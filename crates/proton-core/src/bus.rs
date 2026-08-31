@@ -14,6 +14,7 @@ use crate::lsp::{Completion, Diagnostic, ServerStatus};
 use crate::mode::ModeId;
 use crate::picker::{PickerItem, PickerKind};
 use crate::vim::VimMode;
+use proton_syntax::Span;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
@@ -135,6 +136,12 @@ pub enum Event {
         lines: Vec<String>,
         total_lines: usize,
         version: u64,
+        /// Coloured runs, one list per line in `lines`.
+        ///
+        /// Empty when the file has no grammar, which means "draw it plain" —
+        /// not "these lines happen to have no colours". Otherwise it is
+        /// exactly as long as `lines`, so the two can be walked together.
+        highlights: Vec<Vec<Span>>,
     },
     /// Where the cursor is now. Split from `Viewport` because a motion is the
     /// common case and must not cost a re-render of the text.

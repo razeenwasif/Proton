@@ -12,6 +12,7 @@ use proton_lsp::client::Incoming;
 use crate::action::{Action, Verb};
 use crate::bus::{BufferTab, Command, Event, NoticeLevel, Selection, ServerState};
 use crate::editor::Editor;
+use crate::highlights::Highlighters;
 use crate::key::Key;
 use crate::lsp::{self, Popup, Servers, Severity};
 use crate::mode::ModeId;
@@ -44,6 +45,7 @@ pub struct Workspace {
     viewport: Viewport,
     pickers: Pickers,
     servers: Servers,
+    highlights: Highlighters,
     popup: Popup,
 }
 
@@ -758,13 +760,22 @@ impl Workspace {
         self.viewport.first_line != before
     }
 
-    fn viewport_event(&self) -> Event {
+    fn viewport_event(&mut self) -> Event {
+        let first_line = self.viewport.first_line;
+        let count = self.viewport.lines;
+        // Highlighting is computed here rather than in a second event,
+        // because the colours and the text they colour must never be a frame
+        // apart — one stale and the other fresh is visibly wrong.
+        let spans = self
+            .highlights
+            .spans(self.editor.buffer(), first_line, count);
         let buf = self.editor.buffer();
         Event::Viewport {
-            first_line: self.viewport.first_line,
-            lines: buf.lines(self.viewport.first_line, self.viewport.lines),
+            first_line,
+            lines: buf.lines(first_line, count),
             total_lines: buf.len_lines(),
             version: buf.version(),
+            highlights: spans,
         }
     }
 

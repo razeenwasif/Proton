@@ -365,7 +365,14 @@ $("#scrim").addEventListener("click", closeAll);
    if it did, the two sides could disagree, and the one with the rope
    would be right. */
 
-const view = { firstLine: 0, lines: [], totalLines: 0, cursor: { line: 0, column: 0 } };
+const view = {
+  firstLine: 0,
+  lines: [],
+  totalLines: 0,
+  cursor: { line: 0, column: 0 },
+  /// Coloured runs, parallel to `lines` — or empty for a file with no grammar.
+  highlights: [],
+};
 
 const escapeHtml = (s) =>
   s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
@@ -407,7 +414,42 @@ function markUp(chars, line) {
   return worst;
 }
 
-function lineHtml(number, text, cursorColumn) {
+/* Scope names from the core to the theme's class names. The core says what a
+   run *is*; the stylesheet decides what that looks like, and neither knows
+   the other's vocabulary. */
+const SCOPE = {
+  keyword: "k", function: "fn", type: "ty", string: "str",
+  number: "num", comment: "cm", constant: "cn", variable: "va",
+  property: "pr", operator: "op", punctuation: "pn", attribute: "at",
+};
+
+/// Emit `[from, to)` as merged runs of identical colour and severity.
+///
+/// Merged, because one element per character is a few thousand nodes on a
+/// wide line and the browser feels every one of them. Two channels at once,
+/// because a keyword inside a diagnostic needs to be both coloured and
+/// underlined and splitting them would need twice the elements.
+function runsHtml(chars, scope, severity, from, to) {
+  let html = "";
+  let i = from;
+  while (i < to) {
+    const colour = scope?.[i] ?? null;
+    const mark = severity?.[i] ?? null;
+    let end = i + 1;
+    while (end < to && (scope?.[end] ?? null) === colour && (severity?.[end] ?? null) === mark) {
+      end++;
+    }
+    const text = escapeHtml(chars.slice(i, end).join(""));
+    const classes = [];
+    if (colour && SCOPE[colour]) classes.push(SCOPE[colour]);
+    if (mark) classes.push("sq", "d-" + mark);
+    html += classes.length ? `<span class="${classes.join(" ")}">${text}</span>` : text;
+    i = end;
+  }
+  return html;
+}
+
+function lineHtml(number, text, cursorColumn, highlights) {
   const here = marks.byLine.get(number);
   const sign = here?.length
     ? `<span class="s d-${here[0].severity}">${SIGN[here[0].severity]}</span>`
@@ -417,27 +459,25 @@ function lineHtml(number, text, cursorColumn) {
   const chars = [...text];
   const severity = markUp(chars, number);
 
-  // Escape per character so a diagnostic span can be wrapped around any run
-  // without the markup and the offsets ever disagreeing.
-  const glyph = (i) => {
-    const c = escapeHtml(chars[i]);
-    return severity?.[i] ? `<span class="sq d-${severity[i]}">${c}</span>` : c;
-  };
-  const run = (from, to) => {
-    let out = "";
-    for (let i = from; i < to; i++) out += glyph(i);
-    return out;
-  };
+  // Spans are character columns, already merged and non-overlapping by the
+  // time they arrive, so this only has to expand them.
+  const scope = new Array(chars.length).fill(null);
+  for (const span of highlights ?? []) {
+    for (let i = span.start; i < Math.min(span.end, chars.length); i++) {
+      scope[i] = span.scope;
+    }
+  }
 
   if (cursorColumn === undefined) {
-    return `<div class="ln">${gutter}${run(0, chars.length)}</div>`;
+    return `<div class="ln">${gutter}${runsHtml(chars, scope, severity, 0, chars.length)}</div>`;
   }
   // The caret sits *on* a character in normal mode, so it takes the one it
   // covers with it rather than being drawn between two.
   const under = escapeHtml(chars[cursorColumn] ?? " ") || " ";
   return (
-    `<div class="ln cur">${gutter}${run(0, cursorColumn)}` +
-    `<span class="caret">${under}</span>${run(cursorColumn + 1, chars.length)}</div>`
+    `<div class="ln cur">${gutter}${runsHtml(chars, scope, severity, 0, cursorColumn)}` +
+    `<span class="caret">${under}</span>` +
+    `${runsHtml(chars, scope, severity, cursorColumn + 1, chars.length)}</div>`
   );
 }
 
@@ -447,7 +487,12 @@ function renderEditor() {
   const cursorRow = view.cursor.line - view.firstLine;
   target.innerHTML = view.lines
     .map((text, i) =>
-      lineHtml(view.firstLine + i, text, i === cursorRow ? view.cursor.column : undefined),
+      lineHtml(
+        view.firstLine + i,
+        text,
+        i === cursorRow ? view.cursor.column : undefined,
+        view.highlights[i],
+      ),
     )
     .join("");
 
@@ -743,6 +788,7 @@ onEvent((event) => {
       view.firstLine = event.firstLine;
       view.lines = event.lines;
       view.totalLines = event.totalLines;
+      view.highlights = event.highlights ?? [];
       renderEditor();
       break;
 

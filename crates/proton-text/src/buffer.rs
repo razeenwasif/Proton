@@ -5,6 +5,7 @@
 //! summary tree later (folded height, diagnostic counts) is a change to one
 //! module rather than to everything that reads text.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use ropey::Rope;
@@ -35,6 +36,11 @@ pub struct Buffer {
     group: Group,
     /// Bumped on every change so the front end can drop stale deltas.
     version: u64,
+    /// A bounded log of what changed, for consumers that can update
+    /// themselves more cheaply than they can start again — the parser, above
+    /// all. Bounded because it is an optimisation: when it runs out, the
+    /// answer is "start over", which is always correct.
+    changes: VecDeque<(u64, Change)>,
     pub cursor: Cursor,
 }
 
@@ -53,6 +59,7 @@ impl Buffer {
             saved_at: 0,
             group: Group::None,
             version: 0,
+            changes: VecDeque::new(),
             cursor: Cursor::default(),
         }
     }
@@ -250,13 +257,82 @@ impl Buffer {
     /// Apply edits in the order given. Callers order them highest offset
     /// first so that earlier offsets stay valid.
     fn splice(&mut self, edits: &[Edit]) {
+        // Recorded here rather than in `apply`, because this is the one place
+        // the text actually moves — which means undo and redo are journalled
+        // too, for free, and a consumer following along cannot miss one.
+        let mut recorded = Vec::with_capacity(edits.len());
+
         for edit in edits {
+            let start_byte = self.text.char_to_byte(edit.start);
+            let old_end_byte = self.text.char_to_byte(edit.end);
+            let start_point = self.point_of(edit.start);
+            let old_end_point = self.point_of(edit.end);
+
             self.text.remove(edit.start..edit.end);
             if !edit.text.is_empty() {
                 self.text.insert(edit.start, &edit.text);
             }
+
+            let new_end = edit.start + edit.inserted_len();
+            recorded.push(Change {
+                start_byte,
+                old_end_byte,
+                new_end_byte: self.text.char_to_byte(new_end),
+                start_point,
+                old_end_point,
+                new_end_point: self.point_of(new_end),
+            });
         }
+
         self.version += 1;
+        for change in recorded {
+            if self.changes.len() >= JOURNAL {
+                self.changes.pop_front();
+            }
+            self.changes.push_back((self.version, change));
+        }
+    }
+
+    /// Row and column at a character offset, with the column in **bytes** —
+    /// which is what an incremental parser means by a point, and not what the
+    /// cursor means by a column.
+    fn point_of(&self, offset: usize) -> Point {
+        let offset = offset.min(self.text.len_chars());
+        let row = self.text.char_to_line(offset);
+        let line_start = self.text.line_to_char(row);
+        Point {
+            row,
+            column: self.text.char_to_byte(offset) - self.text.char_to_byte(line_start),
+        }
+    }
+
+    /// Everything that has changed since `version`, in the order it was
+    /// applied.
+    ///
+    /// `None` means the journal no longer reaches back that far and the
+    /// caller has to start over. That fallback is why the journal can be
+    /// bounded at all: being unable to answer is safe, and answering wrongly
+    /// would leave a parse tree describing text that no longer exists.
+    pub fn changes_since(&self, version: u64) -> Option<Vec<Change>> {
+        if version == self.version {
+            return Some(Vec::new());
+        }
+        if version > self.version {
+            // The caller saw a version we have never reached — it is looking
+            // at a different buffer, or one that was reloaded.
+            return None;
+        }
+        let reaches_back = self.changes.front().is_some_and(|(v, _)| *v <= version + 1);
+        if !reaches_back {
+            return None;
+        }
+        Some(
+            self.changes
+                .iter()
+                .filter(|(v, _)| *v > version)
+                .map(|(_, change)| *change)
+                .collect(),
+        )
     }
 
     pub fn undo(&mut self) -> bool {
@@ -391,4 +467,38 @@ impl Buffer {
             .slice(range.start.min(len)..range.end.min(len))
             .to_string()
     }
+}
+
+/// How many changes the journal keeps.
+///
+/// Generous enough that a burst of typing between redraws is always covered,
+/// small enough that it is never a memory concern. Overflowing costs a
+/// re-parse, not a wrong answer.
+const JOURNAL: usize = 512;
+
+/// A row and a column, with the column counted in **bytes**.
+///
+/// Not the same thing as a [`Position`], whose column is characters. Both are
+/// needed: one addresses the cursor, the other addresses a parse tree, and
+/// conflating them puts every highlight on a line with an emoji in the wrong
+/// place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Point {
+    pub row: usize,
+    pub column: usize,
+}
+
+/// One contiguous replacement, in the coordinates an incremental parser wants.
+///
+/// Deliberately not a tree-sitter type: this is a description of what happened
+/// to some text, and `proton-text` has no business knowing what is going to
+/// read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Change {
+    pub start_byte: usize,
+    pub old_end_byte: usize,
+    pub new_end_byte: usize,
+    pub start_point: Point,
+    pub old_end_point: Point,
+    pub new_end_point: Point,
 }

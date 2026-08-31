@@ -5,6 +5,7 @@ members = [
     "crates/proton-index",
     "crates/proton-lsp",
     "crates/proton-shell",
+    "crates/proton-syntax",
     "crates/proton-text",
 ]
 
@@ -19,6 +20,7 @@ repository = "https://github.com/razeenwasif/Proton"
 proton-core = { path = "crates/proton-core" }
 proton-index = { path = "crates/proton-index" }
 proton-lsp = { path = "crates/proton-lsp" }
+proton-syntax = { path = "crates/proton-syntax" }
 proton-text = { path = "crates/proton-text" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

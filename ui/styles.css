@@ -952,7 +952,7 @@ table.df tr:hover td { background: var(--e1); }
 }
 .cmp-row.on .k { color: var(--accent); }
 .cmp-row .l { color: var(--ink-2); }
-.cmp-row.on .l { color: var(--ink-0); }
+.cmp-row.on .l { color: var(--ink); }
 .cmp-row .h {
   margin-left: auto; padding-left: 16px;
   color: var(--ink-4); font-size: 11px;
@@ -965,3 +965,9 @@ table.df tr:hover td { background: var(--e1); }
   border-top: 1px solid var(--edge);
   color: var(--ink-4); font: 9.5px var(--sans); letter-spacing: .04em;
 }
+
+/* The four scopes the mock markup never needed. Same idea as the eight above:
+   the core names what a run is, and only this block decides what that looks
+   like — which is why a fifth theme is a paste rather than a port. */
+.cn { color: var(--tone); }     .va { color: var(--ink-2); }
+.pr { color: var(--info); }     .at { color: var(--accent-2); }

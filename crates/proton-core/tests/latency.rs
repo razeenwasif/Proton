@@ -40,6 +40,13 @@ fn core_latency() {
         "expected a substantial file, got {lines} lines"
     );
     println!("\nproton-core latency — {lines} lines, 60-line viewport");
+    // These now include syntax highlighting, which is why they are an order of
+    // magnitude above the M1 numbers. Anything that changes the text re-parses
+    // and re-queries the visible window before the event is built; anything
+    // that only scrolls re-queries. That is the cost of the colours being in
+    // the same event as the text they colour — worth it, because the
+    // alternative is a frame where one is fresh and the other is stale.
+    println!("(highlighting included — the text and its colours ship together)");
 
     // A motion: the common case, and the one that must never re-send text.
     let n = 2000;

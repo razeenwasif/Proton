@@ -9,9 +9,18 @@ import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
+import type { Span } from "./Span";
 import type { VimMode } from "./VimMode";
 
-export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "type": "pending", keys: string, } | { "type": "leader", prefix: string | null, } | { "type": "cmdline", text: string | null, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "viewport", firstLine: number, lines: Array<string>, totalLines: number, version: bigint, } | { "type": "cursor", line: number, column: number, offset: number, 
+export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "type": "pending", keys: string, } | { "type": "leader", prefix: string | null, } | { "type": "cmdline", text: string | null, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "viewport", firstLine: number, lines: Array<string>, totalLines: number, version: bigint, 
+/**
+ * Coloured runs, one list per line in `lines`.
+ *
+ * Empty when the file has no grammar, which means "draw it plain" —
+ * not "these lines happen to have no colours". Otherwise it is
+ * exactly as long as `lines`, so the two can be walked together.
+ */
+highlights: Array<Array<Span>>, } | { "type": "cursor", line: number, column: number, offset: number, 
 /**
  * Anchor line/column when there is a selection.
  */

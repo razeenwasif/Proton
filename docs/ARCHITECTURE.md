@@ -326,21 +326,52 @@ now become real edits through `proton-core::Editor`. The front end renders from
 `Viewport`/`Cursor` events and asks for only the lines it can show, which is the
 virtualisation.
 
-Still open: tree-sitter highlighting, marks, and visual-block mode.
+`proton-syntax` ships highlighting. A grammar table, the grammar's own
+`highlights.scm`, and twelve scopes — because a reader can tell about a dozen
+colours apart and a grammar will happily name four hundred captures. Anything
+unrecognised is left uncoloured rather than given a thirteenth colour meaning
+"we did not know".
+
+Two things about it were decided by measurement rather than by taste, and the
+numbers are in `crates/proton-syntax/tests/latency.rs`:
+
+**The query runs over the visible window only.** A ten-thousand-line file has
+ten thousand lines of syntax and sixty on screen. Scoped, a redraw costs
+0.25 ms and *does not grow with the file* — which is the property that matters,
+because it means a large file scrolls like a small one.
+
+**Parsing is incremental, and that was not a guess.** A full re-parse measured
+2 ms on a 600-line file and **36 ms on a ten-thousand-line one** — a visible
+stutter on every keystroke, in files that are not rare. Journalling changes in
+`proton-text` and feeding them to `Tree::edit` first brings that to **0.17 ms,
+flat across all three sizes**. The journal is bounded and answers "start over"
+when it runs out, because a parse tree that disagrees with the text by one byte
+does not fail loudly — it quietly miscolours everything after the disagreement.
+`tests/highlight.rs` compares an incrementally-updated tree against a fresh one
+after every edit, which is the only assertion that would catch that.
+
+Compiled queries are cached per language: building Rust's measured 14 ms, and
+paying it per file opened is a pause you feel in a session that opens a lot of
+them.
+
+Still open: marks and visual-block mode.
 
 **Measured on this machine** (release, a 660-line file, 60-line viewport):
 
-| | core | full window re-render |
+| | M1, before highlighting | with highlighting |
 |---|---|---|
-| motion (`j`/`k`) | 0.9 µs | — |
-| word motion (`w`) | 3.1 µs | — |
-| insert a character | 18.2 µs | 1.0 ms |
-| undo | 0.6 µs | — |
+| motion (`j`/`k`) | 0.9 µs | 1.0 µs |
+| word motion (`w`) | 3.1 µs | 26 µs |
+| insert a character | 18.2 µs | 335 µs |
+| undo | 0.6 µs | 6.8 µs |
+| full window re-render | 1.0 ms | — |
 
-The core is nowhere near the budget; the render is the whole cost, and at ~1 ms
-for a full redraw of the visible window there is comfortable headroom inside a
-120 Hz frame. **The webview bet holds so far.** Re-measure when syntax
-highlighting lands, because that is what turns one text node per line into many.
+The second column is an order of magnitude up, and that is the colours: a
+change re-parses and re-queries the window before the event is built, and a
+scroll re-queries it. Worth it, because the alternative is a frame where the
+text is fresh and its colours are stale. At 0.34 ms an insert is **4% of a
+120 Hz frame**, so the headroom survives. **The webview bet still holds.**
+
 *Exit: Proton edits its own source, and `2dd`, `ciw`, `.`, `u` and a recorded
 macro all behave. Measure input-to-photon here and write the number down.*
 
