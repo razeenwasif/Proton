@@ -74,6 +74,11 @@ struct Pending {
     register: Option<String>,
     /// Set after `"` while waiting for the register name.
     awaiting_register: bool,
+    /// Set after `i` or `a` in operator-pending state, while waiting for the
+    /// object key. `true` is `a` (around), `false` is `i` (inner).
+    text_object: Option<bool>,
+    /// Set after `g`, which is a prefix rather than a command: `gg`, `gU`, `gq`.
+    awaiting_g: bool,
 }
 
 impl Pending {
@@ -83,6 +88,8 @@ impl Pending {
             && self.operator_count.is_none()
             && self.register.is_none()
             && !self.awaiting_register
+            && self.text_object.is_none()
+            && !self.awaiting_g
     }
 
     /// vim multiplies the two counts: `2d3w` deletes six words.
@@ -119,8 +126,24 @@ impl Pending {
         if let Some(c) = self.operator_count {
             s.push_str(&c.to_string());
         }
+        if let Some(around) = self.text_object {
+            s.push(if around { 'a' } else { 'i' });
+        }
+        if self.awaiting_g {
+            s.push('g');
+        }
         s
     }
+}
+
+/// One replayable step. Macros record these rather than keystrokes, which is
+/// what lets a macro recorded in Codex replay in Video: an `Action` is
+/// mode-agnostic, a keystroke is not.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Step {
+    Act(Action),
+    Type(char),
+    Escape,
 }
 
 #[derive(Debug, Default)]
@@ -130,6 +153,26 @@ pub struct Vim {
     cmdline: String,
     /// Keys typed after the leader, before which-key resolves.
     leader: Option<String>,
+
+    /// The last change, for `.`. A change is the action *plus* whatever was
+    /// typed in the insert mode it opened — repeating `ciwfoo` has to retype
+    /// `foo`, which is why this is not just an `Action`.
+    last_change: Option<Vec<Step>>,
+    /// The change being accumulated right now.
+    recording_change: Option<Vec<Step>>,
+
+    /// `q{reg}` … `q`
+    macro_register: Option<char>,
+    macro_steps: Vec<Step>,
+    macros: std::collections::HashMap<char, Vec<Step>>,
+    /// Set after `q` or `@` while waiting for the register name.
+    awaiting_macro: Option<MacroWait>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MacroWait {
+    Record,
+    Replay,
 }
 
 impl Vim {
@@ -147,6 +190,125 @@ impl Vim {
 
     pub fn leader_prefix(&self) -> Option<&str> {
         self.leader.as_deref()
+    }
+
+    /// Whether a macro is being recorded, and into which register.
+    pub fn recording(&self) -> Option<char> {
+        self.macro_register
+    }
+
+    /// Feed one keystroke. Returns everything it produced — a list, because
+    /// `.` and `@q` expand into several actions from a single key.
+    pub fn keys(&mut self, k: &Key) -> Vec<Outcome> {
+        // `.` and `@` are the only keys that fan out, and they are handled
+        // before the state machine so a replayed step cannot re-trigger them.
+        if self.mode == VimMode::Normal && self.leader.is_none() && self.pending.is_empty() {
+            if let Some(c) = k.as_char().filter(|_| k.is_bare_char()) {
+                if let Some(wait) = self.awaiting_macro {
+                    self.awaiting_macro = None;
+                    return match wait {
+                        MacroWait::Record => {
+                            self.macro_register = Some(c);
+                            self.macro_steps.clear();
+                            vec![Outcome::Pending(format!("recording @{c}"))]
+                        }
+                        MacroWait::Replay => {
+                            let steps = self.macros.get(&c).cloned().unwrap_or_default();
+                            self.replay(steps)
+                        }
+                    };
+                }
+                if c == 'q' {
+                    if let Some(reg) = self.macro_register.take() {
+                        let steps = std::mem::take(&mut self.macro_steps);
+                        self.macros.insert(reg, steps);
+                        return vec![Outcome::Pending(String::new())];
+                    }
+                    self.awaiting_macro = Some(MacroWait::Record);
+                    return vec![Outcome::Pending("q".into())];
+                }
+                if c == '@' {
+                    self.awaiting_macro = Some(MacroWait::Replay);
+                    return vec![Outcome::Pending("@".into())];
+                }
+                if c == '.' {
+                    let steps = self.last_change.clone().unwrap_or_default();
+                    return self.replay(steps);
+                }
+            }
+        }
+
+        let outcome = self.key(k);
+        self.record(&outcome, k);
+        vec![outcome]
+    }
+
+    /// Replay recorded steps straight into outcomes, without going back
+    /// through the keyboard. A step is already resolved, so this cannot
+    /// re-enter `.` or `@` and loop forever.
+    fn replay(&mut self, steps: Vec<Step>) -> Vec<Outcome> {
+        let mut out = Vec::with_capacity(steps.len());
+        for step in &steps {
+            match step {
+                Step::Act(action) => {
+                    if action.verb == Verb::Change || action.verb == Verb::Insert {
+                        self.mode = VimMode::Insert;
+                    }
+                    out.push(Outcome::Action(action.clone()));
+                }
+                Step::Type(c) => out.push(Outcome::Input(*c)),
+                Step::Escape => {
+                    self.mode = VimMode::Normal;
+                    out.push(Outcome::Ignored);
+                }
+            }
+        }
+        // A replayed change is itself repeatable.
+        if !steps.is_empty() {
+            self.last_change = Some(steps);
+        }
+        out
+    }
+
+    /// Fold an outcome into the macro and `.` recorders.
+    fn record(&mut self, outcome: &Outcome, k: &Key) {
+        let step = match outcome {
+            Outcome::Action(a) => Some(Step::Act(a.clone())),
+            Outcome::Input(c) => Some(Step::Type(*c)),
+            _ if k.key == "Escape" => Some(Step::Escape),
+            _ => None,
+        };
+        let Some(step) = step else { return };
+
+        if self.macro_register.is_some() {
+            self.macro_steps.push(step.clone());
+        }
+
+        // A change starts at the action that modified the buffer and ends when
+        // insert mode does, so `ciwfoo<Esc>` is one repeatable unit.
+        match &step {
+            Step::Act(a) if a.verb.modifies() => {
+                self.recording_change = Some(vec![step.clone()]);
+                if self.mode != VimMode::Insert {
+                    self.last_change = self.recording_change.take();
+                }
+            }
+            Step::Type(_) => {
+                if let Some(change) = &mut self.recording_change {
+                    change.push(step.clone());
+                }
+            }
+            Step::Escape => {
+                if let Some(mut change) = self.recording_change.take() {
+                    // The Escape is part of the change. Without it a replayed
+                    // `.` leaves insert mode open and the next keys are typed
+                    // into the buffer instead of being commands.
+                    change.push(Step::Escape);
+                    self.last_change = Some(change);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Feed one keystroke. Returns what it produced and leaves the engine in
@@ -254,29 +416,27 @@ impl Vim {
         }
 
         // An operator already waiting: this key must be a motion, a doubled
-        // operator, or nothing.
+        // operator, a text object, or nothing.
         if let Some(op) = self.pending.operator {
+            // `iw` / `a(` — `i` and `a` only mean "text object" here. In normal
+            // mode they are insert commands, which is why this branch sits
+            // inside the operator-pending check rather than beside it.
+            if let Some(around) = self.pending.text_object {
+                let Some(object) = Self::text_object(c, around) else {
+                    self.pending.clear();
+                    return Outcome::Pending(String::new());
+                };
+                return Outcome::Action(self.finish_operator(op, object));
+            }
+            if c == 'i' || c == 'a' {
+                self.pending.text_object = Some(c == 'a');
+                return Outcome::Pending(self.pending.showcmd());
+            }
             if Self::doubles(op, c) {
-                let count = self.pending.total_count();
-                let register = self.pending.register.clone();
-                self.pending.clear();
-                if op == Verb::Change {
-                    self.mode = VimMode::Insert;
-                }
-                let mut action = Action::new(op, Object::Line, count);
-                action.register = register;
-                return Outcome::Action(action);
+                return Outcome::Action(self.finish_operator(op, Object::Line));
             }
             if let Some(object) = Self::motion(c) {
-                let count = self.pending.total_count();
-                let register = self.pending.register.clone();
-                self.pending.clear();
-                if op == Verb::Change {
-                    self.mode = VimMode::Insert;
-                }
-                let mut action = Action::new(op, object, count);
-                action.register = register;
-                return Outcome::Action(action);
+                return Outcome::Action(self.finish_operator(op, object));
             }
             // Not a motion — cancel, as vim does.
             self.pending.clear();
@@ -306,6 +466,20 @@ impl Vim {
 
     fn normal_command(&mut self, c: char) -> Outcome {
         let count = self.pending.total_count();
+
+        // `g` is a prefix, not a command. Only `gg` is bound so far; the rest
+        // of the family (`gU`, `gq`, `gd`) hangs off the same branch.
+        if self.pending.awaiting_g {
+            self.pending.clear();
+            return match c {
+                'g' => Outcome::Action(Action::new(Verb::Move, Object::FileStart, count)),
+                _ => Outcome::Ignored,
+            };
+        }
+        if c == 'g' {
+            self.pending.awaiting_g = true;
+            return Outcome::Pending(self.pending.showcmd());
+        }
 
         // Mode entries.
         let enter = |vim: &mut Vim, mode: VimMode, verb: Verb, object: Object| {
@@ -364,7 +538,6 @@ impl Vim {
             'u' => Some(Action::new(Verb::Undo, Object::None, count)),
             'p' => Some(Action::new(Verb::Paste, Object::After, count)),
             'P' => Some(Action::new(Verb::Paste, Object::Here, count)),
-            '.' => Some(Action::new(Verb::Repeat, Object::None, count)),
             'x' => Some(Action::new(Verb::Delete, Object::CharRight, count)),
             'D' => Some(Action::new(Verb::Delete, Object::LineEnd, count)),
             'C' => Some(Action::new(Verb::Change, Object::LineEnd, count)),
@@ -407,6 +580,46 @@ impl Vim {
         }
     }
 
+    /// Complete an operator with its object: take the counts and register,
+    /// reset the pending state, and enter insert mode if the verb was `c`.
+    fn finish_operator(&mut self, op: Verb, object: Object) -> Action {
+        let count = self.pending.total_count();
+        let register = self.pending.register.clone();
+        self.pending.clear();
+        if op == Verb::Change {
+            self.mode = VimMode::Insert;
+        }
+        let mut action = Action::new(op, object, count);
+        action.register = register;
+        action
+    }
+
+    /// The key after `i` or `a` in operator-pending state.
+    fn text_object(c: char, around: bool) -> Option<Object> {
+        Some(match c {
+            'w' if around => Object::AroundWord,
+            'w' => Object::InnerWord,
+            'W' if around => Object::AroundBigWord,
+            'W' => Object::InnerBigWord,
+            '(' | ')' | 'b' => Self::pair('(', around),
+            '{' | '}' | 'B' => Self::pair('{', around),
+            '[' | ']' => Self::pair('[', around),
+            '<' | '>' => Self::pair('<', around),
+            '"' => Self::pair('"', around),
+            '\'' => Self::pair('\'', around),
+            '`' => Self::pair('`', around),
+            _ => return None,
+        })
+    }
+
+    fn pair(open: char, around: bool) -> Object {
+        if around {
+            Object::AroundPair { open }
+        } else {
+            Object::InnerPair { open }
+        }
+    }
+
     fn operator(c: char) -> Option<Verb> {
         match c {
             'd' => Some(Verb::Delete),
@@ -433,6 +646,10 @@ impl Vim {
             'w' => Object::WordForward,
             'b' => Object::WordBackward,
             'e' => Object::WordEnd,
+            'W' => Object::BigWordForward,
+            'B' => Object::BigWordBackward,
+            'E' => Object::BigWordEnd,
+            '^' => Object::FirstNonBlank,
             '0' => Object::LineStart,
             '$' => Object::LineEnd,
             'G' => Object::FileEnd,

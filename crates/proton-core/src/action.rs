@@ -38,7 +38,13 @@ pub enum Object {
     WordForward,
     WordBackward,
     WordEnd,
+    /// `W`, `B`, `E` — every non-blank counts as one class.
+    BigWordForward,
+    BigWordBackward,
+    BigWordEnd,
     LineStart,
+    /// `^` — the first non-blank, which is also where `I` inserts.
+    FirstNonBlank,
     LineEnd,
     FileStart,
     FileEnd,
@@ -52,6 +58,22 @@ pub enum Object {
     /// Open a new line and insert on it.
     LineBelow,
     LineAbove,
+
+    /* ── text objects ─────────────────────────────────────────────
+    These are the reason the engine resolves to objects rather than
+    to offsets: `ciw` means the same thing in every mode that has a
+    notion of "the thing under the cursor". */
+    InnerWord,
+    AroundWord,
+    InnerBigWord,
+    AroundBigWord,
+    /// `i(`, `i{`, `i"` … carried by the *opening* delimiter.
+    InnerPair {
+        open: char,
+    },
+    AroundPair {
+        open: char,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -63,6 +85,16 @@ pub struct Action {
     pub count: u32,
     /// The register a yank or delete writes to, from `"a`.
     pub register: Option<String>,
+}
+
+impl Verb {
+    /// Whether this verb changes the buffer. `.` repeats changes, not motions.
+    pub fn modifies(self) -> bool {
+        matches!(
+            self,
+            Verb::Delete | Verb::Change | Verb::Insert | Verb::Paste | Verb::Repeat
+        )
+    }
 }
 
 impl Action {

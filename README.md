@@ -11,7 +11,7 @@ round-trips through `proton-core`. Everything from M1 on is still a plan.
 
 ```bash
 cargo run -p proton-shell     # the app
-cargo test -p proton-core     # 24 tests, headless
+cargo test --workspace         # 64 tests, headless
 node ui/serve.mjs             # the front end alone → http://localhost:5178
 ```
 
@@ -25,7 +25,8 @@ counts, not mode switches — that collision is why the mode chord is `⌃`.
 
 | Path | |
 |---|---|
-| `crates/proton-core/` | The headless core — command/event bus, mode registry, modal input engine |
+| `crates/proton-core/` | The headless core — command/event bus, mode registry, modal input engine, editor |
+| `crates/proton-text/` | Rope buffers, the undo tree, motions and text objects |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
 | `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, four live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |

@@ -35,9 +35,41 @@ if (HAS_SHELL) {
   };
   const vimEvent = () => ({ type: "vimMode", mode: state.vim, label: LABEL[state.vim] });
 
+  // Read-only file viewing, so the design preview shows real code instead of
+  // an empty pane. It cannot edit — the rope lives in Rust — and it must never
+  // learn how to.
+  const doc = { lines: [""], first: 0, height: 60, name: "[No Name]" };
+  const viewportEvent = () => ({
+    type: "viewport",
+    firstLine: doc.first,
+    lines: doc.lines.slice(doc.first, doc.first + doc.height),
+    totalLines: doc.lines.length,
+    version: 0,
+  });
+
   send = async (command) => {
     if (command.type === "sync") {
       return [{ type: "state", mode: state.mode, vimMode: state.vim, vimLabel: LABEL[state.vim] }];
+    }
+    if (command.type === "viewport") {
+      doc.first = command.firstLine;
+      doc.height = command.lines;
+      return [viewportEvent()];
+    }
+    if (command.type === "openBuffer") {
+      try {
+        const res = await fetch("/" + command.path);
+        if (!res.ok) throw new Error(res.status);
+        doc.lines = (await res.text()).split("\n");
+        doc.name = command.path.split("/").pop();
+      } catch (err) {
+        return [{ type: "notice", text: `${command.path}: ${err}`, level: "error" }];
+      }
+      return [
+        { type: "buffers", names: [{ name: doc.name, path: command.path, modified: false }], active: 0 },
+        viewportEvent(),
+        { type: "cursor", line: 0, column: 0, offset: 0, selection: null },
+      ];
     }
     if (command.type === "setMode") {
       state.mode = command.mode;

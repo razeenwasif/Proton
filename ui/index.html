@@ -230,29 +230,34 @@
         <header>Explorer <span class="grow"></span><span class="chip">3</span></header>
         <div class="find" data-open="telescope"><svg width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></div>
         <div class="scroll tree">
-          <div class="row"><span class="ic">▾</span>📁 src</div>
-          <div class="row indent-1"><span class="ic">▾</span>📁 lib</div>
-          <div class="row indent-2"><span class="ic">◈</span>orbit.ts <span class="git m">M</span></div>
-          <div class="row indent-2"><span class="ic">◈</span>telemetry.ts</div>
-          <div class="row indent-1"><span class="ic">▾</span>📁 routes</div>
-          <div class="row sel indent-2"><span class="ic">◈</span>dashboard.tsx <span class="git m">M</span></div>
-          <div class="row indent-2"><span class="ic">◈</span>fleet.tsx</div>
-          <div class="row indent-1"><span class="ic">▸</span>📁 components</div>
-          <div class="row indent-1"><span class="ic">◈</span>main.tsx</div>
-          <div class="row"><span class="ic">▾</span>📁 native</div>
-          <div class="row indent-1"><span class="ic">⬡</span>trajectory.c <span class="git a">A</span></div>
-          <div class="row indent-1"><span class="ic">⬡</span>trajectory.h</div>
-          <div class="row"><span class="ic">▸</span>📁 analysis</div>
-          <div class="row"><span class="ic">◈</span>package.json</div>
-          <div class="row"><span class="ic">◈</span>proton.toml</div>
-          <div class="group">Targets</div>
-          <div class="row"><span class="ic">🖥</span>web · vite <span class="chip ok" style="margin-left:auto">live</span></div>
-          <div class="row" data-dock="device"><span class="ic">📱</span>android · pixel 8 <span class="chip warn" style="margin-left:auto">idle</span></div>
-          <div class="row"><span class="ic">⬡</span>native · gcc <span class="chip" style="margin-left:auto">—</span></div>
-          <div class="group">Buffers · Harpoon</div>
-          <div class="row"><span class="ic">1</span>dashboard.tsx</div>
-          <div class="row"><span class="ic">2</span>orbit.ts</div>
-          <div class="row"><span class="ic">3</span>trajectory.c</div>
+          <div class="row"><span class="ic">▾</span>📁 crates</div>
+          <div class="row indent-1"><span class="ic">▾</span>📁 proton-core</div>
+          <div class="row indent-2"><span class="ic">▾</span>📁 src</div>
+          <div class="row indent-3" data-path="crates/proton-core/src/vim.rs"><span class="ic">◈</span>vim.rs</div>
+          <div class="row indent-3" data-path="crates/proton-core/src/editor.rs"><span class="ic">◈</span>editor.rs</div>
+          <div class="row indent-3" data-path="crates/proton-core/src/workspace.rs"><span class="ic">◈</span>workspace.rs</div>
+          <div class="row indent-3" data-path="crates/proton-core/src/action.rs"><span class="ic">◈</span>action.rs</div>
+          <div class="row indent-3" data-path="crates/proton-core/src/bus.rs"><span class="ic">◈</span>bus.rs</div>
+          <div class="row indent-3" data-path="crates/proton-core/src/mode.rs"><span class="ic">◈</span>mode.rs</div>
+          <div class="row indent-3" data-path="crates/proton-core/src/key.rs"><span class="ic">◈</span>key.rs</div>
+          <div class="row indent-1"><span class="ic">▾</span>📁 proton-text</div>
+          <div class="row indent-2"><span class="ic">▾</span>📁 src</div>
+          <div class="row indent-3" data-path="crates/proton-text/src/buffer.rs"><span class="ic">◈</span>buffer.rs</div>
+          <div class="row indent-3" data-path="crates/proton-text/src/motion.rs"><span class="ic">◈</span>motion.rs</div>
+          <div class="row indent-3" data-path="crates/proton-text/src/history.rs"><span class="ic">◈</span>history.rs</div>
+          <div class="row indent-3" data-path="crates/proton-text/src/edit.rs"><span class="ic">◈</span>edit.rs</div>
+          <div class="row indent-1"><span class="ic">▾</span>📁 proton-shell</div>
+          <div class="row indent-2" data-path="crates/proton-shell/src/main.rs"><span class="ic">◈</span>main.rs</div>
+          <div class="row indent-2" data-path="crates/proton-shell/src/backdrop.rs"><span class="ic">◈</span>backdrop.rs</div>
+          <div class="row"><span class="ic">▾</span>📁 ui</div>
+          <div class="row indent-1" data-path="ui/app.js"><span class="ic">◈</span>app.js</div>
+          <div class="row indent-1" data-path="ui/bridge.js"><span class="ic">◈</span>bridge.js</div>
+          <div class="row indent-1" data-path="ui/styles.css"><span class="ic">◈</span>styles.css</div>
+          <div class="row"><span class="ic">▾</span>📁 docs</div>
+          <div class="row indent-1" data-path="docs/ARCHITECTURE.md"><span class="ic">◈</span>ARCHITECTURE.md</div>
+          <div class="row indent-1" data-path="docs/STACK.md"><span class="ic">◈</span>STACK.md</div>
+          <div class="row" data-path="Cargo.toml"><span class="ic">◈</span>Cargo.toml</div>
+          <div class="row" data-path="README.md"><span class="ic">◈</span>README.md</div>
         </div>
       </aside>
 
@@ -261,41 +266,14 @@
         <div class="splits" id="codex-splits">
         <section class="split on">
         <div class="buffers">
-          <div class="buf on">◈ dashboard.tsx <span class="tag">route</span> <span class="mod"></span></div>
-          <div class="buf">◈ orbit.ts <span class="tag">lib</span></div>
-          <div class="buf">⬡ trajectory.c <span class="tag">native</span></div>
-          <div class="buf">◈ proton.toml</div>
+          <span data-buffers></span>
           <span class="split-actions">
             <button data-split="v" title="Split right — :vsplit or ␣wv"><svg><use href="#i-split-v"/></svg></button>
             <button data-split="s" title="Split down — :split or ␣ws"><svg><use href="#i-split-h"/></svg></button>
             <button data-split="close" title="Close this split — :q or ␣wq"><svg><use href="#i-close"/></svg></button>
           </span>
         </div>
-        <div class="scroll code">
-          <div class="lens">↑ <b>Proton</b> · 4 references · complexity 6 · covered by 2 tests</div>
-<div class="ln"><span class="n">1</span><span class="s"></span><span class="k">import</span> <span class="pn">{</span> useOrbit<span class="pn">,</span> useTelemetry <span class="pn">}</span> <span class="k">from</span> <span class="str">"@/lib/orbit"</span><span class="pn">;</span></div>
-<div class="ln"><span class="n">2</span><span class="s"></span><span class="k">import</span> <span class="pn">{</span> Panel<span class="pn">,</span> Sparkline <span class="pn">}</span> <span class="k">from</span> <span class="str">"@/components"</span><span class="pn">;</span></div>
-<div class="ln"><span class="n">3</span><span class="s"></span></div>
-<div class="ln"><span class="n">4</span><span class="s"></span><span class="cm">// Fleet health, sampled once per tick.</span></div>
-<div class="ln"><span class="n">5</span><span class="s"></span><span class="k">export default function</span> <span class="fn">Dashboard</span><span class="pn">(</span><span class="pn">)</span> <span class="pn">{</span></div>
-<div class="ln"><span class="n">6</span><span class="s"></span>  <span class="k">const</span> <span class="pn">{</span> sats<span class="pn">,</span> tick <span class="pn">}</span> <span class="op">=</span> <span class="fn">useOrbit</span><span class="pn">(</span><span class="pn">)</span><span class="pn">;</span><span class="inlay">: Fleet</span></div>
-<div class="ln"><span class="n">7</span><span class="s"></span>  <span class="k">const</span> health <span class="op">=</span> <span class="fn">useTelemetry</span><span class="pn">(</span>sats<span class="pn">,</span> <span class="pn">{</span> window<span class="pn">:</span> <span class="num">120</span> <span class="pn">}</span><span class="pn">)</span><span class="pn">;</span></div>
-<div class="ln"><span class="n">8</span><span class="s"></span></div>
-<div class="ln hl-add"><span class="n">9</span><span class="s">▍</span>  <span class="cm">// AI: memoised so the 40-sat grid stops re-laying out.</span></div>
-<div class="ln hl-add"><span class="n">10</span><span class="s">▍</span>  <span class="k">const</span> ranked <span class="op">=</span> <span class="fn">useMemo</span><span class="pn">(</span></div>
-<div class="ln hl-add cur"><span class="n">11</span><span class="s">▍</span>    <span class="pn">(</span><span class="pn">)</span> <span class="op">=&gt;</span> <span class="pn">[</span><span class="op">...</span>sats<span class="pn">]</span><span class="op">.</span><span class="fn">sort</span><span class="pn">(</span><span class="pn">(</span>a<span class="pn">,</span> b<span class="pn">)</span> <span class="op">=&gt;</span> health<span class="pn">[</span>a<span class="op">.</span>id<span class="pn">]</span> <span class="op">-</span> health<span class="pn">[</span>b<span class="op">.</span>id<span class="pn">]</span><span class="pn">)</span><span class="pn">,</span><span class="cursor"></span></div>
-<div class="ln hl-add"><span class="n">12</span><span class="s">▍</span>    <span class="pn">[</span>sats<span class="pn">,</span> health<span class="pn">]</span><span class="pn">,</span></div>
-<div class="ln hl-add"><span class="n">13</span><span class="s">▍</span>  <span class="pn">)</span><span class="pn">;</span> <span class="ghost">// ⇥ accept · ⌥⇥ next suggestion</span></div>
-<div class="ln"><span class="n">14</span><span class="s"></span></div>
-<div class="ln"><span class="n">15</span><span class="s"></span>  <span class="k">return</span> <span class="pn">(</span></div>
-<div class="ln"><span class="n">16</span><span class="s"></span>    <span class="pn">&lt;</span><span class="ty">Panel</span> title<span class="op">=</span><span class="str">"Fleet"</span> badge<span class="op">=</span><span class="pn">{</span>tick<span class="pn">}</span><span class="pn">&gt;</span></div>
-<div class="ln"><span class="n">17</span><span class="s"></span>      <span class="pn">{</span>ranked<span class="op">.</span><span class="fn">map</span><span class="pn">(</span><span class="pn">(</span>s<span class="pn">)</span> <span class="op">=&gt;</span> <span class="pn">(</span></div>
-<div class="ln"><span class="n">18</span><span class="s"></span>        <span class="pn">&lt;</span><span class="ty">Sparkline</span> key<span class="op">=</span><span class="pn">{</span>s<span class="op">.</span>id<span class="pn">}</span> data<span class="op">=</span><span class="pn">{</span>health<span class="pn">[</span>s<span class="op">.</span>id<span class="pn">]</span><span class="pn">}</span> <span class="pn">/&gt;</span></div>
-<div class="ln"><span class="n">19</span><span class="s"></span>      <span class="pn">)</span><span class="pn">)</span><span class="pn">}</span></div>
-<div class="ln"><span class="n">20</span><span class="s"></span>    <span class="pn">&lt;/</span><span class="ty">Panel</span><span class="pn">&gt;</span></div>
-<div class="ln"><span class="n">21</span><span class="s"></span>  <span class="pn">)</span><span class="pn">;</span></div>
-<div class="ln"><span class="n">22</span><span class="s"></span><span class="pn">}</span></div>
-        </div>
+        <div class="scroll code" data-editor></div>
         </section>
         </div>
       </main>
@@ -986,12 +964,12 @@ df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_pa
     <div class="sl sl-mode" id="sl-mode">NORMAL</div>
     <div class="sl project"><span class="dot"></span> orbital-dashboard</div>
     <div class="sl git">  main +2 ~1</div>
-    <div class="sl">src/routes/dashboard.tsx</div>
+    <div class="sl" id="sl-path">—</div>
     <div class="sl">◈ tsx · utf-8 · lf</div>
     <div class="sl grow" id="sl-status"></div>
     <div class="sl">✦ Opus 5 · agent</div>
     <div class="sl">⚠ 0  ⓘ 2 · tsserver eslint tailwind</div>
-    <div class="sl right">ln 11, col 62</div>
+    <div class="sl right" id="sl-position">ln 1, col 1</div>
     <div class="sl sl-mode">42%</div>
   </footer>
 </div>

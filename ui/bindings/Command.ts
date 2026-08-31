@@ -3,4 +3,4 @@ import type { Action } from "./Action";
 import type { Key } from "./Key";
 import type { ModeId } from "./ModeId";
 
-export type Command = { "type": "key", key: Key, } | { "type": "perform", action: Action, } | { "type": "setMode", mode: ModeId, } | { "type": "sync" };
+export type Command = { "type": "key", key: Key, } | { "type": "perform", action: Action, } | { "type": "setMode", mode: ModeId, } | { "type": "openBuffer", path: string, } | { "type": "focusBuffer", index: number, } | { "type": "save" } | { "type": "viewport", firstLine: number, lines: number, } | { "type": "sync" };

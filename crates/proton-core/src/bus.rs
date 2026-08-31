@@ -28,6 +28,22 @@ pub enum Command {
     SetMode {
         mode: ModeId,
     },
+    /// Open a file into a buffer, or focus it if it is already open.
+    OpenBuffer {
+        path: String,
+    },
+    FocusBuffer {
+        index: usize,
+    },
+    Save,
+    /// What the view can show. The core does not know how tall the window is,
+    /// so the front end says, and gets exactly those lines back — which is what
+    /// keeps a large file affordable over the bridge.
+    #[serde(rename_all = "camelCase")]
+    Viewport {
+        first_line: usize,
+        lines: usize,
+    },
     /// Ask for the current state — used once on connect so the shell can render
     /// without guessing.
     Sync,
@@ -81,6 +97,38 @@ pub enum Event {
     ModeChanged {
         mode: ModeId,
     },
+
+    /* ── buffers ──────────────────────────────────────────────────── */
+    /// The visible window of the active buffer. Sent whenever the text, the
+    /// viewport or the active buffer changes — never the whole file.
+    #[serde(rename_all = "camelCase")]
+    Viewport {
+        first_line: usize,
+        lines: Vec<String>,
+        total_lines: usize,
+        version: u64,
+    },
+    /// Where the cursor is now. Split from `Viewport` because a motion is the
+    /// common case and must not cost a re-render of the text.
+    #[serde(rename_all = "camelCase")]
+    Cursor {
+        line: usize,
+        column: usize,
+        offset: usize,
+        /// Anchor line/column when there is a selection.
+        selection: Option<Selection>,
+    },
+    /// The open buffers, for the tab bar.
+    #[serde(rename_all = "camelCase")]
+    Buffers {
+        names: Vec<BufferTab>,
+        active: usize,
+    },
+    /// Something the user should see: a failed open, a save, a macro register.
+    Notice {
+        text: String,
+        level: NoticeLevel,
+    },
     /// Full state, in reply to [`Command::Sync`].
     #[serde(rename_all = "camelCase")]
     State {
@@ -88,4 +136,33 @@ pub enum Event {
         vim_mode: VimMode,
         vim_label: String,
     },
+}
+
+/// A selection's far end, when there is one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct Selection {
+    pub line: usize,
+    pub column: usize,
+    pub offset: usize,
+}
+
+/// One entry in the buffer bar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct BufferTab {
+    pub name: String,
+    pub path: Option<String>,
+    pub modified: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "lowercase")]
+pub enum NoticeLevel {
+    Info,
+    Warn,
+    Error,
 }

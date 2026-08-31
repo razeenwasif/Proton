@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test -p proton-core     # 24 tests, headless
+cargo test --workspace         # 64 tests, headless
 cargo run -p proton-shell     # the app
 node ui/serve.mjs             # the front end alone, in a browser
 ```
@@ -319,9 +319,28 @@ now distinct, because a consumer that cannot tell a keystroke from a submission
 runs `:`, `:v`, `:vs` and `:vsp` on the way to `:vsplit`.
 *Exit met: `[shell] backdrop: mica` on this machine.*
 
-**M1 — The editor.** `proton-text`, `proton-syntax`, virtualised rendering, and
-the text objects / marks / macros the M0 engine was shaped to take. Real
-buffers, real editing, real highlighting.
+**M1 — The editor. ◐ in progress.** `proton-text` ships: rope buffers behind a
+`TextStore` surface, an undo *tree*, word motions and text objects. The modal
+engine gained text objects, `gg`, big-word motions, `.` and macros, and actions
+now become real edits through `proton-core::Editor`. The front end renders from
+`Viewport`/`Cursor` events and asks for only the lines it can show, which is the
+virtualisation.
+
+Still open: tree-sitter highlighting, marks, and visual-block mode.
+
+**Measured on this machine** (release, a 660-line file, 60-line viewport):
+
+| | core | full window re-render |
+|---|---|---|
+| motion (`j`/`k`) | 0.9 µs | — |
+| word motion (`w`) | 3.1 µs | — |
+| insert a character | 18.2 µs | 1.0 ms |
+| undo | 0.6 µs | — |
+
+The core is nowhere near the budget; the render is the whole cost, and at ~1 ms
+for a full redraw of the visible window there is comfortable headroom inside a
+120 Hz frame. **The webview bet holds so far.** Re-measure when syntax
+highlighting lands, because that is what turns one text node per line into many.
 *Exit: Proton edits its own source, and `2dd`, `ciw`, `.`, `u` and a recorded
 macro all behave. Measure input-to-photon here and write the number down.*
 

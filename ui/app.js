@@ -359,6 +359,70 @@ $$("[data-open]").forEach((el) => el.addEventListener("click", () => open(el.dat
 $$("[data-close]").forEach((el) => el.addEventListener("click", closeAll));
 $("#scrim").addEventListener("click", closeAll);
 
+/* ── the editor view ──────────────────────────────────────────────────
+   The core owns the text; this only draws what the last Viewport event
+   said. Nothing here computes a line number, a length or a position —
+   if it did, the two sides could disagree, and the one with the rope
+   would be right. */
+
+const view = { firstLine: 0, lines: [], totalLines: 0, cursor: { line: 0, column: 0 } };
+
+const escapeHtml = (s) =>
+  s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
+function lineHtml(number, text, cursorColumn) {
+  const gutter = `<span class="n">${number + 1}</span><span class="s"></span>`;
+  if (cursorColumn === undefined) {
+    return `<div class="ln">${gutter}${escapeHtml(text)}</div>`;
+  }
+  // The caret sits *on* a character in normal mode, so it takes the one it
+  // covers with it rather than being drawn between two.
+  const chars = [...text];
+  const before = escapeHtml(chars.slice(0, cursorColumn).join(""));
+  const under = escapeHtml(chars[cursorColumn] ?? " ") || " ";
+  const after = escapeHtml(chars.slice(cursorColumn + 1).join(""));
+  return `<div class="ln cur">${gutter}${before}<span class="caret">${under}</span>${after}</div>`;
+}
+
+function renderEditor() {
+  const target = $("[data-editor]");
+  if (!target) return;
+  const cursorRow = view.cursor.line - view.firstLine;
+  target.innerHTML = view.lines
+    .map((text, i) =>
+      lineHtml(view.firstLine + i, text, i === cursorRow ? view.cursor.column : undefined),
+    )
+    .join("");
+}
+
+function renderBuffers(names, active) {
+  const target = $("[data-buffers]");
+  if (!target) return;
+  target.innerHTML = names
+    .map(
+      (b, i) =>
+        `<span class="buf${i === active ? " on" : ""}" data-buffer="${i}">◈ ${escapeHtml(b.name)}` +
+        `${b.modified ? ' <span class="mod"></span>' : ""}</span>`,
+    )
+    .join("");
+}
+
+/** How many lines the stage can actually show, so the core sends no more. */
+function reportViewport() {
+  const target = $("[data-editor]");
+  if (!target) return;
+  const lineHeight = parseFloat(getComputedStyle(target).lineHeight) || 20;
+  const rows = Math.max(1, Math.ceil(target.clientHeight / lineHeight) + 2);
+  dispatch({ type: "viewport", firstLine: view.firstLine, lines: rows });
+}
+
+document.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-path]");
+  if (row) dispatch({ type: "openBuffer", path: row.dataset.path });
+  const tab = e.target.closest("[data-buffer]");
+  if (tab) dispatch({ type: "focusBuffer", index: Number(tab.dataset.buffer) });
+});
+
 /* ── rendering core events ────────────────────────────────────────────── */
 
 function renderVim(label) {
@@ -445,8 +509,38 @@ onEvent((event) => {
     case "input":
       renderStatus(`insert ${JSON.stringify(event.text)}`);
       break;
+
+    case "viewport":
+      view.firstLine = event.firstLine;
+      view.lines = event.lines;
+      view.totalLines = event.totalLines;
+      renderEditor();
+      break;
+
+    case "cursor":
+      view.cursor = { line: event.line, column: event.column };
+      renderEditor();
+      renderPosition();
+      break;
+
+    case "buffers": {
+      renderBuffers(event.names, event.active);
+      const active = event.names[event.active];
+      const path = $("#sl-path");
+      if (path && active) path.textContent = active.path ?? active.name;
+      break;
+    }
+
+    case "notice":
+      renderStatus(event.text);
+      break;
   }
 });
+
+function renderPosition() {
+  const el = $("#sl-position");
+  if (el) el.textContent = `ln ${view.cursor.line + 1}, col ${view.cursor.column + 1}`;
+}
 
 /* ── keys ─────────────────────────────────────────────────────────────
    Two layers, and the split matters. Shell chords (⌘K, ⌘,, ⌃1-7) are the
@@ -618,6 +712,22 @@ applyBackdrop().then((applied) => {
 syncSplits();
 sync();
 drawPointerEdges();
+
+// The stage measures itself, tells the core how many lines it can show, and
+// opens a real file — M1's exit criterion is Proton editing its own source.
+//
+// Not inside requestAnimationFrame: rAF does not fire while the window is
+// hidden, so booting there means an app started minimised never loads
+// anything and shows an empty editor when you finally look at it.
+function boot() {
+  reportViewport();
+  dispatch({ type: "openBuffer", path: "crates/proton-core/src/vim.rs" });
+}
+
+if (document.readyState === "complete") boot();
+else window.addEventListener("load", boot, { once: true });
+
+new ResizeObserver(reportViewport).observe(document.body);
 
 // Exposed for the browser preview's console and for driving screenshots.
 Object.assign(window, {

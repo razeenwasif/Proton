@@ -4,4 +4,4 @@
  * What to do it to. A mode maps these onto its own nouns: `Line` is a line of
  * text in Codex, a layer in Design, a clip in Video.
  */
-export type Object = "Line" | "LineDown" | "LineUp" | "CharLeft" | "CharRight" | "WordForward" | "WordBackward" | "WordEnd" | "LineStart" | "LineEnd" | "FileStart" | "FileEnd" | "Selection" | "None" | "Here" | "After" | "LineBelow" | "LineAbove";
+export type Object = "Line" | "LineDown" | "LineUp" | "CharLeft" | "CharRight" | "WordForward" | "WordBackward" | "WordEnd" | "BigWordForward" | "BigWordBackward" | "BigWordEnd" | "LineStart" | "FirstNonBlank" | "LineEnd" | "FileStart" | "FileEnd" | "Selection" | "None" | "Here" | "After" | "LineBelow" | "LineAbove" | "InnerWord" | "AroundWord" | "InnerBigWord" | "AroundBigWord" | { "InnerPair": { open: string, } } | { "AroundPair": { open: string, } };
