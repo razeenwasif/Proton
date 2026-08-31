@@ -154,10 +154,42 @@ being applied per-component.
 | UI | **Inter** — falls back to SF Pro, then Segoe UI Variable |
 | Code | **CaskaydiaMono Nerd Font** → CaskaydiaCove NF → Cascadia Mono |
 
-The Nerd Font patch matters: devicons in the file tree, the git branch glyph in
-the statusline and the powerline separators all come from that glyph set. Where
-only `CaskaydiaCove NF` is installed (the Code-width patch, which is the common
-one) the fallback catches it and only the character advance changes.
+The Nerd Font patch is worth having for the powerline separators and the git
+branch glyph in the statusline, but nothing structural depends on it. Icons are
+drawn, not typed — see below. Where only `CaskaydiaCove NF` is installed (the
+Code-width patch, which is the common one) the fallback catches it and only the
+character advance changes.
+
+### Icons
+
+Ninety symbols, one sprite, `currentColor` throughout. Drawn on a 24 grid with
+a 1.7 stroke and round caps, so the whole set shares a weight and a corner
+radius and reads as one family rather than as a collection.
+
+**Nothing is an emoji.** They arrive in colour, they change shape with the
+platform, and a yellow folder in a window whose entire palette is sixteen
+tokens is a hole in the design. Every one that was in the prototype is now a
+symbol that inherits the theme, which means a theme switch takes the icons with
+it and a `prefers-reduced-motion` reader gets a server spinner that does not
+spin.
+
+Two rules do most of the work:
+
+**Shape carries the meaning; colour is a second, redundant channel.** In the
+file tree the silhouette says what kind of thing a file is — page, image,
+waveform, sliders — and the tint says which language. A tree where every row is
+the same grey outline is still readable, just slower; one where the shapes are
+identical and only the hue differs is not readable at all to a good fraction of
+people.
+
+**Size is set where the icon sits, not on the icon.** The same mark is 11px in
+a completion list and 17px on the mode rail, and a 1.7 stroke that looks right
+at 17 is a hairline at 11. The context rules tune the stroke along with the box.
+
+Two places deliberately keep glyphs rather than icons. **Keycaps** — `⌘ ⌃ ⎋ ⇥
+␣` — are typography: they are what is printed on the key, and drawing them
+would be redrawing a font badly. And **literal terminal output** in the mock
+panes keeps its `✓` and `❯`, because that is text a program actually wrote.
 
 ---
 

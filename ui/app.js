@@ -396,7 +396,44 @@ const marks = { byLine: new Map(), errors: 0, warnings: 0 };
  * makes the round trip. */
 let completionOpen = false;
 
-const SIGN = { error: "●", warning: "▲", info: "■", hint: "·" };
+/* ── icons ────────────────────────────────────────────────────────────
+   The sprite lives in index.html; this is how the rendered parts of the
+   app reach it. `class="i"` is what makes a `<use>` draw at all — see the
+   comment on that rule in styles.css. */
+const icon = (id, cls = "") =>
+  `<svg class="i${cls ? " " + cls : ""}"><use href="#i-${id}"/></svg>`;
+
+/* Diagnostic signs are solid and told apart by silhouette as much as by
+   colour — a dot, a triangle, a square and a bar stay distinct for a
+   reader who cannot tell red from amber. */
+const SIGN = { error: "d-error", warning: "d-warning", info: "d-info", hint: "d-hint" };
+
+/* What each file gets in the buffer bar. A table rather than a switch
+   because it is read far more often than it is changed; the static
+   explorer markup in index.html mirrors it. */
+const FILE_ICONS = [
+  [/\.rs$/i, "file-code", "ft-rust"],
+  [/\.(tsx?|mts|cts)$/i, "file-code", "ft-ts"],
+  [/\.(jsx?|mjs|cjs)$/i, "file-code", "ft-js"],
+  [/\.(py|pyi)$/i, "file-code", "ft-py"],
+  [/\.go$/i, "file-code", "ft-go"],
+  [/\.(c|h|cpp|hpp|cc)$/i, "file-code", "ft-c"],
+  [/\.(gd|lua|rb|sh|ps1)$/i, "file-code", "ft-script"],
+  [/\.(css|scss)$/i, "file-code", "ft-css"],
+  [/\.(html?|svelte|vue)$/i, "file-code", "ft-html"],
+  [/\.(json|jsonc)$/i, "sliders", "ft-data"],
+  [/\.(toml|ya?ml|ini|cfg|conf)$/i, "sliders", "ft-config"],
+  [/\.lock$/i, "sliders", "ft-lock"],
+  [/\.(md|mdx|txt|rst)$/i, "file-doc", "ft-doc"],
+  [/\.(png|jpe?g|gif|webp|svg|ico|bmp)$/i, "image", "ft-image"],
+  [/\.(wav|mp3|ogg|flac|aac)$/i, "audio", "ft-audio"],
+  [/\.(mp4|mov|mkv|webm)$/i, "film", "ft-video"],
+];
+
+function fileIcon(name) {
+  const [, id, tint] = FILE_ICONS.find(([re]) => re.test(name)) ?? [0, "file", "ft-plain"];
+  return icon(id, tint);
+}
 
 /** Wrap the diagnostic spans on one line, innermost work on a character array. */
 function markUp(chars, line) {
@@ -489,7 +526,7 @@ function selectedOn(line, width) {
 function lineHtml(number, text, cursorColumn, highlights) {
   const here = marks.byLine.get(number);
   const sign = here?.length
-    ? `<span class="s d-${here[0].severity}">${SIGN[here[0].severity]}</span>`
+    ? `<span class="s d-${here[0].severity}">${icon(SIGN[here[0].severity], "solid")}</span>`
     : `<span class="s"></span>`;
   const gutter = `<span class="n">${number + 1}</span>${sign}`;
 
@@ -556,7 +593,8 @@ function renderBuffers(names, active) {
   target.innerHTML = names
     .map(
       (b, i) =>
-        `<span class="buf${i === active ? " on" : ""}" data-buffer="${i}">◈ ${escapeHtml(b.name)}` +
+        `<span class="buf${i === active ? " on" : ""}" data-buffer="${i}">` +
+        `${fileIcon(b.name)} ${escapeHtml(b.name)}` +
         `${b.modified ? ' <span class="mod"></span>' : ""}</span>`,
     )
     .join("");
@@ -670,7 +708,8 @@ function renderDiagnostics(event) {
   if (el) {
     el.innerHTML =
       event.errors || event.warnings
-        ? `<span class="e">✖ ${event.errors}</span><span class="w">⚠ ${event.warnings}</span>`
+        ? `<span class="e">${icon("d-error", "solid")} ${event.errors}</span>` +
+          `<span class="w">${icon("d-warning", "solid")} ${event.warnings}</span>`
         : "";
   }
   renderEditor();
@@ -685,20 +724,27 @@ function renderServers(states) {
       // silence while rust-analyzer indexes is indistinguishable from a
       // broken editor, and that is the impression people keep.
       if (s.status === "busy") {
-        return `<span class="busy">◐ ${escapeHtml(s.note ?? s.language)}</span>`;
+        return `<span class="busy">${icon("srv-busy", "spin")} ${escapeHtml(s.note ?? s.language)}</span>`;
       }
-      if (s.status === "starting") return `<span class="busy">◌ ${escapeHtml(s.language)}</span>`;
-      if (s.status === "ready") return `<span>◆ ${escapeHtml(s.language)}</span>`;
+      if (s.status === "starting") {
+        return `<span class="busy">${icon("srv-busy", "spin")} ${escapeHtml(s.language)}</span>`;
+      }
+      if (s.status === "ready") return `<span>${icon("srv-ready", "solid")} ${escapeHtml(s.language)}</span>`;
       // Not having gopls installed is a normal state, not a fault, so it is
       // dimmed rather than flagged.
-      return `<span class="off">◇ ${escapeHtml(s.language)}</span>`;
+      return `<span class="off">${icon("srv-off")} ${escapeHtml(s.language)}</span>`;
     })
     .join(" ");
 }
 
-const KIND_MARK = {
-  function: "ƒ", method: "ƒ", field: "▪", variable: "α", type: "T",
-  module: "▤", keyword: "◆", constant: "π", snippet: "✂", other: "·",
+/* Twelve LSP categories collapsed onto nine marks. Drawn at 11px in a
+   list the eye scans vertically, which rules out pictograms — these are
+   category marks, learned once, the way a diamond comes to mean keyword. */
+const KIND_ICON = {
+  function: "k-function", method: "k-method", field: "k-field",
+  variable: "k-variable", type: "k-type", module: "k-module",
+  keyword: "k-keyword", constant: "k-constant", snippet: "scissors",
+  other: "k-other",
 };
 
 function renderCompletion(event) {
@@ -710,7 +756,7 @@ function renderCompletion(event) {
     .map(
       (item, i) =>
         `<div class="cmp-row${i === event.selected ? " on" : ""}" data-complete="${i}">` +
-        `<span class="k">${KIND_MARK[item.kind] ?? "·"}</span>` +
+        `<span class="k">${icon(KIND_ICON[item.kind] ?? "k-other")}</span>` +
         `<span class="l">${escapeHtml(item.label)}</span>` +
         (item.hint ? `<span class="h">${escapeHtml(item.hint)}</span>` : "") +
         `</div>`,

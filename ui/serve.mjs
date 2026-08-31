@@ -21,28 +21,36 @@ const TYPES = {
   ".mp4": "video/mp4",
 };
 
+/** The first candidate that is a real file, or null. */
+function resolve(path) {
+  // `ui/` is the web root, so `styles.css` resolves the way it does in the
+  // shell, where `frontendDist` points at that directory. Falling back to the
+  // project root afterwards is what lets the preview's stand-in read real
+  // source files — `openBuffer` fetches `crates/…`, which is not under `ui/`.
+  for (const base of [join(ROOT, "ui"), ROOT]) {
+    const file = join(base, path);
+    // Both bases are inside ROOT, so one check covers the traversal case.
+    if (!file.startsWith(ROOT)) continue;
+    try {
+      if (statSync(file).isFile()) return file;
+    } catch {
+      /* try the next base */
+    }
+  }
+  return null;
+}
+
 createServer((req, res) => {
   let path = decodeURIComponent(req.url.split("?")[0]);
-  if (path === "/") path = "/ui/index.html";
+  if (path === "/") path = "/index.html";
+  path = normalize(path).replace(/^(\.\.[/\\])+/, "");
 
-  // Keep requests inside the project root.
-  const file = join(ROOT, normalize(path).replace(/^(\.\.[/\\])+/, ""));
-  if (!file.startsWith(ROOT)) {
-    res.writeHead(403).end("forbidden");
-    return;
-  }
-
-  let stat;
-  try {
-    stat = statSync(file);
-  } catch {
+  const file = resolve(path);
+  if (!file) {
     res.writeHead(404).end("not found");
     return;
   }
-  if (!stat.isFile()) {
-    res.writeHead(404).end("not found");
-    return;
-  }
+  const stat = statSync(file);
 
   res.writeHead(200, {
     "Content-Type": TYPES[extname(file)] ?? "application/octet-stream",
