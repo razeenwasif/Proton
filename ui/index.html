@@ -76,15 +76,6 @@
     <div class="brand"><svg><use href="#i-proton"/></svg> PROTON</div>
     <div class="crumb"><span class="dot"></span> <b>orbital-dashboard</b> · <span>main</span></div>
 
-    <div class="modes" role="tablist" aria-label="Workspace mode">
-      <button class="mode" role="tab" aria-selected="false" data-mode="chat"><svg><use href="#i-chat"/></svg> Chat</button>
-      <button class="mode" role="tab" aria-selected="true"  data-mode="codex"><svg><use href="#i-code"/></svg> Codex</button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="design"><svg><use href="#i-pen"/></svg> Design</button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="modeling"><svg><use href="#i-cube"/></svg> Modeling</button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="game"><svg><use href="#i-game"/></svg> Game</button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="video"><svg><use href="#i-video"/></svg> Video</button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="data"><svg><use href="#i-chart"/></svg> Data</button>
-    </div>
 
     <div class="tb-right">
       <div class="avatars">
@@ -100,6 +91,18 @@
 
   <div class="body">
     <!-- ══ activity rail ═════════════════════════════════════════ -->
+    <!-- The outer rail chooses which application you are in; the inner one
+         chooses what you are looking at inside it. -->
+    <nav class="mode-rail" role="tablist" aria-label="Workspace mode">
+      <button class="mode" role="tab" aria-selected="false" data-mode="chat"><svg><use href="#i-chat"/></svg><span>Chat</span></button>
+      <button class="mode" role="tab" aria-selected="true"  data-mode="codex"><svg><use href="#i-code"/></svg><span>Codex</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="design"><svg><use href="#i-pen"/></svg><span>Design</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="modeling"><svg><use href="#i-cube"/></svg><span>Model</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="game"><svg><use href="#i-game"/></svg><span>Game</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="video"><svg><use href="#i-video"/></svg><span>Video</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="data"><svg><use href="#i-chart"/></svg><span>Data</span></button>
+    </nav>
+
     <nav class="rail" aria-label="Panels">
       <button title="Chat  ␣aa" data-mode-go="chat"><svg><use href="#i-chat"/></svg></button>
       <button class="on" title="Explorer  ␣e"><svg><use href="#i-files"/></svg></button>
@@ -1095,6 +1098,17 @@ df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_pa
             <span class="nm">Nord</span>
           </button>
         </div>
+      </div>
+      <div class="setting">
+        <h4>Window background</h4>
+        <p>Mica takes its colour from your wallpaper — the compositor samples it, so the whole window tints as you move it across the desktop. Acrylic blurs whatever is actually behind the window, live, and costs more. Content surfaces stay opaque either way: code is never at the mercy of a wallpaper.</p>
+        <div class="seg" style="width:max-content" id="backdrop-picker">
+          <button class="on" data-backdrop-set="mica">Mica</button>
+          <button data-backdrop-set="mica-alt">Mica Alt</button>
+          <button data-backdrop-set="acrylic">Acrylic</button>
+          <button data-backdrop-set="solid">Solid</button>
+        </div>
+        <p style="margin:9px 0 0;font-size:11.5px" id="backdrop-note"></p>
       </div>
       <div class="setting">
         <h4>Surface blur</h4>

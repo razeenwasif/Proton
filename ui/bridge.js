@@ -100,6 +100,36 @@ export const sendKey = (e) =>
 export const setMode = (mode) => dispatch({ type: "setMode", mode });
 export const sync = () => dispatch({ type: "sync" });
 
+/* ── backdrop ─────────────────────────────────────────────────────────
+   Which material the compositor actually gave us. `solid` is a real
+   answer, not a failure: Windows turns Mica off when transparency
+   effects are disabled or under battery saver, and the page paints its
+   own ground in that case. */
+export async function applyBackdrop() {
+  if (!HAS_SHELL) return "solid";
+  let material = "solid";
+  try {
+    material = await tauri.core.invoke("backdrop");
+  } catch (err) {
+    console.error("proton: could not read the backdrop", err);
+  }
+  document.documentElement.dataset.backdrop = material;
+  return material;
+}
+
+/** Ask for a material. Returns what was actually applied, which may differ. */
+export async function setBackdrop(material) {
+  if (!HAS_SHELL) return "solid";
+  let applied = "solid";
+  try {
+    applied = await tauri.core.invoke("set_backdrop", { material });
+  } catch (err) {
+    console.error("proton: could not set the backdrop", err);
+  }
+  document.documentElement.dataset.backdrop = applied;
+  return applied;
+}
+
 /* ── window controls ──────────────────────────────────────────────────── */
 
 /* The window is undecorated because the titlebar is drawn in the page, which

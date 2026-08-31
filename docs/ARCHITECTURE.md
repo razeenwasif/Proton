@@ -1,7 +1,7 @@
 # Proton — architecture
 
-The build document. **M0 is implemented**; everything from M1 on is a plan. The
-design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
+The build document. **M0 and M0.5 are implemented**; everything from M1 on is a
+plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
 reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 **what we build and in what order**, and is the one to argue with before writing
 code.
@@ -68,10 +68,10 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-trace` | Code Visualizer client + process supervision | `tokio` |
 | `proton-plugin` | Wasmtime host, WIT interfaces, capability grants | `wasmtime`, `wit-bindgen` |
 | `proton-core` | Workspace state, mode registry, command/event bus, config | all of the above |
-| `proton-shell` | Window, webview, IPC bridge, packaging | `tauri` v2 |
+| `proton-shell` | Window, webview, IPC bridge, system backdrop, packaging | `tauri` v2, `window-vibrancy` |
 | `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
 
-**M0 ships `proton-core` and `proton-shell` only.** The core today holds the
+**M0/M0.5 ship `proton-core` and `proton-shell` only.** The core today holds the
 bus, the mode registry and the modal engine; the rest of the table is the shape
 it grows into. `proton-vim` and `proton-text` split out of `proton-core` when M1
 gives them enough substance to be worth their own crates — splitting earlier
@@ -297,6 +297,16 @@ exit criterion needs something real to round-trip: counts, operators, doubled
 operators, registers, visual mode, the leader and the command line all work.
 *Exit met: `[bridge] Sync -> 1 event(s): [State { mode: Codex, vim_mode: Normal }]`
 in the running app, plus 23 headless tests.*
+
+**M0.5 — Surface. ✅ done.** The mode switcher moved from the titlebar to a
+vertical rail outboard of the panel rail, and the window ground now comes from
+the compositor rather than from the page. `window-vibrancy` asks DWM for Mica
+(`DWMWA_SYSTEMBACKDROP_TYPE`), the shell reports what was *actually* applied,
+and the front end paints its own ground whenever the answer is `solid` —
+transparency effects off, battery saver, Windows 10, Linux. Switchable at
+runtime from Settings → Appearance.
+*Exit met: `[shell] backdrop: mica` on this machine, with the chrome
+translucent and the stage near-opaque so code never depends on a wallpaper.*
 
 **M1 — The editor.** `proton-text`, `proton-syntax`, virtualised rendering, and
 the text objects / marks / macros the M0 engine was shaped to take. Real

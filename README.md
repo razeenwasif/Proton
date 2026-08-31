@@ -70,7 +70,8 @@ shows its tool calls with results and timings so its claims can be checked.
 
 ## Status
 
-**M0.** Real: the window, the command/event seam, and the modal engine — counts,
+**M0.5.** Real: the window (Mica-backed on Windows 11), the command/event seam,
+the vertical mode rail, and the modal engine — counts,
 operators, doubled operators, registers, visual mode, the leader, the command
 line. Not yet real: buffers, language servers, model calls, renderers. The seven
 modes are still hand-built screens behind a live statusline.

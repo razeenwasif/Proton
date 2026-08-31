@@ -3,10 +3,17 @@
 // from appearing behind it on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod backdrop;
+
 use std::sync::Mutex;
 
+use backdrop::Backdrop;
 use proton_core::{Command, Event, Workspace};
-use tauri::State;
+use tauri::{Manager, State};
+
+/// What the compositor actually gave us. The front end needs this to decide
+/// whether to paint its own ground, so it reads it on boot and after any change.
+type Surface = Mutex<Backdrop>;
 
 /// The whole bridge. One command in, the events it produced out.
 ///
@@ -30,9 +37,36 @@ fn dispatch(command: Command, workspace: State<'_, Mutex<Workspace>>) -> Vec<Eve
     // visible — and is how M0's exit criterion gets verified without a
     // screenshot.
     #[cfg(debug_assertions)]
-    eprintln!("[bridge] {command:?} -> {} event(s): {events:?}", events.len());
+    eprintln!(
+        "[bridge] {command:?} -> {} event(s): {events:?}",
+        events.len()
+    );
 
     events
+}
+
+/// Which backdrop is live: `mica`, `mica-alt`, `acrylic`, `vibrancy`, `solid`.
+#[tauri::command]
+fn backdrop(surface: State<'_, Surface>) -> String {
+    surface
+        .lock()
+        .map(|b| b.to_string())
+        .unwrap_or_else(|_| Backdrop::Solid.to_string())
+}
+
+/// Switch materials at runtime, and report what was actually applied — which
+/// may not be what was asked for.
+#[tauri::command]
+fn set_backdrop(
+    material: Backdrop,
+    window: tauri::WebviewWindow,
+    surface: State<'_, Surface>,
+) -> String {
+    let applied = backdrop::apply(&window, material);
+    if let Ok(mut current) = surface.lock() {
+        *current = applied;
+    }
+    applied.to_string()
 }
 
 /// The window and taskbar icon.
@@ -51,24 +85,29 @@ fn window_icon() -> Option<tauri::image::Image<'static>> {
 }
 
 fn main() {
-    let mut builder = tauri::Builder::default()
+    tauri::Builder::default()
         .manage(Mutex::new(Workspace::new()))
-        .invoke_handler(tauri::generate_handler![dispatch]);
+        .invoke_handler(tauri::generate_handler![dispatch, backdrop, set_backdrop])
+        .setup(|app| {
+            let Some(window) = app.get_webview_window("main") else {
+                // No window means the config is wrong, not that we should limp
+                // on with a half-configured app.
+                return Err("no main window in tauri.conf.json".into());
+            };
 
-    if let Some(icon) = window_icon() {
-        builder = builder.setup(move |app| {
-            use tauri::Manager;
-            if let Some(window) = app.get_webview_window("main") {
+            if let Some(icon) = window_icon() {
                 // A failed icon is cosmetic; it must not stop the app booting.
                 if let Err(err) = window.set_icon(icon) {
                     eprintln!("proton: could not set the window icon: {err}");
                 }
             }
-            Ok(())
-        });
-    }
 
-    builder
+            let applied = backdrop::apply(&window, Backdrop::default());
+            println!("[shell] backdrop: {applied}");
+            app.manage(Surface::new(applied));
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("Proton failed to start");
 }

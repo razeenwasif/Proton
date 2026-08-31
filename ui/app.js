@@ -12,8 +12,8 @@
  * from the second list to the first.
  */
 
-import { HAS_SHELL, dispatch, onEvent, sendKey, setMode as coreSetMode, sync, wireWindowChrome }
-  from "./bridge.js";
+import { HAS_SHELL, applyBackdrop, dispatch, onEvent, sendKey, setBackdrop,
+  setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -96,6 +96,9 @@ $$(".dock-tabs").forEach((group) => {
 });
 
 $$(".seg, .builder-rail").forEach((group) => {
+  // The backdrop picker is driven by what the compositor answered, not by the
+  // click, so it must not get the optimistic view-state handler.
+  if (group.id === "backdrop-picker") return;
   $$("button", group).forEach((b) =>
     b.addEventListener("click", () => {
       $$("button", group).forEach((o) => o.classList.remove("on"));
@@ -329,6 +332,37 @@ try {
 
 wireWindowChrome();
 document.documentElement.classList.toggle("shell", HAS_SHELL);
+/* The backdrop picker reports what the compositor *did*, not what was asked
+   for. Windows turns Mica off under battery saver or with transparency effects
+   disabled, and the setting has to be honest when that happens. */
+function renderBackdrop(applied, wanted) {
+  $$("[data-backdrop-set]").forEach((b) =>
+    b.classList.toggle("on", b.dataset.backdropSet === applied),
+  );
+  const note = $("#backdrop-note");
+  if (!note) return;
+  if (!HAS_SHELL) {
+    note.textContent = "Browser preview — the page paints its own ground here.";
+  } else if (wanted && wanted !== applied) {
+    note.textContent = `${wanted} is unavailable — Windows is compositing "${applied}" instead. `
+      + "Check Settings › Personalisation › Colours › Transparency effects.";
+  } else {
+    note.textContent = "";
+  }
+}
+
+$$("[data-backdrop-set]").forEach((b) =>
+  b.addEventListener("click", async () => {
+    const wanted = b.dataset.backdropSet;
+    renderBackdrop(await setBackdrop(wanted), wanted);
+    requestAnimationFrame(drawPointerEdges);
+  }),
+);
+
+applyBackdrop().then((applied) => {
+  renderBackdrop(applied);
+  requestAnimationFrame(drawPointerEdges);
+});
 sync();
 drawPointerEdges();
 

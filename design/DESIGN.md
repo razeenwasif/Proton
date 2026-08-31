@@ -41,7 +41,7 @@ Visualizer.
 
 ## Surface language
 
-Three rules carry the whole surface. Everything else follows from them.
+Four rules carry the whole surface. Everything else follows from them.
 
 ### 1. One window, no cards
 
@@ -76,7 +76,42 @@ read as a physical sheet rather than a translucent rectangle.
 Blur is a setting, not a constant. Drop it to zero on a remote session and every
 surface falls back to a flat fill — no layout moves.
 
-### 3. Colour is a token set
+**And there is a hard limit worth stating plainly: `backdrop-filter` can only
+blur page content. It can never reach the desktop.** Only the compositor can put
+the wallpaper behind Proton, which is what the next rule is for.
+
+### 3. The ground comes from the compositor
+
+Windows 11 offers two materials through `DWMWA_SYSTEMBACKDROP_TYPE`, and Proton
+asks for one at startup:
+
+| Material | Samples | Live | Cost |
+|---|---|---|---|
+| **Mica** (default) | The wallpaper only — a static, heavily blurred sample that re-tints as the window moves across the desktop | No | Nearly free |
+| **Mica Alt** | Same, stronger tint | No | Nearly free |
+| **Acrylic** | Everything behind the window, other apps included | Yes | Real GPU and battery |
+
+macOS gets vibrancy; Linux has no standard equivalent, so it paints its own
+ground. So does Windows when the user turns transparency effects off or enters
+battery saver — **`solid` is a supported state, not a failure**, and it has to
+look deliberate. The setting reports what the compositor actually did rather
+than what was asked for.
+
+The trade this makes on purpose: the ground is now the user's wallpaper, which
+we do not control, and contrast becomes wallpaper-dependent. So the surface
+splits in two:
+
+- **Chrome is translucent** — mode rail, panel rail, sidebars, titlebar,
+  statusline. This is where the wallpaper shows through and where the colour
+  comes from.
+- **Content is not.** The stage keeps a near-opaque veil. Code is never at the
+  mercy of a wallpaper, which is exactly why Explorer keeps its file list solid
+  and lets Mica show only in the surround.
+
+Internal floating layers keep their CSS glass, because blurring the editor
+behind Telescope is page content and therefore still the right tool.
+
+### 4. Colour is a token set
 
 A theme sets sixteen custom properties on `<html>` and touches no layout rule.
 Four ship, switchable live in Settings → Appearance:
@@ -122,38 +157,35 @@ one) the fallback catches it and only the character advance changes.
 
 ```
 ╭──────────────────────────────────────────────────────────────────────╮
-│ ●●●  PROTON  project ▾  Chat Codex Design Modeling Game Video Data ⋯ │  46px
-├──┬───────────────────┬───────────────────────┬──────────────────────┤
-│  │                   │                       │                      │
-│ r│   context pane    │      stage            │      dock            │
-│ a│                   │                       │                      │
-│ i│                   │                       │                      │
-│ l│                   │                       │                      │
-├──┴───────────────────┴───────────────────────┴──────────────────────┤
+│ ●●●  PROTON   orbital-dashboard · main            ⋯   Share   Build │  46px
+├────┬──┬────────────────┬────────────────────┬──────────────────────┤
+│Chat│  │                │                    │                      │
+│Code│ p│                │                    │                      │
+│Desn│ a│  context pane  │       stage        │         dock         │
+│Modl│ n│                │                    │                      │
+│Game│ e│                │                    │                      │
+│Vide│ l│                │                    │                      │
+│Data│  │                │                    │                      │
+├────┴──┴────────────────┴────────────────────┴──────────────────────┤
 │ NORMAL │  main +2 ~1 │ path │ lsp │      │ ✦ agent │ ln 11, col 62  │  26px
 ╰──────────────────────────────────────────────────────────────────────╯
 ```
 
 Those are hairlines, not panel edges — the diagram overstates them.
 
-> **Decided, not yet in the prototype: the mode switcher moves to a vertical
-> rail.** Chat / Codex / Design / Modeling / Game / Video / Data become a column
-> on the far left, *outboard* of the panel rail — so the order left-to-right is
-> mode rail, panel rail, context pane, stage, dock. Two reasons it is the right
-> shape. Seven pills across a titlebar do not survive an eighth, and a column
-> does; and it puts the two rails in a real hierarchy — the outer one chooses
-> *which application you are in*, the inner one chooses *what you are looking at
-> inside it*. That reads as macOS (Finder's sidebar, Xcode's navigator) rather
-> than as a browser tab strip. It also frees the titlebar for the project
-> breadcrumb and collaborators, which is where those belong.
->
-> The titlebar version stays in the prototype because rebuilding seven screens
-> around a new left column is layout churn that would not teach us anything the
-> current one hasn't. Build it vertical.
+The mode switcher is the outermost column, *outboard* of the panel rail — so
+left to right the order is mode rail, panel rail, context pane, stage, dock.
+Two reasons it is a column rather than pills across the titlebar. Seven pills do
+not survive an eighth, and a column does; and it puts the two rails in a real
+hierarchy — the outer one chooses *which application you are in*, the inner one
+chooses *what you are looking at inside it*. That reads as macOS (Finder's
+sidebar, Xcode's navigator) rather than as a browser tab strip, and it leaves
+the titlebar to the project breadcrumb and the collaborators, which is where
+those belong.
 
 Five regions never move, in any mode:
 
-- **The mode rail** (see the note above) — which application you are in.
+- **The mode rail** — which application you are in.
 - **The panel rail** — panels, not modes. Explorer, Telescope, Git, Debug, Visualizer,
   Database, Plugins. The same rail in Video mode as in Codex.
 - **The context pane** — what you are working *on*. Files in Codex, layers in
