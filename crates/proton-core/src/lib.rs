@@ -5,6 +5,7 @@
 //! be dropped in without touching anything here. See `docs/ARCHITECTURE.md` §1.
 
 pub mod action;
+pub mod agent;
 pub mod block;
 pub mod bus;
 pub mod editor;
@@ -17,6 +18,7 @@ pub mod vim;
 pub mod workspace;
 
 pub use action::{Action, Object, Verb};
+pub use agent::{Activity, Agent, Entry, Speaker};
 pub use bus::{Command, Event};
 pub use editor::Editor;
 pub use highlights::Highlighters;

@@ -47,7 +47,7 @@ pub enum Severity {
 }
 
 impl Severity {
-    fn from_lsp(code: Option<u8>) -> Self {
+    pub fn from_lsp(code: Option<u8>) -> Self {
         match code {
             Some(1) => Severity::Error,
             Some(2) => Severity::Warning,
@@ -90,7 +90,7 @@ pub enum CompletionKind {
 }
 
 impl CompletionKind {
-    fn from_lsp(code: Option<u8>) -> Self {
+    pub fn from_lsp(code: Option<u8>) -> Self {
         match code {
             Some(2) => CompletionKind::Method,
             Some(3) => CompletionKind::Function,

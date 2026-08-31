@@ -379,7 +379,7 @@
 
         <!-- Agent -->
         <div class="dock-panel on" data-panel="agent" style="display:flex;flex-direction:column;flex:1;min-height:0">
-          <div class="scroll">
+          <div class="scroll" data-agent-thread>
             <div class="msg">
               <div class="who"><svg class="i" width="12" height="12" style="color:var(--accent)"><use href="#i-proton"/></svg> You · scope <span class="chip">src/routes</span></div>
               <p>The fleet grid janks at 40 satellites. Find it and fix it.</p>
@@ -407,14 +407,17 @@
           </div>
           <div class="composer">
             <div class="box">
-              <div class="txt">Ask Proton, or ⌘K for an inline edit…</div>
+              <div class="txt" contenteditable="plaintext-only" role="textbox"
+                   aria-label="Ask Proton" data-agent-input
+                   data-placeholder="Ask Proton, or ⌘K for an inline edit…"></div>
               <div class="foot">
                 <span class="select"><svg class="i" width="12" height="12"><use href="#i-plus"/></svg></span>
                 <span class="select">Opus 5 <svg class="i" width="11" height="11"><use href="#i-chev"/></svg></span>
                 <span class="select">Agent <svg class="i" width="11" height="11"><use href="#i-chev"/></svg></span>
                 <span class="select">@repo <svg class="i" width="11" height="11"><use href="#i-chev"/></svg></span>
                 <span class="select"><svg class="i" width="12" height="12"><use href="#i-mic"/></svg></span>
-                <span class="send"><svg class="i" width="13" height="13"><use href="#i-arrow-up"/></svg></span>
+                <span class="send" data-agent-send role="button" tabindex="0"
+                      aria-label="Send"><svg class="i" width="13" height="13"><use href="#i-arrow-up"/></svg></span>
               </div>
             </div>
             <div class="suggest">
@@ -1056,7 +1059,7 @@ df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_pa
     <div class="sl" id="sl-path">—</div>
     <div class="sl"><svg class="i ft-ts"><use href="#i-file-code"/></svg> tsx · utf-8 · lf</div>
     <div class="sl grow" id="sl-status"></div>
-    <div class="sl"><svg class="i ft-ai"><use href="#i-spark"/></svg> Opus 5 · agent</div>
+    <div class="sl" id="sl-agent"><svg class="i ft-ai"><use href="#i-spark"/></svg> Opus 5 · agent</div>
     <div class="sl" id="sl-diagnostics"></div>
     <div class="sl" id="sl-servers"></div>
     <div class="sl right" id="sl-position">ln 1, col 1</div>

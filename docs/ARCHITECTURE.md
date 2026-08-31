@@ -1,13 +1,13 @@
 # Proton — architecture
 
-The build document. **M0 through M2 are implemented**; everything from M3 on is a
-plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
+The build document. **M0 through M2 are implemented and M3 is half-built**;
+everything from M4 on is a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
 reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 **what we build and in what order**, and is the one to argue with before writing
 code.
 
 ```bash
-cargo test --workspace        # 175 tests, headless
+cargo test --workspace        # 228 tests, headless
 cargo test --workspace -- --include-ignored   # plus 4 that drive a real rust-analyzer
 cargo run -p proton-shell     # the app
 node ui/serve.mjs             # the front end alone, in a browser
@@ -65,7 +65,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-lsp` | LSP client, server supervision, JSON-RPC framing, a non-blocking mailbox | `serde_json` |
 | `proton-vcs` | Status, gutter, blame, staging, the shadow worktree | `gix` |
 | `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
-| `proton-agent` | Claude client, tool dispatch, task queue, diff staging | `tokio`, `reqwest`, `eventsource-stream` |
+| `proton-agent` | Messages API client, SSE streaming, request building, auth | `ureq` |
 | `proton-trace` | Code Visualizer client + process supervision | `tokio` |
 | `proton-plugin` | Wasmtime host, WIT interfaces, capability grants | `wasmtime`, `wit-bindgen` |
 | `proton-core` | Workspace state, mode registry, command/event bus, config | all of the above |
@@ -73,7 +73,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
 
 **Built so far: `proton-text`, `proton-index`, `proton-syntax`, `proton-lsp`,
-`proton-core`, `proton-shell`.** The rest of the table is the shape it grows
+`proton-agent`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
 into. `proton-vim` has not split out of `proton-core` yet — the modal engine is
 one file there and would gain nothing but a manifest from moving today.
 
@@ -81,6 +81,12 @@ one file there and would gain nothing but a manifest from moving today.
 and a channel do what `tokio` would, for a client that talks to two or three
 processes; and the protocol surface Proton actually uses is three response
 shapes, each with a subtlety worth writing down rather than inheriting.
+
+`proton-agent` went the same way, and the table above has been corrected to
+match. It has no async runtime, no HTTP framework and no SSE crate: streaming a
+response off a worker thread wants a plain `Read`, not a `Stream`, and the
+whole of SSE is "`event:`, `data:`, a blank line dispatches". `ureq` over
+`rustls` keeps the tree small and leaves no OpenSSL to find on Windows.
 
 **Why Tauri v2 rather than raw `wry`:** the updater, packaging, and the
 permission model are all things you would otherwise write. On Windows 11 the
@@ -476,12 +482,53 @@ about the text produces diagnostics on the wrong lines — the worst kind of
 wrong. Revisit when edits are batched. The language table is hard-coded until
 it becomes user config in M4.
 
-**M3 — Agent.** `proton-agent`, streaming, tool dispatch, the shadow worktree,
-per-hunk Refer/Apply, the task queue. **Chat mode ships here** — it is this
-runtime given the whole window instead of a sidebar, and it is the cheapest way
-to make the agent useful before any non-code mode exists.
-*Exit: "fix the jank" produces applicable hunks the user reviews, and
-`cache_read_input_tokens` is non-zero across turns.*
+**M3 — Agent. ◐ in progress.** The runtime ships: `proton-agent` is the
+Messages API, layered the way `proton-lsp` is, and for the same reasons. `sse`
+frames bytes and knows nothing about their meaning; `stream` assembles events
+into a turn; `wire` gives both directions one set of types, because a response
+has to round-trip into the next request; `client` owns the connection and hands
+back a mailbox drained on the same 50 ms heartbeat the language servers use.
+
+Two deltas cannot be used as they arrive, and both are quiet if you get them
+wrong. **`input_json_delta` carries fragments of a JSON string**, so a tool's
+arguments only exist once its block stops — anything reading them mid-stream is
+reading something that is not there. And **a thinking block's `signature`
+arrives after its text and may be split**, so it is appended rather than
+assigned; a truncated one fails the *next* request, one turn after the mistake.
+
+Most of the request builder is one idea: **prompt caching is prefix-matched, in
+the order `tools` → `system` → `messages`**. The tool list is sorted before it
+is sent, because a `HashMap` iteration order is not stable and a tool list that
+reshuffles is a cache that never hits. Nothing reports that — it shows up as
+`cache_read_input_tokens` going to zero, which is a cost regression rather than
+an error, so the number is asserted on in tests and shown in the statusline.
+
+**The tools are the editor's own capabilities.** `grep` is the index Telescope
+searches and `read_file` reads through the same resolver the picker uses, so
+what the agent sees and what the user sees cannot drift apart. They run in
+`proton-core`, where the workspace is, rather than in `proton-agent`, which
+knows nothing about buffers.
+
+One rule shapes the whole of `core::agent`: **every tool result goes back in a
+single user message.** The model issues parallel calls in one assistant turn,
+and splitting the answers across several user messages trains it out of doing
+that. A failed tool still answers, with `is_error` — dropping the block leaves a
+`tool_use` with no result, which is a conversation the API rejects.
+
+*Exit: half met.* `cache_read_input_tokens` is non-zero across turns and
+asserted end-to-end in `crates/proton-core/tests/agent.rs`, which drives the
+whole loop — question, tool call against the real index, result, answer —
+against a scripted API on a loopback socket. **Applicable hunks are the half
+that is not done**: there is no `edit_file` tool and no hunk staging yet, so the
+agent can read the workspace and explain it but cannot yet propose a change to
+it.
+
+Still open, and the shape of the rest of M3: an `edit_file` tool whose output
+is staged rather than applied, per-hunk Refer/Apply over that staging, and the
+task queue. The shadow worktree is deliberately *not* a prerequisite for the
+first two — a staged diff held against the buffer is enough to review and
+apply, and a real git worktree earns its place later, when proposed changes
+need to be run against tests before they are accepted.
 
 **M4 — Code Visualizer.** Sidecar, then the native pane. First real proof of the
 "second consumer of a document format" pattern every later mode needs — and the

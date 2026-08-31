@@ -75,6 +75,37 @@ if (HAS_SHELL) {
       state.mode = command.mode;
       return [{ type: "modeChanged", mode: state.mode }];
     }
+    // A canned agent turn, so the design preview can be designed against.
+    // Deliberately scripted: the real conversation lives in proton-core and
+    // this must never grow into a second one.
+    if (command.type === "ask") {
+      const you = { speaker: "you", text: command.text, thinking: "", calls: [], streaming: false };
+      const reply = {
+        speaker: "proton", thinking: "", streaming: true, text: "",
+        calls: [{ id: "a", name: "grep", detail: `query=${command.text.split(" ")[0]}`, result: "", state: "running" }],
+      };
+      const agent = (activity, extra) => ({
+        type: "agent", activity, inputTokens: 4210, outputTokens: 183, cachedTokens: 3904,
+        transcript: [you, { ...reply, ...extra }],
+      });
+      // Stagger it so the streaming states are visible while designing them.
+      setTimeout(() => deliver(agent("working", {})), 60);
+      setTimeout(() => deliver(agent("thinking", {
+        thinking: "The grid rebuilds its rows on every tick.",
+        calls: [{ ...reply.calls[0], result: "6 hits (+5 more)", state: "done" }],
+      })), 700);
+      setTimeout(() => deliver(agent("idle", {
+        streaming: false,
+        thinking: "The grid rebuilds its rows on every tick.",
+        calls: [{ ...reply.calls[0], result: "6 hits (+5 more)", state: "done" }],
+        text:
+          "`ranked` is rebuilt on every tick, so all 40 `Sparkline`s remount.\n\n" +
+          "Memoise on `[sats, health]` and the grid stops re-laying out.",
+      })), 1400);
+      return [];
+    }
+    if (command.type === "cancelTurn") return [{ type: "agent", activity: "idle", inputTokens: 0, outputTokens: 0, cachedTokens: 0, transcript: [] }];
+
     if (command.type !== "key") return [];
 
     const k = command.key.key;

@@ -372,3 +372,28 @@ impl Pickers {
         }
     }
 }
+
+impl Pickers {
+    /* ── the index, without a picker ──────────────────────────────────
+    The agent searches the same index Telescope does, so what it finds
+    and what `␣fg` finds cannot drift apart. These skip the picker
+    entirely — there is no query to narrow and no selection to move. */
+
+    /// Matching lines, as `path:line: text`.
+    pub fn grep(&self, query: &str, limit: usize) -> Vec<String> {
+        grep(self.index.root(), self.index.paths(), query, limit)
+            .into_iter()
+            .map(|hit| format!("{}:{}: {}", hit.path, hit.line + 1, hit.text.trim()))
+            .collect()
+    }
+
+    /// Paths, fuzzy-matched the way the file picker matches them.
+    pub fn find(&self, query: &str, limit: usize) -> Vec<String> {
+        let paths = self.index.paths();
+        Matcher::new()
+            .rank(query, paths, limit)
+            .into_iter()
+            .map(|m| paths[m.index].clone())
+            .collect()
+    }
+}

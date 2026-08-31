@@ -1089,3 +1089,47 @@ table.df tr:hover td { background: var(--e1); }
 
 /* A collapsed row points its chevron along the row instead of down. */
 .i.closed { transform: rotate(-90deg); }
+
+/* ── the composer ─────────────────────────────────────────────────── */
+
+.composer .txt:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-4);
+  pointer-events: none;
+}
+.composer .txt:focus { outline: none; }
+
+/* While a turn is running the box is live rather than inert — the border
+   picks up the accent so the panel reads as busy from the corner of the eye,
+   without an extra spinner competing with the one on the tool line. */
+.composer .box.busy { border-color: var(--accent-line); }
+
+.send { cursor: pointer; }
+.send.stop { background: var(--err); }
+
+/* ── the transcript ───────────────────────────────────────────────── */
+
+/* Reasoning is context for a reader who wants it, not part of the answer,
+   so it is collapsed and quiet until asked for. */
+.thought {
+  margin: 2px 0 8px;
+  padding: 0;
+  border-left: 2px solid var(--edge);
+  padding-left: 10px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.thought > summary {
+  cursor: pointer;
+  color: var(--ink-4);
+  font: 600 9.5px var(--sans);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  list-style: none;
+}
+.thought > summary::-webkit-details-marker { display: none; }
+.thought > summary::before { content: "▸ "; }
+.thought[open] > summary::before { content: "▾ "; }
+.thought p { margin: 6px 0; }
+
+#sl-agent .cached { color: var(--ok); }

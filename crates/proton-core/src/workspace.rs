@@ -10,6 +10,7 @@ use std::path::Path;
 use proton_lsp::client::Incoming;
 
 use crate::action::{Action, Verb};
+use crate::agent::Agent;
 use crate::bus::{BufferTab, Command, Event, NoticeLevel, Selection, ServerState};
 use crate::editor::Editor;
 use crate::highlights::Highlighters;
@@ -47,6 +48,7 @@ pub struct Workspace {
     servers: Servers,
     highlights: Highlighters,
     popup: Popup,
+    agent: Agent,
 }
 
 impl Workspace {
@@ -62,6 +64,7 @@ impl Workspace {
             editor: Editor::new(),
             pickers: Pickers::new(root),
             servers: Servers::new(root),
+            agent: Agent::new(&root.display().to_string()),
             ..Default::default()
         }
     }
@@ -113,7 +116,15 @@ impl Workspace {
                     self.cursor_event(),
                     self.diagnostics_event(),
                     self.servers_event(),
+                    self.agent_event(),
                 ]
+            }
+
+            Command::Ask { text } => self.ask(&text),
+
+            Command::CancelTurn => {
+                self.agent.cancel();
+                vec![self.agent_event()]
             }
 
             Command::Poll => self.poll_servers(),
@@ -423,6 +434,13 @@ impl Workspace {
             events.push(self.picker_event());
         }
 
+        // The agent runs on the same heartbeat. It has to: a turn takes tens
+        // of seconds and arrives in pieces, and the core has no clock of its
+        // own to notice them with.
+        if self.agent.is_busy() {
+            events.extend(self.poll_agent());
+        }
+
         let messages = self.servers.poll();
         if messages.is_empty() {
             return events;
@@ -631,6 +649,161 @@ impl Workspace {
                     note,
                 })
                 .collect(),
+        }
+    }
+
+    /* ── the agent ────────────────────────────────────────────────── */
+
+    /// Put a question to the agent.
+    fn ask(&mut self, text: &str) -> Vec<Event> {
+        if text.trim().is_empty() {
+            return Vec::new();
+        }
+        match self.agent.ask(text) {
+            Ok(()) => vec![self.agent_event()],
+            // A missing credential is the common case and it is not an error
+            // in the code — it is a thing the user has to go and do.
+            Err(why) => vec![notice(why, NoticeLevel::Warn)],
+        }
+    }
+
+    /// Drain the agent, run whatever it asked for, and continue the turn.
+    ///
+    /// The tools run here rather than in `proton-agent` because this is where
+    /// the editor is: `grep` is the same index Telescope searches, and
+    /// `read_file` reads through the same buffers the user has open, so what
+    /// the agent sees and what the user sees cannot drift apart.
+    fn poll_agent(&mut self) -> Vec<Event> {
+        let calls = self.agent.poll();
+        let mut events = Vec::new();
+
+        for call in calls {
+            let answer = self.run_tool(&call.name, &call.input);
+            // An `open_buffer` that succeeded changed what is on screen.
+            if call.name == "open_buffer" && answer.is_ok() {
+                events.push(self.buffers_event());
+                events.extend(self.after_action(true));
+            }
+            self.agent.answer(&call.id, answer);
+        }
+
+        // Every outstanding call answered? Then the turn continues, with all
+        // the results in one message.
+        match self.agent.resume() {
+            Ok(_) => {}
+            Err(why) => events.push(notice(why, NoticeLevel::Error)),
+        }
+
+        events.push(self.agent_event());
+        events
+    }
+
+    /// Run one tool against the workspace.
+    fn run_tool(&mut self, name: &str, input: &serde_json::Value) -> Result<String, String> {
+        let text = |key: &str| {
+            input
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .ok_or_else(|| format!("{name}: `{key}` is required and must be a string"))
+        };
+        let count = |key: &str, fallback: usize| {
+            input
+                .get(key)
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize)
+                .unwrap_or(fallback)
+        };
+
+        match name {
+            "read_file" => {
+                let path = text("path")?;
+                let buffer = proton_text::Buffer::open(self.pickers.resolve(&path))
+                    .map_err(|err| format!("{path}: {err}"))?;
+
+                // 1-based on the wire, because that is what the model sees in
+                // the gutter and in every error message it has ever read.
+                let from = count("from", 1).max(1) - 1;
+                let to = count("to", buffer.len_lines()).min(buffer.len_lines());
+                let lines = buffer.lines(from, to.saturating_sub(from));
+
+                Ok(lines
+                    .iter()
+                    .enumerate()
+                    .map(|(i, line)| format!("{:>5}  {line}", from + i + 1))
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+
+            "grep" => {
+                let query = text("query")?;
+                let hits = self.pickers.grep(&query, count("limit", 40));
+                if hits.is_empty() {
+                    return Ok(format!("no matches for {query:?}"));
+                }
+                Ok(hits.join("\n"))
+            }
+
+            "find_files" => {
+                let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                let found = self.pickers.find(query, count("limit", 40));
+                if found.is_empty() {
+                    return Ok(format!("no files matching {query:?}"));
+                }
+                Ok(found.join("\n"))
+            }
+
+            "open_buffer" => {
+                let path = text("path")?;
+                self.editor
+                    .open(self.pickers.resolve(&path))
+                    .map_err(|err| format!("{path}: {err}"))?;
+                self.resync();
+                Ok(format!("opened {path}"))
+            }
+
+            "diagnostics" => {
+                let path = match input.get("path").and_then(|v| v.as_str()) {
+                    Some(path) => self.pickers.resolve(path),
+                    None => match self.editor.buffer().path() {
+                        Some(path) => path.to_path_buf(),
+                        None => return Ok("no file is open".into()),
+                    },
+                };
+                let raw = self.servers.diagnostics_for(&path).to_vec();
+                if raw.is_empty() {
+                    return Ok("no diagnostics".into());
+                }
+                Ok(raw
+                    .iter()
+                    .map(|d| {
+                        format!(
+                            "{}:{} {:?} {}",
+                            d.range.start.line + 1,
+                            d.range.start.character + 1,
+                            lsp::Severity::from_lsp(d.severity),
+                            d.message
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+
+            other => Err(format!("no such tool: {other}")),
+        }
+    }
+
+    fn agent_event(&self) -> Event {
+        let usage = self.agent.usage();
+        Event::Agent {
+            transcript: self.agent.transcript().to_vec(),
+            activity: self.agent.activity(),
+            // The cache number earns its place in the UI: it is the only
+            // visible sign that the prefix is still being hit, and a silent
+            // miss is a cost regression rather than an error.
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cached_tokens: usage.cache_read_input_tokens,
         }
     }
 

@@ -925,6 +925,10 @@ onEvent((event) => {
       renderServers(event.states);
       break;
 
+    case "agent":
+      renderAgent(event);
+      break;
+
     case "notice":
       renderStatus(event.text);
       break;
@@ -1160,4 +1164,130 @@ new ResizeObserver(reportViewport).observe(document.body);
 Object.assign(window, {
   setTheme, setTranslucency, setMode: coreSetMode, setDock, open, closeAll,
   dispatch, drawPointerEdges, splitEditor, closeSplit, onlySplit, setHint,
+});
+
+/* ── the agent ────────────────────────────────────────────────────────
+   The core owns the conversation; this draws it. The whole transcript
+   arrives on every change rather than as deltas — a turn is at most a few
+   dozen entries, and a delta protocol for something that small is a
+   synchronisation bug waiting to be written. */
+
+/** Which tool gets which icon. Unknown tools still get a mark. */
+const TOOL_ICON = {
+  read_file: "file-code",
+  grep: "search",
+  find_files: "files",
+  open_buffer: "split-v",
+  diagnostics: "d-warning",
+};
+
+const CALL_STATE = { starting: "", running: "spin", done: "", failed: "" };
+
+function toolHtml(call) {
+  const spin = CALL_STATE[call.state] === "spin" ? " spin" : "";
+  const mark = TOOL_ICON[call.name] ?? "k-other";
+  const right =
+    call.state === "failed"
+      ? `<span class="t" style="color:var(--err)">${escapeHtml(call.result)}</span>`
+      : call.result
+        ? `<span class="t">${escapeHtml(call.result)}</span>`
+        : "";
+  return (
+    `<div class="tool"><svg class="i${spin}"><use href="#i-${mark}"/></svg> ` +
+    `<b>${escapeHtml(call.name)}</b> ${escapeHtml(call.detail)}${right}</div>`
+  );
+}
+
+/** Minimal inline markup: backticks and paragraphs. Nothing more — this is a
+ *  side panel, not a document viewer. */
+function proseHtml(text) {
+  return escapeHtml(text)
+    .split(/\n{2,}/)
+    .filter((p) => p.trim())
+    .map((p) => `<p>${p.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function entryHtml(entry) {
+  const you = entry.speaker === "you";
+  const who = you
+    ? `<svg class="i" style="color:var(--accent)"><use href="#i-proton"/></svg> You`
+    : `<svg class="i ft-ai"><use href="#i-spark"/></svg> Proton · Opus 5`;
+
+  const thinking = entry.thinking
+    ? `<details class="thought"><summary>thought</summary>${proseHtml(entry.thinking)}</details>`
+    : "";
+  const calls = entry.calls.map(toolHtml).join("");
+  // A caret while the text is still arriving, so an empty answer that is on
+  // its way does not look like an empty answer that arrived.
+  const caret = entry.streaming ? `<span class="cursor"></span>` : "";
+
+  return (
+    `<div class="msg"><div class="who">${who}</div>` +
+    `${thinking}${calls}${proseHtml(entry.text)}${caret}</div>`
+  );
+}
+
+function renderAgent(event) {
+  const thread = $("[data-agent-thread]");
+  if (thread && event.transcript.length) {
+    const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60;
+    thread.innerHTML = event.transcript.map(entryHtml).join("");
+    // Follow the answer only if the reader was already at the bottom —
+    // yanking someone back down while they are reading is worse than
+    // making them scroll.
+    if (atBottom) thread.scrollTop = thread.scrollHeight;
+  }
+
+  const box = $(".composer .box");
+  if (box) box.classList.toggle("busy", event.activity !== "idle");
+
+  const send = $("[data-agent-send]");
+  if (send) {
+    send.classList.toggle("stop", event.activity !== "idle");
+    send.setAttribute("aria-label", event.activity === "idle" ? "Send" : "Stop");
+    send.innerHTML = `<svg class="i"><use href="#i-${
+      event.activity === "idle" ? "arrow-up" : "stop"
+    }"/></svg>`;
+  }
+
+  const meter = $("#sl-agent");
+  if (meter) {
+    // The cached figure earns its place: a prefix that stops matching is a
+    // cost regression rather than an error, and nothing else reports it.
+    meter.innerHTML = event.inputTokens
+      ? `<svg class="i ft-ai"><use href="#i-spark"/></svg> ${fmt(event.inputTokens)} in · ` +
+        `${fmt(event.outputTokens)} out · <span class="cached">${fmt(event.cachedTokens)} cached</span>`
+      : `<svg class="i ft-ai"><use href="#i-spark"/></svg> Opus 5 · agent`;
+  }
+}
+
+const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+function askAgent() {
+  const input = $("[data-agent-input]");
+  if (!input) return;
+  const text = input.textContent.trim();
+  if (!text) return;
+  input.textContent = "";
+  dispatch({ type: "ask", text });
+}
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("[data-agent-send]")) return;
+  // The same button stops a turn that is running — the thing you want when
+  // an answer is going the wrong way is always in the same place.
+  const busy = $("[data-agent-send]")?.classList.contains("stop");
+  if (busy) dispatch({ type: "cancelTurn" });
+  else askAgent();
+});
+
+// Enter sends, Shift-Enter makes a newline. The composer is not the buffer,
+// so these keys never reach the modal engine.
+$("[data-agent-input]")?.addEventListener("keydown", (e) => {
+  e.stopPropagation();
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    askAgent();
+  }
 });

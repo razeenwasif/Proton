@@ -1,0 +1,19 @@
+[package]
+name = "proton-agent"
+description = "Proton's agent runtime: the Messages API, streaming, and tool dispatch."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+ts-rs = { workspace = true }
+
+# Blocking HTTP, no async runtime. `proton-lsp` already established that two
+# threads and a channel do what an executor would for a client that talks to a
+# handful of endpoints, and streaming SSE off a worker wants a plain `Read`
+# rather than a `Stream`. `rustls` so there is no OpenSSL to find on Windows.
+ureq = { version = "3", default-features = false, features = ["rustls", "json", "platform-verifier"] }

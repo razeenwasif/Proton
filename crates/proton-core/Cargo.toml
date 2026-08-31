@@ -8,12 +8,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+proton-agent = { workspace = true }
 proton-index = { workspace = true }
 proton-lsp = { workspace = true }
 proton-syntax = { workspace = true }
 proton-text = { workspace = true }
 serde = { workspace = true }
-ts-rs = { workspace = true }
-
-[dev-dependencies]
 serde_json = { workspace = true }
+ts-rs = { workspace = true }

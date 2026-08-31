@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::action::Action;
+use crate::agent::{Activity, Entry};
 use crate::key::Key;
 use crate::lsp::{Completion, Diagnostic, ServerStatus};
 use crate::mode::ModeId;
@@ -73,6 +74,14 @@ pub enum Command {
     /// its own; something outside has to ask. That is the whole cost of
     /// keeping `apply` total, and it is a good trade.
     Poll,
+    /* ── the agent ────────────────────────────────────────────────── */
+    /// Put a question to the agent.
+    Ask {
+        text: String,
+    },
+    /// Stop the turn in flight. What has arrived stays on screen; nothing is
+    /// committed to the conversation.
+    CancelTurn,
     /// Ask for the current state — used once on connect so the shell can render
     /// without guessing.
     Sync,
@@ -205,6 +214,22 @@ pub enum Event {
     /// What each language server is doing, for the statusline.
     Servers {
         states: Vec<ServerState>,
+    },
+    /// The whole agent transcript, and what it is doing.
+    ///
+    /// Sent whole rather than as deltas: a turn is at most a few dozen
+    /// entries, the front end re-renders one panel from it, and a delta
+    /// protocol for something this small is a synchronisation bug waiting to
+    /// be written.
+    #[serde(rename_all = "camelCase")]
+    Agent {
+        transcript: Vec<Entry>,
+        activity: Activity,
+        input_tokens: u64,
+        output_tokens: u64,
+        /// Served from cache. Surfaced because a silently invalidated prefix
+        /// is a cost regression rather than an error, and nothing else shows it.
+        cached_tokens: u64,
     },
     /// Full state, in reply to [`Command::Sync`].
     #[serde(rename_all = "camelCase")]
