@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace         # 64 tests, headless
+cargo test --workspace         # 86 tests, headless
 cargo run -p proton-shell     # the app
 node ui/serve.mjs             # the front end alone, in a browser
 ```
@@ -63,7 +63,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-syntax` | Tree-sitter parsing, highlight queries, folds, structural selection | `tree-sitter` |
 | `proton-lsp` | LSP client, DAP client, server supervision, capability negotiation | `lsp-types`, `tokio` |
 | `proton-vcs` | Status, gutter, blame, staging, the shadow worktree | `gix` |
-| `proton-index` | Symbol + embedding index behind Telescope's `␣fa` | `tantivy` |
+| `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
 | `proton-agent` | Claude client, tool dispatch, task queue, diff staging | `tokio`, `reqwest`, `eventsource-stream` |
 | `proton-trace` | Code Visualizer client + process supervision | `tokio` |
 | `proton-plugin` | Wasmtime host, WIT interfaces, capability grants | `wasmtime`, `wit-bindgen` |
@@ -344,8 +344,18 @@ highlighting lands, because that is what turns one text node per line into many.
 *Exit: Proton edits its own source, and `2dd`, `ciw`, `.`, `u` and a recorded
 macro all behave. Measure input-to-photon here and write the number down.*
 
-**M2 — Telescope + LSP.** Files, grep, buffers, symbols, diagnostics. The spine
-of the whole interaction model; get it right before adding anything.
+**M2 — Telescope + LSP. ◐ in progress.** Telescope ships: `proton-index` walks
+the tree with `ignore` (so `.gitignore` is honoured), scores with `nucleo` in
+its path-aware configuration, and backs three pickers — files, live grep and
+buffers. They differ only in where their candidates come from, which is why
+symbols and diagnostics will need no new matching code.
+
+The picker owns the keyboard while it is open and the modal engine is suspended
+rather than consulted; leader bindings that name a picker resolve in the core,
+because the keymap is core config and a second front end must not reinvent it.
+
+Still open: the LSP client, and moving the walk onto a worker so a cold index on
+a large repository cannot block a keystroke.
 *Exit: `␣ff` and `␣fg` are faster than reaching for the mouse, and
 rust-analyzer drives completion and go-to-definition.*
 
