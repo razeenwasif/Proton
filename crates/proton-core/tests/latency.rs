@@ -13,11 +13,11 @@ use std::time::Instant;
 use proton_core::{Command, Key, Workspace};
 
 fn open_big() -> Workspace {
-    let mut ws = Workspace::new();
+    let mut ws = Workspace::rooted("../..");
     // A real file, not a synthetic one: line lengths and structure matter to
     // the rope, and a uniform file would flatter the numbers.
     ws.apply(Command::OpenBuffer {
-        path: "src/vim.rs".into(),
+        path: "crates/proton-core/src/vim.rs".into(),
     });
     ws.apply(Command::Viewport {
         first_line: 0,

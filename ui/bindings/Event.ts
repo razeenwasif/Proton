@@ -3,6 +3,8 @@ import type { Action } from "./Action";
 import type { BufferTab } from "./BufferTab";
 import type { ModeId } from "./ModeId";
 import type { NoticeLevel } from "./NoticeLevel";
+import type { PickerItem } from "./PickerItem";
+import type { PickerKind } from "./PickerKind";
 import type { Selection } from "./Selection";
 import type { VimMode } from "./VimMode";
 
@@ -10,4 +12,8 @@ export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "ty
 /**
  * Anchor line/column when there is a selection.
  */
-selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, active: number, } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, };
+selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
+/**
+ * How many candidates the picker is choosing from, before matching.
+ */
+total: number, elapsedMs: number, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, };

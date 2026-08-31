@@ -8,7 +8,9 @@
 use crate::action::{Action, Verb};
 use crate::bus::{BufferTab, Command, Event, NoticeLevel, Selection};
 use crate::editor::Editor;
+use crate::key::Key;
 use crate::mode::ModeId;
+use crate::picker::{Accepted, PickerKind, Pickers};
 use crate::vim::{Outcome, Vim, VimMode};
 
 /// What the front end can currently show. The core keeps it so a buffer change
@@ -35,12 +37,20 @@ pub struct Workspace {
     vim: Vim,
     editor: Editor,
     viewport: Viewport,
+    pickers: Pickers,
 }
 
 impl Workspace {
     pub fn new() -> Self {
+        Self::rooted(".")
+    }
+
+    /// The project root every picker searches. Separate from `new` so a test
+    /// can point at a fixture instead of the process's working directory.
+    pub fn rooted(root: impl AsRef<std::path::Path>) -> Self {
         Self {
             editor: Editor::new(),
+            pickers: Pickers::new(root),
             ..Default::default()
         }
     }
@@ -93,7 +103,11 @@ impl Workspace {
                 ]
             }
 
-            Command::OpenBuffer { path } => match self.editor.open(&path) {
+            // Relative paths resolve against the project root, not the
+            // process's working directory. The front end should not have to
+            // know where the binary happened to be launched from, and a path
+            // from the picker has to mean the same thing as one from the tree.
+            Command::OpenBuffer { path } => match self.editor.open(self.pickers.resolve(&path)) {
                 Ok(_) => vec![
                     self.buffers_event(),
                     self.viewport_event(),
@@ -112,6 +126,21 @@ impl Workspace {
                 }
                 Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
             },
+
+            Command::OpenPicker { kind } => self.open_picker(kind),
+
+            Command::SelectPick { index } => match self.pickers.open_mut() {
+                Some(picker) => {
+                    picker.select(index);
+                    vec![self.picker_event()]
+                }
+                None => Vec::new(),
+            },
+
+            // While a picker is open it owns the keyboard, so the modal engine
+            // is suspended rather than consulted: `d` types a `d` instead of
+            // starting an operator.
+            Command::Key { key } if self.pickers.is_open() => self.picker_key(&key),
 
             Command::Key { key } => {
                 let before = self.vim.mode();
@@ -162,6 +191,116 @@ impl Workspace {
                 events.extend(self.after_action(changed));
                 events
             }
+        }
+    }
+
+    /* ── telescope ────────────────────────────────────────────────── */
+
+    fn buffer_labels(&self) -> Vec<(String, Option<String>)> {
+        self.editor
+            .buffers()
+            .iter()
+            .map(|b| (b.name(), b.path().map(|p| p.display().to_string())))
+            .collect()
+    }
+
+    fn open_picker(&mut self, kind: PickerKind) -> Vec<Event> {
+        let labels = self.buffer_labels();
+        self.pickers.begin(kind, labels);
+        // Close which-key on the way: the leader sequence resolved.
+        vec![Event::Leader { prefix: None }, self.picker_event()]
+    }
+
+    fn picker_key(&mut self, key: &Key) -> Vec<Event> {
+        let labels = self.buffer_labels();
+        match key.key.as_str() {
+            "Escape" => {
+                self.pickers.close();
+                return vec![Event::PickerClosed];
+            }
+            "Enter" => return self.accept_picker(),
+            "ArrowDown" => self.move_selection(1),
+            "ArrowUp" => self.move_selection(-1),
+            "Backspace" => {
+                // Backspace on an empty query closes the picker, the way it
+                // closes the command line.
+                if !self.pickers.pop(labels) {
+                    return vec![Event::PickerClosed];
+                }
+            }
+            // Ctrl-n / Ctrl-p move, as they do in Telescope.
+            "n" if key.ctrl => self.move_selection(1),
+            "p" if key.ctrl => self.move_selection(-1),
+            _ => match key.as_char().filter(|_| key.is_bare_char()) {
+                Some(c) => self.pickers.push(c, labels),
+                None => return Vec::new(),
+            },
+        }
+        vec![self.picker_event()]
+    }
+
+    fn move_selection(&mut self, delta: i32) {
+        if let Some(picker) = self.pickers.open_mut() {
+            picker.move_by(delta);
+        }
+    }
+
+    fn accept_picker(&mut self) -> Vec<Event> {
+        let accepted = self
+            .pickers
+            .open()
+            .map(|p| p.accept())
+            .unwrap_or(Accepted::Nothing);
+        self.pickers.close();
+        let mut events = vec![Event::PickerClosed];
+
+        match accepted {
+            Accepted::OpenPath { path, line, column } => {
+                let full = self.pickers.root().join(&path);
+                match self.editor.open(&full) {
+                    Ok(_) => {
+                        // A grep hit knows where it came from; jump there
+                        // rather than dropping the user at the top of the file.
+                        if let Some(line) = line {
+                            let buf = self.editor.buffer_mut();
+                            let at = buf.offset_of(proton_text::Position {
+                                line,
+                                column: column.unwrap_or(0),
+                            });
+                            buf.cursor = buf.clamp(buf.cursor.moved_to(at));
+                        }
+                        events.push(self.buffers_event());
+                        events.extend(self.after_action(true));
+                    }
+                    Err(err) => events.push(notice(format!("{path}: {err}"), NoticeLevel::Error)),
+                }
+            }
+            Accepted::FocusBuffer { index } => {
+                if self.editor.focus(index) {
+                    events.push(self.buffers_event());
+                    events.extend(self.after_action(true));
+                }
+            }
+            Accepted::Nothing => {}
+        }
+        events
+    }
+
+    fn picker_event(&self) -> Event {
+        let Some(picker) = self.pickers.open() else {
+            return Event::PickerClosed;
+        };
+        Event::Picker {
+            kind: picker.kind(),
+            title: picker.kind().title().to_string(),
+            query: picker.query().to_string(),
+            items: picker.items().to_vec(),
+            selected: picker.selected(),
+            total: match picker.kind() {
+                PickerKind::Buffers => self.editor.buffers().len(),
+                _ => self.pickers.file_count(),
+            },
+            elapsed_ms: picker.elapsed_ms(),
         }
     }
 
@@ -233,6 +372,13 @@ impl Workspace {
                 }
             }
             Outcome::Pending(keys) => (vec![Event::Pending { keys }], false),
+            // A leader sequence that names a picker opens it here rather than
+            // in the front end: the keymap is core config, and a second front
+            // end must not have to reinvent it.
+            Outcome::Leader(prefix) if PickerKind::for_leader(&prefix).is_some() => (
+                self.open_picker(PickerKind::for_leader(&prefix).unwrap()),
+                false,
+            ),
             Outcome::Leader(prefix) => (
                 vec![Event::Leader {
                     prefix: Some(prefix),

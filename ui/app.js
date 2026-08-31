@@ -417,11 +417,62 @@ function reportViewport() {
 }
 
 document.addEventListener("click", (e) => {
+  const pick = e.target.closest("[data-pick]");
+  if (pick) {
+    // Select then accept: the click says which row, and Enter means the same
+    // thing however the row got chosen.
+    dispatch({ type: "selectPick", index: Number(pick.dataset.pick) })
+      .then(() => sendKey({ key: "Enter" }));
+    return;
+  }
   const row = e.target.closest("[data-path]");
   if (row) dispatch({ type: "openBuffer", path: row.dataset.path });
   const tab = e.target.closest("[data-buffer]");
   if (tab) dispatch({ type: "focusBuffer", index: Number(tab.dataset.buffer) });
 });
+
+/* ── telescope ────────────────────────────────────────────────────────
+   The core owns the picker: it holds the query, does the matching and
+   decides what a row opens. This draws the answer and nothing else —
+   including the matched character positions, so the highlight can never
+   disagree with the score that produced the ordering. */
+
+let pickerOpen = false;
+
+function highlight(label, positions) {
+  if (!positions?.length) return escapeHtml(label);
+  const hit = new Set(positions);
+  return [...label]
+    .map((c, i) => (hit.has(i) ? `<mark>${escapeHtml(c)}</mark>` : escapeHtml(c)))
+    .join("");
+}
+
+function renderPicker(event) {
+  pickerOpen = true;
+  open("telescope");
+
+  $("[data-picker-query]").textContent = event.query;
+  $("[data-picker-title]").textContent = event.title;
+  $("[data-picker-count]").textContent =
+    `${event.items.length}/${event.total} · ${event.elapsedMs.toFixed(1)} ms`;
+
+  const results = $("[data-picker-results]");
+  results.innerHTML = event.items
+    .map(
+      (item, i) =>
+        `<div class="res${i === event.selected ? " on" : ""}" data-pick="${i}">` +
+        `<span>${highlight(item.label, item.positions)}</span>` +
+        `<span class="dir" style="margin-left:auto">${escapeHtml(item.detail)}</span></div>`,
+    )
+    .join("");
+
+  results.querySelector(".res.on")?.scrollIntoView({ block: "nearest" });
+}
+
+function closePicker() {
+  pickerOpen = false;
+  closeAll();
+}
 
 /* ── rendering core events ────────────────────────────────────────────── */
 
@@ -531,6 +582,14 @@ onEvent((event) => {
       break;
     }
 
+    case "picker":
+      renderPicker(event);
+      break;
+
+    case "pickerClosed":
+      closePicker();
+      break;
+
     case "notice":
       renderStatus(event.text);
       break;
@@ -558,7 +617,8 @@ document.addEventListener("keydown", (e) => {
 
   if (meta && e.key.toLowerCase() === "k") {
     e.preventDefault();
-    open("telescope");
+    if (HAS_SHELL) dispatch({ type: "openPicker", kind: "files" });
+    else open("telescope"); // browser preview has no file system
     return;
   }
 
@@ -569,6 +629,14 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (meta) return; // leave the rest of the browser/OS chords alone
+
+  // The picker owns the keyboard while it is open: every key goes to the core
+  // and none of the page-level bindings fire.
+  if (pickerOpen) {
+    e.preventDefault();
+    sendKey(e);
+    return;
+  }
 
   // Overlays are view state, so Escape closes them here as well as unwinding
   // the modal state in the core.

@@ -9,6 +9,7 @@ pub mod bus;
 pub mod editor;
 pub mod key;
 pub mod mode;
+pub mod picker;
 pub mod vim;
 pub mod workspace;
 
@@ -17,6 +18,7 @@ pub use bus::{Command, Event};
 pub use editor::Editor;
 pub use key::Key;
 pub use mode::ModeId;
+pub use picker::{Picker, PickerItem, PickerKind};
 pub use proton_text::{Buffer, Cursor, Edit, Position, Range};
 pub use vim::{Outcome, Vim, VimMode};
 pub use workspace::Workspace;

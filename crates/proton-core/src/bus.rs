@@ -11,6 +11,7 @@ use ts_rs::TS;
 use crate::action::Action;
 use crate::key::Key;
 use crate::mode::ModeId;
+use crate::picker::{PickerItem, PickerKind};
 use crate::vim::VimMode;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -43,6 +44,15 @@ pub enum Command {
     Viewport {
         first_line: usize,
         lines: usize,
+    },
+    /// Open a Telescope picker. The picker owns the keyboard until it closes.
+    OpenPicker {
+        kind: PickerKind,
+    },
+    /// Select a row directly, for a click. The keyboard moves by delta; a
+    /// mouse knows exactly which row it is on.
+    SelectPick {
+        index: usize,
     },
     /// Ask for the current state — used once on connect so the shell can render
     /// without guessing.
@@ -124,6 +134,21 @@ pub enum Event {
         names: Vec<BufferTab>,
         active: usize,
     },
+    /// The picker opened, or its query or selection changed.
+    #[serde(rename_all = "camelCase")]
+    Picker {
+        kind: PickerKind,
+        title: String,
+        query: String,
+        items: Vec<PickerItem>,
+        selected: usize,
+        /// How many candidates the picker is choosing from, before matching.
+        total: usize,
+        elapsed_ms: f64,
+    },
+    /// The picker closed. Distinct from an empty result: one means "nothing
+    /// matched", the other means "the keyboard is yours again".
+    PickerClosed,
     /// Something the user should see: a failed open, a save, a macro register.
     Notice {
         text: String,

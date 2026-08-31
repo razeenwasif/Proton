@@ -221,9 +221,9 @@ fn opening_a_missing_file_is_a_notice_not_a_panic() {
 fn proton_can_open_its_own_source() {
     // The literal M1 exit criterion: the editor opens a real file from this
     // repository and reports its lines.
-    let mut ws = Workspace::new();
+    let mut ws = Workspace::rooted("../..");
     let events = ws.apply(Command::OpenBuffer {
-        path: "src/workspace.rs".into(),
+        path: "crates/proton-core/src/workspace.rs".into(),
     });
     assert!(
         !events.iter().any(|e| matches!(e, Event::Notice { .. })),
