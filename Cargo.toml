@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/proton-core", "crates/proton-shell"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+repository = "https://github.com/razeenwasif/Proton"
+
+[workspace.dependencies]
+proton-core = { path = "crates/proton-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ts-rs = "10"
+
+[profile.dev]
+# The shell pulls in a large dependency tree; optimising it once makes the
+# debug loop bearable without giving up debuggability of our own crates.
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 2

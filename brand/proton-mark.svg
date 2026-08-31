@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Proton mark">
+  <g fill="none" stroke="currentColor" stroke-width="13">
+    <ellipse cx="256" cy="256" rx="176" ry="62" transform="rotate(-30 256 256)"/>
+    <ellipse cx="256" cy="256" rx="176" ry="62" transform="rotate(30 256 256)"/>
+    <ellipse cx="256" cy="256" rx="176" ry="62" transform="rotate(90 256 256)"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="408" cy="168" r="21"/>
+    <circle cx="408" cy="344" r="21"/>
+    <circle cx="256" cy="80"  r="21"/>
+    <circle cx="256" cy="256" r="44"/>
+  </g>
+</svg>

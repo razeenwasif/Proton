@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Proton">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#7A0F26"/>
+      <stop offset="0.55" stop-color="#520A19"/>
+      <stop offset="1" stop-color="#2E050F"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FF5C79" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FF5C79" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="114" fill="url(#tile)"/>
+  <rect width="512" height="512" rx="114" fill="url(#sheen)"/>
+  <circle cx="256" cy="256" r="185" fill="url(#glow)"/>
+
+  <g fill="none" stroke="#FFFFFF" stroke-width="13">
+    <ellipse cx="256" cy="256" rx="176" ry="62" transform="rotate(-30 256 256)"/>
+    <ellipse cx="256" cy="256" rx="176" ry="62" transform="rotate(30 256 256)"/>
+    <ellipse cx="256" cy="256" rx="176" ry="62" transform="rotate(90 256 256)"/>
+  </g>
+
+  <g fill="#FFFFFF">
+    <circle cx="408" cy="168" r="21"/>
+    <circle cx="408" cy="344" r="21"/>
+    <circle cx="256" cy="80"  r="21"/>
+  </g>
+
+  <circle cx="256" cy="256" r="44" fill="#FFFFFF"/>
+
+  <rect x="0.5" y="0.5" width="511" height="511" rx="113.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.10"/>
+</svg>

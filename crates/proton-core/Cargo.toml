@@ -1,0 +1,15 @@
+[package]
+name = "proton-core"
+description = "Proton's headless core: state, the modal input engine, and the command/event bus."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+ts-rs = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

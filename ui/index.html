@@ -1,0 +1,1134 @@
+<!doctype html>
+<html lang="en" data-theme="tokyo-night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proton — design preview</title>
+<link rel="icon" href="../../brand/proton-icon.svg">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <!-- UI cut of the mark. Same construction as brand/proton-mark.svg, but the
+       strokes are 20 rather than 13 and the electrons are larger: this is drawn
+       at 13–42px, where the master's hairlines fall below a pixel. -->
+  <symbol id="i-proton" viewBox="0 0 512 512">
+    <g fill="none" stroke="currentColor" stroke-width="20">
+      <ellipse cx="256" cy="256" rx="172" ry="60" transform="rotate(-30 256 256)"/>
+      <ellipse cx="256" cy="256" rx="172" ry="60" transform="rotate(30 256 256)"/>
+      <ellipse cx="256" cy="256" rx="172" ry="60" transform="rotate(90 256 256)"/>
+    </g>
+    <g fill="currentColor">
+      <circle cx="405" cy="170" r="27"/>
+      <circle cx="405" cy="342" r="27"/>
+      <circle cx="256" cy="84"  r="27"/>
+      <circle cx="256" cy="256" r="52"/>
+    </g>
+  </symbol>
+  <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 17l-5-5 5-5M15 7l5 5-5 5"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 19l7-7-4-4-7 7-1 5 5-1zM15 5l4 4"/></symbol>
+    <symbol id="i-cube" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12v9M12 12L4 7.5"/></symbol>
+    <symbol id="i-game" viewBox="0 0 24 24"><path d="M7 12h4M9 10v4M16 11h.01M18 13h.01"/><rect x="2" y="7" width="20" height="11" rx="4"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="2" y="6" width="13" height="12" rx="2.5"/><path d="M15 10.5L22 7v10l-7-3.5z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V4M4 20h16M8 16V11M12.5 16V7M17 16v-4"/></symbol>
+    <symbol id="i-files" viewBox="0 0 24 24"><path d="M3 6a2 2 0 012-2h4l2 2.5h8a2 2 0 012 2V18a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+    <symbol id="i-git" viewBox="0 0 24 24"><circle cx="7" cy="5.5" r="2.5"/><circle cx="7" cy="18.5" r="2.5"/><circle cx="17" cy="12" r="2.5"/><path d="M7 8v8M9.5 12H14.5M9.5 12a5 5 0 004.8-3.6"/></symbol>
+    <symbol id="i-bug" viewBox="0 0 24 24"><rect x="8" y="7" width="8" height="12" rx="4"/><path d="M8 11H4M20 11h-4M8 16H4.5M20 16h-3.5M9.5 7l-1-2.5M14.5 7l1-2.5"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24"><path d="M10 4h4v3a2 2 0 104 0V4h2v6h-3a2 2 0 100 4h3v6h-6v-3a2 2 0 10-4 0v3H4V4h6z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18.5 16l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7z"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0013 0M12 18v3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></symbol>
+    <symbol id="i-desktop" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></symbol>
+    <symbol id="i-tablet" viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M11 18.5h2"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5l12 7.5-12 7.5z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 4.5v15M15 4.5v15"/></symbol>
+    <symbol id="i-step" viewBox="0 0 24 24"><path d="M6 4.5l10 7.5-10 7.5zM19 4.5v15"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M13 15h4"/></symbol>
+    <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="3"/><path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 4.5h6a3 3 0 013 3V20a2.5 2.5 0 00-2.5-2.5H4zM20 4.5h-6a3 3 0 00-3 3V20a2.5 2.5 0 012.5-2.5H20z"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5L16 13h5M3 13l3-8h12l3 8v6a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 01-8 8H8l-4 2 1-4.2A8 8 0 1121 12z"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 3h6l-1 6 4 3v2H6v-2l4-3-1-6zM12 14v7"/></symbol>
+  </g>
+</defs></svg>
+
+<div class="field" aria-hidden="true">
+  <div class="blob a"></div><div class="blob b"></div><div class="blob c"></div><div class="blob d"></div>
+</div>
+
+<div class="app">
+
+  <!-- ══ titlebar ══════════════════════════════════════════════════ -->
+  <header class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="brand"><svg><use href="#i-proton"/></svg> PROTON</div>
+    <div class="crumb"><span class="dot"></span> <b>orbital-dashboard</b> · <span>main</span></div>
+
+    <div class="modes" role="tablist" aria-label="Workspace mode">
+      <button class="mode" role="tab" aria-selected="false" data-mode="chat"><svg><use href="#i-chat"/></svg> Chat</button>
+      <button class="mode" role="tab" aria-selected="true"  data-mode="codex"><svg><use href="#i-code"/></svg> Codex</button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="design"><svg><use href="#i-pen"/></svg> Design</button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="modeling"><svg><use href="#i-cube"/></svg> Modeling</button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="game"><svg><use href="#i-game"/></svg> Game</button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="video"><svg><use href="#i-video"/></svg> Video</button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="data"><svg><use href="#i-chart"/></svg> Data</button>
+    </div>
+
+    <div class="tb-right">
+      <div class="avatars">
+        <span style="background:var(--accent)" title="Razeen — you">RW</span>
+        <span style="background:var(--info)" title="Ada — designer">AD</span>
+        <span style="background:var(--accent-2)" title="Proton Agent">AI</span>
+      </div>
+      <button class="btn" data-open="settings">Settings</button>
+      <button class="btn">Share</button>
+      <button class="btn primary">Build</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <!-- ══ activity rail ═════════════════════════════════════════ -->
+    <nav class="rail" aria-label="Panels">
+      <button title="Chat  ␣aa" data-mode-go="chat"><svg><use href="#i-chat"/></svg></button>
+      <button class="on" title="Explorer  ␣e"><svg><use href="#i-files"/></svg></button>
+      <button title="Telescope  ␣ff" data-open="telescope"><svg><use href="#i-search"/></svg></button>
+      <button title="Git  ␣gg"><svg><use href="#i-git"/></svg></button>
+      <button title="Debug / DAP  ␣db"><svg><use href="#i-bug"/></svg></button>
+      <button title="Code Visualizer  ␣cv" data-dock="visualizer"><svg><use href="#i-proton"/></svg></button>
+      <button title="Database  ␣dd"><svg><use href="#i-db"/></svg></button>
+      <button title="Plugins  ␣px"><svg><use href="#i-ext"/></svg></button>
+      <span class="spacer"></span>
+      <button title="Docs"><svg><use href="#i-book"/></svg></button>
+      <button title="Settings" data-open="settings"><svg><use href="#i-gear"/></svg></button>
+    </nav>
+
+    <!-- ══ CHAT ══════════════════════════════════════════════════ -->
+    <section class="workspace" data-ws="chat" style="grid-template-columns: 260px minmax(0,1fr);">
+      <aside class="pane side hair-r">
+        <header>Conversations <span class="grow"></span><button class="btn" style="padding:3px 9px">New</button></header>
+        <div class="find" data-open="telescope"><svg width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Search chats… <kbd>␣ f n</kbd></div>
+        <div class="scroll tree">
+          <div class="group">Pinned</div>
+          <div class="row"><span class="ic">◈</span>Proton architecture notes</div>
+          <div class="row"><span class="ic">◈</span>Fleet telemetry glossary</div>
+          <div class="group">Today</div>
+          <div class="row sel"><span class="ic">◈</span>Why the fleet grid janks</div>
+          <div class="row"><span class="ic">◈</span>Coyote time for the jump curve</div>
+          <div class="row"><span class="ic">◈</span>SAFE_HOLD on KIR-2</div>
+          <div class="group">Yesterday</div>
+          <div class="row"><span class="ic">◈</span>Cross-compiling trajectory.c</div>
+          <div class="row"><span class="ic">◈</span>Tailwind theme from design tokens</div>
+          <div class="row"><span class="ic">◈</span>Trace format for the Rust backend</div>
+          <div class="group">Last week</div>
+          <div class="row"><span class="ic">◈</span>Rough cut pacing</div>
+          <div class="row"><span class="ic">◈</span>Solar array modifier stack</div>
+        </div>
+      </aside>
+
+      <main class="pane">
+        <div class="canvas-bar">
+          <span class="chip accent">Why the fleet grid janks</span>
+          <span class="chip">6 messages</span>
+          <div class="seg" style="margin-left:auto"><button class="on">Chat</button><button>Artifacts</button><button>Sources</button></div>
+          <button class="btn">Send to Codex</button>
+        </div>
+
+        <div class="chat-stream">
+          <div class="chat-col">
+            <div class="chat-hero">
+              <svg><use href="#i-proton"/></svg>
+              <h1>Good evening, Razeen.</h1>
+              <p>Ask anything. I can see every mode in this workspace.</p>
+            </div>
+
+            <div class="turn you">
+              <div class="who"><svg><use href="#i-proton"/></svg> You</div>
+              <div class="bubble">The fleet grid janks at 40 satellites, and the Android build skips frames too. Same cause?</div>
+            </div>
+
+            <div class="turn">
+              <div class="who"><svg style="color:var(--accent-2)"><use href="#i-spark"/></svg> Proton · Opus 5 · thought 6s</div>
+              <div class="tool">⌕ <b>telescope.grep</b> "sats.sort" <span class="t">6 hits</span></div>
+              <div class="tool">⚡ <b>profile.react</b> Dashboard <span class="t">re-render 41×/s</span></div>
+              <div class="tool">📱 <b>logcat.read</b> com.proton.fleet <span class="t">31 skipped frames</span></div>
+              <p><strong>Yes — one cause, two symptoms.</strong> <code>useOrbit()</code> returns a fresh <code>sats</code> array every tick, so <code>ranked</code> is rebuilt on every tick and all 40 children remount.</p>
+              <ol>
+                <li>On web that is 41 re-renders a second and a visible stall in the grid.</li>
+                <li>On Android the same adapter diff runs on the main thread, which is the Choreographer warning.</li>
+              </ol>
+              <p>The fix is in <code>orbit.ts</code>, not in either view — return a stable reference and memoise the sort. I have it staged as two hunks in Codex.</p>
+              <div class="artifact">◈ dashboard.tsx <span class="chip ok">+5 −1</span></div>
+              <div class="artifact">◈ orbit.ts <span class="chip ok">+1 −1</span></div>
+              <div class="suggest">
+                <span>Open the diffs</span><span>Write the regression test</span><span>Show me the profile</span><span>Why not useCallback?</span>
+              </div>
+            </div>
+
+            <div class="turn you">
+              <div class="who"><svg><use href="#i-proton"/></svg> You</div>
+              <div class="bubble">Show me the profile first.</div>
+            </div>
+
+            <div class="turn">
+              <div class="who"><svg style="color:var(--accent-2)"><use href="#i-spark"/></svg> Proton</div>
+              <p>Render count per second, 40 satellites, before the change:</p>
+              <div class="bars" style="height:88px">
+                <i style="height:96%"></i><i style="height:88%"></i><i style="height:100%"></i><i style="height:92%"></i>
+                <i style="height:86%"></i><i style="height:97%"></i><i style="height:12%"></i><i style="height:9%"></i>
+                <i style="height:11%"></i><i style="height:8%"></i><i style="height:10%"></i><i style="height:9%"></i>
+              </div>
+              <div class="legend"><span><b style="background:var(--accent)"></b>Dashboard renders/s</span><span style="margin-left:auto">← before · after →</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-composer">
+          <div class="chat-col">
+            <div class="box">
+              <div class="txt" style="color:var(--ink-3);font-size:13.5px;min-height:24px">Reply, or drop a file, a trace or an artboard…</div>
+              <div class="foot" style="display:flex;align-items:center;gap:6px;margin-top:10px">
+                <span class="select"><svg width="12" height="12"><use href="#i-plus"/></svg></span>
+                <span class="select">Opus 5 <svg width="11" height="11"><use href="#i-chev"/></svg></span>
+                <span class="select">Agent <svg width="11" height="11"><use href="#i-chev"/></svg></span>
+                <span class="select">@repo <svg width="11" height="11"><use href="#i-chev"/></svg></span>
+                <span class="select">@trace <svg width="11" height="11"><use href="#i-chev"/></svg></span>
+                <span class="select"><svg width="12" height="12"><use href="#i-mic"/></svg></span>
+                <span class="send"><svg width="13" height="13"><use href="#i-arrow-up"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <!-- ══ CODEX ═════════════════════════════════════════════════ -->
+    <section class="workspace on" data-ws="codex" style="grid-template-columns: 232px minmax(0,1fr) 372px;">
+
+      <aside class="pane side hair-r">
+        <header>Explorer <span class="grow"></span><span class="chip">3</span></header>
+        <div class="find" data-open="telescope"><svg width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></div>
+        <div class="scroll tree">
+          <div class="row"><span class="ic">▾</span>📁 src</div>
+          <div class="row indent-1"><span class="ic">▾</span>📁 lib</div>
+          <div class="row indent-2"><span class="ic">◈</span>orbit.ts <span class="git m">M</span></div>
+          <div class="row indent-2"><span class="ic">◈</span>telemetry.ts</div>
+          <div class="row indent-1"><span class="ic">▾</span>📁 routes</div>
+          <div class="row sel indent-2"><span class="ic">◈</span>dashboard.tsx <span class="git m">M</span></div>
+          <div class="row indent-2"><span class="ic">◈</span>fleet.tsx</div>
+          <div class="row indent-1"><span class="ic">▸</span>📁 components</div>
+          <div class="row indent-1"><span class="ic">◈</span>main.tsx</div>
+          <div class="row"><span class="ic">▾</span>📁 native</div>
+          <div class="row indent-1"><span class="ic">⬡</span>trajectory.c <span class="git a">A</span></div>
+          <div class="row indent-1"><span class="ic">⬡</span>trajectory.h</div>
+          <div class="row"><span class="ic">▸</span>📁 analysis</div>
+          <div class="row"><span class="ic">◈</span>package.json</div>
+          <div class="row"><span class="ic">◈</span>proton.toml</div>
+          <div class="group">Targets</div>
+          <div class="row"><span class="ic">🖥</span>web · vite <span class="chip ok" style="margin-left:auto">live</span></div>
+          <div class="row" data-dock="device"><span class="ic">📱</span>android · pixel 8 <span class="chip warn" style="margin-left:auto">idle</span></div>
+          <div class="row"><span class="ic">⬡</span>native · gcc <span class="chip" style="margin-left:auto">—</span></div>
+          <div class="group">Buffers · Harpoon</div>
+          <div class="row"><span class="ic">1</span>dashboard.tsx</div>
+          <div class="row"><span class="ic">2</span>orbit.ts</div>
+          <div class="row"><span class="ic">3</span>trajectory.c</div>
+        </div>
+      </aside>
+
+      <main class="pane">
+        <div class="buffers">
+          <div class="buf on">◈ dashboard.tsx <span class="tag">route</span> <span class="mod"></span></div>
+          <div class="buf">◈ orbit.ts <span class="tag">lib</span></div>
+          <div class="buf">⬡ trajectory.c <span class="tag">native</span></div>
+          <div class="buf">◈ proton.toml</div>
+        </div>
+        <div class="scroll code" id="codex-code">
+          <div class="lens">↑ <b>Proton</b> · 4 references · complexity 6 · covered by 2 tests</div>
+<div class="ln"><span class="n">1</span><span class="s"></span><span class="k">import</span> <span class="pn">{</span> useOrbit<span class="pn">,</span> useTelemetry <span class="pn">}</span> <span class="k">from</span> <span class="str">"@/lib/orbit"</span><span class="pn">;</span></div>
+<div class="ln"><span class="n">2</span><span class="s"></span><span class="k">import</span> <span class="pn">{</span> Panel<span class="pn">,</span> Sparkline <span class="pn">}</span> <span class="k">from</span> <span class="str">"@/components"</span><span class="pn">;</span></div>
+<div class="ln"><span class="n">3</span><span class="s"></span></div>
+<div class="ln"><span class="n">4</span><span class="s"></span><span class="cm">// Fleet health, sampled once per tick.</span></div>
+<div class="ln"><span class="n">5</span><span class="s"></span><span class="k">export default function</span> <span class="fn">Dashboard</span><span class="pn">(</span><span class="pn">)</span> <span class="pn">{</span></div>
+<div class="ln"><span class="n">6</span><span class="s"></span>  <span class="k">const</span> <span class="pn">{</span> sats<span class="pn">,</span> tick <span class="pn">}</span> <span class="op">=</span> <span class="fn">useOrbit</span><span class="pn">(</span><span class="pn">)</span><span class="pn">;</span><span class="inlay">: Fleet</span></div>
+<div class="ln"><span class="n">7</span><span class="s"></span>  <span class="k">const</span> health <span class="op">=</span> <span class="fn">useTelemetry</span><span class="pn">(</span>sats<span class="pn">,</span> <span class="pn">{</span> window<span class="pn">:</span> <span class="num">120</span> <span class="pn">}</span><span class="pn">)</span><span class="pn">;</span></div>
+<div class="ln"><span class="n">8</span><span class="s"></span></div>
+<div class="ln hl-add"><span class="n">9</span><span class="s">▍</span>  <span class="cm">// AI: memoised so the 40-sat grid stops re-laying out.</span></div>
+<div class="ln hl-add"><span class="n">10</span><span class="s">▍</span>  <span class="k">const</span> ranked <span class="op">=</span> <span class="fn">useMemo</span><span class="pn">(</span></div>
+<div class="ln hl-add cur"><span class="n">11</span><span class="s">▍</span>    <span class="pn">(</span><span class="pn">)</span> <span class="op">=&gt;</span> <span class="pn">[</span><span class="op">...</span>sats<span class="pn">]</span><span class="op">.</span><span class="fn">sort</span><span class="pn">(</span><span class="pn">(</span>a<span class="pn">,</span> b<span class="pn">)</span> <span class="op">=&gt;</span> health<span class="pn">[</span>a<span class="op">.</span>id<span class="pn">]</span> <span class="op">-</span> health<span class="pn">[</span>b<span class="op">.</span>id<span class="pn">]</span><span class="pn">)</span><span class="pn">,</span><span class="cursor"></span></div>
+<div class="ln hl-add"><span class="n">12</span><span class="s">▍</span>    <span class="pn">[</span>sats<span class="pn">,</span> health<span class="pn">]</span><span class="pn">,</span></div>
+<div class="ln hl-add"><span class="n">13</span><span class="s">▍</span>  <span class="pn">)</span><span class="pn">;</span> <span class="ghost">// ⇥ accept · ⌥⇥ next suggestion</span></div>
+<div class="ln"><span class="n">14</span><span class="s"></span></div>
+<div class="ln"><span class="n">15</span><span class="s"></span>  <span class="k">return</span> <span class="pn">(</span></div>
+<div class="ln"><span class="n">16</span><span class="s"></span>    <span class="pn">&lt;</span><span class="ty">Panel</span> title<span class="op">=</span><span class="str">"Fleet"</span> badge<span class="op">=</span><span class="pn">{</span>tick<span class="pn">}</span><span class="pn">&gt;</span></div>
+<div class="ln"><span class="n">17</span><span class="s"></span>      <span class="pn">{</span>ranked<span class="op">.</span><span class="fn">map</span><span class="pn">(</span><span class="pn">(</span>s<span class="pn">)</span> <span class="op">=&gt;</span> <span class="pn">(</span></div>
+<div class="ln"><span class="n">18</span><span class="s"></span>        <span class="pn">&lt;</span><span class="ty">Sparkline</span> key<span class="op">=</span><span class="pn">{</span>s<span class="op">.</span>id<span class="pn">}</span> data<span class="op">=</span><span class="pn">{</span>health<span class="pn">[</span>s<span class="op">.</span>id<span class="pn">]</span><span class="pn">}</span> <span class="pn">/&gt;</span></div>
+<div class="ln"><span class="n">19</span><span class="s"></span>      <span class="pn">)</span><span class="pn">)</span><span class="pn">}</span></div>
+<div class="ln"><span class="n">20</span><span class="s"></span>    <span class="pn">&lt;/</span><span class="ty">Panel</span><span class="pn">&gt;</span></div>
+<div class="ln"><span class="n">21</span><span class="s"></span>  <span class="pn">)</span><span class="pn">;</span></div>
+<div class="ln"><span class="n">22</span><span class="s"></span><span class="pn">}</span></div>
+        </div>
+      </main>
+
+      <aside class="pane hair-l" id="codex-dock">
+        <div class="dock-tabs">
+          <button class="dock-tab on"  data-dockpanel="agent">Agent</button>
+          <button class="dock-tab"     data-dockpanel="tasks">Tasks <span class="chip accent">2</span></button>
+          <button class="dock-tab"     data-dockpanel="visualizer">Visualizer</button>
+          <button class="dock-tab"     data-dockpanel="device">Device</button>
+          <button class="dock-tab"     data-dockpanel="term">Terminal</button>
+        </div>
+
+        <!-- Agent -->
+        <div class="dock-panel on" data-panel="agent" style="display:flex;flex-direction:column;flex:1;min-height:0">
+          <div class="scroll">
+            <div class="msg">
+              <div class="who"><svg width="12" height="12" style="color:var(--crimson-300)"><use href="#i-proton"/></svg> You · scope <span class="chip">src/routes</span></div>
+              <p>The fleet grid janks at 40 satellites. Find it and fix it.</p>
+            </div>
+            <div class="msg">
+              <div class="who"><svg width="12" height="12" style="color:var(--violet)"><use href="#i-spark"/></svg> Proton · Opus 5 · thought 4s</div>
+              <div class="tool">⌕ <b>telescope.grep</b> "sats.sort" <span class="t">6 hits</span></div>
+              <div class="tool">◈ <b>lsp.references</b> useTelemetry <span class="t">4 refs</span></div>
+              <div class="tool">⚡ <b>profile.react</b> Dashboard <span class="t">re-render 41×/s</span></div>
+              <p><code>ranked</code> is rebuilt on every tick, so all 40 <code>Sparkline</code>s remount. Memoise on <code>[sats, health]</code> and the grid stops re-laying out.</p>
+              <div class="diff">
+                <header>src/routes/dashboard.tsx · L9
+                  <span class="acts"><button>Refer</button><button class="go">Apply ⏎</button></span>
+                </header>
+                <pre><span class="c">  const health = useTelemetry(sats, …);</span><span class="m">- const ranked = [...sats].sort(byHealth);</span><span class="p">+ const ranked = useMemo(</span><span class="p">+   () =&gt; [...sats].sort(byHealth),</span><span class="p">+   [sats, health],</span><span class="p">+ );</span></pre>
+              </div>
+              <div class="diff">
+                <header>src/lib/orbit.ts · L54
+                  <span class="acts"><button>Refer</button><button class="go">Apply ⏎</button></span>
+                </header>
+                <pre><span class="m">- return { sats: [...store.sats], tick };</span><span class="p">+ return { sats: store.sats, tick };  // stable identity</span></pre>
+              </div>
+              <p>Both hunks land independently. Want me to add a render-count regression test?</p>
+            </div>
+          </div>
+          <div class="composer">
+            <div class="box">
+              <div class="txt">Ask Proton, or ⌘K for an inline edit…</div>
+              <div class="foot">
+                <span class="select"><svg width="12" height="12"><use href="#i-plus"/></svg></span>
+                <span class="select">Opus 5 <svg width="11" height="11"><use href="#i-chev"/></svg></span>
+                <span class="select">Agent <svg width="11" height="11"><use href="#i-chev"/></svg></span>
+                <span class="select">@repo <svg width="11" height="11"><use href="#i-chev"/></svg></span>
+                <span class="select"><svg width="12" height="12"><use href="#i-mic"/></svg></span>
+                <span class="send"><svg width="13" height="13"><use href="#i-arrow-up"/></svg></span>
+              </div>
+            </div>
+            <div class="suggest">
+              <span>Explain this buffer</span><span>Write the failing test</span><span>Trace it in Visualizer</span><span>Port to the Android target</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tasks -->
+        <div class="dock-panel" data-panel="tasks" style="display:none;flex-direction:column;flex:1;min-height:0">
+          <div class="scroll">
+            <div class="group">In progress · 2</div>
+            <div class="task">
+              <div class="hd"><span class="ring run"></span> Memoise the fleet grid</div>
+              <div class="sub">Applying 2 hunks · dashboard.tsx, orbit.ts</div>
+            </div>
+            <div class="task">
+              <div class="hd"><span class="ring run"></span> Port trajectory.c to the Android target</div>
+              <div class="sub">Cross-compiling arm64-v8a · NDK r27</div>
+            </div>
+            <div class="group">Ready for review · 3</div>
+            <div class="task">
+              <div class="hd"><span class="ring done"></span> Ingest six months of telemetry</div>
+              <div class="sub">Parquet written, schema inferred, 3 nulls flagged</div>
+              <div class="sub"><span class="artifact">◈ telemetry.parquet</span> <span class="artifact">◈ schema.json</span></div>
+            </div>
+            <div class="task">
+              <div class="hd"><span class="ring done"></span> Design tokens → Tailwind theme</div>
+              <div class="sub">Design mode edits mirrored into <code>theme.css</code></div>
+            </div>
+            <div class="task">
+              <div class="hd"><span class="ring done"></span> Explain the pointer bug in <code>trajectory.c</code></div>
+              <div class="sub">Traced to step 212 — <code>node-&gt;next</code> reads freed memory</div>
+              <div class="sub"><span class="artifact">◈ trace-2181.json</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Code Visualizer -->
+        <div class="dock-panel" data-panel="visualizer" style="display:none;flex-direction:column;flex:1;min-height:0">
+          <div class="canvas-bar">
+            <span class="chip accent">trajectory.c</span>
+            <span class="chip">gdb</span>
+            <div class="seg" style="margin-left:auto">
+              <button class="on">Memory</button><button>Structure</button><button>Calls</button><button>Layout</button>
+            </div>
+          </div>
+          <div class="cv-canvas" id="cv-canvas">
+            <svg id="cv-edges" aria-hidden="true">
+              <defs>
+                <marker id="ah" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto">
+                  <path d="M0 0 L7 3.5 L0 7 z" fill="var(--info)"/></marker>
+                <marker id="ahr" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto">
+                  <path d="M0 0 L7 3.5 L0 7 z" fill="var(--err)"/></marker>
+              </defs>
+            </svg>
+            <div style="display:grid;grid-template-columns:88px 1fr;gap:46px;position:relative">
+              <div>
+                <div class="mem-h">Stack</div>
+                <div class="frame">
+                  <div class="fh">main</div>
+                  <div class="slot"><span class="nm">head</span><span class="vl ptr" data-ptr="0x5f2a10">0x5f2a10</span></div>
+                  <div class="slot flash"><span class="nm">n</span><span class="vl">3</span></div>
+                </div>
+                <div class="frame">
+                  <div class="fh">walk</div>
+                  <div class="slot"><span class="nm">cur</span><span class="vl ptr" data-ptr="0x5f2b40">0x5f2b40</span></div>
+                  <div class="slot"><span class="nm">i</span><span class="vl">2</span></div>
+                </div>
+              </div>
+              <div>
+                <div class="mem-h">Heap</div>
+                <div class="block" data-addr="0x5f2a10">
+                  <div class="fh">0x5f2a10 · Node</div>
+                  <div class="slot"><span class="nm">val</span><span class="vl">10</span></div>
+                  <div class="slot"><span class="nm">next</span><span class="vl ptr" data-ptr="0x5f2b40">0x5f2b40</span></div>
+                </div>
+                <div class="block fresh" data-addr="0x5f2b40">
+                  <div class="fh">0x5f2b40 · Node <span class="chip warn" style="margin-left:6px">new</span></div>
+                  <div class="slot"><span class="nm">val</span><span class="vl">20</span></div>
+                  <div class="slot"><span class="nm">next</span><span class="vl ptr dangling" data-ptr="0x5f2c70">0x5f2c70</span></div>
+                </div>
+                <div class="block freed" data-addr="0x5f2c70">
+                  <div class="fh">0x5f2c70 · freed <span class="chip" style="margin-left:6px;color:var(--err)">dangling</span></div>
+                  <div class="slot"><span class="nm">val</span><span class="vl" style="color:var(--err)">??</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="cv-scrub">
+            <span>⏮</span><span>◀</span><span>▶</span><span>⏭</span>
+            <div class="bar"><i></i><u></u></div>
+            <span>step 212 / 558</span>
+            <span class="chip accent">tracking&nbsp;<b>cur-&gt;next</b></span>
+          </div>
+        </div>
+
+        <!-- Device / mobile -->
+        <div class="dock-panel" data-panel="device" style="display:none;flex-direction:column;flex:1;min-height:0">
+          <div class="canvas-bar">
+            <span class="chip ok">Pixel 8 · API 35</span>
+            <div class="seg" style="margin-left:auto"><button class="on">Preview</button><button>Layout</button><button>Logcat</button></div>
+          </div>
+          <div class="device-stage">
+            <div class="phone">
+              <div class="screen">
+                <div class="notch"></div>
+                <div class="sbar"><span>9:41</span><span>▮▮▮ ⌁</span></div>
+                <div class="app-body">
+                  <div style="font:700 17px var(--sans);margin-bottom:12px">Fleet</div>
+                  <div class="p-card">
+                    <div class="inspect-box"></div>
+                    <div class="p-line" style="width:62%"></div>
+                    <div class="p-line" style="width:88%;opacity:.6"></div>
+                    <div style="height:26px;border-radius:6px;margin-top:8px;background:linear-gradient(90deg,rgba(255,92,121,.5),rgba(122,15,38,.5))"></div>
+                  </div>
+                  <div class="p-card"><div class="p-line" style="width:48%"></div><div class="p-line" style="width:76%;opacity:.6"></div></div>
+                  <div class="p-card"><div class="p-line" style="width:56%"></div><div class="p-line" style="width:70%;opacity:.6"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="flex:0 0 160px;border-top:1px solid var(--edge);display:flex;flex-direction:column;min-height:0">
+            <header style="padding:7px 11px;font:600 10.5px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--edge);display:flex;gap:8px;align-items:center">
+              Logcat <span class="chip warn">1 W</span> <span class="chip" style="margin-left:auto">com.proton.fleet</span>
+            </header>
+            <div class="scroll logcat">
+              <div class="lg"><span class="lv D">D</span><span class="tg">FleetActivity</span><span class="mg">onCreate savedInstanceState=null</span></div>
+              <div class="lg"><span class="lv I">I</span><span class="tg">TrajectoryJNI</span><span class="mg">loaded libtrajectory.so (arm64-v8a)</span></div>
+              <div class="lg"><span class="lv D">D</span><span class="tg">Telemetry</span><span class="mg">socket open · 40 sats</span></div>
+              <div class="lg"><span class="lv W">W</span><span class="tg">Choreographer</span><span class="mg">Skipped 31 frames — too much work on main thread</span></div>
+              <div class="lg"><span class="lv I">I</span><span class="tg">Proton</span><span class="mg">↳ same jank as the web target — one fix covers both</span></div>
+              <div class="lg"><span class="lv D">D</span><span class="tg">FleetAdapter</span><span class="mg">diffutil 40 → 40 (0 moved)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Terminal -->
+        <div class="dock-panel" data-panel="term" style="display:none;flex-direction:column;flex:1;min-height:0">
+          <div class="scroll term">
+            <div><span class="pmt">proton ❯</span> pnpm vitest run routes</div>
+            <div class="dim"> ✓ dashboard.test.tsx (6)</div>
+            <div class="dim"> ✓ fleet.test.tsx (4)</div>
+            <div><span class="g"> Test Files  2 passed (2)</span></div>
+            <div><span class="g">      Tests  10 passed (10)</span></div>
+            <div style="height:8px"></div>
+            <div><span class="pmt">proton ❯</span> proton trace native/trajectory.c --lang c</div>
+            <div class="dim"> compiling with -g3 -O0 -include cviz_shim.h</div>
+            <div class="dim"> 558 steps · 3 heap blocks · 1 dangling read at step 212</div>
+            <div><span class="g"> → opened in Visualizer</span></div>
+            <div style="height:8px"></div>
+            <div><span class="pmt">proton ❯</span> <span class="cursor"></span></div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ══ DESIGN ════════════════════════════════════════════════ -->
+    <section class="workspace" data-ws="design" style="grid-template-columns: 66px 246px minmax(0,1fr) 268px;">
+      <nav class="builder-rail side">
+        <button><svg><use href="#i-sliders"/></svg>Style</button>
+        <button><svg><use href="#i-grid"/></svg>Layout</button>
+        <button><svg><use href="#i-eye"/></svg>Inspect</button>
+        <button class="on"><svg><use href="#i-layers"/></svg>Layers</button>
+        <button><svg><use href="#i-spark"/></svg>Pagepilot</button>
+      </nav>
+
+      <aside class="pane side hair-r">
+        <header>Layers <span class="grow"></span><span class="chip warn">Draft</span></header>
+        <div class="scroll tree">
+          <div class="row"><span class="ic">▾</span>▢ Container</div>
+          <div class="row indent-1"><span class="ic">T</span>Text</div>
+          <div class="row indent-1"><span class="ic">▾</span>▢ Container</div>
+          <div class="row indent-2"><span class="ic">H</span>Heading</div>
+          <div class="row indent-1"><span class="ic">▾</span>▢ Container</div>
+          <div class="row sel indent-2"><span class="ic">⊞</span>Grid</div>
+          <div class="row indent-3"><span class="ic">🖼</span>Image</div>
+          <div class="row indent-3"><span class="ic">▶</span>Video</div>
+          <div class="row indent-3"><span class="ic">▭</span>Button</div>
+          <div class="row indent-3"><span class="ic">◍</span>Avatar</div>
+          <div class="row indent-3"><span class="ic">↗</span>Link</div>
+          <div class="row indent-3"><span class="ic">⟨⟩</span>Code</div>
+          <div class="row indent-3"><span class="ic">␣</span>Spacer</div>
+          <div class="row indent-3"><span class="ic">⋯</span>Stepper</div>
+          <div class="row indent-3"><span class="ic">—</span>Divider</div>
+          <div class="row"><span class="ic">▾</span>▢ Container</div>
+          <div class="row indent-1"><span class="ic">▥</span>Column</div>
+          <div class="group">Bound to code</div>
+          <div class="row"><span class="ic">◈</span>Dashboard.tsx <span class="chip ok" style="margin-left:auto">2-way</span></div>
+          <div class="row"><span class="ic">◈</span>theme.css <span class="chip ok" style="margin-left:auto">tokens</span></div>
+        </div>
+      </aside>
+
+      <main class="pane">
+        <div class="canvas-bar">
+          <span class="chip">Layout Guide · Blog</span>
+          <span class="chip warn">Draft</span>
+          <div class="seg" style="margin-left:auto">
+            <button class="on"><svg><use href="#i-desktop"/></svg></button>
+            <button><svg><use href="#i-tablet"/></svg></button>
+            <button><svg><use href="#i-phone"/></svg></button>
+          </div>
+          <div class="seg"><button class="on">Design</button><button>Code</button><button>Preview</button></div>
+          <button class="btn primary">Pagepilot ✦</button>
+        </div>
+        <div class="canvas">
+          <div class="artboard">
+            <div class="presence" style="color:var(--info);left:63%;top:150px"><i></i><span style="background:var(--info);color:#04222f">Ada</span></div>
+            <div class="eyebrow">This is text</div>
+            <h2>This is Heading</h2>
+            <div class="ab-grid ab-sel">
+              <div class="ab-img"></div>
+              <div class="ab-vid">▶</div>
+              <div style="display:flex;gap:10px;align-items:center"><div style="width:26px;height:26px;border-radius:50%;background:#d9cdd2"></div><span style="font-size:12px;color:#6b555c">Hello World</span></div>
+              <div class="ab-btn">Save</div>
+            </div>
+            <div style="height:14px"></div>
+            <div style="width:150px;height:120px;border-radius:8px;background:#f6d6da;padding:8px">
+              <div style="width:100%;height:100%;border-radius:5px;background:linear-gradient(135deg,#9fb0c4,#5c7089)"></div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="pane hair-l">
+        <div class="dock-tabs"><button class="dock-tab on">Style</button><button class="dock-tab">Props</button><button class="dock-tab">Events</button><button class="dock-tab">States</button></div>
+        <div class="scroll">
+          <div class="sec-head">Layout <span class="grow"></span><span class="chip">grid</span></div>
+          <div class="prop-row"><span class="lbl">Columns</span><span class="val">repeat(2, 1fr)</span></div>
+          <div class="prop-row"><span class="lbl">Gap</span><span class="val">12px</span></div>
+          <div class="prop-row"><span class="lbl">Align</span><span class="val">stretch</span></div>
+          <div class="sec-head">Appearance</div>
+          <div class="prop-row"><span class="lbl">Background</span><span class="swatch" style="background:#f6d6da"></span><span class="val">--surface-2</span></div>
+          <div class="prop-row"><span class="lbl">Radius</span><span class="val">8px</span></div>
+          <div class="prop-row"><span class="lbl">Shadow</span><span class="val">elevation.2</span></div>
+          <div class="sec-head">Typography</div>
+          <div class="prop-row"><span class="lbl">Family</span><span class="val">Inter</span></div>
+          <div class="prop-row"><span class="lbl">Size / LH</span><span class="val">14 / 1.5</span></div>
+          <div class="sec-head">Generated code <span class="grow"></span><span class="chip ok">in sync</span></div>
+          <div class="diff" style="margin:8px 11px">
+            <header>components/Grid.tsx<span class="acts"><button>Open</button></span></header>
+            <pre><span class="c">&lt;div className="grid grid-cols-2 gap-3"&gt;</span><span class="c">  {children}</span><span class="c">&lt;/div&gt;</span></pre>
+          </div>
+          <div class="msg">
+            <div class="who"><svg width="12" height="12" style="color:var(--violet)"><use href="#i-spark"/></svg> Pagepilot</div>
+            <p>This grid drops to one column below 640px but the video keeps a 16:9 box — it will overflow by 24px. Want me to add <code>aspect-video</code> and a <code>min-w-0</code>?</p>
+            <div class="suggest"><span>Fix it</span><span>Show me the breakpoint</span></div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ══ MODELING ══════════════════════════════════════════════ -->
+    <section class="workspace" data-ws="modeling" style="grid-template-columns: 226px minmax(0,1fr) 268px;">
+      <aside class="pane side hair-r">
+        <header>Outliner</header>
+        <div class="scroll tree">
+          <div class="row"><span class="ic">▾</span>🎬 Scene</div>
+          <div class="row indent-1"><span class="ic">☀</span>Key Light</div>
+          <div class="row indent-1"><span class="ic">📷</span>Camera</div>
+          <div class="row sel indent-1"><span class="ic">⬢</span>Satellite.001</div>
+          <div class="row indent-2"><span class="ic">▦</span>Mesh · 4.2k tris</div>
+          <div class="row indent-2"><span class="ic">◐</span>Mat · brushed-alu</div>
+          <div class="row indent-1"><span class="ic">⬢</span>SolarArray</div>
+          <div class="row indent-1"><span class="ic">◯</span>OrbitPath</div>
+          <div class="group">Primitives</div>
+          <div class="row"><span class="ic">⬢</span>Cube</div>
+          <div class="row"><span class="ic">◯</span>Sphere</div>
+          <div class="row"><span class="ic">▭</span>Plane</div>
+          <div class="group">Assets</div>
+          <div class="row"><span class="ic">◈</span>satellite.glb</div>
+          <div class="row"><span class="ic">◈</span>alu.ktx2</div>
+        </div>
+      </aside>
+
+      <main class="pane">
+        <div class="canvas-bar">
+          <div class="seg"><button class="on">Object</button><button>Edit</button><button>Sculpt</button><button>Shading</button></div>
+          <span class="chip">⬢ Cube · ◯ Sphere · ▭ Plane</span>
+          <span class="chip info" style="margin-left:auto">4.2k tris · 60 fps</span>
+          <button class="btn primary">Generate ✦</button>
+        </div>
+        <div class="viewport">
+          <div class="grid-floor"></div>
+          <svg style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true">
+            <g stroke="var(--accent)" fill="none" stroke-width="1.4" opacity="0.92" transform="translate(0,-14)">
+              <path d="M300 190 L380 150 L460 190 L460 280 L380 320 L300 280 Z"/>
+              <path d="M300 190 L380 230 L460 190 M380 230 L380 320"/>
+              <path d="M300 210 L190 176 L190 236 L300 262" opacity=".8"/>
+              <path d="M460 210 L570 176 L570 236 L460 262" opacity=".8"/>
+            </g>
+            <g stroke-width="2" opacity=".9" transform="translate(0,-14)">
+              <path d="M380 230 L470 230" stroke="var(--err)"/><path d="M380 230 L380 140" stroke="var(--ok)"/><path d="M380 230 L310 272" stroke="var(--info)"/>
+            </g>
+          </svg>
+          <div class="vp-overlay">
+            <div class="vp-badge" style="left:14px;top:14px">Perspective · 50mm</div>
+            <div class="vp-badge" style="left:14px;bottom:14px">G move · R rotate · S scale · ⇥ edit mode</div>
+            <div class="vp-badge" style="right:14px;bottom:14px">Cycles · 128 spp</div>
+            <div class="vp-badge" style="right:14px;top:14px">+Y up</div>
+          </div>
+        </div>
+        <div style="flex:0 0 190px;position:relative;border-top:1px solid var(--edge);overflow:hidden;background:rgba(0,0,0,.2)">
+          <svg style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true">
+            <path d="M170 56 C 210 56, 210 66, 250 66" stroke="var(--err)" stroke-width="1.6" fill="none"/>
+            <path d="M170 122 C 212 122, 212 92, 250 92" stroke="var(--accent-2)" stroke-width="1.6" fill="none"/>
+            <path d="M410 78 C 450 78, 450 96, 490 96" stroke="var(--info)" stroke-width="1.6" fill="none"/>
+          </svg>
+          <div class="graph">
+            <div class="node c-a" style="left:14px;top:30px">
+              <div class="nh">Noise Texture</div>
+              <div class="nb"><div class="port"><i></i>Scale <span class="rt">6.4</span></div><div class="port"><i></i>Detail <span class="rt">2.0</span></div></div>
+            </div>
+            <div class="node c-c" style="left:14px;top:96px">
+              <div class="nh">Color Ramp</div>
+              <div class="nb"><div class="port"><i style="background:var(--accent-2)"></i>Fac <span class="rt">0.31</span></div></div>
+            </div>
+            <div class="node c-b" style="left:252px;top:44px">
+              <div class="nh">Principled BSDF</div>
+              <div class="nb"><div class="port"><i style="background:var(--info)"></i>Base <span class="rt">#8C8F93</span></div><div class="port"><i style="background:var(--info)"></i>Metallic <span class="rt">0.90</span></div><div class="port"><i style="background:var(--info)"></i>Rough <span class="rt">0.24</span></div></div>
+            </div>
+            <div class="node c-d" style="left:492px;top:70px">
+              <div class="nh">Material Output</div>
+              <div class="nb"><div class="port"><i style="background:var(--ok)"></i>Surface</div></div>
+            </div>
+          </div>
+          <div class="vp-badge" style="right:12px;top:12px">Shader graph · ␣ns to add</div>
+        </div>
+      </main>
+
+      <aside class="pane hair-l">
+        <div class="dock-tabs"><button class="dock-tab on">Object</button><button class="dock-tab">Modifiers</button><button class="dock-tab">Physics</button><button class="dock-tab">Agent</button></div>
+        <div class="scroll">
+          <div class="sec-head">Transform</div>
+          <div class="prop-row"><span class="lbl">Position</span><span class="val">0.0</span><span class="val">1.4</span><span class="val">0.0</span></div>
+          <div class="prop-row"><span class="lbl">Rotation</span><span class="val">0°</span><span class="val">32°</span><span class="val">0°</span></div>
+          <div class="prop-row"><span class="lbl">Scale</span><span class="val">1.0</span><span class="val">1.0</span><span class="val">1.0</span></div>
+          <div class="sec-head">Modifier stack</div>
+          <div class="prop-row"><span class="lbl">Subdivision</span><span class="val">levels 2</span></div>
+          <div class="prop-row"><span class="lbl">Bevel</span><span class="val">0.02 m</span></div>
+          <div class="prop-row"><span class="lbl">Array</span><span class="val">×4 · solar</span></div>
+          <div class="msg">
+            <div class="who"><svg width="12" height="12" style="color:var(--violet)"><use href="#i-spark"/></svg> Proton</div>
+            <p>“Give the solar array four panels on a 0.6 m pitch.”</p>
+            <div class="tool">⬢ <b>mesh.array</b> count=4 offset=0.6 <span class="t">applied</span></div>
+            <p>The array modifier is non-destructive — <kbd>u</kbd> undoes it, and the whole stack is written to <code>scene.proton.json</code> so it diffs in Git.</p>
+            <div class="artifact">◈ scene.proton.json <span class="chip ok">+18 −0</span></div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ══ GAME ══════════════════════════════════════════════════ -->
+    <section class="workspace" data-ws="game" style="grid-template-columns: 226px minmax(0,1fr) 268px;">
+      <aside class="pane side hair-r">
+        <header>Hierarchy</header>
+        <div class="scroll tree">
+          <div class="row"><span class="ic">▾</span>🌍 World</div>
+          <div class="row indent-1"><span class="ic">▾</span>◈ Player</div>
+          <div class="row sel indent-2"><span class="ic">⬢</span>CharacterBody2D</div>
+          <div class="row indent-2"><span class="ic">▦</span>Sprite</div>
+          <div class="row indent-2"><span class="ic">◇</span>CollisionShape</div>
+          <div class="row indent-1"><span class="ic">▾</span>◈ Enemies</div>
+          <div class="row indent-2"><span class="ic">⬢</span>Drone ×12</div>
+          <div class="row indent-1"><span class="ic">▦</span>TileMap</div>
+          <div class="row indent-1"><span class="ic">📷</span>Camera2D</div>
+          <div class="group">Assets</div>
+          <div class="row"><span class="ic">◈</span>player.gd</div>
+          <div class="row"><span class="ic">🖼</span>tiles.png</div>
+          <div class="row"><span class="ic">♪</span>thrust.ogg</div>
+          <div class="group">Profiler</div>
+          <div class="row"><span class="ic">⚡</span>frame <span class="chip ok" style="margin-left:auto">6.2 ms</span></div>
+          <div class="row"><span class="ic">▦</span>draws <span class="chip" style="margin-left:auto">184</span></div>
+          <div class="row"><span class="ic">◇</span>physics <span class="chip warn" style="margin-left:auto">2.8 ms</span></div>
+        </div>
+      </aside>
+
+      <main class="pane">
+        <div class="transport">
+          <span class="tp play"><svg><use href="#i-play"/></svg></span>
+          <span class="tp"><svg><use href="#i-pause"/></svg></span>
+          <span class="tp"><svg><use href="#i-step"/></svg></span>
+          <span class="tp"><svg><use href="#i-stop"/></svg></span>
+          <div class="seg" style="margin-left:8px"><button class="on">2D</button><button>3D</button><button>Script</button><button>AssetLib</button></div>
+          <span class="chip ok" style="margin-left:auto">Playing · hot-reload on</span>
+          <span class="chip">1280 × 720</span>
+        </div>
+        <div class="viewport">
+          <svg style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true">
+            <g opacity=".28" stroke="#fff" stroke-width="1">
+              <path d="M0 300 H900 M0 360 H900 M0 240 H900"/>
+            </g>
+            <g fill="color-mix(in srgb, var(--bg) 70%, black)" stroke="rgba(255,255,255,.18)">
+              <rect x="60" y="330" width="360" height="34" rx="4"/>
+              <rect x="470" y="290" width="180" height="34" rx="4"/>
+              <rect x="700" y="336" width="200" height="34" rx="4"/>
+            </g>
+            <rect x="196" y="286" width="30" height="44" rx="5" fill="var(--err)"/>
+            <rect x="192" y="282" width="38" height="52" rx="7" fill="none" stroke="var(--ok)" stroke-width="1.4" stroke-dasharray="4 3"/>
+            <g fill="var(--info)" opacity=".85">
+              <circle cx="520" cy="220" r="9"/><circle cx="596" cy="188" r="9"/><circle cx="672" cy="236" r="9"/>
+            </g>
+            <path d="M226 308 L500 226" stroke="var(--warn)" stroke-width="1.2" stroke-dasharray="5 4" opacity=".7" fill="none"/>
+          </svg>
+          <div class="vp-overlay">
+            <div class="vp-badge" style="left:14px;top:14px">Game view · running</div>
+            <div class="vp-badge" style="left:14px;bottom:14px">Collision shapes · Navmesh · Nav agents</div>
+            <div class="vp-badge" style="right:14px;top:14px">fps 161 · 6.2 ms</div>
+            <div class="vp-badge" style="right:14px;bottom:14px">Drone.ai → chasing Player</div>
+          </div>
+        </div>
+        <div style="flex:0 0 132px;display:flex;flex-direction:column;border-top:1px solid var(--edge);min-height:0">
+          <div class="dock-tabs" style="border-bottom:1px solid var(--edge)"><button class="dock-tab on">Output</button><button class="dock-tab">Debugger</button><button class="dock-tab">Profiler</button><button class="dock-tab">Network</button></div>
+          <div class="scroll term">
+            <div class="dim">-- Godot engine 4.4 · Proton bridge --</div>
+            <div><span class="g">✓</span> hot-reloaded <span class="dim">player.gd</span> in 41 ms — state preserved</div>
+            <div><span class="pmt">drone.ai</span> behaviour tree recompiled · 12 agents rebound</div>
+            <div style="color:var(--warn)">! physics tick 2.8 ms — 12 drones each raycasting 8× per frame</div>
+            <div><span class="pmt">proton ✦</span> <span class="dim">suggestion: share one navmesh query per flock, not per drone</span></div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="pane hair-l">
+        <div class="dock-tabs"><button class="dock-tab on">Inspector</button><button class="dock-tab">Signals</button><button class="dock-tab">Agent</button></div>
+        <div class="scroll">
+          <div class="sec-head">CharacterBody2D</div>
+          <div class="prop-row"><span class="lbl">Position</span><span class="val">196</span><span class="val">286</span></div>
+          <div class="prop-row"><span class="lbl">Velocity</span><span class="val">0</span><span class="val">-410</span></div>
+          <div class="prop-row"><span class="lbl">Gravity</span><span class="val">980</span></div>
+          <div class="prop-row"><span class="lbl">Jump</span><span class="val">-410</span></div>
+          <div class="sec-head">Script · player.gd</div>
+          <div class="diff" style="margin:8px 11px">
+            <header>player.gd · _physics_process<span class="acts"><button>Open</button></span></header>
+            <pre><span class="c">func _physics_process(delta):</span><span class="c">    velocity.y += gravity * delta</span><span class="p">+   coyote = maxf(coyote - delta, 0.0)</span></pre>
+          </div>
+          <div class="msg">
+            <div class="who"><svg width="12" height="12" style="color:var(--violet)"><use href="#i-spark"/></svg> Proton</div>
+            <p>“Jumps feel like they drop input at the ledge.”</p>
+            <p>That is a missing coyote time. I added a 0.1 s grace window and a 0.12 s jump buffer, then replayed the last 30 s of recorded input against both builds.</p>
+            <div class="tool">▶ <b>replay.input</b> 30s · before/after <span class="t">7 missed → 0</span></div>
+            <div class="suggest"><span>Keep it</span><span>Tune the window</span><span>Show the replay</span></div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ══ VIDEO ═════════════════════════════════════════════════ -->
+    <section class="workspace" data-ws="video" style="grid-template-columns: 226px minmax(0,1fr) 268px;">
+      <aside class="pane side hair-r">
+        <header>Media bin</header>
+        <div class="scroll tree">
+          <div class="group">Footage</div>
+          <div class="row sel"><span class="ic">▶</span>launch_a.mov <span class="chip" style="margin-left:auto">4K</span></div>
+          <div class="row"><span class="ic">▶</span>launch_b.mov</div>
+          <div class="row"><span class="ic">▶</span>ground_cam.mp4</div>
+          <div class="row"><span class="ic">▶</span>screen_capture.mov</div>
+          <div class="group">Audio</div>
+          <div class="row"><span class="ic">♪</span>vo_take3.wav</div>
+          <div class="row"><span class="ic">♪</span>bed_ambient.wav</div>
+          <div class="group">Generated</div>
+          <div class="row"><span class="ic">✦</span>lower_third.mogrt</div>
+          <div class="row"><span class="ic">✦</span>captions.srt <span class="chip ok" style="margin-left:auto">auto</span></div>
+          <div class="row"><span class="ic">✦</span>b_roll_orbit.mp4 <span class="chip accent" style="margin-left:auto">gen</span></div>
+        </div>
+      </aside>
+
+      <main class="pane">
+        <div class="canvas-bar">
+          <div class="seg"><button class="on">Edit</button><button>Color</button><button>Audio</button><button>Deliver</button></div>
+          <span class="chip">1920×1080 · 24p</span>
+          <span class="chip info" style="margin-left:auto">00:00:14:08</span>
+          <button class="btn primary">Render</button>
+        </div>
+        <div class="viewport" style="flex:1">
+          <div style="position:absolute;inset:22px;border-radius:8px;border:1px solid var(--edge);overflow:hidden;background:linear-gradient(160deg,color-mix(in srgb,var(--wall-a) 55%,black),var(--bg-deep))">
+            <svg style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true">
+              <circle cx="46%" cy="62%" r="88" fill="color-mix(in srgb, var(--bg-deep) 80%, black)" stroke="rgba(255,255,255,.14)"/>
+              <ellipse cx="46%" cy="62%" rx="150" ry="42" fill="none" stroke="var(--err)" stroke-width="1.6" opacity=".8"/>
+              <circle cx="62%" cy="52%" r="6" fill="var(--err)"/>
+              <g opacity=".5" fill="#fff"><circle cx="18%" cy="22%" r="1.4"/><circle cx="28%" cy="38%" r="1"/><circle cx="72%" cy="26%" r="1.6"/><circle cx="86%" cy="44%" r="1.1"/></g>
+            </svg>
+            <div style="position:absolute;left:26px;bottom:52px;padding:8px 14px;border-radius:8px;background:color-mix(in srgb, var(--accent) 78%, transparent); color:var(--bg-deep);font:600 15px var(--sans)">Orbital insertion — T+00:14</div>
+            <div style="position:absolute;left:50%;transform:translateX(-50%);bottom:16px;font:500 13px var(--sans);color:rgba(255,255,255,.9)">“…and that is the burn complete.”</div>
+          </div>
+          <div class="vp-badge" style="left:32px;top:32px">Program</div>
+          <div class="vp-badge" style="right:32px;top:32px">Safe margins on</div>
+        </div>
+        <div class="tl">
+          <div class="playhead" style="left:38%"></div>
+          <div class="tl-ruler"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span><span>00:20</span><span>00:25</span></div>
+          <div class="track"><div class="name">✦ Text</div><div class="lane"><div class="clip t" style="flex:0 0 16%">Lower third</div><div style="flex:0 0 26%"></div><div class="clip t" style="flex:0 0 20%">Captions · auto</div></div></div>
+          <div class="track"><div class="name">▶ V2</div><div class="lane"><div style="flex:0 0 30%"></div><div class="clip ai" style="flex:0 0 24%">✦ b_roll_orbit · generated</div></div></div>
+          <div class="track"><div class="name">▶ V1</div><div class="lane"><div class="clip v" style="flex:0 0 34%">launch_a.mov</div><div class="clip v" style="flex:0 0 28%">ground_cam</div><div class="clip v" style="flex:1">launch_b</div></div></div>
+          <div class="track" style="border-bottom:0"><div class="name">♪ A1</div><div class="lane"><div class="clip a" style="flex:0 0 46%">vo_take3 · ducked</div><div class="clip a" style="flex:1">bed_ambient</div></div></div>
+        </div>
+      </main>
+
+      <aside class="pane hair-l">
+        <div class="dock-tabs"><button class="dock-tab on">Agent</button><button class="dock-tab">Effects</button><button class="dock-tab">Color</button></div>
+        <div class="scroll">
+          <div class="msg">
+            <div class="who"><svg width="12" height="12" style="color:var(--crimson-300)"><use href="#i-proton"/></svg> You</div>
+            <p>Cut this to 90 seconds, keep every ignition, and caption it.</p>
+          </div>
+          <div class="msg">
+            <div class="who"><svg width="12" height="12" style="color:var(--violet)"><use href="#i-spark"/></svg> Proton · thought 11s</div>
+            <div class="tool">◎ <b>scene.detect</b> 214 cuts <span class="t">4.1s</span></div>
+            <div class="tool">♪ <b>transcribe</b> vo_take3.wav <span class="t">98.4%</span></div>
+            <div class="tool">✂ <b>rough.cut</b> target 90s <span class="t">1:28 · 6 ignitions kept</span></div>
+            <div class="tool">✦ <b>generate</b> b-roll for the 8s gap <span class="t">1 take</span></div>
+            <p>Three silences over 2 s are trimmed, the VO is ducked under the bed by 9 dB, and captions are burned to a sidecar so they stay editable.</p>
+            <div class="artifact">◈ captions.srt</div>
+            <div class="artifact">◈ rough_cut_v3.edl</div>
+            <div class="suggest"><span>Show me the cuts it dropped</span><span>Punch up the ignition audio</span><span>Vertical 9:16 version</span></div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ══ DATA ══════════════════════════════════════════════════ -->
+    <section class="workspace" data-ws="data" style="grid-template-columns: 226px minmax(0,1fr) 300px;">
+      <aside class="pane side hair-r">
+        <header>Sources</header>
+        <div class="find"><svg width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Query anything… <kbd>␣ d q</kbd></div>
+        <div class="scroll tree">
+          <div class="row"><span class="ic">▾</span>🗄 warehouse</div>
+          <div class="row sel indent-1"><span class="ic">▦</span>telemetry <span class="chip" style="margin-left:auto">4.2M</span></div>
+          <div class="row indent-1"><span class="ic">▦</span>passes</div>
+          <div class="row indent-1"><span class="ic">▦</span>ground_stations</div>
+          <div class="row"><span class="ic">▾</span>📁 files</div>
+          <div class="row indent-1"><span class="ic">◈</span>launch_log.csv</div>
+          <div class="row indent-1"><span class="ic">◈</span>telemetry.parquet</div>
+          <div class="group">Schema · telemetry</div>
+          <div class="row"><span class="ic">t</span>ts <span class="chip" style="margin-left:auto">timestamp</span></div>
+          <div class="row"><span class="ic">#</span>sat_id <span class="chip" style="margin-left:auto">int32</span></div>
+          <div class="row"><span class="ic">#</span>battery <span class="chip warn" style="margin-left:auto">3 null</span></div>
+          <div class="row"><span class="ic">#</span>temp_c <span class="chip" style="margin-left:auto">float</span></div>
+          <div class="row"><span class="ic">a</span>mode <span class="chip" style="margin-left:auto">enum 4</span></div>
+        </div>
+      </aside>
+
+      <main class="pane">
+        <div class="canvas-bar">
+          <span class="chip accent">fleet_health.ipynb</span>
+          <div class="seg"><button class="on">Notebook</button><button>SQL</button><button>Grid</button><button>Charts</button></div>
+          <span class="chip ok" style="margin-left:auto">kernel · python 3.13</span>
+          <button class="btn">Run all</button>
+        </div>
+        <div class="scroll">
+          <div class="cell">
+            <header>[1] sql <span class="grow"></span><span class="chip">duckdb</span><span class="chip">0.4 s</span></header>
+            <pre><span class="k">SELECT</span> sat_id, <span class="fn">avg</span>(battery) <span class="k">AS</span> mean_v, <span class="fn">count</span>(<span class="op">*</span>) <span class="k">AS</span> n
+<span class="k">FROM</span> telemetry <span class="k">WHERE</span> ts <span class="op">&gt;</span> <span class="str">'2026-03-01'</span>
+<span class="k">GROUP BY</span> <span class="num">1</span> <span class="k">ORDER BY</span> mean_v <span class="k">ASC</span> <span class="k">LIMIT</span> <span class="num">6</span>;</pre>
+            <div class="out" style="padding:0">
+              <table class="df">
+                <thead><tr><th>sat_id</th><th>mean_v</th><th>n</th><th>trend</th></tr></thead>
+                <tbody>
+                  <tr><td class="n">17</td><td class="n">3.41</td><td class="n">128 400</td><td style="color:var(--err)">▼ −0.18 / mo</td></tr>
+                  <tr><td class="n">31</td><td class="n">3.58</td><td class="n">128 112</td><td style="color:var(--err)">▼ −0.11 / mo</td></tr>
+                  <tr><td class="n">4</td><td class="n">3.74</td><td class="n">129 001</td><td style="color:var(--warn)">▼ −0.04 / mo</td></tr>
+                  <tr><td class="n">22</td><td class="n">3.88</td><td class="n">127 980</td><td style="color:var(--ink-3)">— flat</td></tr>
+                  <tr><td class="n">9</td><td class="n">3.95</td><td class="n">128 655</td><td style="color:var(--ok)">▲ +0.02 / mo</td></tr>
+                  <tr><td class="n">40</td><td class="n">4.02</td><td class="n">128 210</td><td style="color:var(--ok)">▲ +0.05 / mo</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="cell">
+            <header>[2] python <span class="grow"></span><span class="chip info">chart</span><span class="chip">1.2 s</span></header>
+            <pre><span class="k">import</span> polars <span class="k">as</span> pl
+df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_parquet</span>(<span class="str">"telemetry.parquet"</span>)
+<span class="pn">(</span>df<span class="op">.</span><span class="fn">group_by_dynamic</span>(<span class="str">"ts"</span>, every<span class="op">=</span><span class="str">"1mo"</span>)
+   <span class="op">.</span><span class="fn">agg</span>(pl<span class="op">.</span><span class="fn">col</span>(<span class="str">"battery"</span>)<span class="op">.</span><span class="fn">mean</span>())<span class="op">.</span><span class="fn">plot</span>()<span class="pn">)</span></pre>
+            <div class="out">
+              <div class="bars">
+                <i style="height:96%"></i><i style="height:91%"></i><i style="height:87%"></i><i style="height:84%"></i>
+                <i style="height:78%"></i><i style="height:74%"></i><i style="height:66%"></i><i style="height:61%"></i>
+                <i style="height:57%"></i><i style="height:49%"></i><i style="height:44%"></i><i style="height:38%"></i>
+              </div>
+              <div class="legend"><span><b style="background:var(--crimson-300)"></b>mean battery (V)</span><span style="margin-left:auto">Apr 26 → Mar 27</span></div>
+            </div>
+          </div>
+
+          <div class="cell">
+            <header>[3] ✦ proton <span class="grow"></span><span class="chip accent">analyst</span></header>
+            <div class="out" style="border-top:0">
+              <p style="margin:0 0 8px;color:var(--ink-2)">Battery mean falls 24% over twelve months, but it is not fleet-wide: <b>sat 17 and 31 carry 71% of the decline</b> and both share ground station <code>KIR-2</code>. The other 38 satellites drift within noise.</p>
+              <p style="margin:0 0 8px;color:var(--ink-2)">Their <code>mode</code> histogram shows 4× more <code>SAFE_HOLD</code> entries than the fleet median — the batteries are probably fine and the scheduler is not.</p>
+              <div class="tool">◎ <b>test.mannwhitney</b> KIR-2 vs rest <span class="t">p = 0.003</span></div>
+              <div class="suggest"><span>Chart SAFE_HOLD by station</span><span>Write this up</span><span>Open sat 17 in Codex</span></div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="pane hair-l">
+        <div class="dock-tabs"><button class="dock-tab on">Analyst</button><button class="dock-tab">Profile</button><button class="dock-tab">History</button></div>
+        <div class="scroll">
+          <div class="sec-head">Column profile · battery</div>
+          <div class="prop-row"><span class="lbl">Rows</span><span class="val">4 213 887</span></div>
+          <div class="prop-row"><span class="lbl">Null</span><span class="val" style="color:var(--warn)">3 (0.00%)</span></div>
+          <div class="prop-row"><span class="lbl">Mean / σ</span><span class="val">3.81</span><span class="val">0.42</span></div>
+          <div class="prop-row"><span class="lbl">Min / Max</span><span class="val">2.94</span><span class="val">4.21</span></div>
+          <div class="prop-row"><span class="lbl">Outliers</span><span class="val">412 · &gt;3σ</span></div>
+          <div style="padding:6px 11px"><div class="bars" style="height:56px;gap:2px">
+            <i style="height:12%"></i><i style="height:26%"></i><i style="height:52%"></i><i style="height:84%"></i><i style="height:100%"></i><i style="height:92%"></i><i style="height:61%"></i><i style="height:33%"></i><i style="height:14%"></i><i style="height:6%"></i>
+          </div></div>
+          <div class="sec-head">Lineage</div>
+          <div class="prop-row"><span class="lbl">Source</span><span class="val">warehouse.telemetry</span></div>
+          <div class="prop-row"><span class="lbl">Cell</span><span class="val">[1] → [2] → [3]</span></div>
+          <div class="prop-row"><span class="lbl">Reproducible</span><span class="val" style="color:var(--ok)">yes · seed 7</span></div>
+          <div class="msg">
+            <div class="who"><svg width="12" height="12" style="color:var(--violet)"><use href="#i-spark"/></svg> Notes</div>
+            <p>Every cell records its inputs, so “Open sat 17 in Codex” jumps straight to the scheduler code that emits <code>SAFE_HOLD</code> — the analysis and the repository are one workspace.</p>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </div>
+
+  <!-- ══ statusline ══════════════════════════════════════════════ -->
+  <footer class="statusline">
+    <div class="sl sl-mode" id="sl-mode">NORMAL</div>
+    <div class="sl git">  main +2 ~1</div>
+    <div class="sl">src/routes/dashboard.tsx</div>
+    <div class="sl">◈ tsx · utf-8 · lf</div>
+    <div class="sl grow" id="sl-status"></div>
+    <div class="sl">✦ Opus 5 · agent</div>
+    <div class="sl">⚠ 0  ⓘ 2 · tsserver eslint tailwind</div>
+    <div class="sl right">ln 11, col 62</div>
+    <div class="sl sl-mode">42%</div>
+  </footer>
+</div>
+
+<!-- ══ overlays ══════════════════════════════════════════════════ -->
+<div class="scrim" id="scrim"></div>
+
+<div class="overlay float" id="telescope">
+  <div class="prompt"><span class="caret">❯</span> <span>orbdash</span><span class="cursor"></span><span class="chip" style="margin-left:auto">find_files</span><span class="chip">Ⓐ 214 files</span></div>
+  <div class="cols">
+    <div class="results">
+      <div class="res on">◈ <span><mark>o</mark>rbit/<mark>d</mark>ash<mark>b</mark>o<mark>a</mark>rd.t<mark>s</mark>x</span><span class="dir" style="margin-left:auto">src/routes</span></div>
+      <div class="res">◈ <span>dashboard.test.tsx</span><span class="dir" style="margin-left:auto">src/routes</span></div>
+      <div class="res">◈ <span>orbit.ts</span><span class="dir" style="margin-left:auto">src/lib</span></div>
+      <div class="res">⬡ <span>trajectory.c</span><span class="dir" style="margin-left:auto">native</span></div>
+      <div class="res">◈ <span>DashboardCard.tsx</span><span class="dir" style="margin-left:auto">src/components</span></div>
+      <div class="res">◈ <span>fleet_health.ipynb</span><span class="dir" style="margin-left:auto">analysis</span></div>
+      <div class="res">▦ <span>dashboard.artboard</span><span class="dir" style="margin-left:auto">design</span></div>
+      <div class="res">✦ <span>rough_cut_v3.edl</span><span class="dir" style="margin-left:auto">video</span></div>
+      <div class="res">⬢ <span>satellite.glb</span><span class="dir" style="margin-left:auto">modeling</span></div>
+      <div style="padding:12px 9px 4px;font:600 9.5px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-4)">Semantic · ✦</div>
+      <div class="res">✦ <span>“where the fleet grid re-renders”</span><span class="dir" style="margin-left:auto">3 spans</span></div>
+      <div class="res">✦ <span>“who writes SAFE_HOLD”</span><span class="dir" style="margin-left:auto">1 span</span></div>
+    </div>
+    <div class="preview">
+      <div class="pv-head">src/routes/dashboard.tsx · 22 lines</div>
+      <div class="ln"><span class="n">4</span><span class="cm">// Fleet health, sampled once per tick.</span></div>
+      <div class="ln"><span class="n">5</span><span class="k">export default function</span> <span class="fn">Dashboard</span><span class="pn">() {</span></div>
+      <div class="ln"><span class="n">6</span>  <span class="k">const</span> <span class="pn">{</span> sats<span class="pn">,</span> tick <span class="pn">}</span> <span class="op">=</span> <span class="fn">useOrbit</span><span class="pn">();</span></div>
+      <div class="ln"><span class="n">7</span>  <span class="k">const</span> health <span class="op">=</span> <span class="fn">useTelemetry</span><span class="pn">(</span>sats<span class="pn">, {</span> window<span class="pn">:</span> <span class="num">120</span> <span class="pn">});</span></div>
+      <div class="ln cur"><span class="n">10</span>  <span class="k">const</span> ranked <span class="op">=</span> <span class="fn">useMemo</span><span class="pn">(</span></div>
+      <div class="ln"><span class="n">11</span>    <span class="pn">()</span> <span class="op">=&gt;</span> <span class="pn">[</span><span class="op">...</span>sats<span class="pn">].</span><span class="fn">sort</span><span class="pn">(</span>byHealth<span class="pn">),</span></div>
+      <div class="ln"><span class="n">12</span>    <span class="pn">[</span>sats<span class="pn">,</span> health<span class="pn">],</span></div>
+      <div class="ln"><span class="n">13</span>  <span class="pn">);</span></div>
+      <div style="padding:14px 14px 4px;font:600 9.5px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-4)">Pickers</div>
+      <div style="padding:0 14px;color:var(--ink-3);font:12px var(--mono);line-height:1.9">
+        <div><span style="color:var(--crimson-300)">␣ f f</span>  files       <span style="color:var(--crimson-300)">␣ f g</span>  live grep</div>
+        <div><span style="color:var(--crimson-300)">␣ f b</span>  buffers     <span style="color:var(--crimson-300)">␣ f h</span>  help tags</div>
+        <div><span style="color:var(--crimson-300)">␣ f s</span>  symbols     <span style="color:var(--crimson-300)">␣ f d</span>  diagnostics</div>
+        <div><span style="color:var(--crimson-300)">␣ f a</span>  ✦ semantic  <span style="color:var(--crimson-300)">␣ f t</span>  traces</div>
+        <div><span style="color:var(--crimson-300)">␣ f m</span>  artboards   <span style="color:var(--crimson-300)">␣ f c</span>  cells</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay float" id="whichkey">
+  <div class="wk-head"><span style="color:var(--crimson-300)">␣</span> <span style="color:var(--ink-4)">— leader</span></div>
+  <div class="wk-grid">
+    <div class="wk"><b>f</b><span class="arrow">→</span><span class="grp">+find</span></div>
+    <div class="wk"><b>g</b><span class="arrow">→</span><span class="grp">+git</span></div>
+    <div class="wk"><b>l</b><span class="arrow">→</span><span class="grp">+lsp</span></div>
+    <div class="wk"><b>d</b><span class="arrow">→</span><span class="grp">+debug / data</span></div>
+    <div class="wk"><b>c</b><span class="arrow">→</span><span class="grp">+code · cv trace</span></div>
+    <div class="wk"><b>a</b><span class="arrow">→</span><span class="grp">+ai agent</span></div>
+    <div class="wk"><b>w</b><span class="arrow">→</span><span class="grp">+window</span></div>
+    <div class="wk"><b>b</b><span class="arrow">→</span><span class="grp">+buffer</span></div>
+    <div class="wk"><b>t</b><span class="arrow">→</span><span class="grp">+terminal / test</span></div>
+    <div class="wk"><b>m</b><span class="arrow">→</span><span>mode switcher</span></div>
+    <div class="wk"><b>p</b><span class="arrow">→</span><span class="grp">+plugins</span></div>
+    <div class="wk"><b>e</b><span class="arrow">→</span><span>explorer</span></div>
+    <div class="wk"><b>/</b><span class="arrow">→</span><span>live grep</span></div>
+    <div class="wk"><b>?</b><span class="arrow">→</span><span>keymap cheatsheet</span></div>
+    <div class="wk"><b>␣</b><span class="arrow">→</span><span>last buffer</span></div>
+  </div>
+</div>
+
+<div class="overlay float" id="cmdline">
+  <span class="caret">:</span><span id="cmdline-text">ProtonTrace native/trajectory.c</span><span class="cursor"></span>
+  <span class="chip" style="margin-left:auto">↹ ProtonTrace · ProtonMode · ProtonAgent</span>
+</div>
+
+<div class="overlay float" id="settings">
+  <header style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--edge)">
+    <div class="brand"><svg><use href="#i-proton"/></svg> PROTON</div>
+    <span style="color:var(--ink-3)">Settings</span>
+    <span class="grow" style="flex:1"></span>
+    <span class="find" style="margin:0;width:240px"><svg width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Search settings</span>
+    <button class="btn" data-close="settings">Close ⎋</button>
+  </header>
+  <div class="st-body">
+    <div class="st-nav tree">
+      <div class="group">General</div>
+      <div class="row"><span class="ic">◷</span>Recent files</div>
+      <div class="row"><span class="ic">⟨⟩</span>Editor</div>
+      <div class="row"><span class="ic">▤</span>Terminal</div>
+      <div class="row"><span class="ic">🎨</span>Syntax &amp; themes</div>
+      <div class="row sel"><span class="ic">⚙</span>Configuration</div>
+      <div class="row"><span class="ic">✦</span>AI &amp; models</div>
+      <div class="row"><span class="ic">⌨</span>Keymap · vim</div>
+      <div class="row"><span class="ic">🧩</span>Plugins</div>
+      <div class="group">Workspace</div>
+      <div class="row"><span class="ic">👥</span>Members</div>
+      <div class="row"><span class="ic">🔗</span>Integrations</div>
+      <div class="row"><span class="ic">☁</span>Cloud &amp; sync</div>
+      <div class="group">Support</div>
+      <div class="row"><span class="ic">📖</span>Documentation</div>
+      <div class="row"><span class="ic">🛟</span>Help centre</div>
+    </div>
+    <div class="st-sub tree">
+      <div class="group">Preferences</div>
+      <div class="row sel">Appearance</div>
+      <div class="row">Editor management</div>
+      <div class="row">Modes &amp; workspaces</div>
+      <div class="row">Collaboration</div>
+      <div class="row">API &amp; keys</div>
+      <div class="group">Security</div>
+      <div class="row">Backup &amp; recovery</div>
+      <div class="row">Audit log</div>
+      <div class="row">Access control</div>
+      <div class="row">Updates</div>
+    </div>
+    <div class="st-main">
+      <div style="font:600 10.5px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px">Appearance</div>
+      <div class="setting">
+        <h4>Workspace theme</h4>
+        <p>A theme is a palette, not a skin — it sets sixteen tokens and touches no layout rule. Glass surfaces sample what is behind them, so the accent carries through the whole window.</p>
+        <div class="themes">
+          <button class="theme-card on" data-theme-set="tokyo-night">
+            <span class="sw"><i style="background:#16161e"></i><i style="background:#7aa2f7"></i><i style="background:#bb9af7"></i><i style="background:#9ece6a"></i><i style="background:#e0af68"></i></span>
+            <span class="nm">Tokyo Night</span>
+          </button>
+          <button class="theme-card" data-theme-set="one-dark">
+            <span class="sw"><i style="background:#282c34"></i><i style="background:#61afef"></i><i style="background:#c678dd"></i><i style="background:#98c379"></i><i style="background:#e5c07b"></i></span>
+            <span class="nm">One Dark</span>
+          </button>
+          <button class="theme-card" data-theme-set="catppuccin">
+            <span class="sw"><i style="background:#1e1e2e"></i><i style="background:#89b4fa"></i><i style="background:#cba6f7"></i><i style="background:#a6e3a1"></i><i style="background:#f9e2af"></i></span>
+            <span class="nm">Catppuccin Mocha</span>
+          </button>
+          <button class="theme-card" data-theme-set="nord">
+            <span class="sw"><i style="background:#2e3440"></i><i style="background:#88c0d0"></i><i style="background:#b48ead"></i><i style="background:#a3be8c"></i><i style="background:#ebcb8b"></i></span>
+            <span class="nm">Nord</span>
+          </button>
+        </div>
+      </div>
+      <div class="setting">
+        <h4>Surface blur</h4>
+        <p>How far glass blurs what sits behind it. Chrome and floating layers scale together — drop it to zero on a remote session and every surface falls back to a flat fill without moving.</p>
+        <div class="field-ctl">30 px chrome · 46 px floating <span class="caret">▾</span></div>
+      </div>
+      <div class="setting">
+        <h4>Modal editing</h4>
+        <p>Full vim semantics — operators, text objects, registers, marks, macros — dispatched to every mode, not just the editor. Off makes Proton a plain editor; the leader menu stays.</p>
+        <div style="display:flex;align-items:center;gap:10px"><span class="toggle on"></span><span style="color:var(--ink-3);font-size:12px">On · leader is <kbd>␣</kbd></span></div>
+      </div>
+      <div class="setting">
+        <h4>Editor font</h4>
+        <p>CaskaydiaMono Nerd Font — Cascadia with the Nerd Font glyph set, so devicons in the tree and the statusline resolve. Ligatures follow the family; inlay hints render at 84% of the body size.</p>
+        <div style="display:flex;gap:10px"><div class="field-ctl" style="width:240px">CaskaydiaMono Nerd Font <span class="caret">▾</span></div><div class="field-ctl" style="width:110px">13 px <span class="caret">▾</span></div></div>
+      </div>
+      <div class="setting" style="border-bottom:0">
+        <h4>Agent autonomy</h4>
+        <p>How far the agent goes before it stops for you. Every level still writes to a shadow worktree first — nothing touches your tree until you accept.</p>
+        <div class="field-ctl">Plan → propose diffs → wait <span class="caret">▾</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="hint">
+  <span>Try</span>
+  <kbd>⌃1</kbd><kbd>…</kbd><kbd>⌃7</kbd><span style="color:var(--ink-3)">modes</span>
+  <kbd>␣</kbd><span style="color:var(--ink-3)">leader</span>
+  <kbd>⌘K</kbd><span style="color:var(--ink-3)">telescope</span>
+  <kbd>:</kbd><span style="color:var(--ink-3)">cmd</span>
+  <kbd>i</kbd><kbd>v</kbd><kbd>⎋</kbd><span style="color:var(--ink-3)">vim modes</span>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
