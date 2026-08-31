@@ -118,8 +118,8 @@
     </nav>
 
     <!-- ══ CHAT ══════════════════════════════════════════════════ -->
-    <section class="workspace" data-ws="chat" style="grid-template-columns: 260px minmax(0,1fr);">
-      <aside class="pane side hair-r">
+    <section class="workspace" data-ws="chat" style="--col-l:260px; grid-template-columns: var(--col-l) 1px minmax(0,1fr);">
+      <aside class="pane side">
         <header>Conversations <span class="grow"></span><button class="btn" style="padding:3px 9px">New</button></header>
         <div class="find" data-open="telescope"><svg width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Search chats… <kbd>␣ f n</kbd></div>
         <div class="scroll tree">
@@ -140,6 +140,7 @@
         </div>
       </aside>
 
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
         <div class="canvas-bar">
           <span class="chip accent">Why the fleet grid janks</span>
@@ -217,9 +218,9 @@
     </section>
 
     <!-- ══ CODEX ═════════════════════════════════════════════════ -->
-    <section class="workspace on" data-ws="codex" style="grid-template-columns: 232px minmax(0,1fr) 372px;">
+    <section class="workspace on" data-ws="codex" style="--col-l:232px; --col-r:372px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
 
-      <aside class="pane side hair-r">
+      <aside class="pane side">
         <header>Explorer <span class="grow"></span><span class="chip">3</span></header>
         <div class="find" data-open="telescope"><svg width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></div>
         <div class="scroll tree">
@@ -249,6 +250,7 @@
         </div>
       </aside>
 
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
         <div class="buffers">
           <div class="buf on">◈ dashboard.tsx <span class="tag">route</span> <span class="mod"></span></div>
@@ -283,7 +285,8 @@
         </div>
       </main>
 
-      <aside class="pane hair-l" id="codex-dock">
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+      <aside class="pane" id="codex-dock">
         <div class="dock-tabs">
           <button class="dock-tab on"  data-dockpanel="agent">Agent</button>
           <button class="dock-tab"     data-dockpanel="tasks">Tasks <span class="chip accent">2</span></button>
@@ -488,7 +491,7 @@
     </section>
 
     <!-- ══ DESIGN ════════════════════════════════════════════════ -->
-    <section class="workspace" data-ws="design" style="grid-template-columns: 66px 246px minmax(0,1fr) 268px;">
+    <section class="workspace" data-ws="design" style="--col-l:246px; --col-r:268px; grid-template-columns: 66px var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <nav class="builder-rail side">
         <button><svg><use href="#i-sliders"/></svg>Style</button>
         <button><svg><use href="#i-grid"/></svg>Layout</button>
@@ -497,7 +500,7 @@
         <button><svg><use href="#i-spark"/></svg>Pagepilot</button>
       </nav>
 
-      <aside class="pane side hair-r">
+      <aside class="pane side">
         <header>Layers <span class="grow"></span><span class="chip warn">Draft</span></header>
         <div class="scroll tree">
           <div class="row"><span class="ic">▾</span>▢ Container</div>
@@ -523,6 +526,7 @@
         </div>
       </aside>
 
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
         <div class="canvas-bar">
           <span class="chip">Layout Guide · Blog</span>
@@ -554,7 +558,8 @@
         </div>
       </main>
 
-      <aside class="pane hair-l">
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+      <aside class="pane">
         <div class="dock-tabs"><button class="dock-tab on">Style</button><button class="dock-tab">Props</button><button class="dock-tab">Events</button><button class="dock-tab">States</button></div>
         <div class="scroll">
           <div class="sec-head">Layout <span class="grow"></span><span class="chip">grid</span></div>
@@ -583,8 +588,8 @@
     </section>
 
     <!-- ══ MODELING ══════════════════════════════════════════════ -->
-    <section class="workspace" data-ws="modeling" style="grid-template-columns: 226px minmax(0,1fr) 268px;">
-      <aside class="pane side hair-r">
+    <section class="workspace" data-ws="modeling" style="--col-l:226px; --col-r:268px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side">
         <header>Outliner</header>
         <div class="scroll tree">
           <div class="row"><span class="ic">▾</span>🎬 Scene</div>
@@ -605,6 +610,7 @@
         </div>
       </aside>
 
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
         <div class="canvas-bar">
           <div class="seg"><button class="on">Object</button><button>Edit</button><button>Sculpt</button><button>Shading</button></div>
@@ -660,7 +666,8 @@
         </div>
       </main>
 
-      <aside class="pane hair-l">
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+      <aside class="pane">
         <div class="dock-tabs"><button class="dock-tab on">Object</button><button class="dock-tab">Modifiers</button><button class="dock-tab">Physics</button><button class="dock-tab">Agent</button></div>
         <div class="scroll">
           <div class="sec-head">Transform</div>
@@ -683,8 +690,8 @@
     </section>
 
     <!-- ══ GAME ══════════════════════════════════════════════════ -->
-    <section class="workspace" data-ws="game" style="grid-template-columns: 226px minmax(0,1fr) 268px;">
-      <aside class="pane side hair-r">
+    <section class="workspace" data-ws="game" style="--col-l:226px; --col-r:268px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side">
         <header>Hierarchy</header>
         <div class="scroll tree">
           <div class="row"><span class="ic">▾</span>🌍 World</div>
@@ -707,6 +714,7 @@
         </div>
       </aside>
 
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
         <div class="transport">
           <span class="tp play"><svg><use href="#i-play"/></svg></span>
@@ -753,7 +761,8 @@
         </div>
       </main>
 
-      <aside class="pane hair-l">
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+      <aside class="pane">
         <div class="dock-tabs"><button class="dock-tab on">Inspector</button><button class="dock-tab">Signals</button><button class="dock-tab">Agent</button></div>
         <div class="scroll">
           <div class="sec-head">CharacterBody2D</div>
@@ -778,8 +787,8 @@
     </section>
 
     <!-- ══ VIDEO ═════════════════════════════════════════════════ -->
-    <section class="workspace" data-ws="video" style="grid-template-columns: 226px minmax(0,1fr) 268px;">
-      <aside class="pane side hair-r">
+    <section class="workspace" data-ws="video" style="--col-l:226px; --col-r:268px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side">
         <header>Media bin</header>
         <div class="scroll tree">
           <div class="group">Footage</div>
@@ -797,6 +806,7 @@
         </div>
       </aside>
 
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
         <div class="canvas-bar">
           <div class="seg"><button class="on">Edit</button><button>Color</button><button>Audio</button><button>Deliver</button></div>
@@ -828,7 +838,8 @@
         </div>
       </main>
 
-      <aside class="pane hair-l">
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+      <aside class="pane">
         <div class="dock-tabs"><button class="dock-tab on">Agent</button><button class="dock-tab">Effects</button><button class="dock-tab">Color</button></div>
         <div class="scroll">
           <div class="msg">
@@ -851,8 +862,8 @@
     </section>
 
     <!-- ══ DATA ══════════════════════════════════════════════════ -->
-    <section class="workspace" data-ws="data" style="grid-template-columns: 226px minmax(0,1fr) 300px;">
-      <aside class="pane side hair-r">
+    <section class="workspace" data-ws="data" style="--col-l:226px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side">
         <header>Sources</header>
         <div class="find"><svg width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Query anything… <kbd>␣ d q</kbd></div>
         <div class="scroll tree">
@@ -872,6 +883,7 @@
         </div>
       </aside>
 
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
         <div class="canvas-bar">
           <span class="chip accent">fleet_health.ipynb</span>
@@ -928,7 +940,8 @@ df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_pa
         </div>
       </main>
 
-      <aside class="pane hair-l">
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+      <aside class="pane">
         <div class="dock-tabs"><button class="dock-tab on">Analyst</button><button class="dock-tab">Profile</button><button class="dock-tab">History</button></div>
         <div class="scroll">
           <div class="sec-head">Column profile · battery</div>
@@ -1111,9 +1124,18 @@ df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_pa
         <p style="margin:9px 0 0;font-size:11.5px" id="backdrop-note"></p>
       </div>
       <div class="setting">
+        <h4>Translucency</h4>
+        <p>How much of the backdrop comes through. The stage is always the most solid of the three surfaces because it is the one you read from; <b>Heavy</b> is where legibility starts to depend on your wallpaper, which is why it is a choice and not the default.</p>
+        <div class="seg" style="width:max-content" id="translucency-picker">
+          <button data-translucency-set="subtle">Subtle</button>
+          <button class="on" data-translucency-set="medium">Medium</button>
+          <button data-translucency-set="heavy">Heavy</button>
+        </div>
+      </div>
+      <div class="setting">
         <h4>Surface blur</h4>
-        <p>How far glass blurs what sits behind it. Chrome and floating layers scale together — drop it to zero on a remote session and every surface falls back to a flat fill without moving.</p>
-        <div class="field-ctl">30 px chrome · 46 px floating <span class="caret">▾</span></div>
+        <p>How far floating layers blur the page beneath them. It cannot reach the desktop — only the compositor can do that, which is what Window background above is for. Drop it to zero on a remote session and every surface falls back to a flat fill without moving.</p>
+        <div class="field-ctl">46 px · saturate 200% <span class="caret">▾</span></div>
       </div>
       <div class="setting">
         <h4>Modal editing</h4>

@@ -98,18 +98,26 @@ look deliberate. The setting reports what the compositor actually did rather
 than what was asked for.
 
 The trade this makes on purpose: the ground is now the user's wallpaper, which
-we do not control, and contrast becomes wallpaper-dependent. So the surface
-splits in two:
+we do not control, and contrast becomes wallpaper-dependent. So every surface
+gets a **veil** — a flat tint of `--bg` over the material — and the veils form a
+ladder from the outside in. The further from the text, the more wallpaper:
 
-- **Chrome is translucent** — mode rail, panel rail, sidebars, titlebar,
-  statusline. This is where the wallpaper shows through and where the colour
-  comes from.
-- **Content is not.** The stage keeps a near-opaque veil. Code is never at the
-  mercy of a wallpaper, which is exactly why Explorer keeps its file list solid
-  and lets Mica show only in the surround.
+| Surface | Veil | |
+|---|---|---|
+| Mode rail, panel rail | 34% | Outermost; almost pure material |
+| Window, statusline | 38–40% | |
+| Sidebars, docks, builder rail | 46% | |
+| **Stage** | **64%** | Frosted, not opaque — but always the most solid |
 
-Internal floating layers keep their CSS glass, because blurring the editor
-behind Telescope is page content and therefore still the right tool.
+Three steps ship — Subtle, Medium (default), Heavy — and they scale the whole
+ladder together, so the ordering never inverts. Heavy is where legibility starts
+to depend on the wallpaper, which is why it is a choice rather than the default.
+
+The stage gets no `backdrop-filter` of its own, and that is not an oversight:
+there is no page content beneath it to blur, only transparency down to DWM,
+which has already blurred the wallpaper itself. Internal floating layers *do*
+keep their CSS glass, because blurring the editor behind Telescope is page
+content and therefore still the right tool.
 
 ### 4. Colour is a token set
 
@@ -172,6 +180,14 @@ one) the fallback catches it and only the character advance changes.
 ```
 
 Those are hairlines, not panel edges — the diagram overstates them.
+
+**Every divider is a drag handle.** The hairline between panes is a real 1px
+grid track rather than a border, which means a pane's width is one number a drag
+can write and nothing has to be measured. Drag to resize, double-click to reset,
+and widths persist per mode. Two clamps: no pane below 172px, and the stage
+never below 320px. Widths are remembered as *what you asked for* rather than
+what currently fits, so narrowing the window and widening it again gives your
+layout back instead of leaving it clamped.
 
 The mode switcher is the outermost column, *outboard* of the panel rail — so
 left to right the order is mode rail, panel rail, context pane, stage, dock.

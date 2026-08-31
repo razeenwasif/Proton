@@ -305,8 +305,13 @@ the compositor rather than from the page. `window-vibrancy` asks DWM for Mica
 and the front end paints its own ground whenever the answer is `solid` —
 transparency effects off, battery saver, Windows 10, Linux. Switchable at
 runtime from Settings → Appearance.
-*Exit met: `[shell] backdrop: mica` on this machine, with the chrome
-translucent and the stage near-opaque so code never depends on a wallpaper.*
+
+Surfaces are veiled on a ladder — rails 34%, window 40%, sidebars 46%, stage
+64% — scaled together by a three-step Translucency setting, so the stage is
+frosted rather than opaque but always the most solid thing on screen. Panes are
+resizable: each hairline is a real 1px grid track that takes the drag, writes
+one custom property, and persists per mode.
+*Exit met: `[shell] backdrop: mica` on this machine.*
 
 **M1 — The editor.** `proton-text`, `proton-syntax`, virtualised rendering, and
 the text objects / marks / macros the M0 engine was shaped to take. Real
@@ -383,3 +388,22 @@ Verified, not assumed — worth recording because it changes what is cheap:
 The gdb-with-Python check is the one that usually fails on Windows and blocks
 Code Visualizer's C/C++ backends. It passes here, so M4 needs no toolchain work
 — detect `C:\msys64\ucrt64\bin` rather than asking the user.
+
+---
+
+## 10. Working on it
+
+`frontendDist` points at a directory, so `generate_context!` **embeds** the
+front end into the binary. `tauri-build` emits a `rerun-if-changed` for that
+directory, so a UI edit does get picked up — but only by rebuilding:
+
+```bash
+cargo run -p proton-shell     # ~3s incremental after a ui/ edit
+node ui/serve.mjs             # or iterate in a browser, no rebuild at all
+```
+
+The browser path is the faster loop for anything that is not shell behaviour.
+`bridge.js` falls back to a local stand-in when Tauri is absent, so the page
+runs either way — but the stand-in is a demo, not a second implementation, and
+must never grow past keeping the design work honest. The real state machine
+lives in `crates/proton-core/src/vim.rs`.

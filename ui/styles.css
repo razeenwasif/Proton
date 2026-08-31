@@ -177,9 +177,22 @@ body {
    content does not — code is never at the mercy of a wallpaper. It is
    why Explorer keeps its file list opaque and lets Mica show only in the
    surround. */
+/* Three translucency steps, set by `data-translucency` on <html>. The stage is
+   always the most solid of the three, because it is the surface you read;
+   `heavy` is where legibility starts depending on the wallpaper, which is why
+   it is a choice rather than the default. */
+:root {
+  --veil-chrome: 40%;
+  --veil-side: 46%;
+  --veil-stage: 64%;
+}
+:root[data-translucency="subtle"] { --veil-chrome: 62%; --veil-side: 68%; --veil-stage: 84%; }
+:root[data-translucency="heavy"]  { --veil-chrome: 24%; --veil-side: 30%; --veil-stage: 46%; }
+
 :root[data-backdrop]:not([data-backdrop="solid"]) {
-  --chrome-veil: color-mix(in srgb, var(--bg) 52%, transparent);
-  --stage-veil: color-mix(in srgb, var(--bg) 88%, transparent);
+  --chrome-veil: color-mix(in srgb, var(--bg) var(--veil-chrome), transparent);
+  --side-veil:   color-mix(in srgb, var(--bg) var(--veil-side), transparent);
+  --stage-veil:  color-mix(in srgb, var(--bg) var(--veil-stage), transparent);
 }
 :root[data-backdrop]:not([data-backdrop="solid"]) body { background: transparent; }
 :root[data-backdrop]:not([data-backdrop="solid"]) .field { display: none; }
@@ -189,13 +202,41 @@ body {
   -webkit-backdrop-filter: none; backdrop-filter: none;
   box-shadow: var(--spec);
 }
-/* The stage is where you read. It stays nearly opaque in every mode that
-   holds text or a canvas; the rails, sidebars and statusline are where the
-   wallpaper is allowed through. */
-:root[data-backdrop]:not([data-backdrop="solid"]) .workspace > main,
-:root[data-backdrop]:not([data-backdrop="solid"]) .workspace > .pane:not(.side):not(.hair-l) {
+
+/* The stage is frosted, not opaque: a veil over the compositor's material,
+   which is already blurred. Adding `backdrop-filter` here would do nothing —
+   there is no page content beneath it to blur, only transparency down to DWM. */
+:root[data-backdrop]:not([data-backdrop="solid"]) .workspace > main {
   background: var(--stage-veil);
 }
+
+/* Side panels sit between the two: more of the wallpaper than the stage, less
+   than the bare chrome. The black wash that gave them depth over a painted
+   ground would only mud the material, so it goes. */
+:root[data-backdrop]:not([data-backdrop="solid"]) .workspace > aside.pane,
+:root[data-backdrop]:not([data-backdrop="solid"]) .builder-rail {
+  background: var(--side-veil);
+}
+:root[data-backdrop]:not([data-backdrop="solid"]) .mode-rail,
+:root[data-backdrop]:not([data-backdrop="solid"]) .rail {
+  background: color-mix(in srgb, var(--bg) calc(var(--veil-side) - 12%), transparent);
+}
+:root[data-backdrop]:not([data-backdrop="solid"]) .statusline {
+  background: color-mix(in srgb, var(--bg) calc(var(--veil-side) - 8%), transparent);
+}
+
+/* ── resizable gutters ────────────────────────────────────────────────
+   A gutter is a 1px grid track that draws the divider and takes the drag.
+   Making it a real track rather than a border means the pane widths are one
+   number the drag can write, and nothing has to be measured. */
+.gutter {
+  position: relative; cursor: col-resize; background: var(--edge);
+  transition: background .12s;
+}
+/* The line is 1px; the target is not. */
+.gutter::after { content: ""; position: absolute; inset: 0 -4px; z-index: 3; }
+.gutter:hover, .gutter.dragging { background: var(--accent); }
+:root.resizing, :root.resizing * { cursor: col-resize !important; user-select: none; }
 
 /* Hairlines do all the dividing. There are no cards. */
 .hair-b { border-bottom: 1px solid var(--edge); }

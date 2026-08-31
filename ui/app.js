@@ -42,6 +42,26 @@ $$("[data-theme-set]").forEach((c) =>
   c.addEventListener("click", () => setTheme(c.dataset.themeSet)),
 );
 
+/* ── translucency ─────────────────────────────────────────────────────
+   Three steps over one set of veil percentages. Like the theme, it is a
+   token change: no rule below the veil block knows which step is live. */
+function setTranslucency(step) {
+  if (!["subtle", "medium", "heavy"].includes(step)) return;
+  document.documentElement.dataset.translucency = step;
+  $$("[data-translucency-set]").forEach((b) =>
+    b.classList.toggle("on", b.dataset.translucencySet === step),
+  );
+  try {
+    localStorage.setItem("proton.translucency", step);
+  } catch {
+    /* storage blocked — it just won't persist */
+  }
+}
+
+$$("[data-translucency-set]").forEach((b) =>
+  b.addEventListener("click", () => setTranslucency(b.dataset.translucencySet)),
+);
+
 /* ── workspace modes ──────────────────────────────────────────────────
    The mode bar asks the core to switch; the core's ModeChanged event is
    what actually moves the UI. That indirection looks pointless with one
@@ -96,9 +116,11 @@ $$(".dock-tabs").forEach((group) => {
 });
 
 $$(".seg, .builder-rail").forEach((group) => {
-  // The backdrop picker is driven by what the compositor answered, not by the
-  // click, so it must not get the optimistic view-state handler.
-  if (group.id === "backdrop-picker") return;
+  // Both pickers own their own selected state — the backdrop one because it
+  // reflects what the compositor answered rather than what was clicked, the
+  // translucency one because it restores from storage on boot. Neither wants
+  // the optimistic view-state handler.
+  if (group.id === "backdrop-picker" || group.id === "translucency-picker") return;
   $$("button", group).forEach((b) =>
     b.addEventListener("click", () => {
       $$("button", group).forEach((o) => o.classList.remove("on"));
@@ -124,6 +146,105 @@ $$(".buffers").forEach((bar) => {
     }),
   );
 });
+
+/* ── resizable panes ──────────────────────────────────────────────────
+   Each gutter writes one custom property on its workspace, and the grid
+   does the rest. Widths are remembered as *what you asked for* rather
+   than what currently fits, so narrowing the window and widening it again
+   gives your layout back instead of leaving it clamped. */
+const PANE_MIN = 172;
+const STAGE_MIN = 320;
+
+function paneWidths(ws) {
+  try {
+    return JSON.parse(localStorage.getItem(`proton.panes.${ws}`) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function rememberPane(ws, prop, px) {
+  try {
+    localStorage.setItem(`proton.panes.${ws}`, JSON.stringify({ ...paneWidths(ws), [prop]: px }));
+  } catch {
+    /* storage blocked — the drag still works, it just won't survive a reload */
+  }
+}
+
+function defaultPane(section, prop) {
+  // The value the markup shipped with, before any drag.
+  return parseFloat(section.dataset[prop === "--col-l" ? "defL" : "defR"]);
+}
+
+$$(".workspace").forEach((section) => {
+  section.dataset.defL = parseFloat(section.style.getPropertyValue("--col-l")) || 0;
+  section.dataset.defR = parseFloat(section.style.getPropertyValue("--col-r")) || 0;
+
+  const saved = paneWidths(section.dataset.ws);
+  for (const [prop, px] of Object.entries(saved)) section.style.setProperty(prop, `${px}px`);
+});
+
+function resizePane(section, gutter, clientX) {
+  const prop = gutter.dataset.resize;
+  const box = section.getBoundingClientRect();
+  const other = prop === "--col-l"
+    ? parseFloat(getComputedStyle(section).getPropertyValue("--col-r")) || 0
+    : parseFloat(getComputedStyle(section).getPropertyValue("--col-l")) || 0;
+  // Design mode has a fixed 66px tool rail ahead of the resizable column.
+  const fixed = section.dataset.ws === "design" ? 66 : 0;
+
+  const raw = prop === "--col-l" ? clientX - box.left - fixed : box.right - clientX;
+  const room = box.width - fixed - other - STAGE_MIN - 2;
+  const px = Math.round(Math.max(PANE_MIN, Math.min(raw, room)));
+
+  section.style.setProperty(prop, `${px}px`);
+  rememberPane(section.dataset.ws, prop, px);
+}
+
+/* The drag lives on `window`, not on the gutter. Pointer capture would be
+   tidier, but it can throw and it drops the drag the moment the pointer
+   outruns the 1px track — and losing a drag mid-gesture is worse than the
+   extra listener. */
+let drag = null;
+
+$$(".gutter").forEach((gutter) => {
+  const section = gutter.closest(".workspace");
+
+  gutter.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    drag = { gutter, section };
+    gutter.classList.add("dragging");
+    document.documentElement.classList.add("resizing");
+  });
+
+  gutter.addEventListener("dblclick", () => {
+    const prop = gutter.dataset.resize;
+    const px = defaultPane(section, prop);
+    section.style.setProperty(prop, `${px}px`);
+    rememberPane(section.dataset.ws, prop, px);
+    requestAnimationFrame(drawPointerEdges);
+  });
+});
+
+window.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  e.preventDefault();
+  resizePane(drag.section, drag.gutter, e.clientX);
+});
+
+function endDrag() {
+  if (!drag) return;
+  drag.gutter.classList.remove("dragging");
+  document.documentElement.classList.remove("resizing");
+  drag = null;
+  requestAnimationFrame(drawPointerEdges);
+}
+
+window.addEventListener("pointerup", endDrag);
+window.addEventListener("pointercancel", endDrag);
+// A drag that ends outside the window still has to end.
+window.addEventListener("blur", endDrag);
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -324,10 +445,12 @@ if (scrub) {
 /* ── boot ─────────────────────────────────────────────────────────────── */
 
 try {
-  const saved = localStorage.getItem("proton.theme");
-  if (saved) setTheme(saved);
+  const theme = localStorage.getItem("proton.theme");
+  if (theme) setTheme(theme);
+  setTranslucency(localStorage.getItem("proton.translucency") ?? "medium");
 } catch {
-  /* nothing stored, or storage is blocked — the default theme stands */
+  /* nothing stored, or storage is blocked — the defaults stand */
+  setTranslucency("medium");
 }
 
 wireWindowChrome();
