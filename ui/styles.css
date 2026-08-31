@@ -155,7 +155,7 @@ body {
   position: relative; z-index: 1;
   margin: 14px; height: calc(100vh - 28px);
   display: grid;
-  grid-template-rows: 46px 1fr 26px;
+  grid-template-rows: 1fr 26px;
   background: color-mix(in srgb, var(--bg) 74%, transparent);
   -webkit-backdrop-filter: var(--glass-chrome); backdrop-filter: var(--glass-chrome);
   border: 1px solid var(--edge-hi);
@@ -253,26 +253,54 @@ body {
   box-shadow: var(--spec-hi), 0 30px 70px -22px rgba(0, 0, 0, 0.72);
 }
 
-/* ── titlebar — unified, no divider ───────────────────────────────── */
-.titlebar {
-  display: flex; align-items: center; gap: 13px; padding: 0 13px;
-  background: linear-gradient(180deg, rgba(var(--raise), 0.055), transparent);
-  box-shadow: var(--spec);
+/* ── chrome rail ──────────────────────────────────────────────────────
+   There is no titlebar. Window controls, identity, the mode switcher and
+   the project actions all live in one vertical column, which buys the
+   editor a full row of height and puts every piece of chrome on the same
+   edge instead of splitting it across two. */
+.chrome-rail {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 13px 6px 10px; border-right: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.16);
 }
-.lights { display: flex; gap: 8px; }
-.lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+.lights { display: flex; flex-direction: column; gap: 8px; }
+.lights i { width: 11px; height: 11px; border-radius: 50%; display: block; cursor: pointer; }
 .lights i:nth-child(1) { background: #ff5f57; }
 .lights i:nth-child(2) { background: #febc2e; }
 .lights i:nth-child(3) { background: #28c840; }
+.lights i:hover { filter: brightness(1.25); }
 
+.brand-mark { display: grid; place-items: center; padding-bottom: 2px; }
+.brand-mark svg { width: 19px; height: 19px; color: var(--accent); }
+
+/* The wordmark survives in the settings header, where there is room for it. */
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 620; letter-spacing: 0.13em; font-size: 11px; color: var(--ink-2); }
 .brand svg { width: 17px; height: 17px; color: var(--accent); }
 
-.crumb {
-  display: flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px;
-  background: var(--e1); box-shadow: var(--spec); font-size: 11.5px; color: var(--ink-3);
+/* Empty space in the rail is what drags the window. */
+.rail-drag { flex: 1; align-self: stretch; min-height: 20px; }
+
+.rail-actions { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+.rail-actions .avatars { flex-direction: column; }
+.rail-actions .avatars span { margin: -5px 0 0; }
+.rail-actions .avatars span:first-child { margin-top: 0; }
+.rail-btn {
+  width: 100%; padding: 6px 0; border: 0; border-radius: 9px; cursor: pointer;
+  background: var(--e2); box-shadow: var(--spec); color: var(--ink-2);
+  font: 550 10.5px var(--sans); display: grid; place-items: center;
 }
-.crumb b { color: var(--ink); font-weight: 550; }
+.rail-btn svg { width: 15px; height: 15px; }
+.rail-btn:hover { background: var(--e3); color: var(--ink); }
+.rail-btn.primary {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent) 92%, white 8%),
+    color-mix(in srgb, var(--accent) 74%, black 26%));
+  color: var(--bg-deep); font-weight: 640;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 4px 14px -6px var(--accent);
+}
+.rail-btn.primary:hover { filter: brightness(1.08); }
+
+.sl.project { color: var(--ink-2); gap: 7px; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 
 /* ── mode rail ────────────────────────────────────────────────────────
@@ -280,10 +308,7 @@ body {
    rail chooses what you are looking at inside it. Two rails in a real
    hierarchy, which is why this reads as a sidebar rather than a tab
    strip — and why an eighth mode costs nothing. */
-.mode-rail {
-  display: flex; flex-direction: column; gap: 2px; padding: 9px 6px;
-  border-right: 1px solid var(--edge); background: rgba(0, 0, 0, 0.16);
-}
+.mode-rail { display: flex; flex-direction: column; gap: 2px; }
 .mode {
   width: 56px; padding: 8px 0 7px; display: grid; gap: 5px; justify-items: center;
   border: 0; border-radius: 10px; cursor: pointer; background: transparent; color: var(--ink-3);
@@ -298,7 +323,6 @@ body {
 }
 .mode[aria-selected="true"] svg { color: var(--accent); }
 
-.tb-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .avatars { display: flex; }
 .avatars span {
   width: 22px; height: 22px; border-radius: 50%; margin-left: -6px;
@@ -321,7 +345,7 @@ body {
 .btn.primary:hover { filter: brightness(1.08); }
 
 /* ── body ─────────────────────────────────────────────────────────── */
-.body { display: grid; grid-template-columns: 68px 48px 1fr; min-height: 0; }
+.body { display: grid; grid-template-columns: 62px 48px 1fr; min-height: 0; }
 
 .rail {
   display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 0;
@@ -825,3 +849,48 @@ table.df tr:hover td { background: var(--e1); }
   display: flex; align-items: center; gap: 9px;
 }
 .hint kbd + kbd { margin-left: 3px; }
+
+/* ── splits ───────────────────────────────────────────────────────────
+   `:vsplit` shows the same buffer twice, which is the point of it — two
+   views onto one document. A flat list with a direction covers that and
+   the common two- and three-way layouts; real tiling trees arrive with
+   real buffers in M1, when there is something to tile. */
+.splits { display: flex; flex: 1; min-height: 0; }
+.splits.stacked { flex-direction: column; }
+.split { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; position: relative; }
+.splits:not(.stacked) > .split + .split { border-left: 1px solid var(--edge); }
+.splits.stacked > .split + .split { border-top: 1px solid var(--edge); }
+
+/* Which split has focus matters the moment there is more than one, and
+   nothing else on screen says so. */
+.splits > .split.on::before {
+  content: ""; position: absolute; inset: 0 0 auto; height: 2px;
+  background: var(--accent); opacity: 0; transition: opacity .15s;
+}
+.splits.multi > .split.on::before { opacity: .85; }
+.splits.multi > .split:not(.on) { opacity: .74; }
+
+.split-actions { display: flex; gap: 2px; margin-left: auto; padding-right: 4px; align-self: center; }
+.split-actions button {
+  width: 24px; height: 22px; display: grid; place-items: center; cursor: pointer;
+  border: 0; border-radius: 6px; background: transparent; color: var(--ink-4);
+}
+.split-actions button svg { width: 13px; height: 13px; }
+.split-actions button:hover { background: var(--e2); color: var(--ink); }
+/* Closing the only split would leave nothing behind. */
+.splits:not(.multi) .split-actions button[data-split="close"] { opacity: .3; pointer-events: none; }
+
+/* ── the hint collapses ───────────────────────────────────────────────
+   It is a prototype affordance sitting on top of real controls, so it has
+   to get out of the way on request — and stay out of it. */
+.hint { padding: 7px; gap: 7px; }
+.hint-keys { display: flex; align-items: center; gap: 9px; padding-right: 4px; }
+.hint-toggle {
+  width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center;
+  border: 0; border-radius: 8px; cursor: pointer;
+  background: var(--e2); box-shadow: var(--spec); color: var(--ink-3);
+}
+.hint-toggle svg { width: 14px; height: 14px; }
+.hint-toggle:hover { background: var(--e3); color: var(--ink); }
+.hint.collapsed .hint-keys { display: none; }
+.hint.collapsed .hint-toggle { color: var(--accent); }

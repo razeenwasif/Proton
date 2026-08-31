@@ -28,7 +28,7 @@ if (HAS_SHELL) {
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
-  const state = { mode: "codex", vim: "Normal", pending: "" };
+  const state = { mode: "codex", vim: "Normal", cmdline: "", leader: null };
   const LABEL = {
     Normal: "NORMAL", Insert: "INSERT", Visual: "VISUAL",
     VisualLine: "V-LINE", Replace: "REPLACE", Command: "COMMAND",
@@ -47,15 +47,44 @@ if (HAS_SHELL) {
 
     const k = command.key.key;
     const before = state.vim;
-    if (k === "Escape") state.vim = "Normal";
-    else if (state.vim === "Insert" || state.vim === "Replace") {
+
+    if (k === "Escape") {
+      state.cmdline = "";
+      state.leader = null;
+      state.vim = "Normal";
+      return [{ type: "cmdline", text: null }, vimEvent()];
+    }
+
+    if (state.vim === "Command") {
+      if (k === "Enter") {
+        const text = state.cmdline;
+        state.cmdline = "";
+        state.vim = "Normal";
+        return [{ type: "cmdlineRun", text }, vimEvent()];
+      }
+      if (k === "Backspace") state.cmdline = state.cmdline.slice(0, -1);
+      else if (k.length === 1) state.cmdline += k;
+      return [{ type: "cmdline", text: state.cmdline }];
+    }
+
+    if (state.vim === "Insert" || state.vim === "Replace") {
       return k.length === 1 ? [{ type: "input", text: k }] : [];
-    } else if (k === "i" || k === "a" || k === "o") state.vim = "Insert";
+    }
+
+    if (state.leader !== null) {
+      if (k.length === 1) state.leader += k;
+      const prefix = state.leader;
+      if (prefix.length >= 2) state.leader = null;
+      return [{ type: "leader", prefix }];
+    }
+
+    if (k === "i" || k === "a" || k === "o") state.vim = "Insert";
     else if (k === "v") state.vim = state.vim === "Visual" ? "Normal" : "Visual";
     else if (k === "V") state.vim = state.vim === "VisualLine" ? "Normal" : "VisualLine";
-    else if (k === ":") state.vim = "Command";
-    else if (k === " ") return [{ type: "leader", prefix: "" }];
+    else if (k === ":") { state.vim = "Command"; state.cmdline = ""; }
+    else if (k === " ") { state.leader = ""; return [{ type: "leader", prefix: "" }]; }
 
+    if (state.vim === "Command") return [{ type: "cmdline", text: "" }, vimEvent()];
     return state.vim === before ? [] : [vimEvent()];
   };
 }
@@ -145,14 +174,15 @@ export function wireWindowChrome() {
     light.addEventListener("click", () => actions[i]?.());
   });
 
-  const bar = document.querySelector(".titlebar");
-  bar?.addEventListener("mousedown", (e) => {
-    // Only the empty parts of the bar drag the window; controls keep working.
-    if (e.button !== 0 || e.target.closest("button, .lights, .modes, .crumb")) return;
+  // With the titlebar gone, the chrome rail is the drag surface. Only its
+  // empty parts drag; every control on it keeps working.
+  const rail = document.querySelector(".chrome-rail");
+  rail?.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || e.target.closest("button, .lights, .avatars")) return;
     win.startDragging();
   });
-  bar?.addEventListener("dblclick", (e) => {
-    if (e.target.closest("button, .lights, .modes")) return;
+  rail?.addEventListener("dblclick", (e) => {
+    if (e.target.closest("button, .lights, .avatars")) return;
     win.toggleMaximize();
   });
 }

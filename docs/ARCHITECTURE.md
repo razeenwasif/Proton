@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test -p proton-core     # 23 tests, headless
+cargo test -p proton-core     # 24 tests, headless
 cargo run -p proton-shell     # the app
 node ui/serve.mjs             # the front end alone, in a browser
 ```
@@ -310,7 +310,13 @@ Surfaces are veiled on a ladder — rails 34%, window 40%, sidebars 46%, stage
 64% — scaled together by a three-step Translucency setting, so the stage is
 frosted rather than opaque but always the most solid thing on screen. Panes are
 resizable: each hairline is a real 1px grid track that takes the drag, writes
-one custom property, and persists per mode.
+one custom property, and persists per mode. The titlebar is gone — window
+controls, identity, modes and project actions share one vertical rail, and the
+stage splits with `:vsplit` / `:split`.
+
+The core grew one event doing it. `Outcome::Cmdline` and `Outcome::Execute` are
+now distinct, because a consumer that cannot tell a keystroke from a submission
+runs `:`, `:v`, `:vs` and `:vsp` on the way to `:vsplit`.
 *Exit met: `[shell] backdrop: mica` on this machine.*
 
 **M1 — The editor.** `proton-text`, `proton-syntax`, virtualised rendering, and

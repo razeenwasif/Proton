@@ -138,14 +138,107 @@ $$(".tree").forEach((tree) => {
   );
 });
 
-$$(".buffers").forEach((bar) => {
-  $$(".buf", bar).forEach((b) =>
-    b.addEventListener("click", () => {
-      $$(".buf", bar).forEach((o) => o.classList.remove("on"));
-      b.classList.add("on");
-    }),
-  );
+// Delegated, because splitting clones buffer bars and a cloned node brings no
+// listeners with it.
+document.addEventListener("click", (e) => {
+  const buf = e.target.closest(".buf");
+  if (!buf) return;
+  $$(".buf", buf.parentElement).forEach((o) => o.classList.remove("on"));
+  buf.classList.add("on");
 });
+
+/* ── splits ───────────────────────────────────────────────────────────
+   `:vsplit` shows the same buffer twice — two views onto one document —
+   so cloning the pane is the honest model, not a shortcut.
+
+   This is view state today. It becomes core state in M1, when buffers
+   exist and a split has to mean "which buffer, scrolled where" rather
+   than "another copy of the same markup". */
+function splits() {
+  return $("#codex-splits");
+}
+
+function activeSplit() {
+  const box = splits();
+  return box?.querySelector(".split.on") ?? box?.firstElementChild ?? null;
+}
+
+function syncSplits() {
+  const box = splits();
+  if (!box) return;
+  const all = $$(".split", box);
+  box.classList.toggle("multi", all.length > 1);
+  if (!all.some((s) => s.classList.contains("on"))) all[0]?.classList.add("on");
+  requestAnimationFrame(drawPointerEdges);
+}
+
+function splitEditor(direction) {
+  const box = splits();
+  const source = activeSplit();
+  if (!box || !source || $$(".split", box).length >= 4) return;
+
+  box.classList.toggle("stacked", direction === "stacked");
+  const clone = source.cloneNode(true);
+  source.classList.remove("on");
+  clone.classList.add("on");
+  source.after(clone);
+  syncSplits();
+}
+
+function closeSplit(which = activeSplit()) {
+  const box = splits();
+  if (!box || !which || $$(".split", box).length < 2) return;
+  const next = which.nextElementSibling ?? which.previousElementSibling;
+  which.remove();
+  next?.classList.add("on");
+  syncSplits();
+}
+
+function onlySplit() {
+  const box = splits();
+  const keep = activeSplit();
+  if (!box || !keep) return;
+  $$(".split", box).forEach((s) => s !== keep && s.remove());
+  syncSplits();
+}
+
+document.addEventListener("click", (e) => {
+  const action = e.target.closest("[data-split]");
+  if (action) {
+    e.stopPropagation();
+    const split = action.closest(".split");
+    $$(".split", splits()).forEach((s) => s.classList.toggle("on", s === split));
+    if (action.dataset.split === "v") splitEditor("side");
+    else if (action.dataset.split === "s") splitEditor("stacked");
+    else closeSplit(split);
+    return;
+  }
+  // Clicking anywhere in a split focuses it.
+  const split = e.target.closest(".split");
+  if (split && splits()?.contains(split)) {
+    $$(".split", splits()).forEach((s) => s.classList.toggle("on", s === split));
+  }
+});
+
+/* The commands vim already uses for this, wired to the real command line. */
+const SPLIT_COMMANDS = {
+  vsplit: () => splitEditor("side"),
+  vs: () => splitEditor("side"),
+  vsp: () => splitEditor("side"),
+  split: () => splitEditor("stacked"),
+  sp: () => splitEditor("stacked"),
+  q: () => closeSplit(),
+  close: () => closeSplit(),
+  only: () => onlySplit(),
+  on: () => onlySplit(),
+};
+
+const SPLIT_LEADER = {
+  wv: () => splitEditor("side"),
+  ws: () => splitEditor("stacked"),
+  wq: () => closeSplit(),
+  wo: () => onlySplit(),
+};
 
 /* ── resizable panes ──────────────────────────────────────────────────
    Each gutter writes one custom property on its workspace, and the grid
@@ -303,11 +396,17 @@ onEvent((event) => {
       break;
 
     case "leader":
-      if (event.prefix === null) closeAll();
-      else open("whichkey");
-      // ␣ff is the one leader sequence M0 resolves, so Telescope is reachable
-      // the way it will be in M2.
-      if (event.prefix === "ff") open("telescope");
+      if (event.prefix === null) {
+        closeAll();
+      } else if (SPLIT_LEADER[event.prefix]) {
+        closeAll();
+        SPLIT_LEADER[event.prefix]();
+      } else {
+        open("whichkey");
+        // ␣ff is the one leader sequence M0 resolves, so Telescope is reachable
+        // the way it will be in M2.
+        if (event.prefix === "ff") open("telescope");
+      }
       break;
 
     case "cmdline":
@@ -319,6 +418,19 @@ onEvent((event) => {
         if (el) el.textContent = event.text;
       }
       break;
+
+    case "cmdlineRun": {
+      // The core hands back the line it collected; the front end decides what
+      // it means. In M1 that dispatch moves into the core with the buffers.
+      const run = SPLIT_COMMANDS[event.text.trim().replace(/^:/, "")];
+      if (run) {
+        run();
+        renderStatus(`:${event.text.trim()}`);
+      } else if (event.text.trim()) {
+        renderStatus(`:${event.text.trim()} — not a command yet`);
+      }
+      break;
+    }
 
     case "action":
       renderStatus(event.description);
@@ -442,12 +554,29 @@ if (scrub) {
   }, 220);
 }
 
+/* ── the keyboard hint ────────────────────────────────────────────────
+   A prototype affordance parked on top of real controls, so it has to be
+   dismissible — and stay dismissed. */
+function setHint(collapsed) {
+  $("#hint")?.classList.toggle("collapsed", collapsed);
+  try {
+    localStorage.setItem("proton.hint", collapsed ? "collapsed" : "open");
+  } catch {
+    /* storage blocked — it just won't persist */
+  }
+}
+
+$(".hint-toggle")?.addEventListener("click", () =>
+  setHint(!$("#hint").classList.contains("collapsed")),
+);
+
 /* ── boot ─────────────────────────────────────────────────────────────── */
 
 try {
   const theme = localStorage.getItem("proton.theme");
   if (theme) setTheme(theme);
   setTranslucency(localStorage.getItem("proton.translucency") ?? "medium");
+  setHint(localStorage.getItem("proton.hint") === "collapsed");
 } catch {
   /* nothing stored, or storage is blocked — the defaults stand */
   setTranslucency("medium");
@@ -486,8 +615,12 @@ applyBackdrop().then((applied) => {
   renderBackdrop(applied);
   requestAnimationFrame(drawPointerEdges);
 });
+syncSplits();
 sync();
 drawPointerEdges();
 
 // Exposed for the browser preview's console and for driving screenshots.
-Object.assign(window, { setTheme, setMode: coreSetMode, setDock, open, closeAll, dispatch, drawPointerEdges });
+Object.assign(window, {
+  setTheme, setTranslucency, setMode: coreSetMode, setDock, open, closeAll,
+  dispatch, drawPointerEdges, splitEditor, closeSplit, onlySplit, setHint,
+});

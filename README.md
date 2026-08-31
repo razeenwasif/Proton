@@ -11,12 +11,12 @@ round-trips through `proton-core`. Everything from M1 on is still a plan.
 
 ```bash
 cargo run -p proton-shell     # the app
-cargo test -p proton-core     # 23 tests, headless
+cargo test -p proton-core     # 24 tests, headless
 node ui/serve.mjs             # the front end alone → http://localhost:5178
 ```
 
 Best at 1440px or wider. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
-`:` command line · `i` `v` `⎋` vim modes · `⌘,` settings. Bare digits are vim
+`:` command line · `i` `v` `⎋` vim modes · `␣w` splits · `⌘,` settings. Bare digits are vim
 counts, not mode switches — that collision is why the mode chord is `⌃`.
 
 ---

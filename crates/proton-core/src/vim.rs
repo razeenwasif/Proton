@@ -55,6 +55,10 @@ pub enum Outcome {
     Leader(String),
     /// The command line changed. `None` means it closed without executing.
     Cmdline(Option<String>),
+    /// The command line was submitted. Distinct from `Cmdline` because a
+    /// consumer has to be able to tell a keystroke from an execution — they
+    /// carry the same text and mean entirely different things.
+    Execute(String),
     /// A literal character typed in insert mode.
     Input(char),
     /// Nothing happened. Deliberately distinct from an action with no effect.
@@ -193,7 +197,7 @@ impl Vim {
             "Enter" => {
                 let line = std::mem::take(&mut self.cmdline);
                 self.mode = VimMode::Normal;
-                Outcome::Cmdline(Some(line))
+                Outcome::Execute(line)
             }
             "Backspace" => {
                 if self.cmdline.pop().is_none() {

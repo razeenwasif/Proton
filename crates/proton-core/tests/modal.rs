@@ -128,7 +128,7 @@ fn cmdline_collects_and_executes() {
     assert_eq!(vim.mode(), VimMode::Command);
     type_keys(&mut vim, "wq");
     match vim.key(&Key::named("Enter")) {
-        Outcome::Cmdline(Some(line)) => assert_eq!(line, "wq"),
+        Outcome::Execute(line) => assert_eq!(line, "wq"),
         other => panic!("expected the command line to execute, got {other:?}"),
     }
     assert_eq!(vim.mode(), VimMode::Normal);
@@ -218,4 +218,32 @@ fn the_wire_format_is_what_the_shell_expects() {
     };
     let text = serde_json::to_string(&event).unwrap();
     assert!(text.contains(r#""type":"vimMode""#), "got {text}");
+}
+
+#[test]
+fn typing_a_command_is_not_running_it() {
+    // The whole reason `Execute` is a separate outcome: a consumer that cannot
+    // tell these apart runs `:`, `:v`, `:vs` and `:vsp` on the way to `:vsplit`.
+    let mut ws = Workspace::new();
+    ws.apply(Command::Key {
+        key: Key::char(':'),
+    });
+
+    for c in "vsplit".chars() {
+        let events = ws.apply(Command::Key { key: Key::char(c) });
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::CmdlineRun { .. })),
+            "typing {c:?} must not execute anything"
+        );
+    }
+
+    let events = ws.apply(Command::Key {
+        key: Key::named("Enter"),
+    });
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::CmdlineRun { text } if text == "vsplit")),
+        "Enter should run the collected line: {events:?}"
+    );
 }

@@ -164,22 +164,35 @@ one) the fallback catches it and only the character advance changes.
 ## The shell
 
 ```
-╭──────────────────────────────────────────────────────────────────────╮
-│ ●●●  PROTON   orbital-dashboard · main            ⋯   Share   Build │  46px
-├────┬──┬────────────────┬────────────────────┬──────────────────────┤
-│Chat│  │                │                    │                      │
-│Code│ p│                │                    │                      │
-│Desn│ a│  context pane  │       stage        │         dock         │
-│Modl│ n│                │                    │                      │
-│Game│ e│                │                    │                      │
-│Vide│ l│                │                    │                      │
-│Data│  │                │                    │                      │
-├────┴──┴────────────────┴────────────────────┴──────────────────────┤
-│ NORMAL │  main +2 ~1 │ path │ lsp │      │ ✦ agent │ ln 11, col 62  │  26px
-╰──────────────────────────────────────────────────────────────────────╯
+╭────┬──┬─────────────────┬───────────────────┬──────────────────────╮
+│ ●  │  │                 │                   │                      │
+│ ●  │  │                 │                   │                      │
+│ ●  │  │                 │                   │                      │
+│ ⬡  │  │                 │                   │                      │
+│Chat│  │                 │                   │                      │
+│Code│ p│                 │      stage        │                      │
+│Desn│ a│  context pane   │  ┌───────┬──────┐ │        dock          │
+│Modl│ n│                 │  │ split │ split│ │                      │
+│Game│ e│                 │  └───────┴──────┘ │                      │
+│Vide│ l│                 │                   │                      │
+│Data│  │                 │                   │                      │
+│    │  │                 │                   │                      │
+│ 👥 │  │                 │                   │                      │
+│Buld│  │                 │                   │                      │
+├────┴──┴─────────────────┴───────────────────┴──────────────────────┤
+│NORMAL│ ⬢ project │  main +2 ~1 │ path │ ✦ agent │ ln 11, col 62    │  26px
+╰────────────────────────────────────────────────────────────────────╯
 ```
 
 Those are hairlines, not panel edges — the diagram overstates them.
+
+**There is no titlebar.** Window controls, the mark, the modes and the project
+actions are all on the same vertical edge. Two reasons: it buys the editor a
+full row of height, which is the dimension a code editor is always short of;
+and splitting chrome across a top bar *and* a left rail was asking the eye to
+track two different homes for the same class of thing. The project name moves
+to the statusline, next to the branch — which is where a vim user already looks
+for it. Empty rail is the window's drag surface.
 
 **Every divider is a drag handle.** The hairline between panes is a real 1px
 grid track rather than a border, which means a pane's width is one number a drag
@@ -188,6 +201,17 @@ and widths persist per mode. Two clamps: no pane below 172px, and the stage
 never below 320px. Widths are remembered as *what you asked for* rather than
 what currently fits, so narrowing the window and widening it again gives your
 layout back instead of leaving it clamped.
+
+**The stage splits.** `:vsplit` and `:split` — and `␣wv` / `␣ws` / `␣wq` /
+`␣wo` — divide the stage into up to four views, side by side or stacked. The
+active split carries an accent edge and the others dim, because with more than
+one view nothing else on screen says where the cursor is.
+
+A split shows *the same buffer twice*, which is what `:vsplit` has always meant:
+two views onto one document, not two documents. That is why the prototype clones
+the pane rather than inventing a second file — it is the honest model, and the
+thing that has to become real in M1 is the buffer behind each view, not the
+splitting.
 
 The mode switcher is the outermost column, *outboard* of the panel rail — so
 left to right the order is mode rail, panel rail, context pane, stage, dock.

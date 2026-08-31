@@ -78,6 +78,7 @@ impl Workspace {
                 prefix: Some(prefix),
             }],
             Outcome::Cmdline(text) => vec![Event::Cmdline { text }],
+            Outcome::Execute(text) => vec![Event::CmdlineRun { text }],
             Outcome::Input(c) => vec![Event::Input {
                 text: c.to_string(),
             }],

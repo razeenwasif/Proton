@@ -55,6 +55,13 @@ pub enum Event {
     Cmdline {
         text: Option<String>,
     },
+    /// The command line was submitted. A separate event from `Cmdline` on
+    /// purpose: the two carry the same text and mean entirely different
+    /// things, and a consumer that cannot tell them apart runs every
+    /// keystroke as a command.
+    CmdlineRun {
+        text: String,
+    },
     /// An action resolved and the active mode accepted it.
     Action {
         action: Action,

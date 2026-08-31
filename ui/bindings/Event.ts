@@ -3,4 +3,4 @@ import type { Action } from "./Action";
 import type { ModeId } from "./ModeId";
 import type { VimMode } from "./VimMode";
 
-export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "type": "pending", keys: string, } | { "type": "leader", prefix: string | null, } | { "type": "cmdline", text: string | null, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, };
+export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "type": "pending", keys: string, } | { "type": "leader", prefix: string | null, } | { "type": "cmdline", text: string | null, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, };
