@@ -135,6 +135,24 @@ export function onEvent(fn) {
   };
 }
 
+/** Hand one event to everyone listening. */
+function deliver(event) {
+  for (const fn of listeners) fn(event);
+}
+
+/* Events nobody asked for.
+ *
+ * `dispatch` returns what a command produced. Language servers do not work
+ * that way: a diagnostic appears because rust-analyzer finished thinking,
+ * minutes after the keystroke that caused it. Those arrive on their own
+ * channel, pushed by the shell's poll thread, and land in the same renderer —
+ * which is the point of the events being transport-agnostic. */
+if (HAS_SHELL && tauri.event?.listen) {
+  tauri.event.listen("proton://events", ({ payload }) => {
+    for (const event of payload ?? []) deliver(event);
+  });
+}
+
 /** @type {(command: Command) => Promise<void>} */
 export async function dispatch(command) {
   let events;
@@ -147,9 +165,7 @@ export async function dispatch(command) {
     console.error("proton: dispatch failed", command, err);
     return;
   }
-  for (const event of events ?? []) {
-    for (const fn of listeners) fn(event);
-  }
+  for (const event of events ?? []) deliver(event);
 }
 
 export const sendKey = (e) =>

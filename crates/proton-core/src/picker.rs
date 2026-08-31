@@ -187,13 +187,42 @@ impl Pickers {
         self.index.len()
     }
 
-    /// Open a picker, scanning the tree the first time one needs it. Paying
-    /// the walk on first use rather than at startup keeps the window's first
-    /// paint free of it.
-    pub fn begin(&mut self, kind: PickerKind, buffers: Vec<(String, Option<String>)>) {
-        if self.index.is_empty() {
-            self.index.scan();
+    /// Start walking the tree, if nobody has yet.
+    ///
+    /// Called once the window is up rather than during construction, so the
+    /// first paint is never behind a walk, and called before anyone asks for a
+    /// picker so that by the time they do the answer is already there.
+    pub fn warm(&mut self) {
+        if !self.index.is_scanned() {
+            self.index.start();
         }
+    }
+
+    /// Whether the tree is still being walked. A picker opened during the
+    /// first second on a large repository is not empty — it is early, and
+    /// saying so is the difference between "no matches" and "not yet".
+    pub fn is_scanning(&self) -> bool {
+        self.index.is_scanning()
+    }
+
+    /// Take a finished walk and re-run the query against it. `true` if the
+    /// visible list changed.
+    pub fn poll(&mut self, buffers: Vec<(String, Option<String>)>) -> bool {
+        if !self.index.poll() {
+            return false;
+        }
+        if self.open.is_some() {
+            self.requery(buffers);
+            return true;
+        }
+        false
+    }
+
+    /// Open a picker. The walk happens on a worker, so this returns at once
+    /// even on a cold index — the list fills in a beat later rather than the
+    /// window stopping for it.
+    pub fn begin(&mut self, kind: PickerKind, buffers: Vec<(String, Option<String>)>) {
+        self.warm();
         self.open = Some(Picker {
             kind,
             query: String::new(),

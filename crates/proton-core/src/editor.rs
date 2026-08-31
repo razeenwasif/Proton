@@ -75,7 +75,16 @@ impl Editor {
     /// must not become two buffers with diverging histories.
     pub fn open(&mut self, path: impl AsRef<Path>) -> std::io::Result<usize> {
         let path = path.as_ref();
-        let canonical = path.canonicalize().unwrap_or_else(|_| PathBuf::from(path));
+        // Canonicalised so that two spellings of one file cannot become two
+        // buffers, then un-prefixed, because on Windows canonicalising hands
+        // back `\\?\C:\...` — which is the same file, but is neither what a
+        // statusline should show nor a spelling any language server accepts.
+        // The display path and the LSP path want the same normalisation, so
+        // they get it in the same place.
+        let canonical = path
+            .canonicalize()
+            .map(proton_lsp::uri::plain)
+            .unwrap_or_else(|_| PathBuf::from(path));
         if let Some(i) = self
             .buffers
             .iter()
@@ -225,6 +234,12 @@ impl Editor {
             // `.` never reaches here: the engine expands it into the steps it
             // stands for, so the editor only ever sees real verbs.
             Verb::Repeat => false,
+
+            // `gd` is answered by a language server and lands the cursor in a
+            // file this editor may not have open yet, so the workspace handles
+            // it. Reaching here means no server had an answer, which is a
+            // no-op rather than a failure.
+            Verb::Goto => false,
         }
     }
 
@@ -316,7 +331,9 @@ fn resolve(buf: &Buffer, object: Object, count: usize) -> Option<Resolved> {
         AroundBigWord => Resolved::Span(buf.a_word(true)),
         InnerPair { open } => Resolved::Span(buf.inside_pair(open, closing(open), false)?),
         AroundPair { open } => Resolved::Span(buf.inside_pair(open, closing(open), true)?),
-        None | Here | After | LineBelow | LineAbove => return Option::None,
+        // `Definition` is not a span in this buffer — it is a question for a
+        // language server, answered in the workspace where one lives.
+        Definition | None | Here | After | LineBelow | LineAbove => return Option::None,
     })
 }
 

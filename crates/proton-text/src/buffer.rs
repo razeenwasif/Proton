@@ -155,6 +155,29 @@ impl Buffer {
             .char_to_utf16_cu(offset.min(self.text.len_chars()))
     }
 
+    /// The column at `offset`, counted in UTF-16 code units from the start of
+    /// its line — which is what an LSP position's `character` actually is. Not
+    /// bytes, not characters: an emoji before the cursor moves this by two.
+    pub fn utf16_column(&self, offset: usize) -> usize {
+        let offset = offset.min(self.text.len_chars());
+        let start = self.text.line_to_char(self.text.char_to_line(offset));
+        self.utf16_of(offset) - self.utf16_of(start)
+    }
+
+    /// The inverse, for a position a server sent us. Clamped to the line, so a
+    /// diagnostic that arrives one edit late lands somewhere real instead of
+    /// panicking.
+    pub fn offset_at_utf16(&self, line: usize, column: usize) -> usize {
+        let line = line.min(self.text.len_lines().saturating_sub(1));
+        let start = self.text.line_to_char(line);
+        let end = motion::line_end(self.text.slice(..), start);
+        let target = self.utf16_of(start) + column;
+        if target >= self.text.len_utf16_cu() {
+            return end;
+        }
+        self.text.utf16_cu_to_char(target).min(end)
+    }
+
     /* ── editing ──────────────────────────────────────────────────── */
 
     /// Apply edits and record them as one undoable change.

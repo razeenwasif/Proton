@@ -968,7 +968,8 @@ df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_pa
     <div class="sl">◈ tsx · utf-8 · lf</div>
     <div class="sl grow" id="sl-status"></div>
     <div class="sl">✦ Opus 5 · agent</div>
-    <div class="sl">⚠ 0  ⓘ 2 · tsserver eslint tailwind</div>
+    <div class="sl" id="sl-diagnostics"></div>
+    <div class="sl" id="sl-servers"></div>
     <div class="sl right" id="sl-position">ln 1, col 1</div>
     <div class="sl sl-mode">42%</div>
   </footer>
@@ -976,6 +977,13 @@ df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_pa
 
 <!-- ══ overlays ══════════════════════════════════════════════════ -->
 <div class="scrim" id="scrim"></div>
+
+<!-- The completion popup. Not an overlay: it has no scrim and does not take
+     the keyboard, because you are still in insert mode while it is up. -->
+<div class="cmp float" id="completion" hidden>
+  <div class="cmp-list" data-completion-list></div>
+  <div class="cmp-foot"><span>⇥ / ⌃n</span><span>⏎ accept</span><span>⎋ dismiss</span></div>
+</div>
 
 <div class="overlay float" id="telescope">
   <div class="prompt"><span class="caret">❯</span> <span data-picker-query></span><span class="cursor"></span><span class="chip" style="margin-left:auto" data-picker-title>find_files</span><span class="chip" data-picker-count></span></div>

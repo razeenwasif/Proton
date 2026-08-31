@@ -1,0 +1,836 @@
+//! One language server: spawned, supervised, and spoken to without blocking.
+//!
+//! Everything public here returns immediately. Requests go out through a
+//! writer thread so a server that has stopped reading its stdin — which
+//! rust-analyzer does, for whole seconds, while it indexes — cannot wedge a
+//! keystroke. Replies come back through a mailbox the editor drains when it
+//! feels like it. The core stays synchronous and total; the waiting happens
+//! out here.
+
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
+
+use serde_json::{json, Value};
+
+use crate::protocol::{
+    CompletionItem, CompletionResponse, DefinitionResponse, Diagnostic, Position,
+    PublishDiagnostics,
+};
+use crate::{transport, uri};
+
+/// What a reply from the server turned out to be.
+#[derive(Debug, Clone)]
+pub enum Incoming {
+    /// `initialize` came back. Nothing may be requested before this.
+    Ready {
+        server: String,
+    },
+    Diagnostics {
+        path: PathBuf,
+        items: Vec<Diagnostic>,
+    },
+    Completion {
+        id: i64,
+        items: Vec<CompletionItem>,
+    },
+    Definition {
+        id: i64,
+        target: Option<Jump>,
+    },
+    /// Long work the user should be told about — rust-analyzer spends its
+    /// first half-minute here, and an editor that says nothing looks broken.
+    Progress {
+        title: String,
+        message: Option<String>,
+        done: bool,
+    },
+    Log {
+        text: String,
+    },
+    /// The server said no, or said something we could not read.
+    Failed {
+        text: String,
+    },
+    /// The process is gone. Nothing more will arrive.
+    Exited,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Jump {
+    pub path: PathBuf,
+    pub line: u32,
+    pub character: u32,
+}
+
+/// What a request id was asking for, so a reply can be shaped without the
+/// caller having to remember what it sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Initialize,
+    Completion,
+    Definition,
+    Shutdown,
+}
+
+type Pending = Arc<Mutex<HashMap<i64, Kind>>>;
+
+pub struct Client {
+    name: String,
+    child: Child,
+    outgoing: Sender<String>,
+    incoming: Receiver<Incoming>,
+    pending: Pending,
+    next_id: i64,
+    ready: bool,
+    exited: bool,
+    /// Notifications raised before `initialize` returned. The spec forbids
+    /// sending them early, and a file opened during startup is the common
+    /// case, not an edge one.
+    queued: Vec<String>,
+}
+
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("name", &self.name)
+            .field("ready", &self.ready)
+            .field("exited", &self.exited)
+            .field("queued", &self.queued.len())
+            .finish()
+    }
+}
+
+impl Client {
+    /// Spawn a server and send `initialize`. Returns as soon as the process
+    /// exists — it is not usable until [`Incoming::Ready`] arrives, which is
+    /// what `queued` is for.
+    pub fn spawn(
+        name: &str,
+        program: &str,
+        args: &[String],
+        root: &std::path::Path,
+    ) -> std::io::Result<Self> {
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .current_dir(root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        // Without this a console window flashes up behind the editor every
+        // time a server starts.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = command.spawn()?;
+        let stdin = child.stdin.take().expect("piped");
+        let stdout = child.stdout.take().expect("piped");
+        let stderr = child.stderr.take().expect("piped");
+
+        let (to_server, from_editor) = mpsc::channel::<String>();
+        let (to_editor, from_server) = mpsc::channel::<Incoming>();
+        let pending: Pending = Arc::default();
+
+        spawn_named(&format!("lsp-{name}-write"), move || {
+            let mut stdin = stdin;
+            for body in from_editor {
+                if transport::write_message(&mut stdin, body.as_bytes()).is_err() {
+                    break;
+                }
+            }
+            // Closing stdin is how a server is told to stop waiting.
+            drop(stdin);
+        });
+
+        {
+            let to_editor = to_editor.clone();
+            let to_server = to_server.clone();
+            let pending = Arc::clone(&pending);
+            let name = name.to_string();
+            spawn_named(&format!("lsp-{name}-read"), move || {
+                read_loop(BufReader::new(stdout), &to_editor, &to_server, &pending);
+                let _ = to_editor.send(Incoming::Exited);
+            });
+        }
+
+        spawn_named(&format!("lsp-{name}-err"), move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                if to_editor.send(Incoming::Log { text: line }).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let mut client = Self {
+            name: name.to_string(),
+            child,
+            outgoing: to_server,
+            incoming: from_server,
+            pending,
+            next_id: 0,
+            ready: false,
+            exited: false,
+            queued: Vec::new(),
+        };
+        client.initialize(root);
+        Ok(client)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.ready
+    }
+
+    pub fn has_exited(&self) -> bool {
+        self.exited
+    }
+
+    /// Take everything that has arrived. Never blocks, and never waits for a
+    /// reply that has not come — a slow server costs nothing but a later
+    /// answer.
+    pub fn poll(&mut self) -> Vec<Incoming> {
+        let mut out = Vec::new();
+        loop {
+            match self.incoming.try_recv() {
+                Ok(message) => {
+                    match &message {
+                        Incoming::Ready { .. } => {
+                            self.ready = true;
+                            for body in std::mem::take(&mut self.queued) {
+                                let _ = self.outgoing.send(body);
+                            }
+                        }
+                        Incoming::Exited => self.exited = true,
+                        _ => {}
+                    }
+                    out.push(message);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    if !self.exited {
+                        self.exited = true;
+                        out.push(Incoming::Exited);
+                    }
+                    break;
+                }
+            }
+        }
+        out
+    }
+}
+
+fn spawn_named(name: &str, f: impl FnOnce() + Send + 'static) {
+    let _ = std::thread::Builder::new().name(name.to_string()).spawn(f);
+}
+
+/* ── talking ──────────────────────────────────────────────────────── */
+
+impl Client {
+    fn initialize(&mut self, root: &std::path::Path) {
+        let root_uri = uri::from_path(root);
+        let params = json!({
+            // Telling the server our pid is what makes it exit if the editor
+            // is killed rather than lingering as an orphan eating a core.
+            "processId": std::process::id(),
+            "clientInfo": { "name": "Proton", "version": env!("CARGO_PKG_VERSION") },
+            "rootUri": root_uri,
+            "workspaceFolders": [{ "uri": root_uri, "name": "root" }],
+            "capabilities": {
+                "workspace": {
+                    "configuration": true,
+                    "workspaceFolders": true,
+                    "didChangeConfiguration": { "dynamicRegistration": false }
+                },
+                "textDocument": {
+                    "synchronization": { "didSave": true, "dynamicRegistration": false },
+                    "completion": {
+                        "completionItem": {
+                            // Deliberately not claiming snippet support. Claim
+                            // it and rust-analyzer answers with `${1:arg}`
+                            // placeholders, which we would then have to strip
+                            // — better to be told the plain text we can use.
+                            "snippetSupport": false,
+                            "insertReplaceSupport": true,
+                            "labelDetailsSupport": true,
+                            "documentationFormat": ["plaintext"]
+                        }
+                    },
+                    "definition": { "linkSupport": true },
+                    "publishDiagnostics": { "relatedInformation": false }
+                },
+                "window": { "workDoneProgress": true }
+            }
+        });
+
+        self.next_id += 1;
+        let id = self.next_id;
+        lock(&self.pending).insert(id, Kind::Initialize);
+        // The one message that bypasses the queue, being the thing the queue
+        // is waiting for.
+        let _ = self.outgoing.send(
+            json!({ "jsonrpc": "2.0", "id": id, "method": "initialize", "params": params })
+                .to_string(),
+        );
+    }
+
+    fn send(&mut self, body: Value) {
+        let text = body.to_string();
+        if self.ready {
+            let _ = self.outgoing.send(text);
+        } else {
+            self.queued.push(text);
+        }
+    }
+
+    fn notify(&mut self, method: &str, params: Value) {
+        self.send(json!({ "jsonrpc": "2.0", "method": method, "params": params }));
+    }
+
+    fn request(&mut self, kind: Kind, method: &str, params: Value) -> i64 {
+        self.next_id += 1;
+        let id = self.next_id;
+        lock(&self.pending).insert(id, kind);
+        self.send(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
+        id
+    }
+
+    pub fn did_open(
+        &mut self,
+        path: &std::path::Path,
+        language_id: &str,
+        version: u64,
+        text: &str,
+    ) {
+        self.notify(
+            "textDocument/didOpen",
+            json!({ "textDocument": {
+                "uri": uri::from_path(path),
+                "languageId": language_id,
+                "version": version,
+                "text": text,
+            }}),
+        );
+    }
+
+    /// Full-document sync. Incremental would ship less, but it also means
+    /// getting ranges right on both sides of every edit, and a server that
+    /// disagrees with the editor about the text produces diagnostics on the
+    /// wrong lines — the worst kind of wrong. Revisit when edits are batched.
+    pub fn did_change(&mut self, path: &std::path::Path, version: u64, text: &str) {
+        self.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": uri::from_path(path), "version": version },
+                "contentChanges": [{ "text": text }],
+            }),
+        );
+    }
+
+    pub fn did_save(&mut self, path: &std::path::Path, text: &str) {
+        self.notify(
+            "textDocument/didSave",
+            json!({ "textDocument": { "uri": uri::from_path(path) }, "text": text }),
+        );
+    }
+
+    pub fn did_close(&mut self, path: &std::path::Path) {
+        self.notify(
+            "textDocument/didClose",
+            json!({ "textDocument": { "uri": uri::from_path(path) } }),
+        );
+    }
+
+    pub fn completion(&mut self, path: &std::path::Path, at: Position) -> i64 {
+        self.request(
+            Kind::Completion,
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri::from_path(path) },
+                "position": at,
+                // 1 = invoked by the user. Saying "triggered by `.`" would be
+                // more honest but makes some servers return a narrower set.
+                "context": { "triggerKind": 1 },
+            }),
+        )
+    }
+
+    pub fn definition(&mut self, path: &std::path::Path, at: Position) -> i64 {
+        self.request(
+            Kind::Definition,
+            "textDocument/definition",
+            json!({ "textDocument": { "uri": uri::from_path(path) }, "position": at }),
+        )
+    }
+
+    /// Ask the server to stop, then stop waiting for it to.
+    pub fn shutdown(&mut self) {
+        self.request(Kind::Shutdown, "shutdown", json!(null));
+        self.notify("exit", json!(null));
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        // A polite shutdown needs a round trip we are not going to wait for,
+        // so: ask, close stdin, and if it is still there, end it. An orphaned
+        // rust-analyzer will happily index a workspace forever.
+        self.shutdown();
+        let (dead, _) = mpsc::channel();
+        drop(std::mem::replace(&mut self.outgoing, dead));
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    // A panic in a reader thread must not take the editor with it.
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/* ── listening ────────────────────────────────────────────────────── */
+
+fn read_loop(
+    mut stdout: impl BufRead,
+    to_editor: &Sender<Incoming>,
+    to_server: &Sender<String>,
+    pending: &Pending,
+) {
+    // `$/progress` names its work once, in the `begin`, and then refers to it
+    // by token. Remembering the title here is what lets a later `report` say
+    // "indexing: 40%" instead of just "40%".
+    let mut titles: HashMap<String, String> = HashMap::new();
+
+    loop {
+        let body = match transport::read_message(&mut stdout) {
+            Ok(Some(body)) => body,
+            Ok(None) => return,
+            Err(err) => {
+                let _ = to_editor.send(Incoming::Failed {
+                    text: format!("transport: {err}"),
+                });
+                return;
+            }
+        };
+
+        let message: Value = match serde_json::from_slice(&body) {
+            Ok(value) => value,
+            Err(err) => {
+                let _ = to_editor.send(Incoming::Failed {
+                    text: format!("unreadable message: {err}"),
+                });
+                continue;
+            }
+        };
+
+        let id = message.get("id").and_then(Value::as_i64);
+        let method = message.get("method").and_then(Value::as_str);
+
+        match (id, method) {
+            // A request from the server. It is waiting on us, so every one
+            // gets an answer — including methods we have never heard of. A
+            // client that stays silent here hangs a server mid-startup.
+            (Some(id), Some(method)) => {
+                let result = match method {
+                    // One null per item: "use your defaults". The array has to
+                    // be the right length or the server rejects the reply.
+                    "workspace/configuration" => {
+                        let count = message
+                            .pointer("/params/items")
+                            .and_then(Value::as_array)
+                            .map_or(0, Vec::len);
+                        Value::Array(vec![Value::Null; count])
+                    }
+                    _ => Value::Null,
+                };
+                let _ = to_server
+                    .send(json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string());
+            }
+
+            (None, Some(method)) => {
+                if let Some(event) = notification(method, &message, &mut titles) {
+                    if to_editor.send(event).is_err() {
+                        return;
+                    }
+                }
+            }
+
+            (Some(id), None) => {
+                let kind = lock(pending).remove(&id);
+                if let Some(event) = response(id, kind, &message, to_server) {
+                    if to_editor.send(event).is_err() {
+                        return;
+                    }
+                }
+            }
+
+            (None, None) => {}
+        }
+    }
+}
+
+fn notification(
+    method: &str,
+    message: &Value,
+    titles: &mut HashMap<String, String>,
+) -> Option<Incoming> {
+    let params = message.get("params")?;
+    match method {
+        "textDocument/publishDiagnostics" => {
+            let parsed: PublishDiagnostics = serde_json::from_value(params.clone()).ok()?;
+            Some(Incoming::Diagnostics {
+                path: uri::to_path(&parsed.uri)?,
+                items: parsed.diagnostics,
+            })
+        }
+
+        "$/progress" => {
+            let token = match params.get("token")? {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            let value = params.get("value")?;
+            let stage = value.get("kind").and_then(Value::as_str)?;
+            let note = value
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+
+            match stage {
+                "begin" => {
+                    let title = value
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .unwrap_or("working")
+                        .to_string();
+                    titles.insert(token, title.clone());
+                    Some(Incoming::Progress {
+                        title,
+                        message: note,
+                        done: false,
+                    })
+                }
+                "report" => Some(Incoming::Progress {
+                    title: titles.get(&token).cloned().unwrap_or_default(),
+                    message: note,
+                    done: false,
+                }),
+                _ => Some(Incoming::Progress {
+                    title: titles.remove(&token).unwrap_or_default(),
+                    message: note,
+                    done: true,
+                }),
+            }
+        }
+
+        "window/logMessage" | "window/showMessage" => Some(Incoming::Log {
+            text: params.get("message").and_then(Value::as_str)?.to_string(),
+        }),
+
+        _ => None,
+    }
+}
+
+fn response(
+    id: i64,
+    kind: Option<Kind>,
+    message: &Value,
+    to_server: &Sender<String>,
+) -> Option<Incoming> {
+    if let Some(error) = message.get("error") {
+        // -32800 is "you cancelled this", which is something we asked for
+        // rather than something that went wrong.
+        if error.get("code").and_then(Value::as_i64) == Some(-32800) {
+            return None;
+        }
+        return Some(Incoming::Failed {
+            text: error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("request failed")
+                .to_string(),
+        });
+    }
+
+    let result = message.get("result").unwrap_or(&Value::Null);
+
+    match kind? {
+        Kind::Initialize => {
+            // `initialized` must be the next thing the server hears, and it
+            // goes out from here rather than from the editor so nothing the
+            // editor had queued can overtake it.
+            let _ = to_server.send(
+                json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }).to_string(),
+            );
+            Some(Incoming::Ready {
+                server: result
+                    .pointer("/serverInfo/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("language server")
+                    .to_string(),
+            })
+        }
+
+        Kind::Completion if result.is_null() => Some(Incoming::Completion {
+            id,
+            items: Vec::new(),
+        }),
+        Kind::Completion => match serde_json::from_value::<CompletionResponse>(result.clone()) {
+            Ok(response) => Some(Incoming::Completion {
+                id,
+                items: response.into_items(),
+            }),
+            Err(err) => Some(Incoming::Failed {
+                text: format!("completion: {err}"),
+            }),
+        },
+
+        Kind::Definition if result.is_null() => Some(Incoming::Definition { id, target: None }),
+        Kind::Definition => match serde_json::from_value::<DefinitionResponse>(result.clone()) {
+            Ok(response) => Some(Incoming::Definition {
+                id,
+                target: response.first().and_then(|(uri, at)| {
+                    Some(Jump {
+                        path: uri::to_path(&uri)?,
+                        line: at.line,
+                        character: at.character,
+                    })
+                }),
+            }),
+            Err(err) => Some(Incoming::Failed {
+                text: format!("definition: {err}"),
+            }),
+        },
+
+        Kind::Shutdown => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// Run the reader over a scripted server. Returns what the editor would
+    /// have seen, and what we would have written back — the second half
+    /// matters as much as the first: a request we fail to answer is a server
+    /// that stops.
+    fn converse(messages: &[(&str, Option<Kind>)]) -> (Vec<Incoming>, Vec<Value>) {
+        let pending: Pending = Arc::default();
+        let mut wire = Vec::new();
+        for (index, (body, kind)) in messages.iter().enumerate() {
+            if let Some(kind) = kind {
+                lock(&pending).insert(index as i64 + 1, *kind);
+            }
+            transport::write_message(&mut wire, body.as_bytes()).unwrap();
+        }
+
+        let (to_editor, from_server) = mpsc::channel();
+        let (to_server, from_editor) = mpsc::channel();
+        read_loop(Cursor::new(wire), &to_editor, &to_server, &pending);
+        drop(to_editor);
+        drop(to_server);
+
+        (
+            from_server.into_iter().collect(),
+            from_editor
+                .into_iter()
+                .map(|s| serde_json::from_str(&s).unwrap())
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn initialize_is_answered_with_initialized_before_anything_else() {
+        let (heard, said) = converse(&[(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"rust-analyzer"}}}"#,
+            Some(Kind::Initialize),
+        )]);
+        assert!(matches!(&heard[0], Incoming::Ready { server } if server == "rust-analyzer"));
+        assert_eq!(said[0]["method"], "initialized");
+    }
+
+    #[test]
+    fn a_request_from_the_server_always_gets_an_answer() {
+        // Including one we have never heard of. Silence here is a hang, and a
+        // hang during startup looks exactly like a broken editor.
+        let (_, said) = converse(&[
+            (
+                r#"{"jsonrpc":"2.0","id":7,"method":"window/workDoneProgress/create","params":{"token":"x"}}"#,
+                None,
+            ),
+            (
+                r#"{"jsonrpc":"2.0","id":8,"method":"telemetry/somethingNew","params":{}}"#,
+                None,
+            ),
+        ]);
+        assert_eq!(said.len(), 2);
+        assert_eq!(said[0]["id"], 7);
+        assert!(said[0]["result"].is_null());
+        assert_eq!(said[1]["id"], 8);
+    }
+
+    #[test]
+    fn configuration_is_answered_with_one_null_per_item() {
+        // The array has to be the same length as the request's, or the server
+        // treats the reply as malformed and falls back to nothing.
+        let (_, said) = converse(&[(
+            r#"{"jsonrpc":"2.0","id":3,"method":"workspace/configuration",
+                "params":{"items":[{"section":"rust-analyzer"},{"section":"other"}]}}"#,
+            None,
+        )]);
+        assert_eq!(said[0]["result"], serde_json::json!([null, null]));
+    }
+
+    #[test]
+    fn diagnostics_arrive_as_a_path_not_a_uri() {
+        let (heard, _) = converse(&[(
+            r#"{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{
+                "uri":"file:///C:/src/My%20Crate/main.rs",
+                "diagnostics":[{"range":{"start":{"line":3,"character":4},"end":{"line":3,"character":9}},
+                                "severity":1,"code":"E0308","source":"rustc","message":"mismatched types"}]}}"#,
+            None,
+        )]);
+        let Incoming::Diagnostics { path, items } = &heard[0] else {
+            panic!("expected diagnostics, got {heard:?}");
+        };
+        assert!(path.ends_with("main.rs"));
+        assert!(path.to_string_lossy().contains("My Crate"));
+        assert_eq!(items[0].severity, Some(1));
+        assert_eq!(items[0].code.as_ref().unwrap().to_string(), "E0308");
+    }
+
+    #[test]
+    fn completion_reads_both_of_its_legal_shapes() {
+        let (heard, _) = converse(&[
+            (
+                r#"{"jsonrpc":"2.0","id":1,"result":[{"label":"len"}]}"#,
+                Some(Kind::Completion),
+            ),
+            (
+                r#"{"jsonrpc":"2.0","id":2,"result":{"isIncomplete":true,"items":[{"label":"push"}]}}"#,
+                Some(Kind::Completion),
+            ),
+            (
+                r#"{"jsonrpc":"2.0","id":3,"result":null}"#,
+                Some(Kind::Completion),
+            ),
+        ]);
+        let labels: Vec<_> = heard
+            .iter()
+            .map(|e| match e {
+                Incoming::Completion { items, .. } => {
+                    items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+                }
+                other => panic!("expected completion, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(labels, vec![vec!["len"], vec!["push"], Vec::new()]);
+    }
+
+    #[test]
+    fn definition_reads_all_three_of_its_legal_shapes() {
+        let range = r#"{"start":{"line":10,"character":2},"end":{"line":10,"character":6}}"#;
+        let (heard, _) = converse(&[
+            (
+                &format!(
+                    r#"{{"jsonrpc":"2.0","id":1,"result":{{"uri":"file:///a.rs","range":{range}}}}}"#
+                ),
+                Some(Kind::Definition),
+            ),
+            (
+                &format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"result":[{{"uri":"file:///b.rs","range":{range}}}]}}"#
+                ),
+                Some(Kind::Definition),
+            ),
+            (
+                &format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"result":[{{"targetUri":"file:///c.rs","targetRange":{range},"targetSelectionRange":{range}}}]}}"#
+                ),
+                Some(Kind::Definition),
+            ),
+        ]);
+        for (event, name) in heard.iter().zip(["a.rs", "b.rs", "c.rs"]) {
+            let Incoming::Definition {
+                target: Some(jump), ..
+            } = event
+            else {
+                panic!("expected a jump, got {event:?}");
+            };
+            assert!(jump.path.ends_with(name), "{jump:?} is not {name}");
+            assert_eq!(jump.line, 10);
+        }
+    }
+
+    #[test]
+    fn progress_carries_its_title_past_the_message_that_named_it() {
+        // `report` and `end` only carry the token, so an editor that does not
+        // remember can only show a percentage with nothing attached to it.
+        let (heard, _) = converse(&[
+            (
+                r#"{"jsonrpc":"2.0","method":"$/progress","params":{"token":"idx","value":{"kind":"begin","title":"indexing"}}}"#,
+                None,
+            ),
+            (
+                r#"{"jsonrpc":"2.0","method":"$/progress","params":{"token":"idx","value":{"kind":"report","message":"40%"}}}"#,
+                None,
+            ),
+            (
+                r#"{"jsonrpc":"2.0","method":"$/progress","params":{"token":"idx","value":{"kind":"end"}}}"#,
+                None,
+            ),
+        ]);
+        let titles: Vec<_> = heard
+            .iter()
+            .map(|e| match e {
+                Incoming::Progress { title, done, .. } => (title.as_str(), *done),
+                other => panic!("expected progress, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            titles,
+            vec![("indexing", false), ("indexing", false), ("indexing", true)]
+        );
+    }
+
+    #[test]
+    fn a_cancelled_request_is_not_reported_as_a_failure() {
+        let (heard, _) = converse(&[
+            (
+                r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32800,"message":"cancelled"}}"#,
+                Some(Kind::Completion),
+            ),
+            (
+                r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"internal error"}}"#,
+                Some(Kind::Completion),
+            ),
+        ]);
+        assert_eq!(heard.len(), 1, "only the real failure surfaces: {heard:?}");
+        assert!(matches!(&heard[0], Incoming::Failed { text } if text == "internal error"));
+    }
+
+    #[test]
+    fn an_unreadable_message_does_not_end_the_conversation() {
+        let (heard, _) = converse(&[
+            ("not json at all", None),
+            (
+                r#"{"jsonrpc":"2.0","method":"window/logMessage","params":{"message":"still here"}}"#,
+                None,
+            ),
+        ]);
+        assert!(matches!(heard[0], Incoming::Failed { .. }));
+        assert!(matches!(&heard[1], Incoming::Log { text } if text == "still here"));
+    }
+}

@@ -370,18 +370,75 @@ const view = { firstLine: 0, lines: [], totalLines: 0, cursor: { line: 0, column
 const escapeHtml = (s) =>
   s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
 
+/* Diagnostics for the active buffer, indexed by line.
+ *
+ * Held here rather than merged into `view.lines` because the two arrive on
+ * different clocks: text comes back with the keystroke, diagnostics turn up
+ * whenever the server finishes thinking. Keeping them apart means a late
+ * diagnostic never has to wait for a redraw of the text, and a redraw of the
+ * text never has to wait for a server. */
+const marks = { byLine: new Map(), errors: 0, warnings: 0 };
+
+/** Whether the popup is showing. The core is the authority; this mirrors it
+ * so the keydown handler can suppress the browser default before the key
+ * makes the round trip. */
+let completionOpen = false;
+
+const SIGN = { error: "●", warning: "▲", info: "■", hint: "·" };
+
+/** Wrap the diagnostic spans on one line, innermost work on a character array. */
+function markUp(chars, line) {
+  const here = marks.byLine.get(line);
+  if (!here?.length) return null;
+
+  // A per-character severity, so overlapping diagnostics resolve by
+  // seriousness rather than by whichever the server happened to send last.
+  const RANK = { error: 3, warning: 2, info: 1, hint: 0 };
+  const worst = new Array(chars.length).fill(null);
+  for (const d of here) {
+    const from = d.line === line ? d.column : 0;
+    // A diagnostic can span lines; on every line but its last it runs to the
+    // end. A zero-width range still gets one character, or it draws nothing.
+    const to = d.endLine === line ? Math.max(d.endColumn, from + 1) : chars.length;
+    for (let i = from; i < Math.min(to, chars.length); i++) {
+      if (!worst[i] || RANK[d.severity] > RANK[worst[i]]) worst[i] = d.severity;
+    }
+  }
+  return worst;
+}
+
 function lineHtml(number, text, cursorColumn) {
-  const gutter = `<span class="n">${number + 1}</span><span class="s"></span>`;
+  const here = marks.byLine.get(number);
+  const sign = here?.length
+    ? `<span class="s d-${here[0].severity}">${SIGN[here[0].severity]}</span>`
+    : `<span class="s"></span>`;
+  const gutter = `<span class="n">${number + 1}</span>${sign}`;
+
+  const chars = [...text];
+  const severity = markUp(chars, number);
+
+  // Escape per character so a diagnostic span can be wrapped around any run
+  // without the markup and the offsets ever disagreeing.
+  const glyph = (i) => {
+    const c = escapeHtml(chars[i]);
+    return severity?.[i] ? `<span class="sq d-${severity[i]}">${c}</span>` : c;
+  };
+  const run = (from, to) => {
+    let out = "";
+    for (let i = from; i < to; i++) out += glyph(i);
+    return out;
+  };
+
   if (cursorColumn === undefined) {
-    return `<div class="ln">${gutter}${escapeHtml(text)}</div>`;
+    return `<div class="ln">${gutter}${run(0, chars.length)}</div>`;
   }
   // The caret sits *on* a character in normal mode, so it takes the one it
   // covers with it rather than being drawn between two.
-  const chars = [...text];
-  const before = escapeHtml(chars.slice(0, cursorColumn).join(""));
   const under = escapeHtml(chars[cursorColumn] ?? " ") || " ";
-  const after = escapeHtml(chars.slice(cursorColumn + 1).join(""));
-  return `<div class="ln cur">${gutter}${before}<span class="caret">${under}</span>${after}</div>`;
+  return (
+    `<div class="ln cur">${gutter}${run(0, cursorColumn)}` +
+    `<span class="caret">${under}</span>${run(cursorColumn + 1, chars.length)}</div>`
+  );
 }
 
 function renderEditor() {
@@ -393,6 +450,12 @@ function renderEditor() {
       lineHtml(view.firstLine + i, text, i === cursorRow ? view.cursor.column : undefined),
     )
     .join("");
+
+  // The caret element the popup was anchored to has just been replaced, so
+  // an open popup has to be told where the new one is or it stays where the
+  // cursor used to be.
+  const popup = $("#completion");
+  if (popup && !popup.hidden) anchorCompletion(popup);
 }
 
 function renderBuffers(names, active) {
@@ -425,6 +488,14 @@ document.addEventListener("click", (e) => {
       .then(() => sendKey({ key: "Enter" }));
     return;
   }
+  const candidate = e.target.closest("[data-complete]");
+  if (candidate) {
+    // Select then accept, exactly as the picker does: the click says which
+    // row, and accepting means the same thing however the row got chosen.
+    dispatch({ type: "selectCompletion", index: Number(candidate.dataset.complete) })
+      .then(() => dispatch({ type: "acceptCompletion" }));
+    return;
+  }
   const row = e.target.closest("[data-path]");
   if (row) dispatch({ type: "openBuffer", path: row.dataset.path });
   const tab = e.target.closest("[data-buffer]");
@@ -453,8 +524,12 @@ function renderPicker(event) {
 
   $("[data-picker-query]").textContent = event.query;
   $("[data-picker-title]").textContent = event.title;
-  $("[data-picker-count]").textContent =
-    `${event.items.length}/${event.total} · ${event.elapsedMs.toFixed(1)} ms`;
+  // An empty list while the tree is still being walked means "not yet", not
+  // "no matches". Saying so is the difference between waiting a beat and
+  // deciding the file isn't there.
+  $("[data-picker-count]").textContent = event.scanning
+    ? "scanning…"
+    : `${event.items.length}/${event.total} · ${event.elapsedMs.toFixed(1)} ms`;
 
   const results = $("[data-picker-results]");
   results.innerHTML = event.items
@@ -472,6 +547,109 @@ function renderPicker(event) {
 function closePicker() {
   pickerOpen = false;
   closeAll();
+}
+
+/* ── language servers ─────────────────────────────────────────────────
+   Diagnostics, completion and server status. All three arrive without
+   being asked for — the shell's poll thread pushes them — so they are
+   rendered the same way as everything else and only differ in what woke
+   them up. */
+
+function renderDiagnostics(event) {
+  marks.byLine = new Map();
+  marks.errors = event.errors;
+  marks.warnings = event.warnings;
+  for (const d of event.items) {
+    // A multi-line diagnostic is registered on every line it touches, so the
+    // sign column marks all of them rather than just where it started.
+    for (let line = d.line; line <= d.endLine; line++) {
+      const at = marks.byLine.get(line) ?? [];
+      at.push(d);
+      marks.byLine.set(line, at);
+    }
+  }
+  // Most serious first, so the sign column shows the worst thing on the line.
+  const RANK = { error: 3, warning: 2, info: 1, hint: 0 };
+  for (const at of marks.byLine.values()) {
+    at.sort((a, b) => RANK[b.severity] - RANK[a.severity]);
+  }
+
+  const el = $("#sl-diagnostics");
+  if (el) {
+    el.innerHTML =
+      event.errors || event.warnings
+        ? `<span class="e">✖ ${event.errors}</span><span class="w">⚠ ${event.warnings}</span>`
+        : "";
+  }
+  renderEditor();
+}
+
+function renderServers(states) {
+  const el = $("#sl-servers");
+  if (!el) return;
+  el.innerHTML = states
+    .map((s) => {
+      // A server that is busy says what it is busy with. Half a minute of
+      // silence while rust-analyzer indexes is indistinguishable from a
+      // broken editor, and that is the impression people keep.
+      if (s.status === "busy") {
+        return `<span class="busy">◐ ${escapeHtml(s.note ?? s.language)}</span>`;
+      }
+      if (s.status === "starting") return `<span class="busy">◌ ${escapeHtml(s.language)}</span>`;
+      if (s.status === "ready") return `<span>◆ ${escapeHtml(s.language)}</span>`;
+      // Not having gopls installed is a normal state, not a fault, so it is
+      // dimmed rather than flagged.
+      return `<span class="off">◇ ${escapeHtml(s.language)}</span>`;
+    })
+    .join(" ");
+}
+
+const KIND_MARK = {
+  function: "ƒ", method: "ƒ", field: "▪", variable: "α", type: "T",
+  module: "▤", keyword: "◆", constant: "π", snippet: "✂", other: "·",
+};
+
+function renderCompletion(event) {
+  const popup = $("#completion");
+  const list = $("[data-completion-list]");
+  if (!popup || !list) return;
+
+  list.innerHTML = event.items
+    .map(
+      (item, i) =>
+        `<div class="cmp-row${i === event.selected ? " on" : ""}" data-complete="${i}">` +
+        `<span class="k">${KIND_MARK[item.kind] ?? "·"}</span>` +
+        `<span class="l">${escapeHtml(item.label)}</span>` +
+        (item.hint ? `<span class="h">${escapeHtml(item.hint)}</span>` : "") +
+        `</div>`,
+    )
+    .join("");
+
+  popup.hidden = false;
+  completionOpen = true;
+  anchorCompletion(popup);
+  list.querySelector(".cmp-row.on")?.scrollIntoView({ block: "nearest" });
+}
+
+/** Put the popup under the caret, and above it when there is no room below. */
+function anchorCompletion(popup) {
+  const caret = $("[data-editor] .caret");
+  if (!caret) return;
+  const at = caret.getBoundingClientRect();
+  const box = popup.getBoundingClientRect();
+  const gap = 6;
+
+  const below = at.bottom + gap;
+  const fits = below + box.height <= window.innerHeight - 8;
+  popup.style.top = `${fits ? below : Math.max(8, at.top - gap - box.height)}px`;
+  // Nudged left so a popup near the right edge does not hang off it.
+  popup.style.left = `${Math.min(at.left, window.innerWidth - box.width - 8)}px`;
+}
+
+function closeCompletion() {
+  completionOpen = false;
+  const popup = $("#completion");
+  if (popup) popup.hidden = true;
 }
 
 /* ── rendering core events ────────────────────────────────────────────── */
@@ -590,6 +768,22 @@ onEvent((event) => {
       closePicker();
       break;
 
+    case "diagnostics":
+      renderDiagnostics(event);
+      break;
+
+    case "completion":
+      renderCompletion(event);
+      break;
+
+    case "completionClosed":
+      closeCompletion();
+      break;
+
+    case "servers":
+      renderServers(event.states);
+      break;
+
     case "notice":
       renderStatus(event.text);
       break;
@@ -628,11 +822,35 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
+  // ⌃Space asks for completions outright. ⌃n and ⌃p walk the list, and are
+  // sent through as keys because the core is what knows whether a popup is
+  // open — in normal mode those keys mean something else entirely.
+  if (e.ctrlKey && e.key === " ") {
+    e.preventDefault();
+    dispatch({ type: "complete" });
+    return;
+  }
+  if (e.ctrlKey && completionOpen && (e.key === "n" || e.key === "p")) {
+    e.preventDefault();
+    sendKey(e);
+    return;
+  }
+
   if (meta) return; // leave the rest of the browser/OS chords alone
 
   // The picker owns the keyboard while it is open: every key goes to the core
   // and none of the page-level bindings fire.
   if (pickerOpen) {
+    e.preventDefault();
+    sendKey(e);
+    return;
+  }
+
+  // The popup does not own the keyboard — you are still in insert mode — but
+  // the few keys it does claim must not also do what the browser thinks they
+  // do. Tab moving focus out of the editor mid-completion is the worst of
+  // them; the window never comes back on its own.
+  if (completionOpen && ["Tab", "Enter", "ArrowUp", "ArrowDown"].includes(e.key)) {
     e.preventDefault();
     sendKey(e);
     return;

@@ -1,5 +1,5 @@
 use proton_text::edit::Range;
-use proton_text::{Buffer, Cursor, Edit};
+use proton_text::{Buffer, Cursor, Edit, Position};
 
 fn buf(text: &str, at: usize) -> Buffer {
     let mut b = Buffer::from_text(text);
@@ -220,4 +220,41 @@ fn an_unclosed_pair_is_none_rather_than_a_panic() {
     assert_eq!(b.inside_pair('(', ')', false), None);
     let b = buf("no parens here", 3);
     assert_eq!(b.inside_pair('(', ')', false), None);
+}
+
+/* ── the UTF-16 seam ──────────────────────────────────────────────── */
+
+#[test]
+fn lsp_columns_are_utf16_code_units_not_characters() {
+    // One emoji is one character to us and two code units to a language
+    // server. Get this wrong and every diagnostic on a line containing one is
+    // reported in the wrong column — and only for that user.
+    let buffer = Buffer::from_text("let a = 1;\nlet 🦀 = \"héllo\";\n");
+    let line_two = buffer.offset_of(Position { line: 1, column: 0 });
+
+    // `let ` is 4 characters and 4 code units.
+    assert_eq!(buffer.utf16_column(line_two + 4), 4);
+    // Just past the crab: 5 characters in, 6 code units in.
+    assert_eq!(buffer.utf16_column(line_two + 5), 6);
+    // `é` is one code unit, so from here the two counts stay two apart.
+    assert_eq!(buffer.utf16_column(line_two + 12), 13);
+}
+
+#[test]
+fn a_position_from_a_server_comes_back_to_the_right_character() {
+    let buffer = Buffer::from_text("let 🦀 = \"héllo\";\n");
+    for column in 0..buffer.line(0).chars().count() {
+        let offset = buffer.offset_of(Position { line: 0, column });
+        let round_trip = buffer.offset_at_utf16(0, buffer.utf16_column(offset));
+        assert_eq!(round_trip, offset, "column {column} did not survive");
+    }
+}
+
+#[test]
+fn a_stale_position_is_clamped_rather_than_fatal() {
+    // Diagnostics arrive after the edit that invalidated them. Landing on the
+    // end of the line is fine; panicking is not.
+    let buffer = Buffer::from_text("short\n");
+    assert_eq!(buffer.offset_at_utf16(0, 900), buffer.line_end());
+    assert_eq!(buffer.offset_at_utf16(900, 0), buffer.len_chars());
 }

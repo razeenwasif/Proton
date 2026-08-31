@@ -5,10 +5,15 @@
 //! No clock, no threads, no windowing — that is what makes the core testable
 //! headless and lets a second front end reuse it verbatim.
 
+use std::path::Path;
+
+use proton_lsp::client::Incoming;
+
 use crate::action::{Action, Verb};
-use crate::bus::{BufferTab, Command, Event, NoticeLevel, Selection};
+use crate::bus::{BufferTab, Command, Event, NoticeLevel, Selection, ServerState};
 use crate::editor::Editor;
 use crate::key::Key;
+use crate::lsp::{self, Popup, Servers, Severity};
 use crate::mode::ModeId;
 use crate::picker::{Accepted, PickerKind, Pickers};
 use crate::vim::{Outcome, Vim, VimMode};
@@ -38,21 +43,36 @@ pub struct Workspace {
     editor: Editor,
     viewport: Viewport,
     pickers: Pickers,
+    servers: Servers,
+    popup: Popup,
 }
 
 impl Workspace {
     pub fn new() -> Self {
-        Self::rooted(".")
+        Self::rooted(".").with_language_servers()
     }
 
     /// The project root every picker searches. Separate from `new` so a test
     /// can point at a fixture instead of the process's working directory.
-    pub fn rooted(root: impl AsRef<std::path::Path>) -> Self {
+    pub fn rooted(root: impl AsRef<Path>) -> Self {
+        let root = root.as_ref();
         Self {
             editor: Editor::new(),
             pickers: Pickers::new(root),
+            servers: Servers::new(root),
             ..Default::default()
         }
+    }
+
+    /// Opt in to language servers.
+    ///
+    /// Off by default and on for the shell, because otherwise every test that
+    /// opens a `.rs` file spawns rust-analyzer — and every core test opens
+    /// one. Making it explicit here is cheaper than making it conditional in
+    /// eighty tests.
+    pub fn with_language_servers(mut self) -> Self {
+        self.servers.enable();
+        self
     }
 
     pub fn mode(&self) -> ModeId {
@@ -67,20 +87,59 @@ impl Workspace {
         &self.editor
     }
 
+    pub fn pickers(&self) -> &Pickers {
+        &self.pickers
+    }
+
+    pub fn servers(&self) -> &Servers {
+        &self.servers
+    }
+
     pub fn apply(&mut self, command: Command) -> Vec<Event> {
         match command {
-            Command::Sync => vec![
-                self.state_event(),
-                self.buffers_event(),
-                self.viewport_event(),
-                self.cursor_event(),
-            ],
+            Command::Sync => {
+                // The front end connecting is the signal that the window is
+                // up, which is the right moment to start walking the tree: not
+                // during construction, where it would be behind the first
+                // paint, and not on first `␣ff`, where it would be in front of
+                // the user.
+                self.pickers.warm();
+                vec![
+                    self.state_event(),
+                    self.buffers_event(),
+                    self.viewport_event(),
+                    self.cursor_event(),
+                    self.diagnostics_event(),
+                    self.servers_event(),
+                ]
+            }
+
+            Command::Poll => self.poll_servers(),
+
+            Command::Complete => self.request_completion(),
+
+            Command::GotoDefinition => self.goto_definition(),
+
+            Command::AcceptCompletion => self.accept_completion(),
+
+            Command::CloseCompletion => {
+                self.popup.close();
+                vec![Event::CompletionClosed]
+            }
+
+            Command::SelectCompletion { index } => {
+                self.popup.select(index);
+                vec![self.completion_event()]
+            }
 
             Command::SetMode { mode } => self.set_mode(mode),
 
             Command::Perform { action } => {
                 let (mut events, changed) = self.act(&action);
                 events.extend(self.after_action(changed));
+                if changed {
+                    self.resync();
+                }
                 events
             }
 
@@ -100,6 +159,9 @@ impl Workspace {
                     self.buffers_event(),
                     self.viewport_event(),
                     self.cursor_event(),
+                    // Diagnostics are per-file, so switching buffers changes
+                    // which set the gutter should be drawing.
+                    self.diagnostics_event(),
                 ]
             }
 
@@ -108,17 +170,24 @@ impl Workspace {
             // know where the binary happened to be launched from, and a path
             // from the picker has to mean the same thing as one from the tree.
             Command::OpenBuffer { path } => match self.editor.open(self.pickers.resolve(&path)) {
-                Ok(_) => vec![
-                    self.buffers_event(),
-                    self.viewport_event(),
-                    self.cursor_event(),
-                ],
+                Ok(_) => {
+                    self.resync();
+                    vec![
+                        self.buffers_event(),
+                        self.viewport_event(),
+                        self.cursor_event(),
+                        self.diagnostics_event(),
+                    ]
+                }
                 Err(err) => vec![notice(format!("{path}: {err}"), NoticeLevel::Error)],
             },
 
             Command::Save => match self.editor.save() {
                 Ok(()) => {
                     let name = self.editor.buffer().name();
+                    // Some servers only run the expensive checks on save —
+                    // `cargo check` diagnostics do not exist until then.
+                    self.servers.saved(self.editor.buffer());
                     vec![
                         notice(format!("wrote {name}"), NoticeLevel::Info),
                         self.buffers_event(),
@@ -143,7 +212,19 @@ impl Workspace {
             Command::Key { key } if self.pickers.is_open() => self.picker_key(&key),
 
             Command::Key { key } => {
+                // The completion popup gets first refusal on the keys that
+                // mean something to it, and passes the rest through so typing
+                // keeps narrowing the list. Unlike the picker it does not take
+                // the whole keyboard — you are still in insert mode, and most
+                // keys still belong to the buffer.
+                if self.popup.is_open() {
+                    if let Some(events) = self.completion_key(&key) {
+                        return events;
+                    }
+                }
+
                 let before = self.vim.mode();
+                let typed = key.as_char().filter(|_| key.is_bare_char());
                 let mut events = Vec::new();
                 let mut changed = false;
 
@@ -189,6 +270,10 @@ impl Workspace {
                     events.push(self.vim_event());
                 }
                 events.extend(self.after_action(changed));
+                if changed {
+                    self.resync();
+                }
+                events.extend(self.completion_after(typed));
                 events
             }
         }
@@ -301,6 +386,243 @@ impl Workspace {
                 _ => self.pickers.file_count(),
             },
             elapsed_ms: picker.elapsed_ms(),
+            scanning: self.pickers.is_scanning(),
+        }
+    }
+
+    /* ── language servers ─────────────────────────────────────────── */
+
+    /// Tell whichever server owns the active buffer what it now says.
+    fn resync(&mut self) {
+        if self.mode == ModeId::Codex {
+            self.servers.sync(self.editor.buffer());
+        }
+    }
+
+    /// Drain the mailboxes and turn what is in them into events.
+    ///
+    /// This is the only place the core learns anything it was not asked about,
+    /// and it still learns it synchronously, when something outside chooses to
+    /// ask. `apply` stays total.
+    fn poll_servers(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+
+        // The file walk lands here too. It is the same shape of problem — work
+        // finished on a thread the core cannot see — so it uses the same
+        // heartbeat rather than inventing a second one.
+        let labels = self.buffer_labels();
+        if self.pickers.poll(labels) {
+            events.push(self.picker_event());
+        }
+
+        let messages = self.servers.poll();
+        if messages.is_empty() {
+            return events;
+        }
+
+        let mut diagnostics_moved = false;
+        let mut status_moved = false;
+
+        for (_, message) in messages {
+            match message {
+                Incoming::Diagnostics { .. } => diagnostics_moved = true,
+                Incoming::Ready { .. } | Incoming::Progress { .. } | Incoming::Exited => {
+                    status_moved = true
+                }
+                Incoming::Completion { id, items } => {
+                    // `fill` refuses a reply to a question we stopped asking,
+                    // which is most of them: we re-ask on every keystroke.
+                    if self.popup.fill(id, items) {
+                        events.push(self.completion_event());
+                    }
+                }
+                Incoming::Definition { id, target } => {
+                    if self.servers.wanted_definition(id) {
+                        events.extend(self.jump_to(target));
+                    }
+                }
+                // A server saying no is worth showing once; a server logging
+                // its own startup is not.
+                Incoming::Failed { text } => events.push(notice(text, NoticeLevel::Warn)),
+                Incoming::Log { .. } => {}
+            }
+        }
+
+        if diagnostics_moved {
+            events.push(self.diagnostics_event());
+        }
+        if status_moved {
+            events.push(self.servers_event());
+        }
+        events
+    }
+
+    fn request_completion(&mut self) -> Vec<Event> {
+        let buffer = self.editor.buffer();
+        let Some(path) = buffer.path().map(Path::to_path_buf) else {
+            return Vec::new();
+        };
+        let at = lsp::position_of(buffer, buffer.cursor.offset);
+        if let Some(id) = self.servers.completion(&path, at) {
+            // Nothing is shown yet. The popup appears when the reply lands,
+            // which keeps a slow server from being a stuttering one.
+            self.popup.expect(id);
+        }
+        Vec::new()
+    }
+
+    /// Ask again after a keystroke, if there is any reason to.
+    ///
+    /// A `.` opens the popup; word characters keep it fed; anything else
+    /// closes it. The alternative — asking on every character — makes a
+    /// language server the busiest thing in the process for no visible gain.
+    fn completion_after(&mut self, typed: Option<char>) -> Vec<Event> {
+        if self.mode != ModeId::Codex || self.vim.mode() != VimMode::Insert {
+            return Vec::new();
+        }
+        let Some(c) = typed else {
+            return Vec::new();
+        };
+        let trigger = c == '.' || c == ':';
+        let feeding = self.popup.is_open() && (c.is_alphanumeric() || c == '_');
+        if trigger || feeding {
+            return self.request_completion();
+        }
+        if self.popup.is_open() {
+            self.popup.close();
+            return vec![Event::CompletionClosed];
+        }
+        Vec::new()
+    }
+
+    /// While the popup is showing it takes the keys that mean something to it
+    /// and passes on the rest, so typing carries on narrowing the list.
+    /// `None` means "not mine".
+    fn completion_key(&mut self, key: &Key) -> Option<Vec<Event>> {
+        let moved = |ws: &mut Self, delta: i32| {
+            ws.popup.move_by(delta);
+            Some(vec![ws.completion_event()])
+        };
+        match key.key.as_str() {
+            "Tab" | "ArrowDown" => moved(self, 1),
+            "ArrowUp" => moved(self, -1),
+            "n" if key.ctrl => moved(self, 1),
+            "p" if key.ctrl => moved(self, -1),
+            "Enter" => Some(self.accept_completion()),
+            // Escape dismisses the popup and *stays* in insert mode. Leaving
+            // insert as well would punish anyone who wanted to keep typing.
+            "Escape" => {
+                self.popup.close();
+                Some(vec![Event::CompletionClosed])
+            }
+            // Backspace belongs to the buffer, but the list it was built from
+            // no longer describes what is there.
+            "Backspace" => {
+                self.popup.close();
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn accept_completion(&mut self) -> Vec<Event> {
+        let Some(item) = self.popup.chosen().cloned() else {
+            return Vec::new();
+        };
+        self.popup.close();
+
+        lsp::apply_completion(self.editor.buffer_mut(), &item);
+
+        let mut events = vec![Event::CompletionClosed];
+        self.resync();
+        events.extend(self.after_action(true));
+        events
+    }
+
+    fn goto_definition(&mut self) -> Vec<Event> {
+        let buffer = self.editor.buffer();
+        let Some(path) = buffer.path().map(Path::to_path_buf) else {
+            return vec![notice("no file to look in".into(), NoticeLevel::Warn)];
+        };
+        let at = lsp::position_of(buffer, buffer.cursor.offset);
+        match self.servers.definition(&path, at) {
+            Some(_) => Vec::new(),
+            None => vec![notice(
+                "no language server for this file".into(),
+                NoticeLevel::Warn,
+            )],
+        }
+    }
+
+    fn jump_to(&mut self, target: Option<proton_lsp::Jump>) -> Vec<Event> {
+        let Some(jump) = target else {
+            return vec![notice("no definition found".into(), NoticeLevel::Info)];
+        };
+
+        let here = self.editor.buffer().path().map(proton_lsp::uri::plain);
+        if here.as_deref() != Some(jump.path.as_path()) {
+            if let Err(err) = self.editor.open(&jump.path) {
+                return vec![notice(
+                    format!("{}: {err}", jump.path.display()),
+                    NoticeLevel::Error,
+                )];
+            }
+            self.resync();
+        }
+
+        let buffer = self.editor.buffer_mut();
+        let at = buffer.offset_at_utf16(jump.line as usize, jump.character as usize);
+        buffer.cursor = buffer.clamp(buffer.cursor.moved_to(at));
+        // `true` because the view may be looking at a different buffer now,
+        // not because the text changed.
+        self.after_action(true)
+    }
+
+    fn completion_event(&self) -> Event {
+        if !self.popup.is_open() {
+            return Event::CompletionClosed;
+        }
+        Event::Completion {
+            items: self.popup.items().to_vec(),
+            selected: self.popup.selected(),
+        }
+    }
+
+    fn diagnostics_event(&self) -> Event {
+        let buffer = self.editor.buffer();
+        let items: Vec<_> = buffer
+            .path()
+            .map(|path| self.servers.diagnostics_for(path))
+            .unwrap_or_default()
+            .iter()
+            .map(|raw| lsp::diagnostic(buffer, raw))
+            .collect();
+        Event::Diagnostics {
+            path: buffer.path().map(|p| p.display().to_string()),
+            errors: items
+                .iter()
+                .filter(|d| d.severity == Severity::Error)
+                .count(),
+            warnings: items
+                .iter()
+                .filter(|d| d.severity == Severity::Warning)
+                .count(),
+            items,
+        }
+    }
+
+    fn servers_event(&self) -> Event {
+        Event::Servers {
+            states: self
+                .servers
+                .status()
+                .into_iter()
+                .map(|(language, status, note)| ServerState {
+                    language: language.to_string(),
+                    status,
+                    note,
+                })
+                .collect(),
         }
     }
 
@@ -329,6 +651,18 @@ impl Workspace {
                 false,
             );
         }
+        // `gd` is a verb the engine resolves like any other, but the answer
+        // comes from a language server rather than from this buffer, so it is
+        // routed rather than executed.
+        if action.verb == Verb::Goto {
+            let mut events = vec![Event::Action {
+                action: action.clone(),
+                description,
+            }];
+            events.extend(self.goto_definition());
+            return (events, false);
+        }
+
         let changed = self.mode == ModeId::Codex && self.editor.execute(action, self.vim.mode());
 
         // An action that opens insert mode starts an undo group, so the typing

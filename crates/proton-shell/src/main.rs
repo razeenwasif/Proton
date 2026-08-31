@@ -6,10 +6,25 @@
 mod backdrop;
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use backdrop::Backdrop;
 use proton_core::{Command, Event, Workspace};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
+
+/// The channel language servers arrive on. Distinct from the `dispatch` reply
+/// path because nothing asked for these: a diagnostic shows up because a
+/// server finished thinking, not because the user pressed a key.
+const PUSHED: &str = "proton://events";
+
+/// How often to ask the core whether a server has said anything.
+///
+/// The core has no clock and no threads — that is what makes it testable — so
+/// something has to ask on its behalf, and this is that something. Fast enough
+/// that a completion list feels like it arrived with the keystroke, slow
+/// enough to be free: an idle poll is a `try_recv` on a handful of channels
+/// and returns no events, so it never redraws anything.
+const BEAT: Duration = Duration::from_millis(50);
 
 /// What the compositor actually gave us. The front end needs this to decide
 /// whether to paint its own ground, so it reads it on boot and after any change.
@@ -69,6 +84,40 @@ fn set_backdrop(
     applied.to_string()
 }
 
+/// Give the core a heartbeat.
+///
+/// Everything a language server says arrives on a thread the core cannot see,
+/// so the mailbox has to be drained by someone with a clock. This is the whole
+/// of that arrangement: ask, and if anything came back, push it at the page.
+/// Nothing is emitted when nothing happened, which is the common case by
+/// several orders of magnitude.
+fn spawn_poll(app: tauri::AppHandle) {
+    std::thread::Builder::new()
+        .name("proton-poll".into())
+        .spawn(move || loop {
+            std::thread::sleep(BEAT);
+
+            let Some(workspace) = app.try_state::<Mutex<Workspace>>() else {
+                // The app is shutting down and the state is gone.
+                return;
+            };
+            let events = match workspace.lock() {
+                Ok(mut ws) => ws.apply(Command::Poll),
+                Err(poisoned) => poisoned.into_inner().apply(Command::Poll),
+            };
+
+            if events.is_empty() {
+                continue;
+            }
+            #[cfg(debug_assertions)]
+            eprintln!("[poll] {} event(s): {events:?}", events.len());
+            if app.emit(PUSHED, events).is_err() {
+                return;
+            }
+        })
+        .expect("the poll thread is not optional: without it no server is ever heard from");
+}
+
 /// The window and taskbar icon.
 ///
 /// Pinned to the 256px raster explicitly rather than left to the bundle list:
@@ -105,6 +154,8 @@ fn main() {
             let applied = backdrop::apply(&window, Backdrop::default());
             println!("[shell] backdrop: {applied}");
             app.manage(Surface::new(applied));
+
+            spawn_poll(app.handle().clone());
 
             Ok(())
         })

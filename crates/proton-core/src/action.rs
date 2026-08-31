@@ -21,6 +21,10 @@ pub enum Verb {
     Paste,
     Undo,
     Redo,
+    /// Follow a reference to where it is defined. Not an edit, but it is a
+    /// verb the modal engine resolves like any other, which is what lets `gd`
+    /// mean the same shape of thing in a mode that has no text in it.
+    Goto,
     /// Repeat the last change — vim's `.`.
     Repeat,
 }
@@ -50,6 +54,8 @@ pub enum Object {
     FileEnd,
     /// The current selection, in visual mode.
     Selection,
+    /// Where the symbol under the cursor is defined.
+    Definition,
     /// No object — the verb stands alone (`u`, `.`).
     None,
     /// Cursor stays put; used by `i` and `a` to say which side.

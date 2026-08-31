@@ -894,3 +894,74 @@ table.df tr:hover td { background: var(--e1); }
 .hint-toggle:hover { background: var(--e3); color: var(--ink); }
 .hint.collapsed .hint-keys { display: none; }
 .hint.collapsed .hint-toggle { color: var(--accent); }
+
+/* ── diagnostics ──────────────────────────────────────────────────────
+   Two channels, and both earn their place. The sign column says a line
+   has something wrong with it and stays legible while scrolling past at
+   speed; the underline says which characters, and is only readable once
+   you are looking at that line anyway. Ship one and you either hunt for
+   the column or miss the line entirely. */
+
+.ln .s.d-error   { color: var(--err); }
+.ln .s.d-warning { color: var(--warn); }
+.ln .s.d-info    { color: var(--info); }
+.ln .s.d-hint    { color: var(--ink-4); }
+
+.sq {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  /* Without this the wave breaks around descenders and reads as dotted. */
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.sq.d-error   { text-decoration-color: var(--err); }
+.sq.d-warning { text-decoration-color: var(--warn); }
+.sq.d-info    { text-decoration-color: var(--info); }
+.sq.d-hint    { text-decoration-color: var(--ink-4); }
+
+#sl-diagnostics .e { color: var(--err); }
+#sl-diagnostics .w { color: var(--warn); margin-left: 9px; }
+#sl-servers .busy { color: var(--tone); }
+#sl-servers .off  { color: var(--ink-4); }
+
+/* ── the completion popup ─────────────────────────────────────────────
+   Anchored to the caret rather than centred like the picker, because it
+   is a continuation of what you are typing rather than a place you went.
+   It never takes the keyboard: insert mode still has it, and the popup
+   only borrows the handful of keys that mean something to a list. */
+
+.cmp {
+  position: fixed; z-index: 60;
+  min-width: 280px; max-width: 480px;
+  overflow: hidden;
+  font: 12px var(--mono);
+}
+.cmp[hidden] { display: none; }
+
+.cmp-list { max-height: 246px; overflow: auto; padding: 5px; }
+
+.cmp-row {
+  display: flex; gap: 9px; align-items: baseline;
+  padding: 3px 9px; border-radius: 7px; cursor: pointer;
+}
+.cmp-row.on { background: var(--e2); box-shadow: var(--spec); }
+.cmp-row .k {
+  flex: 0 0 13px; text-align: center;
+  color: var(--ink-4); font-size: 10.5px;
+}
+.cmp-row.on .k { color: var(--accent); }
+.cmp-row .l { color: var(--ink-2); }
+.cmp-row.on .l { color: var(--ink-0); }
+.cmp-row .h {
+  margin-left: auto; padding-left: 16px;
+  color: var(--ink-4); font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.cmp-foot {
+  display: flex; gap: 13px;
+  padding: 5px 11px;
+  border-top: 1px solid var(--edge);
+  color: var(--ink-4); font: 9.5px var(--sans); letter-spacing: .04em;
+}

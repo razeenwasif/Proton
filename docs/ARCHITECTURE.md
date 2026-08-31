@@ -344,20 +344,71 @@ highlighting lands, because that is what turns one text node per line into many.
 *Exit: Proton edits its own source, and `2dd`, `ciw`, `.`, `u` and a recorded
 macro all behave. Measure input-to-photon here and write the number down.*
 
-**M2 — Telescope + LSP. ◐ in progress.** Telescope ships: `proton-index` walks
-the tree with `ignore` (so `.gitignore` is honoured), scores with `nucleo` in
-its path-aware configuration, and backs three pickers — files, live grep and
+**M2 — Telescope + LSP. ✅ done.** Telescope ships: `proton-index` walks the
+tree with `ignore` (so `.gitignore` is honoured), scores with `nucleo` in its
+path-aware configuration, and backs three pickers — files, live grep and
 buffers. They differ only in where their candidates come from, which is why
 symbols and diagnostics will need no new matching code.
 
 The picker owns the keyboard while it is open and the modal engine is suspended
 rather than consulted; leader bindings that name a picker resolve in the core,
 because the keymap is core config and a second front end must not reinvent it.
+The walk itself runs on a worker and is collected by the heartbeat below, so a
+cold index on a large repository never sits in front of a keystroke — a picker
+opened before the walk lands says `scanning…` rather than showing an empty list
+that is indistinguishable from no matches.
 
-Still open: the LSP client, and moving the walk onto a worker so a cold index on
-a large repository cannot block a keystroke.
-*Exit: `␣ff` and `␣fg` are faster than reaching for the mouse, and
-rust-analyzer drives completion and go-to-definition.*
+`proton-lsp` is the language-server client: three layers, smallest first.
+`transport` frames bytes (`Content-Length`, counted in bytes — the one framing
+bug that only appears once someone opens a file with an emoji in it), `protocol`
+gives those bytes a shape, and `client` owns a process and turns its replies
+into a mailbox. Hand-written rather than imported: the response shapes that
+matter are three, each with an `untagged` subtlety worth stating explicitly
+instead of inheriting.
+
+**Nothing in the client blocks.** Requests leave through a writer thread,
+because rust-analyzer stops reading its stdin for whole seconds while it
+indexes and a full pipe buffer must not be able to wedge a keystroke. Replies
+arrive on a reader thread and wait in a mailbox. Every request the *server*
+sends gets an answer, including methods we have never heard of — silence there
+is a hang, and a hang during startup is indistinguishable from a broken editor.
+
+That leaves the core's `apply` total and synchronous, which was the constraint
+worth protecting. The cost is one command: `Command::Poll`, sent by a 50 ms
+heartbeat in the shell. The core has no clock and no threads, so something
+outside has to ask on its behalf; an idle poll is a `try_recv` on a handful of
+channels and produces no events, so it never redraws anything.
+
+Two coordinate systems meet here and it is worth being exact about which is
+which. **LSP counts columns in UTF-16 code units; a rope counts characters.**
+They agree for ASCII and diverge on the first emoji, which is the whole reason
+`proton-text` carries a UTF-16 index. The conversion happens once, in
+`proton-core::lsp`, against the buffer that knows — not rediscovered by each
+caller. Windows adds a second spelling problem: `canonicalize` returns
+`\\?\C:\…`, which no server accepts and which never matches the diagnostics
+that come back, so paths are normalised on the way in and the display path and
+the LSP path are the same normalisation.
+
+Completion honours `textEdit` — a server sending one is saying "you typed
+`HashM`, replace all of it", and appending instead is how you get
+`HashMHashMap` — but clamps the span to end at the cursor, because the list can
+be a keystroke or two behind the buffer and eating text ahead of the cursor is
+unrecoverable. The popup does not own the keyboard the way the picker does: you
+are still in insert mode, it borrows the handful of keys that mean something to
+a list, and it stays closed until it has something to show rather than stealing
+Enter from someone mid-word on the chance a list might arrive.
+
+*Exit: met. `␣ff` and `␣fg` are faster than reaching for the mouse;
+`crates/proton-core/tests/live_server.rs` drives a real rust-analyzer through
+the same seam the shell uses and gets back a completion list, a `gd` that lands
+on the declaration, and a type error in the gutter.*
+
+Still open, and deliberately deferred: document sync is full-text rather than
+incremental. Incremental ships less over the pipe, but it means getting ranges
+right on both sides of every edit, and a server that disagrees with the editor
+about the text produces diagnostics on the wrong lines — the worst kind of
+wrong. Revisit when edits are batched. The language table is hard-coded until
+it becomes user config in M4.
 
 **M3 — Agent.** `proton-agent`, streaming, tool dispatch, the shadow worktree,
 per-hunk Refer/Apply, the task queue. **Chat mode ships here** — it is this

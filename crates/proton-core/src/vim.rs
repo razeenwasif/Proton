@@ -467,12 +467,13 @@ impl Vim {
     fn normal_command(&mut self, c: char) -> Outcome {
         let count = self.pending.total_count();
 
-        // `g` is a prefix, not a command. Only `gg` is bound so far; the rest
-        // of the family (`gU`, `gq`, `gd`) hangs off the same branch.
+        // `g` is a prefix, not a command. `gg` and `gd` are bound; the rest
+        // of the family (`gU`, `gq`, `gr`) hangs off the same branch.
         if self.pending.awaiting_g {
             self.pending.clear();
             return match c {
                 'g' => Outcome::Action(Action::new(Verb::Move, Object::FileStart, count)),
+                'd' => Outcome::Action(Action::new(Verb::Goto, Object::Definition, 1)),
                 _ => Outcome::Ignored,
             };
         }

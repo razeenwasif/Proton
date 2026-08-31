@@ -2477,6 +2477,7 @@ name = "proton-core"
 version = "0.0.1"
 dependencies = [
  "proton-index",
+ "proton-lsp",
  "proton-text",
  "serde",
  "serde_json",
@@ -2491,6 +2492,14 @@ dependencies = [
  "nucleo-matcher",
  "serde",
  "ts-rs",
+]
+
+[[package]]
+name = "proton-lsp"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

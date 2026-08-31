@@ -96,3 +96,57 @@ fn grep_ignores_case_and_binaries() {
     // The PNGs in brand/ are walked but must never produce a hit.
     assert!(!hits.iter().any(|h| h.path.ends_with(".png")));
 }
+
+/* ── the walk, off the main thread ────────────────────────────────── */
+
+#[test]
+fn a_walk_runs_in_the_background_and_is_collected_later() {
+    let mut index = FileIndex::new("../..");
+    assert!(!index.is_scanned(), "nothing has been walked yet");
+
+    index.start();
+    assert!(index.is_scanning());
+    // The whole point: `start` returned without walking anything.
+    assert!(index.is_empty(), "results must not be there already");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !index.poll() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the walk never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+
+    assert!(!index.is_scanning());
+    assert!(index.is_scanned());
+    assert!(index.len() > 10, "found {} files", index.len());
+    assert!(index.paths().iter().any(|p| p.ends_with("workspace.rs")));
+}
+
+#[test]
+fn starting_twice_does_not_start_twice() {
+    // `warm` is called on every picker open, so this is the common path, not
+    // an edge case: a second walk would be pure waste and could land stale.
+    let mut index = FileIndex::new("../..");
+    index.start();
+    index.start();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !index.poll() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the walk never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    // One result, and no second one queued behind it.
+    assert!(!index.poll(), "a second walk was started");
+}
+
+#[test]
+fn polling_an_index_nobody_started_is_a_no_op() {
+    let mut index = FileIndex::new("../..");
+    assert!(!index.poll());
+    assert!(!index.is_scanned());
+}

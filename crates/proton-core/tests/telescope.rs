@@ -18,6 +18,42 @@ fn keys(ws: &mut Workspace, s: &str) -> Vec<Event> {
     out
 }
 
+/// Pump the heartbeat until the background walk has landed.
+///
+/// The shell does this on a timer; a test does it by hand, and having to is
+/// the point. `␣ff` returns before the tree has been walked — that is what
+/// stops a cold index on a large repository from freezing the window — so
+/// anything asserting about the *contents* of a picker has to wait for them.
+fn settle(ws: &mut Workspace) -> Vec<Event> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut last = Vec::new();
+    loop {
+        let events = ws.apply(Command::Poll);
+        if !events.is_empty() {
+            last = events;
+        }
+        if !ws.pickers().is_scanning() {
+            return last;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the file walk never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+/// Open a picker and wait for its list. Returns the events that carried it.
+fn opened(ws: &mut Workspace, leader: &str) -> Vec<Event> {
+    let immediate = keys(ws, leader);
+    let after = settle(ws);
+    if after.is_empty() {
+        immediate
+    } else {
+        after
+    }
+}
+
 fn picker(events: &[Event]) -> Option<(&str, &Vec<proton_core::PickerItem>, usize)> {
     events.iter().find_map(|e| match e {
         Event::Picker {
@@ -33,7 +69,7 @@ fn picker(events: &[Event]) -> Option<(&str, &Vec<proton_core::PickerItem>, usiz
 #[test]
 fn the_leader_opens_the_file_picker() {
     let mut ws = workspace();
-    let events = keys(&mut ws, " ff");
+    let events = opened(&mut ws, " ff");
     let (query, items, _) = picker(&events).expect("␣ff opens find_files: {events:?}");
     assert_eq!(query, "");
     assert!(items.len() > 10, "an empty query shows the tree");
@@ -42,7 +78,7 @@ fn the_leader_opens_the_file_picker() {
 #[test]
 fn typing_narrows_and_the_query_is_not_a_command() {
     let mut ws = workspace();
-    keys(&mut ws, " ff");
+    opened(&mut ws, " ff");
     // `d` would start an operator if the modal engine were still listening.
     let events = keys(&mut ws, "vimrs");
     let (query, items, _) = picker(&events).unwrap();
@@ -58,7 +94,7 @@ fn typing_narrows_and_the_query_is_not_a_command() {
 #[test]
 fn accepting_opens_the_file() {
     let mut ws = workspace();
-    keys(&mut ws, " ff");
+    opened(&mut ws, " ff");
     keys(&mut ws, "vimrs");
     let events = ws.apply(Command::Key {
         key: Key::named("Enter"),
@@ -76,7 +112,7 @@ fn accepting_opens_the_file() {
 #[test]
 fn escape_closes_without_opening_anything() {
     let mut ws = workspace();
-    keys(&mut ws, " ff");
+    opened(&mut ws, " ff");
     let before = ws.editor().buffer().name();
     let events = ws.apply(Command::Key {
         key: Key::named("Escape"),
@@ -88,7 +124,7 @@ fn escape_closes_without_opening_anything() {
 #[test]
 fn backspace_unwinds_then_closes() {
     let mut ws = workspace();
-    keys(&mut ws, " ff");
+    opened(&mut ws, " ff");
     keys(&mut ws, "ab");
     let events = ws.apply(Command::Key {
         key: Key::named("Backspace"),
@@ -110,7 +146,7 @@ fn backspace_unwinds_then_closes() {
 #[test]
 fn the_selection_wraps() {
     let mut ws = workspace();
-    keys(&mut ws, " ff");
+    opened(&mut ws, " ff");
     let events = ws.apply(Command::Key {
         key: Key::named("ArrowUp"),
     });
@@ -125,7 +161,7 @@ fn the_selection_wraps() {
 #[test]
 fn live_grep_finds_a_line_and_jumps_to_it() {
     let mut ws = workspace();
-    keys(&mut ws, " fg");
+    opened(&mut ws, " fg");
     let events = keys(&mut ws, "pub struct Workspace");
     let (query, items, _) = picker(&events).expect("grep should be open");
     assert_eq!(query, "pub struct Workspace");
@@ -169,4 +205,49 @@ fn the_buffer_picker_switches_buffers() {
         key: Key::named("Enter"),
     });
     assert_eq!(ws.editor().buffer().name(), "vim.rs");
+}
+
+#[test]
+fn opening_a_picker_does_not_wait_for_the_tree_to_be_walked() {
+    // The point of the worker. On a cold index this used to be a walk of the
+    // whole repository on the thread that handles keystrokes — so `␣ff` froze
+    // the window for exactly as long as the project was large.
+    let mut ws = workspace();
+    let events = keys(&mut ws, " ff");
+
+    let opened_at_once = events.iter().any(|e| matches!(e, Event::Picker { .. }));
+    assert!(opened_at_once, "the picker should be up immediately");
+
+    let scanning = events
+        .iter()
+        .any(|e| matches!(e, Event::Picker { scanning, .. } if *scanning));
+    assert!(
+        scanning,
+        "an empty list before the walk lands must say it is still scanning — \
+         otherwise it is indistinguishable from no matches"
+    );
+
+    // And it fills in on its own, without another keystroke.
+    let landed = settle(&mut ws);
+    let (_, items, _) = picker(&landed).expect("the walk should refresh the list");
+    assert!(items.len() > 10, "the list should arrive by itself");
+}
+
+#[test]
+fn the_walk_happens_once_however_many_pickers_are_opened() {
+    let mut ws = workspace();
+    opened(&mut ws, " ff");
+    let first = ws.pickers().file_count();
+    assert!(first > 10);
+
+    ws.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+    // A second open must not re-walk: the index is warm, so nothing is
+    // scanning and the count is there before any poll.
+    ws.apply(Command::OpenPicker {
+        kind: PickerKind::Files,
+    });
+    assert!(!ws.pickers().is_scanning());
+    assert_eq!(ws.pickers().file_count(), first);
 }
