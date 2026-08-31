@@ -370,6 +370,11 @@ const view = {
   lines: [],
   totalLines: 0,
   cursor: { line: 0, column: 0 },
+  /// The far end of the selection, or null. The near end is the cursor.
+  selection: null,
+  /// Which visual mode is live, because the same two endpoints describe a
+  /// run, a set of lines or a rectangle depending on it.
+  vim: "NORMAL",
   /// Coloured runs, parallel to `lines` — or empty for a file with no grammar.
   highlights: [],
 };
@@ -429,24 +434,56 @@ const SCOPE = {
 /// wide line and the browser feels every one of them. Two channels at once,
 /// because a keyword inside a diagnostic needs to be both coloured and
 /// underlined and splitting them would need twice the elements.
-function runsHtml(chars, scope, severity, from, to) {
+function runsHtml(chars, scope, severity, picked, from, to) {
+  const same = (i, j) =>
+    (scope?.[i] ?? null) === (scope?.[j] ?? null) &&
+    (severity?.[i] ?? null) === (severity?.[j] ?? null) &&
+    Boolean(picked?.[i]) === Boolean(picked?.[j]);
+
   let html = "";
   let i = from;
   while (i < to) {
-    const colour = scope?.[i] ?? null;
-    const mark = severity?.[i] ?? null;
     let end = i + 1;
-    while (end < to && (scope?.[end] ?? null) === colour && (severity?.[end] ?? null) === mark) {
-      end++;
-    }
+    while (end < to && same(i, end)) end++;
+
     const text = escapeHtml(chars.slice(i, end).join(""));
     const classes = [];
+    const colour = scope?.[i];
     if (colour && SCOPE[colour]) classes.push(SCOPE[colour]);
-    if (mark) classes.push("sq", "d-" + mark);
+    if (severity?.[i]) classes.push("sq", "d-" + severity[i]);
+    if (picked?.[i]) classes.push("sel");
     html += classes.length ? `<span class="${classes.join(" ")}">${text}</span>` : text;
     i = end;
   }
   return html;
+}
+
+/* Which characters on a line are selected.
+ *
+ * Three shapes, and they are genuinely different questions. Charwise runs
+ * from one point to another and only the first and last lines are partial.
+ * Linewise takes whole lines. A block takes the same columns from every line,
+ * which is the one shape a range of offsets cannot describe — and the reason
+ * the mode has to know which of the three it is rather than just holding two
+ * endpoints. */
+function selectedOn(line, width) {
+  const anchor = view.selection;
+  if (!anchor) return null;
+  const head = view.cursor;
+
+  const top = anchor.line <= head.line ? anchor : head;
+  const bottom = anchor.line <= head.line ? head : anchor;
+  if (line < top.line || line > bottom.line) return null;
+
+  if (view.vim === "V-LINE") return [0, width];
+  if (view.vim === "V-BLOCK") {
+    const left = Math.min(anchor.column, head.column);
+    const right = Math.max(anchor.column, head.column) + 1;
+    return [Math.min(left, width), Math.min(right, width)];
+  }
+  const from = line === top.line ? top.column : 0;
+  const to = line === bottom.line ? bottom.column + 1 : width;
+  return [Math.min(from, width), Math.min(to, width)];
 }
 
 function lineHtml(number, text, cursorColumn, highlights) {
@@ -468,16 +505,26 @@ function lineHtml(number, text, cursorColumn, highlights) {
     }
   }
 
+  const range = selectedOn(number, chars.length);
+  const picked = range && new Array(chars.length).fill(false);
+  if (range) {
+    for (let i = range[0]; i < range[1]; i++) picked[i] = true;
+  }
+  // A selected empty line has nothing to paint, so the row says so instead.
+  const empty = range && chars.length === 0 ? " selected" : "";
+
   if (cursorColumn === undefined) {
-    return `<div class="ln">${gutter}${runsHtml(chars, scope, severity, 0, chars.length)}</div>`;
+    const body = runsHtml(chars, scope, severity, picked, 0, chars.length);
+    return `<div class="ln${empty}">${gutter}${body}</div>`;
   }
   // The caret sits *on* a character in normal mode, so it takes the one it
   // covers with it rather than being drawn between two.
   const under = escapeHtml(chars[cursorColumn] ?? " ") || " ";
   return (
-    `<div class="ln cur">${gutter}${runsHtml(chars, scope, severity, 0, cursorColumn)}` +
+    `<div class="ln cur${empty}">${gutter}` +
+    `${runsHtml(chars, scope, severity, picked, 0, cursorColumn)}` +
     `<span class="caret">${under}</span>` +
-    `${runsHtml(chars, scope, severity, cursorColumn + 1, chars.length)}</div>`
+    `${runsHtml(chars, scope, severity, picked, cursorColumn + 1, chars.length)}</div>`
   );
 }
 
@@ -700,6 +747,7 @@ function closeCompletion() {
 /* ── rendering core events ────────────────────────────────────────────── */
 
 function renderVim(label) {
+  view.vim = label;
   const el = $("#sl-mode");
   el.className = "sl sl-mode " + (label === "NORMAL" ? "" : label.toLowerCase().replace("-", ""));
   el.textContent = label;
@@ -794,6 +842,7 @@ onEvent((event) => {
 
     case "cursor":
       view.cursor = { line: event.line, column: event.column };
+      view.selection = event.selection;
       renderEditor();
       renderPosition();
       break;

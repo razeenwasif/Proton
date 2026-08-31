@@ -27,6 +27,8 @@ pub enum Verb {
     Goto,
     /// Repeat the last change — vim's `.`.
     Repeat,
+    /// Name the cursor's position, for `m`.
+    SetMark,
 }
 
 /// What to do it to. A mode maps these onto its own nouns: `Line` is a line of
@@ -56,6 +58,23 @@ pub enum Object {
     Selection,
     /// Where the symbol under the cursor is defined.
     Definition,
+
+    /* ── marks ────────────────────────────────────────────────────
+    A mark is a place, so it is an object like any other — which is what
+    makes `d`a` and `y'a` fall out without a line of extra code. */
+    /// The mark to set, for `m`.
+    Mark {
+        name: char,
+    },
+    /// Exactly where a mark is — ``a`.
+    MarkExact {
+        name: char,
+    },
+    /// The first non-blank of a mark's line — `'a`. Linewise, so `d'a`
+    /// takes whole lines.
+    MarkLine {
+        name: char,
+    },
     /// No object — the verb stands alone (`u`, `.`).
     None,
     /// Cursor stays put; used by `i` and `a` to say which side.
@@ -64,6 +83,14 @@ pub enum Object {
     /// Open a new line and insert on it.
     LineBelow,
     LineAbove,
+
+    /* ── visual block ─────────────────────────────────────────────
+    `I` and `A` in a block insert on every line of it at once, which is
+    the reason the mode exists at all. */
+    /// The block's left edge.
+    BlockStart,
+    /// The block's right edge, padding short lines out to reach it.
+    BlockEnd,
 
     /* ── text objects ─────────────────────────────────────────────
     These are the reason the engine resolves to objects rather than

@@ -5,6 +5,7 @@
 //! be dropped in without touching anything here. See `docs/ARCHITECTURE.md` §1.
 
 pub mod action;
+pub mod block;
 pub mod bus;
 pub mod editor;
 pub mod highlights;

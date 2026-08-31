@@ -1,13 +1,14 @@
 # Proton — architecture
 
-The build document. **M0 and M0.5 are implemented**; everything from M1 on is a
+The build document. **M0 through M2 are implemented**; everything from M3 on is a
 plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
 reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 **what we build and in what order**, and is the one to argue with before writing
 code.
 
 ```bash
-cargo test --workspace         # 86 tests, headless
+cargo test --workspace        # 175 tests, headless
+cargo test --workspace -- --include-ignored   # plus 4 that drive a real rust-analyzer
 cargo run -p proton-shell     # the app
 node ui/serve.mjs             # the front end alone, in a browser
 ```
@@ -60,8 +61,8 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 |---|---|---|
 | `proton-text` | Rope, undo tree, multi-cursor selections, UTF‑8 ↔ UTF‑16 ↔ line/col | `ropey` |
 | `proton-vim` | Modal state machine, operators, motions, text objects, registers, marks, macros, which-key tree | — |
-| `proton-syntax` | Tree-sitter parsing, highlight queries, folds, structural selection | `tree-sitter` |
-| `proton-lsp` | LSP client, DAP client, server supervision, capability negotiation | `lsp-types`, `tokio` |
+| `proton-syntax` | Tree-sitter parsing, incremental re-parse, viewport-scoped highlight queries | `tree-sitter` |
+| `proton-lsp` | LSP client, server supervision, JSON-RPC framing, a non-blocking mailbox | `serde_json` |
 | `proton-vcs` | Status, gutter, blame, staging, the shadow worktree | `gix` |
 | `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
 | `proton-agent` | Claude client, tool dispatch, task queue, diff staging | `tokio`, `reqwest`, `eventsource-stream` |
@@ -71,11 +72,15 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-shell` | Window, webview, IPC bridge, system backdrop, packaging | `tauri` v2, `window-vibrancy` |
 | `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
 
-**M0/M0.5 ship `proton-core` and `proton-shell` only.** The core today holds the
-bus, the mode registry and the modal engine; the rest of the table is the shape
-it grows into. `proton-vim` and `proton-text` split out of `proton-core` when M1
-gives them enough substance to be worth their own crates — splitting earlier
-would be structure without content.
+**Built so far: `proton-text`, `proton-index`, `proton-syntax`, `proton-lsp`,
+`proton-core`, `proton-shell`.** The rest of the table is the shape it grows
+into. `proton-vim` has not split out of `proton-core` yet — the modal engine is
+one file there and would gain nothing but a manifest from moving today.
+
+`proton-lsp` ended up with no async runtime and no protocol crate. Two threads
+and a channel do what `tokio` would, for a client that talks to two or three
+processes; and the protocol surface Proton actually uses is three response
+shapes, each with a subtlety worth writing down rather than inheriting.
 
 **Why Tauri v2 rather than raw `wry`:** the updater, packaging, and the
 permission model are all things you would otherwise write. On Windows 11 the
@@ -319,7 +324,7 @@ now distinct, because a consumer that cannot tell a keystroke from a submission
 runs `:`, `:v`, `:vs` and `:vsp` on the way to `:vsplit`.
 *Exit met: `[shell] backdrop: mica` on this machine.*
 
-**M1 — The editor. ◐ in progress.** `proton-text` ships: rope buffers behind a
+**M1 — The editor. ✅ done.** `proton-text` ships: rope buffers behind a
 `TextStore` surface, an undo *tree*, word motions and text objects. The modal
 engine gained text objects, `gg`, big-word motions, `.` and macros, and actions
 now become real edits through `proton-core::Editor`. The front end renders from
@@ -354,7 +359,37 @@ Compiled queries are cached per language: building Rust's measured 14 ms, and
 paying it per file opened is a pause you feel in a session that opens a lot of
 them.
 
-Still open: marks and visual-block mode.
+**Marks** live on the buffer rather than on the editor, because a mark is a
+place in *that* text and has to move when the text around it does. A mark set
+at an offset and then left alone through an hour of editing above it is not at
+that offset any more, and one that still claims to be is worse than no mark —
+it takes you somewhere confidently wrong. So every edit shifts them, and a mark
+inside deleted text collapses to where that text began rather than dangling.
+
+`m`, `` ` `` and `'` all claim the next key as a name, in normal mode and
+operator-pending alike. That is what makes `d'a` work, and it falls out of
+marks being an *object* like any other: the operator machinery needed no
+changes. It did surface that linewise motions were not linewise — `dj` took a
+rectangle of characters rather than two lines — which is now fixed for `dj`,
+`dk` and `d'a` together.
+
+**Visual block** is the one selection that is not a range of offsets. The text
+between two columns on different lines is not contiguous, so it gets its own
+shape in `block.rs` and the operators ask for a list of ranges. `⌃v` enters;
+`d`, `c`, `y` and `x` take the rectangle; `I` and `A` insert on every line at
+once, which is the reason anyone uses the mode. A block yank remembers it was
+a block, so putting it back gives a column again rather than a run.
+
+Two things fell out of building it. A line too short to reach the block is left
+alone rather than clamped into it — clamping is how you eat the wrong
+characters. And `I` and `A` differ on purpose: `A` pads a short line with
+spaces to reach the column, because the point is that the result *is* a column;
+`I` does not, because a column that line never had is not a place to insert.
+
+Selections are now drawn, which they were not before — the events carried them
+from M0 and nothing rendered them. They are painted per character rather than
+as a box behind the line, since a box cannot be the shape of a rectangle
+selection.
 
 **Measured on this machine** (release, a 660-line file, 60-line viewport):
 

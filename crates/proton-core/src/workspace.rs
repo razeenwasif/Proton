@@ -137,7 +137,8 @@ impl Workspace {
             Command::SetMode { mode } => self.set_mode(mode),
 
             Command::Perform { action } => {
-                let (mut events, changed) = self.act(&action);
+                let mode = self.vim.mode();
+                let (mut events, changed) = self.act(&action, mode);
                 events.extend(self.after_action(changed));
                 if changed {
                     self.resync();
@@ -246,7 +247,7 @@ impl Workspace {
                 }
 
                 for outcome in self.vim.keys(&key) {
-                    let (evts, did) = self.events_for(outcome);
+                    let (evts, did) = self.events_for(outcome, before);
                     events.extend(evts);
                     changed |= did;
                 }
@@ -262,6 +263,11 @@ impl Workspace {
                         && self.vim.mode() == VimMode::Normal
                         && self.mode == ModeId::Codex
                     {
+                        // A block insert types on one line and lands on all of
+                        // them, and this is the moment it lands: before the
+                        // group closes, so the whole rectangle is one undo.
+                        changed |= self.editor.finish_block_insert();
+
                         let buf = self.editor.buffer_mut();
                         buf.end_group();
                         let at = buf.cursor.offset;
@@ -642,7 +648,7 @@ impl Workspace {
     ///
     /// Only Codex edits text today; the other modes accept the action and
     /// report it, and gain their own nouns with their document types.
-    fn act(&mut self, action: &Action) -> (Vec<Event>, bool) {
+    fn act(&mut self, action: &Action, was: VimMode) -> (Vec<Event>, bool) {
         let description = action.describe();
         if !self.mode.supports(action) {
             return (
@@ -665,7 +671,7 @@ impl Workspace {
             return (events, false);
         }
 
-        let changed = self.mode == ModeId::Codex && self.editor.execute(action, self.vim.mode());
+        let changed = self.mode == ModeId::Codex && self.editor.execute(action, was);
 
         // An action that opens insert mode starts an undo group, so the typing
         // that follows is part of the same change: `ciwfoo<Esc>` is one thing
@@ -691,9 +697,13 @@ impl Workspace {
         )
     }
 
-    fn events_for(&mut self, outcome: Outcome) -> (Vec<Event>, bool) {
+    /// `was` is the modal mode the key arrived in, not the one the engine is
+    /// in now. The two differ exactly when it matters: an operator in visual
+    /// mode switches back to normal *as* it resolves, so asking the engine
+    /// afterwards is asking too late to find out it was a block.
+    fn events_for(&mut self, outcome: Outcome, was: VimMode) -> (Vec<Event>, bool) {
         match outcome {
-            Outcome::Action(action) => self.act(&action),
+            Outcome::Action(action) => self.act(&action, was),
             Outcome::Input(c) => {
                 if self.mode == ModeId::Codex {
                     self.editor.insert_char(c);

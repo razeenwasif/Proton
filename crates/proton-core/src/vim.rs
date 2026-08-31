@@ -24,6 +24,10 @@ pub enum VimMode {
     Insert,
     Visual,
     VisualLine,
+    /// A rectangle rather than a run. The one selection whose shape a text
+    /// editor cannot express as a range, which is why it is its own mode and
+    /// not a flag on the others.
+    VisualBlock,
     Replace,
     Command,
 }
@@ -36,6 +40,7 @@ impl VimMode {
             VimMode::Insert => "INSERT",
             VimMode::Visual => "VISUAL",
             VimMode::VisualLine => "V-LINE",
+            VimMode::VisualBlock => "V-BLOCK",
             VimMode::Replace => "REPLACE",
             VimMode::Command => "COMMAND",
         }
@@ -79,6 +84,10 @@ struct Pending {
     text_object: Option<bool>,
     /// Set after `g`, which is a prefix rather than a command: `gg`, `gU`, `gq`.
     awaiting_g: bool,
+    /// Set after `m`, ``` or `'`, while waiting for the mark's name. The next
+    /// key is taken literally whatever else is pending, which is what lets
+    /// `d'a` work.
+    awaiting_mark: Option<MarkUse>,
 }
 
 impl Pending {
@@ -90,6 +99,7 @@ impl Pending {
             && !self.awaiting_register
             && self.text_object.is_none()
             && !self.awaiting_g
+            && self.awaiting_mark.is_none()
     }
 
     /// vim multiplies the two counts: `2d3w` deletes six words.
@@ -131,6 +141,13 @@ impl Pending {
         }
         if self.awaiting_g {
             s.push('g');
+        }
+        if let Some(use_of) = self.awaiting_mark {
+            s.push(match use_of {
+                MarkUse::Set => 'm',
+                MarkUse::Exact => '`',
+                MarkUse::Line => '\x27',
+            });
         }
         s
     }
@@ -320,10 +337,25 @@ impl Vim {
             return self.escape();
         }
 
+        // `⌃v` is the one modal command that is a chord rather than a letter,
+        // so it is matched here — before the branch that only looks at bare
+        // characters and would drop it.
+        if k.ctrl && k.key.eq_ignore_ascii_case("v") && !matches!(self.mode, VimMode::Command) {
+            self.pending.clear();
+            self.mode = if self.mode == VimMode::VisualBlock {
+                VimMode::Normal
+            } else {
+                VimMode::VisualBlock
+            };
+            return Outcome::Ignored;
+        }
+
         match self.mode {
             VimMode::Insert | VimMode::Replace => self.key_insert(k),
             VimMode::Command => self.key_cmdline(k),
-            VimMode::Normal | VimMode::Visual | VimMode::VisualLine => self.key_normal(k),
+            VimMode::Normal | VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock => {
+                self.key_normal(k)
+            }
         }
     }
 
@@ -389,6 +421,13 @@ impl Vim {
             return Outcome::Leader(prefix.clone());
         }
 
+        // A mark's name is whatever key comes next, taken literally — before
+        // digits, before the leader, before an operator gets a look at it.
+        // `m1` names a mark `1`, not a count of one.
+        if let Some(use_of) = self.pending.awaiting_mark.take() {
+            return self.mark_named(use_of, c);
+        }
+
         // `"a` selects a register for the next operator.
         if self.pending.awaiting_register {
             self.pending.awaiting_register = false;
@@ -413,6 +452,15 @@ impl Vim {
         if c == ' ' && self.mode == VimMode::Normal && self.pending.is_empty() {
             self.leader = Some(String::new());
             return Outcome::Leader(String::new());
+        }
+
+        // `m` names a mark to set; `` ` `` and `'` name one to go to. All
+        // three claim the next key, in normal mode and operator-pending
+        // alike — which is what makes `d'a` mean "delete to that mark's line".
+        // `m` is normal-mode only, because `dm` is not a command.
+        if let Some(use_of) = MarkUse::prefix(c, self.pending.operator.is_some()) {
+            self.pending.awaiting_mark = Some(use_of);
+            return Outcome::Pending(self.pending.showcmd());
         }
 
         // An operator already waiting: this key must be a motion, a doubled
@@ -444,9 +492,15 @@ impl Vim {
         }
 
         // Visual mode: an operator applies to the selection immediately.
-        let visual = matches!(self.mode, VimMode::Visual | VimMode::VisualLine);
+        let visual = matches!(
+            self.mode,
+            VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+        );
         if visual {
-            if let Some(verb) = Self::operator(c) {
+            // `x` is `d` on a selection. In normal mode it is a character
+            // delete, which is why it is folded in here rather than added to
+            // the operator table.
+            if let Some(verb) = Self::operator(c).or((c == 'x').then_some(Verb::Delete)) {
                 let count = self.pending.total_count();
                 let register = self.pending.register.clone();
                 self.pending.clear();
@@ -480,6 +534,21 @@ impl Vim {
         if c == 'g' {
             self.pending.awaiting_g = true;
             return Outcome::Pending(self.pending.showcmd());
+        }
+
+        // In a block, `I` and `A` insert on *every* line of it at once — the
+        // reason the mode exists. Everywhere else they are ordinary insert
+        // commands, which is why this sits ahead of the mode entries rather
+        // than as another arm of them.
+        if self.mode == VimMode::VisualBlock && (c == 'I' || c == 'A') {
+            self.pending.clear();
+            self.mode = VimMode::Insert;
+            let edge = if c == 'I' {
+                Object::BlockStart
+            } else {
+                Object::BlockEnd
+            };
+            return Outcome::Action(Action::new(Verb::Insert, edge, 1));
         }
 
         // Mode entries.
@@ -656,5 +725,60 @@ impl Vim {
             'G' => Object::FileEnd,
             _ => return None,
         })
+    }
+}
+
+/// What the key after `m`, `` ` `` or `'` is going to be used for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarkUse {
+    Set,
+    /// `` `a `` — exactly where the mark is, column and all.
+    Exact,
+    /// `'a` — the first non-blank of the mark's line, and linewise when an
+    /// operator is waiting.
+    Line,
+}
+
+impl MarkUse {
+    fn prefix(c: char, operator_pending: bool) -> Option<MarkUse> {
+        match c {
+            // `dm` is not a command, so `m` only starts a mark when nothing
+            // is waiting on a motion.
+            'm' if !operator_pending => Some(MarkUse::Set),
+            '`' => Some(MarkUse::Exact),
+            '\'' => Some(MarkUse::Line),
+            _ => None,
+        }
+    }
+}
+
+impl Vim {
+    /// The mark's name arrived. Set it, go to it, or operate to it.
+    fn mark_named(&mut self, use_of: MarkUse, name: char) -> Outcome {
+        // Vim's marks are letters and a handful of punctuation. Anything else
+        // is a typo, and cancelling is friendlier than storing a mark under a
+        // name nobody can type again.
+        if !name.is_ascii_alphanumeric() {
+            self.pending.clear();
+            return Outcome::Pending(String::new());
+        }
+
+        if use_of == MarkUse::Set {
+            self.pending.clear();
+            return Outcome::Action(Action::new(Verb::SetMark, Object::Mark { name }, 1));
+        }
+
+        let object = match use_of {
+            MarkUse::Exact => Object::MarkExact { name },
+            _ => Object::MarkLine { name },
+        };
+        match self.pending.operator {
+            Some(op) => Outcome::Action(self.finish_operator(op, object)),
+            None => {
+                self.pending.clear();
+                // No count: `3'a` is not three of anything.
+                Outcome::Action(Action::new(Verb::Move, object, 1))
+            }
+        }
     }
 }

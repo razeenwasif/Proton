@@ -971,3 +971,20 @@ table.df tr:hover td { background: var(--e1); }
    like — which is why a fifth theme is a paste rather than a port. */
 .cn { color: var(--tone); }     .va { color: var(--ink-2); }
 .pr { color: var(--info); }     .at { color: var(--accent-2); }
+
+/* ── selection ────────────────────────────────────────────────────────
+   Painted per character rather than as a box behind the line, because a
+   block selection is the same columns on several lines and a box cannot
+   be that shape. Same reason the runs carry it as a third channel
+   alongside colour and severity: one element, three meanings. */
+.sel { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.ln.cur .sel { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* A selected line with nothing on it still has to look selected, and there
+   is no character to paint. */
+.ln.selected::after {
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}

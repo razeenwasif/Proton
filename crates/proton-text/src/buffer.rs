@@ -5,7 +5,7 @@
 //! summary tree later (folded height, diagnostic counts) is a change to one
 //! module rather than to everything that reads text.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use ropey::Rope;
@@ -41,6 +41,10 @@ pub struct Buffer {
     /// all. Bounded because it is an optimisation: when it runs out, the
     /// answer is "start over", which is always correct.
     changes: VecDeque<(u64, Change)>,
+    /// Named positions, `ma` to set and ``a` to return. Held here, not in the
+    /// editor, because a mark is a place in *this* text and has to move when
+    /// the text around it does.
+    marks: HashMap<char, usize>,
     pub cursor: Cursor,
 }
 
@@ -60,6 +64,7 @@ impl Buffer {
             group: Group::None,
             version: 0,
             changes: VecDeque::new(),
+            marks: HashMap::new(),
             cursor: Cursor::default(),
         }
     }
@@ -272,6 +277,7 @@ impl Buffer {
             if !edit.text.is_empty() {
                 self.text.insert(edit.start, &edit.text);
             }
+            self.shift_marks(edit);
 
             let new_end = edit.start + edit.inserted_len();
             recorded.push(Change {
@@ -290,6 +296,57 @@ impl Buffer {
                 self.changes.pop_front();
             }
             self.changes.push_back((self.version, change));
+        }
+    }
+
+    /* ── marks ────────────────────────────────────────────────────── */
+
+    /// Remember where the cursor is, under a name.
+    pub fn set_mark(&mut self, name: char, offset: usize) {
+        self.marks.insert(name, offset.min(self.text.len_chars()));
+    }
+
+    /// Where a mark is now — which is not necessarily where it was set.
+    pub fn mark(&self, name: char) -> Option<usize> {
+        self.marks
+            .get(&name)
+            .map(|offset| (*offset).min(self.text.len_chars()))
+    }
+
+    pub fn marks(&self) -> impl Iterator<Item = (char, usize)> + '_ {
+        self.marks.iter().map(|(name, offset)| (*name, *offset))
+    }
+
+    /// Move every mark that an edit displaced.
+    ///
+    /// This is the whole difficulty with marks. A mark set at offset 400 and
+    /// then left alone through an hour of editing above it is not at 400 any
+    /// more, and one that still claims to be is worse than no mark at all —
+    /// it takes you somewhere confidently wrong.
+    fn shift_marks(&mut self, edit: &Edit) {
+        if self.marks.is_empty() {
+            return;
+        }
+        let removed = edit.end - edit.start;
+        let inserted = edit.inserted_len();
+        if removed == 0 && inserted == 0 {
+            return;
+        }
+
+        for offset in self.marks.values_mut() {
+            if *offset <= edit.start {
+                // Before the edit: untouched. `<=` rather than `<` so text
+                // inserted exactly at a mark pushes past it rather than
+                // swallowing it.
+                continue;
+            }
+            *offset = if *offset >= edit.end {
+                (*offset + inserted).saturating_sub(removed)
+            } else {
+                // Inside what was deleted. There is no honest answer, so it
+                // collapses to where that text used to begin.
+                edit.start
+            };
         }
     }
 
@@ -422,6 +479,15 @@ impl Buffer {
 
     pub fn line_range(&self, count: usize) -> Range {
         motion::line_range(self.text.slice(..), self.cursor.offset, count)
+    }
+
+    /// `count` whole lines starting at `line`, wherever the cursor happens to
+    /// be — what a linewise operator between two points acts on.
+    pub fn line_span(&self, line: usize, count: usize) -> Range {
+        let at = self
+            .text
+            .line_to_char(line.min(self.text.len_lines().saturating_sub(1)));
+        motion::line_range(self.text.slice(..), at, count)
     }
 
     pub fn column(&self) -> usize {
