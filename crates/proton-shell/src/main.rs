@@ -84,6 +84,37 @@ fn set_backdrop(
     applied.to_string()
 }
 
+/// Which project this window is looking at.
+///
+/// `proton .` or `proton C:\src\thing`, the way every editor takes it, and
+/// the working directory otherwise. That fallback is right when the app is
+/// launched from a terminal and useless when it is launched from a Start-menu
+/// shortcut — where the working directory is the install folder, and indexing
+/// that would be nonsense. So an installed copy with no argument falls back
+/// again, to the home directory, which is at least somewhere the user has
+/// files.
+fn project_root() -> std::path::PathBuf {
+    if let Some(given) = std::env::args_os().nth(1) {
+        let path = std::path::PathBuf::from(given);
+        if path.is_dir() {
+            return path;
+        }
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let beside_the_exe = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+        .is_some_and(|dir| dir == cwd);
+
+    if beside_the_exe {
+        if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+            return std::path::PathBuf::from(home);
+        }
+    }
+    cwd
+}
+
 /// Give the core a heartbeat.
 ///
 /// Everything a language server says arrives on a thread the core cannot see,
@@ -135,7 +166,9 @@ fn window_icon() -> Option<tauri::image::Image<'static>> {
 
 fn main() {
     tauri::Builder::default()
-        .manage(Mutex::new(Workspace::new()))
+        .manage(Mutex::new(
+            Workspace::rooted(project_root()).with_language_servers(),
+        ))
         .invoke_handler(tauri::generate_handler![dispatch, backdrop, set_backdrop])
         .setup(|app| {
             let Some(window) = app.get_webview_window("main") else {

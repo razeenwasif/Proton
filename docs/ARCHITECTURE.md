@@ -646,3 +646,58 @@ The browser path is the faster loop for anything that is not shell behaviour.
 runs either way — but the stand-in is a demo, not a second implementation, and
 must never grow past keeping the design work honest. The real state machine
 lives in `crates/proton-core/src/vim.rs`.
+
+---
+
+## 11. Packaging
+
+```bash
+git submodule update --init          # the tracer, which is bundled
+cargo tauri build                    # → target/release/bundle/
+```
+
+Two bundles come out: an NSIS `.exe` and an MSI. The NSIS one is the one to
+use — it installs per-user, needs no elevation, and carries an uninstaller.
+
+**Install where Windows keeps per-user programs.** Tauri's NSIS default is
+`%LOCALAPPDATA%\Proton`, which is where applications put their *data*, not
+their binaries. `/D` moves it, and has to be the last argument and unquoted —
+that is NSIS's rule, not a Tauri one:
+
+```bash
+Proton_0.0.1_x64-setup.exe /S /D=%LOCALAPPDATA%\Programs\Proton
+```
+
+### What ships
+
+The tracer goes in the bundle: `server/` and `backends/` from the
+Code Visualizer submodule, and its examples. Upstream's `web/` is 2.5 MB of
+frontend that Proton replaces, so it is left out.
+
+An installed copy has no project tree, so `proton-trace` looks for the checkout
+beside the executable as well as under `vendor/`. Both paths are tested.
+
+### What it still needs from the machine
+
+Bundling the tracer does not bundle a toolchain, and the backends shell out to
+one:
+
+| | |
+|---|---|
+| Python 3 | MSYS2's, at `C:\msys64\ucrt64\bin` — the `python` on `PATH` is the Microsoft Store stub, which is not a Python |
+| `gcc` / `g++` | for the C and C++ backends |
+| `gdb` **with Python support** | the C and C++ backends drive it; `gdb --batch -ex "python print(1)"` is the check |
+
+Without them the Visualizer reports which language is unusable and why —
+`GET /api/toolchain` distinguishes "not implemented" from "not usable here",
+and that reason is what the pane shows. Everything else works.
+
+### Which project it opens
+
+`Proton.exe <folder>`, the way every editor takes it.
+
+With no argument it uses the working directory, which is right from a terminal
+and wrong from a Start-menu shortcut — there the working directory is the
+install folder, and indexing that is nonsense. So a shortcut launch falls back
+to the home directory instead. **There is no folder-open flow yet**; that
+belongs with the session state in a later milestone.

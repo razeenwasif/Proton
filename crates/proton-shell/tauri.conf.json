@@ -37,6 +37,11 @@
       "icons/256x256.png",
       "icons/512x512.png",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "../../vendor/code-visualizer/server": "code-visualizer/server",
+      "../../vendor/code-visualizer/backends": "code-visualizer/backends",
+      "../../vendor/code-visualizer/examples": "code-visualizer/examples"
+    }
   }
 }

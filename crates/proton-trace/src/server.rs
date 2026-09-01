@@ -224,9 +224,34 @@ fn usable(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Where the vendored checkout is, relative to the project root.
+/// Find the tracer checkout.
+///
+/// Two places, because there are two ways to be running. In a development
+/// tree it is the submodule under `vendor/`. In an installed copy there is no
+/// project tree at all — the app was launched from a Start-menu shortcut and
+/// the working directory is wherever Windows felt like — so the copy that
+/// ships beside the executable is the one that exists.
+///
+/// Falls back to the development path when neither is present, so the error
+/// names somewhere a person can go and look.
 pub fn vendored(root: &Path) -> PathBuf {
-    root.join("vendor").join("code-visualizer")
+    let development = root.join("vendor").join("code-visualizer");
+    let mut tried = vec![development.clone()];
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            // Where Tauri puts bundled resources, and beside the binary for a
+            // plain `cargo build` copy.
+            tried.push(dir.join("code-visualizer"));
+            tried.push(dir.join("resources").join("code-visualizer"));
+        }
+    }
+
+    tried
+        .iter()
+        .find(|path| path.join("server").join("app.py").is_file())
+        .cloned()
+        .unwrap_or(development)
 }
 
 #[cfg(test)]
@@ -238,6 +263,51 @@ mod tests {
         let port = free_port().unwrap();
         // Bindable again, which is the property the child needs.
         assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok());
+    }
+
+    #[test]
+    fn the_checkout_is_found_in_a_development_tree() {
+        // The submodule, which is where it lives while working on Proton.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let found = vendored(&root);
+        if root.join("vendor/code-visualizer/server/app.py").is_file() {
+            assert!(found.ends_with("vendor/code-visualizer"), "{found:?}");
+        }
+    }
+
+    #[test]
+    fn an_installed_copy_looks_beside_the_executable() {
+        // There is no project tree in an installed copy — the app was started
+        // from a Start-menu shortcut and the working directory is wherever
+        // Windows felt like. The copy that ships next to the binary is the
+        // only one that exists, so the search has to reach it.
+        let exe = std::env::current_exe().expect("a test binary has a path");
+        let beside = exe.parent().unwrap().join("code-visualizer");
+        std::fs::create_dir_all(beside.join("server")).unwrap();
+        std::fs::write(beside.join("server").join("app.py"), "# stand-in").unwrap();
+
+        // A root with nothing in it, which is what an installed copy has.
+        let empty = std::env::temp_dir().join(format!("proton-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&empty).unwrap();
+
+        let found = vendored(&empty);
+        assert_eq!(
+            found, beside,
+            "should have found the copy beside the binary"
+        );
+
+        std::fs::remove_dir_all(&beside).ok();
+        std::fs::remove_dir_all(&empty).ok();
+    }
+
+    #[test]
+    fn with_no_checkout_anywhere_the_error_names_the_development_path() {
+        // Falling back to somewhere a person can go and look beats reporting
+        // the last place searched, which is a resources directory they have
+        // never heard of.
+        let nowhere = std::env::temp_dir().join("proton-no-such-root");
+        let found = vendored(&nowhere);
+        assert!(found.ends_with("code-visualizer"), "{found:?}");
     }
 
     #[test]
