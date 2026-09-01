@@ -1,0 +1,9869 @@
+{
+ "language": "c",
+ "steps": [
+  {
+   "step": 0,
+   "event": "step",
+   "line": 53,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 53,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 53,
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 1,
+   "event": "step",
+   "line": 57,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 57,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 57,
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 2,
+   "event": "step",
+   "line": 59,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "1"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 3,
+   "event": "step",
+   "line": 25,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 25,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "10"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 25,
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "1"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 4,
+   "event": "step",
+   "line": 27,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 27,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "10"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "1"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "-1163005939"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0xbaadf00dbaadf00d"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 5,
+   "event": "step",
+   "line": 29,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 29,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "10"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "1"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0xbaadf00dbaadf00d"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 6,
+   "event": "step",
+   "line": 31,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 31,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "10"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "1"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 7,
+   "event": "step",
+   "line": 33,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 33,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "10"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "1"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 8,
+   "event": "step",
+   "line": 57,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 57,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "1"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0,
+   "returns": [
+    {
+     "func": "push_front",
+     "value": {
+      "type": "Node *",
+      "kind": "ptr",
+      "target": "0x7c8700"
+     }
+    }
+   ]
+  },
+  {
+   "step": 9,
+   "event": "step",
+   "line": 59,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "2"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 10,
+   "event": "step",
+   "line": 25,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 25,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "20"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 25,
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "2"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 11,
+   "event": "step",
+   "line": 27,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 27,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "20"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "2"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "-1163005939"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0xbaadf00dbaadf00d"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 12,
+   "event": "step",
+   "line": 29,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 29,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "20"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "2"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0xbaadf00dbaadf00d"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 13,
+   "event": "step",
+   "line": 31,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 31,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "20"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "2"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 14,
+   "event": "step",
+   "line": 33,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 33,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "20"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "2"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 15,
+   "event": "step",
+   "line": 57,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 57,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "2"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0,
+   "returns": [
+    {
+     "func": "push_front",
+     "value": {
+      "type": "Node *",
+      "kind": "ptr",
+      "target": "0x7cefa0"
+     }
+    }
+   ]
+  },
+  {
+   "step": 16,
+   "event": "step",
+   "line": 59,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "3"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 17,
+   "event": "step",
+   "line": 25,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 25,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "30"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 25,
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "3"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 18,
+   "event": "step",
+   "line": 27,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 27,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "30"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "3"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "-1163005939"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0xbaadf00dbaadf00d"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 19,
+   "event": "step",
+   "line": 29,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 29,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "30"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "3"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0xbaadf00dbaadf00d"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 20,
+   "event": "step",
+   "line": 31,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 31,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "30"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "3"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 21,
+   "event": "step",
+   "line": 33,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 33,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "30"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "3"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 22,
+   "event": "step",
+   "line": 57,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 57,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "3"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0,
+   "returns": [
+    {
+     "func": "push_front",
+     "value": {
+      "type": "Node *",
+      "kind": "ptr",
+      "target": "0x7cefe0"
+     }
+    }
+   ]
+  },
+  {
+   "step": 23,
+   "event": "step",
+   "line": 59,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "4"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 24,
+   "event": "step",
+   "line": 25,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 25,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "40"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 25,
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "4"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 25,
+   "event": "step",
+   "line": 27,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 27,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "40"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "4"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "-1163005939"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0xbaadf00dbaadf00d"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 26,
+   "event": "step",
+   "line": 29,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 29,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "40"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "4"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0xbaadf00dbaadf00d"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 27,
+   "event": "step",
+   "line": 31,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 31,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "40"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "4"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 28,
+   "event": "step",
+   "line": 33,
+   "func": "push_front",
+   "stack": [
+    {
+     "id": "push_front@2",
+     "func": "push_front",
+     "line": 33,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "value",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe78",
+        "size": 4,
+        "kind": "prim",
+        "repr": "40"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "n",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe58",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 59,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "4"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 29,
+   "event": "step",
+   "line": 57,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 57,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "i",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffea4",
+        "size": 4,
+        "kind": "prim",
+        "repr": "4"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0,
+   "returns": [
+    {
+     "func": "push_front",
+     "value": {
+      "type": "Node *",
+      "kind": "ptr",
+      "target": "0x7cf1f0"
+     }
+    }
+   ]
+  },
+  {
+   "step": 30,
+   "event": "step",
+   "line": 63,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 31,
+   "event": "step",
+   "line": 39,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 39,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "total",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 39,
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 32,
+   "event": "step",
+   "line": 41,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 41,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 41,
+        "type": "Node *",
+        "addr": "0x5ffe50",
+        "size": 8
+       }
+      },
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 33,
+   "event": "step",
+   "line": 43,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 43,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe50",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      },
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "0"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 34,
+   "event": "step",
+   "line": 41,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 41,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe50",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      },
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "40"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 35,
+   "event": "step",
+   "line": 43,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 43,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe50",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "40"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 36,
+   "event": "step",
+   "line": 41,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 41,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe50",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "70"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 37,
+   "event": "step",
+   "line": 43,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 43,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe50",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "70"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 38,
+   "event": "step",
+   "line": 41,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 41,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe50",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "90"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 39,
+   "event": "step",
+   "line": 43,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 43,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe50",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      },
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "90"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 40,
+   "event": "step",
+   "line": 41,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 41,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe50",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      },
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "100"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 41,
+   "event": "step",
+   "line": 45,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 45,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "100"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 42,
+   "event": "step",
+   "line": 47,
+   "func": "sum",
+   "stack": [
+    {
+     "id": "sum@2",
+     "func": "sum",
+     "line": 47,
+     "depth": 2,
+     "args": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe70",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ],
+     "locals": [
+      {
+       "name": "total",
+       "value": {
+        "type": "int",
+        "addr": "0x5ffe5c",
+        "size": 4,
+        "kind": "prim",
+        "repr": "100"
+       }
+      }
+     ]
+    },
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 63,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 43,
+   "event": "step",
+   "line": 67,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 67,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 11,
+   "returns": [
+    {
+     "func": "sum",
+     "value": {
+      "type": "int",
+      "kind": "prim",
+      "repr": "100"
+     }
+    }
+   ]
+  },
+  {
+   "step": 44,
+   "event": "step",
+   "line": 69,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 69,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 69,
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 11
+  },
+  {
+   "step": 45,
+   "event": "step",
+   "line": 71,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 71,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 11
+  },
+  {
+   "step": 46,
+   "event": "step",
+   "line": 73,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 73,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25,
+     "seq": 3,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cf1f0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cf1f0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "40"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cf1f8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefe0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [],
+   "stdout_len": 11
+  },
+  {
+   "step": 47,
+   "event": "step",
+   "line": 67,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 67,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 48,
+   "event": "step",
+   "line": 69,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 69,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cf1f0"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 49,
+   "event": "step",
+   "line": 71,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 71,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 50,
+   "event": "step",
+   "line": 73,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 73,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25,
+     "seq": 2,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefe0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefe0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "30"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefe8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7cefa0"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 51,
+   "event": "step",
+   "line": 67,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 67,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 52,
+   "event": "step",
+   "line": 69,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 69,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefe0"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 53,
+   "event": "step",
+   "line": 71,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 71,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "struct Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 54,
+   "event": "step",
+   "line": 73,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 73,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25,
+     "seq": 1,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7cefa0",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7cefa0",
+         "size": 4,
+         "kind": "prim",
+         "repr": "20"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7cefa8",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x7c8700"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 55,
+   "event": "step",
+   "line": 67,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 67,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 56,
+   "event": "step",
+   "line": 69,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 69,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7cefa0"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 57,
+   "event": "step",
+   "line": 71,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 71,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 58,
+   "event": "step",
+   "line": 73,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 73,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "doomed",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffe98",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x7c8700"
+       }
+      },
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25,
+     "seq": 0,
+     "kind": "malloc",
+     "value": {
+      "type": "Node",
+      "addr": "0x7c8700",
+      "size": 16,
+      "kind": "struct",
+      "fields": [
+       {
+        "name": "value",
+        "value": {
+         "type": "int",
+         "addr": "0x7c8700",
+         "size": 4,
+         "kind": "prim",
+         "repr": "10"
+        }
+       },
+       {
+        "name": "next",
+        "value": {
+         "type": "struct Node *",
+         "addr": "0x7c8708",
+         "size": 8,
+         "kind": "ptr",
+         "target": "0x0",
+         "repr": "NULL"
+        }
+       }
+      ]
+     },
+     "elem_type": "struct Node",
+     "count": 1,
+     "typed": true
+    }
+   ],
+   "freed": [
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 59,
+   "event": "step",
+   "line": 67,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 67,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 60,
+   "event": "step",
+   "line": 81,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 81,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 11
+  },
+  {
+   "step": 61,
+   "event": "step",
+   "line": 83,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 83,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 25
+  },
+  {
+   "step": 62,
+   "event": "step",
+   "line": 85,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 85,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "head",
+       "value": {
+        "type": "Node *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [
+    {
+     "addr": "0x7c8700",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefa0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cefe0",
+     "size": 16,
+     "line": 25
+    },
+    {
+     "addr": "0x7cf1f0",
+     "size": 16,
+     "line": 25
+    }
+   ],
+   "stdout_len": 25
+  }
+ ],
+ "status": "ok",
+ "exit_code": 0,
+ "heap_baseline": 0,
+ "stdout": "sum = 100\nlist emptied\n",
+ "warnings": [],
+ "leaks": [],
+ "source": "/* Building a linked list, then tearing it down.\r\n   Each malloc appears as a heap block; each `next` is an arrow. After free()\r\n   the block disappears and any pointer still aimed at it turns red. */\r\n#include <stdio.h>\r\n#include <stdlib.h>\r\n\r\ntypedef struct Node {\r\n    int          value;\r\n    struct Node *next;\r\n} Node;\r\n\r\nNode *push_front(Node *head, int value) {\r\n    Node *n = malloc(sizeof(Node));\r\n    n->value = value;\r\n    n->next  = head;\r\n    return n;\r\n}\r\n\r\nint sum(Node *head) {\r\n    int total = 0;\r\n    for (Node *p = head; p != NULL; p = p->next)\r\n        total += p->value;\r\n    return total;\r\n}\r\n\r\nint main(void) {\r\n    Node *head = NULL;\r\n\r\n    for (int i = 1; i <= 4; i++)\r\n        head = push_front(head, i * 10);\r\n\r\n    printf(\"sum = %d\\n\", sum(head));\r\n\r\n    while (head != NULL) {\r\n        Node *doomed = head;\r\n        head = head->next;\r\n        free(doomed);\r\n        /* `doomed` is now dangling -- it still points at freed memory */\r\n    }\r\n\r\n    printf(\"list emptied\\n\");\r\n    return 0;\r\n}\r\n",
+ "stdin": ""
+}

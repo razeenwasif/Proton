@@ -1,0 +1,108 @@
+{
+ "language": "c",
+ "steps": [
+  {
+   "step": 0,
+   "event": "step",
+   "line": 2,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 2,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "kind": "uninit",
+        "decl_line": 2,
+        "type": "int *",
+        "addr": "0x5ffea8",
+        "size": 8
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 1,
+   "event": "step",
+   "line": 3,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 3,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "int *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 2,
+   "event": "signal",
+   "line": 3,
+   "func": "main",
+   "stack": [
+    {
+     "id": "main@1",
+     "func": "main",
+     "line": 3,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "p",
+       "value": {
+        "type": "int *",
+        "addr": "0x5ffea8",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x0",
+        "repr": "NULL"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [],
+   "stdout_len": 0
+  }
+ ],
+ "status": "runtime_error",
+ "error": "SIGSEGV: segmentation fault -- dereferenced a bad or NULL pointer",
+ "heap_baseline": 0,
+ "stdout": "",
+ "warnings": [],
+ "leaks": [],
+ "source": "#include <stdio.h>\nint main(void){int *p=0;\n*p=1;\nreturn 0;}\n",
+ "stdin": ""
+}

@@ -2567,6 +2567,7 @@ dependencies = [
  "proton-lsp",
  "proton-syntax",
  "proton-text",
+ "proton-trace",
  "serde",
  "serde_json",
  "ts-rs",
@@ -2626,6 +2627,15 @@ dependencies = [
  "ropey",
  "serde",
  "ts-rs",
+]
+
+[[package]]
+name = "proton-trace"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ureq",
 ]
 
 [[package]]

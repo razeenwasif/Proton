@@ -14,6 +14,7 @@ use crate::key::Key;
 use crate::lsp::{Completion, Diagnostic, ServerStatus};
 use crate::mode::ModeId;
 use crate::picker::{PickerItem, PickerKind};
+use crate::trace::{StepView, TraceState};
 use crate::vim::VimMode;
 use proton_syntax::Span;
 
@@ -74,6 +75,19 @@ pub enum Command {
     /// its own; something outside has to ask. That is the whole cost of
     /// keeping `apply` total, and it is a good trade.
     Poll,
+    /* ── the visualizer ───────────────────────────────────────────── */
+    /// Trace the active buffer — `␣ct`.
+    Trace,
+    /// Move to a step. The pane scrubs, so this is absolute rather than a
+    /// delta: dragging a slider should not depend on how many events arrived.
+    TraceSeek {
+        step: usize,
+    },
+    /// Step by a delta, for the arrow keys.
+    TraceStep {
+        by: i64,
+    },
+
     /* ── the agent ────────────────────────────────────────────────── */
     /// Put a question to the agent.
     Ask {
@@ -230,6 +244,22 @@ pub enum Event {
         /// Served from cache. Surfaced because a silently invalidated prefix
         /// is a cost regression rather than an error, and nothing else shows it.
         cached_tokens: u64,
+    },
+    /// The Visualizer pane.
+    ///
+    /// Carries **one step**, not the trace. A sixty-step run is 178 KB of
+    /// JSON and a long one is megabytes, none of which is on screen at once —
+    /// the same discipline the viewport uses for text.
+    #[serde(rename_all = "camelCase")]
+    Trace {
+        state: TraceState,
+        /// What was traced, for the header.
+        subject: String,
+        /// Step count, an error, or what it is doing.
+        message: String,
+        step: usize,
+        steps: usize,
+        view: Option<StepView>,
     },
     /// Full state, in reply to [`Command::Sync`].
     #[serde(rename_all = "camelCase")]

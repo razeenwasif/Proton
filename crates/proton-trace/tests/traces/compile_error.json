@@ -1,0 +1,8 @@
+{
+ "language": "c",
+ "status": "compile_error",
+ "diagnostics": [],
+ "error": "main.c: In function 'main':\nmain.c:1:25: error: 'notdefined' undeclared (first use in this function)\n    1 | int main(void) { return notdefined; }\n      |                         ^~~~~~~~~~\nmain.c:1:25: note: each undeclared identifier is reported only once for each function it appears in\n",
+ "steps": [],
+ "stdout": ""
+}

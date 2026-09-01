@@ -1,0 +1,1689 @@
+{
+ "language": "python",
+ "status": "ok",
+ "steps": [
+  {
+   "step": 0,
+   "event": "step",
+   "line": 1,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 1,
+     "depth": 1,
+     "args": [],
+     "locals": []
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 1,
+   "event": "step",
+   "line": 19,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 19,
+     "depth": 1,
+     "args": [],
+     "locals": []
+    }
+   ],
+   "globals": [],
+   "heap": [],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 2,
+   "event": "step",
+   "line": 21,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 21,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 3,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 3,
+   "event": "step",
+   "line": 23,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 23,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 3,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 4,
+   "event": "step",
+   "line": 27,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 27,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000050",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 5,
+   "event": "step",
+   "line": 29,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 29,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "c",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000060",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59dcacc0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000050",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59dcacc0",
+     "size": 88,
+     "line": 27,
+     "seq": 1,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59dcacc0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000070",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000080",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000090",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000a0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 6,
+   "event": "step",
+   "line": 33,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 33,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "c",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000060",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59dcacc0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000050",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59dcacc0",
+     "size": 120,
+     "line": 27,
+     "seq": 1,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59dcacc0",
+      "type": "list",
+      "kind": "array",
+      "count": 5,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000070",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000080",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000090",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000a0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000b0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "5"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 7,
+   "event": "step",
+   "line": 35,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 35,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "c",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000060",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59dcacc0"
+       }
+      },
+      {
+       "name": "d",
+       "value": {
+        "type": "list",
+        "addr": "0x20000000c0",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000050",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59dcacc0",
+     "size": 120,
+     "line": 27,
+     "seq": 1,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59dcacc0",
+      "type": "list",
+      "kind": "array",
+      "count": 5,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000070",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000080",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000090",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000a0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000b0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "5"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 8,
+   "event": "step",
+   "line": 39,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 39,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "c",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000060",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59dcacc0"
+       }
+      },
+      {
+       "name": "d",
+       "value": {
+        "type": "list",
+        "addr": "0x20000000c0",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59e03800"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000050",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59dcacc0",
+     "size": 120,
+     "line": 27,
+     "seq": 1,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59dcacc0",
+      "type": "list",
+      "kind": "array",
+      "count": 5,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000070",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000080",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000090",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000a0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000b0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "5"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59e03800",
+     "size": 72,
+     "line": 35,
+     "seq": 2,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59e03800",
+      "type": "list",
+      "kind": "array",
+      "count": 2,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x20000000d0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000e0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 0
+  },
+  {
+   "step": 9,
+   "event": "step",
+   "line": 41,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 41,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "c",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000060",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59dcacc0"
+       }
+      },
+      {
+       "name": "d",
+       "value": {
+        "type": "list",
+        "addr": "0x20000000c0",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59e03800"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000050",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59dcacc0",
+     "size": 120,
+     "line": 27,
+     "seq": 1,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59dcacc0",
+      "type": "list",
+      "kind": "array",
+      "count": 5,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000070",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000080",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000090",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000a0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000b0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "5"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59e03800",
+     "size": 72,
+     "line": 35,
+     "seq": 2,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59e03800",
+      "type": "list",
+      "kind": "array",
+      "count": 2,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x20000000d0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000e0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 18
+  },
+  {
+   "step": 10,
+   "event": "step",
+   "line": 43,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 43,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "c",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000060",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59dcacc0"
+       }
+      },
+      {
+       "name": "d",
+       "value": {
+        "type": "list",
+        "addr": "0x20000000c0",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59e03800"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000050",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59dcacc0",
+     "size": 120,
+     "line": 27,
+     "seq": 1,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59dcacc0",
+      "type": "list",
+      "kind": "array",
+      "count": 5,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000070",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000080",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000090",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000a0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000b0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "5"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59e03800",
+     "size": 72,
+     "line": 35,
+     "seq": 2,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59e03800",
+      "type": "list",
+      "kind": "array",
+      "count": 2,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x20000000d0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000e0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 36
+  },
+  {
+   "step": 11,
+   "event": "step",
+   "line": 45,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 45,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "c",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000060",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59dcacc0"
+       }
+      },
+      {
+       "name": "d",
+       "value": {
+        "type": "list",
+        "addr": "0x20000000c0",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59e03800"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000050",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59dcacc0",
+     "size": 120,
+     "line": 27,
+     "seq": 1,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59dcacc0",
+      "type": "list",
+      "kind": "array",
+      "count": 5,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000070",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000080",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000090",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000a0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000b0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "5"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59e03800",
+     "size": 72,
+     "line": 35,
+     "seq": 2,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59e03800",
+      "type": "list",
+      "kind": "array",
+      "count": 2,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x20000000d0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000e0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 57
+  },
+  {
+   "step": 12,
+   "event": "step",
+   "line": 47,
+   "func": "<module>",
+   "stack": [
+    {
+     "id": "<module>@1",
+     "func": "<module>",
+     "line": 47,
+     "depth": 1,
+     "args": [],
+     "locals": [
+      {
+       "name": "a",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000000",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "b",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000040",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa594a24c0"
+       }
+      },
+      {
+       "name": "c",
+       "value": {
+        "type": "list",
+        "addr": "0x2000000060",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59dcacc0"
+       }
+      },
+      {
+       "name": "d",
+       "value": {
+        "type": "list",
+        "addr": "0x20000000c0",
+        "size": 8,
+        "kind": "ptr",
+        "target": "0x1fa59e03800"
+       }
+      }
+     ]
+    }
+   ],
+   "globals": [],
+   "heap": [
+    {
+     "addr": "0x1fa594a24c0",
+     "size": 88,
+     "line": 19,
+     "seq": 0,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa594a24c0",
+      "type": "list",
+      "kind": "array",
+      "count": 4,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000010",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000020",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000030",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000050",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59dcacc0",
+     "size": 120,
+     "line": 27,
+     "seq": 1,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59dcacc0",
+      "type": "list",
+      "kind": "array",
+      "count": 5,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x2000000070",
+        "size": 8,
+        "kind": "prim",
+        "repr": "1"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000080",
+        "size": 8,
+        "kind": "prim",
+        "repr": "2"
+       },
+       {
+        "type": "int",
+        "addr": "0x2000000090",
+        "size": 8,
+        "kind": "prim",
+        "repr": "3"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000a0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "4"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000b0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "5"
+       }
+      ]
+     }
+    },
+    {
+     "addr": "0x1fa59e03800",
+     "size": 72,
+     "line": 35,
+     "seq": 2,
+     "kind": "list",
+     "elem_type": "list",
+     "typed": true,
+     "value": {
+      "addr": "0x1fa59e03800",
+      "type": "list",
+      "kind": "array",
+      "count": 2,
+      "elems": [
+       {
+        "type": "int",
+        "addr": "0x20000000d0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       },
+       {
+        "type": "int",
+        "addr": "0x20000000e0",
+        "size": 8,
+        "kind": "prim",
+        "repr": "9"
+       }
+      ]
+     }
+    }
+   ],
+   "freed": [],
+   "stdout_len": 69
+  }
+ ],
+ "exit_code": 0,
+ "stdout": "a = [1, 2, 3, 4]\nb = [1, 2, 3, 4]\nc = [1, 2, 3, 4, 5]\nd = [9, 9]\na is b: True  a is c: False\n",
+ "leaks": [],
+ "warnings": [],
+ "source": "\"\"\"Two names, one list.\r\n\r\nThe single most common Python surprise. `b = a` does not copy anything -- both\r\nnames point at the same object, so mutating through one is visible through the\r\nother. Watch the arrows: two variables, one heap object.\r\n\r\nRebinding is different from mutating, and the picture shows why.\r\n\"\"\"\r\n\r\na = [1, 2, 3]\r\nb = a               # same object -- two arrows, one list\r\nb.append(4)         # mutates what BOTH names see\r\n\r\nc = a[:]            # a slice copies -- a second object appears\r\nc.append(5)         # only c changes\r\n\r\nd = a\r\nd = [9, 9]          # rebinding d, not mutating: a is untouched\r\n\r\nprint(\"a =\", a)\r\nprint(\"b =\", b)\r\nprint(\"c =\", c)\r\nprint(\"d =\", d)\r\nprint(\"a is b:\", a is b, \" a is c:\", a is c)\r\n",
+ "stdin": ""
+}

@@ -18,6 +18,7 @@ use crate::key::Key;
 use crate::lsp::{self, Popup, Servers, Severity};
 use crate::mode::ModeId;
 use crate::picker::{Accepted, PickerKind, Pickers};
+use crate::trace::Visualizer;
 use crate::vim::{Outcome, Vim, VimMode};
 
 /// What the front end can currently show. The core keeps it so a buffer change
@@ -49,6 +50,7 @@ pub struct Workspace {
     highlights: Highlighters,
     popup: Popup,
     agent: Agent,
+    visualizer: Visualizer,
 }
 
 impl Workspace {
@@ -65,6 +67,7 @@ impl Workspace {
             pickers: Pickers::new(root),
             servers: Servers::new(root),
             agent: Agent::new(&root.display().to_string()),
+            visualizer: Visualizer::new(root),
             ..Default::default()
         }
     }
@@ -117,7 +120,17 @@ impl Workspace {
                     self.diagnostics_event(),
                     self.servers_event(),
                     self.agent_event(),
+                    self.trace_event(),
                 ]
+            }
+
+            Command::Trace => self.trace_buffer(),
+
+            Command::TraceSeek { step } => self.trace_seek(step),
+
+            Command::TraceStep { by } => {
+                let to = (self.visualizer.step_index() as i64 + by).max(0) as usize;
+                self.trace_seek(to)
             }
 
             Command::Ask { text } => self.ask(&text),
@@ -439,6 +452,13 @@ impl Workspace {
         // own to notice them with.
         if self.agent.is_busy() {
             events.extend(self.poll_agent());
+        }
+
+        // A trace is seconds of compiling and stepping, so it arrives the same
+        // way a language server reply does.
+        if self.visualizer.poll() {
+            events.push(self.trace_event());
+            events.extend(self.follow_trace());
         }
 
         let messages = self.servers.poll();
@@ -807,6 +827,71 @@ impl Workspace {
         }
     }
 
+    /* ── the visualizer ───────────────────────────────────────────── */
+
+    /// Trace the active buffer.
+    fn trace_buffer(&mut self) -> Vec<Event> {
+        let buffer = self.editor.buffer();
+        let Some(path) = buffer.path().map(Path::to_path_buf) else {
+            return vec![notice(
+                "save the file before tracing it".into(),
+                NoticeLevel::Warn,
+            )];
+        };
+        // The buffer's text, not the file's: tracing what is on disk while the
+        // editor shows something else is the kind of wrong that wastes an hour.
+        let source = buffer.contents();
+
+        match self.visualizer.trace(&path, &source) {
+            Ok(()) => vec![self.trace_event()],
+            // Not an error in the code — a missing toolchain or an
+            // unsupported language is something the user has to go and fix,
+            // and the tracer's own reason is better than anything we'd invent.
+            Err(why) => vec![notice(why, NoticeLevel::Warn)],
+        }
+    }
+
+    /// Move to a step, and take the editor's cursor with it.
+    fn trace_seek(&mut self, to: usize) -> Vec<Event> {
+        if !self.visualizer.seek(to) {
+            return Vec::new();
+        }
+        let mut events = vec![self.trace_event()];
+        events.extend(self.follow_trace());
+        events
+    }
+
+    /// Put the cursor on the line the current step is about to run.
+    ///
+    /// This is the half that makes it part of the editor rather than a panel
+    /// beside it: scrubbing the trace moves the buffer, so the code and the
+    /// memory are never describing different moments.
+    fn follow_trace(&mut self) -> Vec<Event> {
+        let Some(line) = self.visualizer.current_line() else {
+            return Vec::new();
+        };
+        // Trace lines are 1-based, as every compiler and every gutter says.
+        let line = (line.saturating_sub(1)) as usize;
+        let buffer = self.editor.buffer_mut();
+        if line >= buffer.len_lines() {
+            return Vec::new();
+        }
+        let at = buffer.offset_of(proton_text::Position { line, column: 0 });
+        buffer.cursor = buffer.clamp(buffer.cursor.moved_to(at));
+        self.after_action(false)
+    }
+
+    fn trace_event(&self) -> Event {
+        Event::Trace {
+            state: self.visualizer.state(),
+            subject: self.visualizer.subject().to_string(),
+            message: self.visualizer.message().to_string(),
+            step: self.visualizer.step_index(),
+            steps: self.visualizer.steps(),
+            view: self.visualizer.view(),
+        }
+    }
+
     /* ── plumbing ─────────────────────────────────────────────────── */
 
     fn set_mode(&mut self, mode: ModeId) -> Vec<Event> {
@@ -898,6 +983,15 @@ impl Workspace {
                 self.open_picker(PickerKind::for_leader(&prefix).unwrap()),
                 false,
             ),
+            // `␣ct` traces the buffer. Upstream binds Space to play/pause and
+            // the arrows to stepping; Proton's leader *is* Space, so the
+            // pane's own keys stay scoped to the pane and the verbs that
+            // belong to the editor live under the leader like everything else.
+            Outcome::Leader(prefix) if prefix == "ct" => {
+                let mut events = vec![Event::Leader { prefix: None }];
+                events.extend(self.trace_buffer());
+                (events, false)
+            }
             Outcome::Leader(prefix) => (
                 vec![Event::Leader {
                     prefix: Some(prefix),

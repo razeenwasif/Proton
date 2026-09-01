@@ -14,6 +14,7 @@ pub mod key;
 pub mod lsp;
 pub mod mode;
 pub mod picker;
+pub mod trace;
 pub mod vim;
 pub mod workspace;
 
@@ -28,5 +29,6 @@ pub use mode::ModeId;
 pub use picker::{Picker, PickerItem, PickerKind};
 pub use proton_syntax::{Scope, Span};
 pub use proton_text::{Buffer, Cursor, Edit, Position, Range};
+pub use trace::{StepView, TraceState, Visualizer};
 pub use vim::{Outcome, Vim, VimMode};
 pub use workspace::Workspace;

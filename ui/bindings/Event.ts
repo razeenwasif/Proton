@@ -12,6 +12,8 @@ import type { PickerKind } from "./PickerKind";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
 import type { Span } from "./Span";
+import type { StepView } from "./StepView";
+import type { TraceState } from "./TraceState";
 import type { VimMode } from "./VimMode";
 
 export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "type": "pending", keys: string, } | { "type": "leader", prefix: string | null, } | { "type": "cmdline", text: string | null, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "viewport", firstLine: number, lines: Array<string>, totalLines: number, version: bigint, 
@@ -40,4 +42,12 @@ scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: st
  * Served from cache. Surfaced because a silently invalidated prefix
  * is a cost regression rather than an error, and nothing else shows it.
  */
-cachedTokens: bigint, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, };
+cachedTokens: bigint, } | { "type": "trace", state: TraceState, 
+/**
+ * What was traced, for the header.
+ */
+subject: string, 
+/**
+ * Step count, an error, or what it is doing.
+ */
+message: string, step: number, steps: number, view: StepView | null, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, };
