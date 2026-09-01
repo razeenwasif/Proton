@@ -1133,3 +1133,49 @@ table.df tr:hover td { background: var(--e1); }
 .thought p { margin: 6px 0; }
 
 #sl-agent .cached { color: var(--ok); }
+
+/* ── the Visualizer ───────────────────────────────────────────────── */
+
+/* Program output, accumulating. The format carries a byte offset per step
+   rather than a copy of the text, so this is a prefix of the whole run —
+   which is what makes "what had it printed by here" cost nothing. */
+.cv-out {
+  flex: 0 0 auto;
+  max-height: 84px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 14px;
+  border-top: 1px solid var(--edge);
+  font: 11.5px/1.6 var(--mono);
+  color: var(--ink-3);
+  white-space: pre-wrap;
+}
+.cv-out:empty { display: none; }
+
+/* The scrubber is a real range input: dragging it is how you read a trace,
+   and a div pretending to be one cannot be dragged with a keyboard. */
+.cv-scrub input.bar {
+  flex: 1;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--e2);
+  cursor: pointer;
+}
+.cv-scrub input.bar::-webkit-slider-thumb {
+  appearance: none;
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: grab;
+}
+.cv-scrub input.bar:disabled { opacity: .4; cursor: default; }
+.cv-scrub span[data-trace-nudge] { cursor: pointer; }
+
+/* A block whose memory is gone. Still drawn — the arrow into it is the bug,
+   and removing the box removes the evidence. */
+.block.freed {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--err) 55%, transparent);
+  opacity: .75;
+}

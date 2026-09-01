@@ -1,0 +1,138 @@
+{
+  "type": "trace",
+  "state": "ready",
+  "subject": "trajectory.c",
+  "message": "27 steps",
+  "step": 22,
+  "steps": 27,
+  "view": {
+    "index": 22,
+    "line": 21,
+    "func": "main",
+    "signal": false,
+    "frames": [
+      {
+        "id": "main@1",
+        "func": "main",
+        "line": 21,
+        "depth": 1,
+        "slots": [
+          {
+            "id": "main@1:head",
+            "name": "head",
+            "typeName": "Fix *",
+            "repr": "0x739810",
+            "addr": "0x5ffea8",
+            "pointsTo": "0x739810",
+            "children": []
+          },
+          {
+            "id": "main@1:mid",
+            "name": "mid",
+            "typeName": "Fix *",
+            "repr": "0x742730",
+            "addr": "0x5ffea0",
+            "pointsTo": "0x742730",
+            "children": []
+          },
+          {
+            "id": "main@1:tail",
+            "name": "tail",
+            "typeName": "Fix *",
+            "repr": "0x742770",
+            "addr": "0x5ffe98",
+            "pointsTo": "0x742770",
+            "children": []
+          }
+        ]
+      }
+    ],
+    "globals": [],
+    "heap": [
+      {
+        "id": "heap:0x739810",
+        "addr": "0x739810",
+        "size": 16,
+        "line": 8,
+        "typeName": "struct Fix",
+        "slots": [
+          {
+            "id": "heap:0x739810.alt",
+            "name": "alt",
+            "typeName": "int",
+            "repr": "420",
+            "addr": "0x739810",
+            "pointsTo": null,
+            "children": []
+          },
+          {
+            "id": "heap:0x739810.next",
+            "name": "next",
+            "typeName": "struct Fix *",
+            "repr": "0x742730",
+            "addr": "0x739818",
+            "pointsTo": "0x742730",
+            "children": []
+          }
+        ],
+        "freed": false
+      },
+      {
+        "id": "heap:0x742730",
+        "addr": "0x742730",
+        "size": 16,
+        "line": 8,
+        "typeName": "struct Fix",
+        "slots": [
+          {
+            "id": "heap:0x742730.alt",
+            "name": "alt",
+            "typeName": "int",
+            "repr": "415",
+            "addr": "0x742730",
+            "pointsTo": null,
+            "children": []
+          },
+          {
+            "id": "heap:0x742730.next",
+            "name": "next",
+            "typeName": "struct Fix *",
+            "repr": "0x742770",
+            "addr": "0x742738",
+            "pointsTo": "0x742770",
+            "children": []
+          }
+        ],
+        "freed": false
+      }
+    ],
+    "edges": [
+      {
+        "from": "main@1:head",
+        "to": "heap:0x739810",
+        "kind": "points"
+      },
+      {
+        "from": "main@1:mid",
+        "to": "heap:0x742730",
+        "kind": "points"
+      },
+      {
+        "from": "main@1:tail",
+        "to": "0x742770",
+        "kind": "dangling"
+      },
+      {
+        "from": "heap:0x739810.next",
+        "to": "heap:0x742730",
+        "kind": "points"
+      },
+      {
+        "from": "heap:0x742730.next",
+        "to": "0x742770",
+        "kind": "dangling"
+      }
+    ],
+    "stdout": ""
+  }
+}

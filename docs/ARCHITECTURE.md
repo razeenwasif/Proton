@@ -1,14 +1,15 @@
 # Proton — architecture
 
-The build document. **M0 through M2 are implemented and M3 is half-built**;
-everything from M4 on is a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
+The build document. **M0 through M2 and M4 are implemented, and M3 is
+half-built**; everything from M5 on is a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
 reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 **what we build and in what order**, and is the one to argue with before writing
 code.
 
 ```bash
-cargo test --workspace        # 228 tests, headless
-cargo test --workspace -- --include-ignored   # plus 4 that drive a real rust-analyzer
+cargo test --workspace        # 252 tests, headless
+cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
+git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
 node ui/serve.mjs             # the front end alone, in a browser
 ```
@@ -66,14 +67,14 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-vcs` | Status, gutter, blame, staging, the shadow worktree | `gix` |
 | `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
 | `proton-agent` | Messages API client, SSE streaming, request building, auth | `ureq` |
-| `proton-trace` | Code Visualizer client + process supervision | `tokio` |
+| `proton-trace` | Code Visualizer client: trace format, pointer resolution, sidecar | `ureq` |
 | `proton-plugin` | Wasmtime host, WIT interfaces, capability grants | `wasmtime`, `wit-bindgen` |
 | `proton-core` | Workspace state, mode registry, command/event bus, config | all of the above |
 | `proton-shell` | Window, webview, IPC bridge, system backdrop, packaging | `tauri` v2, `window-vibrancy` |
 | `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
 
 **Built so far: `proton-text`, `proton-index`, `proton-syntax`, `proton-lsp`,
-`proton-agent`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
+`proton-agent`, `proton-trace`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
 into. `proton-vim` has not split out of `proton-core` yet — the modal engine is
 one file there and would gain nothing but a manifest from moving today.
 
@@ -530,10 +531,49 @@ first two — a staged diff held against the buffer is enough to review and
 apply, and a real git worktree earns its place later, when proposed changes
 need to be run against tests before they are accepted.
 
-**M4 — Code Visualizer.** Sidecar, then the native pane. First real proof of the
-"second consumer of a document format" pattern every later mode needs — and the
-toolchain is already working on this machine, so it is cheap.
-*Exit: `␣ct` traces `trajectory.c` and the dangling read is visible at step 212.*
+**M4 — Code Visualizer. ✅ done.** `proton-trace` is the second consumer of
+upstream's trace format. Nothing forks or patches it: the checkout is a
+submodule pinned to a commit, and Proton uses the extension point the project
+was built around.
+
+The sidecar came first, and was worth it for the reason the integration notes
+predicted — it is where the process supervision, the port handshake and the
+toolchain detection got proven. Two things there are in no document and were
+found by running it. **Python buffers stdout when it is not a terminal**, so
+without `-u` the readiness line sits in a buffer and the handshake waits
+forever. And **on Windows the toolchain is not on `PATH`**: the `python` there
+is the Microsoft Store stub, and the real one is in MSYS2 — which is also where
+the `gcc` and Python-enabled `gdb` the backends need live — so the child is
+handed a `PATH` with MSYS2 in front rather than asked to find it.
+
+**A pointer is an edge, never an inline expansion**, and that rule has two
+halves. Exact address match first, then the *smallest range containing it*, so
+`&node->next` lands on the field and `&arr[2]` on the cell. Resolving only
+exact matches leaves half the arrows in a real program dangling; resolving to
+the largest container aims every arrow at the same box. The resolution lives in
+Rust where it is tested, and the pane draws the edge list it is handed rather
+than re-resolving addresses in the DOM.
+
+Tested against traces captured from the real tracer rather than hand-written
+ones, because a hand-written fixture only tests what you already believed the
+format was. The linked-list fixture carries 287 pointers across 63 steps: 202
+resolve, 70 are null, 3 dangle and 8 point outside what is drawn.
+
+The pane gets **one step**, not the trace — the same discipline the viewport
+uses for text. Scrubbing moves the editor's cursor to the line the step is
+about to run, which is what makes this part of the editor rather than a panel
+beside it.
+
+*Exit: met.* `crates/proton-core/tests/visualizer.rs` presses `␣ct` on a buffer
+with a read-after-free and finds the dangling edge, through the seam the shell
+uses. A dangling pointer draws as a stub ending in a cross rather than as no
+arrow at all: an absent arrow reads as a pointer nobody followed, which deletes
+exactly the evidence the tool exists to show.
+
+Still open, and the shape of the rest: the trace as an agent tool (`@trace` as
+a context scope), `[` and `]` to jump between changes to one value, gutter
+marks on traced lines, and writing traces to `.proton/traces/` so `␣ft` finds
+them.
 
 **M5 — Plugins.** Wasmtime host, WIT interfaces, epoch interruption, wasm
 grammars, themes.

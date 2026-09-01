@@ -75,6 +75,18 @@ if (HAS_SHELL) {
       state.mode = command.mode;
       return [{ type: "modeChanged", mode: state.mode }];
     }
+    // A real traced step, dumped from the core by
+    // `crates/proton-core/tests/dump_step.rs`. Real rather than invented,
+    // because invented data is exactly what hides a rendering bug.
+    if (command.type === "trace" || command.type === "traceSeek" || command.type === "traceStep") {
+      try {
+        const step = await fetch("/fixtures/trace-step.json").then((r) => r.json());
+        return [step];
+      } catch {
+        return [{ type: "notice", text: "no trace fixture — run the dump test", level: "warn" }];
+      }
+    }
+
     // A canned agent turn, so the design preview can be designed against.
     // Deliberately scripted: the real conversation lives in proton-core and
     // this must never grow into a second one.

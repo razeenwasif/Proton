@@ -99,6 +99,12 @@ impl Workspace {
         &self.pickers
     }
 
+    /// How many steps the loaded trace has. For the statusline and for
+    /// anything driving the scrubber.
+    pub fn visualizer_steps(&self) -> usize {
+        self.visualizer.steps()
+    }
+
     pub fn servers(&self) -> &Servers {
         &self.servers
     }

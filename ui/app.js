@@ -929,6 +929,10 @@ onEvent((event) => {
       renderAgent(event);
       break;
 
+    case "trace":
+      renderTrace(event);
+      break;
+
     case "notice":
       renderStatus(event.text);
       break;
@@ -1023,9 +1027,62 @@ function drawPointerEdges() {
   [...svg.querySelectorAll("path")].forEach((p) => p.remove());
   const origin = canvas.getBoundingClientRect();
 
-  $$("[data-ptr]", canvas).forEach((slot) => {
-    const target = $(`[data-addr="${slot.dataset.ptr}"]`, canvas);
-    if (!target) return;
+  /* Where the arrows come from.
+   *
+   * A live trace supplies them already resolved: the core matched each
+   * pointer's target address to an object — exact first, then the smallest
+   * range containing it — and that rule is the whole design of the format,
+   * so it is not re-implemented here. The static mock has no edge list, and
+   * falls back to matching `data-ptr` against `data-addr`. */
+  const pairs = trace.view
+    ? trace.view.edges
+        .filter((edge) => edge.kind === "points" || edge.kind === "dangling")
+        .map((edge) => ({
+          slot: $(`[data-node="${CSS.escape(edge.from)}"]`, canvas),
+          target: $(`[data-node="${CSS.escape(edge.to)}"]`, canvas),
+          dangling: edge.kind === "dangling",
+        }))
+    : $$("[data-ptr]", canvas).map((slot) => ({
+        slot,
+        target: $(`[data-addr="${slot.dataset.ptr}"]`, canvas),
+        dangling: slot.classList.contains("dangling"),
+      }));
+
+  pairs.forEach(({ slot, target, dangling }) => {
+    if (!slot) return;
+
+    /* A pointer into freed memory has nothing drawn at the other end —
+     * that is the whole fact. Skipping it would delete the evidence: the
+     * arrow simply would not be there, and an arrow that is not there
+     * looks like a pointer that was never followed rather than one that
+     * points at memory which is gone. So it gets a stub that visibly
+     * stops in open space. */
+    if (!target) {
+      if (!dangling) return;
+      const a = slot.getBoundingClientRect();
+      const dx = canvas.scrollLeft - origin.left;
+      const dy = canvas.scrollTop - origin.top;
+      const x1 = a.right + dx;
+      const y1 = a.top + a.height / 2 + dy;
+
+      const stub = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      stub.setAttribute("d", `M${x1} ${y1} L${x1 + 34} ${y1}`);
+      stub.setAttribute("fill", "none");
+      stub.setAttribute("stroke", token("--err"));
+      stub.setAttribute("stroke-width", "1.6");
+      stub.setAttribute("stroke-dasharray", "4 3");
+      svg.appendChild(stub);
+
+      // A cross where the object would have been.
+      const gone = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      gone.setAttribute("d", `M${x1 + 38} ${y1 - 4} l8 8 M${x1 + 46} ${y1 - 4} l-8 8`);
+      gone.setAttribute("fill", "none");
+      gone.setAttribute("stroke", token("--err"));
+      gone.setAttribute("stroke-width", "1.6");
+      gone.setAttribute("stroke-linecap", "round");
+      svg.appendChild(gone);
+      return;
+    }
 
     const a = slot.getBoundingClientRect();
     const b = target.getBoundingClientRect();
@@ -1051,7 +1108,6 @@ function drawPointerEdges() {
       d = `M${x1} ${y1} C ${x1 + bend} ${y1}, ${xTo - bend} ${yTo}, ${xTo} ${yTo}`;
     }
 
-    const dangling = slot.classList.contains("dangling");
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
     path.setAttribute("fill", "none");
@@ -1291,3 +1347,133 @@ $("[data-agent-input]")?.addEventListener("keydown", (e) => {
     askAgent();
   }
 });
+
+/* ── the Visualizer ───────────────────────────────────────────────────
+   The core owns the trace and does the pointer resolution — exact match
+   first, then the smallest containing range — because that rule is the
+   whole design of the format and it is tested in Rust. The pane draws
+   what it is told and re-resolves nothing. */
+
+const trace = { view: null, step: 0, steps: 0, state: "empty" };
+
+/** One value row. Pointers carry the resolved edge id, not an address. */
+function slotHtml(slot, depth = 0) {
+  const pad = depth ? ` style="padding-left:${10 + depth * 9}px"` : "";
+  const value = slot.pointsTo
+    ? `<span class="vl ptr">${escapeHtml(slot.repr)}</span>`
+    : `<span class="vl">${escapeHtml(slot.repr)}</span>`;
+  const row =
+    `<div class="slot" data-node="${escapeHtml(slot.id)}"${pad}>` +
+    `<span class="nm">${escapeHtml(slot.name)}</span>${slot.repr ? value : ""}</div>`;
+  return row + slot.children.map((c) => slotHtml(c, depth + 1)).join("");
+}
+
+function frameHtml(frame) {
+  return (
+    `<div class="frame" data-node="${escapeHtml(frame.id)}">` +
+    `<div class="fh">${escapeHtml(frame.func)}<span class="dim" style="margin-left:auto">` +
+    `L${frame.line}</span></div>` +
+    frame.slots.map((s) => slotHtml(s)).join("") +
+    `</div>`
+  );
+}
+
+function blockHtml(block) {
+  const freed = block.freed ? " freed" : "";
+  const tag = block.freed
+    ? `<span class="chip" style="margin-left:6px;color:var(--err)">freed</span>`
+    : "";
+  return (
+    `<div class="block${freed}" data-node="${escapeHtml(block.id)}" ` +
+    `data-addr="${escapeHtml(block.addr)}">` +
+    `<div class="fh">${escapeHtml(block.addr)} · ${escapeHtml(block.typeName)}${tag}</div>` +
+    block.slots.map((s) => slotHtml(s)).join("") +
+    `</div>`
+  );
+}
+
+function renderTrace(event) {
+  Object.assign(trace, {
+    view: event.view,
+    step: event.step,
+    steps: event.steps,
+    state: event.state,
+  });
+
+  const subject = $("[data-trace-subject]");
+  if (subject) subject.textContent = event.subject || "no trace";
+  const status = $("[data-trace-status]");
+  if (status) {
+    status.textContent = event.message;
+    status.className = "chip" + (event.state === "failed" ? " warn" : "");
+  }
+
+  const scrub = $("[data-trace-scrub]");
+  if (scrub) {
+    scrub.max = String(Math.max(0, event.steps - 1));
+    scrub.value = String(event.step);
+    scrub.disabled = event.steps === 0;
+  }
+  const counter = $("[data-trace-step]");
+  if (counter) {
+    counter.textContent = event.steps ? `${event.step + 1} / ${event.steps}` : "—";
+  }
+
+  const stack = $("[data-trace-stack]");
+  const heap = $("[data-trace-heap]");
+  const out = $("[data-trace-stdout]");
+  if (!stack || !heap) return;
+
+  const view = event.view;
+  if (!view) {
+    stack.innerHTML = "";
+    heap.innerHTML = "";
+    if (out) out.textContent = "";
+    drawPointerEdges();
+    return;
+  }
+
+  // Innermost frame first is how the format sends it, and how a call stack
+  // reads — the frame you are in belongs at the top.
+  stack.innerHTML =
+    `<div class="mem-h">Stack</div>` +
+    view.frames.map(frameHtml).join("") +
+    (view.globals.length
+      ? `<div class="frame"><div class="fh">globals</div>` +
+        view.globals.map((s) => slotHtml(s)).join("") +
+        `</div>`
+      : "");
+
+  heap.innerHTML =
+    `<div class="mem-h">Heap</div>` +
+    (view.heap.length ? view.heap.map(blockHtml).join("") : `<div class="dim">nothing allocated</div>`);
+
+  if (out) out.textContent = view.stdout;
+  drawPointerEdges();
+}
+
+document.addEventListener("input", (e) => {
+  const scrub = e.target.closest("[data-trace-scrub]");
+  if (scrub) dispatch({ type: "traceSeek", step: Number(scrub.value) });
+});
+
+document.addEventListener("click", (e) => {
+  const step = e.target.closest("[data-trace-nudge]");
+  if (step) dispatch({ type: "traceStep", by: Number(step.dataset.traceNudge) });
+});
+
+/* Stepping keys, scoped to the pane.
+ *
+ * Upstream binds the arrows globally and Space to play/pause. Proton cannot:
+ * the arrows are motions and Space is the leader. So they work when the
+ * Visualizer has focus and nowhere else, which is the resolution the
+ * integration notes settled on. */
+document.addEventListener("keydown", (e) => {
+  const canvas = $("#cv-canvas");
+  if (!canvas || !canvas.contains(document.activeElement)) return;
+  const by = { ArrowLeft: -1, ArrowRight: 1, "[": -1, "]": 1 }[e.key];
+  if (by === undefined) return;
+  e.preventDefault();
+  e.stopPropagation();
+  dispatch({ type: "traceStep", by: e.shiftKey ? by * 10 : by });
+}, true);

@@ -459,10 +459,10 @@
         <!-- Code Visualizer -->
         <div class="dock-panel" data-panel="visualizer" style="display:none;flex-direction:column;flex:1;min-height:0">
           <div class="canvas-bar">
-            <span class="chip accent">trajectory.c</span>
-            <span class="chip">gdb</span>
+            <span class="chip accent" data-trace-subject>no trace</span>
+            <span class="chip" data-trace-status>press ␣ct to trace this buffer</span>
             <div class="seg" style="margin-left:auto">
-              <button class="on">Memory</button><button>Structure</button><button>Calls</button><button>Layout</button>
+              <button class="on">Memory</button><button>Structure</button><button>Calls</button>
             </div>
           </div>
           <div class="cv-canvas" id="cv-canvas">
@@ -474,44 +474,20 @@
                   <path d="M0 0 L7 3.5 L0 7 z" fill="var(--err)"/></marker>
               </defs>
             </svg>
-            <div style="display:grid;grid-template-columns:88px 1fr;gap:46px;position:relative">
-              <div>
-                <div class="mem-h">Stack</div>
-                <div class="frame">
-                  <div class="fh">main</div>
-                  <div class="slot"><span class="nm">head</span><span class="vl ptr" data-ptr="0x5f2a10">0x5f2a10</span></div>
-                  <div class="slot flash"><span class="nm">n</span><span class="vl">3</span></div>
-                </div>
-                <div class="frame">
-                  <div class="fh">walk</div>
-                  <div class="slot"><span class="nm">cur</span><span class="vl ptr" data-ptr="0x5f2b40">0x5f2b40</span></div>
-                  <div class="slot"><span class="nm">i</span><span class="vl">2</span></div>
-                </div>
-              </div>
-              <div>
-                <div class="mem-h">Heap</div>
-                <div class="block" data-addr="0x5f2a10">
-                  <div class="fh">0x5f2a10 · Node</div>
-                  <div class="slot"><span class="nm">val</span><span class="vl">10</span></div>
-                  <div class="slot"><span class="nm">next</span><span class="vl ptr" data-ptr="0x5f2b40">0x5f2b40</span></div>
-                </div>
-                <div class="block fresh" data-addr="0x5f2b40">
-                  <div class="fh">0x5f2b40 · Node <span class="chip warn" style="margin-left:6px">new</span></div>
-                  <div class="slot"><span class="nm">val</span><span class="vl">20</span></div>
-                  <div class="slot"><span class="nm">next</span><span class="vl ptr dangling" data-ptr="0x5f2c70">0x5f2c70</span></div>
-                </div>
-                <div class="block freed" data-addr="0x5f2c70">
-                  <div class="fh">0x5f2c70 · freed <span class="chip" style="margin-left:6px;color:var(--err)">dangling</span></div>
-                  <div class="slot"><span class="nm">val</span><span class="vl" style="color:var(--err)">??</span></div>
-                </div>
-              </div>
+            <div style="display:grid;grid-template-columns:minmax(120px,auto) 1fr;gap:46px;position:relative">
+              <div data-trace-stack></div>
+              <div data-trace-heap></div>
             </div>
           </div>
+          <pre class="cv-out" data-trace-stdout aria-label="Program output"></pre>
           <div class="cv-scrub">
-            <span><svg class="i flip"><use href="#i-step"/></svg></span><span><svg class="i flip"><use href="#i-play"/></svg></span><span><svg class="i"><use href="#i-play"/></svg></span><span><svg class="i"><use href="#i-step"/></svg></span>
-            <div class="bar"><i></i><u></u></div>
-            <span>step 212 / 558</span>
-            <span class="chip accent">tracking&nbsp;<b>cur-&gt;next</b></span>
+            <span data-trace-nudge="-1000" title="First step"><svg class="i flip"><use href="#i-step"/></svg></span>
+            <span data-trace-nudge="-1" title="Back"><svg class="i flip"><use href="#i-play"/></svg></span>
+            <span data-trace-nudge="1" title="Forward"><svg class="i"><use href="#i-play"/></svg></span>
+            <span data-trace-nudge="1000" title="Last step"><svg class="i"><use href="#i-step"/></svg></span>
+            <input type="range" class="bar" min="0" max="0" value="0" data-trace-scrub
+                   aria-label="Trace step" disabled>
+            <span data-trace-step>—</span>
           </div>
         </div>
 
