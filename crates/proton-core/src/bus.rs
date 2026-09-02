@@ -57,6 +57,17 @@ pub enum Command {
         first_line: usize,
         lines: usize,
     },
+    /// Put the cursor somewhere outright — a click in the text.
+    ///
+    /// A motion cannot say this. `Perform { Move }` is always relative to where
+    /// the cursor already is, and a mouse knows exactly where it wants to be.
+    /// Clamped by the core, so the front end may send whatever its hit test
+    /// produced without checking it against a document it does not hold.
+    PlaceCursor {
+        line: usize,
+        column: usize,
+    },
+
     /// Open a folder in the tree, or close it if it was open.
     ToggleTreeNode {
         path: String,

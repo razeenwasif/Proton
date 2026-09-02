@@ -239,3 +239,132 @@ fn proton_can_open_its_own_source() {
     assert!(buf.contents().contains("pub struct Workspace"));
     assert_eq!(buf.name(), "workspace.rs");
 }
+
+/* ── moving without leaving insert mode ───────────────────────────────
+A modal editor that traps you at one position until you press Escape is
+not being stricter than vim — it is being broken. */
+
+#[test]
+fn the_arrows_move_in_insert_mode() {
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/tests/fixtures/indented.txt".into(),
+    });
+    type_keys(&mut ws, "i");
+    assert_eq!(ws.vim_mode(), proton_core::VimMode::Insert);
+
+    let start = ws.editor().buffer().cursor.offset;
+    ws.apply(Command::Key {
+        key: Key::named("ArrowDown"),
+    });
+    let moved = ws.editor().buffer().cursor.offset;
+    assert!(moved > start, "ArrowDown went nowhere: {start} -> {moved}");
+    assert_eq!(
+        ws.vim_mode(),
+        proton_core::VimMode::Insert,
+        "and it is still insert mode"
+    );
+
+    ws.apply(Command::Key {
+        key: Key::named("ArrowUp"),
+    });
+    assert_eq!(ws.editor().buffer().cursor.offset, start, "and back");
+
+    // Typing still types, which is the thing that must not have broken.
+    ws.apply(Command::Key {
+        key: Key::char('x'),
+    });
+    assert!(ws.editor().buffer().line(0).starts_with('x'));
+}
+
+#[test]
+fn home_and_end_work_in_insert_mode_too() {
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/tests/fixtures/indented.txt".into(),
+    });
+    type_keys(&mut ws, "i");
+
+    ws.apply(Command::Key {
+        key: Key::named("End"),
+    });
+    let at_end = ws
+        .editor()
+        .buffer()
+        .position(ws.editor().buffer().cursor.offset);
+    assert!(at_end.column > 0, "End went nowhere");
+
+    ws.apply(Command::Key {
+        key: Key::named("Home"),
+    });
+    let at_start = ws
+        .editor()
+        .buffer()
+        .position(ws.editor().buffer().cursor.offset);
+    assert_eq!(at_start.column, 0);
+}
+
+/* ── clicking ─────────────────────────────────────────────────────────
+A motion cannot express this: `Move` is always relative to where the
+cursor already is, and a mouse knows exactly where it wants to be. */
+
+#[test]
+fn a_click_puts_the_cursor_where_it_landed() {
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/tests/fixtures/indented.txt".into(),
+    });
+
+    // Line 0 is `  indented line`; line 2 is the trailing empty one.
+    ws.apply(Command::PlaceCursor { line: 0, column: 3 });
+    let at = ws
+        .editor()
+        .buffer()
+        .position(ws.editor().buffer().cursor.offset);
+    assert_eq!((at.line, at.column), (0, 3));
+}
+
+#[test]
+fn a_click_past_the_end_of_a_short_line_lands_on_the_line() {
+    // The ordinary case, not an error: the front end does not hold the
+    // document and cannot know how long the line is before it clicks.
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/tests/fixtures/indented.txt".into(),
+    });
+
+    ws.apply(Command::PlaceCursor {
+        line: 1,
+        column: 9999,
+    });
+    let at = ws
+        .editor()
+        .buffer()
+        .position(ws.editor().buffer().cursor.offset);
+    assert_eq!(at.line, 1, "still on the line that was clicked");
+
+    // And past the end of the file lands on the last line rather than panicking.
+    ws.apply(Command::PlaceCursor {
+        line: 9999,
+        column: 0,
+    });
+    let at = ws
+        .editor()
+        .buffer()
+        .position(ws.editor().buffer().cursor.offset);
+    assert!(at.line < ws.editor().buffer().len_lines());
+}
+
+#[test]
+fn a_click_reports_the_cursor_so_the_view_can_follow() {
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/tests/fixtures/indented.txt".into(),
+    });
+
+    let events = ws.apply(Command::PlaceCursor { line: 2, column: 1 });
+    assert!(
+        events.iter().any(|e| matches!(e, Event::Cursor { .. })),
+        "{events:?}"
+    );
+}

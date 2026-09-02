@@ -349,10 +349,23 @@ function closeAll() {
   $("#scrim").classList.remove("on");
 }
 
+/**
+ * Toggle an overlay. For buttons: clicking Settings twice closes it.
+ *
+ * Never call this from an event handler. An event that fires per keystroke —
+ * the command line, the picker — would toggle the overlay off on every second
+ * key, which looks exactly like the panel flickering. Use `show`.
+ */
 function open(id) {
   const wasOpen = $("#" + id).classList.contains("on");
   closeAll();
   if (wasOpen) return;
+  show(id);
+}
+
+/** Open an overlay, idempotently. Safe to call on every keystroke. */
+function show(id) {
+  closeAll();
   $("#" + id).classList.add("on");
   $("#scrim").classList.add("on");
 }
@@ -589,6 +602,58 @@ function renderEditor() {
   if (popup && !popup.hidden) anchorCompletion(popup);
 }
 
+/* ── clicking in the text ─────────────────────────────────────────────
+   A line is not one text node: syntax spans, diagnostic spans and the caret
+   split it into as many as the highlighter felt like. So the column is found
+   by asking the browser where the click landed and then counting characters
+   from the start of the line to that point, which is correct however the row
+   happens to be cut up — and stays correct if the highlighter changes. */
+
+/** Character offset of a point within `.ln`, or null if it missed. */
+function columnAt(line, x, y) {
+  const hit =
+    document.caretPositionFromPoint?.(x, y) ??
+    (document.caretRangeFromPoint
+      ? (() => {
+          const r = document.caretRangeFromPoint(x, y);
+          return r && { offsetNode: r.startContainer, offset: r.startOffset };
+        })()
+      : null);
+  if (!hit || !line.contains(hit.offsetNode)) return null;
+
+  // Everything before the hit, in document order, minus the gutter — which is
+  // markup rather than text and must not count towards the column.
+  const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+  let column = 0;
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node.parentElement.closest(".n, .s")) continue;
+    if (node === hit.offsetNode) return column + hit.offset;
+    column += node.textContent.length;
+  }
+  return column;
+}
+
+document.addEventListener("mousedown", (e) => {
+  // Left button only, and never when a drag is being started on a gutter.
+  if (e.button !== 0) return;
+  const line = e.target.closest("[data-editor] .ln");
+  if (!line) return;
+
+  const number = Number(line.querySelector(".n")?.textContent);
+  if (!Number.isFinite(number)) return;
+
+  // The gutter is markup, not text. Landing there would otherwise walk past
+  // every run and put the cursor at the end of the line, which is the least
+  // likely thing anybody clicking a line number wanted.
+  const gutter = e.target.closest(".n, .s");
+  const column = gutter ? 0 : columnAt(line, e.clientX, e.clientY);
+  if (column === null) return;
+  // The core clamps: a click past the end of a short line is the ordinary
+  // case, and the front end does not hold the document to check against.
+  dispatch({ type: "placeCursor", line: number - 1, column });
+});
+
 function renderBuffers(names, active) {
   const target = $("[data-buffers]");
   if (!target) return;
@@ -770,7 +835,7 @@ function highlight(label, positions) {
 
 function renderPicker(event) {
   pickerOpen = true;
-  open("telescope");
+  show("telescope");
 
   $("[data-picker-query]").textContent = event.query;
   $("[data-picker-title]").textContent = event.title;
@@ -922,6 +987,12 @@ function renderVim(label) {
   const el = $("#sl-mode");
   el.className = "sl sl-mode " + (label === "NORMAL" ? "" : label.toLowerCase().replace("-", ""));
   el.textContent = label;
+
+  // The caret is a block in every mode but insert, where you sit *between*
+  // characters rather than on one. That difference is the clearest signal of
+  // which mode you are in, and it belongs on the text rather than only in the
+  // statusline nobody is looking at while they type.
+  $$("[data-editor]").forEach((pane) => pane.classList.toggle("insert", label === "INSERT"));
 }
 
 /**
@@ -953,8 +1024,10 @@ onEvent((event) => {
 
     case "vimMode":
       renderVim(event.label);
-      // Leaving normal mode closes which-key and the pending display.
-      if (event.mode !== "Command") $("#cmdline").classList.remove("on");
+      // Leaving the command line has to take the scrim with it. Removing only
+      // the panel's own class left the dimming layer over the whole window
+      // after every `:` command that ran.
+      if (event.mode !== "Command" && !pickerOpen) closeAll();
       renderStatus("");
       break;
 
@@ -970,10 +1043,10 @@ onEvent((event) => {
         closeAll();
         SPLIT_LEADER[event.prefix]();
       } else {
-        open("whichkey");
+        show("whichkey");
         // ␣ff is the one leader sequence M0 resolves, so Telescope is reachable
         // the way it will be in M2.
-        if (event.prefix === "ff") open("telescope");
+        if (event.prefix === "ff") show("telescope");
       }
       break;
 
@@ -981,7 +1054,7 @@ onEvent((event) => {
       if (event.text === null) {
         closeAll();
       } else {
-        open("cmdline");
+        show("cmdline");
         const el = $("#cmdline-text");
         if (el) el.textContent = event.text;
       }

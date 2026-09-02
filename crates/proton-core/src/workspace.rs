@@ -172,6 +172,20 @@ impl Workspace {
                 ]
             }
 
+            Command::PlaceCursor { line, column } => {
+                let buffer = self.editor.buffer_mut();
+                // Clamped twice over: the line against the document, then the
+                // offset against the line, because a click past the end of a
+                // short line is the ordinary case rather than an error.
+                let line = line.min(buffer.len_lines().saturating_sub(1));
+                let at = buffer.offset_of(proton_text::Position { line, column });
+                buffer.cursor = buffer.clamp(buffer.cursor.moved_to(at));
+                // The mode is left alone deliberately. A click in visual mode
+                // extends the selection, which is what vim's mouse does and
+                // what anybody dragging a selection means.
+                self.after_action(false)
+            }
+
             Command::ToggleTreeNode { path } => {
                 if !self.tree.toggle(&path) {
                     return vec![notice(format!("{path}: not a folder"), NoticeLevel::Warn)];

@@ -515,18 +515,38 @@ kbd {
 
 .code { flex: 1; min-height: 0; overflow: auto; font: 12.5px/1.62 var(--mono); padding: 8px 0 40px; }
 .ln { display: flex; padding: 0 12px 0 0; white-space: pre; }
-.ln.cur { background: rgba(var(--raise), 0.045); }
+.ln.cur { background: rgba(var(--raise), 0.07); }
 .ln .n {
   flex: 0 0 48px; text-align: right; padding-right: 14px;
   color: var(--ink-4); user-select: none; font-variant-numeric: tabular-nums;
 }
 .ln.cur .n { color: var(--accent); font-weight: 640; }
 .ln .s { flex: 0 0 14px; text-align: center; user-select: none; font-size: 10px; }
+/* The agent's "still typing" bar. Not the editor caret — that one is below,
+   and the two only ever looked alike. */
 .cursor {
   display: inline-block; width: 7.6px; height: 1.25em; background: var(--accent);
   vertical-align: text-bottom; box-shadow: 0 0 10px var(--accent); animation: blink 1.15s steps(1) infinite;
 }
 @keyframes blink { 50% { opacity: 0.25; } }
+
+/* ── the caret ────────────────────────────────────────────────────────
+   `lineHtml` wraps the character the cursor is *on*, because that is what a
+   block cursor is: reverse video over one character, not a bar drawn between
+   two. Insert mode is the exception — there you sit between characters, so it
+   thins to a bar on the leading edge, which is the one visual difference that
+   tells the two modes apart at a glance. */
+.ln .caret {
+  background: var(--accent); color: var(--bg-deep);
+  border-radius: 1.5px; box-shadow: 0 0 12px -2px var(--accent);
+}
+.code.insert .ln .caret {
+  background: none; color: inherit;
+  box-shadow: inset 1.8px 0 0 var(--accent); border-radius: 0;
+}
+/* The block blinks; the insert bar does not. A bar that blinks while you are
+   typing into it competes with the characters appearing next to it. */
+.code:not(.insert) .ln .caret { animation: blink 1.15s steps(1) infinite; }
 
 .k  { color: var(--accent-2); } .fn { color: var(--accent); }
 .str{ color: var(--ok); }       .num{ color: var(--tone); }

@@ -388,6 +388,27 @@ impl Vim {
     }
 
     fn key_insert(&mut self, k: &Key) -> Outcome {
+        // The arrows and Home/End work in insert mode. Vim's do, and a modal
+        // editor that traps you at one position until you press Escape is not
+        // being stricter than vim — it is being broken.
+        let object = match k.key.as_str() {
+            "ArrowLeft" => Some(Object::CharLeft),
+            "ArrowRight" => Some(Object::CharRight),
+            "ArrowUp" => Some(Object::LineUp),
+            "ArrowDown" => Some(Object::LineDown),
+            "Home" => Some(Object::LineStart),
+            "End" => Some(Object::LineEnd),
+            _ => None,
+        };
+        if let Some(object) = object {
+            return Outcome::Action(Action {
+                verb: Verb::Move,
+                object,
+                count: 1,
+                register: None,
+            });
+        }
+
         match k.as_char() {
             Some(c) if k.is_bare_char() => Outcome::Input(c),
             _ => Outcome::Ignored,
