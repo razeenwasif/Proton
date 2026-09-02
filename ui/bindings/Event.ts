@@ -14,6 +14,7 @@ import type { ServerState } from "./ServerState";
 import type { Span } from "./Span";
 import type { StepView } from "./StepView";
 import type { TraceState } from "./TraceState";
+import type { TreeRow } from "./TreeRow";
 import type { VimMode } from "./VimMode";
 import type { WorkspaceTab } from "./WorkspaceTab";
 
@@ -29,7 +30,7 @@ highlights: Array<Array<Span>>, } | { "type": "cursor", line: number, column: nu
 /**
  * Anchor line/column when there is a selection.
  */
-selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, active: number, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
+selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, active: number, } | { "type": "tree", rows: Array<TreeRow>, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
 /**
  * How many candidates the picker is choosing from, before matching.
  */

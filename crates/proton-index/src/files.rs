@@ -129,6 +129,86 @@ impl FileIndex {
     }
 }
 
+/// One thing in a directory, for the tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Child {
+    pub name: String,
+    pub path: PathBuf,
+    pub dir: bool,
+}
+
+/// What is directly inside a directory, with the same rules the walk uses.
+///
+/// Sharing those rules is the point rather than a convenience: a tree that
+/// shows `target/` while `␣ff` refuses to find anything in it would be two
+/// different answers to "what is in this project", and the user would have to
+/// learn which one to believe.
+///
+/// Depth one and read on demand. A tree only ever shows what has been opened,
+/// so the cost is a handful of directory reads rather than a walk — and
+/// nothing is cached, so nothing can be stale.
+pub fn children(root: &Path, dir: &Path) -> Vec<Child> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    // Built once for the directory rather than once per entry. The rules are
+    // anchored at the project root, so a `.gitignore` above the folder being
+    // listed still applies — which is the usual case, since most projects keep
+    // one at the top and none further down.
+    let rules = ignore_rules(root);
+
+    let mut found: Vec<Child> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // Dotfiles are hidden here for the same reason the walk hides them
+            // and the folder prompt does: a tree that opens on `.git` is a
+            // tree nobody reads.
+            if name.starts_with('.') {
+                return None;
+            }
+            let path = entry.path();
+            let dir = match entry.file_type() {
+                Ok(kind) if kind.is_dir() => true,
+                Ok(kind) if kind.is_symlink() => path.is_dir(),
+                Ok(_) => false,
+                Err(_) => return None,
+            };
+            if rules
+                .as_ref()
+                .is_some_and(|r| r.matched_path_or_any_parents(&path, dir).is_ignore())
+            {
+                return None;
+            }
+            Some(Child { name, path, dir })
+        })
+        .collect();
+
+    // Directories first, then files, each alphabetically and case-insensitively
+    // — the order every file tree has used for forty years, and the one people
+    // scan without thinking about it.
+    found.sort_by(|a, b| {
+        b.dir
+            .cmp(&a.dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    found
+}
+
+/// The project's own ignore rules, or `None` when it has none.
+fn ignore_rules(root: &Path) -> Option<ignore::gitignore::Gitignore> {
+    let file = root.join(".gitignore");
+    if !file.is_file() {
+        return None;
+    }
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
+    builder.add(&file);
+    // Nested ignore files further down are not consulted. Missing one shows a
+    // file that could have been hidden, which is the safe direction to be
+    // wrong in — the other way hides something the user knows is there.
+    builder.build().ok()
+}
+
 fn walk(root: &Path) -> Vec<String> {
     let mut paths = Vec::new();
 

@@ -18,6 +18,7 @@ pub mod mode;
 pub mod picker;
 pub mod session;
 pub mod trace;
+pub mod tree;
 pub mod vim;
 pub mod workspace;
 
@@ -35,5 +36,6 @@ pub use proton_syntax::{Scope, Span};
 pub use proton_text::{Buffer, Cursor, Edit, Position, Range};
 pub use session::Session;
 pub use trace::{StepView, TraceState, Visualizer};
+pub use tree::{Tree, TreeRow};
 pub use vim::{Outcome, Vim, VimMode};
 pub use workspace::Workspace;

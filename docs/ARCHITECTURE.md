@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 330 tests, headless
+cargo test --workspace        # 353 tests, headless
 cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
@@ -172,6 +172,31 @@ only a fallback, used when there is nothing to restore and nothing was named.
 Keeping those apart is what stops a bare `proton` typed in a downloads folder
 from adding it to the projects list for good.
 
+### The file tree
+
+Held as *which folders are open* and nothing else. The rows are computed from
+that and the disk whenever anyone asks, so there is no cached listing to go
+stale — a file another process created shows up the next time the tree is
+drawn rather than never, and there is no invalidation rule to get wrong.
+
+That is affordable because a tree only ever shows what has been expanded: the
+cost is one directory read per *open* folder, not a walk. A closed tree costs
+one. `␣ff` is the thing that walks, and it does that once, on a worker.
+
+Listing goes through `proton_index::children`, which applies the same ignore
+rules the walk does. A tree offering `target/` while `␣ff` refuses to find
+anything in it would be two different answers to "what is in this project",
+and the user would be left deciding which to believe.
+
+The event carries only the visible rows, which is the viewport discipline
+applied to a different shape of data: a closed folder contributes one row
+however much is inside it. A folder with more than 500 entries is cut off with
+a row saying how many were left out — ten thousand generated files is ten
+thousand rows nobody reads, and the count is the useful part.
+
+`␣e` reveals the file you are in, opening every folder above it so the row
+exists to scroll to.
+
 ### Text
 
 `ropey` behind a `TextStore` trait. It already tracks UTF-16 code units in its
@@ -207,11 +232,11 @@ Names abbreviate the way vim's do — `:w`, `:wr`, `:wri`, `:writ`, `:write` are
 one command — and `!` is a separate token, because every command that can
 refuse needs somewhere to say "I know, do it anyway".
 
-`:w`, `:e`, `:q`, `:saveas`, `:bd`, `:wq` and `:x` are the core's. Everything
-else passes back out as `CmdlineRun` for the front end, which still owns
-`:vsplit`, `:close` and `:only` — splits are view state and the core has no
-opinion about them yet. Ranges (`:1,5d`) are deliberately not parsed rather
-than half-parsed.
+`:w`, `:e`, `:q`, `:bn`, `:bp`, `:saveas`, `:bd`, `:wq` and `:x` are the
+core's. Everything else passes back out as `CmdlineRun` for the front end,
+which still owns `:vsplit`, `:close` and `:only` — splits are view state and
+the core has no opinion about them yet. Ranges (`:1,5d`) are deliberately not
+parsed rather than half-parsed.
 
 **`:q` closes the buffer, not a split.** Vim's closes a window and leaves the
 buffer hidden, which makes sense when buffers are invisible; here they are the

@@ -450,7 +450,36 @@ body {
 .row .ic { width: 14px; text-align: center; opacity: 0.8; flex: 0 0 14px; font-size: 11px; }
 .row .git { margin-left: auto; font-size: 10px; font-weight: 700; }
 .row .git.m { color: var(--warn); } .row .git.a { color: var(--ok); } .row .git.d { color: var(--err); }
+/* Still used by the sidebars that are static chrome. The file tree indents
+   inline instead, because a class per level puts a ceiling on how deep a
+   project may be nested. */
 .indent-1 { padding-left: 20px; } .indent-2 { padding-left: 34px; } .indent-3 { padding-left: 48px; }
+
+/* ── the file tree ────────────────────────────────────────────────────
+   A folder row reads as a container: the chevron points at what it will do
+   rather than at what it is, which is the one thing everybody already knows
+   how to read without being told. */
+.row.dir { color: var(--ink); }
+.row .chev { transition: transform .13s ease; opacity: .55; }
+.row.dir.open .chev { transform: rotate(0deg); }
+.row.dir:not(.open) .chev { transform: rotate(-90deg); }
+.row.dir:hover .chev { opacity: 1; }
+
+/* A folder with more in it than the tree will show. Not clickable — there is
+   nothing to click on, and pretending otherwise would be worse than saying so. */
+.row.more {
+  cursor: default; color: var(--ink-4); font-size: 11.5px; font-style: italic;
+  padding-top: 2px; padding-bottom: 5px;
+}
+.row.more:hover { background: none; color: var(--ink-4); }
+
+/* A small button that lives in a panel header. */
+.hbtn {
+  border: 0; background: transparent; cursor: pointer; color: var(--ink-3);
+  padding: 3px; border-radius: 6px; display: grid; place-items: center;
+}
+.hbtn svg { width: 13px; height: 13px; }
+.hbtn:hover { background: var(--e2); color: var(--ink); }
 .group { padding: 13px 12px 5px; font: 620 10px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-4); }
 
 .find {

@@ -38,7 +38,7 @@ if (HAS_SHELL) {
   // Read-only file viewing, so the design preview shows real code instead of
   // an empty pane. It cannot edit — the rope lives in Rust — and it must never
   // learn how to.
-  const doc = { lines: [""], first: 0, height: 60, name: "[No Name]" };
+  const doc = { lines: [""], first: 0, height: 60, name: "[No Name]", path: null };
   const viewportEvent = () => ({
     type: "viewport",
     firstLine: doc.first,
@@ -61,16 +61,60 @@ if (HAS_SHELL) {
   };
   const workspacesEvent = () => ({ type: "workspaces", ...projects });
 
+  // A fixed tree, so the sidebar has rows to draw and folders to open. The
+  // real one is computed from the disk in crates/proton-core/src/tree.rs and
+  // honours the project's ignore rules; this only has to show the chrome.
+  const FILES = {
+    "": ["crates/", "ui/", "docs/", "Cargo.toml", "README.md"],
+    "crates": ["proton-core/", "proton-text/"],
+    "crates/proton-core": ["src/"],
+    "crates/proton-core/src": ["vim.rs", "workspace.rs", "tree.rs", "ex.rs"],
+    "crates/proton-text": ["src/"],
+    "crates/proton-text/src": ["buffer.rs", "edit.rs"],
+    "ui": ["app.js", "bridge.js", "styles.css"],
+    "docs": ["ARCHITECTURE.md", "STACK.md"],
+  };
+  const open = new Set(["crates", "crates/proton-core", "crates/proton-core/src"]);
+
+  const treeRows = (dir = "", depth = 0, rows = []) => {
+    for (const entry of FILES[dir] ?? []) {
+      const isDir = entry.endsWith("/");
+      const name = isDir ? entry.slice(0, -1) : entry;
+      const path = dir ? `${dir}/${name}` : name;
+      const expanded = isDir && open.has(path);
+      rows.push({ depth, name, path, dir: isDir, expanded, active: path === doc.path, truncated: 0 });
+      if (expanded) treeRows(path, depth + 1, rows);
+    }
+    return rows;
+  };
+  const treeEvent = () => ({ type: "tree", rows: treeRows() });
+
   send = async (command) => {
     if (command.type === "sync") {
       return [
         { type: "state", mode: state.mode, vimMode: state.vim, vimLabel: LABEL[state.vim] },
         workspacesEvent(),
+        treeEvent(),
       ];
     }
     if (command.type === "focusWorkspace") {
       projects.active = command.index;
       return [workspacesEvent()];
+    }
+    if (command.type === "toggleTreeNode") {
+      if (!open.delete(command.path)) open.add(command.path);
+      return [treeEvent()];
+    }
+    if (command.type === "revealInTree") {
+      if (!doc.path) return [{ type: "notice", text: "this buffer is not a file yet", level: "warn" }];
+      // Every folder above it, so the row exists to be scrolled to.
+      const parts = doc.path.split("/").slice(0, -1);
+      parts.reduce((so_far, part) => {
+        const path = so_far ? `${so_far}/${part}` : part;
+        open.add(path);
+        return path;
+      }, "");
+      return [treeEvent()];
     }
     if (command.type === "viewport") {
       doc.first = command.firstLine;
@@ -83,6 +127,7 @@ if (HAS_SHELL) {
         if (!res.ok) throw new Error(res.status);
         doc.lines = (await res.text()).split("\n");
         doc.name = command.path.split("/").pop();
+        doc.path = command.path;
       } catch (err) {
         return [{ type: "notice", text: `${command.path}: ${err}`, level: "error" }];
       }
@@ -90,6 +135,8 @@ if (HAS_SHELL) {
         { type: "buffers", names: [{ name: doc.name, path: command.path, modified: false }], active: 0 },
         viewportEvent(),
         { type: "cursor", line: 0, column: 0, offset: 0, selection: null },
+        // The tree marks where you are, so opening a file redraws it.
+        treeEvent(),
       ];
     }
     if (command.type === "setMode") {

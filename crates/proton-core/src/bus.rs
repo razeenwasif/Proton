@@ -15,6 +15,7 @@ use crate::lsp::{Completion, Diagnostic, ServerStatus};
 use crate::mode::ModeId;
 use crate::picker::{PickerItem, PickerKind};
 use crate::trace::{StepView, TraceState};
+use crate::tree::TreeRow;
 use crate::vim::VimMode;
 use proton_syntax::Span;
 
@@ -56,6 +57,13 @@ pub enum Command {
         first_line: usize,
         lines: usize,
     },
+    /// Open a folder in the tree, or close it if it was open.
+    ToggleTreeNode {
+        path: String,
+    },
+    /// Open every folder above the file being edited, and say where it is.
+    RevealInTree,
+
     /// Open a Telescope picker. The picker owns the keyboard until it closes.
     OpenPicker {
         kind: PickerKind,
@@ -213,6 +221,14 @@ pub enum Event {
     Buffers {
         names: Vec<BufferTab>,
         active: usize,
+    },
+    /// The file tree, as the rows that are visible.
+    ///
+    /// Only what is expanded — a closed folder contributes one row whatever is
+    /// inside it, which is what keeps this affordable on a large project
+    /// without a virtualised list on the other side.
+    Tree {
+        rows: Vec<TreeRow>,
     },
     /// The open workspaces, for the switcher above the buffer bar.
     ///

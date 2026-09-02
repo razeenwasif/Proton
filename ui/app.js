@@ -607,6 +607,45 @@ function renderBuffers(names, active) {
     .join("");
 }
 
+/* ── the file tree ────────────────────────────────────────────────────
+   The core owns it: what is in it, which folders are open, and which row
+   is the file you are looking at. This draws rows and sends clicks back —
+   it does not read a directory or decide what to hide, because then the
+   tree and `␣ff` could disagree about what is in the project. */
+
+function renderTree(rows) {
+  const target = $("[data-tree]");
+  if (!target) return;
+
+  target.innerHTML = rows
+    .map((row) => {
+      // Indentation is inline rather than a class per level, because a class
+      // per level puts a ceiling on how deep a project may be nested.
+      const pad = `padding-left:${8 + row.depth * 13}px`;
+
+      if (row.truncated) {
+        return `<div class="row more" style="${pad}">${escapeHtml(row.name)}</div>`;
+      }
+      if (row.dir) {
+        return (
+          `<div class="row dir${row.expanded ? " open" : ""}" style="${pad}"` +
+          ` data-tree-dir="${escapeHtml(row.path)}">` +
+          `<span class="ic"><svg class="i chev"><use href="#i-chev"/></svg></span>` +
+          `<svg class="i ft-folder"><use href="#i-${row.expanded ? "folder-open" : "folder"}"/></svg>` +
+          ` ${escapeHtml(row.name)}</div>`
+        );
+      }
+      return (
+        `<div class="row${row.active ? " sel" : ""}" style="${pad}"` +
+        ` data-path="${escapeHtml(row.path)}">` +
+        `<span class="ic">${fileIcon(row.name)}</span>${escapeHtml(row.name)}</div>`
+      );
+    })
+    .join("");
+
+  target.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
+}
+
 /* ── the workspace rail ───────────────────────────────────────────────
    One tile per open project. The core decides what they are called — it is
    the only thing that can, since telling two projects called `src` apart
@@ -694,6 +733,16 @@ document.addEventListener("click", (e) => {
       // `:q!`, not a mis-aimed pointer.
       force: false,
     });
+    return;
+  }
+
+  const folder = e.target.closest("[data-tree-dir]");
+  if (folder) {
+    dispatch({ type: "toggleTreeNode", path: folder.dataset.treeDir });
+    return;
+  }
+  if (e.target.closest("[data-reveal]")) {
+    dispatch({ type: "revealInTree" });
     return;
   }
 
@@ -990,6 +1039,10 @@ onEvent((event) => {
       break;
     }
 
+    case "tree":
+      renderTree(event.rows);
+      break;
+
     case "workspaces":
       renderWorkspaces(event.items, event.active);
       break;
@@ -1215,18 +1268,6 @@ function drawPointerEdges() {
 new ResizeObserver(drawPointerEdges).observe(document.body);
 window.addEventListener("resize", drawPointerEdges);
 $("#cv-canvas")?.addEventListener("scroll", drawPointerEdges);
-
-/* ── ambient life: the trace scrubber creeps forward ───────────────────
-   Placeholder until proton-trace streams real steps in M4. */
-const scrub = $(".cv-scrub .bar");
-if (scrub) {
-  let at = 38;
-  setInterval(() => {
-    at = at >= 92 ? 12 : at + 0.35;
-    scrub.querySelector("i").style.width = at + "%";
-    scrub.querySelector("u").style.left = at + "%";
-  }, 220);
-}
 
 /* ── the keyboard hint ────────────────────────────────────────────────
    A prototype affordance parked on top of real controls, so it has to be

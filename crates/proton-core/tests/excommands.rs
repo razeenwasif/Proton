@@ -528,6 +528,82 @@ fn a_click_that_would_lose_work_is_refused_and_puts_you_back() {
     );
 }
 
+/* ── :bn and :bp ──────────────────────────────────────────────────── */
+
+#[test]
+fn bn_and_bp_walk_the_buffers_and_wrap() {
+    let scratch = Scratch::new("bnext");
+    scratch.file("a.txt", "one\n");
+    scratch.file("b.txt", "two\n");
+    let mut ws = scratch.workspace();
+    ws.apply(Command::OpenBuffer {
+        path: "a.txt".into(),
+    });
+    ws.apply(Command::OpenBuffer {
+        path: "b.txt".into(),
+    });
+    // [No Name], a.txt, b.txt — sitting on the last one.
+    assert_eq!(ws.editor().buffer().name(), "b.txt");
+
+    run(&mut ws, "bn");
+    assert_eq!(
+        ws.editor().buffer().name(),
+        "[No Name]",
+        "off the end and round"
+    );
+    run(&mut ws, "bn");
+    assert_eq!(ws.editor().buffer().name(), "a.txt");
+    run(&mut ws, "bp");
+    assert_eq!(ws.editor().buffer().name(), "[No Name]");
+    run(&mut ws, "bp");
+    assert_eq!(
+        ws.editor().buffer().name(),
+        "b.txt",
+        "and back the other way"
+    );
+}
+
+#[test]
+fn bn_abbreviates_and_does_not_collide_with_bdelete() {
+    // `:bn` and `:bd` share a first letter and nothing else. Getting the
+    // precedence wrong would make "next buffer" close one.
+    let scratch = Scratch::new("bncollide");
+    scratch.file("a.txt", "one\n");
+
+    for spelling in ["bn", "bne", "bnex", "bnext"] {
+        let mut ws = scratch.workspace();
+        ws.apply(Command::OpenBuffer {
+            path: "a.txt".into(),
+        });
+        run(&mut ws, spelling);
+        assert_eq!(
+            open_names(&ws).len(),
+            2,
+            "{spelling} must not have closed anything"
+        );
+        assert_eq!(ws.editor().buffer().name(), "[No Name]", "{spelling}");
+    }
+
+    for spelling in ["bp", "bpr", "bprev", "bprevious", "bN"] {
+        let mut ws = scratch.workspace();
+        ws.apply(Command::OpenBuffer {
+            path: "a.txt".into(),
+        });
+        run(&mut ws, spelling);
+        assert_eq!(open_names(&ws).len(), 2, "{spelling}");
+        assert_eq!(ws.editor().buffer().name(), "[No Name]", "{spelling}");
+    }
+}
+
+#[test]
+fn stepping_with_one_buffer_says_so_rather_than_doing_nothing() {
+    // Silently doing nothing is the failure users cannot debug.
+    let scratch = Scratch::new("bnone");
+    let mut ws = scratch.workspace();
+    let events = run(&mut ws, "bn");
+    assert!(said(&events, "only one buffer"), "{events:?}");
+}
+
 /* ── compounds, and what the front end still owns ─────────────────── */
 
 #[test]

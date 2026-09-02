@@ -20,6 +20,7 @@ use crate::lsp::{self, Popup, Servers, Severity};
 use crate::mode::ModeId;
 use crate::picker::{Accepted, PickerKey, PickerKind, Pickers};
 use crate::trace::Visualizer;
+use crate::tree::Tree;
 use crate::vim::{Outcome, Vim, VimMode};
 
 /// What the front end can currently show. The core keeps it so a buffer change
@@ -52,6 +53,7 @@ pub struct Workspace {
     popup: Popup,
     agent: Agent,
     visualizer: Visualizer,
+    tree: Tree,
 }
 
 impl Workspace {
@@ -69,6 +71,7 @@ impl Workspace {
             servers: Servers::new(root),
             agent: Agent::new(&root.display().to_string()),
             visualizer: Visualizer::new(root),
+            tree: Tree::new(root),
             ..Default::default()
         }
     }
@@ -165,7 +168,26 @@ impl Workspace {
                     self.servers_event(),
                     self.agent_event(),
                     self.trace_event(),
+                    self.tree_event(),
                 ]
+            }
+
+            Command::ToggleTreeNode { path } => {
+                if !self.tree.toggle(&path) {
+                    return vec![notice(format!("{path}: not a folder"), NoticeLevel::Warn)];
+                }
+                vec![self.tree_event()]
+            }
+
+            Command::RevealInTree => {
+                let Some(path) = self.editor.buffer().path().map(Path::to_path_buf) else {
+                    return vec![notice(
+                        "this buffer is not a file yet".into(),
+                        NoticeLevel::Warn,
+                    )];
+                };
+                self.tree.reveal(&path);
+                vec![self.tree_event()]
             }
 
             Command::Trace => self.trace_buffer(),
@@ -226,14 +248,7 @@ impl Workspace {
                 if !self.editor.focus(index) {
                     return vec![notice(format!("no buffer {index}"), NoticeLevel::Warn)];
                 }
-                vec![
-                    self.buffers_event(),
-                    self.viewport_event(),
-                    self.cursor_event(),
-                    // Diagnostics are per-file, so switching buffers changes
-                    // which set the gutter should be drawing.
-                    self.diagnostics_event(),
-                ]
+                self.switched()
             }
 
             // Relative paths resolve against the project root, not the
@@ -506,6 +521,15 @@ impl Workspace {
         if ex.is("quit", 1) || ex.is("bdelete", 2) {
             return self.ex_quit(&ex);
         }
+        // No overlap with `:bdelete` — `bn` and `bp` are not prefixes of it,
+        // and `bd` is not a prefix of these — so the order here is only about
+        // reading, not about precedence.
+        if ex.is("bnext", 2) {
+            return self.ex_buffer(1);
+        }
+        if ex.is("bprevious", 2) || ex.is("bNext", 2) {
+            return self.ex_buffer(-1);
+        }
         if ex.name == "wq" {
             let mut events = self.ex_write(&ex);
             // Only close if the write actually happened. `:wq` on a file that
@@ -669,13 +693,9 @@ impl Workspace {
         // The buffer you land on is a different file, so everything that is
         // per-file is now wrong on screen.
         self.resync();
-        vec![
-            notice(format!("closed {name}"), NoticeLevel::Info),
-            self.buffers_event(),
-            self.viewport_event(),
-            self.cursor_event(),
-            self.diagnostics_event(),
-        ]
+        let mut events = vec![notice(format!("closed {name}"), NoticeLevel::Info)];
+        events.extend(self.switched());
+        events
     }
 
     /// Write the active buffer to its own file.
@@ -720,15 +740,38 @@ impl Workspace {
         match self.editor.open(self.pickers.resolve(path)) {
             Ok(_) => {
                 self.resync();
-                vec![
-                    self.buffers_event(),
-                    self.viewport_event(),
-                    self.cursor_event(),
-                    self.diagnostics_event(),
-                ]
+                self.switched()
             }
             Err(err) => vec![notice(format!("{path}: {err}"), NoticeLevel::Error)],
         }
+    }
+
+    /// Everything that is per-file, after the active buffer changed.
+    ///
+    /// Diagnostics because the gutter was drawing another file's; the tree
+    /// because it marks where you are, and a tree that cannot say that is half
+    /// a tree.
+    fn switched(&mut self) -> Vec<Event> {
+        vec![
+            self.buffers_event(),
+            self.viewport_event(),
+            self.cursor_event(),
+            self.diagnostics_event(),
+            self.tree_event(),
+        ]
+    }
+
+    /// `:bn` and `:bp` — the next or previous buffer, wrapping.
+    fn ex_buffer(&mut self, by: i64) -> Vec<Event> {
+        let count = self.editor.buffers().len() as i64;
+        if count < 2 {
+            return vec![notice("only one buffer is open".into(), NoticeLevel::Warn)];
+        }
+        let next = (self.editor.active() as i64 + by).rem_euclid(count) as usize;
+        self.editor.focus(next);
+        let mut events = vec![notice(self.editor.buffer().name(), NoticeLevel::Info)];
+        events.extend(self.switched());
+        events
     }
 
     /* ── language servers ─────────────────────────────────────────── */
@@ -1190,6 +1233,18 @@ impl Workspace {
         self.after_action(false)
     }
 
+    /// The tree as it stands.
+    ///
+    /// Recomputed from the disk each time rather than cached, which is what
+    /// makes a file another process created show up without an invalidation
+    /// rule to get wrong. It costs one directory read per *expanded* folder,
+    /// so a closed tree costs one.
+    fn tree_event(&self) -> Event {
+        Event::Tree {
+            rows: self.tree.rows(self.editor.buffer().path()),
+        }
+    }
+
     fn trace_event(&self) -> Event {
         Event::Trace {
             state: self.visualizer.state(),
@@ -1299,6 +1354,13 @@ impl Workspace {
             Outcome::Leader(prefix) if prefix == "ct" => {
                 let mut events = vec![Event::Leader { prefix: None }];
                 events.extend(self.trace_buffer());
+                (events, false)
+            }
+            // `␣e` finds the file you are in. The rail has always claimed this
+            // binding in its tooltip; now it exists.
+            Outcome::Leader(prefix) if prefix == "e" => {
+                let mut events = vec![Event::Leader { prefix: None }];
+                events.extend(self.apply(Command::RevealInTree));
                 (events, false)
             }
             Outcome::Leader(prefix) => (

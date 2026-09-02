@@ -323,40 +323,14 @@
 
     <!-- ══ CODEX ═════════════════════════════════════════════════ -->
     <section class="workspace on" data-ws="codex" style="--col-l:232px; --col-r:372px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
-
       <aside class="pane side">
-        <header>Explorer <span class="grow"></span><span class="chip">3</span></header>
+        <header>Explorer <span class="grow"></span>
+          <button class="hbtn" data-reveal title="Reveal the file you are in — ␣e"><svg class="i"><use href="#i-target"/></svg></button>
+        </header>
         <div class="find" data-open="telescope"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></div>
-        <div class="scroll tree">
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-folder-open"/></svg> crates</div>
-          <div class="row indent-1"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-folder-open"/></svg> proton-core</div>
-          <div class="row indent-2"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-folder-open"/></svg> src</div>
-          <div class="row indent-3" data-path="crates/proton-core/src/vim.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>vim.rs</div>
-          <div class="row indent-3" data-path="crates/proton-core/src/editor.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>editor.rs</div>
-          <div class="row indent-3" data-path="crates/proton-core/src/workspace.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>workspace.rs</div>
-          <div class="row indent-3" data-path="crates/proton-core/src/action.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>action.rs</div>
-          <div class="row indent-3" data-path="crates/proton-core/src/bus.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>bus.rs</div>
-          <div class="row indent-3" data-path="crates/proton-core/src/mode.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>mode.rs</div>
-          <div class="row indent-3" data-path="crates/proton-core/src/key.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>key.rs</div>
-          <div class="row indent-1"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-folder-open"/></svg> proton-text</div>
-          <div class="row indent-2"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-folder-open"/></svg> src</div>
-          <div class="row indent-3" data-path="crates/proton-text/src/buffer.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>buffer.rs</div>
-          <div class="row indent-3" data-path="crates/proton-text/src/motion.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>motion.rs</div>
-          <div class="row indent-3" data-path="crates/proton-text/src/history.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>history.rs</div>
-          <div class="row indent-3" data-path="crates/proton-text/src/edit.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>edit.rs</div>
-          <div class="row indent-1"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-folder-open"/></svg> proton-shell</div>
-          <div class="row indent-2" data-path="crates/proton-shell/src/main.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>main.rs</div>
-          <div class="row indent-2" data-path="crates/proton-shell/src/backdrop.rs"><span class="ic"><svg class="i ft-rust"><use href="#i-file-code"/></svg></span>backdrop.rs</div>
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-folder-open"/></svg> ui</div>
-          <div class="row indent-1" data-path="ui/app.js"><span class="ic"><svg class="i ft-js"><use href="#i-file-code"/></svg></span>app.js</div>
-          <div class="row indent-1" data-path="ui/bridge.js"><span class="ic"><svg class="i ft-js"><use href="#i-file-code"/></svg></span>bridge.js</div>
-          <div class="row indent-1" data-path="ui/styles.css"><span class="ic"><svg class="i ft-css"><use href="#i-file-code"/></svg></span>styles.css</div>
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-folder-open"/></svg> docs</div>
-          <div class="row indent-1" data-path="docs/ARCHITECTURE.md"><span class="ic"><svg class="i ft-doc"><use href="#i-file-doc"/></svg></span>ARCHITECTURE.md</div>
-          <div class="row indent-1" data-path="docs/STACK.md"><span class="ic"><svg class="i ft-doc"><use href="#i-file-doc"/></svg></span>STACK.md</div>
-          <div class="row" data-path="Cargo.toml"><span class="ic"><svg class="i ft-config"><use href="#i-sliders"/></svg></span>Cargo.toml</div>
-          <div class="row" data-path="README.md"><span class="ic"><svg class="i ft-doc"><use href="#i-file-doc"/></svg></span>README.md</div>
-        </div>
+        <!-- Rendered from Event::Tree. The core decides what is in it, what is
+             open and where you are; this draws rows. -->
+        <div class="scroll tree" data-tree></div>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>

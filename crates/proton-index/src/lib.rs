@@ -14,6 +14,6 @@ pub mod files;
 pub mod grep;
 pub mod match_;
 
-pub use files::FileIndex;
+pub use files::{children, Child, FileIndex};
 pub use grep::{grep, GrepHit};
 pub use match_::{Match, Matcher};
