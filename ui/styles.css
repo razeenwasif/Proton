@@ -642,6 +642,12 @@ kbd {
 .sl-mode.insert  { background: var(--ok); }
 .sl-mode.visual  { background: var(--accent-2); }
 .sl-mode.command { background: var(--warn); }
+/* A refusal has to read as one. `:w` declining to overwrite a file something
+   else rewrote is the same shape of message as `:w` succeeding, and at the
+   same colour nobody would notice the difference until the work was gone. */
+#sl-status.warn { color: var(--warn); }
+#sl-status.err { color: var(--err); }
+
 .sl.git { background: var(--e1); color: var(--ink-2); }
 .sl.grow { flex: 1; }
 .sl.right { background: var(--e1); }

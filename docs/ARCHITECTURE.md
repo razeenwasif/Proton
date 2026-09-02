@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 295 tests, headless
+cargo test --workspace        # 324 tests, headless
 cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
@@ -201,6 +201,36 @@ Non-negotiable for this to feel real rather than emulated: operators compose
 with motions and text objects, counts multiply, registers and marks are global,
 macros record *actions* (so they replay across modes), `.` repeats, undo is a
 tree.
+
+**The `:` line** parses in `proton-core/src/ex.rs` and runs in the workspace.
+Names abbreviate the way vim's do — `:w`, `:wr`, `:wri`, `:writ`, `:write` are
+one command — and `!` is a separate token, because every command that can
+refuse needs somewhere to say "I know, do it anyway".
+
+`:w`, `:e`, `:saveas`, `:wq` and `:x` are the core's. Everything else passes
+back out as `CmdlineRun` for the front end, which still owns `:vsplit` and
+`:q` — splits are view state and the core has no opinion about them yet. That
+same channel carries the *residue* of a compound: `:wq` writes in the core and
+hands the `q` on, so one line can be half core and half chrome without either
+half knowing about the other. Ranges (`:1,5d`) are deliberately not parsed
+rather than half-parsed.
+
+Two behaviours are worth stating because they look like bugs otherwise:
+
+- **`:w {file}` is a copy**, and leaves you editing the original, still
+  modified — vim's rule. `:saveas` is the one that moves house. The exception,
+  also vim's, is a buffer with no name of its own: writing that one adopts the
+  name, because the alternative is a file you have no way to keep editing.
+- **A write refuses when the file changed underneath it.** Formatters,
+  language servers and `git checkout` rewrite files under an open editor
+  constantly, and silently discarding that is the one data-loss bug an editor
+  must not have. `:w!` overrides; `:e!` throws yours away instead. Both
+  `Command::Save` and `:w` go through the same guard, because a guard with a
+  way around it is not one.
+
+`:e` re-reads through the ordinary edit path rather than rebuilding the buffer,
+which keeps the parse tree incremental, the marks shifted, and the reload
+itself undoable — `u` after an `:e!` you regret gets your work back.
 
 ### Syntax and semantics
 

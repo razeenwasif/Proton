@@ -13,6 +13,7 @@ use crate::action::{Action, Verb};
 use crate::agent::Agent;
 use crate::bus::{BufferTab, Command, Event, NoticeLevel, Selection, ServerState};
 use crate::editor::Editor;
+use crate::ex::Ex;
 use crate::highlights::Highlighters;
 use crate::key::Key;
 use crate::lsp::{self, Popup, Servers, Severity};
@@ -239,32 +240,12 @@ impl Workspace {
             // process's working directory. The front end should not have to
             // know where the binary happened to be launched from, and a path
             // from the picker has to mean the same thing as one from the tree.
-            Command::OpenBuffer { path } => match self.editor.open(self.pickers.resolve(&path)) {
-                Ok(_) => {
-                    self.resync();
-                    vec![
-                        self.buffers_event(),
-                        self.viewport_event(),
-                        self.cursor_event(),
-                        self.diagnostics_event(),
-                    ]
-                }
-                Err(err) => vec![notice(format!("{path}: {err}"), NoticeLevel::Error)],
-            },
+            Command::OpenBuffer { path } => self.open_path(&path),
 
-            Command::Save => match self.editor.save() {
-                Ok(()) => {
-                    let name = self.editor.buffer().name();
-                    // Some servers only run the expensive checks on save —
-                    // `cargo check` diagnostics do not exist until then.
-                    self.servers.saved(self.editor.buffer());
-                    vec![
-                        notice(format!("wrote {name}"), NoticeLevel::Info),
-                        self.buffers_event(),
-                    ]
-                }
-                Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
-            },
+            // Through the same door `:w` uses, so the overwrite guard cannot be
+            // walked around by whichever of the two the front end happens to
+            // send.
+            Command::Save => self.write_buffer(false),
 
             // Switching projects is the session's job, and the session takes
             // these before a workspace ever sees one. A workspace reached
@@ -471,6 +452,210 @@ impl Workspace {
             },
             elapsed_ms: picker.elapsed_ms(),
             scanning: self.pickers.is_scanning(),
+        }
+    }
+
+    /* ── ex commands ──────────────────────────────────────────────── */
+
+    /// Run a `:` line.
+    ///
+    /// Anything this does not recognise comes back out as `CmdlineRun` for the
+    /// front end, which is where `:vsplit` and `:q` still live — splits are
+    /// view state and the core has no opinion about them yet. The same channel
+    /// carries the *residue* of a compound command: `:wq` writes here and
+    /// hands on the `q`, so one line can be half core and half chrome without
+    /// either half knowing about the other.
+    fn run_ex(&mut self, line: String) -> Vec<Event> {
+        let Some(ex) = Ex::parse(&line) else {
+            return vec![Event::CmdlineRun { text: line }];
+        };
+
+        // Minimum abbreviation lengths are vim's. `:w` is write and `:sav` is
+        // saveas, because `:s` is substitute.
+        if ex.is("write", 1) {
+            return self.ex_write(&ex);
+        }
+        if ex.is("saveas", 3) {
+            return self.ex_saveas(&ex);
+        }
+        if ex.is("edit", 1) {
+            return self.ex_edit(&ex);
+        }
+        if ex.name == "wq" {
+            let mut events = self.ex_write(&ex);
+            // Only close if the write actually happened — `:wq` on a file that
+            // changed underneath you must not close the window on the way to
+            // losing the work.
+            if !refused(&events) {
+                events.push(Event::CmdlineRun { text: "q".into() });
+            }
+            return events;
+        }
+        if ex.is("xit", 1) {
+            // `:x` writes only when there is something to write, which is the
+            // whole difference from `:wq`: it leaves mtimes alone, and build
+            // systems watching the file stay quiet.
+            let mut events = if self.editor.buffer().is_modified() {
+                self.ex_write(&ex)
+            } else {
+                Vec::new()
+            };
+            if !refused(&events) {
+                events.push(Event::CmdlineRun { text: "q".into() });
+            }
+            return events;
+        }
+
+        vec![Event::CmdlineRun { text: line }]
+    }
+
+    /// `:w`, `:w!`, `:w {file}`.
+    fn ex_write(&mut self, ex: &Ex) -> Vec<Event> {
+        let Some(arg) = &ex.arg else {
+            return self.write_buffer(ex.bang);
+        };
+        let path = self.pickers.resolve(arg);
+
+        // `:w {file}` on a buffer with no name of its own adopts the name —
+        // vim does this too, and the alternative is writing a file you then
+        // have no way to keep editing.
+        if self.editor.buffer().path().is_none() {
+            self.editor.buffer_mut().rename(path);
+            return self.write_buffer(true);
+        }
+
+        // Otherwise it is a copy, not a rename: the buffer keeps its own name
+        // and stays modified. `:saveas` is the one that moves house.
+        match self.editor.buffer().write_to(&path) {
+            Ok(()) => vec![notice(
+                format!("wrote a copy to {}", path.display()),
+                NoticeLevel::Info,
+            )],
+            Err(err) => vec![notice(
+                format!("{}: {err}", path.display()),
+                NoticeLevel::Error,
+            )],
+        }
+    }
+
+    /// `:saveas {file}` — write it there and keep editing it there.
+    fn ex_saveas(&mut self, ex: &Ex) -> Vec<Event> {
+        let Some(arg) = &ex.arg else {
+            return vec![notice(
+                ":saveas needs a file name".into(),
+                NoticeLevel::Warn,
+            )];
+        };
+        self.editor.buffer_mut().rename(self.pickers.resolve(arg));
+        // Forced, because the guard is about the file this buffer came from
+        // and it no longer came from there.
+        let mut events = self.write_buffer(true);
+        // The name in the tab bar changed, and so did the language, which is
+        // what decides the grammar and which server sees the file.
+        self.resync();
+        events.push(self.viewport_event());
+        events
+    }
+
+    /// `:e`, `:e!`, `:e {file}`.
+    fn ex_edit(&mut self, ex: &Ex) -> Vec<Event> {
+        if let Some(arg) = &ex.arg {
+            let path = self.pickers.resolve(arg);
+            if path.is_dir() {
+                // Vim would open a directory listing. Proton opens folders as
+                // projects, which is a different verb and lives elsewhere.
+                return vec![notice(
+                    format!("{} is a folder — ␣fp opens folders", path.display()),
+                    NoticeLevel::Warn,
+                )];
+            }
+            return self.open_path(arg);
+        }
+
+        // No argument: re-read this file from disk.
+        if self.editor.buffer().path().is_none() {
+            return vec![notice(
+                "no file to re-read — :e {file} opens one".into(),
+                NoticeLevel::Warn,
+            )];
+        }
+        if !ex.bang && self.editor.buffer().is_modified() {
+            return vec![notice(
+                format!(
+                    "{} has unsaved changes — :e! to discard them",
+                    self.editor.buffer().name()
+                ),
+                NoticeLevel::Warn,
+            )];
+        }
+
+        match self.editor.buffer_mut().reload() {
+            Ok(()) => {
+                let name = self.editor.buffer().name();
+                self.resync();
+                let mut events = vec![
+                    notice(format!("re-read {name}"), NoticeLevel::Info),
+                    self.buffers_event(),
+                    self.viewport_event(),
+                    self.diagnostics_event(),
+                ];
+                events.push(self.cursor_event());
+                events
+            }
+            Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
+        }
+    }
+
+    /// Write the active buffer to its own file.
+    ///
+    /// `force` is `:w!`. Without it a write refuses when the file changed
+    /// underneath us — formatters, language servers and `git checkout` rewrite
+    /// files under an open editor constantly, and silently discarding that is
+    /// the one data-loss bug an editor must not have.
+    fn write_buffer(&mut self, force: bool) -> Vec<Event> {
+        if !force && self.editor.buffer().changed_on_disk() {
+            return vec![notice(
+                format!(
+                    "{} changed on disk since it was read — :w! to overwrite, \
+                     :e! to discard yours",
+                    self.editor.buffer().name()
+                ),
+                NoticeLevel::Warn,
+            )];
+        }
+        match self.editor.save() {
+            Ok(()) => {
+                let name = self.editor.buffer().name();
+                // Some servers only run the expensive checks on save —
+                // `cargo check` diagnostics do not exist until then.
+                self.servers.saved(self.editor.buffer());
+                vec![
+                    notice(format!("wrote {name}"), NoticeLevel::Info),
+                    self.buffers_event(),
+                ]
+            }
+            Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
+        }
+    }
+
+    /// Open a file into a buffer, or focus it if it is already open.
+    ///
+    /// Relative paths resolve against the project root, not the process's
+    /// working directory. The front end should not have to know where the
+    /// binary happened to be launched from, and a path from the picker has to
+    /// mean the same thing as one typed into `:e`.
+    fn open_path(&mut self, path: &str) -> Vec<Event> {
+        match self.editor.open(self.pickers.resolve(path)) {
+            Ok(_) => {
+                self.resync();
+                vec![
+                    self.buffers_event(),
+                    self.viewport_event(),
+                    self.cursor_event(),
+                    self.diagnostics_event(),
+                ]
+            }
+            Err(err) => vec![notice(format!("{path}: {err}"), NoticeLevel::Error)],
         }
     }
 
@@ -1051,7 +1236,10 @@ impl Workspace {
                 false,
             ),
             Outcome::Cmdline(text) => (vec![Event::Cmdline { text }], false),
-            Outcome::Execute(text) => (vec![Event::CmdlineRun { text }], false),
+            // The core runs what it owns; whatever it does not recognise comes
+            // back out as `CmdlineRun` for the front end, which still owns
+            // splits. See `run_ex`.
+            Outcome::Execute(text) => (self.run_ex(text), false),
             Outcome::Ignored => (Vec::new(), false),
         }
     }
@@ -1164,4 +1352,21 @@ impl Workspace {
 
 pub(crate) fn notice(text: String, level: NoticeLevel) -> Event {
     Event::Notice { text, level }
+}
+
+/// Whether a command declined to do the thing it was asked.
+///
+/// A refusal is a warning or an error and nothing else, which is what lets
+/// `:wq` tell "wrote it" from "would not write it" without either half of the
+/// compound knowing how the other reports itself.
+fn refused(events: &[Event]) -> bool {
+    events.iter().any(|event| {
+        matches!(
+            event,
+            Event::Notice {
+                level: NoticeLevel::Warn | NoticeLevel::Error,
+                ..
+            }
+        )
+    })
 }

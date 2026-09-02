@@ -32,6 +32,14 @@ pub struct Buffer {
     history: History,
     /// The history revision the file on disk matches.
     saved_at: usize,
+    /// When the file was last modified as of the read or write that made this
+    /// buffer agree with it.
+    ///
+    /// Kept so a write can notice that something else got there first.
+    /// Formatters, language servers and `git checkout` rewrite files under an
+    /// open editor constantly, and a `:w` that silently discards that is the
+    /// one data-loss bug an editor must not have.
+    disk: Option<std::time::SystemTime>,
     /// Whether edits are currently folding into one undoable group.
     group: Group,
     /// Bumped on every change so the front end can drop stale deltas.
@@ -61,6 +69,7 @@ impl Buffer {
             path: None,
             history: History::new(),
             saved_at: 0,
+            disk: None,
             group: Group::None,
             version: 0,
             changes: VecDeque::new(),
@@ -74,19 +83,80 @@ impl Buffer {
         let text = std::fs::read_to_string(path)?;
         Ok(Self {
             path: Some(path.to_path_buf()),
+            disk: modified_at(path),
             ..Self::from_text(&text)
         })
     }
 
     pub fn save(&mut self) -> std::io::Result<()> {
-        let Some(path) = &self.path else {
+        let Some(path) = self.path.clone() else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "buffer has no path",
             ));
         };
-        std::fs::write(path, self.text.to_string())?;
+        std::fs::write(&path, self.text.to_string())?;
         self.saved_at = self.history.revision();
+        self.disk = modified_at(&path);
+        Ok(())
+    }
+
+    /// Write the text somewhere else, leaving this buffer alone.
+    ///
+    /// `:w {file}` in vim is a copy, not a rename — the buffer keeps its own
+    /// name and stays modified. [`Buffer::rename`] is the other half.
+    pub fn write_to(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        std::fs::write(path, self.text.to_string())
+    }
+
+    /// Point the buffer at a different file. Does not write it.
+    pub fn rename(&mut self, path: impl Into<PathBuf>) {
+        self.path = Some(path.into());
+        // Whatever is at the new path, this buffer has not agreed with it.
+        self.disk = None;
+    }
+
+    /// Whether the file changed underneath us since we last read or wrote it.
+    ///
+    /// `false` when it cannot be told — an unnamed buffer, an unreadable
+    /// directory, a filesystem with no useful timestamps. This guards a write,
+    /// and a guard that fires when it does not know is a guard people learn to
+    /// force past.
+    pub fn changed_on_disk(&self) -> bool {
+        let (Some(path), Some(known)) = (&self.path, self.disk) else {
+            return false;
+        };
+        match modified_at(path) {
+            Some(now) => now != known,
+            None => false,
+        }
+    }
+
+    /// Re-read the file, replacing everything.
+    ///
+    /// Goes through `apply` like any other change rather than rebuilding the
+    /// buffer, which is what keeps the parse tree incremental, the marks
+    /// shifted, and the reload itself undoable — `u` after an `:e!` gets your
+    /// work back, which a rebuilt buffer could not offer.
+    pub fn reload(&mut self) -> std::io::Result<()> {
+        let Some(path) = self.path.clone() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "buffer has no file to re-read",
+            ));
+        };
+        let text = std::fs::read_to_string(&path)?;
+
+        let whole = Range {
+            start: 0,
+            end: self.text.len_chars(),
+        };
+        let at = self.cursor.offset.min(text.chars().count());
+        self.apply(vec![Edit::replace(whole, text)], self.cursor.moved_to(at));
+        self.cursor = self.clamp(self.cursor);
+
+        self.saved_at = self.history.revision();
+        self.disk = modified_at(&path);
         Ok(())
     }
 
@@ -567,4 +637,9 @@ pub struct Change {
     pub start_point: Point,
     pub old_end_point: Point,
     pub new_end_point: Point,
+}
+
+/// The file's modification time, if the filesystem will say.
+fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
 }

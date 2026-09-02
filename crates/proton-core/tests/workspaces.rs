@@ -388,6 +388,36 @@ fn the_session_claims_a_whole_small_keymap_not_one_binding() {
 }
 
 #[test]
+fn an_ex_line_reaches_the_workspace_through_the_session() {
+    // The session reads the events coming back to see whether a leader
+    // sequence was its own. A `:` line is not, and has to pass through
+    // untouched — including the write actually happening.
+    let scratch = Scratch::new("excommand");
+    let mut session = Session::new(scratch.at("alpha"));
+    session.apply(Command::OpenBuffer {
+        path: "main.rs".into(),
+    });
+    keys(&mut session, "Ix");
+    session.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+
+    for c in ":w".chars() {
+        session.apply(Command::Key { key: Key::char(c) });
+    }
+    let events = session.apply(Command::Key {
+        key: Key::named("Enter"),
+    });
+
+    assert!(
+        notices(&events).iter().any(|n| n.contains("wrote main.rs")),
+        "{events:?}"
+    );
+    let written = std::fs::read_to_string(scratch.root.join("alpha").join("main.rs")).unwrap();
+    assert!(written.starts_with('x'), "{written:?}");
+}
+
+#[test]
 fn a_workspaces_own_leader_sequences_still_work() {
     // The session takes `fp` and nothing else. `␣ff` has to stay the file
     // picker, or claiming one prefix has cost the workspace all of them.

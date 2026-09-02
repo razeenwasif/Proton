@@ -853,9 +853,20 @@ function renderVim(label) {
   el.textContent = label;
 }
 
-function renderStatus(text) {
+/**
+ * The statusline message.
+ *
+ * `level` is carried through because a refusal has to look like one. `:w`
+ * declining to overwrite a file something else rewrote is the same shape of
+ * message as `:w` succeeding, and if the two read identically the guard may as
+ * well not be there.
+ */
+function renderStatus(text, level = "info") {
   const el = $("#sl-status");
-  if (el) el.textContent = text ?? "";
+  if (!el) return;
+  el.textContent = text ?? "";
+  el.classList.toggle("warn", level === "warn");
+  el.classList.toggle("err", level === "error");
 }
 
 onEvent((event) => {
@@ -907,13 +918,15 @@ onEvent((event) => {
 
     case "cmdlineRun": {
       // The core hands back the line it collected; the front end decides what
-      // it means. In M1 that dispatch moves into the core with the buffers.
+      // Only what the core did not recognise arrives here — `:w` and `:e` are
+      // its own now. What is left is the split commands, which are still view
+      // state, plus the residue of a compound: `:wq` writes in the core and
+      // hands the `q` on to be run here.
       const run = SPLIT_COMMANDS[event.text.trim().replace(/^:/, "")];
       if (run) {
         run();
-        renderStatus(`:${event.text.trim()}`);
       } else if (event.text.trim()) {
-        renderStatus(`:${event.text.trim()} — not a command yet`);
+        renderStatus(`:${event.text.trim()} — not a command yet`, "warn");
       }
       break;
     }
@@ -992,7 +1005,7 @@ onEvent((event) => {
       break;
 
     case "notice":
-      renderStatus(event.text);
+      renderStatus(event.text, event.level);
       break;
   }
 });
