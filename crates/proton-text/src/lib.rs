@@ -8,8 +8,10 @@ pub mod buffer;
 pub mod edit;
 pub mod history;
 pub mod motion;
+pub mod search;
 
 pub use buffer::{Buffer, Change, Point};
 pub use edit::{Cursor, Edit, Position, Range};
 pub use history::History;
 pub use motion::Class;
+pub use search::find_in;

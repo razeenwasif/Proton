@@ -28,7 +28,7 @@ if (HAS_SHELL) {
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
-  const state = { mode: "codex", vim: "Normal", cmdline: "", prompt: ":", leader: null };
+  const state = { mode: "codex", vim: "Normal", cmdline: "", prompt: ":", pattern: "", leader: null };
   const LABEL = {
     Normal: "NORMAL", Insert: "INSERT", Visual: "VISUAL",
     VisualLine: "V-LINE", Replace: "REPLACE", Command: "COMMAND",
@@ -45,6 +45,19 @@ if (HAS_SHELL) {
     lines: doc.lines.slice(doc.first, doc.first + doc.height),
     totalLines: doc.lines.length,
     version: 0,
+    // Literal, folded like the real one in crates/proton-text/src/search.rs.
+    // Enough to draw the layer; the rule that matters lives in Rust.
+    matches: doc.lines.slice(doc.first, doc.first + doc.height).map((line) => {
+      if (!state.pattern) return [];
+      const sensitive = /[A-Z]/.test(state.pattern);
+      const hay = sensitive ? line : line.toLowerCase();
+      const needle = sensitive ? state.pattern : state.pattern.toLowerCase();
+      const hits = [];
+      for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + needle.length)) {
+        hits.push({ start: at, end: at + needle.length });
+      }
+      return hits;
+    }),
   });
 
   // A static set of projects, so the workspace rail has something to draw in
@@ -193,9 +206,11 @@ if (HAS_SHELL) {
 
     if (k === "Escape") {
       state.cmdline = "";
+      state.pattern = "";
       state.leader = null;
       state.vim = "Normal";
-      return [{ type: "cmdline", text: null, prompt: state.prompt }, vimEvent()];
+      // Abandoning a search stops the painting, as the real one does.
+      return [{ type: "cmdline", text: null, prompt: state.prompt }, viewportEvent(), vimEvent()];
     }
 
     if (state.vim === "Command") {
@@ -207,7 +222,9 @@ if (HAS_SHELL) {
       }
       if (k === "Backspace") state.cmdline = state.cmdline.slice(0, -1);
       else if (k.length === 1) state.cmdline += k;
-      return [{ type: "cmdline", text: state.cmdline, prompt: state.prompt }];
+      // Incremental: the pattern being typed is what gets painted.
+      if (state.prompt !== ":") state.pattern = state.cmdline;
+      return [{ type: "cmdline", text: state.cmdline, prompt: state.prompt }, viewportEvent()];
     }
 
     if (state.vim === "Insert" || state.vim === "Replace") {

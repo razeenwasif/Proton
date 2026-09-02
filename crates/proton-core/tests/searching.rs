@@ -217,3 +217,163 @@ fn a_search_in_visual_mode_extends_the_selection() {
     assert_eq!(cursor.anchor, 0, "anchored where visual mode started");
     std::fs::remove_dir_all(root).ok();
 }
+
+/* ── hlsearch and incremental search ──────────────────────────────── */
+
+/// The match ranges on each visible line.
+fn hits(events: &[Event]) -> Option<Vec<Vec<(u32, u32)>>> {
+    events.iter().rev().find_map(|e| match e {
+        Event::Viewport { matches, .. } => Some(
+            matches
+                .iter()
+                .map(|line| line.iter().map(|h| (h.start, h.end)).collect())
+                .collect(),
+        ),
+        _ => None,
+    })
+}
+
+#[test]
+fn every_match_on_screen_is_painted() {
+    let (mut ws, root) = workspace(SAMPLE);
+    let events = search(&mut ws, "/alpha");
+
+    // Line 0 and line 2 have `alpha`; line 3 has `Alpha`, which a lowercase
+    // pattern also matches.
+    assert_eq!(
+        hits(&events).unwrap(),
+        vec![vec![(10, 15)], vec![], vec![(6, 11)], vec![(7, 12)], vec![],]
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn nothing_is_painted_before_a_search() {
+    let (mut ws, root) = workspace(SAMPLE);
+    let events = ws.apply(Command::Sync);
+    assert!(hits(&events).unwrap().iter().all(Vec::is_empty));
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn typing_paints_before_you_press_enter() {
+    // The whole point of an incremental search: you see where you would land,
+    // and everywhere else you could have landed, before committing.
+    let (mut ws, root) = workspace(SAMPLE);
+    ws.apply(Command::Key {
+        key: Key::char('/'),
+    });
+    let events = keys(&mut ws, "alph");
+
+    let painted: usize = hits(&events).unwrap().iter().map(Vec::len).sum();
+    assert_eq!(painted, 3, "all three, mid-pattern");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn typing_moves_the_cursor_to_the_match() {
+    let (mut ws, root) = workspace(SAMPLE);
+    ws.apply(Command::Key {
+        key: Key::char('/'),
+    });
+    keys(&mut ws, "gam");
+    assert_eq!(at(&ws), (2, 12), "already there, before Enter");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn each_keystroke_searches_from_where_the_prompt_opened() {
+    // Not from where the last preview landed — otherwise every character
+    // jumps to the match after the one before, and the cursor walks away down
+    // the file as you type.
+    let (mut ws, root) = workspace("alpha\nalpha\nalpha\nalpha\n");
+    ws.apply(Command::Key {
+        key: Key::char('/'),
+    });
+    keys(&mut ws, "a");
+    assert_eq!(at(&ws), (0, 4), "the next `a` after the cursor");
+    keys(&mut ws, "l");
+    assert_eq!(at(&ws), (1, 0), "the next `al` after the cursor");
+    keys(&mut ws, "pha");
+    assert_eq!(
+        at(&ws),
+        (1, 0),
+        "still the first `alpha` after the cursor — searching from the \
+         preview instead would have walked on to line 2"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn abandoning_a_search_puts_the_cursor_back() {
+    let (mut ws, root) = workspace(SAMPLE);
+    ws.apply(Command::PlaceCursor { line: 1, column: 2 });
+    let before = at(&ws);
+
+    ws.apply(Command::Key {
+        key: Key::char('/'),
+    });
+    keys(&mut ws, "gamma");
+    assert_ne!(at(&ws), before, "the preview moved it");
+
+    let events = ws.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+    assert_eq!(at(&ws), before, "and Escape put it back");
+    assert!(
+        hits(&events).unwrap().iter().all(Vec::is_empty),
+        "and stopped painting"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn committing_lands_on_the_match_the_preview_showed() {
+    // The preview has already moved the cursor, so searching from *there*
+    // would land on the second match rather than the first.
+    let (mut ws, root) = workspace("alpha\nalpha\nalpha\n");
+    ws.apply(Command::Key {
+        key: Key::char('/'),
+    });
+    keys(&mut ws, "alpha");
+    let previewed = at(&ws);
+
+    ws.apply(Command::Key {
+        key: Key::named("Enter"),
+    });
+    assert_eq!(at(&ws), previewed, "where the preview said");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn noh_stops_painting_without_forgetting_the_pattern() {
+    // The distinction people use `:noh` for: the highlight has served its
+    // purpose, and `n` still has to work.
+    let (mut ws, root) = workspace(SAMPLE);
+    search(&mut ws, "/alpha");
+
+    let events = run_ex(&mut ws, "noh");
+    assert!(
+        hits(&events).unwrap().iter().all(Vec::is_empty),
+        "stopped painting: {events:?}"
+    );
+
+    let events = keys(&mut ws, "n");
+    assert!(!said(&events, "no previous search"), "{events:?}");
+    assert!(
+        hits(&events).unwrap().iter().any(|line| !line.is_empty()),
+        "and searching again paints again"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+/// Type an ex command and submit it.
+fn run_ex(ws: &mut Workspace, line: &str) -> Vec<Event> {
+    ws.apply(Command::Key {
+        key: Key::char(':'),
+    });
+    keys(ws, line);
+    ws.apply(Command::Key {
+        key: Key::named("Enter"),
+    })
+}

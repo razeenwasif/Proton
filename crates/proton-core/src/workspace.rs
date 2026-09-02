@@ -11,7 +11,7 @@ use proton_lsp::client::Incoming;
 
 use crate::action::{Action, Verb};
 use crate::agent::Agent;
-use crate::bus::{BufferTab, Command, Event, NoticeLevel, Selection, ServerState};
+use crate::bus::{BufferTab, Command, Event, Hit, NoticeLevel, Selection, ServerState};
 use crate::editor::Editor;
 use crate::ex::Ex;
 use crate::highlights::Highlighters;
@@ -54,11 +54,20 @@ pub struct Workspace {
     agent: Agent,
     visualizer: Visualizer,
     tree: Tree,
+    /// Where the cursor was when a search prompt opened.
+    ///
+    /// Every keystroke previews from here rather than from the last preview,
+    /// and abandoning the line puts the cursor back.
+    search_origin: Option<proton_text::Cursor>,
     /// The last search, for `n` and `N`.
     ///
     /// Document state rather than modal state: `n` means "again", and only
     /// this layer knows what again was.
     search: Option<Search>,
+    /// Whether matches are painted. `:noh` turns this off without forgetting
+    /// the pattern, which is the distinction people use it for — the highlight
+    /// has served its purpose and `n` still has to work.
+    highlight: bool,
 }
 
 /// A search, remembered.
@@ -539,11 +548,65 @@ impl Workspace {
 
     /* ── search ───────────────────────────────────────────────────── */
 
+    /// Follow the search as it is typed.
+    ///
+    /// Every keystroke searches from where the cursor was when the prompt
+    /// opened — never from where the last preview left it, or each character
+    /// would jump to the match after the one before and the cursor would walk
+    /// away down the file as you typed.
+    fn preview_search(&mut self, pattern: &str, forward: bool) -> Vec<Event> {
+        let origin = *self
+            .search_origin
+            .get_or_insert(self.editor.buffer().cursor);
+
+        // Nothing typed yet, or nothing found: sit where you started rather
+        // than somewhere a prefix of the pattern happened to match.
+        let landing = if pattern.is_empty() {
+            None
+        } else {
+            self.editor.buffer().find(pattern, origin.offset, forward)
+        };
+
+        let selecting = self.vim.is_selecting();
+        let buffer = self.editor.buffer_mut();
+        buffer.cursor = match landing {
+            Some(at) if selecting => buffer.clamp(origin.extended_to(at)),
+            Some(at) => buffer.clamp(origin.moved_to(at)),
+            None => buffer.clamp(origin),
+        };
+        // The viewport goes too, because the matches painted on it are the
+        // pattern being typed. That is the whole point of an incremental
+        // search: you see where you would land before committing to it.
+        let mut events = self.after_action(false);
+        events.push(self.viewport_event());
+        events
+    }
+
+    /// Put the cursor back where the search started. `⎋` out of `/foo`.
+    fn abandon_search(&mut self) -> Vec<Event> {
+        let Some(origin) = self.search_origin.take() else {
+            return Vec::new();
+        };
+        let buffer = self.editor.buffer_mut();
+        buffer.cursor = buffer.clamp(origin);
+        let mut events = self.after_action(false);
+        // The highlight went with the prompt.
+        events.push(self.viewport_event());
+        events
+    }
+
     /// Run a search and remember it, so `n` has something to repeat.
     ///
     /// The pattern belongs to the document rather than to the modal engine —
     /// `n` means "again" and only this layer knows what again was.
     fn search(&mut self, pattern: &str, forward: bool) -> Vec<Event> {
+        // Undo the preview before committing. Typing the pattern has already
+        // moved the cursor to the first match, and searching from *there*
+        // would land on the second one.
+        if let Some(origin) = self.search_origin.take() {
+            let buffer = self.editor.buffer_mut();
+            buffer.cursor = buffer.clamp(origin);
+        }
         if pattern.is_empty() {
             // An empty `/` in vim repeats the last search rather than
             // matching nothing, which is what anybody pressing `/` then Enter
@@ -587,10 +650,7 @@ impl Workspace {
         // paragraph. Keyed on the mode rather than on there already being a
         // selection, because `v` on its own leaves the anchor and the head in
         // the same place and there is nothing yet to notice.
-        let visual = matches!(
-            self.vim.mode(),
-            VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
-        );
+        let visual = self.vim.is_selecting();
         let buffer = self.editor.buffer_mut();
         buffer.cursor = buffer.clamp(if visual {
             buffer.cursor.extended_to(at)
@@ -610,7 +670,14 @@ impl Workspace {
                 NoticeLevel::Info,
             ));
         }
+        // Landing on a match paints them again, whatever `:noh` said about the
+        // last search — you asked to be shown where they are.
+        self.highlight = true;
         events.extend(self.after_action(false));
+        // The pattern changed, so the matches on screen did. `after_action`
+        // only redraws the text when the window moved, which is not the same
+        // question.
+        events.push(self.viewport_event());
         events
     }
 
@@ -639,6 +706,13 @@ impl Workspace {
         }
         if ex.is("edit", 1) {
             return self.ex_edit(&ex);
+        }
+        if ex.is("nohlsearch", 3) {
+            // Vim's `:noh`. The pattern is kept — `n` still works — and only
+            // the painting stops, which is exactly the distinction people use
+            // it for.
+            self.highlight = false;
+            return vec![self.viewport_event()];
         }
         if ex.is("quit", 1) || ex.is("bdelete", 2) {
             return self.ex_quit(&ex);
@@ -1504,13 +1578,23 @@ impl Workspace {
                 }
             }
 
-            Outcome::Cmdline(text) => (
-                vec![Event::Cmdline {
-                    text,
-                    prompt: self.vim.prompt().to_string(),
-                }],
-                false,
-            ),
+            Outcome::Cmdline(text) => {
+                let prompt = self.vim.prompt();
+                let mut events = vec![Event::Cmdline {
+                    text: text.clone(),
+                    prompt: prompt.to_string(),
+                }];
+                match (&text, prompt) {
+                    // The line was abandoned. A search that moved the cursor
+                    // while you typed it has to put the cursor back.
+                    (None, _) => events.extend(self.abandon_search()),
+                    (Some(pattern), '/' | '?') => {
+                        events.extend(self.preview_search(pattern, prompt == '/'));
+                    }
+                    _ => {}
+                }
+                (events, false)
+            }
             // The core runs what it owns; whatever it does not recognise comes
             // back out as `CmdlineRun` for the front end, which still owns
             // splits. See `run_ex`.
@@ -1561,14 +1645,55 @@ impl Workspace {
         let spans = self
             .highlights
             .spans(self.editor.buffer(), first_line, count);
+        let pattern = self.highlight_pattern().map(str::to_owned);
         let buf = self.editor.buffer();
+        let lines = buf.lines(first_line, count);
+
+        // Searched per visible line rather than by asking the document where
+        // every match is. A pattern cannot contain a newline — Enter submits
+        // it — so a line is a complete unit, and the cost is the window rather
+        // than the file however many thousand hits there are below the fold.
+        let matches = match &pattern {
+            Some(pattern) => lines
+                .iter()
+                .map(|line| {
+                    proton_text::find_in(line, pattern)
+                        .into_iter()
+                        .map(|(start, end)| Hit {
+                            start: start as u32,
+                            end: end as u32,
+                        })
+                        .collect()
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+
         Event::Viewport {
             first_line,
-            lines: buf.lines(first_line, count),
             total_lines: buf.len_lines(),
             version: buf.version(),
+            lines,
             highlights: spans,
+            matches,
         }
+    }
+
+    /// What to paint as matched, if anything.
+    ///
+    /// The pattern being typed wins over the last one committed, which is the
+    /// whole of what makes an incremental search useful: you see where you
+    /// would land, and everywhere else you could have landed, before pressing
+    /// Enter.
+    fn highlight_pattern(&self) -> Option<&str> {
+        if self.vim.mode() == VimMode::Command && matches!(self.vim.prompt(), '/' | '?') {
+            let typed = self.vim.cmdline();
+            return (!typed.is_empty()).then_some(typed);
+        }
+        if !self.highlight {
+            return None;
+        }
+        self.search.as_ref().map(|search| search.pattern.as_str())
     }
 
     fn cursor_event(&self) -> Event {

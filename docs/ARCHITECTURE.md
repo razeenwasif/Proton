@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 373 tests, headless
+cargo test --workspace        # 388 tests, headless
 cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
@@ -247,6 +247,25 @@ means — so they share a mode and the prompt character distinguishes them. A
 search is a motion, so a selection survives it: `v/foo` extends to the match
 exactly as `v}` extends to the paragraph, and closing the line gives visual
 mode back.
+
+**Matches are painted per visible line, not per file.** A pattern cannot
+contain a newline — Enter submits it — so a line is a complete unit, and the
+cost is the window rather than the document however many thousand hits are
+below the fold. They travel as their own layer beside the syntax spans rather
+than as another scope: a match is a background and a scope is a colour, and a
+match inside a string has to stay string-coloured.
+
+**Incremental search previews from where the prompt opened**, never from where
+the last preview landed — otherwise each character jumps to the match after the
+one before, and the cursor walks away down the file as you type. Committing
+undoes the preview before jumping, for the same reason. `⎋` puts the cursor
+back where it started; `:noh` stops the painting without forgetting the
+pattern, which is the distinction people use it for.
+
+The folding rule lives in `proton-text`'s `search` module because two callers
+need it: the whole-rope scan that answers "where do I jump next" and the
+per-line scan that answers "what do I paint". A search that jumps to a match it
+will not highlight is worse than one that does neither.
 
 **The `:` line** parses in `proton-core/src/ex.rs` and runs in the workspace.
 Names abbreviate the way vim's do — `:w`, `:wr`, `:wri`, `:writ`, `:write` are

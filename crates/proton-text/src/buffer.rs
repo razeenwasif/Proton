@@ -661,17 +661,11 @@ impl Buffer {
             return Vec::new();
         }
 
-        // ASCII folding rather than Unicode: `char::to_lowercase` can change
-        // how many characters there are, and a match offset that is off by one
-        // is worse than a search that will not fold a Turkish dotted I.
-        let sensitive = needle.iter().any(char::is_ascii_uppercase);
-        let same = |a: char, b: char| {
-            if sensitive {
-                a == b
-            } else {
-                a.eq_ignore_ascii_case(&b)
-            }
-        };
+        // The folding rule lives in `search` because the viewport's highlight
+        // needs the same one. A search that jumps to a match it will not
+        // highlight is worse than one that does neither.
+        let sensitive = crate::search::is_sensitive(pattern);
+        let same = |a: char, b: char| crate::search::same(a, b, sensitive);
 
         let mut found = Vec::new();
         let mut window: VecDeque<char> = VecDeque::with_capacity(needle.len());

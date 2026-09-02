@@ -392,6 +392,10 @@ const view = {
   vim: "NORMAL",
   /// Coloured runs, parallel to `lines` — or empty for a file with no grammar.
   highlights: [],
+  // Search hits on each visible line. A separate layer from `highlights`:
+  // a match is a background and a scope is a colour, and a match inside a
+  // string has to stay string-coloured.
+  matches: [],
 };
 
 const escapeHtml = (s) =>
@@ -486,11 +490,12 @@ const SCOPE = {
 /// wide line and the browser feels every one of them. Two channels at once,
 /// because a keyword inside a diagnostic needs to be both coloured and
 /// underlined and splitting them would need twice the elements.
-function runsHtml(chars, scope, severity, picked, from, to) {
+function runsHtml(chars, scope, severity, picked, hit, from, to) {
   const same = (i, j) =>
     (scope?.[i] ?? null) === (scope?.[j] ?? null) &&
     (severity?.[i] ?? null) === (severity?.[j] ?? null) &&
-    Boolean(picked?.[i]) === Boolean(picked?.[j]);
+    Boolean(picked?.[i]) === Boolean(picked?.[j]) &&
+    Boolean(hit?.[i]) === Boolean(hit?.[j]);
 
   let html = "";
   let i = from;
@@ -504,6 +509,9 @@ function runsHtml(chars, scope, severity, picked, from, to) {
     if (colour && SCOPE[colour]) classes.push(SCOPE[colour]);
     if (severity?.[i]) classes.push("sq", "d-" + severity[i]);
     if (picked?.[i]) classes.push("sel");
+    // Last, so a match reads over a scope rather than under it — the point of
+    // painting it is that you can find it.
+    if (hit?.[i]) classes.push("hit");
     html += classes.length ? `<span class="${classes.join(" ")}">${text}</span>` : text;
     i = end;
   }
@@ -538,7 +546,7 @@ function selectedOn(line, width) {
   return [Math.min(from, width), Math.min(to, width)];
 }
 
-function lineHtml(number, text, cursorColumn, highlights) {
+function lineHtml(number, text, cursorColumn, highlights, hits) {
   const here = marks.byLine.get(number);
   const sign = here?.length
     ? `<span class="s d-${here[0].severity}">${icon(SIGN[here[0].severity], "solid")}</span>`
@@ -557,6 +565,16 @@ function lineHtml(number, text, cursorColumn, highlights) {
     }
   }
 
+  // Search hits, expanded the same way. `null` when nothing is being
+  // searched for, so the merge below has nothing to compare and no cost.
+  let hit = null;
+  if (hits?.length) {
+    hit = new Array(chars.length).fill(false);
+    for (const h of hits) {
+      for (let i = h.start; i < Math.min(h.end, chars.length); i++) hit[i] = true;
+    }
+  }
+
   const range = selectedOn(number, chars.length);
   const picked = range && new Array(chars.length).fill(false);
   if (range) {
@@ -566,7 +584,7 @@ function lineHtml(number, text, cursorColumn, highlights) {
   const empty = range && chars.length === 0 ? " selected" : "";
 
   if (cursorColumn === undefined) {
-    const body = runsHtml(chars, scope, severity, picked, 0, chars.length);
+    const body = runsHtml(chars, scope, severity, picked, hit, 0, chars.length);
     return `<div class="ln${empty}">${gutter}${body}</div>`;
   }
   // The caret sits *on* a character in normal mode, so it takes the one it
@@ -574,9 +592,9 @@ function lineHtml(number, text, cursorColumn, highlights) {
   const under = escapeHtml(chars[cursorColumn] ?? " ") || " ";
   return (
     `<div class="ln cur${empty}">${gutter}` +
-    `${runsHtml(chars, scope, severity, picked, 0, cursorColumn)}` +
+    `${runsHtml(chars, scope, severity, picked, hit, 0, cursorColumn)}` +
     `<span class="caret">${under}</span>` +
-    `${runsHtml(chars, scope, severity, picked, cursorColumn + 1, chars.length)}</div>`
+    `${runsHtml(chars, scope, severity, picked, hit, cursorColumn + 1, chars.length)}</div>`
   );
 }
 
@@ -622,6 +640,7 @@ function renderEditor() {
         text,
         i === cursorRow ? view.cursor.column : undefined,
         view.highlights[i],
+        view.matches[i],
       ),
     )
     .join("");
@@ -1218,6 +1237,7 @@ onEvent((event) => {
       view.lines = event.lines;
       view.totalLines = event.totalLines;
       view.highlights = event.highlights ?? [];
+      view.matches = event.matches ?? [];
       renderEditor();
       break;
 

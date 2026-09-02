@@ -225,6 +225,24 @@ impl Vim {
         &self.cmdline
     }
 
+    /// Whether a selection is being held.
+    ///
+    /// True in any visual mode, and also while a *search* line is open from
+    /// one — the mode is `Command` for the length of typing it, but the
+    /// selection has not gone anywhere and `v/foo` has to keep extending it.
+    pub fn is_selecting(&self) -> bool {
+        let visual = |mode| {
+            matches!(
+                mode,
+                VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+            )
+        };
+        visual(self.mode)
+            || (self.mode == VimMode::Command
+                && matches!(self.prompt, '/' | '?')
+                && visual(self.resume))
+    }
+
     /// Which line is open — `:`, `/` or `?`. What the prompt draws.
     pub fn prompt(&self) -> char {
         if self.prompt == '\0' {

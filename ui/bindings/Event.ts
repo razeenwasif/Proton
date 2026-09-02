@@ -5,6 +5,7 @@ import type { BufferTab } from "./BufferTab";
 import type { Completion } from "./Completion";
 import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
+import type { Hit } from "./Hit";
 import type { ModeId } from "./ModeId";
 import type { NoticeLevel } from "./NoticeLevel";
 import type { PickerItem } from "./PickerItem";
@@ -32,7 +33,19 @@ prompt: string, } | { "type": "cmdlineRun", text: string, } | { "type": "action"
  * not "these lines happen to have no colours". Otherwise it is
  * exactly as long as `lines`, so the two can be walked together.
  */
-highlights: Array<Array<Span>>, } | { "type": "cursor", line: number, column: number, offset: number, 
+highlights: Array<Array<Span>>, 
+/**
+ * Where the current search matches, one list per line in `lines`.
+ *
+ * A separate layer from `highlights` rather than another scope: a
+ * match is a background and a scope is a colour, and a match inside a
+ * string has to stay string-coloured. Empty when nothing is being
+ * searched for.
+ *
+ * Scoped to the window like everything else here — a file with ten
+ * thousand hits sends only the ones you can see.
+ */
+matches: Array<Array<Hit>>, } | { "type": "cursor", line: number, column: number, offset: number, 
 /**
  * Anchor line/column when there is a selection.
  */

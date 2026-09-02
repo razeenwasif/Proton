@@ -230,6 +230,16 @@ pub enum Event {
         /// not "these lines happen to have no colours". Otherwise it is
         /// exactly as long as `lines`, so the two can be walked together.
         highlights: Vec<Vec<Span>>,
+        /// Where the current search matches, one list per line in `lines`.
+        ///
+        /// A separate layer from `highlights` rather than another scope: a
+        /// match is a background and a scope is a colour, and a match inside a
+        /// string has to stay string-coloured. Empty when nothing is being
+        /// searched for.
+        ///
+        /// Scoped to the window like everything else here — a file with ten
+        /// thousand hits sends only the ones you can see.
+        matches: Vec<Vec<Hit>>,
     },
     /// Where the cursor is now. Split from `Viewport` because a motion is the
     /// common case and must not cost a re-render of the text.
@@ -361,6 +371,17 @@ pub struct Selection {
     pub line: usize,
     pub column: usize,
     pub offset: usize,
+}
+
+/// A search hit on one line, in character columns.
+///
+/// Characters rather than bytes, because that is what the front end indexes by
+/// and what the rest of the viewport already speaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+pub struct Hit {
+    pub start: u32,
+    pub end: u32,
 }
 
 /// One entry in the buffer bar.
