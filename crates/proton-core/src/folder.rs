@@ -82,31 +82,33 @@ pub fn expand(query: &str) -> PathBuf {
 /// instead. Here a dot is a prefix like any other character, which is what
 /// somebody typing one means.
 fn split(query: &str) -> (PathBuf, String) {
-    // `~` alone is a folder, not a half-typed name — nobody is going on to
-    // type the rest of their own home directory.
-    if query == "~" {
-        if let Some(home) = home() {
-            return (home, String::new());
-        }
-    }
-
-    let expanded = expand(query);
-    let text = expanded.to_string_lossy().into_owned();
-
-    if bare_drive(&text) {
+    if bare_drive(query) {
         // `C:` on its own is the root of that drive, not the process's
         // current directory on it.
-        return (PathBuf::from(format!("{text}\\")), String::new());
+        return (PathBuf::from(format!("{query}\\")), String::new());
     }
 
-    match text.rfind(is_separator) {
+    // Split what was *typed*, and expand only the directory half afterwards.
+    //
+    // Expanding first loses the thing the split depends on: `~/` expands to a
+    // home directory with no trailing separator, which then reads as "the name
+    // `Razeen`, inside `C:\Users`" — one row, and no way to get inside your own
+    // home folder. The trailing separator is the entire signal, so it has to
+    // survive to be read.
+    match query.rfind(is_separator) {
         // The separator stays with the directory, so a root stays a root:
         // `C:\` must not be trimmed into `C:`, which means something else.
-        Some(at) => (PathBuf::from(&text[..=at]), text[at + 1..].to_string()),
-        // No separator at all: `.` and `..` name a folder, anything else is a
-        // prefix to match in the current one.
-        None if text == "." || text == ".." => (PathBuf::from(text), String::new()),
-        None => (PathBuf::from("."), text),
+        Some(at) => (expand(&query[..=at]), query[at + 1..].to_string()),
+        // `~` alone is a folder, not a half-typed name — nobody is going on to
+        // type the rest of their own home directory.
+        None if query == "~" => (
+            home().unwrap_or_else(|| PathBuf::from(query)),
+            String::new(),
+        ),
+        // `.` and `..` name a folder; anything else with no separator in it is
+        // a prefix to match in the current one.
+        None if query == "." || query == ".." => (PathBuf::from(query), String::new()),
+        None => (PathBuf::from("."), query.to_string()),
     }
 }
 
@@ -244,6 +246,34 @@ mod tests {
         let (dir, prefix) = split(r"C:\Users\");
         assert_eq!(dir, PathBuf::from(r"C:\Users\"));
         assert_eq!(prefix, "");
+    }
+
+    #[test]
+    fn a_tilde_with_a_separator_goes_inside_home() {
+        // The bug this exists to stop: expanding before splitting turns `~/`
+        // into a home directory with no trailing separator, which then reads as
+        // "the name `Razeen` inside `C:\Users`". The prompt showed one row —
+        // your own home folder — and there was no way to get into it.
+        let Some(home) = home() else { return };
+
+        for typed in ["~/", "~\\"] {
+            let (dir, prefix) = split(typed);
+            assert_eq!(dir, home, "{typed}");
+            assert_eq!(prefix, "", "{typed}: nothing was typed to match");
+        }
+
+        // And the folders inside home are what comes back, not home itself.
+        let listed = complete("~/", LIMIT);
+        assert!(
+            listed
+                .iter()
+                .all(|path| path.parent() == Some(home.as_path())),
+            "everything listed should be a child of home: {listed:?}"
+        );
+        assert!(
+            !listed.contains(&home),
+            "and home should not be listed inside itself: {listed:?}"
+        );
     }
 
     #[test]
