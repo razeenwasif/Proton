@@ -18,7 +18,13 @@ import type { TreeRow } from "./TreeRow";
 import type { VimMode } from "./VimMode";
 import type { WorkspaceTab } from "./WorkspaceTab";
 
-export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "type": "pending", keys: string, } | { "type": "leader", prefix: string | null, } | { "type": "cmdline", text: string | null, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "viewport", firstLine: number, lines: Array<string>, totalLines: number, version: bigint, 
+export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "type": "pending", keys: string, } | { "type": "leader", prefix: string | null, } | { "type": "cmdline", text: string | null, 
+/**
+ * Which line it is: `:` for an ex command, `/` or `?` for a search.
+ * They share the prompt, and the character is the only thing telling
+ * a reader which one they are typing into.
+ */
+prompt: string, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "viewport", firstLine: number, lines: Array<string>, totalLines: number, version: bigint, 
 /**
  * Coloured runs, one list per line in `lines`.
  *

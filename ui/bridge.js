@@ -28,7 +28,7 @@ if (HAS_SHELL) {
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
-  const state = { mode: "codex", vim: "Normal", cmdline: "", leader: null };
+  const state = { mode: "codex", vim: "Normal", cmdline: "", prompt: ":", leader: null };
   const LABEL = {
     Normal: "NORMAL", Insert: "INSERT", Visual: "VISUAL",
     VisualLine: "V-LINE", Replace: "REPLACE", Command: "COMMAND",
@@ -195,7 +195,7 @@ if (HAS_SHELL) {
       state.cmdline = "";
       state.leader = null;
       state.vim = "Normal";
-      return [{ type: "cmdline", text: null }, vimEvent()];
+      return [{ type: "cmdline", text: null, prompt: state.prompt }, vimEvent()];
     }
 
     if (state.vim === "Command") {
@@ -207,7 +207,7 @@ if (HAS_SHELL) {
       }
       if (k === "Backspace") state.cmdline = state.cmdline.slice(0, -1);
       else if (k.length === 1) state.cmdline += k;
-      return [{ type: "cmdline", text: state.cmdline }];
+      return [{ type: "cmdline", text: state.cmdline, prompt: state.prompt }];
     }
 
     if (state.vim === "Insert" || state.vim === "Replace") {
@@ -224,10 +224,10 @@ if (HAS_SHELL) {
     if (k === "i" || k === "a" || k === "o") state.vim = "Insert";
     else if (k === "v") state.vim = state.vim === "Visual" ? "Normal" : "Visual";
     else if (k === "V") state.vim = state.vim === "VisualLine" ? "Normal" : "VisualLine";
-    else if (k === ":") { state.vim = "Command"; state.cmdline = ""; }
+    else if (k === ":" || k === "/" || k === "?") { state.vim = "Command"; state.cmdline = ""; state.prompt = k; }
     else if (k === " ") { state.leader = ""; return [{ type: "leader", prefix: "" }]; }
 
-    if (state.vim === "Command") return [{ type: "cmdline", text: "" }, vimEvent()];
+    if (state.vim === "Command") return [{ type: "cmdline", text: "", prompt: state.prompt }, vimEvent()];
     return state.vim === before ? [] : [vimEvent()];
   };
 }

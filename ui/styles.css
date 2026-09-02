@@ -530,6 +530,10 @@ kbd {
 .buf .x:hover { background: var(--e3); color: var(--ink); }
 
 .code { flex: 1; min-height: 0; overflow: auto; font: 12.5px/1.62 var(--mono); padding: 8px 0 40px; }
+/* A spacer the height of the whole file, with the loaded window translated to
+   its place inside. The scrollbar is then the file's, not the window's. */
+.code .doc { position: relative; }
+.code .win { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
 .ln { display: flex; padding: 0 12px 0 0; white-space: pre; }
 .ln.cur { background: rgba(var(--raise), 0.07); }
 .ln .n {

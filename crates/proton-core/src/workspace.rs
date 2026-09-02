@@ -54,6 +54,20 @@ pub struct Workspace {
     agent: Agent,
     visualizer: Visualizer,
     tree: Tree,
+    /// The last search, for `n` and `N`.
+    ///
+    /// Document state rather than modal state: `n` means "again", and only
+    /// this layer knows what again was.
+    search: Option<Search>,
+}
+
+/// A search, remembered.
+#[derive(Debug, Clone)]
+struct Search {
+    pattern: String,
+    /// Which way it was going. `N` is the opposite of *this* rather than of
+    /// forwards — after `?foo`, `n` keeps going backwards.
+    forward: bool,
 }
 
 impl Workspace {
@@ -184,6 +198,23 @@ impl Workspace {
                 // extends the selection, which is what vim's mouse does and
                 // what anybody dragging a selection means.
                 self.after_action(false)
+            }
+
+            Command::SelectTo { line, column } => {
+                let was = self.vim.mode();
+                self.vim.enter_visual();
+                let buffer = self.editor.buffer_mut();
+                let line = line.min(buffer.len_lines().saturating_sub(1));
+                let at = buffer.offset_of(proton_text::Position { line, column });
+                // The head moves and the anchor stays, which is the whole of
+                // what a visual selection is.
+                buffer.cursor = buffer.clamp(buffer.cursor.extended_to(at));
+
+                let mut events = self.after_action(false);
+                if self.vim.mode() != was {
+                    events.push(self.vim_event());
+                }
+                events
             }
 
             Command::ToggleTreeNode { path } => {
@@ -504,6 +535,83 @@ impl Workspace {
             elapsed_ms: picker.elapsed_ms(),
             scanning: self.pickers.is_scanning(),
         }
+    }
+
+    /* ── search ───────────────────────────────────────────────────── */
+
+    /// Run a search and remember it, so `n` has something to repeat.
+    ///
+    /// The pattern belongs to the document rather than to the modal engine —
+    /// `n` means "again" and only this layer knows what again was.
+    fn search(&mut self, pattern: &str, forward: bool) -> Vec<Event> {
+        if pattern.is_empty() {
+            // An empty `/` in vim repeats the last search rather than
+            // matching nothing, which is what anybody pressing `/` then Enter
+            // by accident wants.
+            return self.search_again(forward);
+        }
+        self.search = Some(Search {
+            pattern: pattern.to_string(),
+            forward,
+        });
+        self.jump_to_match(pattern, forward)
+    }
+
+    fn search_again(&mut self, forward: bool) -> Vec<Event> {
+        let Some(search) = self.search.clone() else {
+            return vec![notice("no previous search".into(), NoticeLevel::Warn)];
+        };
+        // `N` is the opposite of whichever direction the search was going, not
+        // of "forwards" — after `?foo`, `n` keeps going backwards.
+        let forward = if forward {
+            search.forward
+        } else {
+            !search.forward
+        };
+        self.jump_to_match(&search.pattern, forward)
+    }
+
+    fn jump_to_match(&mut self, pattern: &str, forward: bool) -> Vec<Event> {
+        let buffer = self.editor.buffer();
+        let Some(at) = buffer.find(pattern, buffer.cursor.offset, forward) else {
+            return vec![notice(format!("{pattern} not found"), NoticeLevel::Warn)];
+        };
+
+        let wrapped = if forward {
+            at <= buffer.cursor.offset
+        } else {
+            at >= buffer.cursor.offset
+        };
+        // Extends rather than moves in visual mode: a search is a motion, so
+        // `v/foo` selects up to the match exactly as `v}` selects to the
+        // paragraph. Keyed on the mode rather than on there already being a
+        // selection, because `v` on its own leaves the anchor and the head in
+        // the same place and there is nothing yet to notice.
+        let visual = matches!(
+            self.vim.mode(),
+            VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+        );
+        let buffer = self.editor.buffer_mut();
+        buffer.cursor = buffer.clamp(if visual {
+            buffer.cursor.extended_to(at)
+        } else {
+            buffer.cursor.moved_to(at)
+        });
+
+        let mut events = Vec::new();
+        if wrapped {
+            // Silently wrapping looks like the search went the wrong way.
+            events.push(notice(
+                format!(
+                    "search hit {} and continued from the {}",
+                    if forward { "the bottom" } else { "the top" },
+                    if forward { "top" } else { "bottom" }
+                ),
+                NoticeLevel::Info,
+            ));
+        }
+        events.extend(self.after_action(false));
+        events
     }
 
     /* ── ex commands ──────────────────────────────────────────────── */
@@ -1383,7 +1491,26 @@ impl Workspace {
                 }],
                 false,
             ),
-            Outcome::Cmdline(text) => (vec![Event::Cmdline { text }], false),
+            Outcome::Search { pattern, forward } => (self.search(&pattern, forward), false),
+            Outcome::Repeat { forward } => (self.search_again(forward), false),
+            Outcome::SearchWord { forward } => {
+                let buffer = self.editor.buffer();
+                match buffer.word_at(buffer.cursor.offset) {
+                    Some(word) => (self.search(&word, forward), false),
+                    None => (
+                        vec![notice("no word under the cursor".into(), NoticeLevel::Warn)],
+                        false,
+                    ),
+                }
+            }
+
+            Outcome::Cmdline(text) => (
+                vec![Event::Cmdline {
+                    text,
+                    prompt: self.vim.prompt().to_string(),
+                }],
+                false,
+            ),
             // The core runs what it owns; whatever it does not recognise comes
             // back out as `CmdlineRun` for the front end, which still owns
             // splits. See `run_ex`.

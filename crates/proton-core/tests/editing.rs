@@ -368,3 +368,56 @@ fn a_click_reports_the_cursor_so_the_view_can_follow() {
         "{events:?}"
     );
 }
+
+#[test]
+fn a_drag_leaves_a_visual_selection() {
+    // Not a selection the modal engine cannot see: a drag has to leave you
+    // somewhere `y` and `d` mean what you expect.
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/tests/fixtures/indented.txt".into(),
+    });
+
+    ws.apply(Command::PlaceCursor { line: 0, column: 2 });
+    let anchor = ws.editor().buffer().cursor.offset;
+    ws.apply(Command::SelectTo { line: 0, column: 8 });
+
+    let cursor = ws.editor().buffer().cursor;
+    assert_eq!(ws.vim_mode(), proton_core::VimMode::Visual);
+    assert!(cursor.has_selection());
+    assert_eq!(cursor.anchor, anchor, "the anchor stayed where it started");
+    assert!(cursor.offset > anchor, "and the head moved");
+}
+
+#[test]
+fn dragging_further_moves_the_head_and_not_the_anchor() {
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/tests/fixtures/indented.txt".into(),
+    });
+
+    ws.apply(Command::PlaceCursor { line: 0, column: 2 });
+    let anchor = ws.editor().buffer().cursor.offset;
+    for column in [4, 8, 12] {
+        ws.apply(Command::SelectTo { line: 0, column });
+        assert_eq!(
+            ws.editor().buffer().cursor.anchor,
+            anchor,
+            "the anchor moved at column {column}"
+        );
+    }
+}
+
+#[test]
+fn a_drag_inside_a_line_selection_keeps_it_linewise() {
+    // Dragging inside a `V` selection must not silently downgrade it to
+    // charwise — the shape was chosen deliberately.
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/tests/fixtures/indented.txt".into(),
+    });
+
+    type_keys(&mut ws, "V");
+    ws.apply(Command::SelectTo { line: 1, column: 2 });
+    assert_eq!(ws.vim_mode(), proton_core::VimMode::VisualLine);
+}

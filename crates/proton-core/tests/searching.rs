@@ -1,0 +1,219 @@
+//! `/`, `?`, `n`, `N`, `*` — driven by typing them.
+
+use proton_core::bus::Event;
+use proton_core::{Command, Key, Workspace};
+
+fn workspace(text: &str) -> (Workspace, std::path::PathBuf) {
+    let root = std::env::temp_dir().join(format!(
+        "proton-search-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("a.txt"), text).unwrap();
+
+    let mut ws = Workspace::rooted(&root);
+    ws.apply(Command::OpenBuffer {
+        path: "a.txt".into(),
+    });
+    (ws, root)
+}
+
+fn keys(ws: &mut Workspace, text: &str) -> Vec<Event> {
+    let mut last = Vec::new();
+    for c in text.chars() {
+        last = ws.apply(Command::Key { key: Key::char(c) });
+    }
+    last
+}
+
+/// Type a search and submit it.
+fn search(ws: &mut Workspace, line: &str) -> Vec<Event> {
+    keys(ws, line);
+    ws.apply(Command::Key {
+        key: Key::named("Enter"),
+    })
+}
+
+fn at(ws: &Workspace) -> (usize, usize) {
+    let buffer = ws.editor().buffer();
+    let p = buffer.position(buffer.cursor.offset);
+    (p.line, p.column)
+}
+
+fn said(events: &[Event], fragment: &str) -> bool {
+    events.iter().any(|e| match e {
+        Event::Notice { text, .. } => text.contains(fragment),
+        _ => false,
+    })
+}
+
+const SAMPLE: &str = "the first alpha\nsecond beta\nthird alpha gamma\nfourth Alpha\n";
+
+#[test]
+fn a_search_jumps_to_the_match() {
+    let (mut ws, root) = workspace(SAMPLE);
+    search(&mut ws, "/beta");
+    assert_eq!(at(&ws), (1, 7));
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn n_and_shift_n_walk_the_matches() {
+    let (mut ws, root) = workspace(SAMPLE);
+    search(&mut ws, "/alpha");
+    assert_eq!(at(&ws), (0, 10), "the first match after the cursor");
+
+    keys(&mut ws, "n");
+    assert_eq!(at(&ws), (2, 6));
+
+    keys(&mut ws, "n");
+    assert_eq!(
+        at(&ws),
+        (3, 7),
+        "smartcase: a lowercase pattern finds Alpha"
+    );
+
+    keys(&mut ws, "N");
+    assert_eq!(at(&ws), (2, 6), "and back");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn searching_wraps_and_says_so() {
+    // Silently wrapping looks exactly like the search having gone the wrong
+    // way, which is how you end up editing the wrong function.
+    let (mut ws, root) = workspace(SAMPLE);
+    search(&mut ws, "/gamma");
+    assert_eq!(at(&ws), (2, 12));
+
+    let events = keys(&mut ws, "n");
+    assert_eq!(at(&ws), (2, 12), "the only match, found again");
+    assert!(said(&events, "continued from the top"), "{events:?}");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn backwards_search_goes_backwards_and_n_keeps_going_that_way() {
+    // `N` is the opposite of the direction the search was going, not of
+    // "forwards" — after `?foo`, `n` still goes backwards.
+    let (mut ws, root) = workspace(SAMPLE);
+    keys(&mut ws, "G"); // last line
+    search(&mut ws, "?alpha");
+    assert_eq!(at(&ws), (3, 7), "the nearest match above");
+
+    keys(&mut ws, "n");
+    assert_eq!(at(&ws), (2, 6), "still going up");
+
+    keys(&mut ws, "N");
+    assert_eq!(at(&ws), (3, 7), "and N turns round");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn smartcase_is_vims() {
+    // A lowercase pattern ignores case; a pattern with a capital in it does
+    // not. That is what makes `/err` find `Error` and `/Error` not find `err`.
+    let (mut ws, root) = workspace(SAMPLE);
+    search(&mut ws, "/Alpha");
+    assert_eq!(at(&ws), (3, 7), "only the capitalised one");
+
+    let events = keys(&mut ws, "n");
+    assert!(
+        said(&events, "continued"),
+        "it is the only match: {events:?}"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn star_searches_the_word_under_the_cursor() {
+    let (mut ws, root) = workspace(SAMPLE);
+    // Land on `alpha` on the first line.
+    keys(&mut ws, "0wwv");
+    ws.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+    ws.apply(Command::PlaceCursor {
+        line: 0,
+        column: 10,
+    });
+
+    keys(&mut ws, "*");
+    assert_eq!(at(&ws), (2, 6), "the next `alpha`");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn a_pattern_that_is_nowhere_says_so_and_stays_put() {
+    let (mut ws, root) = workspace(SAMPLE);
+    let before = at(&ws);
+    let events = search(&mut ws, "/nowhere");
+    assert!(said(&events, "not found"), "{events:?}");
+    assert_eq!(at(&ws), before, "and did not move");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn n_before_any_search_says_so_rather_than_doing_nothing() {
+    let (mut ws, root) = workspace(SAMPLE);
+    let events = keys(&mut ws, "n");
+    assert!(said(&events, "no previous search"), "{events:?}");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn an_empty_search_repeats_the_last_one() {
+    // Vim's rule, and what anybody who pressed `/` and Enter by accident
+    // wants — rather than "matched nothing", which is not a useful answer.
+    let (mut ws, root) = workspace(SAMPLE);
+    search(&mut ws, "/beta");
+    ws.apply(Command::PlaceCursor { line: 0, column: 0 });
+
+    search(&mut ws, "/");
+    assert_eq!(at(&ws), (1, 7), "found beta again");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn the_prompt_says_which_line_you_are_typing_into() {
+    // `:` and `/` share the line at the bottom, and the character is the only
+    // thing telling them apart.
+    let (mut ws, root) = workspace(SAMPLE);
+
+    let prompt_of = |events: &[Event]| {
+        events.iter().find_map(|e| match e {
+            Event::Cmdline { prompt, .. } => Some(prompt.clone()),
+            _ => None,
+        })
+    };
+
+    let events = ws.apply(Command::Key {
+        key: Key::char('/'),
+    });
+    assert_eq!(prompt_of(&events).as_deref(), Some("/"));
+
+    ws.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+    let events = ws.apply(Command::Key {
+        key: Key::char(':'),
+    });
+    assert_eq!(prompt_of(&events).as_deref(), Some(":"));
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn a_search_in_visual_mode_extends_the_selection() {
+    // `v/foo` selects up to the match, the way an operator-pending search
+    // does — the head moves and the anchor stays.
+    let (mut ws, root) = workspace(SAMPLE);
+    keys(&mut ws, "v");
+    search(&mut ws, "/gamma");
+
+    let cursor = ws.editor().buffer().cursor;
+    assert!(cursor.has_selection(), "the drag left a selection");
+    assert_eq!(cursor.anchor, 0, "anchored where visual mode started");
+    std::fs::remove_dir_all(root).ok();
+}

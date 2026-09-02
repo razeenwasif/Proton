@@ -643,3 +643,86 @@ pub struct Change {
 fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).ok()?.modified().ok()
 }
+
+impl Buffer {
+    /* ── search ───────────────────────────────────────────────────────
+    Literal, with vim's smartcase: a pattern containing a capital is
+    case-sensitive, one without is not. No regular expressions yet —
+    `/` earns its keep long before `\<foo\>` does, and a half-supported
+    regex dialect is worse than an honest literal one. */
+
+    /// Every offset where `pattern` occurs, in order.
+    ///
+    /// The whole list rather than the next one, because that is what makes
+    /// wrapping fall out — and what `hlsearch` will want when it arrives.
+    pub fn matches(&self, pattern: &str) -> Vec<usize> {
+        let needle: Vec<char> = pattern.chars().collect();
+        if needle.is_empty() || needle.len() > self.text.len_chars() {
+            return Vec::new();
+        }
+
+        // ASCII folding rather than Unicode: `char::to_lowercase` can change
+        // how many characters there are, and a match offset that is off by one
+        // is worse than a search that will not fold a Turkish dotted I.
+        let sensitive = needle.iter().any(char::is_ascii_uppercase);
+        let same = |a: char, b: char| {
+            if sensitive {
+                a == b
+            } else {
+                a.eq_ignore_ascii_case(&b)
+            }
+        };
+
+        let mut found = Vec::new();
+        let mut window: VecDeque<char> = VecDeque::with_capacity(needle.len());
+        for (at, c) in self.text.chars().enumerate() {
+            if window.len() == needle.len() {
+                window.pop_front();
+            }
+            window.push_back(c);
+            if window.len() == needle.len() && window.iter().zip(&needle).all(|(&a, &b)| same(a, b))
+            {
+                found.push(at + 1 - needle.len());
+            }
+        }
+        found
+    }
+
+    /// The next match from `from`, wrapping round the end of the file.
+    ///
+    /// Strictly after (or before) `from`, so pressing `n` on a match goes to
+    /// the next one rather than staying put.
+    pub fn find(&self, pattern: &str, from: usize, forward: bool) -> Option<usize> {
+        let all = self.matches(pattern);
+        if forward {
+            all.iter()
+                .copied()
+                .find(|&at| at > from)
+                .or_else(|| all.first().copied())
+        } else {
+            all.iter()
+                .copied()
+                .rev()
+                .find(|&at| at < from)
+                .or_else(|| all.last().copied())
+        }
+    }
+
+    /// The word under `offset`, for `*` and `#`.
+    pub fn word_at(&self, offset: usize) -> Option<String> {
+        let is_word = |c: char| c.is_alphanumeric() || c == '_';
+        let len = self.text.len_chars();
+        if offset >= len || !is_word(self.text.char(offset)) {
+            return None;
+        }
+        let mut start = offset;
+        while start > 0 && is_word(self.text.char(start - 1)) {
+            start -= 1;
+        }
+        let mut end = offset + 1;
+        while end < len && is_word(self.text.char(end)) {
+            end += 1;
+        }
+        Some(self.text.slice(start..end).to_string())
+    }
+}

@@ -580,11 +580,42 @@ function lineHtml(number, text, cursorColumn, highlights) {
   );
 }
 
+/* ── scrolling ────────────────────────────────────────────────────────
+   The core sends one screen of lines, so the pane cannot simply scroll —
+   there is nothing below the last line to scroll into. Instead the document
+   is represented by a spacer of its full height, and the loaded window is
+   translated to sit at the right place inside it. The scrollbar is then the
+   real one for the file, and scrolling asks the core for a different window.
+
+   `first_line` stays the core's to decide. The page proposes one when the
+   user scrolls; everything that moves the window for its own reasons — `G`,
+   a grep hit, the cursor leaving the screen — comes back as a viewport event
+   like any other, and the pane follows it. */
+
+/** Height of one rendered line. Measured, because the theme sets it. */
+let lineHeight = 20;
+
+function measureLineHeight() {
+  const line = $("[data-editor] .ln");
+  const measured = line?.getBoundingClientRect().height;
+  if (measured > 0) lineHeight = measured;
+  else {
+    const target = $("[data-editor]");
+    if (target) lineHeight = parseFloat(getComputedStyle(target).lineHeight) || 20;
+  }
+  return lineHeight;
+}
+
 function renderEditor() {
   const target = $("[data-editor]");
   if (!target) return;
+  // Measured before building, because the spacer's height depends on it. With
+  // no line rendered yet this falls back to the pane's computed line-height,
+  // which is the same number.
+  measureLineHeight();
+
   const cursorRow = view.cursor.line - view.firstLine;
-  target.innerHTML = view.lines
+  const rows = view.lines
     .map((text, i) =>
       lineHtml(
         view.firstLine + i,
@@ -594,6 +625,20 @@ function renderEditor() {
       ),
     )
     .join("");
+
+  // A spacer the height of the whole file, with the loaded window positioned
+  // inside it. `translate` rather than `top` so moving the window is a
+  // compositor job and never a reflow.
+  target.innerHTML =
+    `<div class="doc" style="height:${Math.max(1, view.totalLines) * lineHeight}px">` +
+    `<div class="win" style="transform:translateY(${view.firstLine * lineHeight}px)">` +
+    `${rows}</div></div>`;
+
+  // The window moved for a reason of the core's — `G`, a grep hit, the cursor
+  // leaving the screen — so the pane has to follow. A user scroll is already
+  // within one line of where it should be, which is what tells the two apart.
+  const want = view.firstLine * lineHeight;
+  if (Math.abs(target.scrollTop - want) > lineHeight) target.scrollTop = want;
 
   // The caret element the popup was anchored to has just been replaced, so
   // an open popup has to be told where the new one is or it stays where the
@@ -634,24 +679,59 @@ function columnAt(line, x, y) {
   return column;
 }
 
-document.addEventListener("mousedown", (e) => {
-  // Left button only, and never when a drag is being started on a gutter.
-  if (e.button !== 0) return;
-  const line = e.target.closest("[data-editor] .ln");
-  if (!line) return;
-
+/** Where in the document a point is, or null if it is not on a line. */
+function pointAt(x, y) {
+  const line = document.elementFromPoint(x, y)?.closest("[data-editor] .ln");
+  if (!line) return null;
   const number = Number(line.querySelector(".n")?.textContent);
-  if (!Number.isFinite(number)) return;
+  if (!Number.isFinite(number)) return null;
 
   // The gutter is markup, not text. Landing there would otherwise walk past
   // every run and put the cursor at the end of the line, which is the least
   // likely thing anybody clicking a line number wanted.
-  const gutter = e.target.closest(".n, .s");
-  const column = gutter ? 0 : columnAt(line, e.clientX, e.clientY);
-  if (column === null) return;
+  const gutter = document.elementFromPoint(x, y)?.closest(".n, .s");
+  const column = gutter ? 0 : columnAt(line, x, y);
+  return column === null ? null : { line: number - 1, column };
+}
+
+/* A drag is a visual selection, which is what makes it leave you somewhere
+   `y` and `d` mean what you expect. The selection is drawn from core state,
+   so the browser's own is suppressed — two selections disagreeing about what
+   is selected is worse than either. */
+let dragging = false;
+let dragTo = null;
+
+document.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  const at = pointAt(e.clientX, e.clientY);
+  if (!at) return;
+
+  // Stops the browser painting a second, different selection over ours.
+  e.preventDefault();
+  dragging = true;
   // The core clamps: a click past the end of a short line is the ordinary
   // case, and the front end does not hold the document to check against.
-  dispatch({ type: "placeCursor", line: number - 1, column });
+  dispatch({ type: "placeCursor", ...at });
+});
+
+document.addEventListener("mousemove", (e) => {
+  if (!dragging) return;
+  const at = pointAt(e.clientX, e.clientY);
+  if (!at) return;
+  // Coalesced to one per frame: a drag fires far more moves than the screen
+  // can show, and each one would otherwise be a round trip.
+  const queued = dragTo !== null;
+  dragTo = at;
+  if (queued) return;
+  requestAnimationFrame(() => {
+    const to = dragTo;
+    dragTo = null;
+    if (to) dispatch({ type: "selectTo", ...to });
+  });
+});
+
+document.addEventListener("mouseup", () => {
+  dragging = false;
 });
 
 function renderBuffers(names, active) {
@@ -747,14 +827,49 @@ function renderWorkspaces(items, active) {
     .join("");
 }
 
-/** How many lines the stage can actually show, so the core sends no more. */
+/**
+ * Ask the core for the window the pane can currently show.
+ *
+ * `first_line` is exactly the line at the top of the pane, never an overscan
+ * start. It has to mean one thing, because the core sets it too — `G`, a grep
+ * hit, the cursor leaving the screen — and the pane positions itself from it
+ * either way. Offsetting it here would leave the two disagreeing by the
+ * overscan, and the correction would scroll the user back a little on every
+ * frame they scrolled. The overscan is extra rows below instead.
+ */
+const OVERSCAN = 4;
+
 function reportViewport() {
   const target = $("[data-editor]");
   if (!target) return;
-  const lineHeight = parseFloat(getComputedStyle(target).lineHeight) || 20;
-  const rows = Math.max(1, Math.ceil(target.clientHeight / lineHeight) + 2);
-  dispatch({ type: "viewport", firstLine: view.firstLine, lines: rows });
+  const first = Math.max(0, Math.floor(target.scrollTop / lineHeight));
+  const rows = Math.max(1, Math.ceil(target.clientHeight / lineHeight) + OVERSCAN);
+  dispatch({ type: "viewport", firstLine: first, lines: rows });
 }
+
+// Scroll events arrive far faster than frames, and every one of them would
+// otherwise be a round trip to the core. One per frame is enough to keep up
+// with a trackpad and is the most the screen can show anyway.
+let viewportQueued = false;
+
+function reportViewportSoon() {
+  if (viewportQueued) return;
+  viewportQueued = true;
+  requestAnimationFrame(() => {
+    viewportQueued = false;
+    reportViewport();
+  });
+}
+
+document.addEventListener(
+  "scroll",
+  (e) => {
+    if (e.target?.matches?.("[data-editor]")) reportViewportSoon();
+  },
+  // Scroll does not bubble, so the listener has to be capturing to see it on
+  // a descendant of `document`.
+  true,
+);
 
 document.addEventListener("click", (e) => {
   const pick = e.target.closest("[data-pick]");
@@ -1062,6 +1177,10 @@ onEvent((event) => {
         show("cmdline");
         const el = $("#cmdline-text");
         if (el) el.textContent = event.text;
+        // `:` and `/` share the line, and the character is the only thing
+        // telling you which one you are typing into.
+        const prompt = $("#cmdline-prompt");
+        if (prompt) prompt.textContent = event.prompt;
       }
       break;
 

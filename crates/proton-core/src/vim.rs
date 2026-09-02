@@ -64,6 +64,16 @@ pub enum Outcome {
     /// consumer has to be able to tell a keystroke from an execution — they
     /// carry the same text and mean entirely different things.
     Execute(String),
+    /// A search was submitted — `/pattern` or `?pattern`.
+    ///
+    /// Separate from `Execute` because the two are typed the same way and mean
+    /// entirely different things, which is the same reason `Execute` is
+    /// separate from `Cmdline`.
+    Search { pattern: String, forward: bool },
+    /// Move to the next or previous match of the last search — `n` and `N`.
+    Repeat { forward: bool },
+    /// Search for the word under the cursor — `*` and `#`.
+    SearchWord { forward: bool },
     /// A literal character typed in insert mode.
     Input(char),
     /// Nothing happened. Deliberately distinct from an action with no effect.
@@ -168,6 +178,16 @@ pub struct Vim {
     mode: VimMode,
     pending: Pending,
     cmdline: String,
+    /// Which line is open: ':' for an ex command, '/' or '?' for a search.
+    ///
+    /// They share the line at the bottom because they are the same
+    /// interaction, and differ in exactly one thing — what pressing Enter
+    /// means. Keeping the character is cheaper than a second mode that would
+    /// duplicate every key in it.
+    prompt: char,
+    /// The mode the command line was opened from, so a search can give it
+    /// back. See [`Vim::after_prompt`].
+    resume: VimMode,
     /// Keys typed after the leader, before which-key resolves.
     leader: Option<String>,
 
@@ -203,6 +223,29 @@ impl Vim {
 
     pub fn cmdline(&self) -> &str {
         &self.cmdline
+    }
+
+    /// Which line is open — `:`, `/` or `?`. What the prompt draws.
+    pub fn prompt(&self) -> char {
+        if self.prompt == '\0' {
+            ':'
+        } else {
+            self.prompt
+        }
+    }
+
+    /// Begin a charwise visual selection — what a mouse drag is.
+    ///
+    /// A selection already running is left alone, so dragging inside a
+    /// linewise or blockwise one extends it in the shape you chose rather than
+    /// silently downgrading it to charwise.
+    pub fn enter_visual(&mut self) {
+        if matches!(
+            self.mode,
+            VimMode::Normal | VimMode::Insert | VimMode::Replace
+        ) {
+            self.mode = VimMode::Visual;
+        }
     }
 
     /// Drop a leader sequence in progress, without the mode change Escape
@@ -379,11 +422,35 @@ impl Vim {
         self.pending.clear();
         self.leader = None;
         self.cmdline.clear();
-        self.mode = VimMode::Normal;
+        // Abandoning a search goes back to the selection you were holding when
+        // you started typing it. Escape out of `v/foo` should leave you where
+        // Escape out of `v` would not have.
+        self.mode = if was_cmdline {
+            self.after_prompt()
+        } else {
+            VimMode::Normal
+        };
         if was_cmdline {
             Outcome::Cmdline(None)
         } else {
             Outcome::Ignored
+        }
+    }
+
+    /// Which mode closing the command line returns to.
+    ///
+    /// A search is a motion, so a selection survives it: `v/foo` extends to
+    /// the match, exactly as `v}` extends to the paragraph. An ex command is
+    /// not, and leaves you in normal mode the way vim does.
+    fn after_prompt(&self) -> VimMode {
+        let visual = matches!(
+            self.resume,
+            VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+        );
+        if visual && matches!(self.prompt, '/' | '?') {
+            self.resume
+        } else {
+            VimMode::Normal
         }
     }
 
@@ -419,8 +486,18 @@ impl Vim {
         match k.key.as_str() {
             "Enter" => {
                 let line = std::mem::take(&mut self.cmdline);
-                self.mode = VimMode::Normal;
-                Outcome::Execute(line)
+                self.mode = self.after_prompt();
+                match self.prompt {
+                    '/' => Outcome::Search {
+                        pattern: line,
+                        forward: true,
+                    },
+                    '?' => Outcome::Search {
+                        pattern: line,
+                        forward: false,
+                    },
+                    _ => Outcome::Execute(line),
+                }
             }
             "Backspace" => {
                 if self.cmdline.pop().is_none() {
@@ -617,12 +694,21 @@ impl Vim {
                 };
                 return Outcome::Ignored;
             }
-            ':' => {
+            ':' | '/' | '?' => {
                 self.pending.clear();
+                self.resume = self.mode;
                 self.mode = VimMode::Command;
                 self.cmdline.clear();
+                self.prompt = c;
                 return Outcome::Cmdline(Some(String::new()));
             }
+            // `n` and `N` repeat the last search; the pattern is the
+            // document's, not the modal engine's, so the workspace resolves it.
+            'n' => return Outcome::Repeat { forward: true },
+            'N' => return Outcome::Repeat { forward: false },
+            // `*` and `#` search for the word under the cursor.
+            '*' => return Outcome::SearchWord { forward: true },
+            '#' => return Outcome::SearchWord { forward: false },
             _ => {}
         }
 

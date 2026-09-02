@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 353 tests, headless
+cargo test --workspace        # 373 tests, headless
 cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
@@ -227,6 +227,27 @@ with motions and text objects, counts multiply, registers and marks are global,
 macros record *actions* (so they replay across modes), `.` repeats, undo is a
 tree.
 
+**Search** is literal, with vim's smartcase: a pattern containing a capital is
+case-sensitive, one without is not. No regular expressions — `/` earns its keep
+long before `\<foo\>` does, and a half-supported regex dialect is worse than an
+honest literal one. Folding is ASCII rather than Unicode because
+`char::to_lowercase` can change how many characters there are, and a match
+offset that is off by one is worse than not folding a Turkish dotted I.
+
+`Buffer::matches` returns *every* match rather than the next one. That is what
+makes wrapping fall out — and what `hlsearch` will want when it arrives. The
+pattern is remembered by the workspace rather than the modal engine, because
+`n` means "again" and only that layer knows what again was; `N` is the opposite
+of the direction the search was going, so after `?foo` it is `n` that keeps
+going up. Wrapping says so, since silently wrapping looks exactly like the
+search having gone the wrong way.
+
+`/` and `:` share the line at the bottom and differ in one thing — what Enter
+means — so they share a mode and the prompt character distinguishes them. A
+search is a motion, so a selection survives it: `v/foo` extends to the match
+exactly as `v}` extends to the paragraph, and closing the line gives visual
+mode back.
+
 **The `:` line** parses in `proton-core/src/ex.rs` and runs in the workspace.
 Names abbreviate the way vim's do — `:w`, `:wr`, `:wri`, `:writ`, `:write` are
 one command — and `!` is a separate token, because every command that can
@@ -381,6 +402,29 @@ already the design system. Three notes for the build:
 - **The editor pane is virtualised** from day one: visible window plus one
   screen of overscan, syntax highlighting off the main thread, deltas over the
   bridge. This is the pane that decides whether the webview bet holds.
+
+  The scrollbar is the *file's*, not the window's: a spacer of the document's
+  full height holds a loaded window translated to its place inside. Scrolling
+  proposes a `first_line`; everything that moves the window for its own reasons
+  — `G`, a grep hit, the cursor leaving the screen — comes back as a viewport
+  event and the pane follows it.
+
+  `first_line` therefore has to mean exactly one thing, and it means the line
+  at the top of the pane. Overscan is extra rows *below* rather than a lower
+  starting line: offsetting the request would leave the page and the core
+  disagreeing by the overscan, and the correction would scroll the user back a
+  little on every frame they scrolled.
+
+- **The mouse goes through the core.** A click is `PlaceCursor` and a drag is
+  `SelectTo`, because a motion cannot express either — `Move` is always
+  relative to where the cursor already is, and a mouse knows exactly where it
+  wants to be. A drag leaves a real visual selection rather than one the modal
+  engine cannot see, so `y` and `d` mean what you expect afterwards. The
+  browser's own selection is suppressed: two selections disagreeing about what
+  is selected is worse than either.
+
+  The hit test asks the browser where the click landed and counts characters to
+  that point, which is correct however the highlighter cut the row up.
 - **Themes stay CSS custom properties.** Four palettes, sixteen tokens each,
   switched by a `data-theme` attribute. Plugin-contributed themes are just more
   token sets.

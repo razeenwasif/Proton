@@ -68,6 +68,16 @@ pub enum Command {
         column: usize,
     },
 
+    /// Drag the far end of a selection there — a mouse drag.
+    ///
+    /// Starts a charwise visual selection if one is not already running, which
+    /// is what makes a drag leave you somewhere `y` and `d` mean what you
+    /// expect rather than in a selection the modal engine cannot see.
+    SelectTo {
+        line: usize,
+        column: usize,
+    },
+
     /// Open a folder in the tree, or close it if it was open.
     ToggleTreeNode {
         path: String,
@@ -173,6 +183,10 @@ pub enum Event {
     /// The command line opened, changed, or (with `None`) closed.
     Cmdline {
         text: Option<String>,
+        /// Which line it is: `:` for an ex command, `/` or `?` for a search.
+        /// They share the prompt, and the character is the only thing telling
+        /// a reader which one they are typing into.
+        prompt: String,
     },
     /// The command line was submitted. A separate event from `Cmdline` on
     /// purpose: the two carry the same text and mean entirely different
