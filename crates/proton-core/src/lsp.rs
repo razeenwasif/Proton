@@ -312,6 +312,25 @@ impl Servers {
         }
     }
 
+    /// Tell the server a buffer is gone, and forget we announced it.
+    ///
+    /// Both halves matter. Without the notification the server keeps its own
+    /// copy of a file nobody is editing and keeps reporting diagnostics for
+    /// it; without forgetting, reopening the same file would be announced as a
+    /// change to a document the server no longer has.
+    pub fn closed(&mut self, buffer: &Buffer) {
+        let Some(path) = buffer.path().map(proton_lsp::uri::plain) else {
+            return;
+        };
+        let Some(announced) = self.announced.remove(&path) else {
+            return;
+        };
+        if let Some(client) = self.clients.get_mut(announced.language) {
+            client.did_close(&path);
+        }
+        self.diagnostics.remove(&path);
+    }
+
     /// The client responsible for a file, if it is one we have announced.
     /// Asking about a file no server has been told about is not a question
     /// worth answering.

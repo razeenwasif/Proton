@@ -476,6 +476,14 @@ kbd {
 .buf .tag { font-size: 9.5px; color: var(--ink-4); }
 .buf .mod { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
 
+/* The dot and the × share a slot. Hovering is exactly when you stop needing
+   to be told the file is unsaved and start needing somewhere to click. */
+.buf .x { display: none; place-items: center; width: 14px; height: 14px; border-radius: 4px; }
+.buf .x svg { width: 10px; height: 10px; }
+.buf:hover .x { display: grid; }
+.buf:hover .mod { display: none; }
+.buf .x:hover { background: var(--e3); color: var(--ink); }
+
 .code { flex: 1; min-height: 0; overflow: auto; font: 12.5px/1.62 var(--mono); padding: 8px 0 40px; }
 .ln { display: flex; padding: 0 12px 0 0; white-space: pre; }
 .ln.cur { background: rgba(var(--raise), 0.045); }

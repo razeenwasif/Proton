@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 324 tests, headless
+cargo test --workspace        # 330 tests, headless
 cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
@@ -207,13 +207,18 @@ Names abbreviate the way vim's do — `:w`, `:wr`, `:wri`, `:writ`, `:write` are
 one command — and `!` is a separate token, because every command that can
 refuse needs somewhere to say "I know, do it anyway".
 
-`:w`, `:e`, `:saveas`, `:wq` and `:x` are the core's. Everything else passes
-back out as `CmdlineRun` for the front end, which still owns `:vsplit` and
-`:q` — splits are view state and the core has no opinion about them yet. That
-same channel carries the *residue* of a compound: `:wq` writes in the core and
-hands the `q` on, so one line can be half core and half chrome without either
-half knowing about the other. Ranges (`:1,5d`) are deliberately not parsed
-rather than half-parsed.
+`:w`, `:e`, `:q`, `:saveas`, `:bd`, `:wq` and `:x` are the core's. Everything
+else passes back out as `CmdlineRun` for the front end, which still owns
+`:vsplit`, `:close` and `:only` — splits are view state and the core has no
+opinion about them yet. Ranges (`:1,5d`) are deliberately not parsed rather
+than half-parsed.
+
+**`:q` closes the buffer, not a split.** Vim's closes a window and leaves the
+buffer hidden, which makes sense when buffers are invisible; here they are the
+tab bar, and a tab you cannot close is the more obvious missing thing. Splits
+keep `:close` and `␣wq`. The editor always has at least one buffer — `buffer()`
+indexes the list and every caller assumes it succeeds — so closing the last one
+leaves a fresh empty buffer rather than nothing to draw.
 
 Two behaviours are worth stating because they look like bugs otherwise:
 
@@ -226,7 +231,9 @@ Two behaviours are worth stating because they look like bugs otherwise:
   constantly, and silently discarding that is the one data-loss bug an editor
   must not have. `:w!` overrides; `:e!` throws yours away instead. Both
   `Command::Save` and `:w` go through the same guard, because a guard with a
-  way around it is not one.
+  way around it is not one — and so does the `×` on a tab, which is never
+  forced: losing unsaved work should cost a deliberate `:q!`, not a mis-aimed
+  pointer.
 
 `:e` re-reads through the ordinary edit path rather than rebuilding the buffer,
 which keeps the parse tree incremental, the marks shifted, and the reload

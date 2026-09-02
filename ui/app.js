@@ -227,8 +227,10 @@ const SPLIT_COMMANDS = {
   vsp: () => splitEditor("side"),
   split: () => splitEditor("stacked"),
   sp: () => splitEditor("stacked"),
-  q: () => closeSplit(),
+  // `:q` is not here any more — it closes the buffer, in the core. Splits are
+  // still view state, so they keep `:close` and `␣wq`.
   close: () => closeSplit(),
+  clo: () => closeSplit(),
   only: () => onlySplit(),
   on: () => onlySplit(),
 };
@@ -595,7 +597,12 @@ function renderBuffers(names, active) {
       (b, i) =>
         `<span class="buf${i === active ? " on" : ""}" data-buffer="${i}">` +
         `${fileIcon(b.name)} ${escapeHtml(b.name)}` +
-        `${b.modified ? ' <span class="mod"></span>' : ""}</span>`,
+        // The unsaved dot and the close button share a slot, as they do in
+        // every tab bar: two glyphs competing for the same corner reads as
+        // clutter, and hovering is exactly when you stop needing the dot.
+        `${b.modified ? '<span class="mod"></span>' : ""}` +
+        `<span class="x" data-buffer-close="${i}" title="Close ${escapeHtml(b.name)}">` +
+        `<svg class="i"><use href="#i-close"/></svg></span></span>`,
     )
     .join("");
 }
@@ -672,6 +679,21 @@ document.addEventListener("click", (e) => {
   }
   if (e.target.closest("[data-open-workspace]")) {
     dispatch({ type: "openWorkspacePicker" });
+    return;
+  }
+
+  // Checked before focusing, because the × sits inside the tab and a click on
+  // it matches both — only one of them is what was meant.
+  const shutBuffer = e.target.closest("[data-buffer-close]");
+  if (shutBuffer) {
+    e.stopPropagation();
+    dispatch({
+      type: "closeBuffer",
+      index: Number(shutBuffer.dataset.bufferClose),
+      // Never forced from a click. Losing unsaved work must cost a deliberate
+      // `:q!`, not a mis-aimed pointer.
+      force: false,
+    });
     return;
   }
 

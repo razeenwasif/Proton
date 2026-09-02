@@ -240,6 +240,28 @@ impl Workspace {
             // process's working directory. The front end should not have to
             // know where the binary happened to be launched from, and a path
             // from the picker has to mean the same thing as one from the tree.
+            // A click on a tab's `×` closes whichever tab was clicked, which
+            // need not be the one you are in — so it is focused first and then
+            // closed through the one path that knows how to refuse.
+            Command::CloseBuffer { index, force } => {
+                if index >= self.editor.buffers().len() {
+                    return vec![notice(format!("no buffer {index}"), NoticeLevel::Warn)];
+                }
+                let was = self.editor.active();
+                self.editor.focus(index);
+                let events = self.ex_quit(&Ex {
+                    name: "q".into(),
+                    bang: force,
+                    arg: None,
+                });
+                if refused(&events) {
+                    // Put the user back where they were rather than leaving
+                    // them in a buffer they only pointed at.
+                    self.editor.focus(was);
+                }
+                events
+            }
+
             Command::OpenBuffer { path } => self.open_path(&path),
 
             // Through the same door `:w` uses, so the overwrite guard cannot be
@@ -481,13 +503,22 @@ impl Workspace {
         if ex.is("edit", 1) {
             return self.ex_edit(&ex);
         }
+        if ex.is("quit", 1) || ex.is("bdelete", 2) {
+            return self.ex_quit(&ex);
+        }
         if ex.name == "wq" {
             let mut events = self.ex_write(&ex);
-            // Only close if the write actually happened — `:wq` on a file that
-            // changed underneath you must not close the window on the way to
-            // losing the work.
+            // Only close if the write actually happened. `:wq` on a file that
+            // changed underneath you must not take the buffer with it on the
+            // way to losing the work.
             if !refused(&events) {
-                events.push(Event::CmdlineRun { text: "q".into() });
+                // Forced, because the write is what the bang was about and the
+                // buffer is unmodified now anyway.
+                events.extend(self.ex_quit(&Ex {
+                    name: "q".into(),
+                    bang: true,
+                    arg: None,
+                }));
             }
             return events;
         }
@@ -501,7 +532,11 @@ impl Workspace {
                 Vec::new()
             };
             if !refused(&events) {
-                events.push(Event::CmdlineRun { text: "q".into() });
+                events.extend(self.ex_quit(&Ex {
+                    name: "q".into(),
+                    bang: true,
+                    arg: None,
+                }));
             }
             return events;
         }
@@ -604,6 +639,43 @@ impl Workspace {
             }
             Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
         }
+    }
+
+    /// `:q`, `:q!`, and `:bd` under its own name.
+    ///
+    /// Closes the *buffer*, not a split. Vim's `:q` closes a window and leaves
+    /// the buffer hidden, which makes sense when buffers are invisible; here
+    /// they are the tab bar, and a tab you cannot close is the more obvious
+    /// missing thing. Splits keep `:close` and `␣wq` — they are still view
+    /// state and the core has no opinion about them.
+    fn ex_quit(&mut self, ex: &Ex) -> Vec<Event> {
+        if !ex.bang && self.editor.buffer().is_modified() {
+            return vec![notice(
+                format!(
+                    "{} has unsaved changes — :wq to write, :q! to discard them",
+                    self.editor.buffer().name()
+                ),
+                NoticeLevel::Warn,
+            )];
+        }
+
+        let name = self.editor.buffer().name();
+        // Before it goes: the server is holding a copy of a file nobody is
+        // editing any more, and diagnostics for it are still in the gutter's
+        // reach.
+        self.servers.closed(self.editor.buffer());
+        self.editor.close(self.editor.active());
+
+        // The buffer you land on is a different file, so everything that is
+        // per-file is now wrong on screen.
+        self.resync();
+        vec![
+            notice(format!("closed {name}"), NoticeLevel::Info),
+            self.buffers_event(),
+            self.viewport_event(),
+            self.cursor_event(),
+            self.diagnostics_event(),
+        ]
     }
 
     /// Write the active buffer to its own file.

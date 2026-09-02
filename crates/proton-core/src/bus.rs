@@ -40,6 +40,13 @@ pub enum Command {
     FocusBuffer {
         index: usize,
     },
+    /// Close a buffer — the `×` on a tab, and what `:q` does. Refuses while it
+    /// holds unsaved changes unless `force`, which is `:q!`.
+    #[serde(rename_all = "camelCase")]
+    CloseBuffer {
+        index: usize,
+        force: bool,
+    },
     Save,
     /// What the view can show. The core does not know how tall the window is,
     /// so the front end says, and gets exactly those lines back — which is what

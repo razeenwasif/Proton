@@ -118,6 +118,39 @@ impl Editor {
         self.buffer_mut().save()
     }
 
+    /// Close a buffer, and say whether there was one to close.
+    ///
+    /// The editor always has at least one buffer — `buffer()` indexes into the
+    /// list and every caller assumes it succeeds — so closing the last one
+    /// leaves a fresh empty buffer rather than nothing to draw. That is also
+    /// what a user means by it: an editor showing no editor is not a state
+    /// anybody asked for.
+    ///
+    /// Which one you land on afterwards is the tab-bar convention rather than
+    /// vim's: the neighbour to the left, or the new last one if you closed off
+    /// the end.
+    pub fn close(&mut self, index: usize) -> bool {
+        if index >= self.buffers.len() {
+            return false;
+        }
+        self.buffers.remove(index);
+
+        if self.buffers.is_empty() {
+            self.buffers.push(Buffer::default());
+            self.active = 0;
+        } else if index < self.active {
+            // Everything after it shifted down; the same buffer is still open.
+            self.active -= 1;
+        } else if index == self.active {
+            self.active = index.min(self.buffers.len() - 1);
+        }
+
+        // A block insert is a promise to type into a rectangle of the buffer
+        // that was active when it started, and that buffer may have just gone.
+        self.block_insert = None;
+        true
+    }
+
     /* ── executing actions ────────────────────────────────────────── */
 
     /// Run one action. Returns whether the buffer changed, so the caller knows
