@@ -174,7 +174,16 @@
       </div>
       <div class="brand-mark" title="Proton"><svg class="i"><use href="#i-proton"/></svg></div>
 
-      <div class="mode-rail" role="tablist" aria-label="Workspace mode">
+      <!-- Three rails in a real hierarchy: this one chooses which project you
+           are in, the mode rail below chooses what you are doing in it, and the
+           panel rail chooses what you are looking at. -->
+      <div class="ws-rail" role="tablist" aria-label="Project" data-workspaces></div>
+      <button class="ws-add" data-open-workspace title="Open a folder — ␣fp">
+        <svg class="i"><use href="#i-plus"/></svg>
+      </button>
+      <div class="rail-sep" aria-hidden="true"></div>
+
+      <div class="mode-rail" role="tablist" aria-label="Mode">
       <button class="mode" role="tab" aria-selected="false" data-mode="chat"><svg class="i"><use href="#i-chat"/></svg><span>Chat</span></button>
       <button class="mode" role="tab" aria-selected="true"  data-mode="codex"><svg class="i"><use href="#i-code"/></svg><span>Codex</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="design"><svg class="i"><use href="#i-pen"/></svg><span>Design</span></button>

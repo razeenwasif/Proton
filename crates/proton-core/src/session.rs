@@ -1,0 +1,706 @@
+//! Several projects, open at once.
+//!
+//! A [`Workspace`] is one project: its own buffers, its own file index, its own
+//! language servers, its own agent conversation. A `Session` holds a handful of
+//! them and keeps one active — which is the whole of "multiple workspaces",
+//! because a project that shares a file index with another project is not a
+//! separate project, it is a confused one.
+//!
+//! Two rules make this cheap rather than expensive:
+//!
+//! - **Only the active workspace draws.** Every command goes to it, and only
+//!   its events reach the front end. The others are state, not screen.
+//! - **Every workspace still gets polled.** A background project's language
+//!   servers keep answering, and if nobody drains the mailbox it fills up and
+//!   the project is stale the moment you switch back. So `Poll` goes to all of
+//!   them and only the active one's events are kept.
+//!
+//! ## Who claims a keystroke
+//!
+//! Switching projects is not something a project can do to itself, so the
+//! session has to get a say — but the modal engine lives inside the workspace,
+//! and that is where a leader sequence is assembled. The rule that resolves it:
+//! **the session claims leader prefixes the workspace did not.** A workspace
+//! that reports an unresolved `␣fp` is reporting that nothing below knew what
+//! it meant, and the session takes it from there. Nothing about the modal
+//! engine has to know the session exists.
+
+use std::path::{Path, PathBuf};
+
+use proton_index::Matcher;
+use serde::{Deserialize, Serialize};
+
+use crate::bus::{Command, Event, NoticeLevel, WorkspaceTab};
+use crate::folder;
+use crate::key::Key;
+use crate::picker::{Accepted, Picker, PickerItem, PickerKey, PickerKind};
+use crate::workspace::{notice, Workspace};
+
+/// What a leader sequence means to the session.
+///
+/// The keymap lives here rather than in the front end for the same reason the
+/// workspace's does: a second front end must not have to reinvent it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Claim {
+    /// `␣fp` — find project.
+    Picker,
+    /// `␣pn` and `␣pp` — the next and previous project.
+    Cycle(i64),
+}
+
+impl Claim {
+    fn of(prefix: &str) -> Option<Claim> {
+        Some(match prefix {
+            "fp" => Claim::Picker,
+            "pn" => Claim::Cycle(1),
+            "pp" => Claim::Cycle(-1),
+            _ => return None,
+        })
+    }
+}
+
+/// How many projects to remember having opened. Long enough that a project you
+/// touched last month is still one keystroke away, short enough that the list
+/// stays a list.
+const RECENTS: usize = 40;
+
+/// The format version of the stored session. Bumped when the shape changes;
+/// anything else is ignored rather than guessed at.
+const VERSION: u32 = 1;
+
+#[derive(Debug)]
+pub struct Session {
+    workspaces: Vec<Workspace>,
+    active: usize,
+    /// Projects opened before, most recent first. Includes the open ones.
+    recents: Vec<PathBuf>,
+    /// The workspace picker, when it is open. The session's rather than a
+    /// workspace's, because no workspace can see the others.
+    picker: Option<Picker>,
+    matcher: Matcher,
+    /// The window height the front end last reported.
+    ///
+    /// A workspace that has just been created has never been told, and would
+    /// otherwise draw with the 80-line default until the next resize. Only the
+    /// height is kept — the scroll position belongs to each workspace.
+    height: Option<usize>,
+    /// Where the open set is remembered between runs. `None` in tests, which
+    /// must not touch the user's real session.
+    store: Option<PathBuf>,
+    /// Whether workspaces opened from here get language servers.
+    servers: bool,
+}
+
+impl Session {
+    /// One workspace, no persistence, no language servers. What tests want.
+    pub fn new(root: impl AsRef<Path>) -> Session {
+        Session {
+            workspaces: vec![Workspace::rooted(root)],
+            active: 0,
+            recents: Vec::new(),
+            picker: None,
+            matcher: Matcher::new(),
+            height: None,
+            store: None,
+            servers: false,
+        }
+    }
+
+    /// Language servers, for every workspace here and every one opened later.
+    pub fn with_language_servers(mut self) -> Session {
+        self.servers = true;
+        for workspace in &mut self.workspaces {
+            workspace.enable_language_servers();
+        }
+        self
+    }
+
+    /// Remember the open set in `file`, and reload it next time.
+    pub fn storing_in(mut self, file: impl Into<PathBuf>) -> Session {
+        self.store = Some(file.into());
+        self
+    }
+
+    /// What the shell starts with: last time's projects, plus whichever one was
+    /// asked for on the command line.
+    ///
+    /// `requested` is a folder the user actually named — `proton C:\src\thing`.
+    /// It is opened and focused on top of the restored set, because that is
+    /// what naming it meant.
+    ///
+    /// `fallback` is consulted only when there is nothing to restore and
+    /// nothing was named. The working directory belongs here rather than in
+    /// `requested`: it says something on a first run from a terminal and
+    /// nothing at all on the tenth, and treating it as a request is what would
+    /// put a downloads folder in the projects list for good because somebody
+    /// once started the editor from there.
+    pub fn restore(requested: Option<PathBuf>, fallback: Option<PathBuf>) -> Session {
+        Session::restore_from(state_file(), requested, fallback).with_language_servers()
+    }
+
+    /// [`Session::restore`], from a named store and without language servers.
+    ///
+    /// Public because it is the only way to test any of this: a test that
+    /// reached for the real session file would reopen — and then overwrite —
+    /// whatever the user actually had open.
+    pub fn restore_from(
+        store: Option<PathBuf>,
+        requested: Option<PathBuf>,
+        fallback: Option<PathBuf>,
+    ) -> Session {
+        let saved = store.as_deref().and_then(read_state);
+
+        // Start from something valid, then replace it if the stored set has
+        // anything in it. Building an empty `Session` and filling it would mean
+        // a window with no workspace for the length of this function, and a
+        // panic anywhere in between.
+        let start = requested
+            .clone()
+            .or_else(|| fallback.filter(|path| path.is_dir()))
+            .or_else(folder::home)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let mut session = Session::new(&start);
+        session.store = store;
+        session.recents = saved
+            .as_ref()
+            .map(|s| s.recents.iter().map(PathBuf::from).collect())
+            .unwrap_or_default();
+
+        if let Some(saved) = saved {
+            // A project can be deleted, renamed, or on a drive that is not
+            // plugged in. Skipping it silently is right: refusing to start
+            // because a folder from last week is gone would be absurd.
+            let alive: Vec<PathBuf> = saved
+                .open
+                .iter()
+                .map(PathBuf::from)
+                .filter(|path| path.is_dir())
+                .collect();
+            if !alive.is_empty() {
+                session.workspaces = alive.iter().map(|path| session.build(path)).collect();
+                session.active = saved.active.min(session.workspaces.len() - 1);
+            }
+        }
+
+        if let Some(path) = requested {
+            session.open(&path.to_string_lossy());
+        }
+        // Whatever you land in counts as the most recent, however you got
+        // there — named, restored, or fallen back to.
+        let landed = session.active().root().to_path_buf();
+        session.remember(&landed);
+
+        // Write it back before anything else happens. Without this a first run
+        // records nothing at all: opening the folder that was already the
+        // fallback is a focus, focusing what is already active is a no-op, and
+        // a no-op does not save — so there would be nothing to restore until
+        // the user happened to open a *second* project.
+        session.save();
+        session
+    }
+
+    pub fn active(&self) -> &Workspace {
+        &self.workspaces[self.active]
+    }
+
+    pub fn active_mut(&mut self) -> &mut Workspace {
+        &mut self.workspaces[self.active]
+    }
+
+    pub fn workspaces(&self) -> &[Workspace] {
+        &self.workspaces
+    }
+
+    pub fn active_index(&self) -> usize {
+        self.active
+    }
+
+    pub fn recents(&self) -> &[PathBuf] {
+        &self.recents
+    }
+
+    /* ── the bus ──────────────────────────────────────────────────── */
+
+    pub fn apply(&mut self, command: Command) -> Vec<Event> {
+        match command {
+            Command::Poll => self.poll(),
+
+            Command::OpenWorkspace { path } => self.open(&path),
+            Command::FocusWorkspace { index } => self.focus(index),
+            Command::CloseWorkspace { index } => self.close(index),
+            Command::CycleWorkspace { by } => self.cycle(by),
+            Command::OpenWorkspacePicker => self.open_picker(),
+
+            // While the workspace picker is open it owns the keyboard, exactly
+            // as Telescope does inside a workspace — and for the same reason.
+            Command::Key { key } if self.picker.is_some() => self.picker_key(&key),
+            Command::SelectPick { index } if self.picker.is_some() => {
+                if let Some(picker) = &mut self.picker {
+                    picker.select(index);
+                }
+                vec![self.picker_event()]
+            }
+
+            Command::Viewport { first_line, lines } => {
+                self.height = Some(lines.max(1));
+                self.delegate(Command::Viewport { first_line, lines })
+            }
+
+            Command::Sync => {
+                let mut events = self.delegate(Command::Sync);
+                events.push(self.workspaces_event());
+                events
+            }
+
+            other => self.delegate(other),
+        }
+    }
+
+    /// Hand a command to the active workspace, and take back anything it did
+    /// not resolve.
+    fn delegate(&mut self, command: Command) -> Vec<Event> {
+        let events = self.active_mut().apply(command);
+        self.claim(events)
+    }
+
+    /// The session's right of first refusal on unresolved leader sequences.
+    ///
+    /// A workspace reporting `Leader { prefix: Some("fp") }` is reporting that
+    /// nothing below knew what it meant — which-key is showing it and waiting
+    /// for more. That is exactly the moment for the layer above to say it was
+    /// theirs all along.
+    fn claim(&mut self, events: Vec<Event>) -> Vec<Event> {
+        let Some(claim) = events.iter().find_map(|event| match event {
+            Event::Leader { prefix: Some(p) } => Claim::of(p),
+            _ => None,
+        }) else {
+            return events;
+        };
+
+        // The workspace is still holding half a sequence that has now been
+        // resolved somewhere it cannot see.
+        self.active_mut().cancel_leader();
+        let mut out: Vec<Event> = events
+            .into_iter()
+            .filter(|event| !matches!(event, Event::Leader { .. }))
+            .collect();
+        match claim {
+            Claim::Picker => out.extend(self.open_picker()),
+            Claim::Cycle(by) => {
+                // Close which-key on the way: the sequence resolved.
+                out.push(Event::Leader { prefix: None });
+                out.extend(self.cycle(by));
+            }
+        }
+        out
+    }
+
+    /// Drain every workspace, show only the active one.
+    fn poll(&mut self) -> Vec<Event> {
+        let active = self.active;
+        let mut events = Vec::new();
+        for (index, workspace) in self.workspaces.iter_mut().enumerate() {
+            let produced = workspace.apply(Command::Poll);
+            if index == active {
+                events = produced;
+            }
+            // A background project's diagnostics are not on screen, so they are
+            // dropped here — but they had to be *collected*, or its servers
+            // block and the project is stale when you come back to it.
+        }
+        self.claim(events)
+    }
+
+    /* ── opening, closing, switching ──────────────────────────────── */
+
+    fn build(&self, root: &Path) -> Workspace {
+        let mut workspace = Workspace::rooted(root);
+        if self.servers {
+            workspace.enable_language_servers();
+        }
+        if let Some(height) = self.height {
+            workspace.set_height(height);
+        }
+        workspace
+    }
+
+    /// Open a folder, or focus it if it is already open.
+    ///
+    /// Focusing rather than opening a second copy is not a nicety: two
+    /// workspaces on one folder means two file indexes, two language servers,
+    /// and two sets of buffers over the same files that can disagree about what
+    /// is on disk.
+    pub fn open(&mut self, path: &str) -> Vec<Event> {
+        let root = folder::normalise(&folder::expand(path));
+        if !root.is_dir() {
+            return vec![notice(
+                format!("{}: not a folder", root.display()),
+                NoticeLevel::Error,
+            )];
+        }
+        if let Some(index) = self.index_of(&root) {
+            return self.focus(index);
+        }
+
+        let workspace = self.build(&root);
+        self.workspaces.push(workspace);
+        self.active = self.workspaces.len() - 1;
+        self.remember(&root);
+        self.save();
+        self.enter()
+    }
+
+    fn focus(&mut self, index: usize) -> Vec<Event> {
+        if index >= self.workspaces.len() {
+            return vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)];
+        }
+        if index == self.active {
+            return Vec::new();
+        }
+        self.active = index;
+        let root = self.active().root().to_path_buf();
+        self.remember(&root);
+        self.save();
+        self.enter()
+    }
+
+    fn cycle(&mut self, by: i64) -> Vec<Event> {
+        let count = self.workspaces.len() as i64;
+        if count < 2 {
+            return Vec::new();
+        }
+        let next = (self.active as i64 + by).rem_euclid(count) as usize;
+        self.focus(next)
+    }
+
+    fn close(&mut self, index: usize) -> Vec<Event> {
+        if index >= self.workspaces.len() {
+            return vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)];
+        }
+        if self.workspaces.len() == 1 {
+            // There is no editor without a project, and an empty window with a
+            // "+" in it is a worse answer than refusing.
+            return vec![notice(
+                "that is the last workspace — open another first".into(),
+                NoticeLevel::Warn,
+            )];
+        }
+        if self.workspaces[index].is_modified() {
+            // Closing takes the buffers with it and there is no undo for that.
+            let name = folder::name_of(self.workspaces[index].root());
+            return vec![notice(
+                format!("{name} has unsaved changes"),
+                NoticeLevel::Warn,
+            )];
+        }
+
+        self.workspaces.remove(index);
+        let moved = if index < self.active {
+            // Everything after it shifted down; the same project is still
+            // active and nothing needs redrawing but the switcher.
+            self.active -= 1;
+            false
+        } else if index == self.active {
+            self.active = index.min(self.workspaces.len() - 1);
+            true
+        } else {
+            false
+        };
+
+        self.save();
+        if moved {
+            self.enter()
+        } else {
+            vec![self.workspaces_event()]
+        }
+    }
+
+    /// Everything the front end has to redraw when the active workspace
+    /// changes — which is everything, because every panel was showing the other
+    /// project.
+    fn enter(&mut self) -> Vec<Event> {
+        if let Some(height) = self.height {
+            self.active_mut().set_height(height);
+        }
+        let mut events = self.active_mut().apply(Command::Sync);
+        events.push(self.workspaces_event());
+        events
+    }
+
+    fn index_of(&self, root: &Path) -> Option<usize> {
+        self.workspaces.iter().position(|w| w.root() == root)
+    }
+
+    /* ── the workspace picker ─────────────────────────────────────── */
+
+    fn open_picker(&mut self) -> Vec<Event> {
+        self.picker = Some(Picker::over(PickerKind::Workspaces));
+        self.requery();
+        // Close which-key on the way: the leader sequence resolved.
+        vec![Event::Leader { prefix: None }, self.picker_event()]
+    }
+
+    fn picker_key(&mut self, key: &Key) -> Vec<Event> {
+        // Tab completes the highlighted folder and keeps going, the way `:e`
+        // does. Without it, typing a path means typing every character of it.
+        if key.key == "Tab" {
+            return self.complete_selection();
+        }
+
+        match PickerKey::of(key) {
+            PickerKey::Cancel => {
+                self.picker = None;
+                return vec![Event::PickerClosed];
+            }
+            PickerKey::Accept => return self.accept(),
+            PickerKey::Move(by) => {
+                if let Some(picker) = &mut self.picker {
+                    picker.move_by(by);
+                }
+            }
+            PickerKey::Backspace => {
+                let emptied = match &mut self.picker {
+                    Some(picker) => !picker.backspace(),
+                    None => true,
+                };
+                if emptied {
+                    self.picker = None;
+                    return vec![Event::PickerClosed];
+                }
+                self.requery();
+            }
+            PickerKey::Type(c) => {
+                if let Some(picker) = &mut self.picker {
+                    picker.type_char(c);
+                }
+                self.requery();
+            }
+            PickerKey::Ignored => return Vec::new(),
+        }
+        vec![self.picker_event()]
+    }
+
+    /// Replace the query with the highlighted folder, ready for the next
+    /// segment.
+    fn complete_selection(&mut self) -> Vec<Event> {
+        let Some(path) = self
+            .picker
+            .as_ref()
+            .and_then(|p| p.selected_item())
+            .and_then(|item| item.path.clone())
+        else {
+            return vec![self.picker_event()];
+        };
+        if let Some(picker) = &mut self.picker {
+            // The trailing separator is what makes the next keystroke list the
+            // folder's contents rather than re-matching its siblings.
+            picker.set_query(format!("{path}{}", std::path::MAIN_SEPARATOR));
+        }
+        self.requery();
+        vec![self.picker_event()]
+    }
+
+    fn accept(&mut self) -> Vec<Event> {
+        let accepted = self
+            .picker
+            .as_ref()
+            .map(|picker| picker.accept())
+            .unwrap_or(Accepted::Nothing);
+        self.picker = None;
+
+        let mut events = vec![Event::PickerClosed];
+        if let Accepted::OpenWorkspace { path } = accepted {
+            events.extend(self.open(&path));
+        }
+        events
+    }
+
+    /// Rebuild the candidate list for the query as it stands.
+    ///
+    /// Two lists in one prompt, chosen by whether the query looks like a path:
+    /// a name matches against projects you already know, and a path lists what
+    /// is actually in that folder. Which is what the two questions "which of my
+    /// projects" and "where on this disk" each need, and neither can answer for
+    /// the other.
+    fn requery(&mut self) {
+        let started = std::time::Instant::now();
+        let query = match &self.picker {
+            Some(picker) => picker.query().to_string(),
+            None => return,
+        };
+
+        let items = if folder::looks_like_path(&query) {
+            folder::complete(&query, folder::LIMIT)
+                .into_iter()
+                .map(|path| PickerItem {
+                    label: folder::name_of(&path),
+                    detail: path.display().to_string(),
+                    positions: Vec::new(),
+                    path: Some(path.display().to_string()),
+                    line: None,
+                    column: None,
+                })
+                .collect()
+        } else {
+            self.known(&query)
+        };
+
+        if let Some(picker) = &mut self.picker {
+            picker.fill(items, started.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+
+    /// Projects already open, then ones opened before, fuzzy-matched by name.
+    ///
+    /// The open ones come first and say so. Choosing one is not an error — it
+    /// is how you switch — and hiding them would make the picker useless for
+    /// exactly the thing it is most often wanted for.
+    fn known(&mut self, query: &str) -> Vec<PickerItem> {
+        let open: Vec<PathBuf> = self.workspaces.iter().map(|w| w.root().into()).collect();
+        let mut paths = open.clone();
+        paths.extend(
+            self.recents
+                .iter()
+                .filter(|path| !open.contains(path))
+                .cloned(),
+        );
+
+        let names = folder::disambiguate(&paths);
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+
+        self.matcher
+            .rank(query, &refs, folder::LIMIT)
+            .into_iter()
+            .map(|found| {
+                let path = &paths[found.index];
+                let is_open = open.contains(path);
+                PickerItem {
+                    label: names[found.index].clone(),
+                    detail: if is_open {
+                        format!("open · {}", path.display())
+                    } else {
+                        path.display().to_string()
+                    },
+                    positions: found.positions,
+                    path: Some(path.display().to_string()),
+                    line: None,
+                    column: None,
+                }
+            })
+            .collect()
+    }
+
+    fn picker_event(&self) -> Event {
+        let Some(picker) = &self.picker else {
+            return Event::PickerClosed;
+        };
+        Event::Picker {
+            kind: picker.kind(),
+            title: picker.kind().title().to_string(),
+            query: picker.query().to_string(),
+            items: picker.items().to_vec(),
+            selected: picker.selected(),
+            total: picker.items().len(),
+            elapsed_ms: picker.elapsed_ms(),
+            // Nothing is walked in the background here: one directory read
+            // answers the whole query, so the list is never "not yet".
+            scanning: false,
+        }
+    }
+
+    /* ── events ───────────────────────────────────────────────────── */
+
+    fn workspaces_event(&self) -> Event {
+        let paths: Vec<PathBuf> = self.workspaces.iter().map(|w| w.root().into()).collect();
+        let names = folder::disambiguate(&paths);
+        Event::Workspaces {
+            items: self
+                .workspaces
+                .iter()
+                .zip(names)
+                .map(|(workspace, name)| WorkspaceTab {
+                    name,
+                    path: workspace.root().display().to_string(),
+                    modified: workspace.is_modified(),
+                })
+                .collect(),
+            active: self.active,
+        }
+    }
+
+    /* ── remembering ──────────────────────────────────────────────── */
+
+    /// Move a project to the front of the recents list.
+    fn remember(&mut self, root: &Path) {
+        self.recents.retain(|path| path != root);
+        self.recents.insert(0, root.to_path_buf());
+        self.recents.truncate(RECENTS);
+    }
+
+    /// Write the open set out. Best effort by design: a session that cannot be
+    /// saved is a session you have to reopen by hand, not a reason to fail the
+    /// command that triggered it.
+    fn save(&self) {
+        let Some(file) = &self.store else { return };
+        let state = Stored {
+            version: VERSION,
+            open: self
+                .workspaces
+                .iter()
+                .map(|w| w.root().display().to_string())
+                .collect(),
+            active: self.active,
+            recents: self
+                .recents
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+        };
+        let Ok(json) = serde_json::to_string_pretty(&state) else {
+            return;
+        };
+        if let Some(parent) = file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        // Through a temporary file: a half-written session file is worse than
+        // none, because it is the thing read at startup.
+        let temp = file.with_extension("json.tmp");
+        if std::fs::write(&temp, json).is_ok() {
+            let _ = std::fs::rename(&temp, file);
+        }
+    }
+}
+
+/// The session as it is stored between runs.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Stored {
+    version: u32,
+    open: Vec<String>,
+    active: usize,
+    recents: Vec<String>,
+}
+
+/// Where the session lives. Config, not data: it is a handful of paths, and it
+/// is the sort of thing a user should be able to find, read and delete.
+fn state_file() -> Option<PathBuf> {
+    if cfg!(windows) {
+        let base = std::env::var_os("APPDATA")?;
+        return Some(PathBuf::from(base).join("Proton").join("session.json"));
+    }
+    if let Some(base) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Some(PathBuf::from(base).join("proton").join("session.json"));
+    }
+    Some(
+        folder::home()?
+            .join(".config")
+            .join("proton")
+            .join("session.json"),
+    )
+}
+
+fn read_state(file: &Path) -> Option<Stored> {
+    let text = std::fs::read_to_string(file).ok()?;
+    let stored: Stored = serde_json::from_str(&text).ok()?;
+    // A file from a future version is ignored rather than guessed at.
+    (stored.version == VERSION).then_some(stored)
+}

@@ -96,6 +96,31 @@ pub enum Command {
     /// Stop the turn in flight. What has arrived stays on screen; nothing is
     /// committed to the conversation.
     CancelTurn,
+    /* ── workspaces ───────────────────────────────────────────────── */
+    /// Open a folder as a workspace, or focus it if it is already open.
+    ///
+    /// A workspace is one project: its own buffers, its own file index, its
+    /// own language servers, its own agent conversation. Several are open at
+    /// once and one is active.
+    OpenWorkspace {
+        path: String,
+    },
+    FocusWorkspace {
+        index: usize,
+    },
+    /// Close one. Refuses while it holds unsaved buffers, because closing it
+    /// discards them and nothing else would say so.
+    CloseWorkspace {
+        index: usize,
+    },
+    /// Step to the next or previous workspace, wrapping.
+    CycleWorkspace {
+        by: i64,
+    },
+    /// Open the workspace picker — the ones open, the ones opened before, and
+    /// any folder on the disk.
+    OpenWorkspacePicker,
+
     /// Ask for the current state — used once on connect so the shell can render
     /// without guessing.
     Sync,
@@ -180,6 +205,16 @@ pub enum Event {
     #[serde(rename_all = "camelCase")]
     Buffers {
         names: Vec<BufferTab>,
+        active: usize,
+    },
+    /// The open workspaces, for the switcher above the buffer bar.
+    ///
+    /// One level up from `Buffers`: those are files inside a project, these
+    /// are the projects. Sent whenever the set or the active one changes —
+    /// which is rare, so it goes whole.
+    #[serde(rename_all = "camelCase")]
+    Workspaces {
+        items: Vec<WorkspaceTab>,
         active: usize,
     },
     /// The picker opened, or its query or selection changed.
@@ -287,6 +322,20 @@ pub struct Selection {
 pub struct BufferTab {
     pub name: String,
     pub path: Option<String>,
+    pub modified: bool,
+}
+
+/// One entry in the workspace switcher.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceTab {
+    /// The folder's name, or enough of its parent to tell two apart. Two
+    /// checkouts both called `src` are the common case, not the exotic one.
+    pub name: String,
+    /// The full path, for the tooltip and for reopening it later.
+    pub path: String,
+    /// Something in it is unsaved.
     pub modified: bool,
 }
 

@@ -23,6 +23,10 @@ pub enum PickerKind {
     Files,
     Grep,
     Buffers,
+    /// Projects: the ones already open, the ones opened before, and any folder
+    /// on the disk. Fed by the session rather than the file index, because no
+    /// single workspace can see the others.
+    Workspaces,
 }
 
 impl PickerKind {
@@ -31,11 +35,16 @@ impl PickerKind {
             PickerKind::Files => "find_files",
             PickerKind::Grep => "live_grep",
             PickerKind::Buffers => "buffers",
+            PickerKind::Workspaces => "workspaces",
         }
     }
 
     /// Which leader sequences open which picker. Core config, not front-end
     /// config: a second front end must not have to reinvent the keymap.
+    ///
+    /// `Workspaces` is deliberately absent: `␣fp` is claimed by the session
+    /// before the workspace ever sees it resolve, because switching projects
+    /// is not something a project can do to itself. See [`crate::session`].
     pub fn for_leader(prefix: &str) -> Option<Self> {
         Some(match prefix {
             "ff" => PickerKind::Files,
@@ -74,7 +83,51 @@ pub enum Accepted {
     FocusBuffer {
         index: usize,
     },
+    /// Open a folder as a workspace. Only the session can act on this — a
+    /// workspace cannot replace itself — so the picker that produces it is the
+    /// session's, not the editor's.
+    OpenWorkspace {
+        path: String,
+    },
     Nothing,
+}
+
+/// What a keystroke means to an open picker.
+///
+/// Shared rather than written twice: the session's workspace picker and the
+/// editor's file picker are the same interaction, and a fuzzy finder where
+/// `⌃n` works in one list and not the other is worse than one where it works
+/// in neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerKey {
+    Cancel,
+    Accept,
+    /// Move the highlight by a delta.
+    Move(i32),
+    Backspace,
+    Type(char),
+    /// Nothing this picker knows about. Swallowed, not passed through: while a
+    /// picker is open it owns the keyboard.
+    Ignored,
+}
+
+impl PickerKey {
+    pub fn of(key: &crate::key::Key) -> PickerKey {
+        match key.key.as_str() {
+            "Escape" => PickerKey::Cancel,
+            "Enter" => PickerKey::Accept,
+            "ArrowDown" => PickerKey::Move(1),
+            "ArrowUp" => PickerKey::Move(-1),
+            "Backspace" => PickerKey::Backspace,
+            // ⌃n / ⌃p move, as they do in Telescope.
+            "n" if key.ctrl => PickerKey::Move(1),
+            "p" if key.ctrl => PickerKey::Move(-1),
+            _ => match key.as_char().filter(|_| key.is_bare_char()) {
+                Some(c) => PickerKey::Type(c),
+                None => PickerKey::Ignored,
+            },
+        }
+    }
 }
 
 const LIMIT: usize = 200;
@@ -90,6 +143,38 @@ pub struct Picker {
 }
 
 impl Picker {
+    /// An empty picker whose candidates come from somewhere other than the
+    /// file index — the session's workspace list, for one.
+    pub fn over(kind: PickerKind) -> Picker {
+        Picker {
+            kind,
+            ..Picker::default()
+        }
+    }
+
+    /// Replace the candidates, and record what finding them cost.
+    pub fn fill(&mut self, items: Vec<PickerItem>, elapsed_ms: f64) {
+        self.items = items;
+        self.selected = 0;
+        self.elapsed_ms = elapsed_ms;
+    }
+
+    pub fn type_char(&mut self, c: char) {
+        self.query.push(c);
+    }
+
+    /// Replace the query wholesale — for tab completion, which rewrites what
+    /// you typed into the thing you meant.
+    pub fn set_query(&mut self, query: String) {
+        self.query = query;
+    }
+
+    /// `false` when the query was already empty, which every picker treats as
+    /// "close me" — one key to unwind, wherever you are in it.
+    pub fn backspace(&mut self) -> bool {
+        self.query.pop().is_some()
+    }
+
     pub fn kind(&self) -> PickerKind {
         self.kind
     }
@@ -139,6 +224,10 @@ impl Picker {
                 .line
                 .map(|index| Accepted::FocusBuffer { index })
                 .unwrap_or(Accepted::Nothing),
+            PickerKind::Workspaces => match &item.path {
+                Some(path) => Accepted::OpenWorkspace { path: path.clone() },
+                None => Accepted::Nothing,
+            },
             _ => match &item.path {
                 Some(path) => Accepted::OpenPath {
                     path: path.clone(),
@@ -242,7 +331,7 @@ impl Pickers {
 
     pub fn push(&mut self, c: char, buffers: Vec<(String, Option<String>)>) {
         if let Some(picker) = &mut self.open {
-            picker.query.push(c);
+            picker.type_char(c);
         }
         self.requery(buffers);
     }
@@ -253,7 +342,7 @@ impl Pickers {
         };
         // Backspace on an empty query closes the picker, the way it closes the
         // command line: one key to unwind, wherever you are in it.
-        if picker.query.pop().is_none() {
+        if !picker.backspace() {
             self.open = None;
             return false;
         }
@@ -317,6 +406,11 @@ impl Pickers {
                     })
                     .collect()
             }
+
+            // The session owns this list and fills its picker directly — a
+            // `Pickers` never holds one. Empty rather than a panic, because an
+            // unreachable arm is not worth a crash.
+            PickerKind::Workspaces => Vec::new(),
         };
 
         picker.selected = 0;

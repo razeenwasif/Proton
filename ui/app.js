@@ -600,6 +600,37 @@ function renderBuffers(names, active) {
     .join("");
 }
 
+/* ── the workspace rail ───────────────────────────────────────────────
+   One tile per open project. The core decides what they are called — it is
+   the only thing that can, since telling two projects called `src` apart
+   needs to know about both of them. */
+
+/** Up to two letters, one per part of a name the core had to qualify. */
+function initials(name) {
+  return name
+    .split("/")
+    .map((part) => part[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function renderWorkspaces(items, active) {
+  const rail = $("[data-workspaces]");
+  if (!rail) return;
+  rail.innerHTML = items
+    .map(
+      (ws, i) =>
+        `<button class="ws" role="tab" aria-selected="${i === active}"` +
+        ` data-workspace="${i}" title="${escapeHtml(ws.path)}">` +
+        `${escapeHtml(initials(ws.name))}` +
+        `${ws.modified ? '<span class="mod"></span>' : ""}` +
+        `<span class="x" data-workspace-close="${i}" title="Close ${escapeHtml(ws.name)}">` +
+        `<svg class="i"><use href="#i-close"/></svg></span></button>`,
+    )
+    .join("");
+}
+
 /** How many lines the stage can actually show, so the core sends no more. */
 function reportViewport() {
   const target = $("[data-editor]");
@@ -626,6 +657,24 @@ document.addEventListener("click", (e) => {
       .then(() => dispatch({ type: "acceptCompletion" }));
     return;
   }
+  // Closing is checked before focusing: the × sits inside the tile, so a
+  // click on it matches both and only one of them is what was meant.
+  const shut = e.target.closest("[data-workspace-close]");
+  if (shut) {
+    e.stopPropagation();
+    dispatch({ type: "closeWorkspace", index: Number(shut.dataset.workspaceClose) });
+    return;
+  }
+  const project = e.target.closest("[data-workspace]");
+  if (project) {
+    dispatch({ type: "focusWorkspace", index: Number(project.dataset.workspace) });
+    return;
+  }
+  if (e.target.closest("[data-open-workspace]")) {
+    dispatch({ type: "openWorkspacePicker" });
+    return;
+  }
+
   const row = e.target.closest("[data-path]");
   if (row) dispatch({ type: "openBuffer", path: row.dataset.path });
   const tab = e.target.closest("[data-buffer]");
@@ -661,12 +710,17 @@ function renderPicker(event) {
     ? "scanning…"
     : `${event.items.length}/${event.total} · ${event.elapsedMs.toFixed(1)} ms`;
 
+  // A folder prompt lists folders, and a row that looks like a file in a list
+  // of projects is a row you have to read twice.
+  const leader =
+    event.kind === "workspaces" ? '<svg class="i"><use href="#i-folder"/></svg> ' : "";
+
   const results = $("[data-picker-results]");
   results.innerHTML = event.items
     .map(
       (item, i) =>
         `<div class="res${i === event.selected ? " on" : ""}" data-pick="${i}">` +
-        `<span>${highlight(item.label, item.positions)}</span>` +
+        `<span>${leader}${highlight(item.label, item.positions)}</span>` +
         `<span class="dir" style="margin-left:auto">${escapeHtml(item.detail)}</span></div>`,
     )
     .join("");
@@ -900,6 +954,10 @@ onEvent((event) => {
       if (path && active) path.textContent = active.path ?? active.name;
       break;
     }
+
+    case "workspaces":
+      renderWorkspaces(event.items, event.active);
+      break;
 
     case "picker":
       renderPicker(event);

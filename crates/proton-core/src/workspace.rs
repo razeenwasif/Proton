@@ -17,7 +17,7 @@ use crate::highlights::Highlighters;
 use crate::key::Key;
 use crate::lsp::{self, Popup, Servers, Severity};
 use crate::mode::ModeId;
-use crate::picker::{Accepted, PickerKind, Pickers};
+use crate::picker::{Accepted, PickerKey, PickerKind, Pickers};
 use crate::trace::Visualizer;
 use crate::vim::{Outcome, Vim, VimMode};
 
@@ -79,8 +79,24 @@ impl Workspace {
     /// one. Making it explicit here is cheaper than making it conditional in
     /// eighty tests.
     pub fn with_language_servers(mut self) -> Self {
-        self.servers.enable();
+        self.enable_language_servers();
         self
+    }
+
+    /// The same, for a workspace that is already in a collection and cannot be
+    /// taken by value — the session builds them into a `Vec`.
+    pub fn enable_language_servers(&mut self) {
+        self.servers.enable();
+    }
+
+    /// Tell a workspace how tall the window is without moving it.
+    ///
+    /// The height is a property of the window and the scroll position is a
+    /// property of the workspace, and a newly focused workspace needs the first
+    /// without losing the second. Sending it a whole `Viewport` would carry
+    /// another project's scroll across with it.
+    pub fn set_height(&mut self, lines: usize) {
+        self.viewport.lines = lines.max(1);
     }
 
     pub fn mode(&self) -> ModeId {
@@ -107,6 +123,27 @@ impl Workspace {
 
     pub fn servers(&self) -> &Servers {
         &self.servers
+    }
+
+    /// The folder this workspace is a view of.
+    pub fn root(&self) -> &Path {
+        self.pickers.root()
+    }
+
+    /// Whether anything in this workspace has unsaved changes. The session
+    /// asks before closing it, because a closed workspace takes its buffers
+    /// with it and there is no undo for that.
+    pub fn is_modified(&self) -> bool {
+        self.editor.buffers().iter().any(|b| b.is_modified())
+    }
+
+    /// Abandon a half-typed leader sequence.
+    ///
+    /// The session calls this when it claims a prefix the workspace did not
+    /// resolve — `␣fp` is the session's, and without this the workspace would
+    /// still be waiting for the rest of a sequence that already happened.
+    pub fn cancel_leader(&mut self) {
+        self.vim.cancel_leader();
     }
 
     pub fn apply(&mut self, command: Command) -> Vec<Event> {
@@ -229,6 +266,19 @@ impl Workspace {
                 Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
             },
 
+            // Switching projects is the session's job, and the session takes
+            // these before a workspace ever sees one. A workspace reached
+            // directly — a test, or a second front end that has not built a
+            // session yet — says so rather than ignoring it.
+            Command::OpenWorkspace { .. }
+            | Command::FocusWorkspace { .. }
+            | Command::CloseWorkspace { .. }
+            | Command::CycleWorkspace { .. }
+            | Command::OpenWorkspacePicker => vec![notice(
+                "workspaces are the session's, not this workspace's".into(),
+                NoticeLevel::Warn,
+            )],
+
             Command::OpenPicker { kind } => self.open_picker(kind),
 
             Command::SelectPick { index } => match self.pickers.open_mut() {
@@ -336,28 +386,22 @@ impl Workspace {
 
     fn picker_key(&mut self, key: &Key) -> Vec<Event> {
         let labels = self.buffer_labels();
-        match key.key.as_str() {
-            "Escape" => {
+        match PickerKey::of(key) {
+            PickerKey::Cancel => {
                 self.pickers.close();
                 return vec![Event::PickerClosed];
             }
-            "Enter" => return self.accept_picker(),
-            "ArrowDown" => self.move_selection(1),
-            "ArrowUp" => self.move_selection(-1),
-            "Backspace" => {
+            PickerKey::Accept => return self.accept_picker(),
+            PickerKey::Move(by) => self.move_selection(by),
+            PickerKey::Backspace => {
                 // Backspace on an empty query closes the picker, the way it
                 // closes the command line.
                 if !self.pickers.pop(labels) {
                     return vec![Event::PickerClosed];
                 }
             }
-            // Ctrl-n / Ctrl-p move, as they do in Telescope.
-            "n" if key.ctrl => self.move_selection(1),
-            "p" if key.ctrl => self.move_selection(-1),
-            _ => match key.as_char().filter(|_| key.is_bare_char()) {
-                Some(c) => self.pickers.push(c, labels),
-                None => return Vec::new(),
-            },
+            PickerKey::Type(c) => self.pickers.push(c, labels),
+            PickerKey::Ignored => return Vec::new(),
         }
         vec![self.picker_event()]
     }
@@ -404,7 +448,9 @@ impl Workspace {
                     events.extend(self.after_action(true));
                 }
             }
-            Accepted::Nothing => {}
+            // A workspace's own pickers never produce this — the folder picker
+            // belongs to the session, which handles its own accept.
+            Accepted::OpenWorkspace { .. } | Accepted::Nothing => {}
         }
         events
     }
@@ -1116,6 +1162,6 @@ impl Workspace {
     }
 }
 
-fn notice(text: String, level: NoticeLevel) -> Event {
+pub(crate) fn notice(text: String, level: NoticeLevel) -> Event {
     Event::Notice { text, level }
 }

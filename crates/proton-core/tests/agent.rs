@@ -75,7 +75,7 @@ fn asks_for_grep() -> String {
         event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Looking."}}"#),
         event("content_block_stop", r#"{"type":"content_block_stop","index":0}"#),
         event("content_block_start", r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_A","name":"grep","input":{}}}"#),
-        event("content_block_delta", r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\": \"pub struct Workspace\"}"}}"#),
+        event("content_block_delta", r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\": \"pub struct Workspace {\"}"}}"#),
         event("content_block_stop", r#"{"type":"content_block_stop","index":1}"#),
         event("message_delta", r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":30}}"#),
         event("message_stop", r#"{"type":"message_stop"}"#),
@@ -182,7 +182,7 @@ fn a_question_runs_a_tool_and_comes_back_with_an_answer() {
         .iter()
         .find(|c| c.name == "grep")
         .expect("the grep call should be in the transcript");
-    assert_eq!(call.detail, "query=pub struct Workspace");
+    assert_eq!(call.detail, "query=pub struct Workspace {");
     assert!(
         call.result.contains("workspace.rs"),
         "the grep should have found the real file, got {:?}",

@@ -47,9 +47,30 @@ if (HAS_SHELL) {
     version: 0,
   });
 
+  // A static set of projects, so the workspace rail has something to draw in
+  // the preview. Fixed data on purpose: the session — what is open, what is
+  // remembered, what a folder is called when two share a name — lives in
+  // crates/proton-core/src/session.rs, and this only has to show the chrome.
+  const projects = {
+    active: 0,
+    items: [
+      { name: "Proton", path: "C:\\Users\\Razeen\\Projects\\Proton", modified: false },
+      { name: "orbit/web", path: "C:\\Users\\Razeen\\Projects\\orbit\\web", modified: true },
+      { name: "scratch", path: "C:\\Users\\Razeen\\scratch", modified: false },
+    ],
+  };
+  const workspacesEvent = () => ({ type: "workspaces", ...projects });
+
   send = async (command) => {
     if (command.type === "sync") {
-      return [{ type: "state", mode: state.mode, vimMode: state.vim, vimLabel: LABEL[state.vim] }];
+      return [
+        { type: "state", mode: state.mode, vimMode: state.vim, vimLabel: LABEL[state.vim] },
+        workspacesEvent(),
+      ];
+    }
+    if (command.type === "focusWorkspace") {
+      projects.active = command.index;
+      return [workspacesEvent()];
     }
     if (command.type === "viewport") {
       doc.first = command.firstLine;

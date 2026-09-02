@@ -15,6 +15,7 @@ import type { Span } from "./Span";
 import type { StepView } from "./StepView";
 import type { TraceState } from "./TraceState";
 import type { VimMode } from "./VimMode";
+import type { WorkspaceTab } from "./WorkspaceTab";
 
 export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "type": "pending", keys: string, } | { "type": "leader", prefix: string | null, } | { "type": "cmdline", text: string | null, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "viewport", firstLine: number, lines: Array<string>, totalLines: number, version: bigint, 
 /**
@@ -28,7 +29,7 @@ highlights: Array<Array<Span>>, } | { "type": "cursor", line: number, column: nu
 /**
  * Anchor line/column when there is a selection.
  */
-selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
+selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, active: number, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
 /**
  * How many candidates the picker is choosing from, before matching.
  */

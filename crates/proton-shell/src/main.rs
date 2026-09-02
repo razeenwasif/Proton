@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use backdrop::Backdrop;
-use proton_core::{Command, Event, Workspace};
+use proton_core::{Command, Event, Session};
 use tauri::{Emitter, Manager, State};
 
 /// The channel language servers arrive on. Distinct from the `dispatch` reply
@@ -38,9 +38,9 @@ type Surface = Mutex<Backdrop>;
 /// the right shape for both, which is the point of keeping it transport-
 /// agnostic.
 #[tauri::command]
-fn dispatch(command: Command, workspace: State<'_, Mutex<Workspace>>) -> Vec<Event> {
-    let events = match workspace.lock() {
-        Ok(mut ws) => ws.apply(command.clone()),
+fn dispatch(command: Command, session: State<'_, Mutex<Session>>) -> Vec<Event> {
+    let events = match session.lock() {
+        Ok(mut it) => it.apply(command.clone()),
         // A poisoned lock means a previous command panicked. Recover rather
         // than propagating: the front end should keep working, and the panic
         // has already been reported on stderr.
@@ -84,35 +84,33 @@ fn set_backdrop(
     applied.to_string()
 }
 
-/// Which project this window is looking at.
+/// A project the user actually named: `proton .` or `proton C:\src\thing`, the
+/// way every editor takes it.
 ///
-/// `proton .` or `proton C:\src\thing`, the way every editor takes it, and
-/// the working directory otherwise. That fallback is right when the app is
-/// launched from a terminal and useless when it is launched from a Start-menu
-/// shortcut — where the working directory is the install folder, and indexing
-/// that would be nonsense. So an installed copy with no argument falls back
-/// again, to the home directory, which is at least somewhere the user has
-/// files.
-fn project_root() -> std::path::PathBuf {
-    if let Some(given) = std::env::args_os().nth(1) {
-        let path = std::path::PathBuf::from(given);
-        if path.is_dir() {
-            return path;
-        }
-    }
+/// `None` means nothing was named, which is not the same as "the current
+/// directory" — see [`working_folder`].
+fn requested_folder() -> Option<std::path::PathBuf> {
+    let given = std::env::args_os().nth(1)?;
+    let path = std::path::PathBuf::from(given);
+    path.is_dir().then_some(path)
+}
 
-    let cwd = std::env::current_dir().unwrap_or_default();
+/// The working directory, when it is worth anything.
+///
+/// Only a fallback. It is a reasonable guess on a first run from a terminal and
+/// meaningless afterwards, so the session uses it only when there is nothing to
+/// restore and nothing was named — otherwise a bare `proton` typed in a
+/// downloads folder would add it to the projects list for good.
+///
+/// `None` under a Start-menu shortcut, where the working directory is the
+/// install folder and indexing that would be nonsense.
+fn working_folder() -> Option<std::path::PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
     let beside_the_exe = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
         .is_some_and(|dir| dir == cwd);
-
-    if beside_the_exe {
-        if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
-            return std::path::PathBuf::from(home);
-        }
-    }
-    cwd
+    (!beside_the_exe).then_some(cwd)
 }
 
 /// Give the core a heartbeat.
@@ -128,12 +126,12 @@ fn spawn_poll(app: tauri::AppHandle) {
         .spawn(move || loop {
             std::thread::sleep(BEAT);
 
-            let Some(workspace) = app.try_state::<Mutex<Workspace>>() else {
+            let Some(session) = app.try_state::<Mutex<Session>>() else {
                 // The app is shutting down and the state is gone.
                 return;
             };
-            let events = match workspace.lock() {
-                Ok(mut ws) => ws.apply(Command::Poll),
+            let events = match session.lock() {
+                Ok(mut it) => it.apply(Command::Poll),
                 Err(poisoned) => poisoned.into_inner().apply(Command::Poll),
             };
 
@@ -166,9 +164,10 @@ fn window_icon() -> Option<tauri::image::Image<'static>> {
 
 fn main() {
     tauri::Builder::default()
-        .manage(Mutex::new(
-            Workspace::rooted(project_root()).with_language_servers(),
-        ))
+        .manage(Mutex::new(Session::restore(
+            requested_folder(),
+            working_folder(),
+        )))
         .invoke_handler(tauri::generate_handler![dispatch, backdrop, set_backdrop])
         .setup(|app| {
             let Some(window) = app.get_webview_window("main") else {

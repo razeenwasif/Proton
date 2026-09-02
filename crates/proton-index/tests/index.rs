@@ -75,10 +75,10 @@ fn a_query_that_matches_nothing_returns_nothing() {
 #[test]
 fn grep_finds_a_line_and_reports_where() {
     let index = repo();
-    let hits = grep(index.root(), index.paths(), "pub struct Workspace", 20);
+    let hits = grep(index.root(), index.paths(), "pub struct Workspace {", 20);
     let hit = hits.first().expect("Workspace is defined somewhere");
     assert!(hit.path.ends_with("workspace.rs"), "found in {}", hit.path);
-    assert!(hit.text.contains("pub struct Workspace"));
+    assert!(hit.text.contains("pub struct Workspace {"));
 }
 
 #[test]

@@ -162,9 +162,9 @@ fn the_selection_wraps() {
 fn live_grep_finds_a_line_and_jumps_to_it() {
     let mut ws = workspace();
     opened(&mut ws, " fg");
-    let events = keys(&mut ws, "pub struct Workspace");
+    let events = keys(&mut ws, "pub struct Workspace {");
     let (query, items, _) = picker(&events).expect("grep should be open");
-    assert_eq!(query, "pub struct Workspace");
+    assert_eq!(query, "pub struct Workspace {");
     assert!(!items.is_empty(), "grep found nothing");
 
     let events = ws.apply(Command::Key {

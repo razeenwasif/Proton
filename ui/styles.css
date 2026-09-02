@@ -303,6 +303,58 @@ body {
 .sl.project { color: var(--ink-2); gap: 7px; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 
+/* ── workspace rail ───────────────────────────────────────────────────
+   One tile per open project, above the modes: the outermost choice in the
+   window is which project you are in, and everything below it — modes,
+   panels, buffers — is scoped to that answer.
+
+   Initials rather than names because the rail is 56px wide and a name that
+   has been ellipsed to four characters is initials with extra steps. The
+   full path is in the tooltip, and `␣fp` is there when you want to read. */
+.ws-rail { display: flex; flex-direction: column; gap: 4px; width: 100%; align-items: center; }
+.ws {
+  position: relative; width: 38px; height: 38px; flex: none;
+  display: grid; place-items: center; cursor: pointer;
+  border: 0; border-radius: 11px; background: var(--e1); color: var(--ink-3);
+  font: 640 12px/1 var(--sans); letter-spacing: .02em;
+  transition: color .16s, background .16s, box-shadow .16s;
+}
+.ws:hover { background: var(--e2); color: var(--ink-2); }
+.ws[aria-selected="true"] {
+  color: var(--text-hi);
+  background: linear-gradient(180deg, rgba(var(--raise), 0.15), rgba(var(--raise), 0.07));
+  box-shadow: var(--spec-hi), inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* Unsaved work in a project you are not looking at is the one thing the tile
+   has to be able to say on its own. */
+.ws .mod {
+  position: absolute; top: 4px; right: 4px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent-2); box-shadow: 0 0 0 2px var(--bg);
+}
+
+/* Closing is deliberate: a stray click on a 38px tile must not take a
+   project's buffers with it, so the target only exists on hover. */
+.ws .x {
+  position: absolute; top: -3px; right: -3px; width: 15px; height: 15px;
+  display: none; place-items: center; border-radius: 50%;
+  background: var(--e3); color: var(--ink-2); box-shadow: 0 0 0 2px var(--bg);
+}
+.ws .x svg { width: 9px; height: 9px; }
+.ws:hover .x { display: grid; }
+.ws .x:hover { background: var(--err); color: var(--bg-deep); }
+
+.ws-add {
+  width: 38px; height: 26px; flex: none; border: 0; border-radius: 9px;
+  cursor: pointer; background: transparent; color: var(--ink-3);
+  display: grid; place-items: center;
+}
+.ws-add svg { width: 14px; height: 14px; }
+.ws-add:hover { background: var(--e1); color: var(--ink); }
+
+.rail-sep { width: 26px; height: 1px; background: var(--edge); flex: none; }
+
 /* ── mode rail ────────────────────────────────────────────────────────
    The outer rail chooses which application you are in; the inner panel
    rail chooses what you are looking at inside it. Two rails in a real

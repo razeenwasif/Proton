@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 252 tests, headless
+cargo test --workspace        # 295 tests, headless
 cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
@@ -69,7 +69,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-agent` | Messages API client, SSE streaming, request building, auth | `ureq` |
 | `proton-trace` | Code Visualizer client: trace format, pointer resolution, sidecar | `ureq` |
 | `proton-plugin` | Wasmtime host, WIT interfaces, capability grants | `wasmtime`, `wit-bindgen` |
-| `proton-core` | Workspace state, mode registry, command/event bus, config | all of the above |
+| `proton-core` | Session and workspace state, mode registry, command/event bus, config | all of the above |
 | `proton-shell` | Window, webview, IPC bridge, system backdrop, packaging | `tauri` v2, `window-vibrancy` |
 | `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
 
@@ -129,6 +129,48 @@ front end would need.
 ---
 
 ## 3. Core subsystems
+
+### Workspaces
+
+A **workspace** is one project: its own buffers, file index, language servers,
+agent conversation and trace. A **session** holds several and keeps one active.
+Both live in `proton-core`; the shell owns a `Mutex<Session>` and nothing else.
+
+The split is not cosmetic. Everything that makes a project a project is rooted
+somewhere — the walk, the servers, the agent's idea of what "this codebase"
+means — so a second project is a second set of all of it, and two projects
+sharing one file index would not be two projects.
+
+Two rules keep that from being expensive:
+
+- **Only the active workspace draws.** Every command goes to it and only its
+  events cross the bridge. The others are state, not screen.
+- **Every workspace is still polled.** A background project's servers keep
+  answering, and a mailbox nobody drains fills up and leaves the project stale
+  the moment you switch back. So `Poll` goes to all of them and only the active
+  one's events are kept.
+
+**Who claims a keystroke.** Switching projects is not something a project can
+do to itself, but the modal engine — where a leader sequence is assembled —
+lives inside the workspace. The rule that resolves it: *the session claims
+leader prefixes the workspace did not.* A workspace reporting an unresolved
+`␣fp` is reporting that nothing below knew what it meant, and the layer above
+takes it from there. Nothing in the modal engine has to know a session exists,
+and the same mechanism is what a plugin keymap will use.
+
+**Opening a folder** cannot reuse any of Telescope: the folder you want is by
+definition outside the project, so there is no index and nothing to walk in the
+background. `proton-core/src/folder.rs` completes a path one segment at a time
+the way `:e` does — one `read_dir` per keystroke, whatever the size of the
+disk — and the picker shows recents when the query is a name and the disk when
+it is a path. The trailing separator is what tells those apart.
+
+**What is remembered**, in `%APPDATA%\Proton\session.json`: the open set, which
+one was active, and the projects opened before. A named folder is an
+instruction and is opened on top of the restored set; the working directory is
+only a fallback, used when there is nothing to restore and nothing was named.
+Keeping those apart is what stops a bare `proton` typed in a downloads folder
+from adding it to the projects list for good.
 
 ### Text
 
@@ -696,8 +738,11 @@ and that reason is what the pane shows. Everything else works.
 
 `Proton.exe <folder>`, the way every editor takes it.
 
-With no argument it uses the working directory, which is right from a terminal
-and wrong from a Start-menu shortcut — there the working directory is the
-install folder, and indexing that is nonsense. So a shortcut launch falls back
-to the home directory instead. **There is no folder-open flow yet**; that
-belongs with the session state in a later milestone.
+With no argument it reopens last session's projects. Failing that it falls back
+to the working directory, and failing *that* — a Start-menu launch, where the
+working directory is the install folder and indexing it would be nonsense — to
+the home directory.
+
+Once it is open, `␣fp` opens a folder anywhere on the disk, `␣pn` / `␣pp` step
+between the ones already open, and the tiles at the top of the rail switch and
+close them. See § 3 → Workspaces.

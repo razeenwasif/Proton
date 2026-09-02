@@ -205,6 +205,14 @@ impl Vim {
         &self.cmdline
     }
 
+    /// Drop a leader sequence in progress, without the mode change Escape
+    /// would also do. Used when something above the workspace claims the
+    /// prefix — the sequence is over, but nothing about the mode changed.
+    pub fn cancel_leader(&mut self) {
+        self.leader = None;
+        self.pending.clear();
+    }
+
     pub fn leader_prefix(&self) -> Option<&str> {
         self.leader.as_deref()
     }
