@@ -1,0 +1,12 @@
+[package]
+name = "proton-vcs"
+description = "Proton's git integration: the gutter, and what has changed."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+gix = { workspace = true }
+gix-imara-diff = { workspace = true }

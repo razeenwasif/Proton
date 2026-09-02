@@ -27,6 +27,8 @@ pub enum PickerKind {
     /// on the disk. Fed by the session rather than the file index, because no
     /// single workspace can see the others.
     Workspaces,
+    /// What git considers changed — `␣gg`.
+    Changed,
 }
 
 impl PickerKind {
@@ -36,6 +38,7 @@ impl PickerKind {
             PickerKind::Grep => "live_grep",
             PickerKind::Buffers => "buffers",
             PickerKind::Workspaces => "workspaces",
+            PickerKind::Changed => "git_status",
         }
     }
 
@@ -50,6 +53,7 @@ impl PickerKind {
             "ff" => PickerKind::Files,
             "fg" => PickerKind::Grep,
             "fb" => PickerKind::Buffers,
+            "gg" => PickerKind::Changed,
             _ => return None,
         })
     }
@@ -243,6 +247,12 @@ impl Picker {
 #[derive(Debug, Default)]
 pub struct Pickers {
     index: FileIndex,
+    /// What git considers changed, for the `␣gg` picker.
+    ///
+    /// Held here rather than passed in per keystroke because it only changes
+    /// when the working tree does: the workspace refreshes it when the picker
+    /// opens, and typing only narrows what is already there.
+    changes: Vec<(String, char)>,
     matcher: Matcher,
     open: Option<Picker>,
 }
@@ -252,6 +262,7 @@ impl Pickers {
         Self {
             index: FileIndex::new(root),
             matcher: Matcher::new(),
+            changes: Vec::new(),
             open: None,
         }
     }
@@ -270,6 +281,11 @@ impl Pickers {
 
     pub fn root(&self) -> &Path {
         self.index.root()
+    }
+
+    /// Tell the `␣gg` picker what git says, before it opens.
+    pub fn set_changes(&mut self, changes: Vec<(String, char)>) {
+        self.changes = changes;
     }
 
     pub fn file_count(&self) -> usize {
@@ -403,6 +419,29 @@ impl Pickers {
                         // Buffers are addressed by index, not by path.
                         line: Some(m.index),
                         column: None,
+                    })
+                    .collect()
+            }
+
+            PickerKind::Changed => {
+                let labels: Vec<&str> =
+                    self.changes.iter().map(|(path, _)| path.as_str()).collect();
+                self.matcher
+                    .rank(&query, &labels, LIMIT)
+                    .into_iter()
+                    .map(|m| {
+                        let (path, state) = &self.changes[m.index];
+                        let (dir, name) = split_path(path);
+                        PickerItem {
+                            label: name.to_string(),
+                            // The letter first, so the column of them reads
+                            // down the list the way `git status` does.
+                            detail: format!("{state}  {dir}"),
+                            positions: shift(&m.positions, path.len() - name.len()),
+                            path: Some(path.clone()),
+                            line: None,
+                            column: None,
+                        }
                     })
                     .collect()
             }

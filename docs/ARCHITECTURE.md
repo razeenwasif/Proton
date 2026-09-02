@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 416 tests, headless
+cargo test --workspace        # 447 tests, headless
 cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
@@ -64,7 +64,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-vim` | Modal state machine, operators, motions, text objects, registers, marks, macros, which-key tree | — |
 | `proton-syntax` | Tree-sitter parsing, incremental re-parse, viewport-scoped highlight queries | `tree-sitter` |
 | `proton-lsp` | LSP client, server supervision, JSON-RPC framing, a non-blocking mailbox | `serde_json` |
-| `proton-vcs` | Status, gutter, blame, staging, the shadow worktree | `gix` |
+| `proton-vcs` | The gutter, and what git considers changed | `gix` |
 | `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
 | `proton-agent` | Messages API client, SSE streaming, request building, auth | `ureq` |
 | `proton-trace` | Code Visualizer client: trace format, pointer resolution, sidecar | `ureq` |
@@ -74,7 +74,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
 
 **Built so far: `proton-text`, `proton-index`, `proton-syntax`, `proton-lsp`,
-`proton-agent`, `proton-trace`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
+`proton-agent`, `proton-trace`, `proton-vcs`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
 into. `proton-vim` has not split out of `proton-core` yet — the modal engine is
 one file there and would gain nothing but a manifest from moving today.
 
@@ -196,6 +196,41 @@ thousand rows nobody reads, and the count is the useful part.
 
 `␣e` reveals the file you are in, opening every folder above it so the row
 exists to scroll to.
+
+### Git
+
+Two questions with different answers. **What changed in this file** is the
+gutter: a line diff between the version at `HEAD` and the buffer *as it is
+now*, not the file on disk — the point of a gutter is seeing what you have
+done before you save. **What have I touched** is `␣gg`, which is a Telescope
+picker like every other list in the editor rather than a panel of its own.
+
+`gix` rather than shelling out to `git`, as planned — and measured before
+committing to it: 135 crates and about a minute on a clean build. That is a
+real cost, but a one-off, and it buys packfiles, deltas, worktrees and every
+future object-format change. Shelling out would have meant parsing porcelain
+and a hard dependency on a binary.
+
+**What is cached, and against what.** Reading the blob at `HEAD` goes through
+packfiles and deltas, and only changes when the commit does — so it is read
+once per buffer and kept. The diff has to run whenever the buffer changes,
+because a gutter that only moves when you save is not showing you anything.
+So the blob is cached against the buffer and the marks against that buffer's
+*version*: typing recomputes one line diff over a string already in memory,
+and scrolling recomputes nothing. A save drops the blob; closing a buffer
+drops everything, because the index it used will be reused by whatever opens
+next and stale marks on the wrong file are worse than none.
+
+Histogram rather than Myers, which is what git itself defaults to and for the
+same reason: on source it finds the hunk boundaries a person would. A gutter
+that marks a closing brace instead of the function you changed is worse than
+no gutter.
+
+A deletion has no line to mark, so it attaches to the line that took its
+place — and loses to a mark already there, because the change that *is* there
+is more useful to see than the one beside it. Not being in a repository at all
+is ordinary rather than an error: plenty of folders worth editing are not
+checkouts, and the gutter simply has nothing to say about them.
 
 ### Splits
 

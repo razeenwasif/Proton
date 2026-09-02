@@ -268,6 +268,10 @@ pub enum Event {
         /// Scoped to the window like everything else here — a file with ten
         /// thousand hits sends only the ones you can see.
         matches: Vec<Vec<Hit>>,
+        /// Git marks, one per line in `lines`. Empty outside a repository, or
+        /// for a file git has never seen — both of which mean the same thing
+        /// to a gutter: nothing to compare against.
+        git: Vec<Option<GitMark>>,
     },
     /// Where the cursor is now. Split from `Viewport` because a motion is the
     /// common case and must not cost a re-render of the text.
@@ -423,6 +427,18 @@ pub struct SplitView {
     /// Which buffer it shows, as an index into the buffer bar.
     pub buffer: usize,
     pub name: String,
+}
+
+/// What git says happened to one line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub enum GitMark {
+    Added,
+    Modified,
+    /// Lines were deleted here. There is no line to mark, so it attaches to
+    /// the one that took their place.
+    Removed,
 }
 
 /// A search hit on one line, in character columns.

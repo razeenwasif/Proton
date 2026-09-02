@@ -14,6 +14,7 @@ use crate::agent::Agent;
 use crate::bus::{BufferTab, Command, Event, Hit, NoticeLevel, Selection, ServerState, SplitView};
 use crate::editor::Editor;
 use crate::ex::Ex;
+use crate::git::Git;
 use crate::highlights::Highlighters;
 use crate::key::Key;
 use crate::lsp::{self, Popup, Servers, Severity};
@@ -39,6 +40,8 @@ pub struct Workspace {
     agent: Agent,
     visualizer: Visualizer,
     tree: Tree,
+    /// The gutter, and what git has to say about the project.
+    git: Git,
     /// Where the cursor was when a search prompt opened.
     ///
     /// Every keystroke previews from here rather than from the last preview,
@@ -80,6 +83,7 @@ impl Workspace {
             agent: Agent::new(&root.display().to_string()),
             visualizer: Visualizer::new(root),
             tree: Tree::new(root),
+            git: Git::discover(root),
             ..Default::default()
         }
     }
@@ -504,6 +508,20 @@ impl Workspace {
     }
 
     fn open_picker(&mut self, kind: PickerKind) -> Vec<Event> {
+        // Asked for as the picker opens rather than kept up to date: a status
+        // walk is not free, and nothing else on screen needs it.
+        if kind == PickerKind::Changed {
+            if !self.git.is_repo() {
+                return vec![notice("not a git repository".into(), NoticeLevel::Warn)];
+            }
+            let changes = self
+                .git
+                .changes()
+                .into_iter()
+                .map(|c| (c.path, c.state.letter()))
+                .collect();
+            self.pickers.set_changes(changes);
+        }
         let labels = self.buffer_labels();
         self.pickers.begin(kind, labels);
         // Close which-key on the way: the leader sequence resolved.
@@ -962,6 +980,9 @@ impl Workspace {
         // past the end of the list.
         self.splits
             .buffer_closed(closed, self.editor.buffers().len());
+        // The index is about to be reused by whatever opens next, and stale
+        // marks on the wrong file are worse than none.
+        self.git.forget_all();
 
         // The buffer you land on is a different file, so everything that is
         // per-file is now wrong on screen.
@@ -994,6 +1015,9 @@ impl Workspace {
                 // Some servers only run the expensive checks on save —
                 // `cargo check` diagnostics do not exist until then.
                 self.servers.saved(self.editor.buffer());
+                // A save changes what git thinks of the file on disk, so the
+                // blob it was compared against has to be read again.
+                self.git.forget(self.editor.active());
                 vec![
                     notice(format!("wrote {name}"), NoticeLevel::Info),
                     self.buffers_event(),
@@ -1832,6 +1856,7 @@ impl Workspace {
                 version: 0,
                 highlights: Vec::new(),
                 matches: Vec::new(),
+                git: Vec::new(),
             };
         };
         let first_line = pane.first_line;
@@ -1870,6 +1895,12 @@ impl Workspace {
             None => Vec::new(),
         };
 
+        // The gutter is computed for the whole file and sent for the window,
+        // like everything else here. The diff is against the buffer rather
+        // than the file on disk: the point of a gutter is seeing what you have
+        // done *before* you save.
+        let git = self.git.marks(buffer, buf, first_line, count);
+
         Event::Viewport {
             view,
             first_line,
@@ -1878,6 +1909,7 @@ impl Workspace {
             lines,
             highlights: spans,
             matches,
+            git,
         }
     }
 

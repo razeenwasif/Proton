@@ -409,6 +409,8 @@ function paneState(index) {
       // background and a scope is a colour, and a match inside a string has to
       // stay string-coloured.
       matches: [],
+      // Git marks per line — added, modified, or lines removed here.
+      git: [],
     });
   }
   return panes.get(index);
@@ -574,12 +576,16 @@ function selectedOn(line, width) {
   return [Math.min(from, width), Math.min(to, width)];
 }
 
-function lineHtml(number, text, cursorColumn, highlights, hits) {
+function lineHtml(number, text, cursorColumn, highlights, hits, git) {
   const here = marks.byLine.get(number);
   const sign = here?.length
     ? `<span class="s d-${here[0].severity}">${icon(SIGN[here[0].severity], "solid")}</span>`
     : `<span class="s"></span>`;
-  const gutter = `<span class="n">${number + 1}</span>${sign}`;
+  // A thin bar between the number and the diagnostic sign. Its own strip
+  // rather than sharing one, because a line can be both changed and broken
+  // and you need to see both.
+  const change = git ? `<span class="g ${git}"></span>` : `<span class="g"></span>`;
+  const gutter = `<span class="n">${number + 1}</span>${change}${sign}`;
 
   const chars = [...text];
   const severity = markUp(chars, number);
@@ -672,6 +678,7 @@ function renderEditor(index = view.focused) {
         i === cursorRow ? drawing.cursor.column : undefined,
         drawing.highlights[i],
         drawing.matches[i],
+        drawing.git[i],
       ),
     )
     .join("");
@@ -1283,6 +1290,7 @@ onEvent((event) => {
       pane.totalLines = event.totalLines;
       pane.highlights = event.highlights ?? [];
       pane.matches = event.matches ?? [];
+      pane.git = event.git ?? [];
       renderEditor(event.view);
       break;
     }

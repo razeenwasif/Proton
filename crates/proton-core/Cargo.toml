@@ -13,6 +13,7 @@ proton-index = { workspace = true }
 proton-lsp = { workspace = true }
 proton-syntax = { workspace = true }
 proton-trace = { workspace = true }
+proton-vcs = { workspace = true }
 proton-text = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

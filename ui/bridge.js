@@ -69,6 +69,10 @@ if (HAS_SHELL) {
     lines: doc.lines.slice(doc.first, doc.first + doc.height),
     totalLines: doc.lines.length,
     version: 0,
+    // A fixed gutter, so the strip has something to draw. The real marks are
+    // a line diff against HEAD in crates/proton-vcs.
+    git: doc.lines.slice(doc.first, doc.first + doc.height).map((_, i) =>
+      i === 2 ? "added" : i === 3 ? "modified" : i === 7 ? "removed" : null),
     // Literal, folded like the real one in crates/proton-text/src/search.rs.
     // Enough to draw the layer; the rule that matters lives in Rust.
     matches: doc.lines.slice(doc.first, doc.first + doc.height).map((line) => {

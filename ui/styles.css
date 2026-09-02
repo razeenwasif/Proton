@@ -542,6 +542,20 @@ kbd {
 }
 .ln.cur .n { color: var(--accent); font-weight: 640; }
 .ln .s { flex: 0 0 14px; text-align: center; user-select: none; font-size: 10px; }
+
+/* ── the git gutter ───────────────────────────────────────────────────
+   Its own strip between the number and the diagnostic sign, because a line
+   can be both changed and broken and you need to see both. Three pixels: a
+   bar you read as a column down the edge of the file rather than a glyph you
+   read one at a time. */
+.ln .g { flex: 0 0 3px; align-self: stretch; margin-right: 5px; border-radius: 1px; }
+.ln .g.added    { background: var(--ok); }
+.ln .g.modified { background: var(--warn); }
+/* Lines were deleted here, so there is no line to fill — a wedge at the top
+   edge points at the join they were taken from. */
+.ln .g.removed  {
+  background: linear-gradient(var(--err), transparent 60%);
+}
 /* The agent's "still typing" bar. Not the editor caret — that one is below,
    and the two only ever looked alike. */
 .cursor {

@@ -5,6 +5,7 @@ import type { BufferTab } from "./BufferTab";
 import type { Completion } from "./Completion";
 import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
+import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
 import type { ModeId } from "./ModeId";
 import type { NoticeLevel } from "./NoticeLevel";
@@ -50,7 +51,13 @@ highlights: Array<Array<Span>>,
  * Scoped to the window like everything else here — a file with ten
  * thousand hits sends only the ones you can see.
  */
-matches: Array<Array<Hit>>, } | { "type": "cursor", 
+matches: Array<Array<Hit>>, 
+/**
+ * Git marks, one per line in `lines`. Empty outside a repository, or
+ * for a file git has never seen — both of which mean the same thing
+ * to a gutter: nothing to compare against.
+ */
+git: Array<GitMark | null>, } | { "type": "cursor", 
 /**
  * Which split the cursor belongs to. Every view has one; only the
  * focused one can move.

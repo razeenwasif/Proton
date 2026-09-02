@@ -9,6 +9,7 @@ members = [
     "crates/proton-syntax",
     "crates/proton-text",
     "crates/proton-trace",
+    "crates/proton-vcs",
 ]
 
 [workspace.package]
@@ -26,6 +27,9 @@ proton-lsp = { path = "crates/proton-lsp" }
 proton-syntax = { path = "crates/proton-syntax" }
 proton-text = { path = "crates/proton-text" }
 proton-trace = { path = "crates/proton-trace" }
+proton-vcs = { path = "crates/proton-vcs" }
+gix = "0.87"
+gix-imara-diff = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ts-rs = "10"
