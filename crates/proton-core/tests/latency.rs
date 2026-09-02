@@ -20,6 +20,7 @@ fn open_big() -> Workspace {
         path: "crates/proton-core/src/vim.rs".into(),
     });
     ws.apply(Command::Viewport {
+        view: 0,
         first_line: 0,
         lines: 60,
     });

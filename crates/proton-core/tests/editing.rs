@@ -180,6 +180,7 @@ fn an_edit_sends_the_new_lines() {
 fn the_viewport_follows_the_cursor() {
     let mut ws = open(&(0..200).map(|i| format!("line {i}\n")).collect::<String>());
     ws.apply(Command::Viewport {
+        view: 0,
         first_line: 0,
         lines: 20,
     });

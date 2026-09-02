@@ -39,8 +39,32 @@ if (HAS_SHELL) {
   // an empty pane. It cannot edit — the rope lives in Rust — and it must never
   // learn how to.
   const doc = { lines: [""], first: 0, height: 60, name: "[No Name]", path: null };
+  // One split in the preview. The real layout — how many, which buffer each
+  // shows, whose cursor is where — lives in crates/proton-core/src/split.rs;
+  // this only has to give the chrome something to draw.
+  const layout = { count: 1, focused: 0, vertical: true, scroll: [0] };
+
+  const splitsEvent = () => ({
+    type: "splits",
+    views: Array.from({ length: layout.count }, () => ({ buffer: 0, name: doc.name })),
+    focused: layout.focused,
+    vertical: layout.vertical,
+  });
+
+  /// Every pane's content. The preview shows one document in all of them —
+  /// the real thing gives each view its own buffer — but the scroll is per
+  /// pane, which is the part the chrome has to get right.
+  const everyViewport = () =>
+    Array.from({ length: layout.count }, (_, i) => ({
+      ...viewportEvent(),
+      view: i,
+      firstLine: layout.scroll[i] ?? 0,
+      lines: doc.lines.slice(layout.scroll[i] ?? 0, (layout.scroll[i] ?? 0) + doc.height),
+    }));
+
   const viewportEvent = () => ({
     type: "viewport",
+    view: 0,
     firstLine: doc.first,
     lines: doc.lines.slice(doc.first, doc.first + doc.height),
     totalLines: doc.lines.length,
@@ -106,9 +130,48 @@ if (HAS_SHELL) {
     if (command.type === "sync") {
       return [
         { type: "state", mode: state.mode, vimMode: state.vim, vimLabel: LABEL[state.vim] },
+        splitsEvent(),
         workspacesEvent(),
         treeEvent(),
+        viewportEvent(),
       ];
+    }
+    if (command.type === "split") {
+      if (layout.count >= 4) {
+        return [{ type: "notice", text: "four splits is as many as are worth having", level: "warn" }];
+      }
+      layout.vertical = command.vertical;
+      layout.scroll.splice(layout.focused + 1, 0, layout.scroll[layout.focused] ?? 0);
+      layout.count += 1;
+      layout.focused += 1;
+      return [splitsEvent(), ...everyViewport()];
+    }
+    if (command.type === "closeSplit") {
+      if (layout.count < 2) {
+        return [{ type: "notice", text: "that is the last split", level: "warn" }];
+      }
+      const index = command.index ?? layout.focused;
+      layout.scroll.splice(index, 1);
+      layout.count -= 1;
+      if (index <= layout.focused) layout.focused = Math.max(0, layout.focused - 1);
+      return [splitsEvent(), ...everyViewport()];
+    }
+    if (command.type === "onlySplit") {
+      layout.scroll = [layout.scroll[layout.focused] ?? 0];
+      layout.count = 1;
+      layout.focused = 0;
+      return [splitsEvent(), ...everyViewport()];
+    }
+    if (command.type === "focusSplit") {
+      layout.focused = command.index;
+      return [splitsEvent()];
+    }
+    if (command.type === "stepSplit") {
+      const back = ["left", "up", "previous"].includes(command.direction);
+      const next = back ? layout.focused - 1 : layout.focused + 1;
+      if (next < 0 || next >= layout.count) return [];
+      layout.focused = next;
+      return [splitsEvent()];
     }
     if (command.type === "focusWorkspace") {
       projects.active = command.index;
@@ -130,9 +193,10 @@ if (HAS_SHELL) {
       return [treeEvent()];
     }
     if (command.type === "viewport") {
-      doc.first = command.firstLine;
       doc.height = command.lines;
-      return [viewportEvent()];
+      layout.scroll[command.view] = command.firstLine;
+      if (command.view === layout.focused) doc.first = command.firstLine;
+      return [everyViewport()[command.view]].filter(Boolean);
     }
     if (command.type === "openBuffer") {
       try {
@@ -147,7 +211,8 @@ if (HAS_SHELL) {
       return [
         { type: "buffers", names: [{ name: doc.name, path: command.path, modified: false }], active: 0 },
         viewportEvent(),
-        { type: "cursor", line: 0, column: 0, offset: 0, selection: null },
+        splitsEvent(),
+        { type: "cursor", view: 0, line: 0, column: 0, offset: 0, selection: null },
         // The tree marks where you are, so opening a file redraws it.
         treeEvent(),
       ];

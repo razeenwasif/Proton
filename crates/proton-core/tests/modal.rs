@@ -223,13 +223,16 @@ fn the_wire_format_is_what_the_shell_expects() {
 #[test]
 fn typing_a_command_is_not_running_it() {
     // The whole reason `Execute` is a separate outcome: a consumer that cannot
-    // tell these apart runs `:`, `:v`, `:vs` and `:vsp` on the way to `:vsplit`.
+    // tell these apart runs `:`, `:s`, `:so` and `:sor` on the way to `:sort`.
+    //
+    // `sort` because the core does not own it — one it did own would be run
+    // here rather than passed out, and this is about the passing out.
     let mut ws = Workspace::new();
     ws.apply(Command::Key {
         key: Key::char(':'),
     });
 
-    for c in "vsplit".chars() {
+    for c in "sort".chars() {
         let events = ws.apply(Command::Key { key: Key::char(c) });
         assert!(
             !events.iter().any(|e| matches!(e, Event::CmdlineRun { .. })),
@@ -243,7 +246,7 @@ fn typing_a_command_is_not_running_it() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, Event::CmdlineRun { text } if text == "vsplit")),
+            .any(|e| matches!(e, Event::CmdlineRun { text } if text == "sort")),
         "Enter should run the collected line: {events:?}"
     );
 }

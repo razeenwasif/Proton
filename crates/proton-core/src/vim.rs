@@ -190,6 +190,10 @@ pub struct Vim {
     resume: VimMode,
     /// Keys typed after the leader, before which-key resolves.
     leader: Option<String>,
+    /// Set after `⌃w`, while waiting for the key that names what to do with
+    /// the splits. Its own field rather than part of `Pending`, because it
+    /// swallows the next key whatever else is half-typed.
+    awaiting_window: bool,
 
     /// The last change, for `.`. A change is the action *plus* whatever was
     /// typed in the insert mode it opened — repeating `ciwfoo` has to retype
@@ -272,6 +276,7 @@ impl Vim {
     pub fn cancel_leader(&mut self) {
         self.leader = None;
         self.pending.clear();
+        self.awaiting_window = false;
     }
 
     pub fn leader_prefix(&self) -> Option<&str> {
@@ -404,6 +409,20 @@ impl Vim {
         // so no other branch can swallow it.
         if k.key == "Escape" {
             return self.escape();
+        }
+
+        // `⌃w` is vim's window prefix: the next key names what to do with the
+        // splits. Handled here rather than in `key_normal` because it is a
+        // chord, and held in its own field rather than in `Pending` because it
+        // swallows the next key whatever else is half-typed — exactly as
+        // vim's does.
+        if self.awaiting_window {
+            self.awaiting_window = false;
+            return Outcome::Leader(format!("w{}", k.key));
+        }
+        if k.ctrl && k.key.eq_ignore_ascii_case("w") && !matches!(self.mode, VimMode::Command) {
+            self.awaiting_window = true;
+            return Outcome::Pending("^w".into());
         }
 
         // `⌃v` is the one modal command that is a chord rather than a letter,

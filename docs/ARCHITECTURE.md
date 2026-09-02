@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 388 tests, headless
+cargo test --workspace        # 416 tests, headless
 cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
@@ -196,6 +196,38 @@ thousand rows nobody reads, and the count is the useful part.
 
 `␣e` reveals the file you are in, opening every folder above it so the row
 exists to scroll to.
+
+### Splits
+
+A split is a **view**, not a copy: it knows which buffer it shows, where its
+cursor is and where it is scrolled to. So two splits on one file scroll apart
+and keep their own cursors, which is the only reason to open the same file
+twice — and an edit in either shows in both, because they are views of one
+document rather than two of anything.
+
+**Where the cursor lives.** It is a field on `Buffer`, and every motion and
+operator in `editor.rs` reaches for it there; moving it onto the view would
+mean threading it through all of them. It does not have to be. *Only the
+focused view receives commands*, so its is the only cursor that can move and
+every other view's is frozen. The buffer holds the focused view's, each other
+view holds its own, and they are exchanged on a focus change. One swap, and
+nothing below has to know splits exist.
+
+**One row, not a tree.** Vim nests; this is a single row or column. That
+covers what people do — two or three panes side by side — and a tree is a
+great deal of layout code for the case it does not. The shape is a `Vec` and a
+direction, which a tree can replace without the rest of the core noticing.
+Focus moves *along* the layout, and across it there is nothing, exactly as
+vim's does in the same layout.
+
+`Viewport` and `Cursor` events carry a view index, so each pane reports its own
+height and scroll and is redrawn on its own. `:vsplit`, `:split`, `:only`,
+`:close`, `⌃w` and the `␣w` family are all the core's; the front end builds
+panes from the layout it is given and sends clicks back.
+
+**`:q` closes the split while there are several**, and the buffer when there is
+one. Vim would quit, and an editor whose `:q` sometimes shuts the whole window
+is one you lose work in. `:bd` always means the buffer.
 
 ### Text
 
@@ -415,6 +447,7 @@ writing a patch instead of driving a GUI, and what makes any of it reviewable.
 The prototype now lives in `ui/` and is the real chrome; its stylesheet is
 already the design system. Three notes for the build:
 
+- **Splits are core state now**, not cloned markup. See § 3 → Splits.
 - **The mode switcher is a vertical rail**, outboard of the panel rail — see the
   note in `DESIGN.md` § The shell. The prototype still shows it in the titlebar;
   build it vertical.

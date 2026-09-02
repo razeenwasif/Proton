@@ -11,7 +11,7 @@ use proton_lsp::client::Incoming;
 
 use crate::action::{Action, Verb};
 use crate::agent::Agent;
-use crate::bus::{BufferTab, Command, Event, Hit, NoticeLevel, Selection, ServerState};
+use crate::bus::{BufferTab, Command, Event, Hit, NoticeLevel, Selection, ServerState, SplitView};
 use crate::editor::Editor;
 use crate::ex::Ex;
 use crate::highlights::Highlighters;
@@ -19,34 +19,19 @@ use crate::key::Key;
 use crate::lsp::{self, Popup, Servers, Severity};
 use crate::mode::ModeId;
 use crate::picker::{Accepted, PickerKey, PickerKind, Pickers};
+use crate::split::{Direction, Splits};
 use crate::trace::Visualizer;
 use crate::tree::Tree;
 use crate::vim::{Outcome, Vim, VimMode};
-
-/// What the front end can currently show. The core keeps it so a buffer change
-/// can send back exactly the lines that are on screen and nothing more.
-#[derive(Debug, Clone, Copy)]
-struct Viewport {
-    first_line: usize,
-    lines: usize,
-}
-
-impl Default for Viewport {
-    fn default() -> Self {
-        // Enough to be useful before the front end reports its real height.
-        Self {
-            first_line: 0,
-            lines: 80,
-        }
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct Workspace {
     mode: ModeId,
     vim: Vim,
     editor: Editor,
-    viewport: Viewport,
+    /// The views onto the buffers. Always at least one; what used to be a
+    /// single viewport is the focused one of these.
+    splits: Splits,
     pickers: Pickers,
     servers: Servers,
     highlights: Highlighters,
@@ -123,7 +108,7 @@ impl Workspace {
     /// without losing the second. Sending it a whole `Viewport` would carry
     /// another project's scroll across with it.
     pub fn set_height(&mut self, lines: usize) {
-        self.viewport.lines = lines.max(1);
+        self.splits.view_mut().lines = lines.max(1);
     }
 
     pub fn mode(&self) -> ModeId {
@@ -182,17 +167,23 @@ impl Workspace {
                 // paint, and not on first `␣ff`, where it would be in front of
                 // the user.
                 self.pickers.warm();
-                vec![
+                let mut events = vec![
                     self.state_event(),
+                    self.splits_event(),
                     self.buffers_event(),
-                    self.viewport_event(),
-                    self.cursor_event(),
+                ];
+                // Every split, not just the focused one — on connect the front
+                // end has nothing, and an unfocused pane with no content in it
+                // is a blank rectangle.
+                events.extend(self.every_view());
+                events.extend([
                     self.diagnostics_event(),
                     self.servers_event(),
                     self.agent_event(),
                     self.trace_event(),
                     self.tree_event(),
-                ]
+                ]);
+                events
             }
 
             Command::PlaceCursor { line, column } => {
@@ -290,12 +281,75 @@ impl Workspace {
                 events
             }
 
-            Command::Viewport { first_line, lines } => {
-                self.viewport = Viewport {
-                    first_line,
-                    lines: lines.max(1),
+            Command::Viewport {
+                view,
+                first_line,
+                lines,
+            } => {
+                let Some(target) = self.splits.at_mut(view) else {
+                    // A split that has just closed can still have a scroll
+                    // event in flight. Not an error, and not worth a notice.
+                    return Vec::new();
                 };
-                vec![self.viewport_event()]
+                target.first_line = first_line;
+                target.lines = lines.max(1);
+                vec![self.viewport_of(view)]
+            }
+
+            Command::Split { vertical } => {
+                // The cursor goes with the copy, so the new split opens where
+                // the old one was looking.
+                self.park_cursor();
+                if self.splits.split(vertical).is_none() {
+                    self.restore_cursor();
+                    return vec![notice(
+                        "four splits is as many as are worth having".into(),
+                        NoticeLevel::Warn,
+                    )];
+                }
+                self.entered_split()
+            }
+
+            Command::CloseSplit { index } => {
+                let index = index.unwrap_or(self.splits.focused());
+                self.park_cursor();
+                if self.splits.close(index).is_none() {
+                    self.restore_cursor();
+                    return vec![notice(
+                        "that is the last split — :q closes the buffer".into(),
+                        NoticeLevel::Warn,
+                    )];
+                }
+                self.entered_split()
+            }
+
+            Command::OnlySplit => {
+                self.park_cursor();
+                self.splits.only();
+                self.entered_split()
+            }
+
+            Command::FocusSplit { index } => {
+                if index == self.splits.focused() {
+                    return Vec::new();
+                }
+                self.park_cursor();
+                if !self.splits.focus(index) {
+                    self.restore_cursor();
+                    return vec![notice(format!("no split {index}"), NoticeLevel::Warn)];
+                }
+                self.entered_split()
+            }
+
+            Command::StepSplit { direction } => {
+                self.park_cursor();
+                if self.splits.step(direction).is_none() {
+                    // Nothing that way. Put the cursor back and say nothing —
+                    // walking into the edge is not an error.
+                    self.restore_cursor();
+                    return Vec::new();
+                }
+                self.entered_split()
             }
 
             Command::FocusBuffer { index } => {
@@ -707,6 +761,20 @@ impl Workspace {
         if ex.is("edit", 1) {
             return self.ex_edit(&ex);
         }
+        // Splits are the core's now. `:vs` is vim's minimum for `:vsplit`, and
+        // `:sp` for `:split` — `:s` is substitute.
+        if ex.is("vsplit", 2) || ex.is("vnew", 2) {
+            return self.apply(Command::Split { vertical: true });
+        }
+        if ex.is("split", 2) || ex.is("new", 3) {
+            return self.apply(Command::Split { vertical: false });
+        }
+        if ex.is("only", 2) {
+            return self.apply(Command::OnlySplit);
+        }
+        if ex.is("close", 3) {
+            return self.apply(Command::CloseSplit { index: None });
+        }
         if ex.is("nohlsearch", 3) {
             // Vim's `:noh`. The pattern is kept — `n` still works — and only
             // the painting stops, which is exactly the distinction people use
@@ -863,12 +931,15 @@ impl Workspace {
 
     /// `:q`, `:q!`, and `:bd` under its own name.
     ///
-    /// Closes the *buffer*, not a split. Vim's `:q` closes a window and leaves
-    /// the buffer hidden, which makes sense when buffers are invisible; here
-    /// they are the tab bar, and a tab you cannot close is the more obvious
-    /// missing thing. Splits keep `:close` and `␣wq` — they are still view
-    /// state and the core has no opinion about them.
+    /// With splits open it closes the split, the way vim's does. With one
+    /// split it closes the *buffer* — vim would quit, and an editor whose `:q`
+    /// sometimes closes the whole window is an editor you lose work in. The
+    /// tab bar is what buffers look like here, and a tab you cannot close is
+    /// the more obvious missing thing. `:bd` always means the buffer.
     fn ex_quit(&mut self, ex: &Ex) -> Vec<Event> {
+        if self.splits.len() > 1 && !ex.is("bdelete", 2) {
+            return self.apply(Command::CloseSplit { index: None });
+        }
         if !ex.bang && self.editor.buffer().is_modified() {
             return vec![notice(
                 format!(
@@ -884,7 +955,13 @@ impl Workspace {
         // editing any more, and diagnostics for it are still in the gutter's
         // reach.
         self.servers.closed(self.editor.buffer());
-        self.editor.close(self.editor.active());
+        let closed = self.editor.active();
+        self.editor.close(closed);
+        // Every index above the closed one just shifted down, and a split
+        // still pointing at the old number would draw the wrong file — or
+        // past the end of the list.
+        self.splits
+            .buffer_closed(closed, self.editor.buffers().len());
 
         // The buffer you land on is a different file, so everything that is
         // per-file is now wrong on screen.
@@ -948,6 +1025,10 @@ impl Workspace {
     /// because it marks where you are, and a tree that cannot say that is half
     /// a tree.
     fn switched(&mut self) -> Vec<Event> {
+        // The focused view is showing whatever the editor just made active.
+        // Without this the view keeps pointing at the buffer it had, and the
+        // pane draws a file nobody asked for.
+        self.splits.view_mut().buffer = self.editor.active();
         vec![
             self.buffers_event(),
             self.viewport_event(),
@@ -1429,6 +1510,91 @@ impl Workspace {
         self.after_action(false)
     }
 
+    /* ── splits ───────────────────────────────────────────────────── */
+
+    /// Put the focused view's cursor back on the view before the focus moves.
+    ///
+    /// The buffer holds the focused view's cursor, because that is where every
+    /// operator reaches for it. The other views hold their own. These two
+    /// exchange them, and they are the only place that has to know.
+    fn park_cursor(&mut self) {
+        let cursor = self.editor.buffer().cursor;
+        let buffer = self.editor.active();
+        let view = self.splits.view_mut();
+        view.cursor = cursor;
+        view.buffer = buffer;
+    }
+
+    /// The other half: make the newly focused view's cursor the live one.
+    fn restore_cursor(&mut self) {
+        let view = *self.splits.view();
+        // The buffer it was showing may have closed while it was not looking.
+        if !self.editor.focus(view.buffer) {
+            self.editor.focus(0);
+            self.splits.view_mut().buffer = self.editor.active();
+        }
+        let buffer = self.editor.buffer_mut();
+        buffer.cursor = buffer.clamp(view.cursor);
+    }
+
+    /// Everything the front end has to redraw when the focused split changes.
+    fn entered_split(&mut self) -> Vec<Event> {
+        self.restore_cursor();
+        self.resync();
+        let mut events = vec![self.splits_event()];
+        // Every split, because splitting and closing renumber them and the one
+        // that was at index 1 may now be showing something else.
+        events.extend(self.every_view());
+        events.push(self.buffers_event());
+        events.push(self.diagnostics_event());
+        events.push(self.tree_event());
+        events
+    }
+
+    /// The content and cursor of every split.
+    fn every_view(&mut self) -> Vec<Event> {
+        (0..self.splits.len())
+            .flat_map(|view| [self.viewport_of(view), self.cursor_of(view)])
+            .collect()
+    }
+
+    fn splits_event(&self) -> Event {
+        Event::Splits {
+            views: self
+                .splits
+                .views()
+                .iter()
+                .map(|view| SplitView {
+                    buffer: view.buffer,
+                    name: self
+                        .editor
+                        .buffers()
+                        .get(view.buffer)
+                        .map(|b| b.name())
+                        .unwrap_or_default(),
+                })
+                .collect(),
+            focused: self.splits.focused(),
+            vertical: self.splits.is_vertical(),
+        }
+    }
+
+    /// Redraw every split showing the buffer that just changed.
+    ///
+    /// Two views on one file must not disagree about what is in it, even for
+    /// a frame — which is the whole reason a split is a view rather than a
+    /// copy.
+    fn redraw_others(&mut self) -> Vec<Event> {
+        let buffer = self.editor.active();
+        let focused = self.splits.focused();
+        self.splits
+            .showing(buffer)
+            .into_iter()
+            .filter(|&view| view != focused)
+            .flat_map(|view| [self.viewport_of(view), self.cursor_of(view)])
+            .collect()
+    }
+
     /// The tree as it stands.
     ///
     /// Recomputed from the disk each time rather than cached, which is what
@@ -1552,6 +1718,12 @@ impl Workspace {
                 events.extend(self.trace_buffer());
                 (events, false)
             }
+            // The window family, under `␣w` as the rail has always shown it.
+            Outcome::Leader(prefix) if window_command(&prefix).is_some() => {
+                let mut events = vec![Event::Leader { prefix: None }];
+                events.extend(self.apply(window_command(&prefix).unwrap()));
+                (events, false)
+            }
             // `␣e` finds the file you are in. The rail has always claimed this
             // binding in its tooltip; now it exists.
             Outcome::Leader(prefix) if prefix == "e" => {
@@ -1612,6 +1784,10 @@ impl Workspace {
         if text_changed {
             events.push(self.viewport_event());
             events.push(self.buffers_event());
+            // Any other split on this file has to move with it. Two views of
+            // one buffer disagreeing about what is in it, even for a frame, is
+            // the bug that makes a split feel like a copy.
+            events.extend(self.redraw_others());
         } else if scrolled {
             events.push(self.viewport_event());
         }
@@ -1624,29 +1800,54 @@ impl Workspace {
     fn scroll_to_cursor(&mut self) -> bool {
         let buf = self.editor.buffer();
         let line = buf.position(buf.cursor.offset).line;
-        let height = self.viewport.lines;
+        let height = self.splits.view().lines;
         let margin = 1.min(height / 4);
-        let before = self.viewport.first_line;
+        let before = self.splits.view().first_line;
 
         if line < before + margin {
-            self.viewport.first_line = line.saturating_sub(margin);
+            self.splits.view_mut().first_line = line.saturating_sub(margin);
         } else if line + margin >= before + height {
-            self.viewport.first_line = (line + margin + 1).saturating_sub(height);
+            self.splits.view_mut().first_line = (line + margin + 1).saturating_sub(height);
         }
-        self.viewport.first_line != before
+        self.splits.view().first_line != before
     }
 
+    /// The focused split's content.
     fn viewport_event(&mut self) -> Event {
-        let first_line = self.viewport.first_line;
-        let count = self.viewport.lines;
+        self.viewport_of(self.splits.focused())
+    }
+
+    /// One split's content.
+    ///
+    /// An unfocused split may be showing a different buffer, so this reads the
+    /// view's rather than the editor's active one — which is the difference
+    /// between a split and a second copy of the same pane.
+    fn viewport_of(&mut self, view: usize) -> Event {
+        let Some(pane) = self.splits.at(view).copied() else {
+            return Event::Viewport {
+                view,
+                first_line: 0,
+                lines: Vec::new(),
+                total_lines: 0,
+                version: 0,
+                highlights: Vec::new(),
+                matches: Vec::new(),
+            };
+        };
+        let first_line = pane.first_line;
+        let count = pane.lines;
+        let buffer = pane
+            .buffer
+            .min(self.editor.buffers().len().saturating_sub(1));
+
         // Highlighting is computed here rather than in a second event,
         // because the colours and the text they colour must never be a frame
         // apart — one stale and the other fresh is visibly wrong.
         let spans = self
             .highlights
-            .spans(self.editor.buffer(), first_line, count);
+            .spans(&self.editor.buffers()[buffer], first_line, count);
         let pattern = self.highlight_pattern().map(str::to_owned);
-        let buf = self.editor.buffer();
+        let buf = &self.editor.buffers()[buffer];
         let lines = buf.lines(first_line, count);
 
         // Searched per visible line rather than by asking the document where
@@ -1670,6 +1871,7 @@ impl Workspace {
         };
 
         Event::Viewport {
+            view,
             first_line,
             total_lines: buf.len_lines(),
             version: buf.version(),
@@ -1697,8 +1899,21 @@ impl Workspace {
     }
 
     fn cursor_event(&self) -> Event {
-        let buf = self.editor.buffer();
-        let cursor = buf.cursor;
+        self.cursor_of(self.splits.focused())
+    }
+
+    /// One split's cursor.
+    ///
+    /// The focused view's lives on the buffer, where the operators reach for
+    /// it; every other view holds its own. See [`crate::split`].
+    fn cursor_of(&self, view: usize) -> Event {
+        let focused = view == self.splits.focused();
+        let pane = self.splits.at(view).copied().unwrap_or_default();
+        let buffer = pane
+            .buffer
+            .min(self.editor.buffers().len().saturating_sub(1));
+        let buf = &self.editor.buffers()[buffer];
+        let cursor = if focused { buf.cursor } else { pane.cursor };
         let at = buf.position(cursor.offset);
         let selection = cursor.has_selection().then(|| {
             let anchor = buf.position(cursor.anchor);
@@ -1709,6 +1924,7 @@ impl Workspace {
             }
         });
         Event::Cursor {
+            view,
             line: at.line,
             column: at.column,
             offset: cursor.offset,
@@ -1752,6 +1968,35 @@ impl Workspace {
 
 pub(crate) fn notice(text: String, level: NoticeLevel) -> Event {
     Event::Notice { text, level }
+}
+
+/// The `␣w` family — vim's `⌃w`, under the leader where everything else lives.
+///
+/// Core config rather than front-end config, for the same reason the picker's
+/// prefixes are: a second front end must not have to reinvent the keymap.
+fn window_command(prefix: &str) -> Option<Command> {
+    Some(match prefix {
+        "wv" => Command::Split { vertical: true },
+        "ws" => Command::Split { vertical: false },
+        "wq" | "wc" => Command::CloseSplit { index: None },
+        "wo" => Command::OnlySplit,
+        "wh" => Command::StepSplit {
+            direction: Direction::Left,
+        },
+        "wl" => Command::StepSplit {
+            direction: Direction::Right,
+        },
+        "wk" => Command::StepSplit {
+            direction: Direction::Up,
+        },
+        "wj" => Command::StepSplit {
+            direction: Direction::Down,
+        },
+        "ww" => Command::StepSplit {
+            direction: Direction::Next,
+        },
+        _ => return None,
+    })
 }
 
 /// Whether a command declined to do the thing it was asked.

@@ -241,9 +241,22 @@ impl Session {
                 vec![self.picker_event()]
             }
 
-            Command::Viewport { first_line, lines } => {
-                self.height = Some(lines.max(1));
-                self.delegate(Command::Viewport { first_line, lines })
+            Command::Viewport {
+                view,
+                first_line,
+                lines,
+            } => {
+                // Only the first split's height is remembered as the default
+                // for a workspace opened later: a new one starts unsplit, so
+                // that is the height it will have.
+                if view == 0 {
+                    self.height = Some(lines.max(1));
+                }
+                self.delegate(Command::Viewport {
+                    view,
+                    first_line,
+                    lines,
+                })
             }
 
             Command::Sync => {

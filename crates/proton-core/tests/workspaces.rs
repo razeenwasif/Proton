@@ -235,6 +235,7 @@ fn the_window_height_follows_you_into_a_new_workspace() {
     let scratch = Scratch::new("height");
     let mut session = Session::new(&scratch.root);
     session.apply(Command::Viewport {
+        view: 0,
         first_line: 0,
         lines: 12,
     });

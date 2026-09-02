@@ -14,6 +14,7 @@ use crate::key::Key;
 use crate::lsp::{Completion, Diagnostic, ServerStatus};
 use crate::mode::ModeId;
 use crate::picker::{PickerItem, PickerKind};
+use crate::split::Direction;
 use crate::trace::{StepView, TraceState};
 use crate::tree::TreeRow;
 use crate::vim::VimMode;
@@ -54,8 +55,33 @@ pub enum Command {
     /// keeps a large file affordable over the bridge.
     #[serde(rename_all = "camelCase")]
     Viewport {
+        /// Which split is reporting. Each has its own height and scroll, so
+        /// each has to speak for itself.
+        view: usize,
         first_line: usize,
         lines: usize,
+    },
+
+    /* ── splits ───────────────────────────────────────────────────── */
+    /// Split the focused view in two. The new one shows the same buffer,
+    /// scrolled the same way — you split because you want two of what you are
+    /// looking at.
+    Split {
+        vertical: bool,
+    },
+    /// Close one. `None` is the focused one, which is what `:q` and `␣wq`
+    /// mean; a click on a splits `×` names the one it is on.
+    CloseSplit {
+        index: Option<usize>,
+    },
+    /// Close every split but the focused one — `:only`.
+    OnlySplit,
+    FocusSplit {
+        index: usize,
+    },
+    /// Move the focus — `⌃w h` and friends.
+    StepSplit {
+        direction: Direction,
     },
     /// Put the cursor somewhere outright — a click in the text.
     ///
@@ -220,6 +246,8 @@ pub enum Event {
     /// viewport or the active buffer changes — never the whole file.
     #[serde(rename_all = "camelCase")]
     Viewport {
+        /// Which split this is the content of.
+        view: usize,
         first_line: usize,
         lines: Vec<String>,
         total_lines: usize,
@@ -245,6 +273,9 @@ pub enum Event {
     /// common case and must not cost a re-render of the text.
     #[serde(rename_all = "camelCase")]
     Cursor {
+        /// Which split the cursor belongs to. Every view has one; only the
+        /// focused one can move.
+        view: usize,
         line: usize,
         column: usize,
         offset: usize,
@@ -264,6 +295,17 @@ pub enum Event {
     /// without a virtualised list on the other side.
     Tree {
         rows: Vec<TreeRow>,
+    },
+    /// The splits: how many, which buffer each shows, and which has the focus.
+    ///
+    /// Sent when the set or the focus changes, not on every keystroke — the
+    /// content of each one arrives as its own `Viewport`.
+    #[serde(rename_all = "camelCase")]
+    Splits {
+        views: Vec<SplitView>,
+        focused: usize,
+        /// Side by side rather than stacked.
+        vertical: bool,
     },
     /// The open workspaces, for the switcher above the buffer bar.
     ///
@@ -371,6 +413,16 @@ pub struct Selection {
     pub line: usize,
     pub column: usize,
     pub offset: usize,
+}
+
+/// One split, for the layout. Its *content* arrives as a `Viewport`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct SplitView {
+    /// Which buffer it shows, as an index into the buffer bar.
+    pub buffer: usize,
+    pub name: String,
 }
 
 /// A search hit on one line, in character columns.

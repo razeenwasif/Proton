@@ -148,99 +148,88 @@ document.addEventListener("click", (e) => {
 });
 
 /* ── splits ───────────────────────────────────────────────────────────
-   `:vsplit` shows the same buffer twice — two views onto one document —
-   so cloning the pane is the honest model, not a shortcut.
+   A split is a *view* onto a buffer, and the core owns every one of them:
+   which buffer it shows, where its cursor is, where it is scrolled to. This
+   builds the panes the core describes and reports each one's height back.
 
-   This is view state today. It becomes core state in M1, when buffers
-   exist and a split has to mean "which buffer, scrolled where" rather
-   than "another copy of the same markup". */
+   It used to clone the markup, which made two panes onto one document and
+   two panes onto two copies indistinguishable — and neither of them a split. */
 function splits() {
   return $("#codex-splits");
 }
 
-function activeSplit() {
-  const box = splits();
-  return box?.querySelector(".split.on") ?? box?.firstElementChild ?? null;
+/** The markup of one pane. Everything in it is addressed by view index. */
+function splitHtml(view, focused) {
+  return (
+    `<section class="split${view === focused ? " on" : ""}" data-view="${view}">` +
+    `<div class="buffers">` +
+    `<span data-buffers></span>` +
+    `<span class="split-actions">` +
+    `<button data-split="v" title="Split right — :vsplit or ␣wv"><svg class="i"><use href="#i-split-v"/></svg></button>` +
+    `<button data-split="s" title="Split down — :split or ␣ws"><svg class="i"><use href="#i-split-h"/></svg></button>` +
+    `<button data-split="close" title="Close this split — :close or ␣wq"><svg class="i"><use href="#i-close"/></svg></button>` +
+    `</span></div>` +
+    `<div class="scroll code" data-editor data-view="${view}"></div>` +
+    `</section>`
+  );
 }
 
-function syncSplits() {
+/**
+ * Rebuild the panes from the core's layout.
+ *
+ * Only when the shape actually changed. A `Splits` event also arrives when
+ * the focus moves, and tearing down the DOM for that would throw away every
+ * pane's scroll position and make switching splits scroll them all to the top.
+ */
+function renderSplits(views, focused, vertical) {
   const box = splits();
   if (!box) return;
-  const all = $$(".split", box);
-  box.classList.toggle("multi", all.length > 1);
-  if (!all.some((s) => s.classList.contains("on"))) all[0]?.classList.add("on");
+
+  const shapeChanged =
+    $$(".split", box).length !== views.length ||
+    box.classList.contains("stacked") === vertical;
+
+  if (shapeChanged) {
+    box.innerHTML = views.map((_, i) => splitHtml(i, focused)).join("");
+    box.classList.toggle("stacked", !vertical);
+    box.classList.toggle("multi", views.length > 1);
+    // Each pane has its own height, and the core has to be told all of them.
+    requestAnimationFrame(reportEveryViewport);
+  } else {
+    $$(".split", box).forEach((pane) =>
+      pane.classList.toggle("on", Number(pane.dataset.view) === focused),
+    );
+  }
+  view.focused = focused;
   requestAnimationFrame(drawPointerEdges);
 }
 
-function splitEditor(direction) {
-  const box = splits();
-  const source = activeSplit();
-  if (!box || !source || $$(".split", box).length >= 4) return;
-
-  box.classList.toggle("stacked", direction === "stacked");
-  const clone = source.cloneNode(true);
-  source.classList.remove("on");
-  clone.classList.add("on");
-  source.after(clone);
-  syncSplits();
-}
-
-function closeSplit(which = activeSplit()) {
-  const box = splits();
-  if (!box || !which || $$(".split", box).length < 2) return;
-  const next = which.nextElementSibling ?? which.previousElementSibling;
-  which.remove();
-  next?.classList.add("on");
-  syncSplits();
-}
-
-function onlySplit() {
-  const box = splits();
-  const keep = activeSplit();
-  if (!box || !keep) return;
-  $$(".split", box).forEach((s) => s !== keep && s.remove());
-  syncSplits();
+/** Which pane a node is in, or the focused one. */
+function viewOf(node) {
+  const pane = node?.closest?.("[data-view]");
+  return pane ? Number(pane.dataset.view) : view.focused;
 }
 
 document.addEventListener("click", (e) => {
   const action = e.target.closest("[data-split]");
   if (action) {
     e.stopPropagation();
-    const split = action.closest(".split");
-    $$(".split", splits()).forEach((s) => s.classList.toggle("on", s === split));
-    if (action.dataset.split === "v") splitEditor("side");
-    else if (action.dataset.split === "s") splitEditor("stacked");
-    else closeSplit(split);
+    const index = viewOf(action);
+    const kind = action.dataset.split;
+    if (kind === "v") dispatch({ type: "split", vertical: true });
+    else if (kind === "s") dispatch({ type: "split", vertical: false });
+    else dispatch({ type: "closeSplit", index });
     return;
   }
-  // Clicking anywhere in a split focuses it.
-  const split = e.target.closest(".split");
-  if (split && splits()?.contains(split)) {
-    $$(".split", splits()).forEach((s) => s.classList.toggle("on", s === split));
+  // Clicking a panes chrome — its buffer bar, its empty space — focuses it.
+  // A click in the *text* is handled on mousedown, which fires first and has
+  // to focus before it places the cursor.
+  const pane = e.target.closest(".split");
+  if (pane && splits()?.contains(pane)) {
+    const index = Number(pane.dataset.view);
+    if (index !== view.focused) dispatch({ type: "focusSplit", index });
   }
 });
-
-/* The commands vim already uses for this, wired to the real command line. */
-const SPLIT_COMMANDS = {
-  vsplit: () => splitEditor("side"),
-  vs: () => splitEditor("side"),
-  vsp: () => splitEditor("side"),
-  split: () => splitEditor("stacked"),
-  sp: () => splitEditor("stacked"),
-  // `:q` is not here any more — it closes the buffer, in the core. Splits are
-  // still view state, so they keep `:close` and `␣wq`.
-  close: () => closeSplit(),
-  clo: () => closeSplit(),
-  only: () => onlySplit(),
-  on: () => onlySplit(),
-};
-
-const SPLIT_LEADER = {
-  wv: () => splitEditor("side"),
-  ws: () => splitEditor("stacked"),
-  wq: () => closeSplit(),
-  wo: () => onlySplit(),
-};
 
 /* ── resizable panes ──────────────────────────────────────────────────
    Each gutter writes one custom property on its workspace, and the grid
@@ -381,6 +370,9 @@ $("#scrim").addEventListener("click", closeAll);
    would be right. */
 
 const view = {
+  // Which split has the focus. The panes are drawn from the core's layout and
+  // addressed by index; this is the one the keyboard is in.
+  focused: 0,
   firstLine: 0,
   lines: [],
   totalLines: 0,
@@ -390,13 +382,49 @@ const view = {
   /// Which visual mode is live, because the same two endpoints describe a
   /// run, a set of lines or a rectangle depending on it.
   vim: "NORMAL",
-  /// Coloured runs, parallel to `lines` — or empty for a file with no grammar.
-  highlights: [],
-  // Search hits on each visible line. A separate layer from `highlights`:
-  // a match is a background and a scope is a colour, and a match inside a
-  // string has to stay string-coloured.
-  matches: [],
 };
+
+/**
+ * What each split is showing, keyed by view index.
+ *
+ * A split is a view onto a buffer, so every one of them has its own scroll,
+ * its own cursor and its own lines — that is the difference between a split
+ * and a second copy of the same pane, and it has to be true here as well as
+ * in the core.
+ */
+const panes = new Map();
+
+function paneState(index) {
+  if (!panes.has(index)) {
+    panes.set(index, {
+      firstLine: 0,
+      lines: [],
+      totalLines: 0,
+      cursor: { line: 0, column: 0 },
+      /// The far end of the selection, or null. The near end is the cursor.
+      selection: null,
+      /// Coloured runs, parallel to `lines` — empty for a file with no grammar.
+      highlights: [],
+      // Search hits per line. A separate layer from `highlights`: a match is a
+      // background and a scope is a colour, and a match inside a string has to
+      // stay string-coloured.
+      matches: [],
+    });
+  }
+  return panes.get(index);
+}
+
+/**
+ * The pane being drawn right now.
+ *
+ * An ambient rather than a parameter threaded through `lineHtml`,
+ * `selectedOn` and `runsHtml` — they already read the view they are drawing
+ * from a module-level object, and this is that object, now one per split.
+ */
+let drawing = paneState(0);
+
+/** The focused pane's state, for the statusline and the completion popup. */
+const focusedPane = () => paneState(view.focused);
 
 const escapeHtml = (s) =>
   s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
@@ -527,9 +555,9 @@ function runsHtml(chars, scope, severity, picked, hit, from, to) {
  * the mode has to know which of the three it is rather than just holding two
  * endpoints. */
 function selectedOn(line, width) {
-  const anchor = view.selection;
+  const anchor = drawing.selection;
   if (!anchor) return null;
-  const head = view.cursor;
+  const head = drawing.cursor;
 
   const top = anchor.line <= head.line ? anchor : head;
   const bottom = anchor.line <= head.line ? head : anchor;
@@ -624,23 +652,26 @@ function measureLineHeight() {
   return lineHeight;
 }
 
-function renderEditor() {
-  const target = $("[data-editor]");
+function renderEditor(index = view.focused) {
+  const target = $(`[data-editor][data-view="${index}"]`);
   if (!target) return;
+  // The ambient the drawing functions read. Set for the length of this call
+  // and never left pointing at a pane nobody is drawing.
+  drawing = paneState(index);
   // Measured before building, because the spacer's height depends on it. With
   // no line rendered yet this falls back to the pane's computed line-height,
   // which is the same number.
   measureLineHeight();
 
-  const cursorRow = view.cursor.line - view.firstLine;
-  const rows = view.lines
+  const cursorRow = drawing.cursor.line - drawing.firstLine;
+  const rows = drawing.lines
     .map((text, i) =>
       lineHtml(
-        view.firstLine + i,
+        drawing.firstLine + i,
         text,
-        i === cursorRow ? view.cursor.column : undefined,
-        view.highlights[i],
-        view.matches[i],
+        i === cursorRow ? drawing.cursor.column : undefined,
+        drawing.highlights[i],
+        drawing.matches[i],
       ),
     )
     .join("");
@@ -649,14 +680,14 @@ function renderEditor() {
   // inside it. `translate` rather than `top` so moving the window is a
   // compositor job and never a reflow.
   target.innerHTML =
-    `<div class="doc" style="height:${Math.max(1, view.totalLines) * lineHeight}px">` +
-    `<div class="win" style="transform:translateY(${view.firstLine * lineHeight}px)">` +
+    `<div class="doc" style="height:${Math.max(1, drawing.totalLines) * lineHeight}px">` +
+    `<div class="win" style="transform:translateY(${drawing.firstLine * lineHeight}px)">` +
     `${rows}</div></div>`;
 
   // The window moved for a reason of the core's — `G`, a grep hit, the cursor
   // leaving the screen — so the pane has to follow. A user scroll is already
   // within one line of where it should be, which is what tells the two apart.
-  const want = view.firstLine * lineHeight;
+  const want = drawing.firstLine * lineHeight;
   if (Math.abs(target.scrollTop - want) > lineHeight) target.scrollTop = want;
 
   // The caret element the popup was anchored to has just been replaced, so
@@ -728,9 +759,20 @@ document.addEventListener("mousedown", (e) => {
   // Stops the browser painting a second, different selection over ours.
   e.preventDefault();
   dragging = true;
+
   // The core clamps: a click past the end of a short line is the ordinary
   // case, and the front end does not hold the document to check against.
-  dispatch({ type: "placeCursor", ...at });
+  const place = () => dispatch({ type: "placeCursor", ...at });
+
+  // Clicking into a different split focuses it *first*. `PlaceCursor` moves
+  // the focused view's cursor, so the other order would put the cursor in the
+  // pane you just left.
+  const index = viewOf(e.target);
+  if (index !== view.focused) {
+    dispatch({ type: "focusSplit", index }).then(place);
+  } else {
+    place();
+  }
 });
 
 document.addEventListener("mousemove", (e) => {
@@ -858,32 +900,41 @@ function renderWorkspaces(items, active) {
  */
 const OVERSCAN = 4;
 
-function reportViewport() {
-  const target = $("[data-editor]");
+function reportViewport(index = view.focused) {
+  const target = $(`[data-editor][data-view="${index}"]`);
   if (!target) return;
   const first = Math.max(0, Math.floor(target.scrollTop / lineHeight));
   const rows = Math.max(1, Math.ceil(target.clientHeight / lineHeight) + OVERSCAN);
-  dispatch({ type: "viewport", firstLine: first, lines: rows });
+  dispatch({ type: "viewport", view: index, firstLine: first, lines: rows });
+}
+
+/** Every pane has its own height, and the core has to be told all of them. */
+function reportEveryViewport() {
+  $$("[data-editor]").forEach((pane) => reportViewport(Number(pane.dataset.view)));
 }
 
 // Scroll events arrive far faster than frames, and every one of them would
 // otherwise be a round trip to the core. One per frame is enough to keep up
 // with a trackpad and is the most the screen can show anyway.
-let viewportQueued = false;
+const viewportQueued = new Set();
 
-function reportViewportSoon() {
-  if (viewportQueued) return;
-  viewportQueued = true;
+function reportViewportSoon(index) {
+  if (viewportQueued.has(index)) return;
+  viewportQueued.add(index);
   requestAnimationFrame(() => {
-    viewportQueued = false;
-    reportViewport();
+    viewportQueued.delete(index);
+    reportViewport(index);
   });
 }
 
 document.addEventListener(
   "scroll",
   (e) => {
-    if (e.target?.matches?.("[data-editor]")) reportViewportSoon();
+    // Per pane: two splits scrolling at once must not coalesce into one
+    // report, or one of them stops where the other left it.
+    if (e.target?.matches?.("[data-editor]")) {
+      reportViewportSoon(Number(e.target.dataset.view));
+    }
   },
   // Scroll does not bubble, so the listener has to be capturing to see it on
   // a descendant of `document`.
@@ -1178,9 +1229,6 @@ onEvent((event) => {
     case "leader":
       if (event.prefix === null) {
         closeAll();
-      } else if (SPLIT_LEADER[event.prefix]) {
-        closeAll();
-        SPLIT_LEADER[event.prefix]();
       } else {
         show("whichkey");
         // ␣ff is the one leader sequence M0 resolves, so Telescope is reachable
@@ -1205,14 +1253,10 @@ onEvent((event) => {
 
     case "cmdlineRun": {
       // The core hands back the line it collected; the front end decides what
-      // Only what the core did not recognise arrives here — `:w` and `:e` are
-      // its own now. What is left is the split commands, which are still view
-      // state, plus the residue of a compound: `:wq` writes in the core and
-      // hands the `q` on to be run here.
-      const run = SPLIT_COMMANDS[event.text.trim().replace(/^:/, "")];
-      if (run) {
-        run();
-      } else if (event.text.trim()) {
+      // Only what the core did not recognise arrives here. It owns `:w`,
+      // `:e`, `:q` and the splits now, so what is left is genuinely unknown —
+      // and saying so beats swallowing a typo.
+      if (event.text.trim()) {
         renderStatus(`:${event.text.trim()} — not a command yet`, "warn");
       }
       break;
@@ -1232,20 +1276,30 @@ onEvent((event) => {
       renderStatus(`insert ${JSON.stringify(event.text)}`);
       break;
 
-    case "viewport":
-      view.firstLine = event.firstLine;
-      view.lines = event.lines;
-      view.totalLines = event.totalLines;
-      view.highlights = event.highlights ?? [];
-      view.matches = event.matches ?? [];
-      renderEditor();
+    case "viewport": {
+      const pane = paneState(event.view);
+      pane.firstLine = event.firstLine;
+      pane.lines = event.lines;
+      pane.totalLines = event.totalLines;
+      pane.highlights = event.highlights ?? [];
+      pane.matches = event.matches ?? [];
+      renderEditor(event.view);
       break;
+    }
 
-    case "cursor":
-      view.cursor = { line: event.line, column: event.column };
-      view.selection = event.selection;
-      renderEditor();
-      renderPosition();
+    case "cursor": {
+      const pane = paneState(event.view);
+      pane.cursor = { line: event.line, column: event.column };
+      pane.selection = event.selection;
+      renderEditor(event.view);
+      // The statusline speaks for the split you are in, not whichever one
+      // happened to redraw.
+      if (event.view === view.focused) renderPosition();
+      break;
+    }
+
+    case "splits":
+      renderSplits(event.views, event.focused, event.vertical);
       break;
 
     case "buffers": {
@@ -1304,7 +1358,8 @@ onEvent((event) => {
 
 function renderPosition() {
   const el = $("#sl-position");
-  if (el) el.textContent = `ln ${view.cursor.line + 1}, col ${view.cursor.column + 1}`;
+  const at = focusedPane().cursor;
+  if (el) el.textContent = `ln ${at.line + 1}, col ${at.column + 1}`;
 }
 
 /* ── keys ─────────────────────────────────────────────────────────────

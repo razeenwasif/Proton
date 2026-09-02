@@ -335,19 +335,9 @@
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
-        <div class="splits" id="codex-splits">
-        <section class="split on">
-        <div class="buffers">
-          <span data-buffers></span>
-          <span class="split-actions">
-            <button data-split="v" title="Split right — :vsplit or ␣wv"><svg class="i"><use href="#i-split-v"/></svg></button>
-            <button data-split="s" title="Split down — :split or ␣ws"><svg class="i"><use href="#i-split-h"/></svg></button>
-            <button data-split="close" title="Close this split — :q or ␣wq"><svg class="i"><use href="#i-close"/></svg></button>
-          </span>
-        </div>
-        <div class="scroll code" data-editor></div>
-        </section>
-        </div>
+        <!-- Built from Event::Splits. The core owns how many there are, which
+             buffer each shows and which has the focus; this is where they go. -->
+        <div class="splits" id="codex-splits"></div>
       </main>
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>

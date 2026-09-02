@@ -18,6 +18,7 @@ fn viewport(events: &[Event]) -> Option<(&Vec<String>, &Vec<Vec<proton_core::Spa
 fn open(path: &str) -> Workspace {
     let mut ws = Workspace::rooted("../..");
     ws.apply(Command::Viewport {
+        view: 0,
         first_line: 0,
         lines: 40,
     });
@@ -29,6 +30,7 @@ fn open(path: &str) -> Workspace {
 fn highlights_arrive_alongside_the_lines_they_colour() {
     let mut ws = open("crates/proton-core/src/vim.rs");
     let events = ws.apply(Command::Viewport {
+        view: 0,
         first_line: 0,
         lines: 40,
     });
@@ -59,10 +61,12 @@ fn highlights_arrive_alongside_the_lines_they_colour() {
 fn scrolling_recolours_the_lines_that_are_now_visible() {
     let mut ws = open("crates/proton-core/src/vim.rs");
     let top = ws.apply(Command::Viewport {
+        view: 0,
         first_line: 0,
         lines: 20,
     });
     let lower = ws.apply(Command::Viewport {
+        view: 0,
         first_line: 200,
         lines: 20,
     });
@@ -92,6 +96,7 @@ fn editing_recolours_what_the_edit_changed() {
         path: "crates/proton-core/src/vim.rs".into(),
     });
     ws.apply(Command::Viewport {
+        view: 0,
         first_line: 0,
         lines: 10,
     });
@@ -128,6 +133,7 @@ fn a_file_with_no_grammar_is_sent_plain() {
     // lines have no colours" are different instructions.
     let mut ws = open("README.md");
     let events = ws.apply(Command::Viewport {
+        view: 0,
         first_line: 0,
         lines: 10,
     });

@@ -675,12 +675,13 @@ fn x_writes_only_when_there_is_something_to_write() {
 
 #[test]
 fn a_command_the_core_does_not_know_still_reaches_the_front_end() {
-    // Splits are view state and stay the front end's. Swallowing them here
-    // would break them without anything saying why.
+    // Whatever is left after the core has taken what it owns. Swallowing an
+    // unknown command silently would leave the user with no way to tell a
+    // typo from a missing feature.
     let scratch = Scratch::new("passthrough");
     let mut ws = scratch.workspace();
 
-    for line in ["vsplit", "close", "only", "1,5d", "%s/a/b/"] {
+    for line in ["1,5d", "%s/a/b/", "sort", "make"] {
         assert_eq!(
             passed_through(&run(&mut ws, line)).as_deref(),
             Some(line),

@@ -13,6 +13,7 @@ import type { PickerKind } from "./PickerKind";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
 import type { Span } from "./Span";
+import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
 import type { TraceState } from "./TraceState";
 import type { TreeRow } from "./TreeRow";
@@ -25,7 +26,11 @@ export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "ty
  * They share the prompt, and the character is the only thing telling
  * a reader which one they are typing into.
  */
-prompt: string, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "viewport", firstLine: number, lines: Array<string>, totalLines: number, version: bigint, 
+prompt: string, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "viewport", 
+/**
+ * Which split this is the content of.
+ */
+view: number, firstLine: number, lines: Array<string>, totalLines: number, version: bigint, 
 /**
  * Coloured runs, one list per line in `lines`.
  *
@@ -45,11 +50,20 @@ highlights: Array<Array<Span>>,
  * Scoped to the window like everything else here — a file with ten
  * thousand hits sends only the ones you can see.
  */
-matches: Array<Array<Hit>>, } | { "type": "cursor", line: number, column: number, offset: number, 
+matches: Array<Array<Hit>>, } | { "type": "cursor", 
+/**
+ * Which split the cursor belongs to. Every view has one; only the
+ * focused one can move.
+ */
+view: number, line: number, column: number, offset: number, 
 /**
  * Anchor line/column when there is a selection.
  */
-selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, active: number, } | { "type": "tree", rows: Array<TreeRow>, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
+selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, active: number, } | { "type": "tree", rows: Array<TreeRow>, } | { "type": "splits", views: Array<SplitView>, focused: number, 
+/**
+ * Side by side rather than stacked.
+ */
+vertical: boolean, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
 /**
  * How many candidates the picker is choosing from, before matching.
  */
