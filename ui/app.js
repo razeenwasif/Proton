@@ -670,6 +670,11 @@ function renderBuffers(names, active) {
         `<svg class="i"><use href="#i-close"/></svg></span></span>`,
     )
     .join("");
+
+  // The strip scrolls rather than wrapping, so the tab you just switched to
+  // has to be brought into view — otherwise `:bn` past the edge looks like it
+  // did nothing.
+  target.querySelector(".buf.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 /* ── the file tree ────────────────────────────────────────────────────
