@@ -664,13 +664,14 @@ impl Vim {
     fn normal_command(&mut self, c: char) -> Outcome {
         let count = self.pending.total_count();
 
-        // `g` is a prefix, not a command. `gg` and `gd` are bound; the rest
-        // of the family (`gU`, `gq`, `gr`) hangs off the same branch.
+        // `g` is a prefix, not a command. `gg`, `gd` and `gr` are bound; the
+        // rest of the family (`gU`, `gq`) hangs off the same branch.
         if self.pending.awaiting_g {
             self.pending.clear();
             return match c {
                 'g' => Outcome::Action(Action::new(Verb::Move, Object::FileStart, count)),
                 'd' => Outcome::Action(Action::new(Verb::Goto, Object::Definition, 1)),
+                'r' => Outcome::Action(Action::new(Verb::Goto, Object::References, 1)),
                 _ => Outcome::Ignored,
             };
         }
@@ -763,6 +764,9 @@ impl Vim {
             'x' => Some(Action::new(Verb::Delete, Object::CharRight, count)),
             'D' => Some(Action::new(Verb::Delete, Object::LineEnd, count)),
             'C' => Some(Action::new(Verb::Change, Object::LineEnd, count)),
+            // `K` is vim's "look this up". Count is meaningless — there is
+            // one thing under the cursor — so it is not carried.
+            'K' => Some(Action::new(Verb::Explain, Object::Here, 1)),
             _ => None,
         };
         if let Some(mut action) = standalone {

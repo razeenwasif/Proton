@@ -201,7 +201,20 @@ pub struct Servers {
     /// per message: progress reports arrive several times a second, and a
     /// statusline does not need to see every one.
     notes: HashMap<&'static str, String>,
-    awaiting_definition: Option<i64>,
+    awaiting: HashMap<Ask, i64>,
+}
+
+/// A question the editor is waiting on an answer to.
+///
+/// One per kind rather than a set of ids, because asking again replaces the
+/// question: press `gd` twice and only the second answer is wanted, and the
+/// first is a jump to wherever the cursor used to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Ask {
+    Definition,
+    Hover,
+    References,
+    Symbols,
 }
 
 impl Servers {
@@ -347,18 +360,46 @@ impl Servers {
     pub fn definition(&mut self, path: &Path, at: Position) -> Option<i64> {
         let path = proton_lsp::uri::plain(path);
         let id = self.client_for(&path)?.definition(&path, at);
-        self.awaiting_definition = Some(id);
+        self.awaiting.insert(Ask::Definition, id);
         Some(id)
     }
 
-    /// True if this is the jump we are still waiting for, rather than one from
-    /// a keypress the user has since changed their mind about.
-    pub fn wanted_definition(&mut self, id: i64) -> bool {
-        if self.awaiting_definition == Some(id) {
-            self.awaiting_definition = None;
+    pub fn hover(&mut self, path: &Path, at: Position) -> Option<i64> {
+        let path = proton_lsp::uri::plain(path);
+        let id = self.client_for(&path)?.hover(&path, at);
+        self.awaiting.insert(Ask::Hover, id);
+        Some(id)
+    }
+
+    pub fn references(&mut self, path: &Path, at: Position) -> Option<i64> {
+        let path = proton_lsp::uri::plain(path);
+        let id = self.client_for(&path)?.references(&path, at);
+        self.awaiting.insert(Ask::References, id);
+        Some(id)
+    }
+
+    pub fn symbols(&mut self, path: &Path) -> Option<i64> {
+        let path = proton_lsp::uri::plain(path);
+        let id = self.client_for(&path)?.symbols(&path);
+        self.awaiting.insert(Ask::Symbols, id);
+        Some(id)
+    }
+
+    /// True if this is the answer we are still waiting for, rather than one to
+    /// a question the user has since changed their mind about — a `gd` from
+    /// two cursor positions ago, or a hover for a word already scrolled past.
+    pub fn wanted(&mut self, ask: Ask, id: i64) -> bool {
+        if self.awaiting.get(&ask) == Some(&id) {
+            self.awaiting.remove(&ask);
             return true;
         }
         false
+    }
+
+    /// Stop wanting an answer, without one having arrived. Closing the hover
+    /// panel by hand should not leave a reply in flight that reopens it.
+    pub fn forget(&mut self, ask: Ask) {
+        self.awaiting.remove(&ask);
     }
 
     /// Take everything the servers have said. Never blocks.
@@ -456,6 +497,92 @@ pub fn diagnostic(buffer: &Buffer, raw: &proton_lsp::Diagnostic) -> Diagnostic {
         source: raw.source.clone(),
         code: raw.code.as_ref().map(ToString::to_string),
     }
+}
+
+/// The char column a UTF-16 column names, against one line of text.
+///
+/// The buffer does this for text it holds. A reference in a file nobody has
+/// opened has no buffer, and reading the whole file into one to find a column
+/// would be a rope per row of the picker.
+pub fn char_column(line: &str, utf16: usize) -> usize {
+    let mut units = 0;
+    for (chars, c) in line.chars().enumerate() {
+        if units >= utf16 {
+            return chars;
+        }
+        units += c.len_utf16();
+    }
+    line.chars().count()
+}
+
+/// LSP's symbol kinds, in the vocabulary the completion popup already draws.
+///
+/// The two numberings are unrelated — `6` is a method here and a variable
+/// there — so this is a second table rather than a shared one. What is shared
+/// is the *display*: a function is a function, and giving the symbol list its
+/// own icons would be two legends for one idea.
+pub fn symbol_kind(code: Option<u8>) -> CompletionKind {
+    match code {
+        Some(2..=4) => CompletionKind::Module, // module, namespace, package
+        Some(5 | 10 | 11 | 23) => CompletionKind::Type, // class, enum, interface, struct
+        Some(6) => CompletionKind::Method,
+        Some(7) => CompletionKind::Field, // property
+        Some(8) => CompletionKind::Field,
+        Some(9 | 12) => CompletionKind::Function, // constructor, function
+        Some(13) => CompletionKind::Variable,
+        Some(14 | 22) => CompletionKind::Constant, // constant, enum member
+        _ => CompletionKind::Other,
+    }
+}
+
+/// One reference, as a row: the line it is on, and where in it.
+///
+/// The line text is what makes the list readable — `path:12` tells you
+/// nothing about which of the eleven uses this is. Files are read once each
+/// rather than once per hit, because references cluster: forty uses of a
+/// symbol are usually in three or four files.
+pub fn reference_rows(places: &[proton_lsp::Jump], root: &Path) -> Vec<crate::picker::PickerItem> {
+    let mut files: HashMap<PathBuf, Option<Vec<String>>> = HashMap::new();
+    let mut rows = Vec::new();
+
+    for place in places {
+        let lines = files
+            .entry(place.path.clone())
+            .or_insert_with(|| read_lines(&place.path));
+
+        let line = lines
+            .as_ref()
+            .and_then(|lines| lines.get(place.line as usize));
+        let column = line.map_or(place.character as usize, |text| {
+            char_column(text, place.character as usize)
+        });
+
+        // The path relative to the project, when it is inside it. An absolute
+        // path is not wrong, it is just most of a row spent on the part every
+        // row shares.
+        let shown = place
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&place.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        rows.push(crate::picker::PickerItem {
+            label: line.map(|t| t.trim().to_string()).unwrap_or_default(),
+            detail: format!("{shown}:{}", place.line + 1),
+            positions: Vec::new(),
+            path: Some(place.path.to_string_lossy().into_owned()),
+            line: Some(place.line as usize),
+            column: Some(column),
+            kind: None,
+        });
+    }
+    rows
+}
+
+fn read_lines(path: &Path) -> Option<Vec<String>> {
+    let text = std::fs::read_to_string(path).ok()?;
+    Some(text.lines().map(str::to_string).collect())
 }
 
 /* ── the completion popup ─────────────────────────────────────────── */

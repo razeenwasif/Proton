@@ -29,9 +29,22 @@ pub enum PickerKind {
     Workspaces,
     /// What git considers changed — `␣gg`.
     Changed,
+    /// Every use of the symbol under the cursor — `gr`.
+    References,
+    /// What is declared in this file — `␣ds`.
+    Symbols,
 }
 
 impl PickerKind {
+    /// Whether a language server fills this one.
+    ///
+    /// The difference is not cosmetic: every other picker recomputes its rows
+    /// from the query, and these two cannot — the rows arrive once, late, and
+    /// typing narrows what came back rather than asking again.
+    pub fn is_from_a_server(self) -> bool {
+        matches!(self, PickerKind::References | PickerKind::Symbols)
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             PickerKind::Files => "find_files",
@@ -39,6 +52,8 @@ impl PickerKind {
             PickerKind::Buffers => "buffers",
             PickerKind::Workspaces => "workspaces",
             PickerKind::Changed => "git_status",
+            PickerKind::References => "lsp_references",
+            PickerKind::Symbols => "document_symbols",
         }
     }
 
@@ -54,6 +69,7 @@ impl PickerKind {
             "fg" => PickerKind::Grep,
             "fb" => PickerKind::Buffers,
             "gg" => PickerKind::Changed,
+            "ds" => PickerKind::Symbols,
             _ => return None,
         })
     }
@@ -74,6 +90,10 @@ pub struct PickerItem {
     pub path: Option<String>,
     pub line: Option<usize>,
     pub column: Option<usize>,
+    /// What sort of thing this row is, for the icon. Only the symbol list
+    /// fills it, and it borrows the completion popup's vocabulary rather than
+    /// inventing a second set of glyphs for the same ideas.
+    pub kind: Option<crate::lsp::CompletionKind>,
 }
 
 /// What accepting a row asked for.
@@ -253,6 +273,10 @@ pub struct Pickers {
     /// when the working tree does: the workspace refreshes it when the picker
     /// opens, and typing only narrows what is already there.
     changes: Vec<(String, char)>,
+    /// Rows a language server sent, for the pickers it fills. Held for the
+    /// same reason `changes` is — typing narrows a list that already exists —
+    /// but arriving after the picker opens rather than before it.
+    held: Vec<PickerItem>,
     matcher: Matcher,
     open: Option<Picker>,
 }
@@ -263,6 +287,7 @@ impl Pickers {
             index: FileIndex::new(root),
             matcher: Matcher::new(),
             changes: Vec::new(),
+            held: Vec::new(),
             open: None,
         }
     }
@@ -286,6 +311,23 @@ impl Pickers {
     /// Tell the `␣gg` picker what git says, before it opens.
     pub fn set_changes(&mut self, changes: Vec<(String, char)>) {
         self.changes = changes;
+    }
+
+    /// Hand a server-fed picker its rows, once they arrive.
+    ///
+    /// Ignored unless that picker is still open — an answer to a `gr` the
+    /// user has already escaped out of should not reopen it.
+    pub fn set_held(&mut self, items: Vec<PickerItem>) -> bool {
+        if !self
+            .open
+            .as_ref()
+            .is_some_and(|p| p.kind.is_from_a_server())
+        {
+            return false;
+        }
+        self.held = items;
+        self.requery(Vec::new());
+        true
     }
 
     pub fn file_count(&self) -> usize {
@@ -328,6 +370,13 @@ impl Pickers {
     /// window stopping for it.
     pub fn begin(&mut self, kind: PickerKind, buffers: Vec<(String, Option<String>)>) {
         self.warm();
+        // A server-fed picker opens empty and fills when the answer comes.
+        // Keeping the last one's rows would show the previous file's symbols
+        // for as long as the round trip takes, which reads as a wrong answer
+        // rather than as a slow one.
+        if kind.is_from_a_server() {
+            self.held.clear();
+        }
         self.open = Some(Picker {
             kind,
             query: String::new(),
@@ -389,6 +438,7 @@ impl Pickers {
                             path: Some(path.clone()),
                             line: None,
                             column: None,
+                            kind: None,
                         }
                     })
                     .collect()
@@ -403,6 +453,7 @@ impl Pickers {
                     path: Some(hit.path),
                     line: Some(hit.line),
                     column: Some(hit.column),
+                    kind: None,
                 })
                 .collect(),
 
@@ -419,6 +470,7 @@ impl Pickers {
                         // Buffers are addressed by index, not by path.
                         line: Some(m.index),
                         column: None,
+                        kind: None,
                     })
                     .collect()
             }
@@ -441,7 +493,29 @@ impl Pickers {
                             path: Some(path.clone()),
                             line: None,
                             column: None,
+                            kind: None,
                         }
+                    })
+                    .collect()
+            }
+
+            // An empty query keeps the server's own order, which is meaning
+            // rather than ranking: symbols read down the file, references read
+            // in the order the server found them. Ranking an empty pattern
+            // would shuffle both into whatever the matcher considers a tie.
+            PickerKind::References | PickerKind::Symbols if query.is_empty() => {
+                let mut rows = self.held.clone();
+                rows.truncate(LIMIT);
+                rows
+            }
+            PickerKind::References | PickerKind::Symbols => {
+                let labels: Vec<&str> = self.held.iter().map(|i| i.label.as_str()).collect();
+                self.matcher
+                    .rank(&query, &labels, LIMIT)
+                    .into_iter()
+                    .map(|m| PickerItem {
+                        positions: m.positions,
+                        ..self.held[m.index].clone()
                     })
                     .collect()
             }

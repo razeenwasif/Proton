@@ -7,11 +7,18 @@
 use proton_core::bus::{DebugPhase, Event, Stop};
 use proton_core::{Command, Key, Workspace};
 
+/// One directory per call, not per call *site*.
+///
+/// `line!()` here would expand to the line it is written on, which is the
+/// same number for every caller — so all three tests shared a root, and
+/// running in parallel each wiped the directory the others were writing to.
+static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn workspace() -> (Workspace, std::path::PathBuf) {
     let root = std::env::temp_dir().join(format!(
         "proton-debugging-{}-{}",
         std::process::id(),
-        line!()
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();

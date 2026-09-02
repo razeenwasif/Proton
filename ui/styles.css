@@ -1138,6 +1138,35 @@ table.df tr:hover td { background: var(--e1); }
   color: var(--ink-4); font: 9.5px var(--sans); letter-spacing: .04em;
 }
 
+/* ── the hover panel ──────────────────────────────────────────────────
+   Anchored the same way the completion popup is, and for the same reason:
+   it is about the word under the caret, so it belongs beside it rather
+   than in a docked pane the eye has to travel to.
+
+   The text arrives as plain text with its fences already stripped, so the
+   panel's whole job is to preserve the line breaks the server put in and
+   stop growing before it covers the file. */
+
+.hov {
+  position: fixed; z-index: 60;
+  min-width: 240px; max-width: 520px;
+  overflow: hidden;
+  border-left: 2px solid var(--accent);
+}
+.hov[hidden] { display: none; }
+
+.hov-body {
+  max-height: 260px; overflow: auto;
+  padding: 9px 12px;
+  color: var(--ink-2);
+  font: 11.5px/1.55 var(--mono);
+  /* `pre-wrap`, not `pre`: a signature is worth wrapping rather than
+     scrolling sideways for, and the blank lines between sections are the
+     only structure a plaintext hover has left. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* The four scopes the mock markup never needed. Same idea as the eight above:
    the core names what a run is, and only this block decides what that looks
    like — which is why a fifth theme is a paste rather than a port. */

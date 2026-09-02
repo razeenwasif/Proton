@@ -11,4 +11,4 @@ pub mod transport;
 pub mod uri;
 
 pub use client::{Client, Incoming, Jump};
-pub use protocol::{CompletionItem, Diagnostic, Position, Range};
+pub use protocol::{CompletionItem, Diagnostic, Position, Range, Symbol};

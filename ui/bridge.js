@@ -181,6 +181,62 @@ if (HAS_SHELL) {
         terminalEvent(),
       ];
     }
+    if (command.type === "hover") {
+      return [
+        {
+          type: "hover",
+          text:
+            "fn magnitude(&self) -> i32\n\n" +
+            "How far the point is from the origin, as the crow flies.\n" +
+            "Rounded down, because the return type says so.",
+          line: doc.first + 4,
+          column: 8,
+        },
+      ];
+    }
+    if (command.type === "closeHover") return [{ type: "hoverClosed" }];
+
+    if (
+      command.type === "findReferences" ||
+      (command.type === "openPicker" && command.kind === "symbols")
+    ) {
+      const symbols = command.type !== "findReferences";
+      const row = (label, detail, kind) => ({
+        label,
+        detail,
+        positions: [],
+        path: "src/lib.rs",
+        line: 6,
+        column: 4,
+        kind: kind ?? null,
+      });
+      const items = symbols
+        ? [
+            row("Point", "", "type"),
+            row("x", "Point  i32", "field"),
+            row("magnitude", "Point  fn(&self) -> i32", "method"),
+            row("describe", "fn(Point) -> i32", "function"),
+          ]
+        : [
+            row("pub fn magnitude(&self) -> i32 {", "src/lib.rs:7"),
+            row("p.magnitude()", "src/lib.rs:12"),
+            row("assert_eq!(p.magnitude(), 7);", "tests/point.rs:9"),
+          ];
+      return [
+        {
+          type: "picker",
+          kind: symbols ? "symbols" : "references",
+          title: symbols ? "document_symbols" : "lsp_references",
+          query: "",
+          items,
+          selected: 0,
+          total: items.length,
+          elapsedMs: 0.4,
+          scanning: false,
+        },
+      ];
+    }
+
     if (command.type === "split") {
       if (layout.count >= 4) {
         return [{ type: "notice", text: "four splits is as many as are worth having", level: "warn" }];

@@ -270,3 +270,130 @@ fn a_real_mistake_shows_up_in_the_gutter() {
     );
     assert_eq!(complaint.severity, proton_core::Severity::Error);
 }
+
+#[test]
+#[ignore = "spawns rust-analyzer; run with `cargo test -- --include-ignored`"]
+fn k_says_what_the_thing_under_the_cursor_is() {
+    if !installed() {
+        println!("skipping: rust-analyzer is not on PATH");
+        return;
+    }
+    let fixture = Fixture::new("hover");
+    let mut ws = open(&fixture);
+
+    seek(&mut ws, "p.magnitude()", 2);
+    let text = pump(
+        &mut ws,
+        "a hover",
+        |ws| {
+            ws.apply(Command::Hover);
+        },
+        |event| match event {
+            Event::Hover { text, .. } if !text.is_empty() => Some(text.clone()),
+            _ => None,
+        },
+    );
+
+    assert!(
+        text.contains("fn magnitude"),
+        "the hover should carry the signature, got {text:?}"
+    );
+    // The fences come off in `Hover::text`. rust-analyzer sends markdown here
+    // whatever `contentFormat` asked for, so this is the assertion that keeps
+    // the panel from filling up with backticks.
+    assert!(
+        !text.contains("```"),
+        "the hover still has its fences: {text:?}"
+    );
+}
+
+#[test]
+#[ignore = "spawns rust-analyzer; run with `cargo test -- --include-ignored`"]
+fn gr_finds_every_use_including_the_declaration() {
+    if !installed() {
+        println!("skipping: rust-analyzer is not on PATH");
+        return;
+    }
+    let fixture = Fixture::new("refs");
+    let mut ws = open(&fixture);
+
+    // On the declaration itself, which is the case where leaving the
+    // declaration out would make the list disagree with where you are.
+    seek(&mut ws, "fn magnitude", 3);
+    let items = pump(
+        &mut ws,
+        "a reference list",
+        |ws| {
+            ws.apply(Command::FindReferences);
+        },
+        |event| match event {
+            Event::Picker { items, .. } if !items.is_empty() => Some(items.clone()),
+            _ => None,
+        },
+    );
+
+    assert!(
+        items.len() >= 2,
+        "the declaration and the call site, at least: {items:?}"
+    );
+    assert!(
+        items.iter().any(|i| i.label.contains("p.magnitude()")),
+        "the call site should be there, with its line: {items:?}"
+    );
+    // The row says where, and one-based, because that is how the line is
+    // numbered everywhere else on screen.
+    assert!(
+        items.iter().all(|i| i.detail.contains("lib.rs:")),
+        "every row should name its file and line: {items:?}"
+    );
+}
+
+#[test]
+#[ignore = "spawns rust-analyzer; run with `cargo test -- --include-ignored`"]
+fn the_symbol_list_reads_down_the_file() {
+    if !installed() {
+        println!("skipping: rust-analyzer is not on PATH");
+        return;
+    }
+    let fixture = Fixture::new("symbols");
+    let mut ws = open(&fixture);
+
+    let items = pump(
+        &mut ws,
+        "a symbol list",
+        |ws| {
+            ws.apply(Command::OpenPicker {
+                kind: proton_core::picker::PickerKind::Symbols,
+            });
+        },
+        |event| match event {
+            Event::Picker { items, .. } if !items.is_empty() => Some(items.clone()),
+            _ => None,
+        },
+    );
+
+    let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        names.contains(&"Point") && names.contains(&"describe"),
+        "the file's own items should be listed: {names:?}"
+    );
+    // Reading order, not alphabetical: `Point` is declared above `describe`.
+    let point = names.iter().position(|n| *n == "Point").unwrap();
+    let describe = names.iter().position(|n| *n == "describe").unwrap();
+    assert!(
+        point < describe,
+        "the list should read down the file: {names:?}"
+    );
+
+    // Nesting becomes context rather than indentation, so the label stays a
+    // bare name the matcher can work on.
+    let nested = items
+        .iter()
+        .find(|i| i.label == "magnitude")
+        .expect("the method should be listed");
+    assert!(
+        nested.detail.contains("Point"),
+        "a nested symbol should say what it is in: {:?}",
+        nested.detail
+    );
+}

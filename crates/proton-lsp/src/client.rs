@@ -17,8 +17,8 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 use crate::protocol::{
-    CompletionItem, CompletionResponse, DefinitionResponse, Diagnostic, Position,
-    PublishDiagnostics,
+    CompletionItem, CompletionResponse, DefinitionResponse, Diagnostic, Hover, Position,
+    PublishDiagnostics, ReferencesResponse, Symbol, SymbolResponse,
 };
 use crate::{transport, uri};
 
@@ -40,6 +40,21 @@ pub enum Incoming {
     Definition {
         id: i64,
         target: Option<Jump>,
+    },
+    /// Already plain text, and already empty if there was nothing to say —
+    /// the difference between "no hover" and "a hover of only code fences"
+    /// is not one a caller should have to make.
+    Hover {
+        id: i64,
+        text: String,
+    },
+    References {
+        id: i64,
+        places: Vec<Jump>,
+    },
+    Symbols {
+        id: i64,
+        symbols: Vec<Symbol>,
     },
     /// Long work the user should be told about — rust-analyzer spends its
     /// first half-minute here, and an editor that says nothing looks broken.
@@ -73,6 +88,9 @@ enum Kind {
     Initialize,
     Completion,
     Definition,
+    Hover,
+    References,
+    Symbols,
     Shutdown,
 }
 
@@ -268,6 +286,16 @@ impl Client {
                         }
                     },
                     "definition": { "linkSupport": true },
+                    // Plaintext for the same reason snippets are declined
+                    // above: it is the format we can actually show. A hover
+                    // panel that renders markdown is a markdown renderer, and
+                    // the fences come off in `Hover::text` for the servers
+                    // that send them anyway.
+                    "hover": { "contentFormat": ["plaintext"] },
+                    "references": { "dynamicRegistration": false },
+                    // Ask for the tree. A server that cannot build one falls
+                    // back to the flat shape on its own, and both are read.
+                    "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
                     "publishDiagnostics": { "relatedInformation": false }
                 },
                 "window": { "workDoneProgress": true }
@@ -371,6 +399,36 @@ impl Client {
             Kind::Definition,
             "textDocument/definition",
             json!({ "textDocument": { "uri": uri::from_path(path) }, "position": at }),
+        )
+    }
+
+    pub fn hover(&mut self, path: &std::path::Path, at: Position) -> i64 {
+        self.request(
+            Kind::Hover,
+            "textDocument/hover",
+            json!({ "textDocument": { "uri": uri::from_path(path) }, "position": at }),
+        )
+    }
+
+    /// Every use of the symbol, the declaration included — leaving it out
+    /// makes the list disagree with itself when the cursor is already on it.
+    pub fn references(&mut self, path: &std::path::Path, at: Position) -> i64 {
+        self.request(
+            Kind::References,
+            "textDocument/references",
+            json!({
+                "textDocument": { "uri": uri::from_path(path) },
+                "position": at,
+                "context": { "includeDeclaration": true },
+            }),
+        )
+    }
+
+    pub fn symbols(&mut self, path: &std::path::Path) -> i64 {
+        self.request(
+            Kind::Symbols,
+            "textDocument/documentSymbol",
+            json!({ "textDocument": { "uri": uri::from_path(path) } }),
         )
     }
 
@@ -613,6 +671,60 @@ fn response(
             }),
         },
 
+        // A null hover is the server saying "nothing here", which is the
+        // common answer — on whitespace, on a keyword, on a comment.
+        Kind::Hover if result.is_null() => Some(Incoming::Hover {
+            id,
+            text: String::new(),
+        }),
+        Kind::Hover => match serde_json::from_value::<Hover>(result.clone()) {
+            Ok(hover) => Some(Incoming::Hover {
+                id,
+                text: hover.text(),
+            }),
+            Err(err) => Some(Incoming::Failed {
+                text: format!("hover: {err}"),
+            }),
+        },
+
+        Kind::References if result.is_null() => Some(Incoming::References {
+            id,
+            places: Vec::new(),
+        }),
+        Kind::References => match serde_json::from_value::<ReferencesResponse>(result.clone()) {
+            Ok(response) => Some(Incoming::References {
+                id,
+                places: response
+                    .into_locations()
+                    .into_iter()
+                    .filter_map(|l| {
+                        Some(Jump {
+                            path: uri::to_path(&l.uri)?,
+                            line: l.range.start.line,
+                            character: l.range.start.character,
+                        })
+                    })
+                    .collect(),
+            }),
+            Err(err) => Some(Incoming::Failed {
+                text: format!("references: {err}"),
+            }),
+        },
+
+        Kind::Symbols if result.is_null() => Some(Incoming::Symbols {
+            id,
+            symbols: Vec::new(),
+        }),
+        Kind::Symbols => match serde_json::from_value::<SymbolResponse>(result.clone()) {
+            Ok(response) => Some(Incoming::Symbols {
+                id,
+                symbols: response.flatten(),
+            }),
+            Err(err) => Some(Incoming::Failed {
+                text: format!("symbols: {err}"),
+            }),
+        },
+
         Kind::Shutdown => None,
     }
 }
@@ -772,6 +884,52 @@ mod tests {
             assert!(jump.path.ends_with(name), "{jump:?} is not {name}");
             assert_eq!(jump.line, 10);
         }
+    }
+
+    #[test]
+    fn nothing_under_the_cursor_is_an_empty_hover_not_a_failure() {
+        // Both spellings of "nothing": a null result, and a hover whose only
+        // content was fences. A caller that had to tell those apart would get
+        // it wrong, and an empty panel is worse than no panel.
+        let (heard, _) = converse(&[
+            (
+                r#"{"jsonrpc":"2.0","id":1,"result":null}"#,
+                Some(Kind::Hover),
+            ),
+            (
+                r#"{"jsonrpc":"2.0","id":2,"result":{"contents":{"kind":"markdown","value":"```rust\nfn f()\n```"}}}"#,
+                Some(Kind::Hover),
+            ),
+        ]);
+        let texts: Vec<_> = heard
+            .iter()
+            .map(|e| match e {
+                Incoming::Hover { text, .. } => text.as_str(),
+                other => panic!("expected a hover, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(texts, vec!["", "fn f()"]);
+    }
+
+    #[test]
+    fn references_arrive_as_paths_in_the_order_the_server_gave_them() {
+        let range = r#"{"start":{"line":2,"character":4},"end":{"line":2,"character":8}}"#;
+        let (heard, _) = converse(&[(
+            &format!(
+                r#"{{"jsonrpc":"2.0","id":1,"result":[
+                    {{"uri":"file:///C:/src/a.rs","range":{range}}},
+                    {{"uri":"file:///C:/src/My%20Crate/b.rs","range":{range}}}]}}"#
+            ),
+            Some(Kind::References),
+        )]);
+        let Incoming::References { places, .. } = &heard[0] else {
+            panic!("expected references, got {heard:?}");
+        };
+        assert_eq!(places.len(), 2);
+        assert!(places[0].path.ends_with("a.rs"));
+        // The percent-encoding comes off here, not in the picker.
+        assert!(places[1].path.to_string_lossy().contains("My Crate"));
+        assert_eq!(places[0].line, 2);
     }
 
     #[test]

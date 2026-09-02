@@ -9,7 +9,7 @@ use std::path::Path;
 
 use proton_lsp::client::Incoming;
 
-use crate::action::{Action, Verb};
+use crate::action::{Action, Object, Verb};
 use crate::agent::Agent;
 use crate::bus::{
     BufferTab, Command, DebugFrame, DebugPhase, DebugVariable, Event, Hit, NoticeLevel, Selection,
@@ -57,6 +57,10 @@ pub struct Workspace {
     /// How many lines the active buffer had before the last change, so a
     /// breakpoint can be carried along by however many were added or removed.
     lines_before: usize,
+    /// Whether a hover panel is showing. Only a flag: the text belongs to the
+    /// front end once it has been sent, and what the core needs to know is
+    /// when to take it away.
+    hover_open: bool,
     /// Where the cursor was when a search prompt opened.
     ///
     /// Every keystroke previews from here rather than from the last preview,
@@ -376,6 +380,12 @@ impl Workspace {
 
             Command::GotoDefinition => self.goto_definition(),
 
+            Command::Hover => self.request_hover(),
+
+            Command::CloseHover => self.close_hover(),
+
+            Command::FindReferences => self.find_references(),
+
             Command::AcceptCompletion => self.accept_completion(),
 
             Command::CloseCompletion => {
@@ -636,6 +646,23 @@ impl Workspace {
                 .map(|c| (c.path, c.state.letter()))
                 .collect();
             self.pickers.set_changes(changes);
+        }
+        // `␣ds` asks here rather than at the keymap, so the request and the
+        // picker that shows its answer cannot get out of step. `gr` has
+        // already asked by the time it calls this — its question needs a
+        // cursor position, which the picker is about to take the keyboard
+        // away from.
+        if kind == PickerKind::Symbols {
+            let path = self.editor.buffer().path().map(Path::to_path_buf);
+            match path.as_deref().and_then(|p| self.servers.symbols(p)) {
+                Some(_) => {}
+                None => {
+                    return vec![notice(
+                        "no language server for this file".into(),
+                        NoticeLevel::Warn,
+                    )]
+                }
+            }
         }
         let labels = self.buffer_labels();
         self.pickers.begin(kind, labels);
@@ -1272,8 +1299,25 @@ impl Workspace {
                     }
                 }
                 Incoming::Definition { id, target } => {
-                    if self.servers.wanted_definition(id) {
+                    if self.servers.wanted(lsp::Ask::Definition, id) {
                         events.extend(self.jump_to(target));
+                    }
+                }
+                Incoming::Hover { id, text } => {
+                    if self.servers.wanted(lsp::Ask::Hover, id) {
+                        events.extend(self.show_hover(text));
+                    }
+                }
+                Incoming::References { id, places } => {
+                    if self.servers.wanted(lsp::Ask::References, id) {
+                        let rows = lsp::reference_rows(&places, self.pickers.root());
+                        events.extend(self.fill_picker(rows));
+                    }
+                }
+                Incoming::Symbols { id, symbols } => {
+                    if self.servers.wanted(lsp::Ask::Symbols, id) {
+                        let rows = self.symbol_rows(&symbols);
+                        events.extend(self.fill_picker(rows));
                     }
                 }
                 // A server saying no is worth showing once; a server logging
@@ -1386,6 +1430,126 @@ impl Workspace {
                 "no language server for this file".into(),
                 NoticeLevel::Warn,
             )],
+        }
+    }
+
+    /// `K`. Nothing is shown until the answer arrives — a panel that opens
+    /// empty and fills a moment later reads as a flicker, and the answer to
+    /// "what is this" is often "nothing", which deserves no panel at all.
+    fn request_hover(&mut self) -> Vec<Event> {
+        let buffer = self.editor.buffer();
+        let Some(path) = buffer.path().map(Path::to_path_buf) else {
+            return vec![notice("no file to look in".into(), NoticeLevel::Warn)];
+        };
+        let at = lsp::position_of(buffer, buffer.cursor.offset);
+        match self.servers.hover(&path, at) {
+            Some(_) => Vec::new(),
+            None => vec![notice(
+                "no language server for this file".into(),
+                NoticeLevel::Warn,
+            )],
+        }
+    }
+
+    fn close_hover(&mut self) -> Vec<Event> {
+        // Forgetting the request as well as the panel: a reply still in
+        // flight would otherwise reopen what was just dismissed.
+        self.servers.forget(lsp::Ask::Hover);
+        if !self.hover_open {
+            return Vec::new();
+        }
+        self.hover_open = false;
+        vec![Event::HoverClosed]
+    }
+
+    fn show_hover(&mut self, text: String) -> Vec<Event> {
+        if text.trim().is_empty() {
+            return self.close_hover();
+        }
+        let buffer = self.editor.buffer();
+        let at = buffer.position(buffer.cursor.offset);
+        self.hover_open = true;
+        vec![Event::Hover {
+            text,
+            line: at.line,
+            column: at.column,
+        }]
+    }
+
+    /// `gr`. The picker opens straight away and fills when the server
+    /// answers, so the keystroke has an effect before the round trip does.
+    fn find_references(&mut self) -> Vec<Event> {
+        let buffer = self.editor.buffer();
+        let Some(path) = buffer.path().map(Path::to_path_buf) else {
+            return vec![notice("no file to look in".into(), NoticeLevel::Warn)];
+        };
+        let at = lsp::position_of(buffer, buffer.cursor.offset);
+        if self.servers.references(&path, at).is_none() {
+            return vec![notice(
+                "no language server for this file".into(),
+                NoticeLevel::Warn,
+            )];
+        }
+        self.open_picker(PickerKind::References)
+    }
+
+    /// The symbol list, as rows.
+    ///
+    /// Nesting becomes context rather than indentation: `len` under `Buffer`
+    /// reads as "len · Buffer" instead of as an indented `len`, which keeps
+    /// the label a bare name for the matcher to work on — a query that had to
+    /// match through leading spaces would find nothing.
+    fn symbol_rows(&self, symbols: &[proton_lsp::Symbol]) -> Vec<crate::picker::PickerItem> {
+        let buffer = self.editor.buffer();
+        let here = buffer.path().map(|p| p.to_string_lossy().into_owned());
+        let mut parents: Vec<&str> = Vec::new();
+        let mut rows = Vec::new();
+
+        for symbol in symbols {
+            parents.truncate(symbol.depth);
+            let context = parents.join("::");
+            parents.push(&symbol.name);
+
+            let detail = match (context.is_empty(), symbol.detail.as_deref()) {
+                (true, detail) => detail.unwrap_or_default().to_string(),
+                (false, Some(detail)) => format!("{context}  {detail}"),
+                (false, None) => context,
+            };
+
+            // A document symbol names no file because it is in this one; the
+            // flat shape says which, and for a document it says this one too.
+            let path = symbol
+                .uri
+                .as_deref()
+                .and_then(proton_lsp::uri::to_path)
+                .map(|p| p.to_string_lossy().into_owned())
+                .or_else(|| here.clone());
+
+            // Converted against the live buffer rather than the file on
+            // disk: the symbols describe what is on screen, unsaved edits
+            // included.
+            let at = buffer.offset_at_utf16(symbol.line as usize, symbol.character as usize);
+            let position = buffer.position(at);
+
+            rows.push(crate::picker::PickerItem {
+                label: symbol.name.clone(),
+                detail,
+                positions: Vec::new(),
+                path,
+                line: Some(symbol.line as usize),
+                column: Some(position.column),
+                kind: Some(lsp::symbol_kind(symbol.kind)),
+            });
+        }
+        rows
+    }
+
+    /// Fill a server-fed picker, if it is still the one open.
+    fn fill_picker(&mut self, items: Vec<crate::picker::PickerItem>) -> Vec<Event> {
+        if self.pickers.set_held(items) {
+            vec![self.picker_event()]
+        } else {
+            Vec::new()
         }
     }
 
@@ -1872,15 +2036,21 @@ impl Workspace {
                 false,
             );
         }
-        // `gd` is a verb the engine resolves like any other, but the answer
-        // comes from a language server rather than from this buffer, so it is
-        // routed rather than executed.
-        if action.verb == Verb::Goto {
+        // `gd`, `gr` and `K` are verbs the engine resolves like any other, but
+        // their answers come from a language server rather than from this
+        // buffer, so they are routed rather than executed.
+        let asked = match (action.verb, action.object) {
+            (Verb::Goto, Object::Definition) => Some(Workspace::goto_definition as fn(_) -> _),
+            (Verb::Goto, Object::References) => Some(Workspace::find_references as fn(_) -> _),
+            (Verb::Explain, _) => Some(Workspace::request_hover as fn(_) -> _),
+            _ => None,
+        };
+        if let Some(ask) = asked {
             let mut events = vec![Event::Action {
                 action: action.clone(),
                 description,
             }];
-            events.extend(self.goto_definition());
+            events.extend(ask(self));
             return (events, false);
         }
 
@@ -2033,6 +2203,14 @@ impl Workspace {
     fn after_action(&mut self, text_changed: bool) -> Vec<Event> {
         let scrolled = self.scroll_to_cursor();
         let mut events = Vec::new();
+        // The panel describes the word it was opened on. Once anything has
+        // happened it is describing somewhere the cursor no longer is, so it
+        // goes — the same rule vim's own popups follow.
+        if self.hover_open {
+            self.hover_open = false;
+            self.servers.forget(lsp::Ask::Hover);
+            events.push(Event::HoverClosed);
+        }
         if text_changed {
             // Breakpoints are places in the text, so they move with it. The
             // line count is the signal: anything else leaves them on the line

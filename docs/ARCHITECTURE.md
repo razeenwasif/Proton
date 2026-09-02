@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 486 tests, headless
+cargo test --workspace        # 501 tests, headless
 cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
                               # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
@@ -83,8 +83,9 @@ one file there and would gain nothing but a manifest from moving today.
 
 `proton-lsp` ended up with no async runtime and no protocol crate. Two threads
 and a channel do what `tokio` would, for a client that talks to two or three
-processes; and the protocol surface Proton actually uses is three response
-shapes, each with a subtlety worth writing down rather than inheriting.
+processes; and the protocol surface Proton actually uses is a handful of
+response shapes, each with a subtlety worth writing down rather than
+inheriting.
 
 `proton-agent` went the same way, and the table above has been corrected to
 match. It has no async runtime, no HTTP framework and no SSE crate: streaming a
@@ -726,7 +727,8 @@ macro all behave. Measure input-to-photon here and write the number down.*
 tree with `ignore` (so `.gitignore` is honoured), scores with `nucleo` in its
 path-aware configuration, and backs three pickers — files, live grep and
 buffers. They differ only in where their candidates come from, which is why
-symbols and diagnostics will need no new matching code.
+symbols and references cost no new matching code when they arrived — only a
+place to hold rows that a server sends after the picker is already open.
 
 The picker owns the keyboard while it is open and the modal engine is suspended
 rather than consulted; leader bindings that name a picker resolve in the core,
@@ -740,9 +742,10 @@ that is indistinguishable from no matches.
 `transport` frames bytes (`Content-Length`, counted in bytes — the one framing
 bug that only appears once someone opens a file with an emoji in it), `protocol`
 gives those bytes a shape, and `client` owns a process and turns its replies
-into a mailbox. Hand-written rather than imported: the response shapes that
-matter are three, each with an `untagged` subtlety worth stating explicitly
-instead of inheriting.
+into a mailbox. Hand-written rather than imported: nearly every response needs
+an `untagged` enum, and each of those subtleties is worth stating explicitly
+instead of inheriting — LSP has accumulated older spellings of the same answer
+and kept them all legal, so reading one means knowing which shapes it has.
 
 **Nothing in the client blocks.** Requests leave through a writer thread,
 because rust-analyzer stops reading its stdin for whole seconds while it
@@ -776,10 +779,45 @@ are still in insert mode, it borrows the handful of keys that mean something to
 a list, and it stays closed until it has something to show rather than stealing
 Enter from someone mid-word on the chance a list might arrive.
 
+**The read-only three — `K`, `gr`, `␣ds`.** Hover, references and document
+symbols ask nothing of the buffer, which is what makes them one piece of work
+rather than three: no edits to apply, no ranges to reconcile, nothing that can
+be wrong in a way you have to undo.
+
+`K` is answered as **plain text with the markdown taken off**. We ask for
+`plaintext` and rust-analyzer sends markdown anyway — `contentFormat` is a
+preference, not a contract, and the deprecated `MarkedString` shape is fenced
+by definition — so the fences come off in `Hover::text`. The horizontal rules
+go with them: a `---` is a section break, the blank line it sits between is
+already that break, and without a rule to draw it is a row of stray dashes.
+The alternative was a markdown renderer in the panel, which is a lot of front
+end for a signature and two sentences. A hover that reduces to nothing is
+reported as nothing rather than as an empty panel, because "no hover" is the
+common answer — on whitespace, on a keyword, on a comment.
+
+`gr` and `␣ds` are **pickers whose rows arrive late**, which is the one thing
+Telescope had never had to do: every other picker recomputes its rows from the
+query, and these two cannot. So the rows are held, the query narrows what came
+back, and an empty query keeps the server's own order — reading order is
+meaning for a symbol list, and ranking an empty pattern would shuffle it into
+whatever the matcher considers a tie. Both open immediately and fill on the
+reply, so the keystroke has an effect before the round trip does; an answer to
+a picker that has since been closed is dropped rather than reopening it.
+
+Two details in the rows themselves. A reference carries **the line it is on**,
+because `path:12` says nothing about which of the eleven uses this is — files
+are read once each rather than once per hit, since references cluster. And a
+nested symbol carries **its parent as context rather than as indentation**:
+`len` under `Buffer` reads as `len · Buffer`, which keeps the label a bare name
+for the matcher to work on. A query that had to match through leading spaces
+would find nothing.
+
 *Exit: met. `␣ff` and `␣fg` are faster than reaching for the mouse;
 `crates/proton-core/tests/live_server.rs` drives a real rust-analyzer through
 the same seam the shell uses and gets back a completion list, a `gd` that lands
-on the declaration, and a type error in the gutter.*
+on the declaration, a type error in the gutter, a hover carrying the signature
+with no fences left in it, a `gr` that finds the declaration and the call site,
+and a symbol list that reads down the file.*
 
 Still open, and deliberately deferred: document sync is full-text rather than
 incremental. Incremental ships less over the pipe, but it means getting ranges

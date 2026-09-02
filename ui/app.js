@@ -710,6 +710,8 @@ function renderEditor(index = view.focused) {
   // cursor used to be.
   const popup = $("#completion");
   if (popup && !popup.hidden) anchorCompletion(popup);
+  const hover = $("#hover");
+  if (hover && !hover.hidden && hoverAt) anchorHover(hover, hoverAt);
 }
 
 /* ── clicking in the text ─────────────────────────────────────────────
@@ -1228,12 +1230,19 @@ function renderPicker(event) {
 
   const results = $("[data-picker-results]");
   results.innerHTML = event.items
-    .map(
-      (item, i) =>
+    .map((item, i) => {
+      // A symbol row says what kind of thing it is, using the marks the
+      // completion popup already teaches — a second alphabet for the same
+      // nine categories would be one to learn twice.
+      const mark = item.kind
+        ? `<span class="k">${icon(KIND_ICON[item.kind] ?? "k-other")}</span>`
+        : leader;
+      return (
         `<div class="res${i === event.selected ? " on" : ""}" data-pick="${i}">` +
-        `<span>${leader}${highlight(item.label, item.positions)}</span>` +
-        `<span class="dir" style="margin-left:auto">${escapeHtml(item.detail)}</span></div>`,
-    )
+        `<span>${mark}${highlight(item.label, item.positions)}</span>` +
+        `<span class="dir" style="margin-left:auto">${escapeHtml(item.detail)}</span></div>`
+      );
+    })
     .join("");
 
   results.querySelector(".res.on")?.scrollIntoView({ block: "nearest" });
@@ -1353,6 +1362,60 @@ function closeCompletion() {
   completionOpen = false;
   const popup = $("#completion");
   if (popup) popup.hidden = true;
+}
+
+/* `K`. The core sends a panel only when there is something in it, and takes
+   it away on the next action, so this end has no state beyond a flag for
+   whether Escape should be spent dismissing it. */
+let hoverOpen = false;
+let hoverAt = null;
+
+function renderHover(event) {
+  const panel = $("#hover");
+  const body = $("[data-hover-text]");
+  if (!panel || !body) return;
+
+  // Plain text with its fences already off. `textContent` rather than markup
+  // both because there is no markup left to honour and because a signature
+  // full of generics is a page of angle brackets to escape.
+  body.textContent = event.text;
+  panel.hidden = false;
+  hoverOpen = true;
+  hoverAt = event;
+  anchorHover(panel, event);
+}
+
+/** Above the caret by preference — the code you are reading is below it. */
+function anchorHover(panel, event) {
+  const caret = $("[data-editor] .caret");
+  // No caret means the pane is drawing something else entirely; the event
+  // says which line it was about, so the row still gives somewhere to point.
+  const row = caret ?? rowFor(event.line);
+  if (!row) return;
+
+  const at = row.getBoundingClientRect();
+  const box = panel.getBoundingClientRect();
+  const gap = 6;
+
+  const above = at.top - gap - box.height;
+  panel.style.top = `${above >= 8 ? above : Math.min(at.bottom + gap, window.innerHeight - box.height - 8)}px`;
+  panel.style.left = `${Math.max(8, Math.min(at.left, window.innerWidth - box.width - 8))}px`;
+}
+
+/** The line element carrying a buffer line number, if it is on screen. */
+function rowFor(line) {
+  return (
+    [...document.querySelectorAll("[data-editor] .ln")].find(
+      (el) => Number(el.querySelector(".n")?.textContent) === line + 1,
+    ) ?? null
+  );
+}
+
+function closeHover() {
+  hoverOpen = false;
+  hoverAt = null;
+  const panel = $("#hover");
+  if (panel) panel.hidden = true;
 }
 
 /* ── rendering core events ────────────────────────────────────────────── */
@@ -1532,6 +1595,14 @@ onEvent((event) => {
       renderCompletion(event);
       break;
 
+    case "hover":
+      renderHover(event);
+      break;
+
+    case "hoverClosed":
+      closeHover();
+      break;
+
     case "completionClosed":
       closeCompletion();
       break;
@@ -1636,6 +1707,9 @@ document.addEventListener("keydown", (e) => {
   // Overlays are view state, so Escape closes them here as well as unwinding
   // the modal state in the core.
   if (e.key === "Escape") closeAll();
+  // The hover panel is not an overlay and Escape in normal mode resolves to
+  // nothing, so the core would never hear that it should go away.
+  if (e.key === "Escape" && hoverOpen) dispatch({ type: "closeHover" });
 
   // Space and the vim keys must not scroll or type into the page.
   if (e.key === " " || e.key.length === 1) e.preventDefault();
@@ -1812,7 +1886,6 @@ applyBackdrop().then((applied) => {
   renderBackdrop(applied);
   requestAnimationFrame(drawPointerEdges);
 });
-syncSplits();
 sync();
 drawPointerEdges();
 
@@ -1833,9 +1906,10 @@ else window.addEventListener("load", boot, { once: true });
 new ResizeObserver(reportViewport).observe(document.body);
 
 // Exposed for the browser preview's console and for driving screenshots.
+// Splitting is a command now, not a function here — `dispatch` covers it.
 Object.assign(window, {
   setTheme, setTranslucency, setMode: coreSetMode, setDock, open, closeAll,
-  dispatch, drawPointerEdges, splitEditor, closeSplit, onlySplit, setHint,
+  dispatch, drawPointerEdges, setHint,
 });
 
 /* ── the agent ────────────────────────────────────────────────────────

@@ -552,6 +552,7 @@ impl Session {
                     path: Some(path.display().to_string()),
                     line: None,
                     column: None,
+                    kind: None,
                 })
                 .collect()
         } else {
@@ -598,6 +599,7 @@ impl Session {
                     path: Some(path.display().to_string()),
                     line: None,
                     column: None,
+                    kind: None,
                 }
             })
             .collect()

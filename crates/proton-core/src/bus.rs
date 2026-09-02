@@ -131,6 +131,12 @@ pub enum Command {
     Complete,
     /// Jump to where the symbol under the cursor is defined — `gd`.
     GotoDefinition,
+    /// Ask what the symbol under the cursor is — `K`.
+    Hover,
+    /// Dismiss the hover panel.
+    CloseHover,
+    /// Every use of the symbol under the cursor, in a picker — `gr`.
+    FindReferences,
     /// Drain whatever the language servers have said.
     ///
     /// The core has no clock and no threads, so it cannot notice a reply on
@@ -424,6 +430,19 @@ pub enum Event {
     /// `PickerClosed` is: one means "nothing matched", the other means "the
     /// keyboard is yours again".
     CompletionClosed,
+    /// What the server said the thing under the cursor is.
+    ///
+    /// Anchored to a place in the buffer rather than to the cursor, because
+    /// the panel should stay pointing at the word it describes even once the
+    /// cursor has moved off it.
+    Hover {
+        text: String,
+        line: usize,
+        column: usize,
+    },
+    /// The hover panel closed — or was never opened, because the server had
+    /// nothing to say about what is under the cursor.
+    HoverClosed,
     /// What each language server is doing, for the statusline.
     Servers {
         states: Vec<ServerState>,

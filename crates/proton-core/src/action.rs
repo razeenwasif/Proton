@@ -25,6 +25,11 @@ pub enum Verb {
     /// verb the modal engine resolves like any other, which is what lets `gd`
     /// mean the same shape of thing in a mode that has no text in it.
     Goto,
+    /// Ask what the thing under the cursor *is* — vim's `K`. Not a motion and
+    /// not an edit: the answer appears beside the cursor and the buffer is
+    /// untouched. A verb rather than a bare command so that a mode with no
+    /// text in it can answer it about a layer or a cell.
+    Explain,
     /// Repeat the last change — vim's `.`.
     Repeat,
     /// Name the cursor's position, for `m`.
@@ -58,6 +63,8 @@ pub enum Object {
     Selection,
     /// Where the symbol under the cursor is defined.
     Definition,
+    /// Everywhere the symbol under the cursor is used.
+    References,
 
     /* ── marks ────────────────────────────────────────────────────
     A mark is a place, so it is an object like any other — which is what

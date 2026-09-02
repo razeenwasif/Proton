@@ -1042,6 +1042,12 @@ df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_pa
   <div class="cmp-foot"><span>⇥ / ⌃n</span><span>⏎ accept</span><span>⎋ dismiss</span></div>
 </div>
 
+<!-- What `K` asked the server. Like the completion popup it takes no keyboard
+     and has no scrim: it is an annotation on the buffer, not a mode. -->
+<div class="hov float" id="hover" hidden>
+  <div class="hov-body" data-hover-text></div>
+</div>
+
 <div class="overlay float" id="telescope">
   <div class="prompt"><span class="caret">❯</span> <span data-picker-query></span><span class="cursor"></span><span class="chip" style="margin-left:auto" data-picker-title>find_files</span><span class="chip" data-picker-count></span></div>
   <div class="cols">

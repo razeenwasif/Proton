@@ -95,7 +95,7 @@ total: number, elapsedMs: number,
  * The tree is still being walked. An empty list under this flag means
  * "not yet", not "no matches" — and those look identical without it.
  */
-scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "agent", transcript: Array<Entry>, activity: Activity, inputTokens: bigint, outputTokens: bigint, 
+scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "hover", text: string, line: number, column: number, } | { "type": "hoverClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "agent", transcript: Array<Entry>, activity: Activity, inputTokens: bigint, outputTokens: bigint, 
 /**
  * Served from cache. Surfaced because a silently invalidated prefix
  * is a cost regression rather than an error, and nothing else shows it.

@@ -318,11 +318,12 @@ impl Editor {
                 false
             }
 
-            // `gd` is answered by a language server and lands the cursor in a
-            // file this editor may not have open yet, so the workspace handles
-            // it. Reaching here means no server had an answer, which is a
+            // `gd` and `gr` are answered by a language server and land in a
+            // file this editor may not have open yet; `K` is answered beside
+            // the cursor and touches nothing at all. All three belong to the
+            // workspace, so reaching here means nobody had an answer — a
             // no-op rather than a failure.
-            Verb::Goto => false,
+            Verb::Goto | Verb::Explain => false,
         }
     }
 
@@ -445,6 +446,7 @@ fn resolve(buf: &Buffer, object: Object, count: usize) -> Option<Resolved> {
         | BlockEnd
         | Mark { .. }
         | Definition
+        | References
         | None
         | Here
         | After

@@ -346,3 +346,206 @@ fn a_file_with_no_diagnostics_still_reports_an_empty_set() {
         "opening a buffer should report its diagnostics: {events:?}"
     );
 }
+
+/* ── hover, references, symbols ───────────────────────────────────── */
+
+#[test]
+fn k_and_gr_reach_the_workspace_as_verbs() {
+    use proton_core::{Object, Verb};
+
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/src/vim.rs".into(),
+    });
+
+    let events = keys(&mut ws, "K");
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Action { action, .. } if action.verb == Verb::Explain)),
+        "`K` should resolve to Explain: {events:?}"
+    );
+
+    let events = keys(&mut ws, "gr");
+    assert!(
+        events.iter().any(|e| {
+            matches!(e, Event::Action { action, .. }
+                if action.verb == Verb::Goto && action.object == Object::References)
+        }),
+        "`gr` should resolve to Goto · References: {events:?}"
+    );
+}
+
+#[test]
+fn hover_and_references_without_a_server_say_so() {
+    // The same rule `gd` follows: silence is the failure nobody can debug.
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/src/vim.rs".into(),
+    });
+
+    for command in [Command::Hover, Command::FindReferences] {
+        let events = ws.apply(command);
+        assert!(
+            events.iter().any(
+                |e| matches!(e, Event::Notice { level: NoticeLevel::Warn, text }
+                if text.contains("language server"))
+            ),
+            "expected a notice, got {events:?}"
+        );
+    }
+}
+
+#[test]
+fn a_hover_with_nothing_in_it_opens_no_panel() {
+    // A server answers "nothing here" for whitespace, keywords and comments,
+    // which is most of a file. An empty panel for each would be worse than
+    // the silence it replaced.
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/src/vim.rs".into(),
+    });
+    let events = ws.apply(Command::CloseHover);
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Hover { .. })),
+        "no panel should have opened: {events:?}"
+    );
+}
+
+#[test]
+fn a_utf16_column_is_read_against_the_line_it_names() {
+    // LSP counts in UTF-16 code units, so an emoji is two and an accented
+    // letter is one. A reference in an unopened file has no buffer to ask,
+    // which is why this exists separately from the buffer's own conversion.
+    assert_eq!(lsp::char_column("hello", 3), 3);
+    // `é` is one unit and one char; the astral emoji is two units, one char.
+    assert_eq!(lsp::char_column("héllo", 4), 4);
+    assert_eq!(lsp::char_column("🦀x", 2), 1, "past the crab is char 1");
+    assert_eq!(lsp::char_column("🦀x", 3), 2);
+    // A column past the end clamps rather than panicking: the file on disk
+    // and the server's idea of it can differ by an edit.
+    assert_eq!(lsp::char_column("ab", 99), 2);
+}
+
+#[test]
+fn a_reference_row_carries_the_line_it_is_on() {
+    // `path:12` says nothing about which of the eleven uses this is.
+    let root = std::env::temp_dir().join(format!("proton-refs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("a.rs");
+    std::fs::write(&file, "fn one() {}\n    let x = one();\n").unwrap();
+
+    let places = vec![
+        proton_lsp::Jump {
+            path: file.clone(),
+            line: 1,
+            character: 12,
+        },
+        // A file that is not there at all — a stale index, a deleted file.
+        proton_lsp::Jump {
+            path: root.join("gone.rs"),
+            line: 0,
+            character: 0,
+        },
+    ];
+    let rows = lsp::reference_rows(&places, &root);
+
+    assert_eq!(rows[0].label, "let x = one();", "trimmed of its indent");
+    assert_eq!(rows[0].detail, "a.rs:2", "relative, and one-based");
+    assert_eq!(rows[0].line, Some(1));
+    assert_eq!(rows[0].column, Some(12));
+    // The missing file still gets a row: dropping it silently would make the
+    // count disagree with what the server said.
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].label, "");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn symbol_kinds_are_a_second_table_not_the_completion_one() {
+    // The numberings are unrelated: 6 is a method here and a variable there.
+    // Sharing the display without sharing the mapping is the whole point.
+    assert_eq!(lsp::symbol_kind(Some(6)), CompletionKind::Method);
+    assert_eq!(CompletionKind::from_lsp(Some(6)), CompletionKind::Variable);
+    assert_eq!(lsp::symbol_kind(Some(12)), CompletionKind::Function);
+    assert_eq!(lsp::symbol_kind(Some(23)), CompletionKind::Type);
+    assert_eq!(lsp::symbol_kind(None), CompletionKind::Other);
+}
+
+#[test]
+fn a_server_fed_picker_keeps_the_servers_order_until_a_query_narrows_it() {
+    use proton_core::picker::{PickerItem, PickerKind, Pickers};
+
+    let mut pickers = Pickers::new("../..");
+    pickers.begin(PickerKind::Symbols, Vec::new());
+    // It opens empty — the answer has not arrived yet.
+    assert!(pickers.open().unwrap().items().is_empty());
+
+    let rows: Vec<PickerItem> = ["zebra", "apple", "apricot"]
+        .iter()
+        .map(|name| PickerItem {
+            label: (*name).to_string(),
+            detail: String::new(),
+            positions: Vec::new(),
+            path: None,
+            line: None,
+            column: None,
+            kind: None,
+        })
+        .collect();
+    assert!(pickers.set_held(rows));
+
+    // Reading order, not ranked order: symbols read down the file.
+    let shown: Vec<&str> = pickers
+        .open()
+        .unwrap()
+        .items()
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+    assert_eq!(shown, vec!["zebra", "apple", "apricot"]);
+
+    pickers.push('a', Vec::new());
+    pickers.push('p', Vec::new());
+    let shown: Vec<&str> = pickers
+        .open()
+        .unwrap()
+        .items()
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(shown.contains(&"apple") && shown.contains(&"apricot"));
+    assert!(!shown.contains(&"zebra"), "the query should have narrowed");
+}
+
+#[test]
+fn an_answer_to_a_closed_picker_is_dropped() {
+    use proton_core::picker::{PickerKind, Pickers};
+
+    let mut pickers = Pickers::new("../..");
+    pickers.begin(PickerKind::References, Vec::new());
+    pickers.close();
+    assert!(
+        !pickers.set_held(Vec::new()),
+        "a `gr` already escaped out of should not reopen itself"
+    );
+    assert!(!pickers.is_open());
+}
+
+#[test]
+fn opening_the_symbol_picker_without_a_server_says_so() {
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/src/vim.rs".into(),
+    });
+    let events = keys(&mut ws, " ds");
+    assert!(
+        events.iter().any(
+            |e| matches!(e, Event::Notice { level: NoticeLevel::Warn, text }
+            if text.contains("language server"))
+        ),
+        "expected a notice, got {events:?}"
+    );
+}
