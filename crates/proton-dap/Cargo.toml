@@ -1,0 +1,13 @@
+[package]
+name = "proton-dap"
+description = "Proton's debug adapter client: launching an adapter, and the conversation with it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+proton-lsp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

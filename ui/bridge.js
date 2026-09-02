@@ -69,6 +69,8 @@ if (HAS_SHELL) {
     lines: doc.lines.slice(doc.first, doc.first + doc.height),
     totalLines: doc.lines.length,
     version: 0,
+    // A couple of breakpoints, so the sign column has something to draw.
+    stops: [{ line: 3, verified: true, here: true }, { line: 9, verified: false, here: false }],
     // A fixed gutter, so the strip has something to draw. The real marks are
     // a line diff against HEAD in crates/proton-vcs.
     git: doc.lines.slice(doc.first, doc.first + doc.height).map((_, i) =>
@@ -130,6 +132,24 @@ if (HAS_SHELL) {
   };
   const treeEvent = () => ({ type: "tree", rows: treeRows() });
 
+  // A canned debug session, so the panel can be designed against. The real
+  // one drives a debug adapter from crates/proton-core/src/debug.rs.
+  const debugEvent = () => ({
+    type: "debug",
+    phase: "stopped",
+    frames: [
+      { name: "add", path: "src/demo.c", line: 4 },
+      { name: "main", path: "src/demo.c", line: 11 },
+      { name: "ntdll!RtlUserThreadStart", path: null, line: 0 },
+    ],
+    variables: [
+      { name: "a", value: "0", expandable: false },
+      { name: "b", value: "1", expandable: false },
+      { name: "point", value: "{x = 3, y = 7}", expandable: true },
+    ],
+    output: ["total=1", "total=3"],
+  });
+
   send = async (command) => {
     if (command.type === "sync") {
       return [
@@ -138,6 +158,7 @@ if (HAS_SHELL) {
         workspacesEvent(),
         treeEvent(),
         viewportEvent(),
+        debugEvent(),
       ];
     }
     if (command.type === "split") {

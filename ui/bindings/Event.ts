@@ -3,6 +3,9 @@ import type { Action } from "./Action";
 import type { Activity } from "./Activity";
 import type { BufferTab } from "./BufferTab";
 import type { Completion } from "./Completion";
+import type { DebugFrame } from "./DebugFrame";
+import type { DebugPhase } from "./DebugPhase";
+import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
 import type { GitMark } from "./GitMark";
@@ -16,6 +19,7 @@ import type { ServerState } from "./ServerState";
 import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
+import type { Stop } from "./Stop";
 import type { TraceState } from "./TraceState";
 import type { TreeRow } from "./TreeRow";
 import type { VimMode } from "./VimMode";
@@ -57,7 +61,13 @@ matches: Array<Array<Hit>>,
  * for a file git has never seen — both of which mean the same thing
  * to a gutter: nothing to compare against.
  */
-git: Array<GitMark | null>, } | { "type": "cursor", 
+git: Array<GitMark | null>, 
+/**
+ * Breakpoints in this window, and whether the program is stopped on
+ * one. A list rather than one-per-line because there are usually
+ * none, and a screenful of `null` to say so is waste.
+ */
+stops: Array<Stop>, } | { "type": "cursor", 
 /**
  * Which split the cursor belongs to. Every view has one; only the
  * focused one can move.
@@ -70,7 +80,7 @@ selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, a
 /**
  * Side by side rather than stacked.
  */
-vertical: boolean, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
+vertical: boolean, } | { "type": "debug", phase: DebugPhase, frames: Array<DebugFrame>, variables: Array<DebugVariable>, output: Array<string>, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
 /**
  * How many candidates the picker is choosing from, before matching.
  */

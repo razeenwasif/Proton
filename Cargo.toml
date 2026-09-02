@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/proton-agent",
     "crates/proton-core",
+    "crates/proton-dap",
     "crates/proton-index",
     "crates/proton-lsp",
     "crates/proton-shell",
@@ -22,6 +23,7 @@ repository = "https://github.com/razeenwasif/Proton"
 [workspace.dependencies]
 proton-agent = { path = "crates/proton-agent" }
 proton-core = { path = "crates/proton-core" }
+proton-dap = { path = "crates/proton-dap" }
 proton-index = { path = "crates/proton-index" }
 proton-lsp = { path = "crates/proton-lsp" }
 proton-syntax = { path = "crates/proton-syntax" }

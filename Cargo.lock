@@ -3704,6 +3704,7 @@ name = "proton-core"
 version = "0.0.1"
 dependencies = [
  "proton-agent",
+ "proton-dap",
  "proton-index",
  "proton-lsp",
  "proton-syntax",
@@ -3713,6 +3714,15 @@ dependencies = [
  "serde",
  "serde_json",
  "ts-rs",
+]
+
+[[package]]
+name = "proton-dap"
+version = "0.0.1"
+dependencies = [
+ "proton-lsp",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

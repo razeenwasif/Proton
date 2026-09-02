@@ -543,6 +543,27 @@ kbd {
 .ln.cur .n { color: var(--accent); font-weight: 640; }
 .ln .s { flex: 0 0 14px; text-align: center; user-select: none; font-size: 10px; }
 
+/* ── breakpoints ──────────────────────────────────────────────────────
+   In the sign column, because a breakpoint is a thing you put there and a
+   diagnostic is a thing that happened — and when both are true the one you
+   chose is the one you are looking for. */
+.ln .s.bp::before {
+  content: ""; display: inline-block; width: 9px; height: 9px;
+  border-radius: 50%; background: var(--err);
+  box-shadow: 0 0 8px -1px var(--err); vertical-align: -0.06em;
+}
+/* The adapter could not place it — that line will never be hit, and saying so
+   is the difference between a bug and a misunderstanding. */
+.ln .s.bp.unset::before {
+  background: none; box-shadow: none;
+  border: 1.5px solid color-mix(in srgb, var(--err) 60%, transparent);
+}
+/* Stopped right here. */
+.ln .s.bp.at::before {
+  background: var(--warn); box-shadow: 0 0 10px var(--warn);
+}
+.ln.cur .s.bp.at::before { transform: scale(1.15); }
+
 /* ── the git gutter ───────────────────────────────────────────────────
    Its own strip between the number and the diagnostic sign, because a line
    can be both changed and broken and you need to see both. Three pixels: a
@@ -1340,3 +1361,12 @@ table.df tr:hover td { background: var(--e1); }
   border-color: color-mix(in srgb, var(--err) 55%, transparent);
   opacity: .75;
 }
+
+/* The debugger's program output. Monospace because it is a program talking,
+   and scrolled to the end because the last line is the one you want. */
+.dbg-output {
+  font: 11.5px/1.5 var(--mono); color: var(--ink-2);
+  padding: 4px 12px 10px; white-space: pre-wrap; max-height: 180px; overflow: auto;
+}
+.row.empty { color: var(--ink-4); font-style: italic; cursor: default; }
+.row.empty:hover { background: none; }

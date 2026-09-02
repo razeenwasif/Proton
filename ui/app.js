@@ -411,6 +411,9 @@ function paneState(index) {
       matches: [],
       // Git marks per line — added, modified, or lines removed here.
       git: [],
+      // Breakpoints on visible lines, keyed by line number. A map because
+      // there are usually none and a screenful of nulls to say so is waste.
+      stops: new Map(),
     });
   }
   return panes.get(index);
@@ -576,9 +579,13 @@ function selectedOn(line, width) {
   return [Math.min(from, width), Math.min(to, width)];
 }
 
-function lineHtml(number, text, cursorColumn, highlights, hits, git) {
+function lineHtml(number, text, cursorColumn, highlights, hits, git, stop) {
+  // A breakpoint takes the sign column: it is a thing you put there, and a
+  // diagnostic is a thing that happened. Yours wins.
   const here = marks.byLine.get(number);
-  const sign = here?.length
+  const sign = stop
+    ? `<span class="s bp${stop.verified ? "" : " unset"}${stop.here ? " at" : ""}"></span>`
+    : here?.length
     ? `<span class="s d-${here[0].severity}">${icon(SIGN[here[0].severity], "solid")}</span>`
     : `<span class="s"></span>`;
   // A thin bar between the number and the diagnostic sign. Its own strip
@@ -679,6 +686,7 @@ function renderEditor(index = view.focused) {
         drawing.highlights[i],
         drawing.matches[i],
         drawing.git[i],
+        drawing.stops.get(drawing.firstLine + i),
       ),
     )
     .join("");
@@ -863,6 +871,65 @@ function renderTree(rows) {
 
   target.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
 }
+
+/* ── the debugger ─────────────────────────────────────────────────────
+   The core owns where it is, what the stack looks like and what is in
+   scope. This draws it and sends the buttons back. */
+
+function renderDebug(event) {
+  const phase = $("[data-debug-phase]");
+  if (phase) {
+    phase.textContent = event.phase;
+    phase.className = "chip" + (event.phase === "stopped" ? " warn" : event.phase === "running" ? " accent" : "");
+  }
+
+  const frames = $("[data-debug-frames]");
+  if (frames) {
+    frames.innerHTML = event.frames.length
+      ? event.frames
+          .map(
+            (f, i) =>
+              `<div class="row${i === 0 ? " sel" : ""}"` +
+              // A frame with a path can be jumped to; one in a library cannot.
+              `${f.path ? ` data-path="${escapeHtml(f.path)}"` : ""}>` +
+              `<span class="ic">${icon("k-function")}</span>${escapeHtml(f.name)}` +
+              `<span class="dir" style="margin-left:auto">` +
+              `${f.path ? escapeHtml(f.path) + ":" + f.line : "—"}</span></div>`,
+          )
+          .join("")
+      : `<div class="row empty">not stopped</div>`;
+  }
+
+  const variables = $("[data-debug-variables]");
+  if (variables) {
+    variables.innerHTML = event.variables.length
+      ? event.variables
+          .map(
+            (v) =>
+              `<div class="row"><span class="ic">${icon(
+                v.expandable ? "k-type" : "k-variable",
+              )}</span>${escapeHtml(v.name)}` +
+              `<span class="dir" style="margin-left:auto">${escapeHtml(v.value)}</span></div>`,
+          )
+          .join("")
+      : `<div class="row empty">nothing in scope</div>`;
+  }
+
+  const output = $("[data-debug-output]");
+  if (output) {
+    output.textContent = event.output.join("\n");
+    output.scrollTop = output.scrollHeight;
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const button = e.target.closest("[data-debug]");
+  if (!button) return;
+  const what = button.dataset.debug;
+  dispatch({
+    type: { start: "debugStart", stop: "debugStop", resume: "debugResume", stepOver: "debugStepOver" }[what],
+  });
+});
 
 /* ── the workspace rail ───────────────────────────────────────────────
    One tile per open project. The core decides what they are called — it is
@@ -1291,6 +1358,7 @@ onEvent((event) => {
       pane.highlights = event.highlights ?? [];
       pane.matches = event.matches ?? [];
       pane.git = event.git ?? [];
+      pane.stops = new Map((event.stops ?? []).map((s) => [s.line, s]));
       renderEditor(event.view);
       break;
     }
@@ -1320,6 +1388,10 @@ onEvent((event) => {
 
     case "tree":
       renderTree(event.rows);
+      break;
+
+    case "debug":
+      renderDebug(event);
       break;
 
     case "workspaces":

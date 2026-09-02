@@ -183,6 +183,22 @@ pub enum Command {
     /// any folder on the disk.
     OpenWorkspacePicker,
 
+    /* ── debugging ────────────────────────────────────────────────── */
+    /// Put a breakpoint on a line, or take one off. Works with no debugger
+    /// running — that is the ordinary way to set them.
+    #[serde(rename_all = "camelCase")]
+    ToggleBreakpoint {
+        /// The line the cursor is on when absent.
+        line: Option<usize>,
+    },
+    /// Launch what `.proton/debug.json` names.
+    DebugStart,
+    DebugStop,
+    DebugResume,
+    DebugStepOver,
+    DebugStepInto,
+    DebugStepOut,
+
     /// Ask for the current state — used once on connect so the shell can render
     /// without guessing.
     Sync,
@@ -272,6 +288,10 @@ pub enum Event {
         /// for a file git has never seen — both of which mean the same thing
         /// to a gutter: nothing to compare against.
         git: Vec<Option<GitMark>>,
+        /// Breakpoints in this window, and whether the program is stopped on
+        /// one. A list rather than one-per-line because there are usually
+        /// none, and a screenful of `null` to say so is waste.
+        stops: Vec<Stop>,
     },
     /// Where the cursor is now. Split from `Viewport` because a motion is the
     /// common case and must not cost a re-render of the text.
@@ -310,6 +330,18 @@ pub enum Event {
         focused: usize,
         /// Side by side rather than stacked.
         vertical: bool,
+    },
+    /// The debugger: where it is, and what it can see from there.
+    ///
+    /// Sent whole rather than as deltas, for the reason the agent transcript
+    /// is: a stack is a few dozen frames, the panel re-renders from it, and a
+    /// delta protocol for something this small is a bug waiting to be written.
+    #[serde(rename_all = "camelCase")]
+    Debug {
+        phase: DebugPhase,
+        frames: Vec<DebugFrame>,
+        variables: Vec<DebugVariable>,
+        output: Vec<String>,
     },
     /// The open workspaces, for the switcher above the buffer bar.
     ///
@@ -427,6 +459,55 @@ pub struct SplitView {
     /// Which buffer it shows, as an index into the buffer bar.
     pub buffer: usize,
     pub name: String,
+}
+
+/// A breakpoint on a visible line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct Stop {
+    /// Zero-based, like every other line number crossing this bus.
+    pub line: usize,
+    /// The adapter confirmed it could place it. An unverified one is a
+    /// breakpoint the debugger will never hit, and saying so is the
+    /// difference between a bug and a misunderstanding.
+    pub verified: bool,
+    /// The program is stopped right here.
+    pub here: bool,
+}
+
+/// Where the debugger is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub enum DebugPhase {
+    /// No adapter. Breakpoints still work — they are waiting for one.
+    Idle,
+    Running,
+    Stopped,
+}
+
+/// One frame on the stack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct DebugFrame {
+    pub name: String,
+    /// Relative to the project when it is inside it. Absent for a frame in a
+    /// library, which is ordinary rather than an error.
+    pub path: Option<String>,
+    pub line: usize,
+}
+
+/// One variable in scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct DebugVariable {
+    pub name: String,
+    pub value: String,
+    /// It has children to expand — a struct, an array.
+    pub expandable: bool,
 }
 
 /// What git says happened to one line.

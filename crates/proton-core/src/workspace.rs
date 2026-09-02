@@ -11,7 +11,11 @@ use proton_lsp::client::Incoming;
 
 use crate::action::{Action, Verb};
 use crate::agent::Agent;
-use crate::bus::{BufferTab, Command, Event, Hit, NoticeLevel, Selection, ServerState, SplitView};
+use crate::bus::{
+    BufferTab, Command, DebugFrame, DebugPhase, DebugVariable, Event, Hit, NoticeLevel, Selection,
+    ServerState, SplitView, Stop,
+};
+use crate::debug::{self, Debugger};
 use crate::editor::Editor;
 use crate::ex::Ex;
 use crate::git::Git;
@@ -42,6 +46,11 @@ pub struct Workspace {
     tree: Tree,
     /// The gutter, and what git has to say about the project.
     git: Git,
+    /// Breakpoints, and the debug session when there is one.
+    debugger: Debugger,
+    /// How many lines the active buffer had before the last change, so a
+    /// breakpoint can be carried along by however many were added or removed.
+    lines_before: usize,
     /// Where the cursor was when a search prompt opened.
     ///
     /// Every keystroke previews from here rather than from the last preview,
@@ -84,6 +93,7 @@ impl Workspace {
             visualizer: Visualizer::new(root),
             tree: Tree::new(root),
             git: Git::discover(root),
+            debugger: Debugger::new(root),
             ..Default::default()
         }
     }
@@ -181,6 +191,7 @@ impl Workspace {
                 // is a blank rectangle.
                 events.extend(self.every_view());
                 events.extend([
+                    self.debug_event(),
                     self.diagnostics_event(),
                     self.servers_event(),
                     self.agent_event(),
@@ -219,6 +230,63 @@ impl Workspace {
                     events.push(self.vim_event());
                 }
                 events
+            }
+
+            Command::ToggleBreakpoint { line } => {
+                let Some(path) = self.editor.buffer().path().map(Path::to_path_buf) else {
+                    return vec![notice(
+                        "this buffer is not a file yet".into(),
+                        NoticeLevel::Warn,
+                    )];
+                };
+                let buffer = self.editor.buffer();
+                // Lines are 1-based everywhere a debugger speaks, and 0-based
+                // everywhere the buffer does. The conversion lives here so
+                // only one place has to remember.
+                let line = line.unwrap_or(buffer.position(buffer.cursor.offset).line) + 1;
+                let set = self.debugger.toggle(&path, line);
+                let mut events = vec![notice(
+                    format!("breakpoint {} line {line}", if set { "on" } else { "off" }),
+                    NoticeLevel::Info,
+                )];
+                events.extend(self.every_view());
+                events
+            }
+
+            Command::DebugStart => match self.debugger.start() {
+                Ok(()) => {
+                    let mut events = vec![notice("debugging".into(), NoticeLevel::Info)];
+                    events.push(self.debug_event());
+                    events
+                }
+                Err(why) => vec![notice(why, NoticeLevel::Error)],
+            },
+
+            Command::DebugStop => {
+                self.debugger.stop();
+                let mut events = vec![self.debug_event()];
+                events.extend(self.every_view());
+                events
+            }
+
+            Command::DebugResume => {
+                self.debugger.resume();
+                let mut events = vec![self.debug_event()];
+                events.extend(self.every_view());
+                events
+            }
+
+            Command::DebugStepOver => {
+                self.debugger.step_over();
+                Vec::new()
+            }
+            Command::DebugStepInto => {
+                self.debugger.step_into();
+                Vec::new()
+            }
+            Command::DebugStepOut => {
+                self.debugger.step_out();
+                Vec::new()
             }
 
             Command::ToggleTreeNode { path } => {
@@ -1053,6 +1121,10 @@ impl Workspace {
         // Without this the view keeps pointing at the buffer it had, and the
         // pane draws a file nobody asked for.
         self.splits.view_mut().buffer = self.editor.active();
+        // And the line count is now this buffer's, so the next edit measures
+        // against the right number. Left at the old one, the first edit after
+        // opening a file would shift its breakpoints by the whole difference.
+        self.lines_before = self.editor.buffer().len_lines();
         vec![
             self.buffers_event(),
             self.viewport_event(),
@@ -1091,6 +1163,14 @@ impl Workspace {
     /// ask. `apply` stays total.
     fn poll_servers(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+
+        // The debugger is on the same heartbeat as everything else that
+        // happens on a thread the core cannot see.
+        if self.debugger.poll() {
+            events.push(self.debug_event());
+            // Where it stopped is drawn in the gutter, so the text goes too.
+            events.extend(self.every_view());
+        }
 
         // The file walk lands here too. It is the same shape of problem — work
         // finished on a thread the core cannot see — so it uses the same
@@ -1619,6 +1699,48 @@ impl Workspace {
             .collect()
     }
 
+    /* ── debugging ────────────────────────────────────────────────── */
+
+    fn debug_event(&self) -> Event {
+        let root = self.pickers.root();
+        Event::Debug {
+            phase: match self.debugger.phase() {
+                debug::Phase::Idle => DebugPhase::Idle,
+                debug::Phase::Running => DebugPhase::Running,
+                debug::Phase::Stopped => DebugPhase::Stopped,
+            },
+            frames: self
+                .debugger
+                .frames()
+                .iter()
+                .map(|frame| DebugFrame {
+                    name: frame.name.clone(),
+                    // Relative to the project when it is inside it: an
+                    // absolute path in a stack is unreadable at a glance and
+                    // the project is what the reader is holding in their head.
+                    path: frame.path.as_ref().map(|path| {
+                        path.strip_prefix(root)
+                            .unwrap_or(path)
+                            .to_string_lossy()
+                            .replace('\\', "/")
+                    }),
+                    line: frame.line,
+                })
+                .collect(),
+            variables: self
+                .debugger
+                .variables()
+                .iter()
+                .map(|variable| DebugVariable {
+                    name: variable.name.clone(),
+                    value: variable.value.clone(),
+                    expandable: variable.children != 0,
+                })
+                .collect(),
+            output: self.debugger.output().to_vec(),
+        }
+    }
+
     /// The tree as it stands.
     ///
     /// Recomputed from the disk each time rather than cached, which is what
@@ -1729,21 +1851,36 @@ impl Workspace {
             // A leader sequence that names a picker opens it here rather than
             // in the front end: the keymap is core config, and a second front
             // end must not have to reinvent it.
-            Outcome::Leader(prefix) if PickerKind::for_leader(&prefix).is_some() => (
-                self.open_picker(PickerKind::for_leader(&prefix).unwrap()),
-                false,
-            ),
+            Outcome::Leader(prefix) if PickerKind::for_leader(&prefix).is_some() => {
+                // Every arm below resolves the sequence, so the engine has to
+                // be told: it accumulates until something claims a prefix, and
+                // a second `␣db` would otherwise arrive as `db db`.
+                self.vim.cancel_leader();
+                (
+                    self.open_picker(PickerKind::for_leader(&prefix).unwrap()),
+                    false,
+                )
+            }
             // `␣ct` traces the buffer. Upstream binds Space to play/pause and
             // the arrows to stepping; Proton's leader *is* Space, so the
             // pane's own keys stay scoped to the pane and the verbs that
             // belong to the editor live under the leader like everything else.
             Outcome::Leader(prefix) if prefix == "ct" => {
+                self.vim.cancel_leader();
                 let mut events = vec![Event::Leader { prefix: None }];
                 events.extend(self.trace_buffer());
                 (events, false)
             }
+            // The debugger, under `␣d` as the rail has always shown it.
+            Outcome::Leader(prefix) if debug_command(&prefix).is_some() => {
+                self.vim.cancel_leader();
+                let mut events = vec![Event::Leader { prefix: None }];
+                events.extend(self.apply(debug_command(&prefix).unwrap()));
+                (events, false)
+            }
             // The window family, under `␣w` as the rail has always shown it.
             Outcome::Leader(prefix) if window_command(&prefix).is_some() => {
+                self.vim.cancel_leader();
                 let mut events = vec![Event::Leader { prefix: None }];
                 events.extend(self.apply(window_command(&prefix).unwrap()));
                 (events, false)
@@ -1751,6 +1888,7 @@ impl Workspace {
             // `␣e` finds the file you are in. The rail has always claimed this
             // binding in its tooltip; now it exists.
             Outcome::Leader(prefix) if prefix == "e" => {
+                self.vim.cancel_leader();
                 let mut events = vec![Event::Leader { prefix: None }];
                 events.extend(self.apply(Command::RevealInTree));
                 (events, false)
@@ -1806,6 +1944,20 @@ impl Workspace {
         let scrolled = self.scroll_to_cursor();
         let mut events = Vec::new();
         if text_changed {
+            // Breakpoints are places in the text, so they move with it. The
+            // line count is the signal: anything else leaves them on the line
+            // number they were put on rather than the code.
+            if let Some(path) = self.editor.buffer().path().map(Path::to_path_buf) {
+                let now = self.editor.buffer().len_lines();
+                let by = now as isize - self.lines_before as isize;
+                let at = self
+                    .editor
+                    .buffer()
+                    .position(self.editor.buffer().cursor.offset)
+                    .line;
+                self.debugger.shift(&path, at + 1, by);
+                self.lines_before = now;
+            }
             events.push(self.viewport_event());
             events.push(self.buffers_event());
             // Any other split on this file has to move with it. Two views of
@@ -1857,6 +2009,7 @@ impl Workspace {
                 highlights: Vec::new(),
                 matches: Vec::new(),
                 git: Vec::new(),
+                stops: Vec::new(),
             };
         };
         let first_line = pane.first_line;
@@ -1901,6 +2054,24 @@ impl Workspace {
         // done *before* you save.
         let git = self.git.marks(buffer, buf, first_line, count);
 
+        // Breakpoints are 1-based, like everything a debugger says.
+        let stops: Vec<Stop> = match buf.path() {
+            Some(path) => {
+                let stopped = self.debugger.stopped_at();
+                self.debugger
+                    .in_file(path)
+                    .into_iter()
+                    .filter(|(line, _)| *line > first_line && *line <= first_line + count)
+                    .map(|(line, verified)| Stop {
+                        line: line - 1,
+                        verified,
+                        here: stopped == Some((path, line)),
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+
         Event::Viewport {
             view,
             first_line,
@@ -1910,6 +2081,7 @@ impl Workspace {
             highlights: spans,
             matches,
             git,
+            stops,
         }
     }
 
@@ -2000,6 +2172,21 @@ impl Workspace {
 
 pub(crate) fn notice(text: String, level: NoticeLevel) -> Event {
     Event::Notice { text, level }
+}
+
+/// The `␣d` family. `␣db` is the one the rail has advertised all along.
+fn debug_command(prefix: &str) -> Option<Command> {
+    Some(match prefix {
+        // Toggle a breakpoint on the cursor's line — the thing you do most.
+        "db" => Command::ToggleBreakpoint { line: None },
+        "dr" => Command::DebugStart,
+        "dq" => Command::DebugStop,
+        "dc" => Command::DebugResume,
+        "dn" => Command::DebugStepOver,
+        "di" => Command::DebugStepInto,
+        "do" => Command::DebugStepOut,
+        _ => return None,
+    })
 }
 
 /// The `␣w` family — vim's `⌃w`, under the leader where everything else lives.

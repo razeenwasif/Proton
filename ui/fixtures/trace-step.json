@@ -21,27 +21,27 @@
             "id": "main@1:head",
             "name": "head",
             "typeName": "Fix *",
-            "repr": "0x739810",
+            "repr": "0x73e650",
             "addr": "0x5ffea8",
-            "pointsTo": "0x739810",
+            "pointsTo": "0x73e650",
             "children": []
           },
           {
             "id": "main@1:mid",
             "name": "mid",
             "typeName": "Fix *",
-            "repr": "0x742730",
+            "repr": "0x7441b0",
             "addr": "0x5ffea0",
-            "pointsTo": "0x742730",
+            "pointsTo": "0x7441b0",
             "children": []
           },
           {
             "id": "main@1:tail",
             "name": "tail",
             "typeName": "Fix *",
-            "repr": "0x742770",
+            "repr": "0x7441f0",
             "addr": "0x5ffe98",
-            "pointsTo": "0x742770",
+            "pointsTo": "0x7441f0",
             "children": []
           }
         ]
@@ -50,56 +50,56 @@
     "globals": [],
     "heap": [
       {
-        "id": "heap:0x739810",
-        "addr": "0x739810",
+        "id": "heap:0x73e650",
+        "addr": "0x73e650",
         "size": 16,
         "line": 8,
         "typeName": "struct Fix",
         "slots": [
           {
-            "id": "heap:0x739810.alt",
+            "id": "heap:0x73e650.alt",
             "name": "alt",
             "typeName": "int",
             "repr": "420",
-            "addr": "0x739810",
+            "addr": "0x73e650",
             "pointsTo": null,
             "children": []
           },
           {
-            "id": "heap:0x739810.next",
+            "id": "heap:0x73e650.next",
             "name": "next",
             "typeName": "struct Fix *",
-            "repr": "0x742730",
-            "addr": "0x739818",
-            "pointsTo": "0x742730",
+            "repr": "0x7441b0",
+            "addr": "0x73e658",
+            "pointsTo": "0x7441b0",
             "children": []
           }
         ],
         "freed": false
       },
       {
-        "id": "heap:0x742730",
-        "addr": "0x742730",
+        "id": "heap:0x7441b0",
+        "addr": "0x7441b0",
         "size": 16,
         "line": 8,
         "typeName": "struct Fix",
         "slots": [
           {
-            "id": "heap:0x742730.alt",
+            "id": "heap:0x7441b0.alt",
             "name": "alt",
             "typeName": "int",
             "repr": "415",
-            "addr": "0x742730",
+            "addr": "0x7441b0",
             "pointsTo": null,
             "children": []
           },
           {
-            "id": "heap:0x742730.next",
+            "id": "heap:0x7441b0.next",
             "name": "next",
             "typeName": "struct Fix *",
-            "repr": "0x742770",
-            "addr": "0x742738",
-            "pointsTo": "0x742770",
+            "repr": "0x7441f0",
+            "addr": "0x7441b8",
+            "pointsTo": "0x7441f0",
             "children": []
           }
         ],
@@ -109,27 +109,27 @@
     "edges": [
       {
         "from": "main@1:head",
-        "to": "heap:0x739810",
+        "to": "heap:0x73e650",
         "kind": "points"
       },
       {
         "from": "main@1:mid",
-        "to": "heap:0x742730",
+        "to": "heap:0x7441b0",
         "kind": "points"
       },
       {
         "from": "main@1:tail",
-        "to": "0x742770",
+        "to": "0x7441f0",
         "kind": "dangling"
       },
       {
-        "from": "heap:0x739810.next",
-        "to": "heap:0x742730",
+        "from": "heap:0x73e650.next",
+        "to": "heap:0x7441b0",
         "kind": "points"
       },
       {
-        "from": "heap:0x742730.next",
-        "to": "0x742770",
+        "from": "heap:0x7441b0.next",
+        "to": "0x7441f0",
         "kind": "dangling"
       }
     ],

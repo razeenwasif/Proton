@@ -7,8 +7,9 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 447 tests, headless
-cargo test --workspace -- --include-ignored   # plus 10 driving rust-analyzer and the tracer
+cargo test --workspace        # 478 tests, headless
+cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
+                              # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
 node ui/serve.mjs             # the front end alone, in a browser
@@ -68,13 +69,14 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
 | `proton-agent` | Messages API client, SSE streaming, request building, auth | `ureq` |
 | `proton-trace` | Code Visualizer client: trace format, pointer resolution, sidecar | `ureq` |
+| `proton-dap` | Debug adapter client: launching one, and the conversation with it | `serde_json` |
 | `proton-plugin` | Wasmtime host, WIT interfaces, capability grants | `wasmtime`, `wit-bindgen` |
 | `proton-core` | Session and workspace state, mode registry, command/event bus, config | all of the above |
 | `proton-shell` | Window, webview, IPC bridge, system backdrop, packaging | `tauri` v2, `window-vibrancy` |
 | `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
 
 **Built so far: `proton-text`, `proton-index`, `proton-syntax`, `proton-lsp`,
-`proton-agent`, `proton-trace`, `proton-vcs`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
+`proton-agent`, `proton-trace`, `proton-vcs`, `proton-dap`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
 into. `proton-vim` has not split out of `proton-core` yet — the modal engine is
 one file there and would gain nothing but a manifest from moving today.
 
@@ -196,6 +198,44 @@ thousand rows nobody reads, and the count is the useful part.
 
 `␣e` reveals the file you are in, opening every folder above it so the row
 exists to scroll to.
+
+### Debugging
+
+`proton-dap` is layered the way `proton-lsp` is and for the same reasons: an
+adapter is a third-party process that can hang or die, so it lives out of
+process behind two threads and a channel, and the core drains a mailbox on the
+same heartbeat as everything else. The framing is literally
+`proton_lsp::transport` — DAP took it from LSP — and sharing the
+implementation beats a copy that could rot into disagreeing with the original.
+
+**The handshake is not a straight line**, and getting it wrong looks exactly
+like a breakpoint that does not work. `initialize`, then `launch` *without
+waiting for it*, then the adapter's `initialized` **event** says it is ready to
+be configured, and only then may breakpoints be set; the `launch` response
+comes back last. The reader thread answers the `initialized` event itself, the
+same way `proton-lsp`'s reader answers server requests — nothing above should
+need to know the shape of a handshake in order to set a breakpoint.
+
+**A breakpoint's first answer is not its last.** `setBreakpoints` before the
+program is loaded comes back `verified: false, reason: pending`; the real
+answer arrives later as a `breakpoint` event. The response is deliberately not
+read at all — a UI that draws it shows every breakpoint as broken.
+
+**Breakpoints exist without an adapter.** You set them while reading, long
+before anything runs, so they are a per-file set of lines that shifts with
+edits the way marks do, and the adapter is told about them when one starts.
+An unverified one draws hollow: a breakpoint the debugger will never hit is
+the difference between a bug and a misunderstanding, and it should say which.
+
+**What to run comes from `.proton/debug.json`** — an adapter, its arguments,
+and a program. Absent, the session says what is missing. Guessing which binary
+you meant and debugging the wrong one is worse than asking.
+
+The live tests drive GDB's own DAP interpreter, which is already on this
+machine for the Visualizer and debugs C, C++ and Rust. They compile a small
+program, stop in it, and read the locals back — because the protocol module's
+other tests prove what Proton does with a message, and only a real adapter
+proves the messages are the ones it will get.
 
 ### Git
 
