@@ -132,6 +132,25 @@ if (HAS_SHELL) {
   };
   const treeEvent = () => ({ type: "tree", rows: treeRows() });
 
+  // A canned terminal screen, so the panel can be designed against. The real
+  // one is a pseudo-terminal in crates/proton-term; this only has to show the
+  // chrome and the colours.
+  const run = (text, extra = {}) => ({ text, fg: null, bg: null, rgb: null, bold: false, italic: false, underline: false, inverse: false, ...extra });
+  const terminalEvent = () => ({
+    type: "terminal",
+    rows: [
+      [run("C:\Users\Razeen\Projects\Proton> "), run("cargo test", { bold: true })],
+      [run("   Compiling proton-term v0.0.1", { fg: 8 })],
+      [run("    Finished ", { fg: 2, bold: true }), run("test profile in 1.2s")],
+      [run("running 7 tests")],
+      [run("test result: "), run("ok", { fg: 2, bold: true }), run(". 7 passed; 0 failed")],
+      [run("C:\Users\Razeen\Projects\Proton> ")],
+    ],
+    cursor: [5, 34],
+    cursorVisible: true,
+    running: true,
+  });
+
   // A canned debug session, so the panel can be designed against. The real
   // one drives a debug adapter from crates/proton-core/src/debug.rs.
   const debugEvent = () => ({
@@ -159,6 +178,7 @@ if (HAS_SHELL) {
         treeEvent(),
         viewportEvent(),
         debugEvent(),
+        terminalEvent(),
       ];
     }
     if (command.type === "split") {
@@ -198,6 +218,11 @@ if (HAS_SHELL) {
       layout.focused = next;
       return [splitsEvent()];
     }
+    if (command.type === "openTerminal") return [terminalEvent()];
+    if (command.type === "closeTerminal") {
+      return [{ type: "terminal", rows: [], cursor: [0, 0], cursorVisible: false, running: false }];
+    }
+    if (command.type === "terminalInput" || command.type === "terminalSize") return [];
     if (command.type === "focusWorkspace") {
       projects.active = command.index;
       return [workspacesEvent()];

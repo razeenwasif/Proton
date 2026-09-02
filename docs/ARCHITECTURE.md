@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 478 tests, headless
+cargo test --workspace        # 486 tests, headless
 cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
                               # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
@@ -70,13 +70,14 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-agent` | Messages API client, SSE streaming, request building, auth | `ureq` |
 | `proton-trace` | Code Visualizer client: trace format, pointer resolution, sidecar | `ureq` |
 | `proton-dap` | Debug adapter client: launching one, and the conversation with it | `serde_json` |
+| `proton-term` | Pseudo-terminal, and the screen it paints | `portable-pty`, `vt100` |
 | `proton-plugin` | Wasmtime host, WIT interfaces, capability grants | `wasmtime`, `wit-bindgen` |
 | `proton-core` | Session and workspace state, mode registry, command/event bus, config | all of the above |
 | `proton-shell` | Window, webview, IPC bridge, system backdrop, packaging | `tauri` v2, `window-vibrancy` |
 | `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
 
 **Built so far: `proton-text`, `proton-index`, `proton-syntax`, `proton-lsp`,
-`proton-agent`, `proton-trace`, `proton-vcs`, `proton-dap`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
+`proton-agent`, `proton-trace`, `proton-vcs`, `proton-dap`, `proton-term`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
 into. `proton-vim` has not split out of `proton-core` yet — the modal engine is
 one file there and would gain nothing but a manifest from moving today.
 
@@ -198,6 +199,35 @@ thousand rows nobody reads, and the count is the useful part.
 
 `␣e` reveals the file you are in, opening every folder above it so the row
 exists to scroll to.
+
+### The terminal
+
+`proton-term` is the same arrangement as every other foreign process here: the
+shell runs out of process, a reader thread pumps its bytes into a channel, and
+the core drains that on its heartbeat. `portable-pty` for the pseudo-terminal
+and `vt100` for the screen — 34 crates, measured before committing to them.
+
+**ConPTY asks a question and stalls until it is answered.** The first thing a
+Windows pseudo-console sends is `ESC[6n` — *where is the cursor?* — and it will
+not pump the child's output until something replies `ESC[<row>;<col>R`. A
+terminal that ignores it reads four bytes and then nothing, which looks exactly
+like the shell failing to start. That was measured, not read: the probe that
+found it saw a live child process, no output, and those four bytes. `vt100`
+parses the screen but does not answer queries, so the reply is sent by hand.
+
+The screen crosses the bridge as **rows of runs**, merged by look, for the
+reason the editor's viewport merges its spans: a row is mostly one colour, and
+a cell per character would be eighty objects for a line of prose. Trailing
+blanks are trimmed — but only *unpainted* ones, because a run with a background
+is drawing those spaces on purpose and cutting them shortens the bar.
+
+Colours arrive as palette indices and are coloured by the theme, so a terminal
+in Nord does not look like a terminal in Tokyo Night; only a true colour, which
+has no name in the palette, is sent as itself.
+
+The panel takes the whole keyboard while it has the focus, exactly as the
+picker does and for the same reason — `d` types a `d` at the shell rather than
+starting an operator, and `⌃c` interrupts a program rather than doing nothing.
 
 ### Debugging
 

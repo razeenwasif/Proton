@@ -14,4 +14,4 @@ view: number, firstLine: number, lines: number, } | { "type": "split", vertical:
 /**
  * The line the cursor is on when absent.
  */
-line: number | null, } | { "type": "debugStart" } | { "type": "debugStop" } | { "type": "debugResume" } | { "type": "debugStepOver" } | { "type": "debugStepInto" } | { "type": "debugStepOut" } | { "type": "sync" };
+line: number | null, } | { "type": "openTerminal" } | { "type": "terminalInput", text: string, } | { "type": "terminalSize", rows: number, cols: number, } | { "type": "closeTerminal" } | { "type": "debugStart" } | { "type": "debugStop" } | { "type": "debugResume" } | { "type": "debugStepOver" } | { "type": "debugStepInto" } | { "type": "debugStepOut" } | { "type": "sync" };

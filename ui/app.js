@@ -872,6 +872,117 @@ function renderTree(rows) {
   target.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
 }
 
+/* ── the terminal ─────────────────────────────────────────────────────
+   The core owns the pseudo-terminal and the screen it paints. This draws
+   rows of runs and sends keys back — it does not interpret an escape
+   sequence or decide where the cursor is, because the thing holding the
+   shell already knows. */
+
+/** Whether the terminal has the keyboard. */
+let terminalFocused = false;
+
+function runHtml(run, row, column, cursor) {
+  const classes = [];
+  if (run.fg != null) classes.push(`tf${run.fg}`);
+  if (run.bg != null) classes.push(`tb${run.bg}`);
+  if (run.bold) classes.push("tbold");
+  if (run.italic) classes.push("titalic");
+  if (run.underline) classes.push("tunder");
+  if (run.inverse) classes.push("tinv");
+  // A true colour has no palette name, so it goes inline. Nothing else does.
+  const style = run.rgb ? ` style="color:${run.rgb}"` : "";
+  const attrs = `${classes.length ? ` class="${classes.join(" ")}"` : ""}${style}`;
+  return attrs ? `<span${attrs}>${escapeHtml(run.text)}</span>` : escapeHtml(run.text);
+}
+
+function renderTerminal(event) {
+  const state = $("[data-term-state]");
+  if (state) {
+    state.textContent = event.running ? "running" : event.rows.length ? "exited" : "closed";
+    state.className = "chip" + (event.running ? " accent" : "");
+  }
+
+  const screen = $("[data-term-screen]");
+  if (!screen) return;
+  const [cursorRow, cursorCol] = event.cursor;
+
+  screen.innerHTML = event.rows
+    .map((row, i) => {
+      const body = row.map((run) => runHtml(run)).join("");
+      // The cursor is drawn as a class on its row plus a marker span, rather
+      // than by splitting a run: the core said which cell it is on, and
+      // cutting runs to find it would be re-deriving what it already sent.
+      const here = event.cursorVisible && i === cursorRow;
+      return `<div class="trow${here ? " tcur" : ""}"${
+        here ? ` style="--tcol:${cursorCol}"` : ""
+      }>${body || "&nbsp;"}</div>`;
+    })
+    .join("");
+  screen.scrollTop = screen.scrollHeight;
+}
+
+/** What a keystroke means to a shell. */
+function terminalBytes(e) {
+  if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) return e.key;
+  switch (e.key) {
+    case "Enter":
+      return "\r";
+    case "Backspace":
+      // A shell expects DEL here, not backspace — the difference between
+      // deleting a character and printing `^H`.
+      return "\x7f";
+    case "Tab":
+      return "\t";
+    case "Escape":
+      return "\x1b";
+    case "ArrowUp":
+      return "\x1b[A";
+    case "ArrowDown":
+      return "\x1b[B";
+    case "ArrowRight":
+      return "\x1b[C";
+    case "ArrowLeft":
+      return "\x1b[D";
+    case "Home":
+      return "\x1b[H";
+    case "End":
+      return "\x1b[F";
+    case "Delete":
+      return "\x1b[3~";
+    default:
+      // `⌃c`, `⌃d` and the rest are the letter with the top three bits off.
+      if (e.ctrlKey && /^[a-z]$/i.test(e.key)) {
+        return String.fromCharCode(e.key.toUpperCase().charCodeAt(0) - 64);
+      }
+      return null;
+  }
+}
+
+/** How many cells fit, so the shell can be told. */
+function reportTerminalSize() {
+  const screen = $("[data-term-screen]");
+  if (!screen || !screen.offsetParent) return;
+  const probe = screen.querySelector(".trow");
+  const lineHeight = probe?.getBoundingClientRect().height || 17;
+  // Measured from a real row rather than assumed: the font is the theme's.
+  const charWidth = probe ? probe.getBoundingClientRect().width / Math.max(1, probe.textContent.length) : 7;
+  const rows = Math.max(1, Math.floor(screen.clientHeight / lineHeight));
+  const cols = Math.max(20, Math.floor(screen.clientWidth / Math.max(4, charWidth)));
+  dispatch({ type: "terminalSize", rows, cols });
+}
+
+document.addEventListener("click", (e) => {
+  const button = e.target.closest("[data-term]");
+  if (button) {
+    dispatch({ type: button.dataset.term === "open" ? "openTerminal" : "closeTerminal" });
+    return;
+  }
+  // Clicking the screen gives it the keyboard; clicking anywhere else takes
+  // it back, or every keystroke in the editor would go to the shell.
+  terminalFocused = Boolean(e.target.closest("[data-term-screen]"));
+  $("[data-term-screen]")?.classList.toggle("on", terminalFocused);
+});
+
 /* ── the debugger ─────────────────────────────────────────────────────
    The core owns where it is, what the stack looks like and what is in
    scope. This draws it and sends the buttons back. */
@@ -1394,6 +1505,13 @@ onEvent((event) => {
       renderDebug(event);
       break;
 
+    case "terminal":
+      renderTerminal(event);
+      // The shell has to be told how big the panel is, and only the panel
+      // knows once it has a row to measure.
+      requestAnimationFrame(reportTerminalSize);
+      break;
+
     case "workspaces":
       renderWorkspaces(event.items, event.active);
       break;
@@ -1448,6 +1566,18 @@ function renderPosition() {
    keystroke the core interprets — including the digits, which are vim
    counts, not mode switches. */
 document.addEventListener("keydown", (e) => {
+  // The terminal takes the whole keyboard while it has the focus, exactly as
+  // the picker does — `d` types a `d` at the shell rather than starting an
+  // operator, and `⌃c` interrupts a program rather than doing nothing.
+  if (terminalFocused) {
+    const bytes = terminalBytes(e);
+    if (bytes !== null) {
+      e.preventDefault();
+      dispatch({ type: "terminalInput", text: bytes });
+      return;
+    }
+  }
+
   const meta = e.metaKey || e.ctrlKey;
 
   if (meta && /^[1-7]$/.test(e.key)) {

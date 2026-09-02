@@ -1370,3 +1370,46 @@ table.df tr:hover td { background: var(--e1); }
 }
 .row.empty { color: var(--ink-4); font-style: italic; cursor: default; }
 .row.empty:hover { background: none; }
+
+/* ── the terminal ─────────────────────────────────────────────────────
+   A grid of rows of runs, drawn from what the core's vt100 parser says the
+   screen looks like. Nothing here interprets an escape sequence. */
+.term { font: 12px/1.45 var(--mono); padding: 8px 12px; white-space: pre; }
+.trow { min-height: 1.45em; }
+.term.on { outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); outline-offset: -1px; }
+
+/* The block cursor, positioned by cell rather than by splitting a run — the
+   core already said which column it is on. */
+.trow.tcur { position: relative; }
+.trow.tcur::after {
+  content: ""; position: absolute; top: 0.1em; height: 1.15em; width: 1ch;
+  left: calc(var(--tcol) * 1ch);
+  background: var(--accent); opacity: .55; border-radius: 1px;
+}
+
+.tbold { font-weight: 680; }
+.titalic { font-style: italic; }
+.tunder { text-decoration: underline; }
+/* Reverse video: the terminal's way of highlighting, and it has to actually
+   reverse or a selected line reads as ordinary text. */
+.tinv { background: var(--ink-2); color: var(--bg-deep); }
+
+/* The sixteen ANSI colours, mapped onto the theme rather than hard-coded, so
+   a terminal in Nord does not look like a terminal in Tokyo Night. */
+.tf0 { color: var(--ink-4); }   .tf8  { color: var(--ink-3); }
+.tf1 { color: var(--err); }     .tf9  { color: var(--err); }
+.tf2 { color: var(--ok); }      .tf10 { color: var(--ok); }
+.tf3 { color: var(--warn); }    .tf11 { color: var(--warn); }
+.tf4 { color: var(--info); }    .tf12 { color: var(--info); }
+.tf5 { color: var(--accent-2); }.tf13 { color: var(--accent-2); }
+.tf6 { color: var(--tone); }    .tf14 { color: var(--tone); }
+.tf7 { color: var(--ink-2); }   .tf15 { color: var(--text-hi); }
+
+.tb0 { background: var(--bg-deep); }  .tb8  { background: var(--e2); }
+.tb1 { background: var(--err); }      .tb9  { background: var(--err); }
+.tb2 { background: var(--ok); }       .tb10 { background: var(--ok); }
+.tb3 { background: var(--warn); }     .tb11 { background: var(--warn); }
+.tb4 { background: var(--info); }     .tb12 { background: var(--info); }
+.tb5 { background: var(--accent-2); } .tb13 { background: var(--accent-2); }
+.tb6 { background: var(--tone); }     .tb14 { background: var(--tone); }
+.tb7 { background: var(--ink-2); }    .tb15 { background: var(--text-hi); }

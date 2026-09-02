@@ -526,21 +526,16 @@
         </div>
 
         <!-- Terminal -->
+        <!-- Rendered from Event::Terminal. The core owns the pseudo-terminal
+             and the screen; this draws rows of runs and sends keys back. -->
         <div class="dock-panel" data-panel="term" style="display:none;flex-direction:column;flex:1;min-height:0">
-          <div class="scroll term">
-            <div><span class="pmt">proton ❯</span> pnpm vitest run routes</div>
-            <div class="dim"> ✓ dashboard.test.tsx (6)</div>
-            <div class="dim"> ✓ fleet.test.tsx (4)</div>
-            <div><span class="g"> Test Files  2 passed (2)</span></div>
-            <div><span class="g">      Tests  10 passed (10)</span></div>
-            <div style="height:8px"></div>
-            <div><span class="pmt">proton ❯</span> proton trace native/trajectory.c --lang c</div>
-            <div class="dim"> compiling with -g3 -O0 -include cviz_shim.h</div>
-            <div class="dim"> 558 steps · 3 heap blocks · 1 dangling read at step 212</div>
-            <div><span class="g"> → opened in Visualizer</span></div>
-            <div style="height:8px"></div>
-            <div><span class="pmt">proton ❯</span> <span class="cursor"></span></div>
-          </div>
+          <header>
+            <span class="chip" data-term-state>closed</span>
+            <span class="grow"></span>
+            <button class="hbtn" data-term="open" title="Open a shell — ␣tt or :terminal"><svg class="i"><use href="#i-play"/></svg></button>
+            <button class="hbtn" data-term="close" title="Close it"><svg class="i"><use href="#i-stop"/></svg></button>
+          </header>
+          <div class="scroll term" data-term-screen tabindex="0"></div>
         </div>
       </aside>
     </section>

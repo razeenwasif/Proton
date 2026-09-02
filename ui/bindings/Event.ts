@@ -20,6 +20,7 @@ import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
+import type { TermRun } from "./TermRun";
 import type { TraceState } from "./TraceState";
 import type { TreeRow } from "./TreeRow";
 import type { VimMode } from "./VimMode";
@@ -80,7 +81,12 @@ selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, a
 /**
  * Side by side rather than stacked.
  */
-vertical: boolean, } | { "type": "debug", phase: DebugPhase, frames: Array<DebugFrame>, variables: Array<DebugVariable>, output: Array<string>, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
+vertical: boolean, } | { "type": "terminal", rows: Array<Array<TermRun>>, cursor: [number, number], cursorVisible: boolean, 
+/**
+ * The shell is still there. A dead terminal keeps its last screen:
+ * what a command printed before it exited is the useful part.
+ */
+running: boolean, } | { "type": "debug", phase: DebugPhase, frames: Array<DebugFrame>, variables: Array<DebugVariable>, output: Array<string>, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
 /**
  * How many candidates the picker is choosing from, before matching.
  */

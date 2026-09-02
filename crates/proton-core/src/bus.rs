@@ -191,6 +191,21 @@ pub enum Command {
         /// The line the cursor is on when absent.
         line: Option<usize>,
     },
+    /// Open a terminal in the project, or focus the one there is.
+    OpenTerminal,
+    /// Type at it. The front end sends what the keyboard produced; the shell
+    /// decides what it means.
+    TerminalInput {
+        text: String,
+    },
+    /// How big the panel is, in cells. Programs redraw from this.
+    #[serde(rename_all = "camelCase")]
+    TerminalSize {
+        rows: u16,
+        cols: u16,
+    },
+    CloseTerminal,
+
     /// Launch what `.proton/debug.json` names.
     DebugStart,
     DebugStop,
@@ -331,6 +346,19 @@ pub enum Event {
         /// Side by side rather than stacked.
         vertical: bool,
     },
+    /// The terminal, as rows of styled runs.
+    ///
+    /// Runs rather than cells: a row is mostly one colour, and a cell per
+    /// character would put eighty objects on the bridge for a line of prose.
+    #[serde(rename_all = "camelCase")]
+    Terminal {
+        rows: Vec<Vec<TermRun>>,
+        cursor: (u16, u16),
+        cursor_visible: bool,
+        /// The shell is still there. A dead terminal keeps its last screen:
+        /// what a command printed before it exited is the useful part.
+        running: bool,
+    },
     /// The debugger: where it is, and what it can see from there.
     ///
     /// Sent whole rather than as deltas, for the reason the agent transcript
@@ -459,6 +487,25 @@ pub struct SplitView {
     /// Which buffer it shows, as an index into the buffer bar.
     pub buffer: usize,
     pub name: String,
+}
+
+/// One run of terminal characters sharing a look.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct TermRun {
+    pub text: String,
+    /// An ANSI palette index, which the theme colours. `None` is the default
+    /// foreground, which is whatever the pane is already using.
+    pub fg: Option<u8>,
+    pub bg: Option<u8>,
+    /// A true colour, when the program asked for one the palette has no name
+    /// for. As `#rrggbb`, ready to go straight into a style.
+    pub rgb: Option<String>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub inverse: bool,
 }
 
 /// A breakpoint on a visible line.

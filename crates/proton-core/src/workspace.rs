@@ -13,7 +13,7 @@ use crate::action::{Action, Verb};
 use crate::agent::Agent;
 use crate::bus::{
     BufferTab, Command, DebugFrame, DebugPhase, DebugVariable, Event, Hit, NoticeLevel, Selection,
-    ServerState, SplitView, Stop,
+    ServerState, SplitView, Stop, TermRun,
 };
 use crate::debug::{self, Debugger};
 use crate::editor::Editor;
@@ -48,6 +48,12 @@ pub struct Workspace {
     git: Git,
     /// Breakpoints, and the debug session when there is one.
     debugger: Debugger,
+    /// The terminal, once something has asked for one. Not started on boot:
+    /// a shell nobody opened is a process nobody wanted.
+    terminal: Option<proton_term::Terminal>,
+    /// How big the panel is. Kept even with no terminal, so the one opened
+    /// next starts the right size rather than at a default nobody chose.
+    term_size: (u16, u16),
     /// How many lines the active buffer had before the last change, so a
     /// breakpoint can be carried along by however many were added or removed.
     lines_before: usize,
@@ -94,6 +100,7 @@ impl Workspace {
             tree: Tree::new(root),
             git: Git::discover(root),
             debugger: Debugger::new(root),
+            term_size: (24, 80),
             ..Default::default()
         }
     }
@@ -230,6 +237,46 @@ impl Workspace {
                     events.push(self.vim_event());
                 }
                 events
+            }
+
+            Command::OpenTerminal => {
+                if self.terminal.is_none() {
+                    let (rows, cols) = self.term_size;
+                    match proton_term::Terminal::open(self.pickers.root(), rows, cols) {
+                        Ok(term) => self.terminal = Some(term),
+                        Err(err) => {
+                            return vec![notice(format!("no terminal: {err}"), NoticeLevel::Error)]
+                        }
+                    }
+                }
+                vec![self.terminal_event()]
+            }
+
+            Command::TerminalInput { text } => {
+                if let Some(term) = self.terminal.as_mut() {
+                    term.write(&text);
+                }
+                // Nothing is drawn from here: what the shell makes of it comes
+                // back on the next poll, which is the only thing that knows.
+                Vec::new()
+            }
+
+            Command::TerminalSize { rows, cols } => {
+                self.term_size = (rows.max(1), cols.max(1));
+                match self.terminal.as_mut() {
+                    Some(term) => {
+                        term.resize(rows, cols);
+                        vec![self.terminal_event()]
+                    }
+                    None => Vec::new(),
+                }
+            }
+
+            Command::CloseTerminal => {
+                // Dropping it kills the shell, which is what closing a
+                // terminal means.
+                self.terminal = None;
+                vec![self.terminal_event()]
             }
 
             Command::ToggleBreakpoint { line } => {
@@ -861,6 +908,9 @@ impl Workspace {
         if ex.is("close", 3) {
             return self.apply(Command::CloseSplit { index: None });
         }
+        if ex.is("terminal", 4) {
+            return self.apply(Command::OpenTerminal);
+        }
         if ex.is("nohlsearch", 3) {
             // Vim's `:noh`. The pattern is kept — `n` still works — and only
             // the painting stops, which is exactly the distinction people use
@@ -1163,6 +1213,12 @@ impl Workspace {
     /// ask. `apply` stays total.
     fn poll_servers(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+
+        // The shell is on the same heartbeat as everything else that happens
+        // on a thread the core cannot see.
+        if self.terminal.as_mut().is_some_and(|t| t.poll()) {
+            events.push(self.terminal_event());
+        }
 
         // The debugger is on the same heartbeat as everything else that
         // happens on a thread the core cannot see.
@@ -1699,6 +1755,33 @@ impl Workspace {
             .collect()
     }
 
+    /* ── the terminal ─────────────────────────────────────────────── */
+
+    fn terminal_event(&mut self) -> Event {
+        let Some(term) = self.terminal.as_mut() else {
+            // Closed. An empty screen rather than no event at all, so the
+            // panel clears instead of keeping a dead shell on it.
+            return Event::Terminal {
+                rows: Vec::new(),
+                cursor: (0, 0),
+                cursor_visible: false,
+                running: false,
+            };
+        };
+        let running = term.is_alive();
+        let screen = term.screen();
+        Event::Terminal {
+            rows: screen
+                .rows
+                .iter()
+                .map(|row| row.iter().map(term_run).collect())
+                .collect(),
+            cursor: screen.cursor,
+            cursor_visible: screen.cursor_visible && running,
+            running,
+        }
+    }
+
     /* ── debugging ────────────────────────────────────────────────── */
 
     fn debug_event(&self) -> Event {
@@ -1869,6 +1952,13 @@ impl Workspace {
                 self.vim.cancel_leader();
                 let mut events = vec![Event::Leader { prefix: None }];
                 events.extend(self.trace_buffer());
+                (events, false)
+            }
+            // `␣tt` opens a terminal.
+            Outcome::Leader(prefix) if terminal_command(&prefix).is_some() => {
+                self.vim.cancel_leader();
+                let mut events = vec![Event::Leader { prefix: None }];
+                events.extend(self.apply(terminal_command(&prefix).unwrap()));
                 (events, false)
             }
             // The debugger, under `␣d` as the rail has always shown it.
@@ -2174,6 +2264,22 @@ pub(crate) fn notice(text: String, level: NoticeLevel) -> Event {
     Event::Notice { text, level }
 }
 
+/// One terminal run, as the bridge carries it.
+fn term_run(run: &proton_term::Run) -> TermRun {
+    TermRun {
+        text: run.text.clone(),
+        fg: run.fg,
+        bg: run.bg,
+        // Turned into a colour here rather than three numbers on the wire: the
+        // front end would only put it back together to use it.
+        rgb: run.rgb.map(|(r, g, b)| format!("#{r:02x}{g:02x}{b:02x}")),
+        bold: run.bold,
+        italic: run.italic,
+        underline: run.underline,
+        inverse: run.inverse,
+    }
+}
+
 /// The `␣d` family. `␣db` is the one the rail has advertised all along.
 fn debug_command(prefix: &str) -> Option<Command> {
     Some(match prefix {
@@ -2187,6 +2293,14 @@ fn debug_command(prefix: &str) -> Option<Command> {
         "do" => Command::DebugStepOut,
         _ => return None,
     })
+}
+
+/// `␣t` opens a terminal. Vims own `:terminal` too, and both work.
+fn terminal_command(prefix: &str) -> Option<Command> {
+    match prefix {
+        "tt" => Some(Command::OpenTerminal),
+        _ => None,
+    }
 }
 
 /// The `␣w` family — vim's `⌃w`, under the leader where everything else lives.
