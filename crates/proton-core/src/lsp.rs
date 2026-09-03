@@ -202,6 +202,10 @@ pub struct Servers {
     /// statusline does not need to see every one.
     notes: HashMap<&'static str, String>,
     awaiting: HashMap<Ask, i64>,
+    /// Which servers said they would format. Recorded from `initialize`
+    /// rather than learned from a failed request: a save should not produce
+    /// an error notice on every language whose server has no formatter.
+    formats: HashSet<&'static str>,
 }
 
 /// A question the editor is waiting on an answer to.
@@ -215,6 +219,7 @@ pub enum Ask {
     Hover,
     References,
     Symbols,
+    Format,
 }
 
 impl Servers {
@@ -378,6 +383,23 @@ impl Servers {
         Some(id)
     }
 
+    /// Whether anything would come of asking this file's server to format it.
+    pub fn formats(&self, path: &Path) -> bool {
+        self.announced
+            .get(&proton_lsp::uri::plain(path))
+            .is_some_and(|a| self.formats.contains(a.language))
+    }
+
+    pub fn format(&mut self, path: &Path) -> Option<i64> {
+        let path = proton_lsp::uri::plain(path);
+        if !self.formats(&path) {
+            return None;
+        }
+        let id = self.client_for(&path)?.formatting(&path);
+        self.awaiting.insert(Ask::Format, id);
+        Some(id)
+    }
+
     pub fn symbols(&mut self, path: &Path) -> Option<i64> {
         let path = proton_lsp::uri::plain(path);
         let id = self.client_for(&path)?.symbols(&path);
@@ -413,8 +435,11 @@ impl Servers {
 
         for (language, message) in &all {
             match message {
-                Incoming::Ready { .. } => {
+                Incoming::Ready { formats, .. } => {
                     self.status.insert(language, ServerStatus::Ready);
+                    if *formats {
+                        self.formats.insert(language);
+                    }
                 }
                 Incoming::Progress {
                     title,
@@ -513,6 +538,57 @@ pub fn char_column(line: &str, utf16: usize) -> usize {
         units += c.len_utf16();
     }
     line.chars().count()
+}
+
+/// Apply a server's edits to a buffer, keeping the cursor where it was.
+///
+/// Three things make this more than a loop.
+///
+/// **Every offset is computed before anything is applied.** The ranges are
+/// all against the document as the server saw it, so converting them one at a
+/// time as the text moves underneath would leave every edit but the first
+/// pointing at the wrong place. `Buffer::apply` then applies them back to
+/// front and records the lot as one undoable change — which is what makes a
+/// reformat one press of `u` rather than four hundred.
+///
+/// **The cursor is kept by line and column, not by offset.** A whole-document
+/// format is usually one edit replacing everything, and an offset-preserving
+/// cursor lands at the end of the file. Line and column survives the common
+/// case — a few lines re-indented above you — which is the one that matters.
+///
+/// Returns whether anything actually changed.
+pub fn apply_edits(buffer: &mut Buffer, edits: &[proton_lsp::TextEdit]) -> bool {
+    let was = buffer.position(buffer.cursor.offset);
+
+    let edits: Vec<Edit> = edits
+        .iter()
+        .map(|edit| Edit {
+            start: buffer.offset_at_utf16(
+                edit.range.start.line as usize,
+                edit.range.start.character as usize,
+            ),
+            end: buffer.offset_at_utf16(
+                edit.range.end.line as usize,
+                edit.range.end.character as usize,
+            ),
+            text: edit.new_text.clone(),
+        })
+        // A server may send an edit that changes nothing — a range replaced
+        // by what is already in it. Keeping those would make an already
+        // formatted file report as reformatted, and mark it modified.
+        .filter(|edit| buffer.text().slice(edit.start..edit.end) != edit.text.as_str())
+        .collect();
+
+    if edits.is_empty() {
+        return false;
+    }
+
+    // Where the cursor lands is worked out after the edits are applied, so
+    // this is a placeholder that `apply` will clamp; the real move follows.
+    buffer.apply(edits, buffer.cursor);
+    let at = buffer.offset_of(was);
+    buffer.cursor = buffer.clamp(buffer.cursor.moved_to(at));
+    true
 }
 
 /// LSP's symbol kinds, in the vocabulary the completion popup already draws.

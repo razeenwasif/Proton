@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 501 tests, headless
+cargo test --workspace        # 510 tests, headless
 cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
                               # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
@@ -812,12 +812,44 @@ nested symbol carries **its parent as context rather than as indentation**:
 for the matcher to work on. A query that had to match through leading spaces
 would find nothing.
 
+**Formatting, and the order `:w` does things in.** A save formats when the
+server offers to — rustfmt behind rust-analyzer, gofmt behind gopls — and the
+options we send are a floor rather than a policy, because a server with a real
+formatter behind it reads the *repository's* configuration and ignores them.
+The style that wins should be the project's, not the editor's.
+
+**The file is written first and formatted second.** An editor with a blocking
+save formats first and waits with a timeout; this core has no clock, so it
+cannot. And a `:w` that might not write, because a server went quiet, is worse
+than a file written twice. So the text goes to disk as it is, the question goes
+out, and if the answer changes anything the file is written again. The cost is
+visible and worth naming: a watcher sees two writes for a save that reformats.
+
+Formatting is the first thing here that both asks a server a question *and*
+edits on the answer, which makes it the first that can be stale in a way that
+corrupts rather than merely disappoints — edits computed against one version of
+a file, applied to another, land in the wrong places. So the request remembers
+which file and which buffer version it was asked about, and a reply that no
+longer matches is dropped with a notice rather than applied.
+
+Two rules in the applier itself, which is the piece rename and code actions
+will reuse. **Every offset is converted before anything is applied**, because
+they all describe the document the server saw; converting them one at a time as
+the text moves underneath leaves every edit but the first pointing somewhere
+else. And **the cursor is kept by line and column, not by offset** — a
+whole-document format is usually one edit replacing everything, and an
+offset-preserving cursor lands at the end of the file. The whole set goes to
+`Buffer::apply` at once, so a reformat is one press of `u`.
+
+`:fmt` formats without saving, which is the only reason it exists separately.
+
 *Exit: met. `␣ff` and `␣fg` are faster than reaching for the mouse;
 `crates/proton-core/tests/live_server.rs` drives a real rust-analyzer through
 the same seam the shell uses and gets back a completion list, a `gd` that lands
 on the declaration, a type error in the gutter, a hover carrying the signature
 with no fences left in it, a `gr` that finds the declaration and the call site,
-and a symbol list that reads down the file.*
+a symbol list that reads down the file, and a `:w` on a badly spaced file that
+comes back rustfmt-clean on disk as well as in the buffer.*
 
 Still open, and deliberately deferred: document sync is full-text rather than
 incremental. Incremental ships less over the pipe, but it means getting ranges

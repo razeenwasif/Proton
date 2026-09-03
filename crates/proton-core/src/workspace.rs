@@ -5,7 +5,7 @@
 //! No clock, no threads, no windowing — that is what makes the core testable
 //! headless and lets a second front end reuse it verbatim.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use proton_lsp::client::Incoming;
 
@@ -28,6 +28,22 @@ use crate::split::{Direction, Splits};
 use crate::trace::Visualizer;
 use crate::tree::Tree;
 use crate::vim::{Outcome, Vim, VimMode};
+
+/// What a formatting reply will be checked against when it arrives.
+///
+/// Formatting is the first thing here that both *asks* a server a question
+/// and *edits* on the answer, so it is the first that can be stale in a way
+/// that corrupts rather than merely disappoints: edits computed against one
+/// version of a file, applied to another, land in the wrong places. The file
+/// and the version are what make that checkable.
+#[derive(Debug)]
+struct Formatting {
+    path: PathBuf,
+    version: u64,
+    /// A `:w` is waiting on this, so the file is written again once the edits
+    /// land. False for `:fmt`, which formats without saving.
+    then_write: bool,
+}
 
 #[derive(Debug, Default)]
 pub struct Workspace {
@@ -61,6 +77,8 @@ pub struct Workspace {
     /// front end once it has been sent, and what the core needs to know is
     /// when to take it away.
     hover_open: bool,
+    /// A formatting request in flight.
+    formatting: Option<Formatting>,
     /// Where the cursor was when a search prompt opened.
     ///
     /// Every keystroke previews from here rather than from the last preview,
@@ -385,6 +403,8 @@ impl Workspace {
             Command::CloseHover => self.close_hover(),
 
             Command::FindReferences => self.find_references(),
+
+            Command::Format => self.request_format(false),
 
             Command::AcceptCompletion => self.accept_completion(),
 
@@ -938,6 +958,11 @@ impl Workspace {
         if ex.is("terminal", 4) {
             return self.apply(Command::OpenTerminal);
         }
+        // Spelled out rather than abbreviated: `:fo` is `:fold` in vim and
+        // `:f` is `:file`, so there is no short form going spare.
+        if ex.name == "fmt" || ex.name == "format" {
+            return self.apply(Command::Format);
+        }
         if ex.is("nohlsearch", 3) {
             // Vim's `:noh`. The pattern is kept — `n` still works — and only
             // the painting stops, which is exactly the distinction people use
@@ -1163,13 +1188,96 @@ impl Workspace {
                 // A save changes what git thinks of the file on disk, so the
                 // blob it was compared against has to be read again.
                 self.git.forget(self.editor.active());
-                vec![
+                let mut events = vec![
                     notice(format!("wrote {name}"), NoticeLevel::Info),
                     self.buffers_event(),
-                ]
+                ];
+                events.extend(self.request_format(true));
+                events
             }
             Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
         }
+    }
+
+    /// Ask the server to format the active buffer.
+    ///
+    /// **`:w` writes first and formats second.** The core has no clock, so it
+    /// cannot wait for a reply with a timeout the way an editor with a
+    /// blocking save does; and a `:w` that might not write, because a server
+    /// went quiet, is worse than a file written twice. So the file goes to
+    /// disk as it is, the question goes out, and if the answer changes
+    /// anything the file is written again. The visible cost is that a watcher
+    /// sees two writes for a save that reformats.
+    fn request_format(&mut self, then_write: bool) -> Vec<Event> {
+        let Some(path) = self.editor.buffer().path().map(Path::to_path_buf) else {
+            return match then_write {
+                true => Vec::new(),
+                false => vec![notice("no file to format".into(), NoticeLevel::Warn)],
+            };
+        };
+        // The server has to be looking at the text we are asking about, or it
+        // formats the version before the edit that prompted the save.
+        self.resync();
+
+        if self.servers.format(&path).is_none() {
+            self.formatting = None;
+            return match then_write {
+                // Saving a file whose language has no formatter is the
+                // ordinary case, not something to say anything about.
+                true => Vec::new(),
+                false => vec![notice(
+                    "no formatter for this file".into(),
+                    NoticeLevel::Warn,
+                )],
+            };
+        }
+        self.formatting = Some(Formatting {
+            path,
+            version: self.editor.buffer().version(),
+            then_write,
+        });
+        Vec::new()
+    }
+
+    /// Put a server's formatting edits in the buffer, if they still fit.
+    fn formatted(&mut self, edits: &[proton_lsp::TextEdit]) -> Vec<Event> {
+        let Some(pending) = self.formatting.take() else {
+            return Vec::new();
+        };
+        let here = self.editor.buffer().path().map(proton_lsp::uri::plain);
+        if here.as_deref() != Some(pending.path.as_path()) {
+            // Switched files while it was thinking. Silent: the save that
+            // asked already happened and said so.
+            return Vec::new();
+        }
+        if self.editor.buffer().version() != pending.version {
+            return vec![notice(
+                "kept your edits — the file changed while it was being formatted".into(),
+                NoticeLevel::Info,
+            )];
+        }
+        if !lsp::apply_edits(self.editor.buffer_mut(), edits) {
+            return Vec::new();
+        }
+
+        let mut events = vec![notice(
+            format!("formatted {}", self.editor.buffer().name()),
+            NoticeLevel::Info,
+        )];
+        if pending.then_write {
+            // Forced: we wrote this file a moment ago, so the copy on disk
+            // being newer than the one we read is us.
+            if let Err(err) = self.editor.save() {
+                events.push(notice(err.to_string(), NoticeLevel::Error));
+            } else {
+                self.servers.saved(self.editor.buffer());
+                self.git.forget(self.editor.active());
+            }
+        }
+        self.resync();
+        events.push(self.buffers_event());
+        events.extend(self.after_action(true));
+        events
     }
 
     /// Open a file into a buffer, or focus it if it is already open.
@@ -1312,6 +1420,11 @@ impl Workspace {
                     if self.servers.wanted(lsp::Ask::References, id) {
                         let rows = lsp::reference_rows(&places, self.pickers.root());
                         events.extend(self.fill_picker(rows));
+                    }
+                }
+                Incoming::Formatted { id, edits } => {
+                    if self.servers.wanted(lsp::Ask::Format, id) {
+                        events.extend(self.formatted(&edits));
                     }
                 }
                 Incoming::Symbols { id, symbols } => {

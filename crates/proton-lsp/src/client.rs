@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 
 use crate::protocol::{
     CompletionItem, CompletionResponse, DefinitionResponse, Diagnostic, Hover, Position,
-    PublishDiagnostics, ReferencesResponse, Symbol, SymbolResponse,
+    PublishDiagnostics, ReferencesResponse, Symbol, SymbolResponse, TextEdit,
 };
 use crate::{transport, uri};
 
@@ -28,6 +28,11 @@ pub enum Incoming {
     /// `initialize` came back. Nothing may be requested before this.
     Ready {
         server: String,
+        /// Whether it will format a whole document. Asked once, here, rather
+        /// than discovered by sending a request and reading the error —
+        /// declining to format is a legitimate answer for a server, not a
+        /// fault to report.
+        formats: bool,
     },
     Diagnostics {
         path: PathBuf,
@@ -51,6 +56,12 @@ pub enum Incoming {
     References {
         id: i64,
         places: Vec<Jump>,
+    },
+    /// The whole document, rewritten. Empty means it was already formatted,
+    /// which is the answer most saves get.
+    Formatted {
+        id: i64,
+        edits: Vec<TextEdit>,
     },
     Symbols {
         id: i64,
@@ -91,6 +102,7 @@ enum Kind {
     Hover,
     References,
     Symbols,
+    Format,
     Shutdown,
 }
 
@@ -293,6 +305,7 @@ impl Client {
                     // that send them anyway.
                     "hover": { "contentFormat": ["plaintext"] },
                     "references": { "dynamicRegistration": false },
+                    "formatting": { "dynamicRegistration": false },
                     // Ask for the tree. A server that cannot build one falls
                     // back to the flat shape on its own, and both are read.
                     "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
@@ -420,6 +433,28 @@ impl Client {
                 "textDocument": { "uri": uri::from_path(path) },
                 "position": at,
                 "context": { "includeDeclaration": true },
+            }),
+        )
+    }
+
+    /// Format a whole document.
+    ///
+    /// The options are a floor, not a policy. A server with a real formatter
+    /// behind it — rustfmt, gofmt — uses the project's own configuration and
+    /// ignores these entirely, which is the point: the style that wins should
+    /// be the repository's, not the editor's.
+    pub fn formatting(&mut self, path: &std::path::Path) -> i64 {
+        self.request(
+            Kind::Format,
+            "textDocument/formatting",
+            json!({
+                "textDocument": { "uri": uri::from_path(path) },
+                "options": {
+                    "tabSize": 4,
+                    "insertSpaces": true,
+                    "trimTrailingWhitespace": true,
+                    "insertFinalNewline": true,
+                },
             }),
         )
     }
@@ -632,6 +667,12 @@ fn response(
                 json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }).to_string(),
             );
             Some(Incoming::Ready {
+                // `boolean | DocumentFormattingOptions`, so anything present
+                // that is not an explicit `false` means yes.
+                formats: !matches!(
+                    result.pointer("/capabilities/documentFormattingProvider"),
+                    None | Some(Value::Null) | Some(Value::Bool(false))
+                ),
                 server: result
                     .pointer("/serverInfo/name")
                     .and_then(Value::as_str)
@@ -711,6 +752,20 @@ fn response(
             }),
         },
 
+        // Null and an empty array mean the same thing here — "nothing to
+        // change" — and a caller that had to tell them apart would be reading
+        // a difference the servers do not intend.
+        Kind::Format if result.is_null() => Some(Incoming::Formatted {
+            id,
+            edits: Vec::new(),
+        }),
+        Kind::Format => match serde_json::from_value::<Vec<TextEdit>>(result.clone()) {
+            Ok(edits) => Some(Incoming::Formatted { id, edits }),
+            Err(err) => Some(Incoming::Failed {
+                text: format!("formatting: {err}"),
+            }),
+        },
+
         Kind::Symbols if result.is_null() => Some(Incoming::Symbols {
             id,
             symbols: Vec::new(),
@@ -769,8 +824,68 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"rust-analyzer"}}}"#,
             Some(Kind::Initialize),
         )]);
-        assert!(matches!(&heard[0], Incoming::Ready { server } if server == "rust-analyzer"));
+        assert!(matches!(&heard[0], Incoming::Ready { server, .. } if server == "rust-analyzer"));
         assert_eq!(said[0]["method"], "initialized");
+    }
+
+    #[test]
+    fn a_server_is_taken_at_its_word_about_formatting() {
+        // `boolean | DocumentFormattingOptions`, and absent for a server that
+        // does not do it at all. Guessing wrong in the permissive direction
+        // means every save asks a question that comes back an error.
+        let answers = [
+            (
+                r#"{"capabilities":{"documentFormattingProvider":true}}"#,
+                true,
+            ),
+            (
+                r#"{"capabilities":{"documentFormattingProvider":{}}}"#,
+                true,
+            ),
+            (
+                r#"{"capabilities":{"documentFormattingProvider":false}}"#,
+                false,
+            ),
+            (r#"{"capabilities":{}}"#, false),
+            (r#"{}"#, false),
+        ];
+        for (result, expected) in answers {
+            let (heard, _) = converse(&[(
+                &format!(r#"{{"jsonrpc":"2.0","id":1,"result":{result}}}"#),
+                Some(Kind::Initialize),
+            )]);
+            let Incoming::Ready { formats, .. } = &heard[0] else {
+                panic!("expected ready, got {heard:?}");
+            };
+            assert_eq!(*formats, expected, "for {result}");
+        }
+    }
+
+    #[test]
+    fn nothing_to_reformat_is_an_empty_answer_not_a_missing_one() {
+        let (heard, _) = converse(&[
+            (
+                r#"{"jsonrpc":"2.0","id":1,"result":null}"#,
+                Some(Kind::Format),
+            ),
+            (
+                r#"{"jsonrpc":"2.0","id":2,"result":[]}"#,
+                Some(Kind::Format),
+            ),
+            (
+                r#"{"jsonrpc":"2.0","id":3,"result":[{"range":{"start":{"line":0,"character":0},
+                    "end":{"line":1,"character":0}},"newText":"fn main() {}\n"}]}"#,
+                Some(Kind::Format),
+            ),
+        ]);
+        let counts: Vec<_> = heard
+            .iter()
+            .map(|e| match e {
+                Incoming::Formatted { edits, .. } => edits.len(),
+                other => panic!("expected formatting, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(counts, vec![0, 0, 1]);
     }
 
     #[test]

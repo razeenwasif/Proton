@@ -112,7 +112,13 @@ fn start(root: &Path) -> Client {
         "initialize",
         Duration::from_secs(30),
         |m| match m {
-            Incoming::Ready { server } => Some(server.clone()),
+            // rust-analyzer formats, and a real handshake is the only place
+            // that claim can be checked against the server rather than
+            // against a fixture of what we think it says.
+            Incoming::Ready { server, formats } => {
+                assert!(*formats, "rust-analyzer should offer formatting");
+                Some(server.clone())
+            }
             _ => None,
         },
     );

@@ -137,6 +137,9 @@ pub enum Command {
     CloseHover,
     /// Every use of the symbol under the cursor, in a picker — `gr`.
     FindReferences,
+    /// Reformat the active buffer without saving it — `:fmt`. Saving formats
+    /// on its own; this is for reformatting something you are not done with.
+    Format,
     /// Drain whatever the language servers have said.
     ///
     /// The core has no clock and no threads, so it cannot notice a reply on

@@ -715,6 +715,38 @@ fn escape_abandons_the_line_without_running_it() {
     assert!(ws.is_modified());
 }
 
+#[test]
+fn a_save_with_no_formatter_writes_and_says_nothing_about_it() {
+    // Formatting on save is on, but most languages have no formatter behind
+    // their server and these tests start no servers at all. A save that
+    // complained about that every time would be worse than a quiet one — and
+    // the file still has to reach the disk, which is the whole job.
+    let scratch = Scratch::new("fmt");
+    scratch.file("a.rs", "fn  a(){}\n");
+    let mut ws = scratch.workspace();
+    ws.apply(Command::OpenBuffer {
+        path: "a.rs".into(),
+    });
+
+    let events = run(&mut ws, "w");
+    assert!(
+        notices(&events).iter().any(|n| n.contains("wrote")),
+        "`:w` should write: {events:?}"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            Event::Notice {
+                level: proton_core::bus::NoticeLevel::Warn,
+                ..
+            }
+        )),
+        "and should not mention a formatter nobody asked for: {events:?}"
+    );
+    assert_eq!(scratch.read("a.rs"), "fn  a(){}\n", "written as it was");
+    assert!(!ws.is_modified());
+}
+
 /// Rewrite a file and make sure its mtime actually differs.
 ///
 /// Windows timestamps are coarse enough that writing twice in the same

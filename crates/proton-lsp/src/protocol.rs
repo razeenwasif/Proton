@@ -333,6 +333,20 @@ impl ReferencesResponse {
     }
 }
 
+/* ── formatting ───────────────────────────────────────────────────── */
+
+/// One replacement, in the server's coordinates.
+///
+/// Its own type rather than a reuse of completion's `Edit`: that one is an
+/// untagged enum because a completion may send an insert/replace *pair*, and
+/// nothing but completion does. A formatting edit is only ever this.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextEdit {
+    pub range: Range,
+    pub new_text: String,
+}
+
 /* ── document symbols ─────────────────────────────────────────────── */
 
 /// The modern shape: a tree, with the nesting the file actually has.

@@ -397,3 +397,104 @@ fn the_symbol_list_reads_down_the_file() {
         nested.detail
     );
 }
+
+#[test]
+#[ignore = "spawns rust-analyzer; run with `cargo test -- --include-ignored`"]
+fn saving_formats_the_file_and_writes_it_again() {
+    if !installed() {
+        println!("skipping: rust-analyzer is not on PATH");
+        return;
+    }
+    let fixture = Fixture::new("format");
+    // Badly spaced on purpose, and still valid Rust — rustfmt will not touch
+    // a file it cannot parse, and a test that asserted on one would be
+    // asserting that nothing happens.
+    let ugly = "pub fn  add( a:i32,b:i32 )->i32{a+b}\n";
+    let path = fixture.root.join("src").join("lib.rs");
+    std::fs::write(&path, ugly).unwrap();
+
+    let mut ws = Workspace::rooted(&fixture.root).with_language_servers();
+    ws.apply(Command::Sync);
+    ws.apply(Command::OpenBuffer {
+        path: "src/lib.rs".into(),
+    });
+
+    // `:w` writes first and formats second, so the file reaching the disk
+    // unformatted is the expected intermediate state, not a failure.
+    pump(
+        &mut ws,
+        "a reformat",
+        |ws| {
+            for key in [':', 'w'] {
+                ws.apply(Command::Key {
+                    key: Key::char(key),
+                });
+            }
+            ws.apply(Command::Key {
+                key: Key::named("Enter"),
+            });
+        },
+        |event| match event {
+            Event::Notice { text, .. } if text.contains("formatted") => Some(()),
+            _ => None,
+        },
+    );
+
+    let buffer = ws.editor().buffer();
+    assert_eq!(
+        buffer.contents(),
+        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
+        "the buffer should hold what rustfmt returned"
+    );
+    // And the second write is the point: what is on the disk is the formatted
+    // text, not the text that went out before the server answered.
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        buffer.contents(),
+        "the file on disk should match the buffer"
+    );
+    assert!(!ws.is_modified(), "and the buffer should be saved");
+}
+
+#[test]
+#[ignore = "spawns rust-analyzer; run with `cargo test -- --include-ignored`"]
+fn fmt_reformats_without_writing() {
+    if !installed() {
+        println!("skipping: rust-analyzer is not on PATH");
+        return;
+    }
+    let fixture = Fixture::new("fmtonly");
+    let ugly = "pub fn  two( )->i32{2}\n";
+    let path = fixture.root.join("src").join("lib.rs");
+    std::fs::write(&path, ugly).unwrap();
+
+    let mut ws = Workspace::rooted(&fixture.root).with_language_servers();
+    ws.apply(Command::Sync);
+    ws.apply(Command::OpenBuffer {
+        path: "src/lib.rs".into(),
+    });
+
+    pump(
+        &mut ws,
+        "a reformat",
+        |ws| {
+            ws.apply(Command::Format);
+        },
+        |event| match event {
+            Event::Notice { text, .. } if text.contains("formatted") => Some(()),
+            _ => None,
+        },
+    );
+
+    assert_eq!(
+        ws.editor().buffer().contents(),
+        "pub fn two() -> i32 {\n    2\n}\n"
+    );
+    // The distinction that makes `:fmt` worth having separately from `:w`.
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        ugly,
+        "`:fmt` should not have written anything"
+    );
+    assert!(ws.is_modified(), "the buffer is changed and unsaved");
+}

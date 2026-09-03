@@ -549,3 +549,124 @@ fn opening_the_symbol_picker_without_a_server_says_so() {
         "expected a notice, got {events:?}"
     );
 }
+
+/* ── formatting ───────────────────────────────────────────────────── */
+
+fn text_edit(line: u32, from: u32, to_line: u32, to: u32, text: &str) -> proton_lsp::TextEdit {
+    proton_lsp::TextEdit {
+        range: Range {
+            start: Position {
+                line,
+                character: from,
+            },
+            end: Position {
+                line: to_line,
+                character: to,
+            },
+        },
+        new_text: text.into(),
+    }
+}
+
+#[test]
+fn several_edits_all_land_where_the_server_meant_them() {
+    // Every offset is computed against the document the server saw. Converting
+    // them one at a time as the text moves underneath would leave every edit
+    // but the first pointing somewhere else — and the further down the file,
+    // the further off.
+    let mut buffer = Buffer::from_text("fn  a(){}\nfn  b(){}\nfn  c(){}\n");
+    let changed = lsp::apply_edits(
+        &mut buffer,
+        &[
+            text_edit(0, 0, 0, 9, "fn a() {}"),
+            text_edit(1, 0, 1, 9, "fn b() {}"),
+            text_edit(2, 0, 2, 9, "fn c() {}"),
+        ],
+    );
+    assert!(changed);
+    assert_eq!(buffer.contents(), "fn a() {}\nfn b() {}\nfn c() {}\n");
+}
+
+#[test]
+fn a_whole_file_reformat_is_one_press_of_u() {
+    // The reason the whole set goes to `Buffer::apply` at once. Four hundred
+    // edits that each undo separately is not an undo history, it is a
+    // punishment.
+    let mut buffer = Buffer::from_text("let  x=1;\nlet  y=2;\n");
+    lsp::apply_edits(
+        &mut buffer,
+        &[
+            text_edit(0, 0, 0, 9, "let x = 1;"),
+            text_edit(1, 0, 1, 9, "let y = 2;"),
+        ],
+    );
+    assert_eq!(buffer.contents(), "let x = 1;\nlet y = 2;\n");
+    buffer.undo();
+    assert_eq!(buffer.contents(), "let  x=1;\nlet  y=2;\n");
+}
+
+#[test]
+fn formatting_leaves_the_cursor_on_the_line_it_was_on() {
+    // A whole-document format is usually one edit replacing everything, so a
+    // cursor kept by offset lands at the end of the file. Losing your place on
+    // every save is what makes people turn a feature off.
+    let mut buffer = Buffer::from_text("fn a() {}\nfn b() {}\nfn c() {}\n");
+    let third = buffer.offset_of(proton_text::Position { line: 2, column: 3 });
+    buffer.cursor = Cursor::at(third);
+
+    lsp::apply_edits(
+        &mut buffer,
+        &[text_edit(
+            0,
+            0,
+            3,
+            0,
+            "fn a() {}\n\nfn b() {}\n\nfn c() {}\n",
+        )],
+    );
+    let at = buffer.position(buffer.cursor.offset);
+    assert_eq!(at.line, 2, "the line is kept, not the offset");
+    assert_eq!(at.column, 3);
+}
+
+#[test]
+fn an_edit_that_changes_nothing_is_not_a_change() {
+    // Some servers answer with the text that is already there. Taking those at
+    // face value would mark a just-saved file modified again, which is a save
+    // that never settles.
+    let mut buffer = Buffer::from_text("fn a() {}\n");
+    assert!(!lsp::apply_edits(
+        &mut buffer,
+        &[text_edit(0, 0, 0, 9, "fn a() {}")]
+    ));
+    assert!(!lsp::apply_edits(&mut buffer, &[]));
+    assert_eq!(buffer.contents(), "fn a() {}\n");
+}
+
+#[test]
+fn an_edit_past_the_end_of_the_file_is_clamped_not_panicked() {
+    // The file the server formatted and the buffer we hold can differ by an
+    // edit. Being wrong about where is survivable; panicking is not.
+    let mut buffer = Buffer::from_text("short\n");
+    lsp::apply_edits(&mut buffer, &[text_edit(9, 40, 12, 80, "!")]);
+    assert!(!buffer.contents().is_empty());
+}
+
+#[test]
+fn fmt_without_a_formatter_says_so_because_it_was_asked_for() {
+    // The opposite of what a save does, and for the same reason: silence is
+    // right for something that happened on the way past, and wrong for
+    // something typed.
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/src/vim.rs".into(),
+    });
+    let events = ws.apply(Command::Format);
+    assert!(
+        events.iter().any(
+            |e| matches!(e, Event::Notice { level: NoticeLevel::Warn, text }
+            if text.contains("formatter"))
+        ),
+        "expected a notice, got {events:?}"
+    );
+}
