@@ -1,13 +1,13 @@
 # Proton — architecture
 
-The build document. **M0 through M4 are implemented**; everything from M5 on
-is a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
+The build document. **M0 through M4 are implemented and M5 is half-built**;
+M6 and M7 are a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
 reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 **what we build and in what order**, and is the one to argue with before writing
 code.
 
 ```bash
-cargo test --workspace        # 573 tests, headless
+cargo test --workspace        # 601 tests, headless
 cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
                               # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
@@ -77,7 +77,8 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
 
 **Built so far: `proton-text`, `proton-index`, `proton-syntax`, `proton-lsp`,
-`proton-agent`, `proton-trace`, `proton-vcs`, `proton-dap`, `proton-term`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
+`proton-agent`, `proton-trace`, `proton-vcs`, `proton-dap`, `proton-term`,
+`proton-plugin`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
 into. `proton-vim` has not split out of `proton-core` yet — the modal engine is
 one file there and would gain nothing but a manifest from moving today.
 
@@ -482,13 +483,32 @@ and `markup.heading` are both read for the same reason the two spellings exist.
 ### Plugins
 
 Wasmtime, Component Model, WIT-defined interfaces. Two things configured on day
-one, not later:
+one, not later — both are guarantees rather than features, and a guarantee
+retrofitted is a guarantee that was false in between:
 
 - **`Config::epoch_interruption`** with a per-call deadline. Without it the
   "a plugin can't hog the thread" guarantee is false — an infinite loop in wasm
-  spins forever by default.
+  spins forever by default. Epochs rather than fuel: fuel counts instructions,
+  and two plugins hanging the editor for the same wall-clock time would get
+  very different treatment. One ticker thread serves the whole engine, and
+  every store the host hands out already carries a deadline, so there is no
+  path that runs plugin code off the clock.
 - **A coarse API.** Host calls are not free, so there is no per-keystroke hook.
   Plugins get grammars, themes, LSP adapters, commands, and mode contributions.
+  The WIT world's import side is three functions — read the buffer, where is
+  the cursor, where is the project — because every one of them is a permission
+  granted to every plugin, and the bar for adding one is not "a plugin might
+  want it" but "a plugin cannot do its job without it".
+
+Two orderings follow. **The manifest is read before the wasm is**, so a plugin
+that only ships a theme never has its code run and nothing is executed at
+startup merely for being installed. And **plugins are per user, not per
+project**: they sit beside `session.json`, because a repository that could drop
+code into the editor by existing would be a repository you could not safely
+open. The session loads them once and shares one set with every workspace.
+
+A command's result is applied as an ordinary edit, so `u` takes it back — the
+rule everything that writes to a buffer here follows.
 
 ### Agent runtime
 
@@ -1087,10 +1107,44 @@ a context scope), `[` and `]` to jump between changes to one value, gutter
 marks on traced lines, and writing traces to `.proton/traces/` so `␣ft` finds
 them.
 
-**M5 — Plugins.** Wasmtime host, WIT interfaces, epoch interruption, wasm
-grammars, themes.
-*Exit: a third-party grammar and theme install without a native toolchain, and a
-deliberately infinite plugin is killed rather than hanging the app.*
+**M5 — Plugins. ◐ in progress.** The host ships: `proton-plugin` is a
+wasmtime engine with the Component Model on and epoch interruption on, a
+manifest read before any code runs, and a component loader. `examples/hello-plugin`
+is a real plugin built to a real component and committed, so the tests need no
+wasm toolchain to run.
+
+**The guarantee is the interesting half.** Wasm does not stop on its own: by
+default an infinite loop in a plugin spins forever and takes the thread with
+it, so "a plugin cannot hang the editor" is a claim rather than a property
+unless the engine is told otherwise. Epochs rather than fuel, because fuel
+counts instructions and the thing anybody waiting cares about is measured in
+milliseconds — a tight loop and a slow one should be stopped after the same
+wait. One ticker thread serves the whole engine, and every store the host
+hands out already carries a deadline, so there is no path that runs plugin
+code off the clock.
+
+**The manifest is read before the wasm is.** A plugin that only ships a theme
+has nothing to run, and discovering what a plugin contributes by *calling* it
+would mean running everything installed at startup. Paths in a manifest are
+resolved against the plugin's own folder and refused if they climb out of it:
+a manifest is a file somebody else wrote.
+
+Plugins are **per user, not per project** — they sit beside `session.json`,
+because a repository that could drop code into the editor by existing would be
+a repository you could not safely open. The session loads them once and shares
+one set with every workspace; loading them per project would be a second
+engine and a second compile of every component for a second open folder.
+
+Wasmtime is **252 crates and about a minute and a half** on a clean build,
+measured before committing to it — the largest dependency here by some way,
+and the one with the least substitutable job.
+
+*Exit: half met.* A deliberately infinite plugin is killed rather than hanging
+the app, proven twice: against hand-written wasm in `crates/proton-plugin/tests/deadline.rs`,
+and against a real compiled-Rust loop in a real component in `tests/component.rs`.
+Still open: a third-party grammar and theme installing without a native
+toolchain. The manifest already describes both; what is missing is the
+tree-sitter side of a wasm grammar and the theme pipeline.
 
 **M6 — Data mode.** Closest to Codex; the first real exercise of the mode
 contract by something that is not a text editor.

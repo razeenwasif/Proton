@@ -1,0 +1,5 @@
+id = "hello"
+name = "Hello"
+description = "The example plugin: a theme, and three commands."
+version = "0.1.0"
+wasm = "hello.wasm"

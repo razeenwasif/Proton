@@ -35,6 +35,8 @@ pub enum PickerKind {
     Symbols,
     /// What the server offers to do about the line the cursor is on — `␣la`.
     Actions,
+    /// Everything the loaded plugins offer — `␣pc`.
+    PluginCommands,
 }
 
 impl PickerKind {
@@ -50,6 +52,16 @@ impl PickerKind {
         )
     }
 
+    /// Whether the workspace hands this one its rows rather than the picker
+    /// computing them from the query.
+    ///
+    /// The three above plus the plugin commands, which differ only in *when*:
+    /// a server answers late and the plugins are already loaded, so those
+    /// rows are set before the picker opens rather than after.
+    pub fn is_given_its_rows(self) -> bool {
+        self.is_from_a_server() || self == PickerKind::PluginCommands
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             PickerKind::Files => "find_files",
@@ -60,6 +72,7 @@ impl PickerKind {
             PickerKind::References => "lsp_references",
             PickerKind::Symbols => "document_symbols",
             PickerKind::Actions => "code_actions",
+            PickerKind::PluginCommands => "plugin_commands",
         }
     }
 
@@ -76,6 +89,7 @@ impl PickerKind {
             "fb" => PickerKind::Buffers,
             "gg" => PickerKind::Changed,
             "ls" => PickerKind::Symbols,
+            "pc" => PickerKind::PluginCommands,
             _ => return None,
         })
     }
@@ -122,6 +136,10 @@ pub enum Accepted {
     /// Carry out the code action at this index. Like `FocusBuffer`, addressed
     /// by position rather than by path — the thing chosen is not a place.
     RunAction {
+        index: usize,
+    },
+    /// Run a plugin command, addressed the same way and for the same reason.
+    RunPluginCommand {
         index: usize,
     },
     Nothing,
@@ -267,6 +285,10 @@ impl Picker {
                 .line
                 .map(|index| Accepted::RunAction { index })
                 .unwrap_or(Accepted::Nothing),
+            PickerKind::PluginCommands => item
+                .line
+                .map(|index| Accepted::RunPluginCommand { index })
+                .unwrap_or(Accepted::Nothing),
             _ => match &item.path {
                 Some(path) => Accepted::OpenPath {
                     path: path.clone(),
@@ -326,6 +348,14 @@ impl Pickers {
     /// Tell the `␣gg` picker what git says, before it opens.
     pub fn set_changes(&mut self, changes: Vec<(String, char)>) {
         self.changes = changes;
+    }
+
+    /// Supply the rows for a picker the workspace fills itself.
+    ///
+    /// Set before it opens, for the kinds that are known up front — the
+    /// plugins are already loaded, so their commands need no round trip.
+    pub fn set_rows(&mut self, items: Vec<PickerItem>) {
+        self.held = items;
     }
 
     /// Hand a server-fed picker its rows, once they arrive.
@@ -518,14 +548,20 @@ impl Pickers {
             // rather than ranking: symbols read down the file, references read
             // in the order the server found them. Ranking an empty pattern
             // would shuffle both into whatever the matcher considers a tie.
-            PickerKind::References | PickerKind::Symbols | PickerKind::Actions
+            PickerKind::References
+            | PickerKind::Symbols
+            | PickerKind::Actions
+            | PickerKind::PluginCommands
                 if query.is_empty() =>
             {
                 let mut rows = self.held.clone();
                 rows.truncate(LIMIT);
                 rows
             }
-            PickerKind::References | PickerKind::Symbols | PickerKind::Actions => {
+            PickerKind::References
+            | PickerKind::Symbols
+            | PickerKind::Actions
+            | PickerKind::PluginCommands => {
                 let labels: Vec<&str> = self.held.iter().map(|i| i.label.as_str()).collect();
                 self.matcher
                     .rank(&query, &labels, LIMIT)

@@ -1,0 +1,18 @@
+[package]
+name = "proton-plugin"
+description = "Proton's plugin host: wasm components, on a deadline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+ts-rs = { workspace = true }
+toml = "0.9"
+wasmtime = { version = "39", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
+
+[dev-dependencies]
+wasmtime = { version = "39", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
+wat = "1"

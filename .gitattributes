@@ -1,6 +1,4 @@
-* text=auto eol=lf
-
-*.png binary
-*.ico binary
-*.webp binary
-*.mp4 binary
+# The example plugin's component. Committed so the tests need no wasm
+# toolchain; binary so a diff of it is a line saying so rather than a screenful
+# of mojibake.
+*.wasm binary

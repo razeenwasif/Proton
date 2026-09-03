@@ -1,0 +1,61 @@
+package proton:plugin@0.1.0;
+
+/// What a plugin can ask the editor, and the shapes both sides speak in.
+///
+/// Deliberately small. Every function here is a permission granted to every
+/// plugin, so the bar for adding one is not "a plugin might want it" but
+/// "a plugin cannot do its job without it". A plugin that can read the buffer
+/// and say something back can be most of what a plugin is for.
+interface editor {
+    /// A colour, as a theme names it: `#rrggbb`.
+    record swatch {
+        name: string,
+        value: string,
+    }
+
+    /// A named palette.
+    record theme {
+        id: string,
+        name: string,
+        /// Whether it wants light or dark chrome around it.
+        dark: bool,
+        colours: list<swatch>,
+    }
+
+    /// Something the plugin can be asked to do, shown in the picker.
+    record command {
+        id: string,
+        title: string,
+    }
+
+    /// What running a command produced.
+    variant outcome {
+        /// Say this, and do nothing else.
+        message(string),
+        /// Put this in the buffer, where the cursor is.
+        insert(string),
+        /// It did not work, and this is why.
+        failed(string),
+    }
+
+    /// The active buffer's whole text.
+    read-buffer: func() -> string;
+    /// Where the cursor is: line and column, both from zero.
+    cursor: func() -> tuple<u32, u32>;
+    /// The project root, so a plugin can find its own files.
+    root: func() -> string;
+}
+
+world plugin {
+    use editor.{theme, command, outcome};
+
+    import editor;
+
+    /// Called once, when the plugin is loaded. Everything a plugin
+    /// contributes is declared in one call rather than discovered by asking
+    /// repeatedly — the host calls are the expensive part.
+    export themes: func() -> list<theme>;
+    export commands: func() -> list<command>;
+    /// Run one. The id is one this plugin returned from `commands`.
+    export run: func(id: string) -> outcome;
+}

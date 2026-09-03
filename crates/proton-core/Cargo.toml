@@ -12,6 +12,7 @@ proton-agent = { workspace = true }
 proton-dap = { workspace = true }
 proton-index = { workspace = true }
 proton-lsp = { workspace = true }
+proton-plugin = { workspace = true }
 proton-syntax = { workspace = true }
 proton-trace = { workspace = true }
 proton-vcs = { workspace = true }

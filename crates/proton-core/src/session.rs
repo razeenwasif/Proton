@@ -89,6 +89,13 @@ pub struct Session {
     store: Option<PathBuf>,
     /// Whether workspaces opened from here get language servers.
     servers: bool,
+    /// The loaded plugins, shared by every workspace.
+    ///
+    /// Loaded once for the session rather than once per project: a plugin
+    /// belongs to the person and not to the checkout, and loading them per
+    /// workspace would mean a second wasm engine and a second compile of
+    /// every component the moment you opened a second project.
+    plugins: std::sync::Arc<crate::plugins::Plugins>,
 }
 
 impl Session {
@@ -103,6 +110,7 @@ impl Session {
             height: None,
             store: None,
             servers: false,
+            plugins: std::sync::Arc::default(),
         }
     }
 
@@ -113,6 +121,34 @@ impl Session {
             workspace.enable_language_servers();
         }
         self
+    }
+
+    /// Load the installed plugins, once, for every workspace here and every
+    /// one opened later.
+    ///
+    /// Off by default, like the language servers and for the same reason: a
+    /// test must not start a wasm engine and compile whatever happens to be
+    /// installed on the machine running it.
+    pub fn with_plugins_from(mut self, folder: &Path) -> Session {
+        let mut plugins = crate::plugins::Plugins::default();
+        plugins.load(folder);
+        self.plugins = std::sync::Arc::new(plugins);
+        for workspace in &mut self.workspaces {
+            workspace.share_plugins(&self.plugins);
+        }
+        self
+    }
+
+    /// The same, from where plugins actually live.
+    pub fn with_plugins(self) -> Session {
+        match crate::plugins::folder() {
+            Some(folder) => self.with_plugins_from(&folder),
+            None => self,
+        }
+    }
+
+    pub fn plugins(&self) -> &crate::plugins::Plugins {
+        &self.plugins
     }
 
     /// Remember the open set in `file`, and reload it next time.
@@ -135,7 +171,9 @@ impl Session {
     /// put a downloads folder in the projects list for good because somebody
     /// once started the editor from there.
     pub fn restore(requested: Option<PathBuf>, fallback: Option<PathBuf>) -> Session {
-        Session::restore_from(state_file(), requested, fallback).with_language_servers()
+        Session::restore_from(state_file(), requested, fallback)
+            .with_language_servers()
+            .with_plugins()
     }
 
     /// [`Session::restore`], from a named store and without language servers.
@@ -327,7 +365,7 @@ impl Session {
     /* ── opening, closing, switching ──────────────────────────────── */
 
     fn build(&self, root: &Path) -> Workspace {
-        let mut workspace = Workspace::rooted(root);
+        let mut workspace = Workspace::rooted(root).sharing_plugins(&self.plugins);
         if self.servers {
             workspace.enable_language_servers();
         }

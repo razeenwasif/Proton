@@ -6,6 +6,7 @@
 //! headless and lets a second front end reuse it verbatim.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use proton_lsp::client::Incoming;
 
@@ -91,6 +92,9 @@ pub struct Workspace {
     review: review::Review,
     /// What has been asked of the agent, running and waiting.
     tasks: crate::tasks::Queue,
+    /// The loaded plugins. Empty unless somebody loaded them. Shared with
+    /// the session, which loads them once for every project.
+    plugins: Arc<crate::plugins::Plugins>,
     /// Where the cursor was when a search prompt opened.
     ///
     /// Every keystroke previews from here rather than from the last preview,
@@ -720,6 +724,19 @@ impl Workspace {
                 }
             }
         }
+        // The plugins are already loaded, so their commands are known now.
+        // Set before the picker opens rather than after, which is the only
+        // way this differs from the ones a server fills.
+        if kind == PickerKind::PluginCommands {
+            if self.plugins.commands().is_empty() {
+                return vec![notice(
+                    "no plugin commands — nothing installed that offers any".into(),
+                    NoticeLevel::Warn,
+                )];
+            }
+            let rows = self.plugin_rows();
+            self.pickers.set_rows(rows);
+        }
         let labels = self.buffer_labels();
         self.pickers.begin(kind, labels);
         // Close which-key on the way: the leader sequence resolved.
@@ -791,6 +808,7 @@ impl Workspace {
                 }
             }
             Accepted::RunAction { index } => events.extend(self.chose_action(index)),
+            Accepted::RunPluginCommand { index } => events.extend(self.run_plugin(index)),
             // A workspace's own pickers never produce this — the folder picker
             // belongs to the session, which handles its own accept.
             Accepted::OpenWorkspace { .. } | Accepted::Nothing => {}
@@ -1878,6 +1896,114 @@ impl Workspace {
             ),
             NoticeLevel::Warn,
         )]
+    }
+
+    /* ── plugins ──────────────────────────────────────────────────── */
+
+    /// Load whatever is installed. Explicit, and off in tests, because a core
+    /// test must not start a wasm engine and compile whatever happens to be
+    /// on the machine running it.
+    /// Load plugins from a folder named outright.
+    ///
+    /// A workspace on its own, for tests and for a single-project embedding.
+    /// A session loads them once and shares them — see [`Self::share_plugins`]
+    /// — because a plugin belongs to the person and not to the checkout.
+    pub fn with_plugins_from(mut self, folder: &Path) -> Self {
+        let mut plugins = crate::plugins::Plugins::default();
+        plugins.load(folder);
+        self.plugins = Arc::new(plugins);
+        self
+    }
+
+    /// Use the session's already-loaded plugins.
+    pub fn share_plugins(&mut self, plugins: &Arc<crate::plugins::Plugins>) {
+        self.plugins = Arc::clone(plugins);
+    }
+
+    /// The same, for the builder chain a session's `build` uses.
+    pub fn sharing_plugins(mut self, plugins: &Arc<crate::plugins::Plugins>) -> Self {
+        self.share_plugins(plugins);
+        self
+    }
+
+    pub fn plugins(&self) -> &crate::plugins::Plugins {
+        &self.plugins
+    }
+
+    /// Every plugin command, as picker rows.
+    ///
+    /// The plugin's name is the dim half, because you are looking for what
+    /// you want to do rather than for which plugin happens to provide it —
+    /// but you still want to know who is about to run.
+    fn plugin_rows(&self) -> Vec<crate::picker::PickerItem> {
+        self.plugins
+            .commands()
+            .into_iter()
+            .enumerate()
+            .map(|(index, (plugin, command))| crate::picker::PickerItem {
+                label: command.title,
+                detail: plugin,
+                positions: Vec::new(),
+                path: None,
+                // Addressed by position, like a code action: the thing chosen
+                // is not a place.
+                line: Some(index),
+                column: None,
+                kind: None,
+            })
+            .collect()
+    }
+
+    /// Run the chosen one, and do what it asked for.
+    fn run_plugin(&mut self, index: usize) -> Vec<Event> {
+        let all = self.plugins.commands();
+        let Some((plugin, command)) = all.get(index).cloned() else {
+            return Vec::new();
+        };
+
+        // What the plugin is lent for the length of the call. It cannot see
+        // the buffer — it is outside the sandbox — so anything it needs has
+        // to be handed over here.
+        let buffer = self.editor.buffer();
+        let at = buffer.position(buffer.cursor.offset);
+        let lent = proton_plugin::Lent {
+            buffer: buffer.contents(),
+            cursor: (at.line as u32, at.column as u32),
+            root: self.pickers.root().to_string_lossy().into_owned(),
+        };
+
+        match self.plugins.run(&plugin, &command.id, lent) {
+            Ok(proton_plugin::Outcome::Message(text)) => vec![notice(text, NoticeLevel::Info)],
+            Ok(proton_plugin::Outcome::Insert(text)) => self.insert_from_plugin(&text),
+            // The plugin's own refusal, which is not the same as a crash and
+            // should not read like one.
+            Ok(proton_plugin::Outcome::Failed(why)) => {
+                vec![notice(format!("{plugin}: {why}"), NoticeLevel::Warn)]
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    /// Put a plugin's text in the buffer, at the cursor.
+    ///
+    /// An ordinary edit, so `u` takes it back. A plugin whose work you can
+    /// only undo in git is one you would not run twice.
+    fn insert_from_plugin(&mut self, text: &str) -> Vec<Event> {
+        let buffer = self.editor.buffer_mut();
+        let at = buffer.cursor.offset;
+        let landing = at + text.chars().count();
+        buffer.apply(
+            vec![proton_text::Edit {
+                start: at,
+                end: at,
+                text: text.to_string(),
+            }],
+            proton_text::Cursor::at(landing),
+        );
+        self.resync();
+        let mut events = vec![self.buffers_event()];
+        events.extend(self.after_action(true));
+        events
     }
 
     /* ── the agent's staged changes ───────────────────────────────── */

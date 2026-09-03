@@ -1,0 +1,19 @@
+[workspace]
+
+[package]
+name = "hello-plugin"
+description = "The example Proton plugin: a theme, and two commands."
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.48"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
