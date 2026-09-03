@@ -202,10 +202,10 @@ pub struct Servers {
     /// statusline does not need to see every one.
     notes: HashMap<&'static str, String>,
     awaiting: HashMap<Ask, i64>,
-    /// Which servers said they would format. Recorded from `initialize`
-    /// rather than learned from a failed request: a save should not produce
-    /// an error notice on every language whose server has no formatter.
-    formats: HashSet<&'static str>,
+    /// What each server said it would do, from its `initialize` reply.
+    /// Recorded rather than learned from a failed request: a save should not
+    /// produce an error notice on every language with no formatter behind it.
+    can: HashMap<&'static str, proton_lsp::Capable>,
 }
 
 /// A question the editor is waiting on an answer to.
@@ -220,6 +220,9 @@ pub enum Ask {
     References,
     Symbols,
     Format,
+    Rename,
+    CodeActions,
+    ResolveAction,
 }
 
 impl Servers {
@@ -383,20 +386,56 @@ impl Servers {
         Some(id)
     }
 
-    /// Whether anything would come of asking this file's server to format it.
-    pub fn formats(&self, path: &Path) -> bool {
+    /// What this file's server said it would do. Everything false for a file
+    /// no server has been told about, which is the honest answer.
+    pub fn can(&self, path: &Path) -> proton_lsp::Capable {
         self.announced
             .get(&proton_lsp::uri::plain(path))
-            .is_some_and(|a| self.formats.contains(a.language))
+            .and_then(|a| self.can.get(a.language).copied())
+            .unwrap_or_default()
     }
 
     pub fn format(&mut self, path: &Path) -> Option<i64> {
         let path = proton_lsp::uri::plain(path);
-        if !self.formats(&path) {
+        if !self.can(&path).format {
             return None;
         }
         let id = self.client_for(&path)?.formatting(&path);
         self.awaiting.insert(Ask::Format, id);
+        Some(id)
+    }
+
+    pub fn rename(&mut self, path: &Path, at: Position, to: &str) -> Option<i64> {
+        let path = proton_lsp::uri::plain(path);
+        if !self.can(&path).rename {
+            return None;
+        }
+        let id = self.client_for(&path)?.rename(&path, at, to);
+        self.awaiting.insert(Ask::Rename, id);
+        Some(id)
+    }
+
+    pub fn code_actions(
+        &mut self,
+        path: &Path,
+        range: proton_lsp::Range,
+        diagnostics: &[serde_json::Value],
+    ) -> Option<i64> {
+        let path = proton_lsp::uri::plain(path);
+        if !self.can(&path).code_action {
+            return None;
+        }
+        let id = self
+            .client_for(&path)?
+            .code_actions(&path, range, diagnostics);
+        self.awaiting.insert(Ask::CodeActions, id);
+        Some(id)
+    }
+
+    pub fn resolve_action(&mut self, path: &Path, action: serde_json::Value) -> Option<i64> {
+        let path = proton_lsp::uri::plain(path);
+        let id = self.client_for(&path)?.resolve_action(action);
+        self.awaiting.insert(Ask::ResolveAction, id);
         Some(id)
     }
 
@@ -418,6 +457,21 @@ impl Servers {
         false
     }
 
+    /// Whether a server's idea of a document is still the one we sent it.
+    ///
+    /// The version in a workspace edit is the server's count of *our*
+    /// `didChange` notifications, not the buffer's own version — so this is
+    /// the only place the two can be compared. `true` when there is nothing
+    /// to check: a server that sent no version, or a file we never announced.
+    pub fn is_current(&self, path: &Path, version: Option<i64>) -> bool {
+        let (Some(version), Some(announced)) =
+            (version, self.announced.get(&proton_lsp::uri::plain(path)))
+        else {
+            return true;
+        };
+        announced.sent as i64 == version
+    }
+
     /// Stop wanting an answer, without one having arrived. Closing the hover
     /// panel by hand should not leave a reply in flight that reopens it.
     pub fn forget(&mut self, ask: Ask) {
@@ -435,11 +489,9 @@ impl Servers {
 
         for (language, message) in &all {
             match message {
-                Incoming::Ready { formats, .. } => {
+                Incoming::Ready { can, .. } => {
                     self.status.insert(language, ServerStatus::Ready);
-                    if *formats {
-                        self.formats.insert(language);
-                    }
+                    self.can.insert(language, *can);
                 }
                 Incoming::Progress {
                     title,

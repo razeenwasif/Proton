@@ -79,6 +79,13 @@ pub struct Workspace {
     hover_open: bool,
     /// A formatting request in flight.
     formatting: Option<Formatting>,
+    /// The code actions the picker is showing, in its order. Held because a
+    /// picker row carries a label, not an action — and the action is what has
+    /// to be applied or resolved when a row is chosen.
+    actions: Vec<proton_lsp::CodeAction>,
+    /// The title of the action waiting on `codeAction/resolve`, so the notice
+    /// its edit produces can say which one it was.
+    pending_action: Option<String>,
     /// Where the cursor was when a search prompt opened.
     ///
     /// Every keystroke previews from here rather than from the last preview,
@@ -406,6 +413,12 @@ impl Workspace {
 
             Command::Format => self.request_format(false),
 
+            Command::PromptRename => self.prompt_rename(),
+
+            Command::Rename { to } => self.request_rename(&to),
+
+            Command::CodeActions => self.request_code_actions(),
+
             Command::AcceptCompletion => self.accept_completion(),
 
             Command::CloseCompletion => {
@@ -667,7 +680,7 @@ impl Workspace {
                 .collect();
             self.pickers.set_changes(changes);
         }
-        // `␣ds` asks here rather than at the keymap, so the request and the
+        // `␣ls` asks here rather than at the keymap, so the request and the
         // picker that shows its answer cannot get out of step. `gr` has
         // already asked by the time it calls this — its question needs a
         // cursor position, which the picker is about to take the keyboard
@@ -754,6 +767,7 @@ impl Workspace {
                     events.extend(self.after_action(true));
                 }
             }
+            Accepted::RunAction { index } => events.extend(self.chose_action(index)),
             // A workspace's own pickers never produce this — the folder picker
             // belongs to the session, which handles its own accept.
             Accepted::OpenWorkspace { .. } | Accepted::Nothing => {}
@@ -962,6 +976,14 @@ impl Workspace {
         // `:f` is `:file`, so there is no short form going spare.
         if ex.name == "fmt" || ex.name == "format" {
             return self.apply(Command::Format);
+        }
+        // `:ren` is vim's `:rename`… for a *file*. Ours renames a symbol, so
+        // it is spelled out rather than abbreviated into that collision.
+        if ex.name == "rename" {
+            return match &ex.arg {
+                Some(to) => self.apply(Command::Rename { to: to.clone() }),
+                None => vec![notice("rename to what?".into(), NoticeLevel::Warn)],
+            };
         }
         if ex.is("nohlsearch", 3) {
             // Vim's `:noh`. The pattern is kept — `n` still works — and only
@@ -1427,6 +1449,37 @@ impl Workspace {
                         events.extend(self.formatted(&edits));
                     }
                 }
+                Incoming::Renamed { id, changes } => {
+                    if self.servers.wanted(lsp::Ask::Rename, id) {
+                        events.extend(self.apply_workspace_edit(&changes, "rename"));
+                    }
+                }
+                Incoming::CodeActions { id, actions } => {
+                    if self.servers.wanted(lsp::Ask::CodeActions, id) {
+                        self.actions = actions;
+                        let rows = self.action_rows();
+                        events.extend(self.fill_picker(rows));
+                    }
+                }
+                Incoming::Resolved { id, action } => {
+                    if self.servers.wanted(lsp::Ask::ResolveAction, id) {
+                        let title = self
+                            .pending_action
+                            .take()
+                            .unwrap_or_else(|| action.title.clone());
+                        match action.edit.clone() {
+                            Some(edit) => {
+                                events.extend(self.apply_workspace_edit(&edit.resolve(), &title))
+                            }
+                            // Resolved, and still no edit. The server had
+                            // nothing beyond a command to run.
+                            None => events.push(notice(
+                                format!("\"{title}\" needs a server command Proton cannot run"),
+                                NoticeLevel::Warn,
+                            )),
+                        }
+                    }
+                }
                 Incoming::Symbols { id, symbols } => {
                     if self.servers.wanted(lsp::Ask::Symbols, id) {
                         let rows = self.symbol_rows(&symbols);
@@ -1655,6 +1708,266 @@ impl Workspace {
             });
         }
         rows
+    }
+
+    /// `␣lr` — open the `:` line holding the name the symbol has now.
+    fn prompt_rename(&mut self) -> Vec<Event> {
+        let buffer = self.editor.buffer();
+        if buffer.path().is_none() {
+            return vec![notice("no file to rename in".into(), NoticeLevel::Warn)];
+        }
+        let Some(word) = buffer.word_at(buffer.cursor.offset) else {
+            return vec![notice(
+                "no symbol under the cursor".into(),
+                NoticeLevel::Warn,
+            )];
+        };
+        // No `prepareRename` first. It would tell us whether the symbol can be
+        // renamed and what its name is, at the cost of a round trip before the
+        // prompt opens — and the buffer already knows the name. A symbol the
+        // server refuses to rename says so when the rename is asked for, which
+        // is one message later and no less clear.
+        let line = self.vim.open_cmdline(format!("rename {word}"));
+        vec![
+            Event::Leader { prefix: None },
+            Event::Cmdline {
+                text: Some(line),
+                prompt: ":".into(),
+            },
+        ]
+    }
+
+    fn request_rename(&mut self, to: &str) -> Vec<Event> {
+        let to = to.trim();
+        if to.is_empty() {
+            return vec![notice("rename to what?".into(), NoticeLevel::Warn)];
+        }
+        let buffer = self.editor.buffer();
+        let Some(path) = buffer.path().map(Path::to_path_buf) else {
+            return vec![notice("no file to rename in".into(), NoticeLevel::Warn)];
+        };
+        let at = lsp::position_of(buffer, buffer.cursor.offset);
+        self.resync();
+        match self.servers.rename(&path, at, to) {
+            Some(_) => Vec::new(),
+            None => vec![notice(
+                "no language server that renames for this file".into(),
+                NoticeLevel::Warn,
+            )],
+        }
+    }
+
+    /// `␣la` — what the server offers for the line the cursor is on.
+    fn request_code_actions(&mut self) -> Vec<Event> {
+        let buffer = self.editor.buffer();
+        let Some(path) = buffer.path().map(Path::to_path_buf) else {
+            return vec![notice("no file to act on".into(), NoticeLevel::Warn)];
+        };
+        let line = buffer.position(buffer.cursor.offset).line as u32;
+        let range = proton_lsp::Range {
+            start: proton_lsp::Position { line, character: 0 },
+            end: proton_lsp::Position {
+                line,
+                character: u32::MAX,
+            },
+        };
+        // The diagnostics on that line go with the request. A quick fix is a
+        // fix *for a diagnostic*, and a server handed none has nothing to
+        // offer one for — ask with an empty context on a line with an error
+        // and you get refactors and no fixes.
+        let here: Vec<serde_json::Value> = self
+            .servers
+            .diagnostics_for(&path)
+            .iter()
+            .filter(|d| d.range.start.line <= line && line <= d.range.end.line)
+            .map(|d| {
+                serde_json::json!({
+                    "range": d.range,
+                    "severity": d.severity,
+                    "source": d.source,
+                    "message": d.message,
+                })
+            })
+            .collect();
+
+        self.resync();
+        if self.servers.code_actions(&path, range, &here).is_none() {
+            return vec![notice(
+                "no language server with actions for this file".into(),
+                NoticeLevel::Warn,
+            )];
+        }
+        self.open_picker(PickerKind::Actions)
+    }
+
+    /// The offered actions, as rows.
+    ///
+    /// One that cannot be applied is still listed, marked rather than hidden:
+    /// a menu that quietly drops half of what the server offered is one you
+    /// cannot trust to be showing you everything.
+    fn action_rows(&self) -> Vec<crate::picker::PickerItem> {
+        self.actions
+            .iter()
+            .enumerate()
+            .map(|(index, action)| crate::picker::PickerItem {
+                label: action.title.clone(),
+                detail: match action.is_applicable() {
+                    true => action.kind.clone().unwrap_or_default(),
+                    false => "needs a server command".into(),
+                },
+                positions: Vec::new(),
+                path: None,
+                // Addressed by position, like a buffer row: the thing chosen
+                // is not a place.
+                line: Some(index),
+                column: None,
+                kind: None,
+            })
+            .collect()
+    }
+
+    /// A chosen action: apply its edit, or ask the server to fill one in.
+    fn chose_action(&mut self, index: usize) -> Vec<Event> {
+        let Some(action) = self.actions.get(index).cloned() else {
+            return Vec::new();
+        };
+        if let Some(edit) = action.edit.clone() {
+            return self.apply_workspace_edit(&edit.resolve(), &action.title);
+        }
+        if action.data.is_some() {
+            let path = self.editor.buffer().path().map(Path::to_path_buf);
+            self.pending_action = Some(action.title.clone());
+            if path
+                .as_deref()
+                .and_then(|p| self.servers.resolve_action(p, action.raw.clone()))
+                .is_some()
+            {
+                return Vec::new();
+            }
+        }
+        // A bare `Command`, or an action whose server has gone. Both need
+        // `workspace/executeCommand`, which runs code inside the server rather
+        // than editing text, and Proton does not run it.
+        vec![notice(
+            format!(
+                "\"{}\" needs a server command Proton cannot run",
+                action.title
+            ),
+            NoticeLevel::Warn,
+        )]
+    }
+
+    /// Apply an edit that may touch several files.
+    ///
+    /// Public because it is the seam, not because a test needed it: a rename,
+    /// a code action and — when M3's second half lands — an agent's staged
+    /// diff are all "a set of edits across files, applied or refused as one".
+    ///
+    /// Three rules, all of them about not half-doing it.
+    ///
+    /// **File operations are refused outright.** Renaming a Rust module
+    /// renames its file, and rust-analyzer sends that in the same list as the
+    /// text edits. Creating, moving or deleting a file touches things that are
+    /// not open, cannot be taken back with `u`, and may be under version
+    /// control — so the whole edit is declined and named, rather than applied
+    /// with the file half of it silently dropped.
+    ///
+    /// **Everything is checked before anything is applied.** A version that
+    /// has moved on, or a file that will not open, refuses the lot. An edit
+    /// applied to four files out of six is worse than one applied to none.
+    ///
+    /// **Nothing is written.** Every touched file is opened as a buffer and
+    /// left modified, so the change is visible, `u` takes it back, and it
+    /// reaches the disk only when you say so.
+    pub fn apply_workspace_edit(
+        &mut self,
+        changes: &proton_lsp::Changes,
+        what: &str,
+    ) -> Vec<Event> {
+        if changes.file_operations > 0 {
+            return vec![notice(
+                format!(
+                    "\"{what}\" also creates, moves or deletes {} file{} — Proton does not do \
+                     that yet, so nothing was changed",
+                    changes.file_operations,
+                    if changes.file_operations == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                ),
+                NoticeLevel::Warn,
+            )];
+        }
+        if changes.is_empty() {
+            return vec![notice(
+                format!("{what}: nothing to change"),
+                NoticeLevel::Info,
+            )];
+        }
+
+        // Pass one: resolve and check. Nothing is touched here.
+        let mut planned = Vec::new();
+        for file in &changes.files {
+            if file.edits.is_empty() {
+                continue;
+            }
+            let Some(path) = proton_lsp::uri::to_path(&file.uri) else {
+                return vec![notice(
+                    format!("{what}: cannot read {}", file.uri),
+                    NoticeLevel::Error,
+                )];
+            };
+            if !self.servers.is_current(&path, file.version) {
+                return vec![notice(
+                    format!(
+                        "{what}: {} changed while it was being worked out, so nothing \
+                             was changed",
+                        path.display()
+                    ),
+                    NoticeLevel::Warn,
+                )];
+            }
+            if !path.exists() {
+                return vec![notice(
+                    format!(
+                        "{what}: {} is not there, so nothing was changed",
+                        path.display()
+                    ),
+                    NoticeLevel::Error,
+                )];
+            }
+            planned.push((path, file.edits.clone()));
+        }
+
+        // Pass two: apply. The active buffer is restored afterwards, because
+        // landing in the last file a rename happened to touch is not where
+        // anybody was.
+        let was = self.editor.active();
+        let mut touched = 0;
+        for (path, edits) in &planned {
+            if self.editor.open(path).is_err() {
+                continue;
+            }
+            if lsp::apply_edits(self.editor.buffer_mut(), edits) {
+                touched += 1;
+            }
+        }
+        self.editor.focus(was);
+        self.splits.view_mut().buffer = self.editor.active();
+
+        self.resync();
+        let mut events = vec![notice(
+            match touched {
+                0 => format!("{what}: nothing to change"),
+                1 => format!("{what} — 1 file changed, none written yet"),
+                n => format!("{what} — {n} files changed, none written yet"),
+            },
+            NoticeLevel::Info,
+        )];
+        events.push(self.buffers_event());
+        events.extend(self.after_action(true));
+        events
     }
 
     /// Fill a server-fed picker, if it is still the one open.
@@ -2251,6 +2564,13 @@ impl Workspace {
                 events.extend(self.apply(debug_command(&prefix).unwrap()));
                 (events, false)
             }
+            // The `␣l` family: rename, code actions and format.
+            Outcome::Leader(prefix) if lsp_command(&prefix).is_some() => {
+                self.vim.cancel_leader();
+                let mut events = vec![Event::Leader { prefix: None }];
+                events.extend(self.apply(lsp_command(&prefix).unwrap()));
+                (events, false)
+            }
             // The window family, under `␣w` as the rail has always shown it.
             Outcome::Leader(prefix) if window_command(&prefix).is_some() => {
                 self.vim.cancel_leader();
@@ -2596,6 +2916,21 @@ fn terminal_command(prefix: &str) -> Option<Command> {
 
 /// The `␣w` family — vim's `⌃w`, under the leader where everything else lives.
 ///
+/// The `␣l` family — everything answered by a language server.
+///
+/// `␣ls` is not here: it opens a picker, so it goes through the picker's own
+/// table with the rest of them. `␣d` was never an option for any of these:
+/// that letter is the debugger's, and `␣ds` reading as "debug s…" was the
+/// mistake this family is the correction of.
+fn lsp_command(prefix: &str) -> Option<Command> {
+    Some(match prefix {
+        "lr" => Command::PromptRename,
+        "la" => Command::CodeActions,
+        "lf" => Command::Format,
+        _ => return None,
+    })
+}
+
 /// Core config rather than front-end config, for the same reason the picker's
 /// prefixes are: a second front end must not have to reinvent the keymap.
 fn window_command(prefix: &str) -> Option<Command> {

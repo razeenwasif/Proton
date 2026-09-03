@@ -270,6 +270,22 @@ impl Vim {
         }
     }
 
+    /// Open the command line already holding something.
+    ///
+    /// For `␣lr`, which is `:rename <the name it has now>` — a command you
+    /// edit rather than one you type from nothing. Reusing the `:` line means
+    /// a rename needs no prompt of its own, and the name arrives through the
+    /// same ex command anyone can type by hand.
+    pub fn open_cmdline(&mut self, text: String) -> String {
+        self.pending.clear();
+        self.leader = None;
+        self.resume = self.mode;
+        self.mode = VimMode::Command;
+        self.prompt = ':';
+        self.cmdline = text;
+        self.cmdline.clone()
+    }
+
     /// Drop a leader sequence in progress, without the mode change Escape
     /// would also do. Used when something above the workspace claims the
     /// prefix — the sequence is over, but nothing about the mode changed.

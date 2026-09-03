@@ -140,6 +140,15 @@ pub enum Command {
     /// Reformat the active buffer without saving it — `:fmt`. Saving formats
     /// on its own; this is for reformatting something you are not done with.
     Format,
+    /// Open the command line holding `rename <the name it has now>` — `␣lr`.
+    /// The rename itself is the ex command, so it can also be typed.
+    PromptRename,
+    /// Rename the symbol under the cursor, everywhere it is used.
+    Rename {
+        to: String,
+    },
+    /// What the server would offer for the cursor's line — `␣la`.
+    CodeActions,
     /// Drain whatever the language servers have said.
     ///
     /// The core has no clock and no threads, so it cannot notice a reply on

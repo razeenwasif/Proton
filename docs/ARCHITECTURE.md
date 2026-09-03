@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 510 tests, headless
+cargo test --workspace        # 527 tests, headless
 cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
                               # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
@@ -779,7 +779,7 @@ are still in insert mode, it borrows the handful of keys that mean something to
 a list, and it stays closed until it has something to show rather than stealing
 Enter from someone mid-word on the chance a list might arrive.
 
-**The read-only three — `K`, `gr`, `␣ds`.** Hover, references and document
+**The read-only three — `K`, `gr`, `␣ls`.** Hover, references and document
 symbols ask nothing of the buffer, which is what makes them one piece of work
 rather than three: no edits to apply, no ranges to reconcile, nothing that can
 be wrong in a way you have to undo.
@@ -795,7 +795,7 @@ end for a signature and two sentences. A hover that reduces to nothing is
 reported as nothing rather than as an empty panel, because "no hover" is the
 common answer — on whitespace, on a keyword, on a comment.
 
-`gr` and `␣ds` are **pickers whose rows arrive late**, which is the one thing
+`gr` and `␣ls` are **pickers whose rows arrive late**, which is the one thing
 Telescope had never had to do: every other picker recomputes its rows from the
 query, and these two cannot. So the rows are held, the query narrows what came
 back, and an empty query keeps the server's own order — reading order is
@@ -843,13 +843,69 @@ offset-preserving cursor lands at the end of the file. The whole set goes to
 
 `:fmt` formats without saving, which is the only reason it exists separately.
 
+**Rename and code actions — `␣lr` and `␣la`.** Both come back as a
+`WorkspaceEdit`: a set of text edits across however many files the change
+reaches. `Workspace::apply_workspace_edit` is where they land, and it is public
+because it is the seam rather than because a test wanted it — a rename, a code
+action and, when M3's second half arrives, an agent's staged diff are all the
+same shape of thing.
+
+Three rules there, all of them about not half-doing it.
+
+**File operations are refused outright.** Renaming a Rust module renames its
+file, and rust-analyzer sends that in the same list as the text edits.
+Creating, moving or deleting a file touches things that are not open, cannot be
+taken back with `u`, and may be under version control — so the whole edit is
+declined and named, rather than applied with the file half silently dropped. A
+`mod` pointing at nothing, reported as success, is the outcome that rule
+exists to prevent.
+
+**Everything is checked before anything is applied.** A version that has moved
+on, a file that is not there — either refuses the lot. The version in a
+workspace edit is the server's count of *our* `didChange` notifications, not
+the buffer's own version, so `Servers::is_current` is the only place the two
+can be compared; claiming `documentChanges` in the handshake is what makes
+those versions arrive at all.
+
+**Nothing is written.** Every touched file is opened as a buffer and left
+modified, so the change is visible, `u` takes it back, and it reaches the disk
+when you say so. A rename that saves six files behind you is not one you can
+look at before you commit it.
+
+The action list is a picker like the others, with two details. An action that
+*cannot* be applied is listed and marked rather than hidden, because a menu
+that quietly drops half of what the server offered is one you cannot trust to
+be showing everything. And most of rust-analyzer's actions arrive **without an
+edit** — computing twenty of them to draw a list nobody has read yet is what
+makes a code-action menu slow — so the chosen one is resolved through
+`codeAction/resolve` and the edit lands a round trip after the Enter.
+
+Rename reuses the `:` line rather than growing a prompt of its own: `␣lr`
+opens it holding `rename <the name it has now>`, read from the buffer rather
+than from `prepareRename`, which would put a round trip in front of the prompt
+to learn something the text already says. The rename is an ordinary ex command,
+so it can also be typed.
+
+`workspace/applyEdit` — a server pushing an edit at us rather than answering
+one we asked for — is declined in the shape the server expects, `applied:
+false`. It is a *request*: the reply is read, and answering `null`, or worse
+`applied: true` for an edit nobody applied, leaves the server believing the
+workspace says something it does not.
+
+All four of these live under `␣l`, which is what the which-key rail has always
+labelled `+lsp`: `␣lr` rename, `␣la` action, `␣ls` symbols, `␣lf` format. The
+symbol picker was briefly `␣ds`, which was a mistake — `␣d` is the debugger's
+letter and `␣ds` reads as "debug s…".
+
 *Exit: met. `␣ff` and `␣fg` are faster than reaching for the mouse;
 `crates/proton-core/tests/live_server.rs` drives a real rust-analyzer through
 the same seam the shell uses and gets back a completion list, a `gd` that lands
 on the declaration, a type error in the gutter, a hover carrying the signature
 with no fences left in it, a `gr` that finds the declaration and the call site,
-a symbol list that reads down the file, and a `:w` on a badly spaced file that
-comes back rustfmt-clean on disk as well as in the buffer.*
+a symbol list that reads down the file, a `:w` on a badly spaced file that
+comes back rustfmt-clean on disk as well as in the buffer, a rename that
+reaches the declaration and the call site without writing either, and a code
+action — "Extract into variable" — resolved and applied.*
 
 Still open, and deliberately deferred: document sync is full-text rather than
 incremental. Incremental ships less over the pipe, but it means getting ranges

@@ -340,7 +340,7 @@ impl ReferencesResponse {
 /// Its own type rather than a reuse of completion's `Edit`: that one is an
 /// untagged enum because a completion may send an insert/replace *pair*, and
 /// nothing but completion does. A formatting edit is only ever this.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextEdit {
     pub range: Range,
@@ -442,6 +442,168 @@ impl SymbolResponse {
     }
 }
 
+/* ── edits across files ───────────────────────────────────────────── */
+
+/// A change to one document, with the version it was computed against.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextDocumentEdit {
+    pub text_document: VersionedDocument,
+    pub edits: Vec<TextEdit>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VersionedDocument {
+    pub uri: String,
+    /// Null for a document the server is not tracking a version of.
+    #[serde(default)]
+    pub version: Option<i64>,
+}
+
+/// Creating, renaming or deleting a file — recognised so it can be named in a
+/// refusal, not so it can be carried out.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileOperation {
+    pub kind: String,
+}
+
+/// `documentChanges` is a list of either, and the two are disjoint on their
+/// required fields: an edit has `edits`, an operation has `kind`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum DocumentChange {
+    Edits(TextDocumentEdit),
+    File(FileOperation),
+}
+
+/// Two spellings of the same idea. `changes` is the older map of uri to edits;
+/// `documentChanges` is the list that can also carry file operations and, more
+/// usefully, a version per document.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceEdit {
+    #[serde(default)]
+    pub changes: Option<std::collections::HashMap<String, Vec<TextEdit>>>,
+    #[serde(default)]
+    pub document_changes: Option<Vec<DocumentChange>>,
+}
+
+/// One file's worth of a workspace edit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileEdits {
+    pub uri: String,
+    pub version: Option<i64>,
+    pub edits: Vec<TextEdit>,
+}
+
+/// A workspace edit, flattened into the form a caller can act on.
+#[derive(Debug, Clone, Default)]
+pub struct Changes {
+    pub files: Vec<FileEdits>,
+    /// How many create/rename/delete operations came with it. Counted rather
+    /// than carried out: renaming a Rust module renames its file, and a file
+    /// operation touches things that are not open, cannot be taken back with
+    /// `u`, and may be under version control.
+    pub file_operations: usize,
+}
+
+impl Changes {
+    pub fn is_empty(&self) -> bool {
+        self.files.iter().all(|f| f.edits.is_empty())
+    }
+}
+
+impl WorkspaceEdit {
+    /// Flatten to a list of files, in a stable order.
+    ///
+    /// `documentChanges` wins when both are present, which is what the spec
+    /// says and also what you want: it is the one carrying versions. The map
+    /// form is sorted by uri, because a `HashMap` iterates in whatever order
+    /// it feels like and a rename that reports its files differently each time
+    /// is one nobody can test.
+    pub fn resolve(self) -> Changes {
+        if let Some(changes) = self.document_changes {
+            let mut out = Changes::default();
+            for change in changes {
+                match change {
+                    DocumentChange::Edits(one) => out.files.push(FileEdits {
+                        uri: one.text_document.uri,
+                        version: one.text_document.version,
+                        edits: one.edits,
+                    }),
+                    DocumentChange::File(_) => out.file_operations += 1,
+                }
+            }
+            return out;
+        }
+
+        let mut files: Vec<FileEdits> = self
+            .changes
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(uri, edits)| FileEdits {
+                uri,
+                version: None,
+                edits,
+            })
+            .collect();
+        files.sort_by(|a, b| a.uri.cmp(&b.uri));
+        Changes {
+            files,
+            file_operations: 0,
+        }
+    }
+}
+
+/* ── code actions ─────────────────────────────────────────────────── */
+
+/// One offer from the server.
+///
+/// The response is a list of `CodeAction` *or* `Command`, and both have a
+/// `title`. They are not told apart here because the distinction does not
+/// change what we can do with them: an action is applicable when it carries an
+/// edit or can be resolved into one, and everything else needs
+/// `workspace/executeCommand`, which Proton does not run.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeAction {
+    pub title: String,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub edit: Option<WorkspaceEdit>,
+    /// Opaque, and handed straight back in `codeAction/resolve`. The expensive
+    /// actions arrive without an edit and with this instead — computing one
+    /// for every offer in a list of twenty would make the list slow to appear.
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+    /// The whole thing as it arrived, because resolving means sending it back.
+    #[serde(skip)]
+    pub raw: serde_json::Value,
+}
+
+impl CodeAction {
+    /// Whether choosing this would do anything.
+    pub fn is_applicable(&self) -> bool {
+        self.edit.is_some() || self.data.is_some()
+    }
+
+    /// Read a `textDocument/codeAction` result, keeping each entry's original
+    /// JSON alongside the parsed form.
+    pub fn parse(result: &serde_json::Value) -> Vec<CodeAction> {
+        result
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|entry| {
+                let mut action: CodeAction = serde_json::from_value(entry.clone()).ok()?;
+                action.raw = entry.clone();
+                Some(action)
+            })
+            .collect()
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,5 +675,107 @@ mod tests {
         assert_eq!(flat[0].name, "main");
         assert_eq!(flat[0].detail.as_deref(), Some("crate"));
         assert_eq!(flat[0].uri.as_deref(), Some("file:///a.rs"));
+    }
+
+    fn workspace_edit(json: &str) -> Changes {
+        serde_json::from_str::<WorkspaceEdit>(json)
+            .expect("a workspace edit")
+            .resolve()
+    }
+
+    #[test]
+    fn a_workspace_edit_reads_both_of_its_spellings() {
+        let one = r#"{"range":{"start":{"line":1,"character":0},
+                      "end":{"line":1,"character":3}},"newText":"new"}"#;
+
+        // The old map form. Sorted by uri, because a HashMap iterates in
+        // whatever order it likes and a rename that lists its files
+        // differently each run is one nobody can test.
+        let changes = workspace_edit(&format!(
+            r#"{{"changes":{{"file:///z.rs":[{one}],"file:///a.rs":[{one}]}}}}"#
+        ));
+        assert_eq!(
+            changes
+                .files
+                .iter()
+                .map(|f| f.uri.as_str())
+                .collect::<Vec<_>>(),
+            vec!["file:///a.rs", "file:///z.rs"]
+        );
+        assert!(changes.files[0].version.is_none(), "the map form has none");
+
+        // The modern list form, which carries a version per document.
+        let changes = workspace_edit(&format!(
+            r#"{{"documentChanges":[
+                {{"textDocument":{{"uri":"file:///a.rs","version":7}},"edits":[{one}]}}]}}"#
+        ));
+        assert_eq!(changes.files[0].version, Some(7));
+        assert_eq!(changes.files[0].edits.len(), 1);
+    }
+
+    #[test]
+    fn document_changes_win_when_a_server_sends_both() {
+        // The spec's rule, and the one you would want anyway: the list form is
+        // the one carrying versions.
+        let one = r#"{"range":{"start":{"line":0,"character":0},
+                      "end":{"line":0,"character":1}},"newText":"x"}"#;
+        let changes = workspace_edit(&format!(
+            r#"{{"changes":{{"file:///old.rs":[{one}]}},
+                 "documentChanges":[{{"textDocument":{{"uri":"file:///new.rs","version":1}},
+                                      "edits":[{one}]}}]}}"#
+        ));
+        assert_eq!(changes.files.len(), 1);
+        assert_eq!(changes.files[0].uri, "file:///new.rs");
+    }
+
+    #[test]
+    fn file_operations_are_counted_not_mistaken_for_edits() {
+        // Renaming a Rust module renames its file, and rust-analyzer says so
+        // in the same list as the text edits. Reading one as an edit with no
+        // edits in it would silently drop the half of the change that moves
+        // the file.
+        let one = r#"{"range":{"start":{"line":0,"character":0},
+                      "end":{"line":0,"character":1}},"newText":"x"}"#;
+        let changes = workspace_edit(&format!(
+            r#"{{"documentChanges":[
+                {{"textDocument":{{"uri":"file:///a.rs","version":1}},"edits":[{one}]}},
+                {{"kind":"rename","oldUri":"file:///a.rs","newUri":"file:///b.rs"}},
+                {{"kind":"create","uri":"file:///c.rs"}}]}}"#
+        ));
+        assert_eq!(changes.files.len(), 1);
+        assert_eq!(changes.file_operations, 2);
+    }
+
+    #[test]
+    fn an_empty_workspace_edit_is_empty_however_it_is_spelled() {
+        assert!(workspace_edit(r#"{}"#).is_empty());
+        assert!(workspace_edit(r#"{"changes":{}}"#).is_empty());
+        assert!(workspace_edit(r#"{"documentChanges":[]}"#).is_empty());
+        assert!(workspace_edit(
+            r#"{"documentChanges":[{"textDocument":{"uri":"file:///a.rs"},"edits":[]}]}"#
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn a_code_action_knows_whether_choosing_it_would_do_anything() {
+        let list = serde_json::json!([
+            { "title": "Fill match arms", "edit": { "changes": {} } },
+            { "title": "Extract into function", "data": { "id": 3 } },
+            // A bare Command: a title and a server-side name, no edit and
+            // nothing to resolve. Nothing we can run.
+            { "title": "Run test", "command": "rust-analyzer.runSingle" },
+        ]);
+        let actions = CodeAction::parse(&list);
+        assert_eq!(actions.len(), 3);
+        assert_eq!(
+            actions
+                .iter()
+                .map(CodeAction::is_applicable)
+                .collect::<Vec<_>>(),
+            vec![true, true, false]
+        );
+        // The original JSON is kept, because resolving means sending it back.
+        assert_eq!(actions[1].raw["data"]["id"], 3);
     }
 }

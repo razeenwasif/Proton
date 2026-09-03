@@ -10,5 +10,7 @@ pub mod protocol;
 pub mod transport;
 pub mod uri;
 
-pub use client::{Client, Incoming, Jump};
-pub use protocol::{CompletionItem, Diagnostic, Position, Range, Symbol, TextEdit};
+pub use client::{Capable, Client, Incoming, Jump};
+pub use protocol::{
+    Changes, CodeAction, CompletionItem, Diagnostic, FileEdits, Position, Range, Symbol, TextEdit,
+};

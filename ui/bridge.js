@@ -196,6 +196,31 @@ if (HAS_SHELL) {
     }
     if (command.type === "closeHover") return [{ type: "hoverClosed" }];
 
+    if (command.type === "codeActions") {
+      const row = (label, detail) => ({
+        label, detail, positions: [], path: null, line: 0, column: null, kind: null,
+      });
+      const items = [
+        row("Extract into variable", "refactor.extract"),
+        row("Fill match arms", "quickfix"),
+        row("Convert to guarded return", "refactor.rewrite"),
+        row("Run test", "needs a server command"),
+      ];
+      return [
+        {
+          type: "picker",
+          kind: "actions",
+          title: "code_actions",
+          query: "",
+          items,
+          selected: 0,
+          total: items.length,
+          elapsedMs: 0.6,
+          scanning: false,
+        },
+      ];
+    }
+
     if (
       command.type === "findReferences" ||
       (command.type === "openPicker" && command.kind === "symbols")

@@ -498,3 +498,188 @@ fn fmt_reformats_without_writing() {
     );
     assert!(ws.is_modified(), "the buffer is changed and unsaved");
 }
+
+#[test]
+#[ignore = "spawns rust-analyzer; run with `cargo test -- --include-ignored`"]
+fn a_rename_reaches_every_use_and_writes_nothing() {
+    if !installed() {
+        println!("skipping: rust-analyzer is not on PATH");
+        return;
+    }
+    let fixture = Fixture::new("rename");
+    let path = fixture.root.join("src").join("lib.rs");
+    let mut ws = open(&fixture);
+
+    // On the declaration, so both it and the call site have to move.
+    seek(&mut ws, "fn magnitude", 3);
+    pump(
+        &mut ws,
+        "a rename",
+        |ws| {
+            ws.apply(Command::Rename {
+                to: "length".into(),
+            });
+        },
+        |event| match event {
+            Event::Notice { text, .. } if text.contains("changed") => Some(()),
+            _ => None,
+        },
+    );
+
+    let text = ws.editor().buffer().contents();
+    assert!(
+        text.contains("pub fn length(&self)"),
+        "the declaration should have moved: {text}"
+    );
+    assert!(
+        text.contains("p.length()"),
+        "and so should the call site: {text}"
+    );
+    assert!(!text.contains("magnitude"), "nothing left behind: {text}");
+
+    // Nothing is written. A rename you cannot look at before it hits the disk
+    // is one you have to undo in git rather than in the editor.
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("magnitude"),
+        "the file on disk should be untouched"
+    );
+    assert!(ws.is_modified(), "and the buffer left modified");
+}
+
+#[test]
+#[ignore = "spawns rust-analyzer; run with `cargo test -- --include-ignored`"]
+fn a_rename_the_server_refuses_says_so() {
+    if !installed() {
+        println!("skipping: rust-analyzer is not on PATH");
+        return;
+    }
+    let fixture = Fixture::new("norename");
+    let mut ws = open(&fixture);
+
+    // On the `pub` keyword, which is not a symbol anybody can rename.
+    seek(&mut ws, "pub struct Point", 1);
+    let text = pump(
+        &mut ws,
+        "an answer",
+        |ws| {
+            ws.apply(Command::Rename {
+                to: "whatever".into(),
+            });
+        },
+        |event| match event {
+            Event::Notice { text, .. } => Some(text.clone()),
+            _ => None,
+        },
+    );
+    // Either the server's own refusal or our "nothing to change" — what
+    // matters is that something is said and the buffer is untouched.
+    assert!(!text.is_empty(), "silence is the failure nobody can debug");
+    assert!(
+        ws.editor().buffer().contents().contains("pub struct Point"),
+        "and nothing was changed"
+    );
+}
+
+#[test]
+#[ignore = "spawns rust-analyzer; run with `cargo test -- --include-ignored`"]
+fn code_actions_are_offered_for_the_line_the_cursor_is_on() {
+    if !installed() {
+        println!("skipping: rust-analyzer is not on PATH");
+        return;
+    }
+    let fixture = Fixture::new("actions");
+    let mut ws = open(&fixture);
+
+    // Inside `magnitude`, where rust-analyzer always has refactors to offer.
+    seek(&mut ws, "self.x + self.y", 2);
+    let items = pump(
+        &mut ws,
+        "a list of actions",
+        |ws| {
+            ws.apply(Command::CodeActions);
+        },
+        |event| match event {
+            Event::Picker { items, .. } if !items.is_empty() => Some(items.clone()),
+            _ => None,
+        },
+    );
+
+    assert!(
+        !items.is_empty(),
+        "rust-analyzer should offer something here"
+    );
+    // Every row has a title worth reading, and an applicable one says nothing
+    // about needing a command we cannot run.
+    assert!(
+        items.iter().all(|i| !i.label.trim().is_empty()),
+        "every action needs a title: {items:?}"
+    );
+    assert!(
+        items.iter().any(|i| i.detail != "needs a server command"),
+        "at least one should be applicable: {items:?}"
+    );
+}
+
+#[test]
+#[ignore = "spawns rust-analyzer; run with `cargo test -- --include-ignored`"]
+fn choosing_a_code_action_changes_the_buffer() {
+    if !installed() {
+        println!("skipping: rust-analyzer is not on PATH");
+        return;
+    }
+    let fixture = Fixture::new("applyaction");
+    let path = fixture.root.join("src").join("lib.rs");
+    let mut ws = open(&fixture);
+
+    seek(&mut ws, "self.x + self.y", 2);
+    let items = pump(
+        &mut ws,
+        "a list of actions",
+        |ws| {
+            ws.apply(Command::CodeActions);
+        },
+        |event| match event {
+            Event::Picker { items, .. } if !items.is_empty() => Some(items.clone()),
+            _ => None,
+        },
+    );
+
+    // Whichever one it is — the assertion is about the machinery, not about
+    // rust-analyzer's menu, which is free to change between versions.
+    let chosen = items
+        .iter()
+        .position(|i| i.detail != "needs a server command")
+        .expect("something here should be applicable");
+    println!("choosing {:?}", items[chosen].label);
+
+    let before = ws.editor().buffer().contents();
+    ws.apply(Command::SelectPick { index: chosen });
+    ws.apply(Command::Key {
+        key: Key::named("Enter"),
+    });
+
+    // Most of rust-analyzer's actions arrive without an edit and are resolved
+    // only once chosen, so the change lands a round trip after the Enter.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        ws.apply(Command::Poll);
+        if ws.editor().buffer().contents() != before {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    assert_ne!(
+        ws.editor().buffer().contents(),
+        before,
+        "choosing an applicable action should have changed something"
+    );
+    // Same rule as a rename: visible first, written when you say so.
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        before,
+        "and nothing should have reached the disk"
+    );
+}

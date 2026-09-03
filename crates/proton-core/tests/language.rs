@@ -540,7 +540,7 @@ fn opening_the_symbol_picker_without_a_server_says_so() {
     ws.apply(Command::OpenBuffer {
         path: "crates/proton-core/src/vim.rs".into(),
     });
-    let events = keys(&mut ws, " ds");
+    let events = keys(&mut ws, " ls");
     assert!(
         events.iter().any(
             |e| matches!(e, Event::Notice { level: NoticeLevel::Warn, text }

@@ -17,8 +17,9 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 use crate::protocol::{
-    CompletionItem, CompletionResponse, DefinitionResponse, Diagnostic, Hover, Position,
-    PublishDiagnostics, ReferencesResponse, Symbol, SymbolResponse, TextEdit,
+    Changes, CodeAction, CompletionItem, CompletionResponse, DefinitionResponse, Diagnostic, Hover,
+    Position, PublishDiagnostics, ReferencesResponse, Symbol, SymbolResponse, TextEdit,
+    WorkspaceEdit,
 };
 use crate::{transport, uri};
 
@@ -28,11 +29,7 @@ pub enum Incoming {
     /// `initialize` came back. Nothing may be requested before this.
     Ready {
         server: String,
-        /// Whether it will format a whole document. Asked once, here, rather
-        /// than discovered by sending a request and reading the error —
-        /// declining to format is a legitimate answer for a server, not a
-        /// fault to report.
-        formats: bool,
+        can: Capable,
     },
     Diagnostics {
         path: PathBuf,
@@ -63,6 +60,21 @@ pub enum Incoming {
         id: i64,
         edits: Vec<TextEdit>,
     },
+    /// What a rename would change, across every file it touches.
+    Renamed {
+        id: i64,
+        changes: Changes,
+    },
+    CodeActions {
+        id: i64,
+        actions: Vec<CodeAction>,
+    },
+    /// A chosen action, with its edit filled in — the expensive ones arrive
+    /// without one and are resolved only once somebody picks them.
+    Resolved {
+        id: i64,
+        action: Box<CodeAction>,
+    },
     Symbols {
         id: i64,
         symbols: Vec<Symbol>,
@@ -85,6 +97,37 @@ pub enum Incoming {
     Exited,
 }
 
+/// What a server said it would do, read from its `initialize` reply.
+///
+/// Asked once, here, rather than discovered by sending a request and reading
+/// the error. Declining to format or rename is a legitimate answer for a
+/// server — most languages' servers have no formatter behind them — and an
+/// editor that finds out by failing turns every save into an error notice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Capable {
+    pub format: bool,
+    pub rename: bool,
+    pub code_action: bool,
+}
+
+impl Capable {
+    /// `boolean | SomethingOptions` for every one of these, so anything
+    /// present that is not an explicit `false` means yes.
+    fn read(result: &Value) -> Self {
+        let has = |name: &str| {
+            !matches!(
+                result.pointer(&format!("/capabilities/{name}")),
+                None | Some(Value::Null) | Some(Value::Bool(false))
+            )
+        };
+        Capable {
+            format: has("documentFormattingProvider"),
+            rename: has("renameProvider"),
+            code_action: has("codeActionProvider"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Jump {
     pub path: PathBuf,
@@ -103,6 +146,9 @@ enum Kind {
     References,
     Symbols,
     Format,
+    Rename,
+    CodeActions,
+    Resolve,
     Shutdown,
 }
 
@@ -281,7 +327,13 @@ impl Client {
                 "workspace": {
                     "configuration": true,
                     "workspaceFolders": true,
-                    "didChangeConfiguration": { "dynamicRegistration": false }
+                    "didChangeConfiguration": { "dynamicRegistration": false },
+                    // The list form of a workspace edit, which is the one that
+                    // carries a version per document — the thing that makes a
+                    // stale rename detectable rather than silently wrong.
+                    // Claiming it also means file operations arrive labelled
+                    // instead of as edits with nothing in them.
+                    "workspaceEdit": { "documentChanges": true }
                 },
                 "textDocument": {
                     "synchronization": { "didSave": true, "dynamicRegistration": false },
@@ -306,6 +358,25 @@ impl Client {
                     "hover": { "contentFormat": ["plaintext"] },
                     "references": { "dynamicRegistration": false },
                     "formatting": { "dynamicRegistration": false },
+                    "rename": { "dynamicRegistration": false },
+                    "codeAction": {
+                        // Without this a server may answer with bare
+                        // `Command`s, which need `workspace/executeCommand` to
+                        // do anything. Asking for literals is asking for
+                        // actions that carry their own edit.
+                        "codeActionLiteralSupport": {
+                            "codeActionKind": { "valueSet": [
+                                "quickfix", "refactor", "refactor.extract",
+                                "refactor.inline", "refactor.rewrite", "source"
+                            ]}
+                        },
+                        // The expensive actions arrive without an edit and are
+                        // resolved once one is chosen — computing twenty of
+                        // them to draw a list nobody has read yet is what
+                        // makes a code-action menu slow to appear.
+                        "dataSupport": true,
+                        "resolveSupport": { "properties": ["edit"] }
+                    },
                     // Ask for the tree. A server that cannot build one falls
                     // back to the flat shape on its own, and both are read.
                     "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
@@ -459,6 +530,47 @@ impl Client {
         )
     }
 
+    pub fn rename(&mut self, path: &std::path::Path, at: Position, to: &str) -> i64 {
+        self.request(
+            Kind::Rename,
+            "textDocument/rename",
+            json!({
+                "textDocument": { "uri": uri::from_path(path) },
+                "position": at,
+                "newName": to,
+            }),
+        )
+    }
+
+    /// What the server would offer for a span of the file.
+    ///
+    /// The diagnostics in that span go with the request. A quick fix *is* a
+    /// fix for a particular diagnostic, and a server given none has nothing to
+    /// offer a fix for — which is why asking with an empty context on a line
+    /// with an error comes back with refactors and no fixes.
+    pub fn code_actions(
+        &mut self,
+        path: &std::path::Path,
+        range: crate::protocol::Range,
+        diagnostics: &[Value],
+    ) -> i64 {
+        self.request(
+            Kind::CodeActions,
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": uri::from_path(path) },
+                "range": range,
+                "context": { "diagnostics": diagnostics },
+            }),
+        )
+    }
+
+    /// Fill in a chosen action's edit. The action goes back exactly as it
+    /// arrived — the server's `data` is opaque and round-trips.
+    pub fn resolve_action(&mut self, action: Value) -> i64 {
+        self.request(Kind::Resolve, "codeAction/resolve", action)
+    }
+
     pub fn symbols(&mut self, path: &std::path::Path) -> i64 {
         self.request(
             Kind::Symbols,
@@ -545,6 +657,15 @@ fn read_loop(
                             .map_or(0, Vec::len);
                         Value::Array(vec![Value::Null; count])
                     }
+                    // A server pushing an edit at us, rather than answering
+                    // one we asked for. Declined honestly: the reply is read,
+                    // and answering `null` — or worse, `applied: true` for an
+                    // edit nobody applied — would leave the server believing
+                    // the workspace says something it does not.
+                    "workspace/applyEdit" => json!({
+                        "applied": false,
+                        "failureReason": "Proton applies only edits it asked for",
+                    }),
                     _ => Value::Null,
                 };
                 let _ = to_server
@@ -667,12 +788,7 @@ fn response(
                 json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }).to_string(),
             );
             Some(Incoming::Ready {
-                // `boolean | DocumentFormattingOptions`, so anything present
-                // that is not an explicit `false` means yes.
-                formats: !matches!(
-                    result.pointer("/capabilities/documentFormattingProvider"),
-                    None | Some(Value::Null) | Some(Value::Bool(false))
-                ),
+                can: Capable::read(result),
                 server: result
                     .pointer("/serverInfo/name")
                     .and_then(Value::as_str)
@@ -766,6 +882,40 @@ fn response(
             }),
         },
 
+        // A null rename is "there is nothing here to rename", which is what
+        // you get on a keyword or a literal.
+        Kind::Rename if result.is_null() => Some(Incoming::Renamed {
+            id,
+            changes: Changes::default(),
+        }),
+        Kind::Rename => match serde_json::from_value::<WorkspaceEdit>(result.clone()) {
+            Ok(edit) => Some(Incoming::Renamed {
+                id,
+                changes: edit.resolve(),
+            }),
+            Err(err) => Some(Incoming::Failed {
+                text: format!("rename: {err}"),
+            }),
+        },
+
+        Kind::CodeActions => Some(Incoming::CodeActions {
+            id,
+            actions: CodeAction::parse(result),
+        }),
+
+        Kind::Resolve => match serde_json::from_value::<CodeAction>(result.clone()) {
+            Ok(mut action) => {
+                action.raw = result.clone();
+                Some(Incoming::Resolved {
+                    id,
+                    action: Box::new(action),
+                })
+            }
+            Err(err) => Some(Incoming::Failed {
+                text: format!("code action: {err}"),
+            }),
+        },
+
         Kind::Symbols if result.is_null() => Some(Incoming::Symbols {
             id,
             symbols: Vec::new(),
@@ -854,11 +1004,67 @@ mod tests {
                 &format!(r#"{{"jsonrpc":"2.0","id":1,"result":{result}}}"#),
                 Some(Kind::Initialize),
             )]);
-            let Incoming::Ready { formats, .. } = &heard[0] else {
+            let Incoming::Ready { can, .. } = &heard[0] else {
                 panic!("expected ready, got {heard:?}");
             };
-            assert_eq!(*formats, expected, "for {result}");
+            assert_eq!(can.format, expected, "for {result}");
         }
+    }
+
+    #[test]
+    fn the_three_capabilities_are_read_independently() {
+        // A server offering one of them and not the others is the common
+        // case; reading them as a single "supports LSP" flag would offer
+        // renames on servers that decline to do them.
+        let (heard, _) = converse(&[(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"capabilities":{
+                "renameProvider":{"prepareProvider":true},
+                "codeActionProvider":true}}}"#,
+            Some(Kind::Initialize),
+        )]);
+        let Incoming::Ready { can, .. } = &heard[0] else {
+            panic!("expected ready, got {heard:?}");
+        };
+        assert!(can.rename && can.code_action);
+        assert!(!can.format, "this one said nothing about formatting");
+    }
+
+    #[test]
+    fn an_edit_pushed_at_us_is_declined_in_the_shape_the_server_expects() {
+        // `workspace/applyEdit` is a *request*: the server waits for an answer
+        // and reads it. `null` is not one of the shapes it accepts, and
+        // `applied: true` for an edit nobody applied would leave the server
+        // believing the workspace says something it does not.
+        let (_, said) = converse(&[(
+            r#"{"jsonrpc":"2.0","id":4,"method":"workspace/applyEdit",
+                "params":{"edit":{"changes":{}}}}"#,
+            None,
+        )]);
+        assert_eq!(said[0]["id"], 4);
+        assert_eq!(said[0]["result"]["applied"], false);
+    }
+
+    #[test]
+    fn a_rename_that_moves_a_file_says_so_rather_than_dropping_it() {
+        // Renaming a Rust module renames its file. Reading that operation as
+        // an edit with no edits in it would apply half the change and report
+        // success.
+        let one = r#"{"range":{"start":{"line":0,"character":4},
+                      "end":{"line":0,"character":7}},"newText":"bar"}"#;
+        let (heard, _) = converse(&[(
+            &format!(
+                r#"{{"jsonrpc":"2.0","id":1,"result":{{"documentChanges":[
+                    {{"textDocument":{{"uri":"file:///lib.rs","version":2}},"edits":[{one}]}},
+                    {{"kind":"rename","oldUri":"file:///foo.rs","newUri":"file:///bar.rs"}}]}}}}"#
+            ),
+            Some(Kind::Rename),
+        )]);
+        let Incoming::Renamed { changes, .. } = &heard[0] else {
+            panic!("expected a rename, got {heard:?}");
+        };
+        assert_eq!(changes.files.len(), 1);
+        assert_eq!(changes.files[0].version, Some(2));
+        assert_eq!(changes.file_operations, 1);
     }
 
     #[test]

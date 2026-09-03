@@ -31,18 +31,23 @@ pub enum PickerKind {
     Changed,
     /// Every use of the symbol under the cursor — `gr`.
     References,
-    /// What is declared in this file — `␣ds`.
+    /// What is declared in this file — `␣ls`.
     Symbols,
+    /// What the server offers to do about the line the cursor is on — `␣la`.
+    Actions,
 }
 
 impl PickerKind {
     /// Whether a language server fills this one.
     ///
     /// The difference is not cosmetic: every other picker recomputes its rows
-    /// from the query, and these two cannot — the rows arrive once, late, and
+    /// from the query, and these cannot — the rows arrive once, late, and
     /// typing narrows what came back rather than asking again.
     pub fn is_from_a_server(self) -> bool {
-        matches!(self, PickerKind::References | PickerKind::Symbols)
+        matches!(
+            self,
+            PickerKind::References | PickerKind::Symbols | PickerKind::Actions
+        )
     }
 
     pub fn title(self) -> &'static str {
@@ -54,6 +59,7 @@ impl PickerKind {
             PickerKind::Changed => "git_status",
             PickerKind::References => "lsp_references",
             PickerKind::Symbols => "document_symbols",
+            PickerKind::Actions => "code_actions",
         }
     }
 
@@ -69,7 +75,7 @@ impl PickerKind {
             "fg" => PickerKind::Grep,
             "fb" => PickerKind::Buffers,
             "gg" => PickerKind::Changed,
-            "ds" => PickerKind::Symbols,
+            "ls" => PickerKind::Symbols,
             _ => return None,
         })
     }
@@ -112,6 +118,11 @@ pub enum Accepted {
     /// session's, not the editor's.
     OpenWorkspace {
         path: String,
+    },
+    /// Carry out the code action at this index. Like `FocusBuffer`, addressed
+    /// by position rather than by path — the thing chosen is not a place.
+    RunAction {
+        index: usize,
     },
     Nothing,
 }
@@ -252,6 +263,10 @@ impl Picker {
                 Some(path) => Accepted::OpenWorkspace { path: path.clone() },
                 None => Accepted::Nothing,
             },
+            PickerKind::Actions => item
+                .line
+                .map(|index| Accepted::RunAction { index })
+                .unwrap_or(Accepted::Nothing),
             _ => match &item.path {
                 Some(path) => Accepted::OpenPath {
                     path: path.clone(),
@@ -503,12 +518,14 @@ impl Pickers {
             // rather than ranking: symbols read down the file, references read
             // in the order the server found them. Ranking an empty pattern
             // would shuffle both into whatever the matcher considers a tie.
-            PickerKind::References | PickerKind::Symbols if query.is_empty() => {
+            PickerKind::References | PickerKind::Symbols | PickerKind::Actions
+                if query.is_empty() =>
+            {
                 let mut rows = self.held.clone();
                 rows.truncate(LIMIT);
                 rows
             }
-            PickerKind::References | PickerKind::Symbols => {
+            PickerKind::References | PickerKind::Symbols | PickerKind::Actions => {
                 let labels: Vec<&str> = self.held.iter().map(|i| i.label.as_str()).collect();
                 self.matcher
                     .rank(&query, &labels, LIMIT)
