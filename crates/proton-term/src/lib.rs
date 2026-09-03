@@ -47,6 +47,10 @@ pub struct Screen {
     pub cursor: (u16, u16),
     /// Whether the cursor should be drawn at all — a program can hide it.
     pub cursor_visible: bool,
+    /// How far back through the history this view is, in rows. `0` is the
+    /// live screen. Sent so the panel can say so: a terminal scrolled back
+    /// looks exactly like a terminal where the shell has stopped answering.
+    pub scrollback: usize,
 }
 
 pub struct Terminal {
@@ -159,8 +163,58 @@ impl Terminal {
 
     /// Type at it.
     pub fn write(&mut self, text: &str) {
+        // Typing returns to the live screen, the way every terminal does:
+        // what you are about to type will appear at the bottom, and being
+        // left looking at history while the shell echoes somewhere unseen is
+        // the more confusing of the two behaviours.
+        self.parser.screen_mut().set_scrollback(0);
         let _ = self.writer.write_all(text.as_bytes());
         let _ = self.writer.flush();
+    }
+
+    /// How far back through the history the view is, in rows. `0` is live.
+    pub fn scrollback(&self) -> usize {
+        self.parser.screen().scrollback()
+    }
+
+    /// Look back through what has scrolled off the top.
+    ///
+    /// `back` is in rows: positive goes further into the history, negative
+    /// comes forward toward the live screen. Answers whether the view
+    /// actually moved, so a wheel at either end costs no redraw.
+    ///
+    /// The bound is neither asked for nor stored. `vt100` clamps to however
+    /// much history it really kept — which is not the configured maximum
+    /// until the maximum has been reached — so the position is read back
+    /// from it afterwards rather than predicted here.
+    pub fn scroll(&mut self, back: i32) -> bool {
+        let at = self.scrollback();
+        let want = (at as i64 + i64::from(back)).max(0);
+        let screen = self.parser.screen_mut();
+        screen.set_scrollback(usize::try_from(want).unwrap_or(usize::MAX));
+        self.scrollback() != at
+    }
+
+    /// Back to the live screen.
+    pub fn scroll_to_bottom(&mut self) -> bool {
+        let moved = self.scrollback() != 0;
+        self.parser.screen_mut().set_scrollback(0);
+        moved
+    }
+
+    /// How much history there is, in rows.
+    ///
+    /// Asked of `vt100` rather than counted here, and asked the only way it
+    /// answers: `set_scrollback` clamps to what it actually kept, so setting
+    /// it past the end and reading it back is what tells you the bound. The
+    /// position is put back before returning, so this reads as a question.
+    fn history(&mut self) -> usize {
+        let screen = self.parser.screen_mut();
+        let at = screen.scrollback();
+        screen.set_scrollback(usize::MAX);
+        let len = screen.scrollback();
+        screen.set_scrollback(at);
+        len
     }
 
     /// Tell the shell the window changed. Programs redraw from this.
@@ -179,10 +233,23 @@ impl Terminal {
             pixel_height: 0,
         });
         self.parser.screen_mut().set_size(rows, cols);
+        // A resize reflows what is on the screen, so a row count taken before
+        // it no longer points at the same text. Returning to the bottom is
+        // the honest answer; keeping the number would land somewhere arbitrary
+        // while looking deliberate.
+        self.parser.screen_mut().set_scrollback(0);
     }
 
     /// Take whatever the shell has said. `true` when the screen changed.
+    ///
+    /// If the view is scrolled back, it stays on the same *text* rather than
+    /// the same offset. The offset counts rows from the bottom, so leaving it
+    /// alone while new lines arrive would slide the history downward under
+    /// the reader — which is precisely what happens when you scroll back to
+    /// read an error from a build that is still printing.
     pub fn poll(&mut self) -> bool {
+        let at = self.scrollback();
+        let before = if at > 0 { self.history() } else { 0 };
         let mut changed = false;
         loop {
             match self.incoming.try_recv() {
@@ -208,17 +275,33 @@ impl Terminal {
                 }
             }
         }
+        if at > 0 && changed {
+            let grew = self.history().saturating_sub(before);
+            if grew > 0 {
+                self.parser.screen_mut().set_scrollback(at + grew);
+            }
+        }
         changed
     }
 
     /// The screen, as runs.
+    ///
+    /// Scrolled back or not, this is the same code: `vt100`'s `cell` already
+    /// answers from the scrollback when there is an offset, so history is
+    /// painted by the path that paints the live screen rather than a second
+    /// one that could disagree with it.
     pub fn screen(&self) -> Screen {
         let screen = self.parser.screen();
         let (rows, _) = screen.size();
+        let scrollback = screen.scrollback();
         Screen {
             rows: (0..rows).map(|row| row_of(screen, row)).collect(),
             cursor: screen.cursor_position(),
-            cursor_visible: !screen.hide_cursor(),
+            // The cursor belongs to the live screen. Scrolled back, its row
+            // means nothing here, and drawing it would put a caret on an
+            // arbitrary line of history.
+            cursor_visible: !screen.hide_cursor() && scrollback == 0,
+            scrollback,
         }
     }
 }
@@ -401,6 +484,63 @@ mod tests {
         // A row of prose should not cross the bridge as eighty objects.
         let rows = painted("aaaaaaaaaa");
         assert_eq!(rows[0].len(), 1);
+    }
+
+    /// A parser with history, filled past the top of its screen.
+    ///
+    /// Four rows and ten lines, so six have scrolled off — enough that being
+    /// off by one in either direction shows up as the wrong number.
+    fn filled() -> vt100::Parser {
+        let mut parser = vt100::Parser::new(4, 20, 100);
+        for n in 1..=10 {
+            parser.process(format!("line{n}\r\n").as_bytes());
+        }
+        parser
+    }
+
+    fn rows_of(parser: &vt100::Parser) -> Vec<String> {
+        let screen = parser.screen();
+        (0..screen.size().0)
+            .map(|row| line(&row_of(screen, row)))
+            .collect()
+    }
+
+    #[test]
+    fn history_is_painted_by_the_same_path_as_the_live_screen() {
+        // The reason `screen()` needed no second code path: `vt100`'s `cell`
+        // answers from the scrollback once there is an offset, so `row_of`
+        // paints history without knowing there is any.
+        let mut parser = filled();
+        let live = rows_of(&parser);
+        assert!(live.contains(&"line10".to_string()), "{live:?}");
+        assert!(!live.contains(&"line4".to_string()), "{live:?}");
+
+        parser.screen_mut().set_scrollback(3);
+        let back = rows_of(&parser);
+        assert!(
+            back.contains(&"line7".to_string()),
+            "three rows back should reach line7: {back:?}"
+        );
+        assert!(
+            !back.contains(&"line10".to_string()),
+            "and should have left the newest behind: {back:?}"
+        );
+    }
+
+    #[test]
+    fn asking_past_the_end_of_the_history_stops_at_the_oldest_line() {
+        // What `scroll` relies on instead of tracking a bound itself: vt100
+        // clamps, so the position read back afterwards is the real one.
+        let mut parser = filled();
+        parser.screen_mut().set_scrollback(usize::MAX);
+        let kept = parser.screen().scrollback();
+        assert!(kept > 0 && kept < usize::MAX, "clamped to {kept}");
+
+        let oldest = rows_of(&parser);
+        assert!(
+            oldest.contains(&"line1".to_string()),
+            "the very top of the history: {oldest:?}"
+        );
     }
 
     #[test]

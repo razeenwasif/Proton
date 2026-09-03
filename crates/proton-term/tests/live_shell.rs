@@ -99,3 +99,103 @@ fn a_dead_shell_keeps_what_it_printed() {
         "the screen was cleared when it died"
     );
 }
+
+/// A command that keeps printing for a while after it is started.
+///
+/// Needed because typing returns the view to the bottom on purpose: to watch
+/// output arrive *while* scrolled back, it has to come from something already
+/// running rather than from another `write`.
+fn slow_output() -> &'static str {
+    #[cfg(windows)]
+    {
+        "ping -n 12 127.0.0.1\r\n"
+    }
+    #[cfg(not(windows))]
+    {
+        "for i in $(seq 12); do echo NEW$i; sleep 0.4; done\r\n"
+    }
+}
+
+#[test]
+#[ignore = "starts a shell"]
+fn scrolling_back_reaches_output_that_has_left_the_screen() {
+    // A short screen so a handful of lines is already history.
+    let mut term = Terminal::open(&std::env::temp_dir(), 6, 80).expect("a shell");
+    until(&mut term, |screen| !text(screen).trim().is_empty());
+
+    for n in 1..=40 {
+        term.write(&format!("echo MARK{n}\r\n"));
+    }
+    assert!(
+        until(&mut term, |screen| text(screen).contains("MARK40")),
+        "the last line never arrived"
+    );
+    assert!(
+        !text(&term.screen()).contains("MARK1"),
+        "MARK1 should have scrolled off a six-row screen"
+    );
+    assert_eq!(term.scrollback(), 0, "still live before scrolling");
+
+    // Back far enough to reach the beginning.
+    while term.scroll(10) {}
+    let back = text(&term.screen());
+    assert!(term.scrollback() > 0, "the view should have moved");
+    assert!(
+        back.contains("MARK1"),
+        "scrolling back should reach the earliest output: {back}"
+    );
+    assert!(
+        !term.screen().cursor_visible,
+        "the cursor belongs to the live screen, not to history"
+    );
+
+    // And typing returns to it.
+    term.write("\r\n");
+    assert_eq!(term.scrollback(), 0, "typing returns to the live screen");
+}
+
+#[test]
+#[ignore = "starts a shell"]
+fn output_arriving_does_not_slide_the_history_under_the_reader() {
+    // The case this exists for: scrolling back to read an error while the
+    // thing that produced it is still printing. The offset counts rows from
+    // the bottom, so holding it still would move the text.
+    let mut term = Terminal::open(&std::env::temp_dir(), 6, 80).expect("a shell");
+    until(&mut term, |screen| !text(screen).trim().is_empty());
+
+    for n in 1..=30 {
+        term.write(&format!("echo OLD{n}\r\n"));
+    }
+    assert!(until(&mut term, |screen| text(screen).contains("OLD30")));
+
+    // Started *before* scrolling back, because typing deliberately returns to
+    // the bottom — the output has to keep arriving on its own afterwards.
+    term.write(slow_output());
+    std::thread::sleep(Duration::from_millis(400));
+    term.poll();
+
+    while term.scroll(6) {}
+    let anchored = text(&term.screen());
+    let at = term.scrollback();
+    assert!(anchored.contains("OLD1"), "{anchored}");
+
+    // Let the command go on printing, without touching the view.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut arrived = false;
+    while Instant::now() < deadline {
+        arrived |= term.poll();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(arrived, "no further output arrived, so nothing was tested");
+
+    assert_eq!(
+        text(&term.screen()),
+        anchored,
+        "the view slid: it was on OLD1 at offset {at}, now at {}",
+        term.scrollback()
+    );
+    assert!(
+        term.scrollback() > at,
+        "and the offset should have grown to hold it there"
+    );
+}

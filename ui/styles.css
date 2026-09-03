@@ -462,6 +462,9 @@ body {
 .chip.ok   { background: color-mix(in srgb, var(--ok) 16%, transparent);   color: var(--ok); }
 .chip.warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
 .chip.info { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
+/* A chip that is also a control: same pill, but it says it can be pressed. */
+button.chip { border: 0; font: inherit; font-size: 10px; font-weight: 550; cursor: pointer; }
+button.chip:hover { filter: brightness(1.25); }
 
 /* ── trees ────────────────────────────────────────────────────────── */
 .tree { padding: 4px 7px; font-size: 12.5px; }

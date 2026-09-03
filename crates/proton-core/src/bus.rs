@@ -255,6 +255,19 @@ pub enum Command {
         rows: u16,
         cols: u16,
     },
+    /// Look back through what has scrolled off the top.
+    ///
+    /// Rows, signed: positive goes further into the history, negative comes
+    /// forward. Clamped at both ends by however much history there is.
+    TerminalScroll {
+        lines: i32,
+    },
+    /// Back to the live screen, however far back the view is.
+    ///
+    /// Its own command rather than a very large `TerminalScroll`, because
+    /// "return to the bottom" is what is meant and a number big enough to
+    /// mean it is a number that has to be guessed.
+    TerminalToBottom,
     CloseTerminal,
 
     /// Launch what `.proton/debug.json` names.
@@ -409,6 +422,11 @@ pub enum Event {
         /// The shell is still there. A dead terminal keeps its last screen:
         /// what a command printed before it exited is the useful part.
         running: bool,
+        /// How far back through the history this is, in rows; `0` is live.
+        /// Sent because a terminal scrolled back looks exactly like one whose
+        /// shell has stopped answering, and the panel should be able to say
+        /// which it is.
+        scrollback: usize,
     },
     /// The debugger: where it is, and what it can see from there.
     ///

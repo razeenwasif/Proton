@@ -231,6 +231,29 @@ The panel takes the whole keyboard while it has the focus, exactly as the
 picker does and for the same reason — `d` types a `d` at the shell rather than
 starting an operator, and `⌃c` interrupts a program rather than doing nothing.
 
+**Scrolling back is not a second screen.** `vt100` keeps two thousand rows of
+history, and once an offset is set its `cell` answers from that history — so
+the rows the panel draws while scrolled back come from the code that draws the
+live screen, not from a second path that could disagree with it. The offset
+lives in `vt100` rather than beside it, for the same reason: two copies of a
+position are two positions.
+
+The offset counts rows from the *bottom*, which is the detail that matters.
+Holding it still while new output arrives would slide the history downward
+under the reader — exactly when you have scrolled back to read an error from a
+build that is still printing. So `poll` measures how much history grew and
+moves the offset by that much, keeping the view on the same text. The bound is
+never tracked here either: `set_scrollback` clamps to what was really kept, so
+the position is set and then *read back* rather than predicted.
+
+Typing returns to the live screen, because what you are about to type will
+appear there. A resize returns to it too — reflowing changes what a row number
+means, and keeping the number would land somewhere arbitrary while looking
+deliberate. The cursor is not drawn while scrolled back, since its row belongs
+to the live screen. And the panel says when it is looking at history, because
+a terminal scrolled back looks exactly like one whose shell has stopped
+answering.
+
 ### Debugging
 
 `proton-dap` is layered the way `proton-lsp` is and for the same reasons: an

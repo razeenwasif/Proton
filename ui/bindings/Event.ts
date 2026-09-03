@@ -90,7 +90,14 @@ vertical: boolean, } | { "type": "terminal", rows: Array<Array<TermRun>>, cursor
  * The shell is still there. A dead terminal keeps its last screen:
  * what a command printed before it exited is the useful part.
  */
-running: boolean, } | { "type": "debug", phase: DebugPhase, frames: Array<DebugFrame>, variables: Array<DebugVariable>, output: Array<string>, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
+running: boolean, 
+/**
+ * How far back through the history this is, in rows; `0` is live.
+ * Sent because a terminal scrolled back looks exactly like one whose
+ * shell has stopped answering, and the panel should be able to say
+ * which it is.
+ */
+scrollback: number, } | { "type": "debug", phase: DebugPhase, frames: Array<DebugFrame>, variables: Array<DebugVariable>, output: Array<string>, } | { "type": "workspaces", items: Array<WorkspaceTab>, active: number, } | { "type": "picker", kind: PickerKind, title: string, query: string, items: Array<PickerItem>, selected: number, 
 /**
  * How many candidates the picker is choosing from, before matching.
  */

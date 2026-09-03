@@ -1089,6 +1089,12 @@ function renderTerminal(event) {
     state.className = "chip" + (event.running ? " accent" : "");
   }
 
+  const back = $("[data-term-back]");
+  if (back) {
+    back.hidden = !event.scrollback;
+    if (event.scrollback) $("[data-term-back-rows]").textContent = String(event.scrollback);
+  }
+
   const screen = $("[data-term-screen]");
   if (!screen) return;
   const [cursorRow, cursorCol] = event.cursor;
@@ -1145,6 +1151,11 @@ function terminalBytes(e) {
   }
 }
 
+/** How many rows the panel is showing, for a page-sized scroll. */
+function terminalRows() {
+  return $("[data-term-screen]")?.querySelectorAll(".trow").length || 24;
+}
+
 /** How many cells fit, so the shell can be told. */
 function reportTerminalSize() {
   const screen = $("[data-term-screen]");
@@ -1158,7 +1169,32 @@ function reportTerminalSize() {
   dispatch({ type: "terminalSize", rows, cols });
 }
 
+/** How many rows a wheel notch moves. */
+const TERM_WHEEL_ROWS = 3;
+
+// The wheel over the screen looks back through the history. The panel renders
+// exactly the rows the core sent, so there is nothing here for the browser to
+// scroll — without this the wheel does nothing at all.
+document.addEventListener(
+  "wheel",
+  (e) => {
+    if (!e.target.closest("[data-term-screen]")) return;
+    e.preventDefault();
+    // Up the page is back in time, which is the direction a wheel already
+    // means: deltaY is negative going up.
+    const lines = e.deltaY < 0 ? TERM_WHEEL_ROWS : -TERM_WHEEL_ROWS;
+    dispatch({ type: "terminalScroll", lines });
+  },
+  { passive: false },
+);
+
 document.addEventListener("click", (e) => {
+  // The indicator is also the way out of history.
+  if (e.target.closest("[data-term-back]")) {
+    dispatch({ type: "terminalToBottom" });
+    return;
+  }
+
   const button = e.target.closest("[data-term]");
   if (button) {
     dispatch({ type: button.dataset.term === "open" ? "openTerminal" : "closeTerminal" });
@@ -1838,6 +1874,15 @@ document.addEventListener("keydown", (e) => {
   // the picker does — `d` types a `d` at the shell rather than starting an
   // operator, and `⌃c` interrupts a program rather than doing nothing.
   if (terminalFocused) {
+    // Shift+PageUp/PageDown look through the history, which is the pairing
+    // every terminal uses — the unshifted keys belong to whatever is running
+    // in the shell, and taking those would break a pager.
+    if (e.shiftKey && (e.key === "PageUp" || e.key === "PageDown")) {
+      e.preventDefault();
+      const page = Math.max(1, terminalRows() - 1);
+      dispatch({ type: "terminalScroll", lines: e.key === "PageUp" ? page : -page });
+      return;
+    }
     const bytes = terminalBytes(e);
     if (bytes !== null) {
       e.preventDefault();

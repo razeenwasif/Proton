@@ -314,6 +314,27 @@ impl Workspace {
                 }
             }
 
+            Command::TerminalScroll { lines } => {
+                // Only redrawn when the view actually moved, so a wheel spun
+                // at either end of the history costs nothing.
+                let moved = self.terminal.as_mut().is_some_and(|t| t.scroll(lines));
+                match moved {
+                    true => vec![self.terminal_event()],
+                    false => Vec::new(),
+                }
+            }
+
+            Command::TerminalToBottom => {
+                let moved = self
+                    .terminal
+                    .as_mut()
+                    .is_some_and(proton_term::Terminal::scroll_to_bottom);
+                match moved {
+                    true => vec![self.terminal_event()],
+                    false => Vec::new(),
+                }
+            }
+
             Command::CloseTerminal => {
                 // Dropping it kills the shell, which is what closing a
                 // terminal means.
@@ -2805,6 +2826,7 @@ impl Workspace {
                 cursor: (0, 0),
                 cursor_visible: false,
                 running: false,
+                scrollback: 0,
             };
         };
         let running = term.is_alive();
@@ -2818,6 +2840,7 @@ impl Workspace {
             cursor: screen.cursor,
             cursor_visible: screen.cursor_visible && running,
             running,
+            scrollback: screen.scrollback,
         }
     }
 

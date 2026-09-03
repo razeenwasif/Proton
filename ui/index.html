@@ -519,6 +519,10 @@
         <div class="dock-panel" data-panel="term" style="display:none;flex-direction:column;flex:1;min-height:0">
           <header>
             <span class="chip" data-term-state>closed</span>
+            <!-- Only while looking at history. A terminal scrolled back looks
+                 exactly like one whose shell has stopped answering, so it has
+                 to say which it is — and offer the way out. -->
+            <button class="chip warn" data-term-back hidden title="Back to the live screen">↑ <span data-term-back-rows>0</span></button>
             <span class="grow"></span>
             <button class="hbtn" data-term="open" title="Open a shell — ␣tt or :terminal"><svg class="i"><use href="#i-play"/></svg></button>
             <button class="hbtn" data-term="close" title="Close it"><svg class="i"><use href="#i-stop"/></svg></button>
