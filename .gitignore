@@ -3,3 +3,4 @@ target/
 /crates/*/gen
 node_modules
 *.log
+.venv/

@@ -1,0 +1,16 @@
+[package]
+name = "proton-data"
+description = "Proton's notebook runtime: the Jupyter wire protocol, and the documents it runs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+zmq = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+rand = "0.9"

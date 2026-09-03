@@ -1,0 +1,188 @@
+//! The connection file, and the ports in it.
+//!
+//! A kernel is not told where to listen — it is *handed* a JSON file naming
+//! five ports and a signing key, and it binds them. Which means the ports have
+//! to be chosen before the kernel exists, and chosen so that nothing else
+//! takes them in between.
+//!
+//! The honest way to do that is to bind them here first and hold them until
+//! the moment the kernel starts. Asking the OS for a free port, closing it and
+//! writing the number down is the version that works on a quiet machine and
+//! fails on a busy one — the gap between closing and the kernel binding is a
+//! race, and losing it means a kernel that exits with "address in use".
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+/// What a kernel is told, and what a client reads back.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Connection {
+    pub transport: String,
+    pub ip: String,
+    pub shell_port: u16,
+    pub iopub_port: u16,
+    pub stdin_port: u16,
+    pub control_port: u16,
+    pub hb_port: u16,
+    /// The HMAC key. Empty means unsigned, which the protocol allows.
+    pub key: String,
+    pub signature_scheme: String,
+    #[serde(default)]
+    pub kernel_name: String,
+}
+
+impl Connection {
+    /// Five ports nothing else is using, and a fresh key.
+    ///
+    /// The ports come from `reserve`, which binds them to find out. They are
+    /// released just before the kernel is launched — see `Reserved`.
+    pub fn open(key: String) -> std::io::Result<(Connection, Reserved)> {
+        let held = Reserved::five()?;
+        let ports = held.ports();
+        Ok((
+            Connection {
+                transport: "tcp".into(),
+                ip: "127.0.0.1".into(),
+                shell_port: ports[0],
+                iopub_port: ports[1],
+                stdin_port: ports[2],
+                control_port: ports[3],
+                hb_port: ports[4],
+                key,
+                signature_scheme: "hmac-sha256".into(),
+                kernel_name: String::new(),
+            },
+            held,
+        ))
+    }
+
+    pub fn read(path: &Path) -> Result<Connection, String> {
+        let text =
+            std::fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        serde_json::from_str(&text).map_err(|err| format!("{}: {err}", path.display()))
+    }
+
+    pub fn write(&self, path: &Path) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let text = serde_json::to_string_pretty(self).map_err(|err| err.to_string())?;
+        std::fs::write(path, text).map_err(|err| format!("{}: {err}", path.display()))
+    }
+
+    pub fn address(&self, port: u16) -> String {
+        format!("{}://{}:{}", self.transport, self.ip, port)
+    }
+}
+
+/// Ports held open so nothing else can take them.
+///
+/// Dropping this releases them. That is the whole point: they are held from
+/// the moment they are chosen until the moment the kernel is spawned, so the
+/// window in which another process could take one is as small as it can be
+/// made without the kernel choosing its own ports — which the protocol does
+/// not allow.
+#[derive(Debug)]
+pub struct Reserved {
+    listeners: Vec<std::net::TcpListener>,
+}
+
+impl Reserved {
+    fn five() -> std::io::Result<Reserved> {
+        let listeners = (0..5)
+            .map(|_| std::net::TcpListener::bind("127.0.0.1:0"))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        Ok(Reserved { listeners })
+    }
+
+    fn ports(&self) -> Vec<u16> {
+        self.listeners
+            .iter()
+            .map(|l| l.local_addr().map(|a| a.port()).unwrap_or(0))
+            .collect()
+    }
+
+    /// Let them go, just before the kernel binds them.
+    pub fn release(self) {
+        drop(self);
+    }
+}
+
+/// Where a connection file for this kernel should live.
+///
+/// Under the OS temp directory rather than the project: it names a signing key
+/// and dies with the kernel, so it is neither the user's business nor
+/// something a repository should ever see.
+pub fn connection_file(id: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("proton-kernel-{id}.json"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn five_ports_are_reserved_and_all_different() {
+        let (connection, held) = Connection::open("k".into()).unwrap();
+        let ports = [
+            connection.shell_port,
+            connection.iopub_port,
+            connection.stdin_port,
+            connection.control_port,
+            connection.hb_port,
+        ];
+        assert!(ports.iter().all(|p| *p != 0), "{ports:?}");
+
+        let mut unique = ports.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(
+            unique.len(),
+            5,
+            "a port used twice is a kernel that cannot start"
+        );
+        held.release();
+    }
+
+    #[test]
+    fn the_ports_really_are_held_until_released() {
+        // The property the whole approach rests on. If binding again while
+        // they are held succeeded, they would not be reserved at all and the
+        // race this avoids would still be there.
+        let (connection, held) = Connection::open("k".into()).unwrap();
+        let taken = std::net::TcpListener::bind(("127.0.0.1", connection.shell_port));
+        assert!(taken.is_err(), "the port was not actually held");
+
+        held.release();
+        // And once released, a kernel can have them.
+        assert!(std::net::TcpListener::bind(("127.0.0.1", connection.shell_port)).is_ok());
+    }
+
+    #[test]
+    fn a_connection_file_round_trips() {
+        let (connection, held) = Connection::open("sekrit".into()).unwrap();
+        held.release();
+        let path = std::env::temp_dir().join(format!(
+            "proton-conn-test-{}-{:?}.json",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        connection.write(&path).unwrap();
+
+        let read = Connection::read(&path).unwrap();
+        assert_eq!(read.key, "sekrit");
+        assert_eq!(read.shell_port, connection.shell_port);
+        assert_eq!(read.signature_scheme, "hmac-sha256");
+        assert_eq!(
+            read.address(read.shell_port),
+            format!("tcp://127.0.0.1:{}", read.shell_port)
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_missing_connection_file_is_an_error_not_a_panic() {
+        assert!(Connection::read(Path::new("/no/such/kernel.json")).is_err());
+    }
+}

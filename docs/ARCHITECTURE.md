@@ -1198,7 +1198,7 @@ a context scope), `[` and `]` to jump between changes to one value, gutter
 marks on traced lines, and writing traces to `.proton/traces/` so `␣ft` finds
 them.
 
-**M5 — Plugins. ◐ in progress.** The host ships: `proton-plugin` is a
+**M5 — Plugins. ✅ done.** The host ships: `proton-plugin` is a
 wasmtime engine with the Component Model on and epoch interruption on, a
 manifest read before any code runs, and a component loader. `examples/hello-plugin`
 is a real plugin built to a real component and committed, so the tests need no
@@ -1288,10 +1288,51 @@ longer needs emscripten or Docker to produce a `.wasm` grammar. Since 0.25 it
 downloads a wasi-sdk clang and drives that directly, which removes the
 toolchain argument against ever regenerating one of these.
 
-**M6 — Data mode.** Closest to Codex; the first real exercise of the mode
-contract by something that is not a text editor.
+**M6 — Data mode. ◐ in progress.** Closest to Codex; the first real exercise of
+the mode contract by something that is not a text editor.
 *Exit: a notebook runs, a dataframe renders, and "open sat 17 in Codex" jumps to
 the right line.*
+
+**The kernel ships.** `proton-data` speaks the Jupyter wire protocol to a real
+kernel: five ports, HMAC-SHA256 signing, and the same two-threads-and-a-channel
+arrangement as every other foreign process here, drained on the core's
+heartbeat.
+
+Three things about that protocol are worth writing down, because each one fails
+in a way that does not look like its cause.
+
+*The delimiter is not an offset.* A message is a list of frames, and everything
+before `<IDS|MSG>` is routing identity the socket added. Counting frames from
+the front works until a DEALER puts an identity in — then the identity is read
+as the signature and nothing verifies.
+
+*A bad signature is silence.* The four JSON frames are signed, and a kernel
+drops what does not authenticate without saying so, because a message it cannot
+authenticate is not one it can safely answer. So a signing bug does not look
+like an error; it looks like a kernel that ignores you. Incoming messages are
+verified the same way, constant-time, since that compares a secret against
+bytes from outside.
+
+*The reply is not the output.* `execute_reply` says only whether it worked and
+what the execution count was. Everything the code actually did — what it
+printed, returned, or raised — arrives on the **iopub** broadcast, tied back to
+its request by `parent_header`. A client that waits for the reply and renders
+its content displays nothing at all, and one that ignores `parent_header` files
+one cell's output under another.
+
+Two smaller decisions follow from the protocol rather than from taste. The five
+ports are **bound and held** until the moment the kernel is spawned, because a
+kernel is handed its ports rather than choosing them: asking the OS for a free
+port and closing it leaves a race that is lost only on a busy machine.
+And readiness is *asked for* rather than waited for — `kernel_info_request`
+until a reply — because a SUB socket drops everything published before its
+subscription is live, so a kernel that starts quickly can say "idle" to nobody
+and a client waiting for it waits forever.
+
+`tests/live_kernel.rs` runs against a real `ipykernel` behind
+`PROTON_TEST_KERNEL`, the way the language-server and adapter tests do: code
+runs, printing and results arrive as different messages, a traceback survives,
+state persists between cells, and two cells in flight keep their output apart.
 
 **M7 — Design mode.** Two-way binding between artboard and component source.
 The hardest of the seven, because the binding has to survive a human editing

@@ -4,6 +4,7 @@ members = [
     "crates/proton-agent",
     "crates/proton-core",
     "crates/proton-dap",
+    "crates/proton-data",
     "crates/proton-index",
     "crates/proton-lsp",
     "crates/proton-plugin",
@@ -26,6 +27,7 @@ repository = "https://github.com/razeenwasif/Proton"
 proton-agent = { path = "crates/proton-agent" }
 proton-core = { path = "crates/proton-core" }
 proton-dap = { path = "crates/proton-dap" }
+proton-data = { path = "crates/proton-data" }
 proton-index = { path = "crates/proton-index" }
 proton-lsp = { path = "crates/proton-lsp" }
 proton-plugin = { path = "crates/proton-plugin" }
