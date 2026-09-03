@@ -1,13 +1,13 @@
 # Proton — architecture
 
-The build document. **M0 through M2 and M4 are implemented, and M3 is
-half-built**; everything from M5 on is a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
+The build document. **M0 through M4 are implemented**; everything from M5 on
+is a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
 reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 **what we build and in what order**, and is the one to argue with before writing
 code.
 
 ```bash
-cargo test --workspace        # 559 tests, headless
+cargo test --workspace        # 573 tests, headless
 cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
                               # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
@@ -63,7 +63,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 |---|---|---|
 | `proton-text` | Rope, undo tree, multi-cursor selections, UTF‑8 ↔ UTF‑16 ↔ line/col | `ropey` |
 | `proton-vim` | Modal state machine, operators, motions, text objects, registers, marks, macros, which-key tree | — |
-| `proton-syntax` | Tree-sitter parsing, incremental re-parse, viewport-scoped highlight queries | `tree-sitter` |
+| `proton-syntax` | Tree-sitter parsing, incremental re-parse, viewport-scoped highlight queries, companion grammars | `tree-sitter` |
 | `proton-lsp` | LSP client, server supervision, JSON-RPC framing, a non-blocking mailbox | `serde_json` |
 | `proton-vcs` | The gutter, what git considers changed, and the diff behind both | `gix` |
 | `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
@@ -311,6 +311,13 @@ and keep their own cursors, which is the only reason to open the same file
 twice — and an edit in either shows in both, because they are views of one
 document rather than two of anything.
 
+**How wide each one is, is the front end's.** `Command` and `Event` name no
+pixels, so the shares live in the DOM and a second front end would size its
+panes its own way. Dragging a divider moves only the pair either side of it:
+the two share the span they already had between them, and everything further
+out keeps the size it was given. A drag between panes 2 and 3 that shoved
+pane 1 about would be a layout you cannot aim.
+
 **Where the cursor lives.** It is a field on `Buffer`, and every motion and
 operator in `editor.rs` reaches for it there; moving it onto the view would
 mean threading it through all of them. It does not have to be. *Only the
@@ -449,6 +456,28 @@ for everything semantic; DAP for the debug rail. Both language servers and
 debug adapters run out of process, so a crash costs a squiggle rather than the
 editor. Grammars load as wasm through the same sandbox as plugins, which means a
 plugin can add a language without a native build step.
+
+**Some languages are two grammars.** Markdown is the first: one grammar for the
+block structure — headings, fences, lists, quotes — and a second for what is
+inside a paragraph, where emphasis, links and code spans live. The block
+grammar marks those stretches as `inline` nodes and stops, so a single pass
+colours the headings and leaves the prose plain.
+
+The second pass is one parse, not one per paragraph: tree-sitter's
+`included_ranges` takes all the ranges at once and returns a tree covering
+them, which also keeps the offsets absolute so the captures need no rebasing.
+It is rebuilt whole rather than incrementally, because the ranges themselves
+move whenever a paragraph does and a tree edited against ranges that have
+shifted colours the file wrong rather than failing — the worse of the two. Its
+captures join the first grammar's in one list and sort as the narrower spans
+they are, so a code span inside a paragraph is code rather than paragraph.
+
+Markup needs a vocabulary code does not, and two of its entries are not colours
+at all: **emphasis is a slope and strong is a weight**, which is how the text
+itself says them. Painting those as two more colours would be a legend to learn
+instead of a thing you can already read. It is also the one capture family
+where the *tail* carries the meaning — `text` alone is prose — so `text.title`
+and `markup.heading` are both read for the same reason the two spellings exist.
 
 ### Plugins
 
@@ -914,7 +943,7 @@ about the text produces diagnostics on the wrong lines — the worst kind of
 wrong. Revisit when edits are batched. The language table is hard-coded until
 it becomes user config in M4.
 
-**M3 — Agent. ◐ in progress.** The runtime ships: `proton-agent` is the
+**M3 — Agent. ✅ done.** The runtime ships: `proton-agent` is the
 Messages API, layered the way `proton-lsp` is, and for the same reasons. `sse`
 frames bytes and knows nothing about their meaning; `stream` assembles events
 into a turn; `wire` gives both directions one set of types, because a response
@@ -990,11 +1019,29 @@ calls `edit_file`, and checks that the file on disk is untouched afterwards.
 **Applicable hunks are done**: `edit_file` stages, the review panel draws the
 hunks, and Refer and Apply act on them one at a time.
 
-Still open, and the last of M3: the task queue. The shadow worktree is
-deliberately *not* a prerequisite — a staged diff held against the buffer was
-enough to review and apply, as planned, and a real git worktree earns its place
-later, when proposed changes need to be run against tests before they are
-accepted.
+**The task queue.** The agent runs one turn at a time and always will — a
+conversation is a sequence, and two turns interleaving into one transcript
+would be neither. What the queue changes is what happens to the *second*
+question: it used to be refused, which meant remembering it yourself and asking
+again at the right moment. Now it waits, and starts on its own when the one in
+front of it ends.
+
+Two groups, as the design has always drawn them. **In progress** is the running
+task plus everything behind it; **ready for review** is everything that
+finished, each row carrying the answer's first sentence, how many tools it ran,
+and the files it staged — which is the thing you have to go and decide about,
+and the reason the group is called that rather than "done". A failure is a
+state rather than a disappearance: a task that vanished when it went wrong
+would leave you wondering whether you had asked at all.
+
+The one thing the queue will not do is drop the running task. Removing its row
+would not stop the turn, and a list that lies about what is happening is worse
+than one you cannot tidy.
+
+*M3 is done.* The shadow worktree was deliberately *not* a prerequisite — a
+staged diff held against the buffer was enough to review and apply, as planned,
+and a real git worktree earns its place later, when proposed changes need to be
+run against tests before they are accepted.
 
 **M4 — Code Visualizer. ✅ done.** `proton-trace` is the second consumer of
 upstream's trace format. Nothing forks or patches it: the checkout is a

@@ -293,3 +293,53 @@ fn a_change_older_than_the_journal_falls_back_to_a_full_parse() {
         "falling back must produce the right answer, not an approximate one"
     );
 }
+
+/* ── markdown, which is two grammars ──────────────────────────────── */
+
+/// Every scope on one line, in order.
+fn scopes(spans: &[Span]) -> Vec<Scope> {
+    spans.iter().map(|s| s.scope).collect()
+}
+
+#[test]
+fn markdown_is_coloured_by_both_of_its_grammars() {
+    // The block grammar sees the heading and the fence; the inline one sees
+    // the emphasis, the code span and the link. Without the second pass the
+    // middle line comes back with nothing on it but the punctuation.
+    let text = "# A heading\n\nSome *emphasis* and `code` and a [link](http://x).\n\n\
+                ```rust\nlet x = 1;\n```\n";
+    let buffer = Buffer::from_text(text);
+    let mut syntax = Syntax::for_path(std::path::Path::new("notes.md")).expect("a grammar");
+    let spans = syntax.spans(&buffer, 0, 8);
+
+    assert!(
+        scopes(&spans[0]).contains(&Scope::Heading),
+        "the heading's text, not just its hash: {:?}",
+        spans[0]
+    );
+
+    let prose = scopes(&spans[2]);
+    assert!(prose.contains(&Scope::Emphasis), "{:?}", spans[2]);
+    assert!(prose.contains(&Scope::Link), "{:?}", spans[2]);
+    assert!(
+        prose.contains(&Scope::String),
+        "a code span is a literal: {:?}",
+        spans[2]
+    );
+
+    // The marks themselves stay dim, which is what makes the text between
+    // them read as the text rather than as the syntax.
+    assert!(prose.contains(&Scope::Punctuation), "{:?}", spans[2]);
+    // And what is inside a fence is a literal too.
+    assert!(scopes(&spans[5]).contains(&Scope::String), "{:?}", spans[5]);
+}
+
+#[test]
+fn a_language_with_one_grammar_is_unaffected_by_the_second_pass() {
+    // The companion is opt-in per language, and everything else has none.
+    let buffer = Buffer::from_text("fn main() { let x = 1; }\n");
+    let mut syntax = Syntax::for_path(std::path::Path::new("a.rs")).expect("a grammar");
+    let spans = syntax.spans(&buffer, 0, 1);
+    assert!(!spans[0].is_empty());
+    assert!(!scopes(&spans[0]).contains(&Scope::Heading));
+}

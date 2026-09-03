@@ -16,6 +16,7 @@ use crate::mode::ModeId;
 use crate::picker::{PickerItem, PickerKind};
 use crate::review::ChangeView;
 use crate::split::Direction;
+use crate::tasks::Task;
 use crate::trace::{StepView, TraceState};
 use crate::tree::TreeRow;
 use crate::vim::VimMode;
@@ -200,6 +201,13 @@ pub enum Command {
     /// Stop the turn in flight. What has arrived stays on screen; nothing is
     /// committed to the conversation.
     CancelTurn,
+    /// Take one task off the queue. A running one stays: removing its row
+    /// would not stop the turn.
+    DropTask {
+        id: usize,
+    },
+    /// Clear everything that has finished, leaving what is still to come.
+    ClearTasks,
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -482,6 +490,10 @@ pub enum Event {
     /// What each language server is doing, for the statusline.
     Servers {
         states: Vec<ServerState>,
+    },
+    /// The queue: what is running, what is waiting, and what is ready.
+    Tasks {
+        tasks: Vec<Task>,
     },
     /// What the agent has proposed and nobody has accepted yet.
     ///

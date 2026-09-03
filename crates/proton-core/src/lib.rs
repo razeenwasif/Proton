@@ -21,6 +21,7 @@ pub mod picker;
 pub mod review;
 pub mod session;
 pub mod split;
+pub mod tasks;
 pub mod trace;
 pub mod tree;
 pub mod vim;

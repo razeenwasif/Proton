@@ -89,6 +89,8 @@ pub struct Workspace {
     pending_action: Option<String>,
     /// Changes the agent has proposed and nobody has accepted yet.
     review: review::Review,
+    /// What has been asked of the agent, running and waiting.
+    tasks: crate::tasks::Queue,
     /// Where the cursor was when a search prompt opened.
     ///
     /// Every keystroke previews from here rather than from the last preview,
@@ -396,6 +398,16 @@ impl Workspace {
             }
 
             Command::Ask { text } => self.ask(&text),
+
+            Command::DropTask { id } => {
+                self.tasks.drop_task(id);
+                vec![self.tasks_event()]
+            }
+
+            Command::ClearTasks => {
+                self.tasks.clear_finished();
+                vec![self.tasks_event()]
+            }
 
             Command::CancelTurn => {
                 self.agent.cancel();
@@ -2222,15 +2234,61 @@ impl Workspace {
     /* ── the agent ────────────────────────────────────────────────── */
 
     /// Put a question to the agent.
+    /// Ask the agent something, or queue it if it is already working.
+    ///
+    /// The agent runs one turn at a time and always will — a conversation is
+    /// a sequence, and two turns interleaving into one transcript would be
+    /// neither. What changed is what happens to the second question: it used
+    /// to be refused, which meant remembering it yourself and asking again at
+    /// the right moment. Now it waits.
     fn ask(&mut self, text: &str) -> Vec<Event> {
         if text.trim().is_empty() {
             return Vec::new();
         }
+        let busy = self.agent.is_busy();
+        self.tasks.push(text, busy);
+        if busy {
+            return vec![self.tasks_event()];
+        }
         match self.agent.ask(text) {
-            Ok(()) => vec![self.agent_event()],
-            // A missing credential is the common case and it is not an error
-            // in the code — it is a thing the user has to go and do.
-            Err(why) => vec![notice(why, NoticeLevel::Warn)],
+            Ok(()) => vec![self.agent_event(), self.tasks_event()],
+            Err(why) => {
+                // A missing credential is the common case and it is not an
+                // error in the code — it is a thing the user has to go and
+                // do. The task still records that it was asked and failed.
+                self.tasks.finished(&why, 0, Vec::new(), false);
+                vec![notice(why, NoticeLevel::Warn), self.tasks_event()]
+            }
+        }
+    }
+
+    /// Start whatever is next, once a turn has ended.
+    fn task_finished(&mut self) -> Vec<Event> {
+        let last = self.agent.transcript().last();
+        let ok = last.is_some();
+        let note = last.map(|e| first_sentence(&e.text)).unwrap_or_default();
+        let tools = last.map_or(0, |e| e.calls.len());
+        // What it left for you to look at. The point of the group being
+        // called "ready for review" rather than "done".
+        let files = self.staged().into_iter().map(|c| c.path).collect();
+
+        let mut events = Vec::new();
+        if let Some(next) = self.tasks.finished(&note, tools, files, ok) {
+            match self.agent.ask(&next) {
+                Ok(()) => events.push(self.agent_event()),
+                Err(why) => {
+                    self.tasks.finished(&why, 0, Vec::new(), false);
+                    events.push(notice(why, NoticeLevel::Warn));
+                }
+            }
+        }
+        events.push(self.tasks_event());
+        events
+    }
+
+    fn tasks_event(&self) -> Event {
+        Event::Tasks {
+            tasks: self.tasks.all().to_vec(),
         }
     }
 
@@ -2241,6 +2299,7 @@ impl Workspace {
     /// `read_file` reads through the same buffers the user has open, so what
     /// the agent sees and what the user sees cannot drift apart.
     fn poll_agent(&mut self) -> Vec<Event> {
+        let was_busy = self.agent.is_busy();
         let calls = self.agent.poll();
         let mut events = Vec::new();
 
@@ -2267,6 +2326,21 @@ impl Workspace {
         }
 
         events.push(self.agent_event());
+
+        // The turn ended between the start of this poll and its end, which is
+        // the only moment the next task may start: two turns in flight would
+        // interleave into one transcript.
+        if was_busy && !self.agent.is_busy() {
+            events.extend(self.task_finished());
+        } else if was_busy {
+            // Still going. The row says what it is doing, which is the whole
+            // reason it is a queue and not a spinner.
+            let last = self.agent.transcript().last();
+            let note = last.map(|e| first_sentence(&e.text)).unwrap_or_default();
+            let tools = last.map_or(0, |e| e.calls.len());
+            self.tasks.progress(&note, tools);
+            events.push(self.tasks_event());
+        }
         events
     }
 
@@ -3154,6 +3228,25 @@ fn terminal_command(prefix: &str) -> Option<Command> {
 
 /// The `␣w` family — vim's `⌃w`, under the leader where everything else lives.
 ///
+/// An answer's first sentence, for a one-line summary of a task.
+///
+/// A row in a queue is a row: the transcript is where the answer is read, and
+/// this only has to be enough to tell one task from another at a glance.
+fn first_sentence(text: &str) -> String {
+    const MOST: usize = 90;
+    let text = text.trim();
+    let end = text
+        .find(". ")
+        .map(|at| at + 1)
+        .or_else(|| text.find('\n'))
+        .unwrap_or(text.len());
+    let line: String = text[..end].chars().take(MOST).collect();
+    match line.chars().count() < text[..end].chars().count() {
+        true => format!("{line}…"),
+        false => line,
+    }
+}
+
 /// The `␣l` family — everything answered by a language server.
 ///
 /// `␣ls` is not here: it opens a picker, so it goes through the picker's own

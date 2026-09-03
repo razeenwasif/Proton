@@ -480,6 +480,8 @@ body {
 }
 .hbtn svg { width: 13px; height: 13px; }
 .hbtn:hover { background: var(--e2); color: var(--ink); }
+/* The one header button that is a word rather than a glyph. */
+.hbtn.wide { padding: 3px 9px; font: 620 10.5px var(--sans); }
 .group { padding: 13px 12px 5px; font: 620 10px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-4); }
 
 .find {
@@ -535,6 +537,11 @@ kbd {
 .code .doc { position: relative; }
 .code .win { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
 .ln { display: flex; padding: 0 12px 0 0; white-space: pre; }
+/* The line's text, as one flex item. Not decoration: a flex container never
+   renders a text node that is only whitespace, so the single spaces between
+   highlighted tokens would vanish and `from typing import List` would read
+   `fromtypingimportList`. Inside here it is ordinary inline flow again. */
+.ln .tx { flex: 1 1 auto; min-width: 0; }
 .ln.cur { background: rgba(var(--raise), 0.07); }
 .ln .n {
   flex: 0 0 48px; text-align: right; padding-right: 14px;
@@ -608,6 +615,17 @@ kbd {
 .cm { color: var(--ink-4); font-style: italic; }
 .ty { color: var(--warn); }     .op { color: var(--info); }
 .pn { color: var(--ink-2); }
+
+/* Prose. A markdown file is read rather than scanned, so these say what the
+   marks around them mean — a heading looks like a heading, emphasis leans,
+   strong is heavier — instead of adding four more colours to tell apart.
+   The `*` and `` ` `` themselves stay punctuation-dim, which is what makes
+   the text between them read as the text and not as the syntax. */
+.md-h  { color: var(--accent); font-weight: 700; }
+.md-em { font-style: italic; }
+.md-b  { font-weight: 700; color: var(--ink); }
+.md-a  { color: var(--info); text-decoration: underline; text-underline-offset: 2px;
+         text-decoration-color: color-mix(in srgb, var(--info) 45%, transparent); }
 
 .hl-add { background: color-mix(in srgb, var(--ok) 11%, transparent); box-shadow: inset 2px 0 0 var(--ok); }
 .hl-del { background: color-mix(in srgb, var(--err) 10%, transparent); box-shadow: inset 2px 0 0 var(--err); }
@@ -732,7 +750,25 @@ kbd {
 .ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink-4); flex: 0 0 12px; }
 .ring.run { border-color: var(--accent); border-right-color: transparent; animation: spin 1s linear infinite; }
 .ring.done { border-color: var(--ok); background: var(--ok); box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 55%, transparent); }
+/* Failed is a state, not a disappearance: a task that vanished when it went
+   wrong would leave you wondering whether you had asked at all. */
+.ring.fail { border-color: var(--err); background: color-mix(in srgb, var(--err) 35%, transparent); }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Queued is dimmer than running, which is the difference you are actually
+   looking for when you glance at the list. */
+.task .hd .ring:not(.run):not(.done):not(.fail) { opacity: .5; }
+.task .hd { position: relative; padding-right: 20px; }
+.task .hd .x {
+  position: absolute; right: 0; top: 1px; opacity: 0;
+  cursor: pointer; color: var(--ink-4); display: grid; place-items: center;
+}
+.task:hover .hd .x { opacity: 1; }
+.task .hd .x:hover { color: var(--err); }
+.task .hd .x svg { width: 12px; height: 12px; }
+.task .sub .dim { color: var(--ink-4); }
+
+.empty { padding: 22px 14px; color: var(--ink-4); font-size: 12px; text-align: center; }
 .artifact {
   display: inline-flex; align-items: center; gap: 6px; margin: 5px 5px 0 0; padding: 4px 10px;
   background: var(--e2); border-radius: 7px; box-shadow: var(--spec);
@@ -1056,9 +1092,30 @@ table.df tr:hover td { background: var(--e1); }
    real buffers in M1, when there is something to tile. */
 .splits { display: flex; flex: 1; min-height: 0; }
 .splits.stacked { flex-direction: column; }
-.split { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; position: relative; }
-.splits:not(.stacked) > .split + .split { border-left: 1px solid var(--edge); }
-.splits.stacked > .split + .split { border-top: 1px solid var(--edge); }
+/* `--share` is how much of the row this pane takes, and it is the front end's
+   to decide: the core owns which buffer a view shows and where its cursor is,
+   and has no opinion about pixels. Defaults to 1, so panes start even. */
+.split {
+  display: flex; flex-direction: column; position: relative;
+  flex: var(--share, 1) 1 0; min-width: 0; min-height: 0;
+}
+
+/* The divider between two panes. A 1px line you can actually hit: the border
+   is what you see, the padding is what you grab. */
+.sp-gutter {
+  flex: 0 0 1px; position: relative; z-index: 5;
+  background: var(--edge);
+  cursor: col-resize; touch-action: none;
+}
+.splits.stacked > .sp-gutter { cursor: row-resize; }
+.sp-gutter::after {
+  content: ""; position: absolute; inset: 0 -3px;
+  background: transparent; transition: background .12s;
+}
+.splits.stacked > .sp-gutter::after { inset: -3px 0; }
+.sp-gutter:hover::after, .sp-gutter.dragging::after {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
 
 /* Which split has focus matters the moment there is more than one, and
    nothing else on screen says so. */

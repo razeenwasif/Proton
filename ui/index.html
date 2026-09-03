@@ -407,33 +407,15 @@
         </div>
 
         <!-- Tasks -->
+        <!-- Rendered from Event::Tasks. The core owns the queue: what is
+             running, what is behind it, and what each one left for you. -->
         <div class="dock-panel" data-panel="tasks" style="display:none;flex-direction:column;flex:1;min-height:0">
-          <div class="scroll">
-            <div class="group">In progress · 2</div>
-            <div class="task">
-              <div class="hd"><span class="ring run"></span> Memoise the fleet grid</div>
-              <div class="sub">Applying 2 hunks · dashboard.tsx, orbit.ts</div>
-            </div>
-            <div class="task">
-              <div class="hd"><span class="ring run"></span> Port trajectory.c to the Android target</div>
-              <div class="sub">Cross-compiling arm64-v8a · NDK r27</div>
-            </div>
-            <div class="group">Ready for review · 3</div>
-            <div class="task">
-              <div class="hd"><span class="ring done"></span> Ingest six months of telemetry</div>
-              <div class="sub">Parquet written, schema inferred, 3 nulls flagged</div>
-              <div class="sub"><span class="artifact"><svg class="i ft-data"><use href="#i-sliders"/></svg> telemetry.parquet</span> <span class="artifact"><svg class="i ft-data"><use href="#i-sliders"/></svg> schema.json</span></div>
-            </div>
-            <div class="task">
-              <div class="hd"><span class="ring done"></span> Design tokens → Tailwind theme</div>
-              <div class="sub">Design mode edits mirrored into <code>theme.css</code></div>
-            </div>
-            <div class="task">
-              <div class="hd"><span class="ring done"></span> Explain the pointer bug in <code>trajectory.c</code></div>
-              <div class="sub">Traced to step 212 — <code>node-&gt;next</code> reads freed memory</div>
-              <div class="sub"><span class="artifact"><svg class="i ft-data"><use href="#i-sliders"/></svg> trace-2181.json</span></div>
-            </div>
-          </div>
+          <header>
+            <span class="chip" data-task-count>nothing queued</span>
+            <span class="grow"></span>
+            <button class="hbtn wide" data-tasks-clear title="Clear everything that has finished">Clear finished</button>
+          </header>
+          <div class="scroll" data-tasks></div>
         </div>
 
         <!-- Code Visualizer -->

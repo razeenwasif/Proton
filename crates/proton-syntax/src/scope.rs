@@ -26,6 +26,17 @@ pub enum Scope {
     Operator,
     Punctuation,
     Attribute,
+
+    /* ── prose ────────────────────────────────────────────────────────
+    Markdown is a different vocabulary for a different kind of file, and
+    two of these are not colours at all: emphasis and strong are a slope
+    and a weight, which is how the text itself says them. Painting them as
+    two more colours would be a legend to learn instead of a thing you can
+    already read. */
+    Heading,
+    Emphasis,
+    Strong,
+    Link,
 }
 
 impl Scope {
@@ -43,6 +54,31 @@ impl Scope {
         // and `None` come along with it, which is what themes do anyway.
         if name.starts_with("constant.builtin") {
             return Some(Scope::Number);
+        }
+
+        // Markup is the one family where the *tail* carries the meaning:
+        // `text` on its own is prose and stays uncoloured, and everything
+        // interesting about it is what comes after the dot. Newer grammars
+        // spell the same ideas `markup.*`, so both are read here rather than
+        // waiting for the ones we use to be renamed.
+        if let Some(kind) = name
+            .strip_prefix("text.")
+            .or_else(|| name.strip_prefix("markup."))
+        {
+            let head = kind.split('.').next().unwrap_or(kind);
+            return Some(match head {
+                "title" | "heading" => Scope::Heading,
+                "emphasis" | "italic" => Scope::Emphasis,
+                "strong" | "bold" => Scope::Strong,
+                // A link is one thing to a reader, whichever half it is: the
+                // text you click and the address it goes to.
+                "uri" | "reference" | "link" => Scope::Link,
+                // Inline code and fenced code, which is a literal wherever it
+                // appears — the same colour a string gets, and for the same
+                // reason: it is content rather than prose.
+                "literal" | "raw" => Scope::String,
+                _ => return None,
+            });
         }
 
         let head = name.split('.').next().unwrap_or(name);

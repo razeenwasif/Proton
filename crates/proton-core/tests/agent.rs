@@ -406,3 +406,101 @@ fn an_edit_the_model_asks_for_is_staged_and_never_written() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+fn tasks(events: &[Event]) -> Vec<proton_core::tasks::Task> {
+    events
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            Event::Tasks { tasks } => Some(tasks.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_second_question_waits_its_turn_instead_of_being_refused() {
+    let _guard = exclusive();
+    use proton_core::tasks::TaskState;
+
+    // Two turns for the first question — it calls a tool — and one for the
+    // second, which the queue starts on its own once the first is done.
+    let (url, _seen) = api(vec![asks_for_grep(), answers(), answers()]);
+    std::env::set_var("ANTHROPIC_BASE_URL", &url);
+    std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key");
+
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::Sync);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while ws.pickers().is_scanning() {
+        ws.apply(Command::Poll);
+        assert!(Instant::now() < deadline, "the file walk never finished");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    ws.apply(Command::Ask {
+        text: "where is Workspace defined?".into(),
+    });
+    // Straight away, while the first is still in flight.
+    let queued = ws.apply(Command::Ask {
+        text: "and what is in it?".into(),
+    });
+
+    let waiting = tasks(&queued);
+    assert_eq!(waiting.len(), 2, "{waiting:?}");
+    assert_eq!(waiting[0].state, TaskState::Running);
+    assert_eq!(
+        waiting[1].state,
+        TaskState::Queued,
+        "the second waits rather than being turned away"
+    );
+    assert_eq!(waiting[1].prompt, "and what is in it?");
+
+    // Pump until both have been through.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut all = Vec::new();
+    loop {
+        all.extend(ws.apply(Command::Poll));
+        let now = tasks(&all);
+        if now.len() == 2 && now.iter().all(|t| t.state == TaskState::Ready) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the queue never drained: {now:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let done = tasks(&all);
+    // The row carries what happened, so the list is readable without opening
+    // each one — which is the whole point of it being a list.
+    assert!(!done[0].note.is_empty(), "{done:?}");
+    assert_eq!(done[0].tools, 1, "the grep it ran: {done:?}");
+}
+
+#[test]
+fn a_finished_task_can_be_cleared_and_a_running_one_cannot() {
+    let _guard = exclusive();
+    use proton_core::tasks::TaskState;
+
+    let (url, _seen) = api(vec![answers()]);
+    std::env::set_var("ANTHROPIC_BASE_URL", &url);
+    std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key");
+
+    let mut ws = Workspace::rooted("../..");
+    let started = ws.apply(Command::Ask {
+        text: "a question".into(),
+    });
+    let running = tasks(&started);
+    assert_eq!(running[0].state, TaskState::Running);
+
+    // Removing the row would not stop the turn, and a list that lies about
+    // what is happening is worse than one you cannot tidy.
+    let refused = ws.apply(Command::DropTask { id: running[0].id });
+    assert_eq!(tasks(&refused).len(), 1);
+
+    settle(&mut ws);
+    let cleared = ws.apply(Command::ClearTasks);
+    assert!(tasks(&cleared).is_empty(), "{:?}", tasks(&cleared));
+}

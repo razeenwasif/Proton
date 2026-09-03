@@ -47,6 +47,21 @@ if (HAS_SHELL) {
   // empty until something asks for it — the way it is in the real thing.
   const staged = {};
 
+  // A canned queue, so the Tasks panel can be designed against. The real one
+  // is in crates/proton-core/src/tasks.rs and runs the turns for real.
+  let queue = [
+    { id: 0, prompt: "Memoise the fleet grid", state: "running",
+      note: "Looking at how ranked is rebuilt", tools: 3, files: [] },
+    { id: 1, prompt: "Port trajectory.c to the Android target", state: "queued",
+      note: "", tools: 0, files: [] },
+    { id: 2, prompt: "Ingest six months of telemetry", state: "ready",
+      note: "Parquet written, schema inferred, 3 nulls flagged", tools: 6,
+      files: ["src/lib/telemetry.ts", "src/schema.json"] },
+    { id: 3, prompt: "Explain the pointer bug in trajectory.c", state: "failed",
+      note: "no ANTHROPIC_API_KEY", tools: 0, files: [] },
+  ];
+  const tasksEvent = () => ({ type: "tasks", tasks: queue });
+
   const splitsEvent = () => ({
     type: "splits",
     views: Array.from({ length: layout.count }, () => ({ buffer: 0, name: doc.name })),
@@ -182,7 +197,16 @@ if (HAS_SHELL) {
         viewportEvent(),
         debugEvent(),
         terminalEvent(),
+        tasksEvent(),
       ];
+    }
+    if (command.type === "dropTask") {
+      queue = queue.filter((t) => t.id !== command.id || t.state === "running");
+      return [tasksEvent()];
+    }
+    if (command.type === "clearTasks") {
+      queue = queue.filter((t) => t.state === "running" || t.state === "queued");
+      return [tasksEvent()];
     }
     // Staged changes. The stand-in keeps a list so Apply and Refer visibly
     // take a hunk off the panel, which is the interaction worth previewing.

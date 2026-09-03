@@ -190,9 +190,17 @@ function renderSplits(views, focused, vertical) {
     box.classList.contains("stacked") === vertical;
 
   if (shapeChanged) {
-    box.innerHTML = views.map((_, i) => splitHtml(i, focused)).join("");
+    // A divider between each pair. Rebuilt with the panes rather than kept,
+    // because splitting and closing renumber everything either side of them.
+    box.innerHTML = views
+      .map((_, i) => (i ? `<div class="sp-gutter" data-sp="${i}"></div>` : "") + splitHtml(i, focused))
+      .join("");
     box.classList.toggle("stacked", !vertical);
     box.classList.toggle("multi", views.length > 1);
+    // Splitting resets the shares. Two panes from one are even, which is what
+    // you asked for; carrying the old ratios over would give the new pane a
+    // width nobody chose.
+    $$(".split", box).forEach((pane) => pane.style.removeProperty("--share"));
     // Each pane has its own height, and the core has to be told all of them.
     requestAnimationFrame(reportEveryViewport);
   } else {
@@ -201,6 +209,9 @@ function renderSplits(views, focused, vertical) {
     );
   }
   view.focused = focused;
+  // Which buffer each pane is showing, so its strip can mark the right tab.
+  bufferBar.panes = views.map((v) => v.buffer);
+  renderBufferBars();
   requestAnimationFrame(drawPointerEdges);
 }
 
@@ -229,6 +240,87 @@ document.addEventListener("click", (e) => {
     const index = Number(pane.dataset.view);
     if (index !== view.focused) dispatch({ type: "focusSplit", index });
   }
+});
+
+/* ── resizing the editor splits ───────────────────────────────────────
+   Two panes, one divider, and the only thing that moves is how the pair
+   share the space between them. Everything further out keeps its size, so
+   dragging the divider between panes 2 and 3 cannot shove pane 1 about.
+
+   The shares live in the DOM as `--share` rather than in the core: the core
+   owns which buffer a view shows and where its cursor is, and `Command` and
+   `Event` deliberately name no pixels. A second front end would size its
+   panes its own way. */
+const SPLIT_MIN = 120;
+
+/** The pane before a divider and the pane after it. */
+function neighbours(gutter) {
+  return [gutter.previousElementSibling, gutter.nextElementSibling];
+}
+
+function resizeSplit(gutter, at) {
+  const [before, after] = neighbours(gutter);
+  if (!before || !after) return;
+
+  const stacked = gutter.parentElement.classList.contains("stacked");
+  const a = before.getBoundingClientRect();
+  const b = after.getBoundingClientRect();
+  const size = (r) => (stacked ? r.height : r.width);
+  const start = stacked ? a.top : a.left;
+
+  // The pair's own span, shared out by where the pointer is inside it. Only
+  // the two of them: a share is relative to its siblings, so leaving the rest
+  // alone is what keeps a drag local.
+  const span = size(a) + size(b);
+  if (span <= SPLIT_MIN * 2) return;
+  const want = Math.max(SPLIT_MIN, Math.min(at - start, span - SPLIT_MIN));
+
+  // Scaled to keep the pair's total share the same, whatever it was — the
+  // two may already be an uneven part of a row of four.
+  const total =
+    (parseFloat(before.style.getPropertyValue("--share")) || 1) +
+    (parseFloat(after.style.getPropertyValue("--share")) || 1);
+  const share = (want / span) * total;
+  before.style.setProperty("--share", share.toFixed(4));
+  after.style.setProperty("--share", (total - share).toFixed(4));
+}
+
+let splitDrag = null;
+
+document.addEventListener("pointerdown", (e) => {
+  const gutter = e.target.closest(".sp-gutter");
+  if (!gutter) return;
+  e.preventDefault();
+  splitDrag = gutter;
+  gutter.classList.add("dragging");
+  document.body.style.cursor = gutter.parentElement.classList.contains("stacked")
+    ? "row-resize"
+    : "col-resize";
+});
+
+window.addEventListener("pointermove", (e) => {
+  if (!splitDrag) return;
+  const stacked = splitDrag.parentElement.classList.contains("stacked");
+  resizeSplit(splitDrag, stacked ? e.clientY : e.clientX);
+});
+
+window.addEventListener("pointerup", () => {
+  if (!splitDrag) return;
+  splitDrag.classList.remove("dragging");
+  splitDrag = null;
+  document.body.style.cursor = "";
+  // A pane that changed size can show a different number of lines, and the
+  // core hands out exactly the ones asked for.
+  reportEveryViewport();
+});
+
+/* Double-clicking a divider evens the pair up again — the way back from a
+   drag you did not mean, without having to aim. */
+document.addEventListener("dblclick", (e) => {
+  const gutter = e.target.closest(".sp-gutter");
+  if (!gutter) return;
+  neighbours(gutter).forEach((pane) => pane?.style.removeProperty("--share"));
+  reportEveryViewport();
 });
 
 /* ── resizable panes ──────────────────────────────────────────────────
@@ -515,6 +607,9 @@ const SCOPE = {
   keyword: "k", function: "fn", type: "ty", string: "str",
   number: "num", comment: "cm", constant: "cn", variable: "va",
   property: "pr", operator: "op", punctuation: "pn", attribute: "at",
+  // Prose. Two of these are a weight and a slope rather than a colour,
+  // because that is how the text itself says them.
+  heading: "md-h", emphasis: "md-em", strong: "md-b", link: "md-a",
 };
 
 /// Emit `[from, to)` as merged runs of identical colour and severity.
@@ -624,18 +719,27 @@ function lineHtml(number, text, cursorColumn, highlights, hits, git, stop) {
   // A selected empty line has nothing to paint, so the row says so instead.
   const empty = range && chars.length === 0 ? " selected" : "";
 
+  // The text goes inside one element, not straight into the row.
+  //
+  // The row is a flex container so the gutter columns line up, and a flex
+  // container **drops text nodes that are only whitespace** — they never
+  // become anonymous flex items. Highlighting cuts a line into a span per
+  // token with bare spaces between them, so `from typing import List` laid
+  // out as flex items reads `fromtypingimportList`. One element around the
+  // whole line makes its interior ordinary inline flow again.
   if (cursorColumn === undefined) {
     const body = runsHtml(chars, scope, severity, picked, hit, 0, chars.length);
-    return `<div class="ln${empty}">${gutter}${body}</div>`;
+    return `<div class="ln${empty}">${gutter}<span class="tx">${body}</span></div>`;
   }
   // The caret sits *on* a character in normal mode, so it takes the one it
   // covers with it rather than being drawn between two.
   const under = escapeHtml(chars[cursorColumn] ?? " ") || " ";
   return (
-    `<div class="ln cur${empty}">${gutter}` +
+    `<div class="ln cur${empty}">${gutter}<span class="tx">` +
     `${runsHtml(chars, scope, severity, picked, hit, 0, cursorColumn)}` +
     `<span class="caret">${under}</span>` +
-    `${runsHtml(chars, scope, severity, picked, hit, cursorColumn + 1, chars.length)}</div>`
+    `${runsHtml(chars, scope, severity, picked, hit, cursorColumn + 1, chars.length)}` +
+    `</span></div>`
   );
 }
 
@@ -812,27 +916,57 @@ document.addEventListener("mouseup", () => {
   dragging = false;
 });
 
-function renderBuffers(names, active) {
-  const target = $("[data-buffers]");
-  if (!target) return;
-  target.innerHTML = names
-    .map(
-      (b, i) =>
-        `<span class="buf${i === active ? " on" : ""}" data-buffer="${i}">` +
-        `${fileIcon(b.name)} ${escapeHtml(b.name)}` +
-        // The unsaved dot and the close button share a slot, as they do in
-        // every tab bar: two glyphs competing for the same corner reads as
-        // clutter, and hovering is exactly when you stop needing the dot.
-        `${b.modified ? '<span class="mod"></span>' : ""}` +
-        `<span class="x" data-buffer-close="${i}" title="Close ${escapeHtml(b.name)}">` +
-        `<svg class="i"><use href="#i-close"/></svg></span></span>`,
-    )
-    .join("");
+/* The open buffers, and which one each pane is showing.
+ *
+ * Two events feed one strip per pane: `Buffers` says what is open, `Splits`
+ * says which of them each pane has. Kept here so either can arrive first and
+ * redraw with what the other last said. */
+const bufferBar = { names: [], active: 0, panes: [] };
 
-  // The strip scrolls rather than wrapping, so the tab you just switched to
-  // has to be brought into view — otherwise `:bn` past the edge looks like it
-  // did nothing.
-  target.querySelector(".buf.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+function renderBuffers(names, active) {
+  bufferBar.names = names;
+  bufferBar.active = active;
+  renderBufferBars();
+}
+
+/**
+ * Draw every pane's tab strip.
+ *
+ * Every pane, not the first one — `querySelector` finds one `[data-buffers]`
+ * and there is one per split, so writing to it put every file you opened in
+ * the leftmost pane's strip however many panes were open and whichever one
+ * you were in.
+ *
+ * And each strip marks *its own* buffer, not the editor's active one: a pane
+ * showing a file it is not highlighting is a pane disagreeing with itself.
+ */
+function renderBufferBars() {
+  $$("[data-buffers]").forEach((target) => {
+    const index = viewOf(target);
+    // The pane's own buffer when the layout has said, the editor's active one
+    // until it has — which is the case with a single pane and no splits.
+    const mine = bufferBar.panes[index] ?? bufferBar.active;
+    target.innerHTML = bufferBar.names
+      .map(
+        (b, i) =>
+          `<span class="buf${i === mine ? " on" : ""}" data-buffer="${i}">` +
+          `${fileIcon(b.name)} ${escapeHtml(b.name)}` +
+          // The unsaved dot and the close button share a slot, as they do in
+          // every tab bar: two glyphs competing for the same corner reads as
+          // clutter, and hovering is exactly when you stop needing the dot.
+          `${b.modified ? '<span class="mod"></span>' : ""}` +
+          `<span class="x" data-buffer-close="${i}" title="Close ${escapeHtml(b.name)}">` +
+          `<svg class="i"><use href="#i-close"/></svg></span></span>`,
+      )
+      .join("");
+
+    // The strip scrolls rather than wrapping, so the tab you just switched to
+    // has to be brought into view — otherwise `:bn` past the edge looks like
+    // it did nothing. Only the focused pane, or three of them fight over it.
+    if (index === view.focused) {
+      target.querySelector(".buf.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  });
 }
 
 /* ── the file tree ────────────────────────────────────────────────────
@@ -1619,6 +1753,10 @@ onEvent((event) => {
       renderReview(event);
       break;
 
+    case "tasks":
+      renderTasks(event);
+      break;
+
     case "trace":
       renderTrace(event);
       break;
@@ -1715,11 +1853,34 @@ document.addEventListener("keydown", (e) => {
   // nothing, so the core would never hear that it should go away.
   if (e.key === "Escape" && hoverOpen) dispatch({ type: "closeHover" });
 
-  // Space and the vim keys must not scroll or type into the page.
-  if (e.key === " " || e.key.length === 1) e.preventDefault();
+  // Nothing that moves the cursor may also move the page.
+  //
+  // The single-character test above misses every key whose name is a word,
+  // which is all of the ones the browser scrolls with — so the core moved the
+  // cursor down a line *and* the browser scrolled, which reads as the page
+  // sliding away underneath you on every press of `↓`.
+  if (e.key === " " || e.key.length === 1 || SCROLLS_THE_PAGE.has(e.key)) {
+    e.preventDefault();
+  }
 
   sendKey(e);
 });
+
+/// Keys the browser scrolls with. Backspace is here for a different reason —
+/// in some browsers it is still "back" — but it belongs to the buffer either
+/// way.
+const SCROLLS_THE_PAGE = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+  "Backspace",
+  "Tab",
+]);
 
 /* ── Code Visualizer: a pointer is an edge, never an inline expansion ──
    Every pointer slot carries data-ptr; every heap block carries data-addr.
@@ -1977,6 +2138,71 @@ function entryHtml(entry) {
     `${thinking}${calls}${proseHtml(entry.text)}${caret}</div>`
   );
 }
+
+/* ── the task queue ───────────────────────────────────────────────────
+   Two groups, as the design has always drawn them: what is happening and
+   what is waiting on you. The core owns the queue — which one is running,
+   what each is doing, and what it left behind. */
+
+const RING = { running: "run", queued: "", ready: "done", failed: "fail" };
+
+function renderTasks(event) {
+  const box = $("[data-tasks]");
+  if (!box) return;
+
+  const doing = event.tasks.filter((t) => t.state === "running" || t.state === "queued");
+  const done = event.tasks.filter((t) => t.state === "ready" || t.state === "failed");
+
+  const count = $("[data-task-count]");
+  if (count) {
+    count.textContent = event.tasks.length
+      ? `${doing.length} running · ${done.length} ready`
+      : "nothing queued";
+  }
+
+  const group = (title, list) =>
+    list.length
+      ? `<div class="group">${title} · ${list.length}</div>` + list.map(taskHtml).join("")
+      : "";
+
+  box.innerHTML =
+    group("In progress", doing) + group("Ready for review", done) ||
+    `<div class="empty">Nothing queued. Ask Proton something.</div>`;
+}
+
+function taskHtml(task) {
+  // A queued one can be taken off; a running one cannot, so it is not
+  // offered — a button that refuses is worse than no button.
+  const drop =
+    task.state === "running"
+      ? ""
+      : `<span class="x" data-task-drop="${task.id}" title="Remove"><svg class="i"><use href="#i-close"/></svg></span>`;
+  const files = task.files.length
+    ? `<div class="sub">${task.files
+        .map((f) => `<span class="artifact">${fileIcon(f)} ${escapeHtml(f)}</span>`)
+        .join("")}</div>`
+    : "";
+  const note = task.note
+    ? `<div class="sub">${escapeHtml(task.note)}${
+        task.tools ? ` <span class="dim">· ${task.tools} tool${task.tools === 1 ? "" : "s"}</span>` : ""
+      }</div>`
+    : "";
+  return (
+    `<div class="task" data-task="${task.id}">` +
+    `<div class="hd"><span class="ring ${RING[task.state] ?? ""}"></span>` +
+    `${escapeHtml(task.prompt)}${drop}</div>${note}${files}</div>`
+  );
+}
+
+document.addEventListener("click", (e) => {
+  const drop = e.target.closest("[data-task-drop]");
+  if (drop) {
+    e.stopPropagation();
+    dispatch({ type: "dropTask", id: Number(drop.dataset.taskDrop) });
+    return;
+  }
+  if (e.target.closest("[data-tasks-clear]")) dispatch({ type: "clearTasks" });
+});
 
 /* Changes the agent has proposed and nobody has accepted yet.
    The hunks are the live diff between each buffer and what was proposed, so

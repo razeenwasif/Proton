@@ -338,3 +338,28 @@ fn run_ex(ws: &mut Workspace, line: &str) -> Vec<Event> {
         key: Key::named("Enter"),
     })
 }
+
+#[test]
+fn a_file_opens_in_the_pane_you_are_in() {
+    // Three panes, the middle one focused. Opening a file has to land there
+    // and not in whichever pane happens to be first.
+    let (mut ws, root) = workspace();
+    ws.apply(Command::Split { vertical: true });
+    ws.apply(Command::Split { vertical: true });
+    ws.apply(Command::FocusSplit { index: 1 });
+    assert_eq!(layout(&ws.apply(Command::Sync)).unwrap().1, 1);
+
+    ws.apply(Command::OpenBuffer {
+        path: "other.txt".into(),
+    });
+
+    let events = ws.apply(Command::Sync);
+    let (names, focused, _) = layout(&events).unwrap();
+    assert_eq!(focused, 1, "the focus should not have moved");
+    assert_eq!(
+        names,
+        vec!["long.txt", "other.txt", "long.txt"],
+        "the middle pane is the one that changed"
+    );
+    std::fs::remove_dir_all(root).ok();
+}

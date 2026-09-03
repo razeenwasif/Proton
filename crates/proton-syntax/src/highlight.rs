@@ -54,6 +54,18 @@ pub struct Syntax {
     /// The buffer version the tree was parsed from, so an unchanged buffer is
     /// not re-parsed on every cursor move.
     parsed: Option<u64>,
+    /// The second grammar, for languages that hand part of themselves over.
+    /// Its tree is rebuilt whole rather than incrementally: the ranges it
+    /// covers move whenever a paragraph does, and a tree edited against the
+    /// wrong ranges colours the file wrong rather than failing.
+    inline: Option<Inline>,
+}
+
+struct Inline {
+    inside: &'static str,
+    parser: Parser,
+    query: Arc<Query>,
+    tree: Option<Tree>,
 }
 
 impl std::fmt::Debug for Syntax {
@@ -82,12 +94,28 @@ impl Syntax {
 
         let query = compiled(language, &grammar)?;
 
+        // A companion that will not build is dropped rather than fatal: the
+        // block half still colours headings and fences, which is more than
+        // plain text.
+        let inline = language.inline.as_ref().and_then(|companion| {
+            let grammar = (companion.grammar)();
+            let mut parser = Parser::new();
+            parser.set_language(&grammar).ok()?;
+            Some(Inline {
+                inside: companion.inside,
+                query: cached(companion.id, &grammar, companion.queries)?,
+                parser,
+                tree: None,
+            })
+        });
+
         Some(Self {
             language,
             parser,
             query,
             tree: None,
             parsed: None,
+            inline,
         })
     }
 
@@ -142,6 +170,63 @@ impl Syntax {
         );
         self.parsed = Some(buffer.version());
         self.tree = tree;
+        self.sync_inline(buffer);
+    }
+
+    /// Parse the ranges the first grammar handed over.
+    ///
+    /// One parse rather than one per range: tree-sitter's `included_ranges`
+    /// takes the lot and produces a single tree covering all of them, which
+    /// is also what keeps the offsets absolute — the captures come back in
+    /// the document's own bytes and need no rebasing.
+    ///
+    /// Whole rather than incremental. The ranges themselves move whenever a
+    /// paragraph does, and a tree edited against ranges that have shifted
+    /// colours the file wrong rather than failing, which is the worse of the
+    /// two. Markdown files are prose-sized and the second parse is over the
+    /// prose only.
+    fn sync_inline(&mut self, buffer: &Buffer) {
+        let (Some(inline), Some(tree)) = (self.inline.as_mut(), self.tree.as_ref()) else {
+            return;
+        };
+
+        let mut ranges = Vec::new();
+        let mut walk = tree.walk();
+        let mut nodes = vec![tree.root_node()];
+        while let Some(node) = nodes.pop() {
+            if node.kind() == inline.inside {
+                ranges.push(tree_sitter::Range {
+                    start_byte: node.start_byte(),
+                    end_byte: node.end_byte(),
+                    start_point: node.start_position(),
+                    end_point: node.end_position(),
+                });
+                continue;
+            }
+            nodes.extend(node.children(&mut walk));
+        }
+
+        // Sorted before they are handed over: the walk above finds them in
+        // whatever order it pops them, and tree-sitter refuses ranges that are
+        // not in order and disjoint.
+        ranges.sort_by_key(|r| r.start_byte);
+        if ranges.is_empty() || inline.parser.set_included_ranges(&ranges).is_err() {
+            inline.tree = None;
+            return;
+        }
+
+        let text = buffer.text();
+        inline.tree = inline.parser.parse_with_options(
+            &mut |offset: usize, _| {
+                if offset >= text.len_bytes() {
+                    return &[][..];
+                }
+                let (chunk, chunk_start, _, _) = text.chunk_at_byte(offset);
+                &chunk.as_bytes()[offset - chunk_start..]
+            },
+            None,
+            None,
+        );
     }
 
     /// The coloured runs for a window of lines, one list per line.
@@ -193,6 +278,26 @@ impl Syntax {
                 };
                 let node = capture.node;
                 captures.push((node.byte_range(), found.pattern_index, scope));
+            }
+        }
+
+        // The second grammar's captures join the same list. They are inside
+        // the first's ranges by construction, so they sort as the narrower
+        // spans they are and paint over the block colour — which is what you
+        // want: a code span inside a paragraph is code, not paragraph.
+        if let Some(inline) = &self.inline {
+            if let Some(tree) = &inline.tree {
+                let mut cursor = QueryCursor::new();
+                cursor.set_byte_range(window.clone());
+                let names = inline.query.capture_names();
+                let mut matches = cursor.matches(&inline.query, tree.root_node(), Rope(text));
+                while let Some(found) = matches.next() {
+                    for capture in found.captures() {
+                        if let Some(scope) = Scope::from_capture(names[capture.index as usize]) {
+                            captures.push((capture.node.byte_range(), found.pattern_index, scope));
+                        }
+                    }
+                }
             }
         }
 
@@ -345,16 +450,24 @@ fn input_edit(change: &proton_text::Change) -> InputEdit {
 
 /// The compiled highlight query for a language, built once.
 fn compiled(language: &'static Language, grammar: &tree_sitter::Language) -> Option<Arc<Query>> {
+    cached(language.id, grammar, language.queries)
+}
+
+fn cached(
+    key: &'static str,
+    grammar: &tree_sitter::Language,
+    queries: &[&str],
+) -> Option<Arc<Query>> {
     // A poisoned lock means some other thread panicked mid-insert. The cache
     // holds nothing that a panic could have left inconsistent, so recovering
     // is better than taking the editor down with it.
     let mut cache = QUERIES
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(query) = cache.get(language.id) {
+    if let Some(query) = cache.get(key) {
         return Some(Arc::clone(query));
     }
-    let query = Arc::new(Query::new(grammar, &language.queries.join("\n")).ok()?);
-    cache.insert(language.id, Arc::clone(&query));
+    let query = Arc::new(Query::new(grammar, &queries.join("\n")).ok()?);
+    cache.insert(key, Arc::clone(&query));
     Some(query)
 }

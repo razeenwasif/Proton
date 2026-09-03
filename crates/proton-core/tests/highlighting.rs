@@ -131,7 +131,11 @@ fn editing_recolours_what_the_edit_changed() {
 fn a_file_with_no_grammar_is_sent_plain() {
     // Empty rather than a list of empty lists: "draw it plain" and "these
     // lines have no colours" are different instructions.
-    let mut ws = open("README.md");
+    //
+    // `.gitignore` rather than `.md`, which used to be the example here and
+    // has a grammar now. A file type nobody has a grammar for is the ordinary
+    // case, not a gap.
+    let mut ws = open(".gitignore");
     let events = ws.apply(Command::Viewport {
         view: 0,
         first_line: 0,
@@ -139,5 +143,24 @@ fn a_file_with_no_grammar_is_sent_plain() {
     });
     let (lines, highlights) = viewport(&events).unwrap();
     assert!(!lines.is_empty(), "the file should have opened");
-    assert!(highlights.is_empty(), "no grammar for markdown yet");
+    assert!(highlights.is_empty(), "nothing parses a .gitignore");
+}
+
+#[test]
+fn markdown_arrives_coloured() {
+    // The other half of the rule above: a file type that *does* have a
+    // grammar has to come back with colours on it, and markdown's are the
+    // ones two grammars have to cooperate to produce.
+    let mut ws = open("README.md");
+    let events = ws.apply(Command::Viewport {
+        view: 0,
+        first_line: 0,
+        lines: 40,
+    });
+    let (lines, highlights) = viewport(&events).unwrap();
+    assert!(!lines.is_empty());
+    assert!(
+        highlights.iter().any(|line| !line.is_empty()),
+        "markdown should be coloured"
+    );
 }

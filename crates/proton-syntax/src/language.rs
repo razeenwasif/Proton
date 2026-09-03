@@ -16,6 +16,25 @@ pub struct Language {
     /// TypeScript's own query covers only what TypeScript adds, and without
     /// JavaScript's in front of it every `const` in a `.ts` file is plain text.
     pub queries: &'static [&'static str],
+    /// A second grammar for the parts the first one hands over.
+    ///
+    /// Markdown is two grammars by design: one for the block structure —
+    /// headings, fences, lists — and one for what is inside a paragraph:
+    /// emphasis, links, code spans. The block grammar marks those stretches
+    /// as `inline` nodes and stops, and without the second pass a markdown
+    /// file gets its headings coloured and nothing else.
+    pub inline: Option<Companion>,
+}
+
+/// A grammar that parses ranges the main one delegated, and its query.
+pub struct Companion {
+    /// Its own name, for the compiled-query cache — which is keyed by
+    /// `&'static str` and must not be handed a string built at run time.
+    pub id: &'static str,
+    /// The node type whose ranges it is given.
+    pub inside: &'static str,
+    pub grammar: fn() -> Grammar,
+    pub queries: &'static [&'static str],
 }
 
 impl Language {
@@ -42,42 +61,64 @@ pub const LANGUAGES: &[Language] = &[
         extensions: &["rs"],
         grammar: || tree_sitter_rust::LANGUAGE.into(),
         queries: &[tree_sitter_rust::HIGHLIGHTS_QUERY],
+        inline: None,
     },
     Language {
         id: "typescript",
         extensions: &["ts", "mts", "cts"],
         grammar: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         queries: TYPESCRIPT,
+        inline: None,
     },
     Language {
         id: "tsx",
         extensions: &["tsx"],
         grammar: || tree_sitter_typescript::LANGUAGE_TSX.into(),
         queries: TYPESCRIPT,
+        inline: None,
     },
     Language {
         id: "javascript",
         extensions: &["js", "jsx", "mjs", "cjs"],
         grammar: || tree_sitter_javascript::LANGUAGE.into(),
         queries: &[tree_sitter_javascript::HIGHLIGHT_QUERY],
+        inline: None,
     },
     Language {
         id: "python",
         extensions: &["py", "pyi"],
         grammar: || tree_sitter_python::LANGUAGE.into(),
         queries: &[tree_sitter_python::HIGHLIGHTS_QUERY],
+        inline: None,
     },
     Language {
         id: "json",
         extensions: &["json", "jsonc"],
         grammar: || tree_sitter_json::LANGUAGE.into(),
         queries: &[tree_sitter_json::HIGHLIGHTS_QUERY],
+        inline: None,
     },
     Language {
         id: "toml",
         extensions: &["toml"],
         grammar: || tree_sitter_toml_ng::LANGUAGE.into(),
         queries: &[tree_sitter_toml_ng::HIGHLIGHTS_QUERY],
+        inline: None,
+    },
+    Language {
+        id: "markdown",
+        extensions: &["md", "markdown", "mdx"],
+        grammar: || tree_sitter_md::LANGUAGE.into(),
+        queries: &[tree_sitter_md::HIGHLIGHT_QUERY_BLOCK],
+        // The block grammar stops at the edge of a paragraph and marks what
+        // is inside as `inline`. Everything a reader looks for in prose —
+        // emphasis, links, code spans — is in there.
+        inline: Some(Companion {
+            id: "markdown.inline",
+            inside: "inline",
+            grammar: || tree_sitter_md::INLINE_LANGUAGE.into(),
+            queries: &[tree_sitter_md::HIGHLIGHT_QUERY_INLINE],
+        }),
     },
 ];
 
