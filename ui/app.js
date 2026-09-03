@@ -24,7 +24,7 @@ const token = (name) => getComputedStyle(document.documentElement).getPropertyVa
    A theme sets sixteen custom properties on <html> and nothing else. No
    rule below the palette block knows which one is active, which is why
    switching is instant and why adding a fifth is a paste, not a port. */
-const THEMES = ["tokyo-night", "one-dark", "catppuccin", "nord"];
+const THEMES = ["tokyo-night", "one-dark", "catppuccin", "nord", "gruvbox-dark"];
 
 function setTheme(name) {
   if (!THEMES.includes(name)) return;

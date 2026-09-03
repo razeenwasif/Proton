@@ -11,7 +11,6 @@ wit_bindgen::generate!({
 });
 
 // The world exports bare functions rather than an interface, so bindgen puts
-// the `Guest` trait and the types at the top level.
 // the `Guest` trait and the types at the top level — the world's own
 // `use editor.{...}` is what puts them there. `Swatch` is not in that list —
 // it only appears inside a theme — so it keeps its interface path.
