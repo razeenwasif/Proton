@@ -20,12 +20,20 @@ use tauri::{LogicalSize, PhysicalPosition, WebviewWindow, WindowEvent};
 /// ignored rather than guessed at, exactly as the session's is.
 const VERSION: u32 = 1;
 
-/// How often a drag is allowed to reach the disk.
+/// How long the window has to hold still before its geometry is written.
 ///
-/// Resizing emits an event per frame, and a file write per frame while the
-/// mouse is down would be the only expensive thing about dragging a corner.
-/// The last position is not lost by this: closing writes unconditionally.
+/// Not a throttle — a debounce, and the difference is what makes maximizing
+/// work. Resizing emits an event per frame, so a write per event would be the
+/// only expensive thing about dragging a corner; but more importantly, the
+/// `Resized` that arrives when a window is maximized arrives while
+/// `is_maximized()` still answers *false*. Saving from inside that event
+/// records the screen-filling size as if it were an ordinary one, and the
+/// size to return to is lost. Waiting for the window to settle and then
+/// asking is the only way to be told the truth.
 const SETTLE: Duration = Duration::from_millis(400);
+
+/// How often to check whether it has settled.
+const TICK: Duration = Duration::from_millis(120);
 
 /// The geometry as it is stored between runs.
 ///
@@ -50,7 +58,8 @@ struct Stored {
 /// What the last write said, so a maximized window can be saved without
 /// losing the size underneath it.
 static LAST: Mutex<Option<Stored>> = Mutex::new(None);
-static WROTE_AT: Mutex<Option<Instant>> = Mutex::new(None);
+/// When the window last moved, if it has not been written since.
+static MOVED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 
 fn file() -> Option<PathBuf> {
     Some(proton_core::folder::config()?.join("window.json"))
@@ -169,7 +178,13 @@ fn snapshot(window: &WebviewWindow) -> Option<Stored> {
     }
 
     let scale = window.scale_factor().ok()?;
-    let size = window.outer_size().ok()?;
+    // `inner_size`, not `outer_size`, because `set_size` sets the *inner*
+    // one. Saving the outer size and restoring it as the inner size adds the
+    // window frame back on every launch — measured at 16x9 here, so the
+    // window crept larger each time it was opened: 1240 to 1256 to 1272.
+    // Position has no such asymmetry: `outer_position` and `set_position` are
+    // both the outer one, which is why it restored exactly while size did not.
+    let size = window.inner_size().ok()?;
     let at = window.outer_position().ok()?;
     Some(Stored {
         version: VERSION,
@@ -181,16 +196,9 @@ fn snapshot(window: &WebviewWindow) -> Option<Stored> {
     })
 }
 
-/// Save, unless a save happened moments ago and this is not the last word.
-fn save(window: &WebviewWindow, now: bool) {
-    if !now {
-        let mut wrote = WROTE_AT.lock().unwrap();
-        if wrote.is_some_and(|at| at.elapsed() < SETTLE) {
-            return;
-        }
-        *wrote = Some(Instant::now());
-    }
-
+/// Write what the window looks like now.
+fn save(window: &WebviewWindow) {
+    *MOVED_AT.lock().unwrap() = None;
     let Some(stored) = snapshot(window) else {
         return;
     };
@@ -216,13 +224,30 @@ pub fn remember(window: &WebviewWindow) {
 
     let watched = window.clone();
     window.on_window_event(move |event| match event {
-        // Throttled: these arrive once a frame while a corner is being
-        // dragged.
-        WindowEvent::Resized(_) | WindowEvent::Moved(_) => save(&watched, false),
-        // The last word, and the one that matters — whatever the throttle
-        // skipped during the final frames of a drag is written here.
-        WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => save(&watched, true),
+        // Noted, not saved. These arrive once a frame while a corner is
+        // dragged, and the one that arrives on maximizing arrives too early
+        // to be believed — see `SETTLE`.
+        WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
+            *MOVED_AT.lock().unwrap() = Some(Instant::now());
+        }
+        // The last word. By the time a window is closing it has long since
+        // settled, so this can ask directly.
+        WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => save(&watched),
         _ => {}
+    });
+
+    // Writes what the events above only noted, once the window has held still
+    // long enough to answer honestly about being maximized.
+    let ticking = window.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(TICK);
+        let settled = MOVED_AT
+            .lock()
+            .unwrap()
+            .is_some_and(|at| at.elapsed() >= SETTLE);
+        if settled {
+            save(&ticking);
+        }
     });
 }
 

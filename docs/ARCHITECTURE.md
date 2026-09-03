@@ -675,6 +675,17 @@ already the design system. Three notes for the build:
   physical coordinates, so a physical position is the one that can be checked
   against the screens that actually exist.
 
+  **Tauri's accessors are not symmetric, and getting that wrong is invisible
+  once.** `set_size` sets the *inner* size, so it pairs with `inner_size`;
+  `set_position` and `outer_position` are both the outer one, so those match.
+  Saving the outer size and restoring it through `set_size` adds the window
+  frame back at every launch — measured here at 16×9, so the window crept from
+  1240 to 1256 to 1272 across three runs. One open-and-close cycle looks
+  correct, because one frame's worth of growth reads as a rounding error; it
+  takes two to see it. That the position restored *exactly* while the size
+  drifted is the tell, and the reason to suspect the pairing rather than the
+  scale-factor arithmetic.
+
   Which it is checked against, because the interesting failure is not the
   size. Close on a second monitor, unplug it, reopen: the stored position is
   still perfectly valid and describes a place that is no longer on any screen,
@@ -685,10 +696,22 @@ already the design system. Three notes for the build:
   because a monitor cannot be unplugged from inside a test.
 
   A maximized window stores the size it will *return* to, or unmaximizing
-  after a restart would do nothing. A minimized one stores nothing, since its
-  reported size would reopen the app as a sliver. Writes are throttled, as
-  resizing emits an event per frame — and closing writes unconditionally, so
-  whatever the throttle skipped in the last frames of a drag is not lost.
+  after a restart would do nothing. That needs a size underneath it, so a first
+  run seeds one from the window it was just given — otherwise somebody who
+  opens Proton and immediately maximizes it saves nothing at all. A minimized
+  window stores nothing, since its reported size would reopen the app as a
+  sliver.
+
+  **Writes are debounced rather than throttled, and that is what makes
+  maximizing work.** The `Resized` event that arrives when a window is
+  maximized arrives while `is_maximized()` still answers *false* — so saving
+  from inside the event records the screen-filling size as an ordinary one and
+  loses the size to return to. A throttle does not help, because the first
+  event of a maximize passes one. The event only notes that the window moved;
+  the write happens once it has held still, by which point the window answers
+  honestly. Closing writes directly, since by then it has long since settled.
+  The same mechanism keeps a corner-drag from writing a file per frame, so it
+  replaces the throttle rather than joining it.
 
 - **The mouse goes through the core.** A click is `PlaceCursor` and a drag is
   `SelectTo`, because a motion cannot express either — `Move` is always
