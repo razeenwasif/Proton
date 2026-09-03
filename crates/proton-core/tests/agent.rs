@@ -299,3 +299,110 @@ fn asking_without_a_credential_says_so_rather_than_failing_silently() {
         std::env::set_var("ANTHROPIC_API_KEY", key);
     }
 }
+
+/// A turn that proposes an edit and stops.
+fn asks_for_an_edit(path: &str) -> String {
+    // The arguments arrive as fragments of a JSON *string*, which is the
+    // delta shape that cannot be used until the block stops — the same
+    // subtlety `proton-agent` is built around, exercised here with a payload
+    // that has a newline in it.
+    let input = serde_json::json!({
+        "path": path,
+        "old_text": "    1\n",
+        "new_text": "    11\n",
+    })
+    .to_string();
+    let escaped = serde_json::Value::String(input).to_string();
+    [
+        event("message_start", r#"{"type":"message_start","message":{"usage":{"input_tokens":900}}}"#),
+        event("content_block_start", r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#),
+        event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Staging one."}}"#),
+        event("content_block_stop", r#"{"type":"content_block_stop","index":0}"#),
+        event("content_block_start", r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_E","name":"edit_file","input":{}}}"#),
+        event(
+            "content_block_delta",
+            &format!(
+                r#"{{"type":"content_block_delta","index":1,"delta":{{"type":"input_json_delta","partial_json":{escaped}}}}}"#
+            ),
+        ),
+        event("content_block_stop", r#"{"type":"content_block_stop","index":1}"#),
+        event("message_delta", r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":30}}"#),
+        event("message_stop", r#"{"type":"message_stop"}"#),
+    ]
+    .concat()
+}
+
+fn says_it_staged() -> String {
+    [
+        event("message_start", r#"{"type":"message_start","message":{"usage":{"input_tokens":1400}}}"#),
+        event("content_block_start", r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#),
+        event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Staged for you to look at."}}"#),
+        event("content_block_stop", r#"{"type":"content_block_stop","index":0}"#),
+        event("message_delta", r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":40}}"#),
+        event("message_stop", r#"{"type":"message_stop"}"#),
+    ]
+    .concat()
+}
+
+#[test]
+fn an_edit_the_model_asks_for_is_staged_and_never_written() {
+    let _guard = exclusive();
+    // The whole loop, and the promise the loop has to keep: the model asks,
+    // the tool stages, the answer tells the model it is not done, and the
+    // file on disk is exactly as it was.
+    let root = std::env::temp_dir().join(format!("proton-agent-edit-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let source = "fn one() {\n    1\n}\n";
+    std::fs::write(root.join("a.rs"), source).unwrap();
+
+    let (url, _seen) = api(vec![asks_for_an_edit("a.rs"), says_it_staged()]);
+    std::env::set_var("ANTHROPIC_BASE_URL", &url);
+    std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key");
+
+    let mut ws = Workspace::rooted(&root);
+    ws.apply(Command::Ask {
+        text: "make it eleven".into(),
+    });
+    let events = settle(&mut ws);
+
+    let entries = transcript(&events);
+    let call = entries[1]
+        .calls
+        .iter()
+        .find(|c| c.name == "edit_file")
+        .expect("the edit_file call should be in the transcript");
+    assert!(
+        call.result.contains("staged"),
+        "the model has to be told it staged rather than applied: {:?}",
+        call.result
+    );
+    // The transcript row is a line, not a block of source. `edit_file`
+    // carries whole snippets and unrolling one pushes the answer off screen.
+    assert!(
+        !call.detail.contains('\n') && call.detail.len() < 200,
+        "the row should be one short line: {:?}",
+        call.detail
+    );
+
+    // Staged, drawn, and on disk exactly as it was.
+    let staged = ws.staged();
+    assert_eq!(staged.len(), 1, "{staged:?}");
+    assert_eq!(staged[0].path, "a.rs");
+    assert_eq!(staged[0].hunks.len(), 1);
+    assert_eq!(std::fs::read_to_string(root.join("a.rs")).unwrap(), source);
+    assert!(
+        !ws.is_modified(),
+        "and the buffer was not typed into either"
+    );
+
+    // And the review reached the front end without being asked for.
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Review { files } if !files.is_empty())),
+        "a staged change has to reach the panel that draws it"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}

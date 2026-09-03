@@ -24,6 +24,7 @@ use crate::key::Key;
 use crate::lsp::{self, Popup, Servers, Severity};
 use crate::mode::ModeId;
 use crate::picker::{Accepted, PickerKey, PickerKind, Pickers};
+use crate::review;
 use crate::split::{Direction, Splits};
 use crate::trace::Visualizer;
 use crate::tree::Tree;
@@ -86,6 +87,8 @@ pub struct Workspace {
     /// The title of the action waiting on `codeAction/resolve`, so the notice
     /// its edit produces can say which one it was.
     pending_action: Option<String>,
+    /// Changes the agent has proposed and nobody has accepted yet.
+    review: review::Review,
     /// Where the cursor was when a search prompt opened.
     ///
     /// Every keystroke previews from here rather than from the last preview,
@@ -418,6 +421,14 @@ impl Workspace {
             Command::Rename { to } => self.request_rename(&to),
 
             Command::CodeActions => self.request_code_actions(),
+
+            Command::ApplyHunk { path, hunk } => self.apply_hunk(&path, hunk),
+
+            Command::RejectHunk { path, hunk } => self.reject_hunk(&path, hunk),
+
+            Command::ApplyStaged { path } => self.apply_staged(path.as_deref()),
+
+            Command::RejectStaged { path } => self.reject_staged(path.as_deref()),
 
             Command::AcceptCompletion => self.accept_completion(),
 
@@ -1857,6 +1868,163 @@ impl Workspace {
         )]
     }
 
+    /* ── the agent's staged changes ───────────────────────────────── */
+
+    /// What one staged file says right now — from the buffer if it is open,
+    /// which it always is, because staging opens it.
+    fn staged_text(&self, path: &Path) -> Option<String> {
+        self.editor
+            .buffers()
+            .iter()
+            .find(|b| b.path() == Some(path))
+            .map(|b| b.contents())
+            .or_else(|| std::fs::read_to_string(path).ok())
+    }
+
+    /// Everything the agent has proposed and nobody has accepted yet.
+    ///
+    /// Computed on the spot, like every other view of the review: the hunks
+    /// are the diff between each buffer and what was proposed, so there is
+    /// nothing stored that this could return a stale copy of.
+    pub fn staged(&self) -> Vec<review::ChangeView> {
+        self.review
+            .view(self.pickers.root(), |path| self.staged_text(path))
+    }
+
+    fn review_event(&self) -> Event {
+        Event::Review {
+            files: self.staged(),
+        }
+    }
+
+    /// Accept one hunk: put it in the buffer, and leave it there unsaved.
+    ///
+    /// Applied as an ordinary edit, so it joins the undo history like
+    /// anything else you did. Accepting the agent's work and then pressing
+    /// `u` has to take it back — the alternative is a change you can only
+    /// undo in git.
+    fn apply_hunk(&mut self, path: &str, index: usize) -> Vec<Event> {
+        let path = self.pickers.resolve(path);
+        let Some(current) = self.staged_text(&path) else {
+            return vec![notice(
+                format!("{}: not open any more", path.display()),
+                NoticeLevel::Warn,
+            )];
+        };
+        let Some((lines, replacement)) = self.review.accept(&path, index, &current) else {
+            // The file moved under the review. Not an error: the panel is
+            // about to be redrawn without that hunk in it.
+            return vec![self.review_event()];
+        };
+
+        let was = self.editor.active();
+        if self.editor.open_or_create(&path, &current).is_err() {
+            return vec![notice(
+                format!("{}: cannot open", path.display()),
+                NoticeLevel::Error,
+            )];
+        }
+
+        let buffer = self.editor.buffer_mut();
+        let start = buffer.offset_of(proton_text::Position {
+            line: lines.start,
+            column: 0,
+        });
+        // The end of the last line it replaces, newline included — except at
+        // the end of the file, where there is no newline to include and
+        // reaching for one lands past the rope.
+        let end = match lines.end < buffer.len_lines() {
+            true => buffer.offset_of(proton_text::Position {
+                line: lines.end,
+                column: 0,
+            }),
+            false => buffer.len_chars(),
+        };
+        let mut text = replacement.join("\n");
+        if !text.is_empty() && end < buffer.len_chars() {
+            text.push('\n');
+        }
+        let landing = start + text.chars().count();
+        buffer.apply(
+            vec![proton_text::Edit { start, end, text }],
+            proton_text::Cursor::at(landing),
+        );
+
+        // Nothing left to argue about in this file.
+        let now = self.editor.buffer().contents();
+        if self.review.hunks(&path, &now).is_empty() {
+            self.review.forget(&path);
+        }
+
+        self.editor.focus(was);
+        self.splits.view_mut().buffer = self.editor.active();
+        self.resync();
+
+        let mut events = vec![self.review_event(), self.buffers_event()];
+        events.extend(self.after_action(true));
+        events
+    }
+
+    /// Refuse one hunk. The buffer is untouched; what changes is what is
+    /// still being proposed.
+    fn reject_hunk(&mut self, path: &str, index: usize) -> Vec<Event> {
+        let path = self.pickers.resolve(path);
+        let Some(current) = self.staged_text(&path) else {
+            return vec![self.review_event()];
+        };
+        self.review.reject(&path, index, &current);
+        vec![self.review_event()]
+    }
+
+    /// Take everything staged, for one file or for all of them.
+    ///
+    /// Hunk by hunk from the bottom up, so that applying one cannot move the
+    /// lines the next one describes. Top-down would need every later hunk
+    /// renumbered after every edit, which is the bookkeeping this whole
+    /// design exists to avoid.
+    fn apply_staged(&mut self, path: Option<&str>) -> Vec<Event> {
+        let paths = match path {
+            Some(one) => vec![self.pickers.resolve(one)],
+            None => self.review.paths(),
+        };
+
+        let mut applied = 0;
+        for path in &paths {
+            let Some(current) = self.staged_text(path) else {
+                continue;
+            };
+            let count = self.review.hunks(path, &current).len();
+            for index in (0..count).rev() {
+                self.apply_hunk(&path.to_string_lossy(), index);
+                applied += 1;
+            }
+        }
+
+        let mut events = vec![notice(
+            match applied {
+                0 => "nothing staged".into(),
+                1 => "applied 1 hunk — not written yet".into(),
+                n => format!("applied {n} hunks — not written yet"),
+            },
+            NoticeLevel::Info,
+        )];
+        events.push(self.review_event());
+        events.push(self.buffers_event());
+        events.extend(self.after_action(true));
+        events
+    }
+
+    fn reject_staged(&mut self, path: Option<&str>) -> Vec<Event> {
+        match path {
+            Some(one) => self.review.forget(&self.pickers.resolve(one)),
+            None => self.review.clear(),
+        }
+        vec![
+            notice("discarded what was staged".into(), NoticeLevel::Info),
+            self.review_event(),
+        ]
+    }
+
     /// Apply an edit that may touch several files.
     ///
     /// Public because it is the seam, not because a test needed it: a rename,
@@ -2078,10 +2246,15 @@ impl Workspace {
 
         for call in calls {
             let answer = self.run_tool(&call.name, &call.input);
-            // An `open_buffer` that succeeded changed what is on screen.
-            if call.name == "open_buffer" && answer.is_ok() {
+            // Both of these change what is on screen: `open_buffer` puts a
+            // file in front of you, and `edit_file` opens the one it is
+            // proposing to change so the diff has something to sit beside.
+            if matches!(call.name.as_str(), "open_buffer" | "edit_file") && answer.is_ok() {
                 events.push(self.buffers_event());
                 events.extend(self.after_action(true));
+            }
+            if call.name == "edit_file" {
+                events.push(self.review_event());
             }
             self.agent.answer(&call.id, answer);
         }
@@ -2098,7 +2271,12 @@ impl Workspace {
     }
 
     /// Run one tool against the workspace.
-    fn run_tool(&mut self, name: &str, input: &serde_json::Value) -> Result<String, String> {
+    ///
+    /// Public because the tools are the *editor's* capabilities rather than
+    /// the agent's: `grep` is the index Telescope searches and `read_file`
+    /// reads the buffers the user has open. The agent is the first caller and
+    /// a plugin will be the second.
+    pub fn run_tool(&mut self, name: &str, input: &serde_json::Value) -> Result<String, String> {
         let text = |key: &str| {
             input
                 .get(key)
@@ -2159,6 +2337,66 @@ impl Workspace {
                     .map_err(|err| format!("{path}: {err}"))?;
                 self.resync();
                 Ok(format!("opened {path}"))
+            }
+
+            "edit_file" => {
+                let path = self.pickers.resolve(&text("path")?);
+                let old = text("old_text")?;
+                let new = text("new_text")?;
+
+                // The file as it is *now*, from the buffer when one is open —
+                // an agent editing what is on disk while the user has unsaved
+                // changes in front of them would propose a diff against a
+                // file neither of them is looking at.
+                let existing = self
+                    .editor
+                    .buffers()
+                    .iter()
+                    .find(|b| b.path() == Some(path.as_path()))
+                    .map(|b| b.contents())
+                    .or_else(|| std::fs::read_to_string(&path).ok());
+
+                let (current, creates) = match (existing, old.is_empty()) {
+                    (Some(text), _) => (text, false),
+                    // An empty `old_text` on a file that is not there is how
+                    // a new one is asked for.
+                    (None, true) => (String::new(), true),
+                    (None, false) => return Err(format!("{}: no such file", path.display())),
+                };
+
+                // A second edit to a file already staged applies to what was
+                // staged, not to the buffer. Several calls in one turn are
+                // ordinary — a rename touches three places — and each one
+                // starting again from the buffer would leave only the last.
+                let base = self
+                    .review
+                    .get(&path)
+                    .map(|change| change.target.clone())
+                    .unwrap_or_else(|| current.clone());
+
+                let target = match creates && base.is_empty() {
+                    true => new.clone(),
+                    false => review::substitute(&base, &old, &new)?,
+                };
+                if target == current {
+                    return Ok("that is already what the file says".into());
+                }
+
+                // Opened so the change can be looked at. Staging something
+                // invisible and asking to have it reviewed is not a review.
+                self.editor
+                    .open_or_create(&path, &current)
+                    .map_err(|err| format!("{}: {err}", path.display()))?;
+                self.review.stage(&path, target, creates);
+                self.resync();
+
+                let hunks = self.review.hunks(&path, &current).len();
+                Ok(format!(
+                    "staged {hunks} hunk{} in {} for review — nothing is applied or written \
+                     until the user accepts it",
+                    if hunks == 1 { "" } else { "s" },
+                    path.display()
+                ))
             }
 
             "diagnostics" => {

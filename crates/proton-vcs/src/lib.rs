@@ -6,6 +6,10 @@
 //!   version at `HEAD` and what is in the buffer right now.
 //! - **What have I touched?** — `␣gg`. The paths git considers changed.
 //!
+//! The diff underneath the first of those is not about git at all, so it is
+//! its own module: `hunk` compares any two texts, and a review of what an
+//! agent proposed uses it exactly as the gutter does.
+//!
 //! `gix` rather than shelling out to `git`, as the build document planned.
 //! Measured before committing to it: 135 crates and about a minute added to a
 //! clean build, which is a real cost but a one-off, and it buys packfiles,
@@ -20,8 +24,10 @@
 use std::path::{Path, PathBuf};
 
 pub mod gutter;
+pub mod hunk;
 
 pub use gutter::{diff, Mark, Marked};
+pub use hunk::{ends_with_newline, hunks, join, lines, Hunk};
 
 /// What git says about a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1615,6 +1615,10 @@ onEvent((event) => {
       renderAgent(event);
       break;
 
+    case "review":
+      renderReview(event);
+      break;
+
     case "trace":
       renderTrace(event);
       break;
@@ -1973,6 +1977,71 @@ function entryHtml(entry) {
     `${thinking}${calls}${proseHtml(entry.text)}${caret}</div>`
   );
 }
+
+/* Changes the agent has proposed and nobody has accepted yet.
+   The hunks are the live diff between each buffer and what was proposed, so
+   this redraws whole on every change — there is no stored list of them a
+   delta could describe. */
+function renderReview(event) {
+  const box = $("[data-staged]");
+  if (!box) return;
+
+  if (!event.files.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+
+  const total = event.files.reduce((n, f) => n + f.hunks.length, 0);
+  box.innerHTML =
+    `<div class="head">${total} hunk${total === 1 ? "" : "s"} staged` +
+    `<span class="acts">` +
+    `<button data-staged-reject>Discard all</button>` +
+    `<button class="go" data-staged-apply>Apply all</button>` +
+    `</span></div>` +
+    event.files
+      .map((file) =>
+        file.hunks
+          .map(
+            (hunk, i) =>
+              `<div class="diff"><header>` +
+              `${escapeHtml(file.path)} · L${hunk.line}` +
+              (file.creates ? ` <span class="new">new file</span>` : "") +
+              `<span class="acts">` +
+              `<button data-refer="${i}" data-path="${escapeHtml(file.path)}">Refer</button>` +
+              `<button class="go" data-apply="${i}" data-path="${escapeHtml(file.path)}">Apply</button>` +
+              `</span></header><pre>${hunk.lines.map(diffLineHtml).join("")}</pre></div>`,
+          )
+          .join(""),
+      )
+      .join("");
+  box.hidden = false;
+}
+
+const DIFF_MARK = { added: "p", removed: "m", context: "c" };
+
+function diffLineHtml(line) {
+  const sign = { added: "+ ", removed: "- ", context: "  " }[line.mark];
+  return `<span class="${DIFF_MARK[line.mark]}">${escapeHtml(sign + line.text)}</span>`;
+}
+
+/* One hunk at a time, addressed by file and index. The index is only valid
+   for the list as it is right now — the core refuses one that has moved on
+   rather than applying it to whatever is at that position. */
+document.addEventListener("click", (e) => {
+  const apply = e.target.closest("[data-apply]");
+  if (apply) {
+    dispatch({ type: "applyHunk", path: apply.dataset.path, hunk: Number(apply.dataset.apply) });
+    return;
+  }
+  const refer = e.target.closest("[data-refer]");
+  if (refer) {
+    dispatch({ type: "rejectHunk", path: refer.dataset.path, hunk: Number(refer.dataset.refer) });
+    return;
+  }
+  if (e.target.closest("[data-staged-apply]")) dispatch({ type: "applyStaged", path: null });
+  if (e.target.closest("[data-staged-reject]")) dispatch({ type: "rejectStaged", path: null });
+});
 
 function renderAgent(event) {
   const thread = $("[data-agent-thread]");

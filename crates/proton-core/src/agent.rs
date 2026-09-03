@@ -233,6 +233,34 @@ impl Agent {
                 }),
             },
             Tool {
+                name: "edit_file".into(),
+                description: "Propose a change to a file. The edit is STAGED for the user to \
+                              review, hunk by hunk — it is not applied and nothing is written \
+                              to disk, so say what you changed rather than claiming it is \
+                              done. `old_text` must appear exactly once in the file: include \
+                              enough surrounding lines to make it unique, and read the file \
+                              first so it matches byte for byte. To create a new file, give \
+                              an empty `old_text`. Call this once per edit; several calls in \
+                              one turn are fine and stack up into one review."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Path relative to the workspace root." },
+                        "old_text": {
+                            "type": "string",
+                            "description": "The exact text to replace, including indentation. \
+                                            Empty to create a new file."
+                        },
+                        "new_text": {
+                            "type": "string",
+                            "description": "What to put there. Empty to delete the old text."
+                        }
+                    },
+                    "required": ["path", "old_text", "new_text"]
+                }),
+            },
+            Tool {
                 name: "diagnostics".into(),
                 description: "Errors and warnings the language server has reported for a \
                               file, or for the active buffer when no path is given."
@@ -476,11 +504,26 @@ fn summarise(input: &Value) -> String {
     object
         .iter()
         .map(|(key, value)| match value {
-            Value::String(s) => format!("{key}={s}"),
-            other => format!("{key}={other}"),
+            Value::String(s) => format!("{key}={}", short(s)),
+            other => format!("{key}={}", short(&other.to_string())),
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// One line, and not a long one.
+///
+/// `edit_file` carries whole blocks of source in its arguments, and a
+/// transcript row that unrolls one is a row that pushes the answer off the
+/// screen. The diff below it is where you read the change.
+fn short(value: &str) -> String {
+    const MOST: usize = 48;
+    let line = value.lines().next().unwrap_or("");
+    let mut out: String = line.chars().take(MOST).collect();
+    if line.chars().count() > MOST || value.lines().nth(1).is_some() {
+        out.push('…');
+    }
+    out
 }
 
 fn first_line(text: &str) -> String {
@@ -502,6 +545,11 @@ have. Call tools in parallel when the calls do not depend on each other.
 Be concrete. Name files and line numbers. When you propose a change, say what \
 it changes and why the current code does the wrong thing, rather than \
 restating the fix as a description of itself.
+
+Use `edit_file` to propose changes rather than printing code for the user to \
+copy. What it produces is staged for review, hunk by hunk, and nothing is \
+written until they accept it — so describe what you changed and leave the \
+deciding to them. Never say a change is done.
 
 Keep answers short. The user is reading this in a side panel next to the code, \
 not in a document.";
@@ -537,7 +585,16 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 6);
+        // `edit_file` has to say that it stages rather than applies. A model
+        // told only "edit a file" reports the job as done, and the user reads
+        // that as a file that has changed.
+        let editing = tools.iter().find(|t| t.name == "edit_file").unwrap();
+        assert!(
+            editing.description.contains("STAGED"),
+            "edit_file must say it does not apply: {}",
+            editing.description
+        );
         for tool in &tools {
             assert!(
                 tool.description.len() > 40,

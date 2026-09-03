@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 527 tests, headless
+cargo test --workspace        # 559 tests, headless
 cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
                               # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
@@ -65,7 +65,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-vim` | Modal state machine, operators, motions, text objects, registers, marks, macros, which-key tree | — |
 | `proton-syntax` | Tree-sitter parsing, incremental re-parse, viewport-scoped highlight queries | `tree-sitter` |
 | `proton-lsp` | LSP client, server supervision, JSON-RPC framing, a non-blocking mailbox | `serde_json` |
-| `proton-vcs` | The gutter, and what git considers changed | `gix` |
+| `proton-vcs` | The gutter, what git considers changed, and the diff behind both | `gix` |
 | `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
 | `proton-agent` | Messages API client, SSE streaming, request building, auth | `ureq` |
 | `proton-trace` | Code Visualizer client: trace format, pointer resolution, sidecar | `ureq` |
@@ -947,20 +947,54 @@ and splitting the answers across several user messages trains it out of doing
 that. A failed tool still answers, with `is_error` — dropping the block leaves a
 `tool_use` with no result, which is a conversation the API rejects.
 
+**`edit_file`, and the review it stages.** The agent proposes changes rather
+than making them: the tool returns a *staged* change, and nothing reaches the
+buffer — let alone the disk — until somebody accepts it. The tool result says
+so in as many words, because a model told only "edit a file" reports the job
+as done and the user reads that as a file that has changed.
+
+The tool is **search and replace with a uniqueness rule**, not a line range and
+not a whole new file. A line range is brittle — the numbers move as the model
+plans its next edit — and a whole file is expensive and invites drift. So
+`old_text` must appear **exactly once**: matching twice means the model has not
+pinned the place down, and picking the first match is how an edit lands in the
+wrong function, so it is refused *with the count*, which tells the model to
+send more context. Matching nothing means the file is not what the model thinks
+it is, and the answer to that is to read it again.
+
+One idea carries the whole of `core::review`: **a staged change is a target
+text, and the hunks are the live diff between the buffer and that target.**
+Accepting a hunk edits the *buffer* to match the target over its lines;
+rejecting one edits the *target* to match the buffer. Both leave the two texts
+agreeing about that stretch, so the next diff has one fewer hunk — and there is
+no per-hunk state to go stale, no indices to renumber after an edit, and no way
+for the list on screen to disagree with the file. It is the discipline the file
+tree and the git gutter already follow: recompute from what is there rather
+than remember. The diff itself is `proton-vcs::hunk`, which is the gutter's
+Histogram diff with the hunks kept instead of flattened into marks.
+
+Three consequences worth stating. **Accepting is the same as having typed it** —
+an ordinary edit, so `u` takes it back; a change you can only undo in git is
+not one you would accept in the first place. **Nothing is written**: staging
+opens the file so the diff has something to sit beside, accepting types into
+that buffer, and `:w` is still the only thing that reaches the disk. And
+**several calls in one turn stack**, because a second edit applies to what was
+already staged rather than starting again from the buffer — a rename that
+touches three places would otherwise arrive as one third of a rename.
+
 *Exit: half met.* `cache_read_input_tokens` is non-zero across turns and
 asserted end-to-end in `crates/proton-core/tests/agent.rs`, which drives the
 whole loop — question, tool call against the real index, result, answer —
-against a scripted API on a loopback socket. **Applicable hunks are the half
-that is not done**: there is no `edit_file` tool and no hunk staging yet, so the
-agent can read the workspace and explain it but cannot yet propose a change to
-it.
+against a scripted API on a loopback socket — which now also drives a turn that
+calls `edit_file`, and checks that the file on disk is untouched afterwards.
+**Applicable hunks are done**: `edit_file` stages, the review panel draws the
+hunks, and Refer and Apply act on them one at a time.
 
-Still open, and the shape of the rest of M3: an `edit_file` tool whose output
-is staged rather than applied, per-hunk Refer/Apply over that staging, and the
-task queue. The shadow worktree is deliberately *not* a prerequisite for the
-first two — a staged diff held against the buffer is enough to review and
-apply, and a real git worktree earns its place later, when proposed changes
-need to be run against tests before they are accepted.
+Still open, and the last of M3: the task queue. The shadow worktree is
+deliberately *not* a prerequisite — a staged diff held against the buffer was
+enough to review and apply, as planned, and a real git worktree earns its place
+later, when proposed changes need to be run against tests before they are
+accepted.
 
 **M4 — Code Visualizer. ✅ done.** `proton-trace` is the second consumer of
 upstream's trace format. Nothing forks or patches it: the checkout is a

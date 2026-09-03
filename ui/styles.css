@@ -664,6 +664,35 @@ kbd {
 .diff pre .m { color: var(--err); background: color-mix(in srgb, var(--err) 9%, transparent); }
 .diff pre .c { color: var(--ink-3); }
 
+/* Staged changes, pinned above the composer. Capped and scrollable, because
+   an agent that touched six files must not push the composer off the screen —
+   the thing you need in order to tell it to stop. */
+.staged {
+  flex: 0 0 auto; max-height: 46vh; overflow: auto;
+  padding: 0 13px; margin-bottom: 2px;
+}
+.staged[hidden] { display: none; }
+.staged .head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 2px;
+  font: 620 10px var(--sans); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-4);
+}
+.staged .head .acts { margin-left: auto; display: flex; gap: 5px; }
+.staged .head .acts button {
+  padding: 3px 9px; border-radius: 6px; cursor: pointer;
+  font: 620 10.5px var(--sans); letter-spacing: 0; text-transform: none;
+  border: 0; background: var(--e2); box-shadow: var(--spec); color: var(--ink-2);
+}
+.staged .head .acts button:hover { background: var(--e3); color: var(--ink); }
+.staged .head .acts button.go {
+  background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok);
+}
+/* A file that does not exist yet. Said in words rather than by a colour,
+   because "new" and "changed" are not a thing you should have to learn a
+   legend for. */
+.staged .new { color: var(--ok); font-weight: 620; }
+
 /* ── composer ─────────────────────────────────────────────────────── */
 .composer { flex: 0 0 auto; padding: 10px 12px 12px; }
 .composer .box {

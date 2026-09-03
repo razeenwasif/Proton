@@ -43,6 +43,9 @@ if (HAS_SHELL) {
   // shows, whose cursor is where — lives in crates/proton-core/src/split.rs;
   // this only has to give the chrome something to draw.
   const layout = { count: 1, focused: 0, vertical: true, scroll: [0] };
+  // Staged changes for the preview. Filled on first use, so the panel is
+  // empty until something asks for it — the way it is in the real thing.
+  const staged = {};
 
   const splitsEvent = () => ({
     type: "splits",
@@ -181,6 +184,50 @@ if (HAS_SHELL) {
         terminalEvent(),
       ];
     }
+    // Staged changes. The stand-in keeps a list so Apply and Refer visibly
+    // take a hunk off the panel, which is the interaction worth previewing.
+    if (command.type === "review" || command.type === "applyHunk" ||
+        command.type === "rejectHunk" || command.type === "applyStaged" ||
+        command.type === "rejectStaged") {
+      const line = (mark, text) => ({ mark, text });
+      staged.files ??= [
+        {
+          path: "src/routes/dashboard.tsx",
+          creates: false,
+          hunks: [
+            { line: 9, lines: [
+              line("context", "const health = useTelemetry(sats, …);"),
+              line("removed", "const ranked = [...sats].sort(byHealth);"),
+              line("added", "const ranked = useMemo("),
+              line("added", "  () => [...sats].sort(byHealth),"),
+              line("added", "  [sats, health],"),
+              line("added", ");"),
+              line("context", "return <Grid rows={ranked} />;"),
+            ]},
+          ],
+        },
+        {
+          path: "src/lib/orbit.ts",
+          creates: false,
+          hunks: [
+            { line: 54, lines: [
+              line("removed", "return { sats: [...store.sats], tick };"),
+              line("added", "return { sats: store.sats, tick };  // stable identity"),
+            ]},
+          ],
+        },
+      ];
+      if (command.type === "applyHunk" || command.type === "rejectHunk") {
+        const file = staged.files.find((f) => f.path === command.path);
+        if (file) {
+          file.hunks.splice(command.hunk, 1);
+          if (!file.hunks.length) staged.files = staged.files.filter((f) => f !== file);
+        }
+      }
+      if (command.type === "applyStaged" || command.type === "rejectStaged") staged.files = [];
+      return [{ type: "review", files: staged.files }];
+    }
+
     if (command.type === "hover") {
       return [
         {

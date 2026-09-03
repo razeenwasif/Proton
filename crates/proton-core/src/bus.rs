@@ -14,6 +14,7 @@ use crate::key::Key;
 use crate::lsp::{Completion, Diagnostic, ServerStatus};
 use crate::mode::ModeId;
 use crate::picker::{PickerItem, PickerKind};
+use crate::review::ChangeView;
 use crate::split::Direction;
 use crate::trace::{StepView, TraceState};
 use crate::tree::TreeRow;
@@ -149,6 +150,29 @@ pub enum Command {
     },
     /// What the server would offer for the cursor's line — `␣la`.
     CodeActions,
+
+    /* ── the agent's staged changes ───────────────────────────────── */
+    /// Put one staged hunk in the buffer. Still unsaved: accepting is the
+    /// same as having typed it.
+    #[serde(rename_all = "camelCase")]
+    ApplyHunk {
+        path: String,
+        hunk: usize,
+    },
+    /// Refuse one, so it stops being proposed.
+    #[serde(rename_all = "camelCase")]
+    RejectHunk {
+        path: String,
+        hunk: usize,
+    },
+    /// Take every hunk of one file, or of everything when no path is given.
+    ApplyStaged {
+        path: Option<String>,
+    },
+    /// Refuse the lot.
+    RejectStaged {
+        path: Option<String>,
+    },
     /// Drain whatever the language servers have said.
     ///
     /// The core has no clock and no threads, so it cannot notice a reply on
@@ -458,6 +482,14 @@ pub enum Event {
     /// What each language server is doing, for the statusline.
     Servers {
         states: Vec<ServerState>,
+    },
+    /// What the agent has proposed and nobody has accepted yet.
+    ///
+    /// Sent whole and recomputed every time, because the hunks *are* the live
+    /// diff between each buffer and what was proposed — there is no stored
+    /// list of them that a delta could describe.
+    Review {
+        files: Vec<ChangeView>,
     },
     /// The whole agent transcript, and what it is doing.
     ///

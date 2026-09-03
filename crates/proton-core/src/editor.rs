@@ -114,6 +114,23 @@ impl Editor {
         Ok(self.active)
     }
 
+    /// Open a file, or make a buffer for one that is not there yet.
+    ///
+    /// For a staged change that creates a file: the review has to be looked at
+    /// before anything is written, so the buffer has to exist before the file
+    /// does. `text` is what it starts with, which is empty for a new file and
+    /// the current contents for one that failed to open for another reason.
+    pub fn open_or_create(&mut self, path: &Path, text: &str) -> std::io::Result<usize> {
+        if let Ok(index) = self.open(path) {
+            return Ok(index);
+        }
+        let mut buffer = proton_text::Buffer::from_text(text);
+        buffer.rename(path);
+        self.buffers.push(buffer);
+        self.active = self.buffers.len() - 1;
+        Ok(self.active)
+    }
+
     pub fn save(&mut self) -> std::io::Result<()> {
         self.buffer_mut().save()
     }

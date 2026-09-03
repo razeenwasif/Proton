@@ -18,6 +18,7 @@ pub mod key;
 pub mod lsp;
 pub mod mode;
 pub mod picker;
+pub mod review;
 pub mod session;
 pub mod split;
 pub mod trace;
