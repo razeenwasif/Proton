@@ -221,3 +221,58 @@ fn a_workspace_with_no_plugins_says_so_rather_than_opening_an_empty_picker() {
     assert!(picker(&events).is_none(), "and no picker opened");
     std::fs::remove_dir_all(root).ok();
 }
+
+/* ── themes ───────────────────────────────────────────────────────── */
+
+fn plugin_event(events: &[Event]) -> Option<(Vec<String>, Vec<String>)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::Plugins { items, themes } => Some((
+            items
+                .iter()
+                .map(|p| format!("{}: {}", p.name, p.provides))
+                .collect(),
+            themes
+                .iter()
+                .map(|t| format!("{} ({})", t.id, t.from))
+                .collect(),
+        )),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_theme_pack_is_listed_and_its_palettes_reach_the_front_end() {
+    // The half of M5's exit criterion that needs no toolchain at all: the
+    // pack is three TOML files, and nothing in the path from disk to the
+    // front end compiles anything.
+    let (mut ws, root) = workspace("themes");
+    let events = ws.apply(Command::Sync);
+    let (items, themes) = plugin_event(&events).expect("a plugins event");
+
+    assert!(
+        items.iter().any(|p| p == "Dusk: 2 themes"),
+        "the pack should be listed with what it brought: {items:?}"
+    );
+    assert!(
+        themes.iter().any(|t| t == "dusk-rose (dusk)"),
+        "and its palettes should carry which plugin they came from: {themes:?}"
+    );
+    // The component's own theme comes through the same list — a theme built
+    // by code and one read from a file are the same thing here.
+    assert!(
+        themes.iter().any(|t| t == "hello-dusk (hello)"),
+        "{themes:?}"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn a_plugin_with_no_code_is_still_listed() {
+    // A theme pack that vanished from the list because it had nothing to run
+    // would be one you could not find to uninstall.
+    let (mut ws, root) = workspace("listed");
+    let events = ws.apply(Command::Sync);
+    let (items, _) = plugin_event(&events).expect("a plugins event");
+    assert_eq!(items.len(), 2, "{items:?}");
+    std::fs::remove_dir_all(root).ok();
+}

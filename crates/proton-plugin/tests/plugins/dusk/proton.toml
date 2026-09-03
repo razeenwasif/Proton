@@ -1,0 +1,5 @@
+id = "dusk"
+name = "Dusk"
+description = "A theme pack: two palettes, no code."
+version = "0.1.0"
+themes = ["rose.toml", "moss.toml"]

@@ -15,6 +15,7 @@ import type { ModeId } from "./ModeId";
 import type { NoticeLevel } from "./NoticeLevel";
 import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
+import type { PluginView } from "./PluginView";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
 import type { Span } from "./Span";
@@ -23,6 +24,7 @@ import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
 import type { Task } from "./Task";
 import type { TermRun } from "./TermRun";
+import type { ThemeView } from "./ThemeView";
 import type { TraceState } from "./TraceState";
 import type { TreeRow } from "./TreeRow";
 import type { VimMode } from "./VimMode";
@@ -97,7 +99,7 @@ total: number, elapsedMs: number,
  * The tree is still being walked. An empty list under this flag means
  * "not yet", not "no matches" — and those look identical without it.
  */
-scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "hover", text: string, line: number, column: number, } | { "type": "hoverClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "tasks", tasks: Array<Task>, } | { "type": "review", files: Array<ChangeView>, } | { "type": "agent", transcript: Array<Entry>, activity: Activity, inputTokens: bigint, outputTokens: bigint, 
+scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "hover", text: string, line: number, column: number, } | { "type": "hoverClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "tasks", tasks: Array<Task>, } | { "type": "plugins", items: Array<PluginView>, themes: Array<ThemeView>, } | { "type": "review", files: Array<ChangeView>, } | { "type": "agent", transcript: Array<Entry>, activity: Activity, inputTokens: bigint, outputTokens: bigint, 
 /**
  * Served from cache. Surfaced because a silently invalidated prefix
  * is a cost regression rather than an error, and nothing else shows it.

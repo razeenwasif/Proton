@@ -47,7 +47,10 @@ static QUERIES: LazyLock<Mutex<HashMap<&'static str, Arc<Query>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub struct Syntax {
-    language: &'static Language,
+    /// The language id, for the statusline. A `String` rather than a
+    /// `&'static str` because a grammar a plugin brought has no entry in the
+    /// static table to borrow one from.
+    id: String,
     parser: Parser,
     query: Arc<Query>,
     tree: Option<Tree>,
@@ -71,7 +74,7 @@ struct Inline {
 impl std::fmt::Debug for Syntax {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Syntax")
-            .field("language", &self.language.id)
+            .field("language", &self.id)
             .field("parsed", &self.parsed)
             .finish()
     }
@@ -110,7 +113,7 @@ impl Syntax {
         });
 
         Some(Self {
-            language,
+            id: language.id.to_string(),
             parser,
             query,
             tree: None,
@@ -119,8 +122,39 @@ impl Syntax {
         })
     }
 
-    pub fn language(&self) -> &'static str {
-        self.language.id
+    /// Build one from a grammar a plugin brought.
+    ///
+    /// The static table is tried first by the caller, so a plugin cannot
+    /// quietly replace Rust — a grammar that claims an extension the editor
+    /// already parses is ignored rather than allowed to win, because a file
+    /// whose colours depend on what you have installed is a file you cannot
+    /// reason about.
+    ///
+    /// The query is compiled here rather than cached: the cache is keyed by
+    /// `&'static str` and a plugin's id is not one. Grammars are added once
+    /// at startup, so this is paid once per file opened in that language —
+    /// worth revisiting if anybody ships a query the size of Rust's.
+    pub fn from_grammar(
+        grammar: &crate::wasm::Added,
+        grammars: &crate::wasm::Grammars,
+    ) -> Option<Self> {
+        let (parser, language) = grammars.parser(grammar).ok()?;
+        let query = Query::new(&language, &grammar.query).ok()?;
+        Some(Self {
+            id: grammar.id.clone(),
+            parser,
+            query: Arc::new(query),
+            tree: None,
+            parsed: None,
+            // A companion grammar is a thing the static table declares. A
+            // plugin shipping a two-grammar language is a later problem, and
+            // pretending to support it now would be a shape nobody has tried.
+            inline: None,
+        })
+    }
+
+    pub fn language(&self) -> &str {
+        &self.id
     }
 
     /// Re-parse if the buffer has moved since the last time.

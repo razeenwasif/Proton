@@ -23,6 +23,6 @@ pub mod manifest;
 pub mod plugin;
 
 pub use host::{Host, Shared, DEADLINE};
-pub use manifest::{discover, Grammar, Installed, Manifest, PluginView};
+pub use manifest::{discover, Grammar, Installed, Manifest, PluginView, ThemeView};
 pub use plugin::proton::plugin::editor::Swatch;
 pub use plugin::{Command, Lent, Loaded, Outcome, Theme};

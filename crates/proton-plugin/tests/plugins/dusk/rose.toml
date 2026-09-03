@@ -1,0 +1,10 @@
+id = "dusk-rose"
+name = "Dusk Rose"
+dark = true
+
+[colours]
+bg      = "#1f1a1d"
+bg-deep = "#151113"
+text    = "#e0d4d9"
+text-hi = "#f6ecf0"
+accent  = "#d98a9b"

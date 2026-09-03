@@ -1,0 +1,10 @@
+id = "dusk-moss"
+name = "Dusk Moss"
+dark = true
+
+[colours]
+bg      = "#1a1f1b"
+bg-deep = "#121613"
+text    = "#d2ded4"
+text-hi = "#eef5ef"
+accent  = "#8fbf9f"

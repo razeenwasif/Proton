@@ -40,9 +40,15 @@ fn a_plugin_is_discovered_from_its_manifest_alone() {
     // would mean running everything installed at startup.
     let (found, problems) = proton_plugin::discover(&plugins());
     assert!(problems.is_empty(), "{problems:?}");
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].manifest.name, "Hello");
-    assert_eq!(found[0].manifest.wasm.as_deref(), Some("hello.wasm"));
+
+    // Sorted by folder, so the list reads the same every run — and load order
+    // is what decides which of two plugins claiming one theme id wins.
+    let ids: Vec<&str> = found.iter().map(|p| p.manifest.id.as_str()).collect();
+    assert_eq!(ids, vec!["dusk", "hello"]);
+
+    let hello = found.iter().find(|p| p.manifest.id == "hello").unwrap();
+    assert_eq!(hello.manifest.name, "Hello");
+    assert_eq!(hello.manifest.wasm.as_deref(), Some("hello.wasm"));
 }
 
 #[test]
@@ -152,4 +158,73 @@ fn a_command_the_plugin_never_declared_is_refused_without_running_it() {
         .run(&host, "hello.nope", Lent::default())
         .expect_err("it should refuse");
     assert!(why.contains("no command hello.nope"), "{why}");
+}
+
+/* ── a plugin with no code at all ─────────────────────────────────── */
+
+#[test]
+fn a_theme_pack_needs_no_component_and_no_toolchain() {
+    // Half of M5's exit criterion, and the half that should be easiest: a
+    // palette is a list of colours, so shipping one should not mean writing a
+    // program or compiling anything. `tests/plugins/dusk` is three TOML files.
+    let (found, problems) = proton_plugin::discover(&plugins());
+    assert!(problems.is_empty(), "{problems:?}");
+
+    let pack = found
+        .iter()
+        .find(|p| p.manifest.id == "dusk")
+        .expect("the theme pack");
+    assert!(pack.manifest.wasm.is_none(), "no code");
+    assert_eq!(pack.manifest.themes.len(), 2);
+
+    let rose = proton_plugin::ThemeView::read(pack, "rose.toml").expect("a theme");
+    assert_eq!(rose.id, "dusk-rose");
+    assert_eq!(rose.name, "Dusk Rose");
+    assert!(rose.dark);
+    assert_eq!(rose.from, "dusk", "it says which plugin brought it");
+    let bg = rose
+        .colours
+        .iter()
+        .find(|(name, _)| name == "bg")
+        .expect("a background");
+    assert_eq!(bg.1, "#1f1a1d");
+}
+
+#[test]
+fn a_theme_that_is_not_colours_is_refused_by_name() {
+    // Checked where the file is read, not where it is used: a token that is
+    // not a colour reaches the page as a CSS value that silently does
+    // nothing, and "one thing is the wrong colour" is much harder to work out
+    // than "this theme is broken, and here is the token".
+    let dir = std::env::temp_dir().join(format!("proton-badtheme-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let root = dir.join("bad");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("proton.toml"),
+        "id = \"bad\"\nname = \"Bad\"\nthemes = [\"t.toml\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("t.toml"),
+        "id = \"t\"\nname = \"T\"\n\n[colours]\nbg = \"rebeccapurple\"\n",
+    )
+    .unwrap();
+
+    let installed = proton_plugin::manifest::read(&root).expect("a manifest");
+    let why = proton_plugin::ThemeView::read(&installed, "t.toml").expect_err("it should refuse");
+    assert!(why.contains("bg"), "it should name the token: {why}");
+    assert!(why.contains("not a colour"), "{why}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_theme_cannot_be_read_from_outside_its_plugin() {
+    // The same rule the component path follows. A manifest is a file somebody
+    // else wrote, and a path in it is untrusted input.
+    let (found, _) = proton_plugin::discover(&plugins());
+    let pack = found.iter().find(|p| p.manifest.id == "dusk").unwrap();
+    let why =
+        proton_plugin::ThemeView::read(pack, "../hello/proton.toml").expect_err("it should refuse");
+    assert!(why.contains("outside the plugin"), "{why}");
 }

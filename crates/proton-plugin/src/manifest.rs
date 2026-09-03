@@ -83,6 +83,90 @@ impl Installed {
     }
 }
 
+/// A palette a plugin brought, as the front end applies it.
+///
+/// The same shape as the component's `theme` record, because a theme from a
+/// file and a theme built by code are the same thing to everything
+/// downstream — the file is just the way to ship one without writing a
+/// program, which is the point of a theme pack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeView {
+    pub id: String,
+    pub name: String,
+    /// Whether it wants light or dark chrome around it.
+    #[serde(default = "yes")]
+    pub dark: bool,
+    /// Token name to `#rrggbb`, in the order the file listed them.
+    ///
+    /// A list rather than a map: TOML and JSON both reorder a map, and a
+    /// palette that reshuffles is one whose swatch strip never looks the same
+    /// twice. Order is also how a theme says which colour is its headline.
+    pub colours: Vec<(String, String)>,
+    /// Which plugin it came from, for the row under its name.
+    #[serde(default)]
+    pub from: String,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// A theme file: `[theme]` and a table of colours.
+#[derive(Debug, Deserialize)]
+struct ThemeFile {
+    id: String,
+    name: String,
+    #[serde(default = "yes")]
+    dark: bool,
+    colours: toml::Table,
+}
+
+impl ThemeView {
+    /// Read one from a plugin's folder.
+    ///
+    /// Colours are checked here rather than at the point of use: a token that
+    /// is not a colour reaches the page as a CSS value that silently does
+    /// nothing, and "the theme applied but one thing is the wrong colour" is
+    /// much harder to work out than "this theme is broken and here is why".
+    pub fn read(plugin: &Installed, relative: &str) -> Result<ThemeView, String> {
+        let path = plugin.file(relative)?;
+        let text =
+            std::fs::read_to_string(&path).map_err(|err| format!("{}: {err}", path.display()))?;
+        let file: ThemeFile = toml::from_str(&text).map_err(|err| format!("{relative}: {err}"))?;
+
+        let mut colours = Vec::new();
+        for (name, value) in &file.colours {
+            let Some(value) = value.as_str() else {
+                return Err(format!("{relative}: {name} is not a colour"));
+            };
+            if !is_colour(value) {
+                return Err(format!("{relative}: {name} = {value:?} is not a colour"));
+            }
+            colours.push((name.clone(), value.to_string()));
+        }
+
+        Ok(ThemeView {
+            id: file.id,
+            name: file.name,
+            dark: file.dark,
+            colours,
+            from: plugin.manifest.id.clone(),
+        })
+    }
+}
+
+/// `#rgb`, `#rrggbb`, or the same with alpha. Deliberately only hex: a theme
+/// is a palette rather than a stylesheet, and letting `red` or
+/// `var(--something)` through would be letting a plugin write CSS.
+fn is_colour(value: &str) -> bool {
+    let Some(digits) = value.strip_prefix('#') else {
+        return false;
+    };
+    matches!(digits.len(), 3 | 4 | 6 | 8) && digits.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 /// What the front end draws in the plugin list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]

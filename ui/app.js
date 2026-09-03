@@ -26,9 +26,56 @@ const token = (name) => getComputedStyle(document.documentElement).getPropertyVa
    switching is instant and why adding a fifth is a paste, not a port. */
 const THEMES = ["tokyo-night", "one-dark", "catppuccin", "nord", "gruvbox-dark"];
 
+/* Palettes a plugin brought, by id.
+ *
+ * A built-in theme is a `[data-theme]` block in the stylesheet; a plugin's is
+ * the same tokens set on `<html>` from JavaScript. Both end up as the same
+ * custom properties, which is the whole reason a plugin can ship a theme
+ * without shipping any code: the design's rule that colour is a token set is
+ * what makes an extension point out of it. */
+const plugged = new Map();
+
+/// The tokens a theme may set. An allow-list, because these arrive from a
+/// file somebody else wrote: without it a "theme" could set any custom
+/// property the stylesheet reads, which is a stylesheet rather than a palette.
+const TOKENS = new Set([
+  "bg", "bg-deep", "raise", "text", "text-hi",
+  "accent", "accent-2", "ok", "warn", "err", "info", "tone",
+  "wall-a", "wall-b", "wall-c",
+]);
+
 function setTheme(name) {
-  if (!THEMES.includes(name)) return;
-  document.documentElement.dataset.theme = name;
+  const plugin = plugged.get(name);
+  if (!plugin && !THEMES.includes(name)) return;
+
+  // A plugin's tokens are set on the element and a built-in's come from the
+  // stylesheet, so switching between them has to clear whatever the last one
+  // put there — otherwise a plugin's accent survives into Tokyo Night.
+  TOKENS.forEach((t) => document.documentElement.style.removeProperty(`--${t}`));
+
+  if (plugin) {
+    // A built-in stays underneath as the base, so a palette that sets five
+    // tokens gets sensible values for the other ten rather than the browser's
+    // idea of an unset custom property. The plugin's own tokens are set on
+    // the element, which beats any stylesheet block.
+    document.documentElement.dataset.theme = "tokyo-night";
+    document.documentElement.dataset.pluginTheme = plugin.id;
+    for (const [key, value] of plugin.colours) {
+      if (TOKENS.has(key)) document.documentElement.style.setProperty(`--${key}`, value);
+    }
+    // `--raise` is what "lighter" means on this ground, and on a light one
+    // lighter is black. A palette may say so itself; most will not.
+    if (!plugin.colours.some(([k]) => k === "raise")) {
+      document.documentElement.style.setProperty(
+        "--raise",
+        plugin.dark ? "255, 255, 255" : "0, 0, 0",
+      );
+    }
+  } else {
+    document.documentElement.dataset.theme = name;
+    delete document.documentElement.dataset.pluginTheme;
+  }
+
   $$("[data-theme-set]").forEach((c) => c.classList.toggle("on", c.dataset.themeSet === name));
   try {
     localStorage.setItem("proton.theme", name);
@@ -38,9 +85,13 @@ function setTheme(name) {
   requestAnimationFrame(drawPointerEdges); // edges are painted, not tokenised
 }
 
-$$("[data-theme-set]").forEach((c) =>
-  c.addEventListener("click", () => setTheme(c.dataset.themeSet)),
-);
+/* Delegated rather than bound per card: the plugin themes' cards do not exist
+   until the core says what is installed, and a listener attached at load
+   would miss every one of them. */
+document.addEventListener("click", (e) => {
+  const card = e.target.closest("[data-theme-set]");
+  if (card) setTheme(card.dataset.themeSet);
+});
 
 /* ── translucency ─────────────────────────────────────────────────────
    Three steps over one set of veil percentages. Like the theme, it is a
@@ -1757,6 +1808,10 @@ onEvent((event) => {
       renderTasks(event);
       break;
 
+    case "plugins":
+      renderPlugins(event);
+      break;
+
     case "trace":
       renderTrace(event);
       break;
@@ -2136,6 +2191,72 @@ function entryHtml(entry) {
   return (
     `<div class="msg"><div class="who">${who}</div>` +
     `${thinking}${calls}${proseHtml(entry.text)}${caret}</div>`
+  );
+}
+
+/* ── what is installed ────────────────────────────────────────────────
+   Sent once, when the front end connects: plugins are loaded when the
+   session is built and there is no way to install one without restarting,
+   so there is nothing later to redraw from. */
+function renderPlugins(event) {
+  // Palettes first, so a theme a plugin brought is choosable before anyone
+  // reads the list of what brought it.
+  plugged.clear();
+  event.themes.forEach((t) => plugged.set(t.id, t));
+
+  const strip = $(".themes");
+  if (strip) {
+    $$(".theme-card[data-from]", strip).forEach((c) => c.remove());
+    strip.insertAdjacentHTML(
+      "beforeend",
+      event.themes.map(themeCardHtml).join(""),
+    );
+    // The stored choice may name a plugin's theme, which did not exist when
+    // the page loaded and so could not be applied then.
+    const wanted = (() => {
+      try {
+        return localStorage.getItem("proton.theme");
+      } catch {
+        return null;
+      }
+    })();
+    if (wanted && plugged.has(wanted)) setTheme(wanted);
+  }
+
+  const box = $("[data-plugins]");
+  const setting = $("[data-plugins-setting]");
+  if (!box || !setting) return;
+  setting.hidden = event.items.length === 0;
+  box.innerHTML = event.items.map(pluginRowHtml).join("");
+}
+
+/** Five swatches, the way the built-in cards show one. */
+function themeCardHtml(theme) {
+  const of = (name) => theme.colours.find(([k]) => k === name)?.[1];
+  const swatches = ["bg", "accent", "accent-2", "ok", "warn"]
+    .map((n) => of(n) ?? of("text") ?? "#888")
+    .map((c) => `<i style="background:${escapeHtml(c)}"></i>`)
+    .join("");
+  return (
+    `<button class="theme-card" data-theme-set="${escapeHtml(theme.id)}" ` +
+    `data-from="${escapeHtml(theme.from)}" title="from ${escapeHtml(theme.from)}">` +
+    `<span class="sw">${swatches}</span>` +
+    `<span class="nm">${escapeHtml(theme.name)}</span></button>`
+  );
+}
+
+function pluginRowHtml(plugin) {
+  // A plugin that failed says why, in its own row. One that failed silently
+  // is one you uninstall in confusion.
+  const right = plugin.problem
+    ? `<span class="dir" style="margin-left:auto;padding-left:16px;color:var(--err)">${escapeHtml(plugin.problem)}</span>`
+    : `<span class="dir" style="margin-left:auto;padding-left:16px">${escapeHtml(plugin.provides)}</span>`;
+  const version = plugin.version ? ` <span class="dim">${escapeHtml(plugin.version)}</span>` : "";
+  return (
+    `<div class="res" style="cursor:default;align-items:flex-start">` +
+    `<span>${escapeHtml(plugin.name)}${version}` +
+    (plugin.description ? `<br><span class="dim">${escapeHtml(plugin.description)}</span>` : "") +
+    `</span>${right}</div>`
   );
 }
 

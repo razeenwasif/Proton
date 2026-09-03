@@ -20,6 +20,7 @@ use crate::tasks::Task;
 use crate::trace::{StepView, TraceState};
 use crate::tree::TreeRow;
 use crate::vim::VimMode;
+use proton_plugin::{PluginView, ThemeView};
 use proton_syntax::Span;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -494,6 +495,17 @@ pub enum Event {
     /// The queue: what is running, what is waiting, and what is ready.
     Tasks {
         tasks: Vec<Task>,
+    },
+    /// What is installed, and the palettes it brought.
+    ///
+    /// Sent once at startup and never again: plugins are loaded when the
+    /// session is built and there is no way to install one without
+    /// restarting yet. Themes come with it rather than as their own event
+    /// because the two are read together — a palette you cannot attribute is
+    /// one you cannot uninstall.
+    Plugins {
+        items: Vec<PluginView>,
+        themes: Vec<ThemeView>,
     },
     /// What the agent has proposed and nobody has accepted yet.
     ///

@@ -230,6 +230,10 @@ impl Workspace {
                     self.state_event(),
                     self.splits_event(),
                     self.buffers_event(),
+                    // Once, here. Plugins are loaded when the session is built
+                    // and there is no way to install one without restarting,
+                    // so there is nothing later to send.
+                    self.plugins_event(),
                 ];
                 // Every split, not just the focused one — on connect the front
                 // end has nothing, and an unfocused pane with no content in it
@@ -1930,6 +1934,13 @@ impl Workspace {
         &self.plugins
     }
 
+    fn plugins_event(&self) -> Event {
+        Event::Plugins {
+            items: self.plugins.view(),
+            themes: self.plugins.themes(),
+        }
+    }
+
     /// Every plugin command, as picker rows.
     ///
     /// The plugin's name is the dim half, because you are looking for what
@@ -3160,9 +3171,12 @@ impl Workspace {
         // Highlighting is computed here rather than in a second event,
         // because the colours and the text they colour must never be a frame
         // apart — one stale and the other fresh is visibly wrong.
-        let spans = self
-            .highlights
-            .spans(&self.editor.buffers()[buffer], first_line, count);
+        let spans = self.highlights.spans(
+            &self.editor.buffers()[buffer],
+            first_line,
+            count,
+            self.plugins.grammars(),
+        );
         let pattern = self.highlight_pattern().map(str::to_owned);
         let buf = &self.editor.buffers()[buffer];
         let lines = buf.lines(first_line, count);

@@ -7,7 +7,7 @@ reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 code.
 
 ```bash
-cargo test --workspace        # 601 tests, headless
+cargo test --workspace        # 609 tests, headless
 cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
                               # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
@@ -63,7 +63,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 |---|---|---|
 | `proton-text` | Rope, undo tree, multi-cursor selections, UTF‑8 ↔ UTF‑16 ↔ line/col | `ropey` |
 | `proton-vim` | Modal state machine, operators, motions, text objects, registers, marks, macros, which-key tree | — |
-| `proton-syntax` | Tree-sitter parsing, incremental re-parse, viewport-scoped highlight queries, companion grammars | `tree-sitter` |
+| `proton-syntax` | Tree-sitter parsing, incremental re-parse, viewport-scoped highlight queries, companion and wasm grammars | `tree-sitter` |
 | `proton-lsp` | LSP client, server supervision, JSON-RPC framing, a non-blocking mailbox | `serde_json` |
 | `proton-vcs` | The gutter, what git considers changed, and the diff behind both | `gix` |
 | `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
@@ -1139,12 +1139,51 @@ Wasmtime is **252 crates and about a minute and a half** on a clean build,
 measured before committing to it — the largest dependency here by some way,
 and the one with the least substitutable job.
 
-*Exit: half met.* A deliberately infinite plugin is killed rather than hanging
-the app, proven twice: against hand-written wasm in `crates/proton-plugin/tests/deadline.rs`,
-and against a real compiled-Rust loop in a real component in `tests/component.rs`.
-Still open: a third-party grammar and theme installing without a native
-toolchain. The manifest already describes both; what is missing is the
-tree-sitter side of a wasm grammar and the theme pipeline.
+**Themes without a toolchain.** A palette is a list of colours, so shipping
+one should not mean writing a program: `themes = ["rose.toml"]` in a manifest
+is the whole of it, and `tests/plugins/dusk` is three TOML files and no code.
+A theme built by a component's `themes()` export arrives through the same
+list, because to everything downstream they are the same thing.
+
+Colours are checked where the file is read rather than where it is used — a
+token that is not a colour reaches the page as a CSS value that silently does
+nothing, and "one thing is the wrong colour" is much harder to work out than
+"this theme is broken, and here is the token". Only hex is accepted: a theme
+is a palette rather than a stylesheet, and letting `var(--x)` through would be
+letting a plugin write CSS. The front end holds an allow-list of the fifteen
+tokens for the same reason.
+
+This works at all because of the design's own rule that **colour is a token
+set** — a built-in theme is a `[data-theme]` block and a plugin's is the same
+custom properties set from JavaScript, so the extension point was already
+there. A built-in stays underneath as the base, so a palette that sets five
+tokens gets sensible values for the other ten.
+
+**Grammars.** A tree-sitter grammar is C, and shipping one normally means a
+native build per platform; compiled to wasm it is one file that works
+everywhere. They are loaded by tree-sitter's own engine rather than the
+plugin host's, and that engine is deliberately a *separate* one: the host's
+has epoch interruption on and every store carries a deadline, and tree-sitter
+creates its stores internally where no deadline can be set — sharing it would
+mean the first tick traps a parse. **So a grammar's external scanner is not on
+a clock.** The deadline covers plugin commands, which is what it was built
+for, and this is a real limit rather than an oversight.
+
+The built-in table is asked first, so a plugin cannot decide how Rust is
+coloured by being installed. A grammar is loaded once when it is added rather
+than the first time a file wants it, so a grammar that is not one is reported
+when you install it instead of showing up as a file that mysteriously has no
+colours.
+
+*Exit: mostly met.* A deliberately infinite plugin is killed rather than
+hanging the app, proven twice: against hand-written wasm in
+`crates/proton-plugin/tests/deadline.rs`, and against a real compiled-Rust
+loop in a real component in `tests/component.rs`. A theme installs with no
+toolchain at all and is covered end to end. **The grammar path is built and
+wired but not yet proven against a real grammar** — producing a `.wasm` one
+needs emscripten or Docker, and committing somebody else's grammar binary
+here is a licensing decision rather than a testing one. `tests/live_grammar.rs`
+runs against one the moment `PROTON_TEST_GRAMMAR_WASM` points at it.
 
 **M6 — Data mode.** Closest to Codex; the first real exercise of the mode
 contract by something that is not a text editor.

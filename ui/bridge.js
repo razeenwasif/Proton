@@ -62,6 +62,29 @@ if (HAS_SHELL) {
   ];
   const tasksEvent = () => ({ type: "tasks", tasks: queue });
 
+  // A canned pair of plugins, so the settings panel and the theme strip can
+  // be designed against. The real ones are wasm components loaded by
+  // crates/proton-plugin; this only has to show the chrome.
+  const pluginsEvent = () => ({
+    type: "plugins",
+    items: [
+      { id: "dusk", name: "Dusk", description: "A theme pack: two palettes, no code.",
+        version: "0.1.0", provides: "2 themes", problem: "" },
+      { id: "hello", name: "Hello", description: "The example plugin.",
+        version: "0.1.0", provides: "1 theme · 3 commands", problem: "" },
+      { id: "broken", name: "broken", description: "", version: "",
+        provides: "", problem: "broken: expected a component, found a module" },
+    ],
+    themes: [
+      { id: "dusk-rose", name: "Dusk Rose", dark: true, from: "dusk",
+        colours: [["bg", "#1f1a1d"], ["bg-deep", "#151113"], ["text", "#e0d4d9"],
+                  ["text-hi", "#f6ecf0"], ["accent", "#d98a9b"]] },
+      { id: "dusk-moss", name: "Dusk Moss", dark: true, from: "dusk",
+        colours: [["bg", "#1a1f1b"], ["bg-deep", "#121613"], ["text", "#d2ded4"],
+                  ["text-hi", "#eef5ef"], ["accent", "#8fbf9f"]] },
+    ],
+  });
+
   const splitsEvent = () => ({
     type: "splits",
     views: Array.from({ length: layout.count }, () => ({ buffer: 0, name: doc.name })),
@@ -198,6 +221,7 @@ if (HAS_SHELL) {
         debugEvent(),
         terminalEvent(),
         tasksEvent(),
+        pluginsEvent(),
       ];
     }
     if (command.type === "dropTask") {

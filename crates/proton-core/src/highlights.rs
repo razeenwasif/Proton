@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use proton_syntax::{Span, Syntax};
+use proton_syntax::{Grammars, Span, Syntax};
 use proton_text::Buffer;
 
 #[derive(Debug, Default)]
@@ -24,14 +24,27 @@ impl Highlighters {
     ///
     /// Empty when the file has no grammar, which the front end reads as "draw
     /// it plain" — not as an error, and not as "no colours on these lines".
-    pub fn spans(&mut self, buffer: &Buffer, first_line: usize, count: usize) -> Vec<Vec<Span>> {
+    pub fn spans(
+        &mut self,
+        buffer: &Buffer,
+        first_line: usize,
+        count: usize,
+        grammars: &Grammars,
+    ) -> Vec<Vec<Span>> {
         let Some(path) = buffer.path() else {
             return Vec::new();
         };
-        let syntax = self
-            .by_path
-            .entry(path.to_path_buf())
-            .or_insert_with(|| Syntax::for_path(path));
+        let syntax = self.by_path.entry(path.to_path_buf()).or_insert_with(|| {
+            // The built-in table is tried first. A plugin that claimed `.rs`
+            // would otherwise decide how Rust is coloured by being installed,
+            // and a file whose colours depend on what you happen to have
+            // installed is a file you cannot reason about.
+            Syntax::for_path(path).or_else(|| {
+                let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+                let added = grammars.for_extension(&extension)?;
+                Syntax::from_grammar(added, grammars)
+            })
+        });
 
         match syntax {
             Some(syntax) => syntax.spans(buffer, first_line, count),
@@ -40,7 +53,7 @@ impl Highlighters {
     }
 
     /// The language a file is being highlighted as, for the statusline.
-    pub fn language(&self, buffer: &Buffer) -> Option<&'static str> {
+    pub fn language(&self, buffer: &Buffer) -> Option<&str> {
         let path = buffer.path()?;
         self.by_path.get(path)?.as_ref().map(Syntax::language)
     }

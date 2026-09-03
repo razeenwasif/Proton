@@ -8,7 +8,9 @@
 pub mod highlight;
 pub mod language;
 pub mod scope;
+pub mod wasm;
 
 pub use highlight::{Span, Syntax};
 pub use language::{Language, LANGUAGES};
 pub use scope::Scope;
+pub use wasm::{Added, Grammars};
