@@ -173,6 +173,126 @@ fn typescript_is_highlighted_as_javascript_plus_its_own_additions() {
 }
 
 #[test]
+fn c_gets_the_colours_you_would_expect() {
+    let mut syntax = Syntax::for_path(std::path::Path::new("a.c")).unwrap();
+    let buffer = Buffer::from_text("int main(void) {\n    char *s = \"x\"; // hi\n}\n");
+
+    let first = runs(&buffer, &syntax.spans(&buffer, 0, 1)[0], 0);
+    assert!(
+        first
+            .iter()
+            .any(|(text, scope)| text == "int" && *scope == Scope::Type),
+        "{first:?}"
+    );
+
+    let second = runs(&buffer, &syntax.spans(&buffer, 1, 1)[0], 1);
+    for want in [("\"x\"", Scope::String), ("// hi", Scope::Comment)] {
+        assert!(
+            second
+                .iter()
+                .any(|(text, scope)| (text.as_str(), *scope) == want),
+            "{want:?} not in {second:?}"
+        );
+    }
+}
+
+#[test]
+fn cpp_is_highlighted_as_c_plus_its_own_additions() {
+    // The same bug as TypeScript's, in a language where it is easier to
+    // miss: C++'s own query is seventy lines about templates and namespaces.
+    // It has no rule for comments, none for numbers, and for strings only
+    // `raw_string_literal` — so on its own, a `.cpp` file's every comment and
+    // every ordinary string comes out plain. Both halves are asserted here:
+    // the C-level colours that prove C's query runs, and a template keyword
+    // that proves C++'s still does.
+    let mut syntax = Syntax::for_path(std::path::Path::new("a.cpp")).unwrap();
+    let buffer = Buffer::from_text("// note\ntemplate <typename T> class Box { T v = 42; };\n");
+
+    let comment = runs(&buffer, &syntax.spans(&buffer, 0, 1)[0], 0);
+    assert!(
+        comment
+            .iter()
+            .any(|(text, scope)| text == "// note" && *scope == Scope::Comment),
+        "a comment is C's rule, and C++ has none: {comment:?}"
+    );
+
+    let body = runs(&buffer, &syntax.spans(&buffer, 1, 1)[0], 1);
+    assert!(
+        body.iter()
+            .any(|(text, scope)| text == "42" && *scope == Scope::Number),
+        "a number is C's rule too: {body:?}"
+    );
+    assert!(
+        body.iter()
+            .any(|(text, scope)| text == "template" && *scope == Scope::Keyword),
+        "and `template` is C++'s own, so both queries have to run: {body:?}"
+    );
+}
+
+#[test]
+fn assembly_tells_a_label_from_an_instruction() {
+    // Worth asserting rather than counting spans: in assembly nearly every
+    // line is one bare word followed by operands, and a highlighter that
+    // painted all of them alike would be no help at all.
+    let mut syntax = Syntax::for_path(std::path::Path::new("boot.s")).unwrap();
+    let buffer = Buffer::from_text("_start:\n    mov $1, %rax\n");
+
+    let label = runs(&buffer, &syntax.spans(&buffer, 0, 1)[0], 0);
+    let instruction = runs(&buffer, &syntax.spans(&buffer, 1, 1)[0], 1);
+
+    let label_scope = label
+        .iter()
+        .find(|(text, _)| text == "_start")
+        .map(|(_, s)| *s);
+    let mov_scope = instruction
+        .iter()
+        .find(|(text, _)| text == "mov")
+        .map(|(_, s)| *s);
+    assert!(label_scope.is_some(), "{label:?}");
+    assert!(mov_scope.is_some(), "{instruction:?}");
+    assert_ne!(
+        label_scope, mov_scope,
+        "a label and an instruction should not be the same colour"
+    );
+    assert!(
+        instruction
+            .iter()
+            .any(|(text, scope)| text == "%rax" && *scope == Scope::Variable),
+        "a register is the operand you scan for: {instruction:?}"
+    );
+}
+
+#[test]
+fn a_c_header_and_a_cpp_header_go_to_different_grammars() {
+    // `.h` is ambiguous in the real world and has to be decided somewhere.
+    // This is that decision, written down where it will fail if it changes.
+    assert_eq!(
+        Syntax::for_path(std::path::Path::new("a.h"))
+            .unwrap()
+            .language(),
+        "c"
+    );
+    for name in ["a.hpp", "a.hh", "a.hxx", "a.cc", "a.cxx"] {
+        assert_eq!(
+            Syntax::for_path(std::path::Path::new(name))
+                .unwrap()
+                .language(),
+            "cpp",
+            "{name}"
+        );
+    }
+    // `.S` is `.s` after the lower-casing every extension goes through: the
+    // difference between them is whether the preprocessor runs, not what the
+    // file is.
+    assert_eq!(
+        Syntax::for_path(std::path::Path::new("boot.S"))
+            .unwrap()
+            .language(),
+        "asm"
+    );
+}
+
+#[test]
 fn an_unchanged_buffer_is_not_reparsed() {
     // Highlighting is asked for on every cursor move, and re-parsing a large
     // file each time would make a bare motion cost more than an edit.

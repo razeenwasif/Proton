@@ -458,6 +458,24 @@ debug adapters run out of process, so a crash costs a squiggle rather than the
 editor. Grammars load as wasm through the same sandbox as plugins, which means a
 plugin can add a language without a native build step.
 
+**Some languages are two queries.** TypeScript was the first: its own
+`highlights.scm` covers only what TypeScript adds to JavaScript, so used alone
+every `const` in a `.ts` file comes out plain. C++ is the same shape and an
+easier one to get wrong — its query is seventy lines about templates,
+namespaces and `auto`, with no rule for comments, none for numbers, and for
+strings only `raw_string_literal`. A `.cpp` file highlighted by C++'s query
+alone gets its templates coloured and every comment and ordinary string left
+grey. Because the C++ *grammar* is a superset of C's, C's query matches against
+it, and the two are simply joined in that order. The `queries` field is a list
+for exactly this.
+
+Which grammar claims `.h` has to be decided rather than inferred, since a
+header does not say which language it is. It goes to C: C's query against a C++
+header still colours the comments, strings and types, where C++'s against a C
+header is the worse of the two trades. `.s` and `.S` both arrive lower-cased
+and land on the same assembly grammar — the difference between them is whether
+the preprocessor runs, not what the file is.
+
 **Some languages are two grammars.** Markdown is the first: one grammar for the
 block structure — headings, fences, lists, quotes — and a second for what is
 inside a paragraph, where emphasis, links and code spans live. The block
@@ -1175,15 +1193,27 @@ than the first time a file wants it, so a grammar that is not one is reported
 when you install it instead of showing up as a file that mysteriously has no
 colours.
 
-*Exit: mostly met.* A deliberately infinite plugin is killed rather than
+*Exit: met.* A deliberately infinite plugin is killed rather than
 hanging the app, proven twice: against hand-written wasm in
 `crates/proton-plugin/tests/deadline.rs`, and against a real compiled-Rust
 loop in a real component in `tests/component.rs`. A theme installs with no
-toolchain at all and is covered end to end. **The grammar path is built and
-wired but not yet proven against a real grammar** — producing a `.wasm` one
-needs emscripten or Docker, and committing somebody else's grammar binary
-here is a licensing decision rather than a testing one. `tests/live_grammar.rs`
-runs against one the moment `PROTON_TEST_GRAMMAR_WASM` points at it.
+toolchain at all and is covered end to end. And the grammar path has now been
+run against a real grammar: `tree-sitter-go` compiled to wasm, loaded through
+`Grammars::add`, found by extension, and asked for spans — with the same
+discipline the built-in grammars are held to, that columns are characters and
+no span runs past its line.
+
+`tests/live_grammar.rs` stays `#[ignore]` rather than committing that wasm.
+Building it is a one-line `tree-sitter build --wasm`, but checking somebody
+else's grammar binary into this repository is a licensing decision rather than
+a testing one, and the test's value is in having been run, not in running on
+every `cargo test`. It runs the moment `PROTON_TEST_GRAMMAR_WASM` points at a
+grammar; the module comment holds the invocation.
+
+One thing worth recording, because the tooling moved: tree-sitter's CLI no
+longer needs emscripten or Docker to produce a `.wasm` grammar. Since 0.25 it
+downloads a wasi-sdk clang and drives that directly, which removes the
+toolchain argument against ever regenerating one of these.
 
 **M6 — Data mode.** Closest to Codex; the first real exercise of the mode
 contract by something that is not a text editor.

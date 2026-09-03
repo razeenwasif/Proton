@@ -55,12 +55,52 @@ const TYPESCRIPT: &[&str] = &[
     tree_sitter_typescript::HIGHLIGHTS_QUERY,
 ];
 
+/// C++ stands in the same relation to C, and for the same reason: its own
+/// query is seventy lines of what C++ adds — templates, namespaces, `auto` —
+/// and says almost nothing about comments, strings or numbers. Alone it would
+/// colour a `.cpp` file's templates and leave its string literals grey. The
+/// C++ *grammar* is a superset of C's, so C's patterns match here too.
+const CPP: &[&str] = &[
+    tree_sitter_c::HIGHLIGHT_QUERY,
+    tree_sitter_cpp::HIGHLIGHT_QUERY,
+];
+
 pub const LANGUAGES: &[Language] = &[
     Language {
         id: "rust",
         extensions: &["rs"],
         grammar: || tree_sitter_rust::LANGUAGE.into(),
         queries: &[tree_sitter_rust::HIGHLIGHTS_QUERY],
+        inline: None,
+    },
+    Language {
+        id: "c",
+        // `.h` is claimed here rather than by C++ because it has to go
+        // somewhere and a header is not readable from its extension. C's
+        // query against a C++ header still colours the comments, strings and
+        // types; C++'s against a C header would be the worse trade.
+        extensions: &["c", "h"],
+        grammar: || tree_sitter_c::LANGUAGE.into(),
+        queries: &[tree_sitter_c::HIGHLIGHT_QUERY],
+        inline: None,
+    },
+    Language {
+        id: "cpp",
+        extensions: &[
+            "cpp", "cc", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ipp", "tcc",
+        ],
+        grammar: || tree_sitter_cpp::LANGUAGE.into(),
+        queries: CPP,
+        inline: None,
+    },
+    Language {
+        id: "asm",
+        // `.s` and `.S` both arrive lower-cased, which is the point of
+        // lower-casing: the difference between them is whether the
+        // preprocessor runs, not what the file is.
+        extensions: &["s", "asm"],
+        grammar: || tree_sitter_asm::LANGUAGE.into(),
+        queries: &[tree_sitter_asm::HIGHLIGHTS_QUERY],
         inline: None,
     },
     Language {

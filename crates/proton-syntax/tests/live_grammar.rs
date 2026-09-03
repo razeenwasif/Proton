@@ -1,20 +1,21 @@
 //! A grammar a plugin brought, against a real one.
 //!
 //! Ignored by default because it needs a `.wasm` tree-sitter grammar, and
-//! building one needs emscripten or Docker — which is exactly the toolchain
-//! M5 exists to keep *users* from needing. Committing a third-party grammar
-//! here to make the test run unattended would be shipping somebody else's
-//! binary in this repository, which is a licensing decision rather than a
-//! testing one.
+//! committing a third-party one here to make the test run unattended would be
+//! shipping somebody else's binary in this repository — a licensing decision
+//! rather than a testing one. Not because building one is hard: tree-sitter's
+//! CLI has not needed emscripten or Docker since 0.25, and fetches a wasi-sdk
+//! clang itself.
 //!
-//! So it reads one from the environment instead:
+//! So it reads one from the environment instead. Both tests have been run this
+//! way against `tree-sitter-go` built from its checkout:
 //!
 //! ```bash
-//! # e.g. from `tree-sitter build --wasm` in a grammar's checkout
-//! PROTON_TEST_GRAMMAR=zig \
-//! PROTON_TEST_GRAMMAR_WASM=/path/to/tree-sitter-zig.wasm \
+//! # in a grammar's checkout: tree-sitter build --wasm -o tree-sitter-go.wasm .
+//! PROTON_TEST_GRAMMAR=go \
+//! PROTON_TEST_GRAMMAR_WASM=/path/to/tree-sitter-go.wasm \
 //! PROTON_TEST_GRAMMAR_QUERY=/path/to/queries/highlights.scm \
-//! PROTON_TEST_GRAMMAR_FILE=/path/to/example.zig \
+//! PROTON_TEST_GRAMMAR_FILE=/path/to/example.go \
 //! cargo test -p proton-syntax --test live_grammar -- --include-ignored
 //! ```
 //!
@@ -76,7 +77,10 @@ fn a_wasm_grammar_loads_and_colours_a_file() {
         let width = buffer.line(row).chars().count();
         for span in line {
             assert!(span.start <= span.end, "line {row}: {span:?}");
-            assert!(span.end <= width, "line {row}: {span:?} past a {width}-wide line");
+            assert!(
+                span.end <= width,
+                "line {row}: {span:?} past a {width}-wide line"
+            );
         }
     }
 }
