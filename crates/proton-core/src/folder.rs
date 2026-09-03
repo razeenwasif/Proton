@@ -25,6 +25,26 @@ pub fn home() -> Option<PathBuf> {
         .filter(|path| path.is_dir())
 }
 
+/// Where Proton keeps what it remembers between runs.
+///
+/// Config rather than data, deliberately: it is a handful of paths, a window
+/// size and whatever a plugin brought, and it is the sort of thing somebody
+/// should be able to find, read and delete.
+///
+/// One function rather than the same three branches in each caller — the
+/// session, the plugins folder and the window's geometry all live here, and
+/// they must agree on where "here" is.
+pub fn config() -> Option<PathBuf> {
+    if cfg!(windows) {
+        let base = std::env::var_os("APPDATA")?;
+        return Some(PathBuf::from(base).join("Proton"));
+    }
+    if let Some(base) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Some(PathBuf::from(base).join("proton"));
+    }
+    Some(home()?.join(".config").join("proton"))
+}
+
 fn is_separator(c: char) -> bool {
     c == '/' || c == '\\'
 }

@@ -663,6 +663,33 @@ already the design system. Three notes for the build:
   disagreeing by the overscan, and the correction would scroll the user back a
   little on every frame they scrolled.
 
+- **The window remembers where it was**, and this is the one piece of state
+  that deliberately does *not* go through the command bus. `proton-core` names
+  no widget and has no idea the window has a size, so geometry is the shell's
+  alone: read once before the window is shown, written back as it moves. The
+  size in `tauri.conf.json` is the first-run default, not the size.
+
+  Size is stored **logical**, position **physical**. That looks inconsistent
+  and is not: a logical size reopens the window at the same apparent size on a
+  monitor with a different scale factor, while monitor layout is expressed in
+  physical coordinates, so a physical position is the one that can be checked
+  against the screens that actually exist.
+
+  Which it is checked against, because the interesting failure is not the
+  size. Close on a second monitor, unplug it, reopen: the stored position is
+  still perfectly valid and describes a place that is no longer on any screen,
+  so the window opens invisibly and the app looks like it failed to start. The
+  check is a point a little inside the top-left corner rather than the corner
+  itself — what has to be reachable is the strip you can grab to drag it back.
+  That decision is a function over plain rectangles rather than over a window,
+  because a monitor cannot be unplugged from inside a test.
+
+  A maximized window stores the size it will *return* to, or unmaximizing
+  after a restart would do nothing. A minimized one stores nothing, since its
+  reported size would reopen the app as a sliver. Writes are throttled, as
+  resizing emits an event per frame — and closing writes unconditionally, so
+  whatever the throttle skipped in the last frames of a drag is not lost.
+
 - **The mouse goes through the core.** A click is `PlaceCursor` and a drag is
   `SelectTo`, because a motion cannot express either — `Move` is always
   relative to where the cursor already is, and a mouse knows exactly where it

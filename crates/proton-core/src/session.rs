@@ -733,22 +733,9 @@ struct Stored {
     recents: Vec<String>,
 }
 
-/// Where the session lives. Config, not data: it is a handful of paths, and it
-/// is the sort of thing a user should be able to find, read and delete.
+/// Where the session lives.
 fn state_file() -> Option<PathBuf> {
-    if cfg!(windows) {
-        let base = std::env::var_os("APPDATA")?;
-        return Some(PathBuf::from(base).join("Proton").join("session.json"));
-    }
-    if let Some(base) = std::env::var_os("XDG_CONFIG_HOME") {
-        return Some(PathBuf::from(base).join("proton").join("session.json"));
-    }
-    Some(
-        folder::home()?
-            .join(".config")
-            .join("proton")
-            .join("session.json"),
-    )
+    Some(folder::config()?.join("session.json"))
 }
 
 fn read_state(file: &Path) -> Option<Stored> {

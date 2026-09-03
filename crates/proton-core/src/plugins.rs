@@ -290,19 +290,7 @@ fn count(n: usize, one: &str, many: &str) -> Option<String> {
 /// Where plugins live: beside the session, because they belong to the person
 /// rather than to the project.
 pub fn folder() -> Option<PathBuf> {
-    if cfg!(windows) {
-        let base = std::env::var_os("APPDATA")?;
-        return Some(PathBuf::from(base).join("Proton").join("plugins"));
-    }
-    if let Some(base) = std::env::var_os("XDG_CONFIG_HOME") {
-        return Some(PathBuf::from(base).join("proton").join("plugins"));
-    }
-    Some(
-        crate::folder::home()?
-            .join(".config")
-            .join("proton")
-            .join("plugins"),
-    )
+    Some(crate::folder::config()?.join("plugins"))
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod backdrop;
+mod window;
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -182,6 +183,12 @@ fn main() {
                     eprintln!("proton: could not set the window icon: {err}");
                 }
             }
+
+            // Before anything else touches the window: it opens where it was
+            // last closed, and the size in `tauri.conf.json` is only the
+            // first-run default.
+            window::restore(&window);
+            window::remember(&window);
 
             let applied = backdrop::apply(&window, Backdrop::default());
             println!("[shell] backdrop: {applied}");
