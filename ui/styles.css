@@ -1516,7 +1516,10 @@ table.df tr:hover td { background: var(--e1); }
 /* ── the terminal ─────────────────────────────────────────────────────
    A grid of rows of runs, drawn from what the core's vt100 parser says the
    screen looks like. Nothing here interprets an escape sequence. */
-.term { font: 12px/1.45 var(--mono); padding: 8px 12px; white-space: pre; }
+/* No sideways scrolling: the shell already wraps at the width it was told, so
+   a horizontal scrollbar can only mean the measurement was wrong — and it
+   steals the height of a row on the way, costing the bottom line. */
+.term { font: 12px/1.45 var(--mono); padding: 8px 12px; white-space: pre; overflow-x: hidden; }
 .trow { min-height: 1.45em; }
 .term.on { outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); outline-offset: -1px; }
 

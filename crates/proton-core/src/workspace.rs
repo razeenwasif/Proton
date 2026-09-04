@@ -26,7 +26,7 @@ use crate::lsp::{self, Popup, Servers, Severity};
 use crate::mode::ModeId;
 use crate::picker::{Accepted, PickerKey, PickerKind, Pickers};
 use crate::review;
-use crate::split::{Direction, Splits};
+use crate::split::{Direction, Splits, View};
 use crate::trace::Visualizer;
 use crate::tree::Tree;
 use crate::vim::{Outcome, Vim, VimMode};
@@ -201,6 +201,111 @@ impl Workspace {
         self.pickers.root()
     }
 
+    /// A cheap summary of everything the stored layout depends on, except the
+    /// cursor.
+    ///
+    /// Used to notice that the layout changed without asking what it is:
+    /// building a `Layout` allocates a path per buffer, and doing that after
+    /// every keystroke to find out whether anything moved would cost more than
+    /// the saving it triggers. This is a handful of integers.
+    ///
+    /// Deliberately blind to the cursor. A file write per cursor move is not
+    /// worth it, and the cursor is written whenever something structural
+    /// happens anyway — as well as when the window closes.
+    pub fn shape(&self) -> Vec<usize> {
+        let mut shape = Vec::with_capacity(self.splits.len() + 3);
+        shape.push(self.editor.buffers().len());
+        shape.push(self.splits.focused());
+        shape.push(usize::from(self.splits.is_vertical()));
+        shape.extend(self.splits.views().iter().map(|view| view.buffer));
+        shape
+    }
+
+    /// What is open here, and how the panes are arranged.
+    ///
+    /// Only files. A buffer with no path is something typed but never saved,
+    /// and writing its *name* into the session would promise to reopen a
+    /// thing that does not exist. Panes pointing at one are folded onto the
+    /// first buffer rather than dropped, so the arrangement survives even
+    /// when one of its contents cannot.
+    pub fn layout(&self) -> Layout {
+        let mut files = Vec::new();
+        // Where each editor buffer ended up in `files`, so views can be
+        // renumbered — the two lists differ as soon as one buffer is skipped.
+        let mut moved: Vec<Option<usize>> = Vec::new();
+        for buffer in self.editor.buffers() {
+            match buffer.path() {
+                Some(path) => {
+                    moved.push(Some(files.len()));
+                    files.push(path.to_path_buf());
+                }
+                None => moved.push(None),
+            }
+        }
+
+        Layout {
+            files,
+            views: self
+                .splits
+                .views()
+                .iter()
+                .map(|view| StoredView {
+                    file: moved.get(view.buffer).copied().flatten().unwrap_or(0),
+                    first_line: view.first_line,
+                    line: view.cursor.offset,
+                })
+                .collect(),
+            focused: self.splits.focused(),
+            vertical: self.splits.is_vertical(),
+        }
+    }
+
+    /// Put one back. Best effort, and deliberately so.
+    ///
+    /// A session is a description of a world that has moved on: files get
+    /// deleted, renamed, or live on a drive that is not plugged in. Every one
+    /// that still opens is opened, the rest are passed over, and the panes are
+    /// rebuilt around what survived. Refusing to restore anything because one
+    /// file is missing would be the worse answer by far.
+    pub fn restore_layout(&mut self, layout: &Layout) {
+        let mut opened: Vec<Option<usize>> = Vec::new();
+        for file in &layout.files {
+            opened.push(self.editor.open(file).ok());
+        }
+        if opened.iter().all(Option::is_none) {
+            return;
+        }
+
+        let views: Vec<View> = layout
+            .views
+            .iter()
+            .map(|stored| {
+                let buffer = opened.get(stored.file).copied().flatten().unwrap_or(0);
+                let mut view = View {
+                    buffer,
+                    first_line: stored.first_line,
+                    ..View::default()
+                };
+                // Clamped against the file as it is *now*. An offset saved
+                // last week can point past the end of a file somebody has
+                // since edited, and a cursor outside its buffer is the kind
+                // of thing that panics three operations later.
+                let len = self.editor.buffers()[buffer].len_chars();
+                view.cursor.offset = stored.line.min(len);
+                view.cursor.anchor = view.cursor.offset;
+                view
+            })
+            .collect();
+
+        let count = self.editor.buffers().len();
+        self.splits
+            .restore(views, layout.focused, layout.vertical, count);
+        // The focused pane's buffer is the one the editor is showing, and the
+        // two disagreeing is what makes a restored window edit the wrong file.
+        let showing = self.splits.view().buffer;
+        self.editor.focus(showing);
+    }
+
     /// Whether anything in this workspace has unsaved changes. The session
     /// asks before closing it, because a closed workspace takes its buffers
     /// with it and there is no undo for that.
@@ -282,6 +387,13 @@ impl Workspace {
             }
 
             Command::OpenTerminal => {
+                // A shell that has exited is as good as no shell: asking for a
+                // terminal when the last one is dead means wanting a live one,
+                // not being shown its corpse a second time.
+                let gone = self.terminal.as_mut().is_some_and(|t| !t.is_alive());
+                if gone {
+                    self.terminal = None;
+                }
                 if self.terminal.is_none() {
                     let (rows, cols) = self.term_size;
                     match proton_term::Terminal::open(self.pickers.root(), rows, cols) {
@@ -3467,4 +3579,33 @@ fn refused(events: &[Event]) -> bool {
             }
         )
     })
+}
+
+/// What a workspace had open, in a shape that survives being written down.
+///
+/// Paths rather than buffer handles, and an index into `files` rather than a
+/// buffer index, because the numbering on the other side of a restart is not
+/// the numbering that was saved: a file that no longer opens shifts every
+/// buffer after it.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Layout {
+    pub files: Vec<PathBuf>,
+    #[serde(default)]
+    pub views: Vec<StoredView>,
+    #[serde(default)]
+    pub focused: usize,
+    #[serde(default)]
+    pub vertical: bool,
+}
+
+/// One pane, as stored.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct StoredView {
+    /// Which of `files` it was showing.
+    pub file: usize,
+    #[serde(default)]
+    pub first_line: usize,
+    /// The cursor, as a character offset into that file.
+    #[serde(default)]
+    pub line: usize,
 }

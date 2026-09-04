@@ -524,8 +524,10 @@
                  to say which it is — and offer the way out. -->
             <button class="chip warn" data-term-back hidden title="Back to the live screen">↑ <span data-term-back-rows>0</span></button>
             <span class="grow"></span>
-            <button class="hbtn" data-term="open" title="Open a shell — ␣tt or :terminal"><svg class="i"><use href="#i-play"/></svg></button>
-            <button class="hbtn" data-term="close" title="Close it"><svg class="i"><use href="#i-stop"/></svg></button>
+            <!-- Only when the shell has gone. There is no button to start one:
+                 opening the panel does that, because that is what opening it
+                 means. -->
+            <button class="hbtn" data-term-restart hidden title="Start a new shell"><svg class="i"><use href="#i-play"/></svg></button>
           </header>
           <div class="scroll term" data-term-screen tabindex="0"></div>
         </div>

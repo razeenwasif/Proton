@@ -217,6 +217,16 @@ impl Session {
             if !alive.is_empty() {
                 session.workspaces = alive.iter().map(|path| session.build(path)).collect();
                 session.active = saved.active.min(session.workspaces.len() - 1);
+
+                // Matched by root rather than by position: the list above has
+                // already dropped whichever projects have gone, so the indices
+                // no longer line up with what was written.
+                for workspace in &mut session.workspaces {
+                    let root = workspace.root().display().to_string();
+                    if let Some(stored) = saved.layouts.iter().find(|l| l.root == root) {
+                        workspace.restore_layout(&stored.layout);
+                    }
+                }
             }
         }
 
@@ -260,6 +270,24 @@ impl Session {
     /* ── the bus ──────────────────────────────────────────────────── */
 
     pub fn apply(&mut self, command: Command) -> Vec<Event> {
+        let before = self.shape();
+        let events = self.dispatch(command);
+        // Saved when the arrangement moved, rather than after a list of
+        // commands somebody has to remember to extend. A command added next
+        // year that opens a file in a pane is covered by this and would not
+        // have been covered by an enumeration.
+        if self.shape() != before {
+            self.save();
+        }
+        events
+    }
+
+    /// Every workspace's arrangement, as integers. See `Workspace::shape`.
+    fn shape(&self) -> Vec<Vec<usize>> {
+        self.workspaces.iter().map(Workspace::shape).collect()
+    }
+
+    fn dispatch(&mut self, command: Command) -> Vec<Event> {
         match command {
             Command::Poll => self.poll(),
 
@@ -708,6 +736,14 @@ impl Session {
                 .iter()
                 .map(|path| path.display().to_string())
                 .collect(),
+            layouts: self
+                .workspaces
+                .iter()
+                .map(|w| StoredLayout {
+                    root: w.root().display().to_string(),
+                    layout: w.layout(),
+                })
+                .collect(),
         };
         let Ok(json) = serde_json::to_string_pretty(&state) else {
             return;
@@ -728,6 +764,15 @@ impl Session {
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Stored {
     version: u32,
+    /// What each open workspace had on screen, by root.
+    ///
+    /// Added without bumping `version`, and keyed by root rather than
+    /// positional, so a session file from before this existed still restores
+    /// its projects — it simply has no layouts, and every workspace opens the
+    /// way it used to. Unknown fields are ignored on the way in, so an older
+    /// build reading a newer file loses the layouts and nothing else.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    layouts: Vec<StoredLayout>,
     open: Vec<String>,
     active: usize,
     recents: Vec<String>,
@@ -743,4 +788,12 @@ fn read_state(file: &Path) -> Option<Stored> {
     let stored: Stored = serde_json::from_str(&text).ok()?;
     // A file from a future version is ignored rather than guessed at.
     (stored.version == VERSION).then_some(stored)
+}
+
+/// One workspace's layout, tied to the folder it belongs to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredLayout {
+    root: String,
+    #[serde(flatten)]
+    layout: crate::workspace::Layout,
 }

@@ -141,6 +141,16 @@ function setDock(panel) {
     p.style.display = on ? "flex" : "none";
   });
   requestAnimationFrame(drawPointerEdges);
+
+  // A terminal panel with no terminal in it is a panel that does nothing until
+  // you find the button. Showing it is the request.
+  if (panel === "term") {
+    dispatch({ type: "openTerminal" });
+    requestAnimationFrame(() => {
+      reportTerminalSize();
+      focusTerminal(true);
+    });
+  }
 }
 
 $$("#codex-dock .dock-tab").forEach((t) =>
@@ -1068,6 +1078,12 @@ function renderTree(rows) {
 /** Whether the terminal has the keyboard. */
 let terminalFocused = false;
 
+/** Give the terminal the keyboard, or take it back. */
+function focusTerminal(on) {
+  terminalFocused = on;
+  $("[data-term-screen]")?.classList.toggle("on", on);
+}
+
 function runHtml(run, row, column, cursor) {
   const classes = [];
   if (run.fg != null) classes.push(`tf${run.fg}`);
@@ -1085,9 +1101,13 @@ function runHtml(run, row, column, cursor) {
 function renderTerminal(event) {
   const state = $("[data-term-state]");
   if (state) {
-    state.textContent = event.running ? "running" : event.rows.length ? "exited" : "closed";
+    state.textContent = event.running ? "ready" : event.rows.length ? "exited" : "starting";
     state.className = "chip" + (event.running ? " accent" : "");
   }
+  // A shell you exited out of is the one case where there is something to
+  // press. While one is running there is nothing to do, so nothing is shown.
+  const restart = $("[data-term-restart]");
+  if (restart) restart.hidden = event.running || !event.rows.length;
 
   const back = $("[data-term-back]");
   if (back) {
@@ -1156,16 +1176,44 @@ function terminalRows() {
   return $("[data-term-screen]")?.querySelectorAll(".trow").length || 24;
 }
 
+/** The size of one character cell, measured rather than assumed.
+ *
+ * A row cannot be measured for this. `.trow` is a block, so its width is the
+ * container's whatever is written in it — dividing that by the row's character
+ * count gave a cell width that depended on how long the first line happened to
+ * be. A one-character prompt made the terminal twenty columns wide in a panel
+ * that fits fifty.
+ *
+ * So: a hidden span of known length, in the terminal's own font, divided by
+ * that length. `pre` because a run of spaces would otherwise collapse and the
+ * answer would be too small.
+ */
+function cellSize(screen) {
+  const probe = document.createElement("span");
+  probe.className = "term";
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;padding:0";
+  probe.textContent = "0".repeat(100);
+  screen.appendChild(probe);
+  const box = probe.getBoundingClientRect();
+  probe.remove();
+  return { width: box.width / 100 || 7, height: box.height || 17 };
+}
+
 /** How many cells fit, so the shell can be told. */
 function reportTerminalSize() {
   const screen = $("[data-term-screen]");
   if (!screen || !screen.offsetParent) return;
-  const probe = screen.querySelector(".trow");
-  const lineHeight = probe?.getBoundingClientRect().height || 17;
-  // Measured from a real row rather than assumed: the font is the theme's.
-  const charWidth = probe ? probe.getBoundingClientRect().width / Math.max(1, probe.textContent.length) : 7;
-  const rows = Math.max(1, Math.floor(screen.clientHeight / lineHeight));
-  const cols = Math.max(20, Math.floor(screen.clientWidth / Math.max(4, charWidth)));
+  const cell = cellSize(screen);
+  // Padding is inside `clientWidth`/`clientHeight`, so it has to come off or
+  // the answer is one row and a couple of columns too many — and the bottom
+  // row of the shell is drawn where it cannot be seen.
+  const style = getComputedStyle(screen);
+  const inner = (a, b) => parseFloat(style[a]) + parseFloat(style[b]) || 0;
+  const height = screen.clientHeight - inner("paddingTop", "paddingBottom");
+  const width = screen.clientWidth - inner("paddingLeft", "paddingRight");
+
+  const rows = Math.max(1, Math.floor(height / cell.height));
+  const cols = Math.max(20, Math.floor(width / cell.width));
   dispatch({ type: "terminalSize", rows, cols });
 }
 
@@ -1195,16 +1243,22 @@ document.addEventListener("click", (e) => {
     return;
   }
 
-  const button = e.target.closest("[data-term]");
-  if (button) {
-    dispatch({ type: button.dataset.term === "open" ? "openTerminal" : "closeTerminal" });
+  // A fresh shell, for when the last one was exited out of.
+  if (e.target.closest("[data-term-restart]")) {
+    dispatch({ type: "openTerminal" });
+    focusTerminal(true);
     return;
   }
   // Clicking the screen gives it the keyboard; clicking anywhere else takes
   // it back, or every keystroke in the editor would go to the shell.
-  terminalFocused = Boolean(e.target.closest("[data-term-screen]"));
-  $("[data-term-screen]")?.classList.toggle("on", terminalFocused);
+  focusTerminal(Boolean(e.target.closest("[data-term-screen]")));
 });
+
+// The shell is told the panel's size, and the panel changes size for reasons
+// that have nothing to do with the shell: the window, the dock, a split. An
+// observer is the only thing that hears all of them.
+const termScreen = $("[data-term-screen]");
+if (termScreen) new ResizeObserver(reportTerminalSize).observe(termScreen);
 
 /* ── the debugger ─────────────────────────────────────────────────────
    The core owns where it is, what the stack looks like and what is in

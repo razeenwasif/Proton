@@ -186,6 +186,31 @@ impl Splits {
         self.focused = 0;
     }
 
+    /// Put a stored layout back.
+    ///
+    /// Everything is clamped rather than trusted. The file it came from was
+    /// written by a previous run and describes a world that has since changed:
+    /// a buffer it names may not have opened, and a pane count from a build
+    /// with a different limit would otherwise leave a view pointing at
+    /// nothing. A layout that cannot be honoured exactly is worth honouring
+    /// approximately — the alternative is opening to one empty pane.
+    pub fn restore(&mut self, views: Vec<View>, focused: usize, vertical: bool, buffers: usize) {
+        let kept: Vec<View> = views
+            .into_iter()
+            .take(LIMIT)
+            .map(|mut view| {
+                view.buffer = view.buffer.min(buffers.saturating_sub(1));
+                view
+            })
+            .collect();
+        if kept.is_empty() {
+            return;
+        }
+        self.focused = focused.min(kept.len() - 1);
+        self.views = kept;
+        self.vertical = vertical;
+    }
+
     /// Focus one outright. `false` if there is no such split.
     pub fn focus(&mut self, index: usize) -> bool {
         if index >= self.views.len() {

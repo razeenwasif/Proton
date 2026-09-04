@@ -231,6 +231,25 @@ The panel takes the whole keyboard while it has the focus, exactly as the
 picker does and for the same reason — `d` types a `d` at the shell rather than
 starting an operator, and `⌃c` interrupts a program rather than doing nothing.
 
+**Opening the panel is the request.** There is no button to start a shell:
+showing a terminal panel means wanting a terminal, and a panel that sits empty
+until you find the play button is one that does nothing for the length of time
+it takes to notice. Asking for a terminal when the last one has exited gets a
+new one rather than its corpse a second time. The only control is a restart,
+and it appears only once a shell has gone.
+
+**Cell size is measured, not inferred from a row.** A `.trow` is a block, so
+its width is the container's whatever is written in it — dividing that by the
+row's character count made the terminal's width depend on how long the first
+line happened to be. A one-character prompt reported twenty columns in a panel
+that fits fifty, which is what "the terminal is cut off" turns out to mean.
+The measurement is a hidden span of known length in the terminal's own font,
+and the padding comes off both axes: it is inside `clientHeight`, so leaving it
+in claims a row that is drawn where it cannot be seen. Sideways scrolling is
+off, because the shell already wraps at the width it was given — a horizontal
+scrollbar could only mean the measurement was wrong, and it would steal the
+height of a row on its way in.
+
 **Scrolling back is not a second screen.** `vt100` keeps two thousand rows of
 history, and once an offset is set its `cell` answers from that history — so
 the rows the panel draws while scrolled back come from the code that draws the
@@ -662,6 +681,35 @@ already the design system. Three notes for the build:
   starting line: offsetting the request would leave the page and the core
   disagreeing by the overscan, and the correction would scroll the user back a
   little on every frame they scrolled.
+
+- **The session remembers the layout, not just the projects.** Which files were
+  open, which pane each was in, how the panes were arranged, and where the
+  cursor was. Stored per workspace and keyed by root, because the restored
+  project list has already dropped whatever has gone and the indices no longer
+  line up with what was written.
+
+  Added *without* bumping the session version, and that is the point: the
+  version check discards a file it does not recognise, so bumping it would have
+  thrown away the project list — the part that already worked — to gain the
+  part that did not. A session file from before layouts existed still opens its
+  projects and simply has no layouts.
+
+  Everything is clamped on the way back in, because a session describes a world
+  that has moved on. Files get deleted, renamed, or live on a drive that is not
+  plugged in; a cursor offset saved last week can point past the end of a file
+  somebody has since edited, and a cursor outside its buffer panics three
+  operations later. Every file that still opens is opened, the rest are passed
+  over, and the panes are rebuilt around what survived.
+
+  Saving is triggered by a **fingerprint** rather than a list of commands:
+  a handful of integers — buffer count, focused pane, orientation, and which
+  buffer each pane shows — compared before and after every command. Building a
+  `Layout` allocates a path per buffer, which is not something to do after each
+  keystroke to find out whether anything moved. The fingerprint is deliberately
+  blind to the cursor, so a cursor move does not cost a file write; the cursor
+  rides along with the next structural change. A command added next year that
+  opens a file in a pane is covered by this and would not have been covered by
+  an enumeration.
 
 - **The window remembers where it was**, and this is the one piece of state
   that deliberately does *not* go through the command bus. `proton-core` names
