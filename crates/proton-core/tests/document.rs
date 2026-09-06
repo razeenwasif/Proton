@@ -4,7 +4,7 @@
 //! undo history, a cursor and a `:w`, and offering any of those for a file
 //! that cannot be edited would be a promise the editor cannot keep.
 
-use proton_core::bus::{DocumentKind, Event};
+use proton_core::bus::{Event, ViewerKind};
 use proton_core::{Command, Workspace};
 
 fn project(name: &str) -> std::path::PathBuf {
@@ -36,7 +36,7 @@ fn a_pdf_is_a_document_rather_than_a_buffer() {
         _ => None,
     });
     let (name, kind, path) = found.expect("a pdf should open as a document");
-    assert_eq!(kind, DocumentKind::Pdf);
+    assert_eq!(kind, ViewerKind::Pdf);
     assert_eq!(name, "paper.pdf");
     assert!(path.ends_with("paper.pdf"), "{path}");
     assert!(
@@ -54,12 +54,12 @@ fn a_pdf_is_a_document_rather_than_a_buffer() {
 #[test]
 fn the_extension_is_matched_whatever_its_case() {
     assert_eq!(
-        DocumentKind::of(std::path::Path::new("a.PDF")),
-        Some(DocumentKind::Pdf)
+        ViewerKind::of(std::path::Path::new("a.PDF")),
+        Some(ViewerKind::Pdf)
     );
     assert_eq!(
-        DocumentKind::of(std::path::Path::new("a.Pdf")),
-        Some(DocumentKind::Pdf)
+        ViewerKind::of(std::path::Path::new("a.Pdf")),
+        Some(ViewerKind::Pdf)
     );
 }
 
@@ -69,7 +69,7 @@ fn everything_else_still_opens_as_text() {
     // format belongs there only once something can draw it.
     for name in ["a.rs", "a.txt", "a.png", "a.zip", "noextension"] {
         assert_eq!(
-            DocumentKind::of(std::path::Path::new(name)),
+            ViewerKind::of(std::path::Path::new(name)),
             None,
             "{name} should not be treated as a document"
         );

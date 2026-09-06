@@ -8,10 +8,10 @@ import type { DebugFrame } from "./DebugFrame";
 import type { DebugPhase } from "./DebugPhase";
 import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
-import type { DocumentKind } from "./DocumentKind";
 import type { Entry } from "./Entry";
 import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
+import type { Layout } from "./Layout";
 import type { ModeId } from "./ModeId";
 import type { NoticeLevel } from "./NoticeLevel";
 import type { PickerItem } from "./PickerItem";
@@ -29,6 +29,7 @@ import type { TermRun } from "./TermRun";
 import type { ThemeView } from "./ThemeView";
 import type { TraceState } from "./TraceState";
 import type { TreeRow } from "./TreeRow";
+import type { ViewerKind } from "./ViewerKind";
 import type { VimMode } from "./VimMode";
 import type { WorkspaceTab } from "./WorkspaceTab";
 
@@ -117,7 +118,7 @@ path: string,
 /**
  * What to put on the tab.
  */
-name: string, kind: DocumentKind, } | { "type": "repo", 
+name: string, kind: ViewerKind, } | { "type": "layout", layout: Layout, } | { "type": "repo", 
 /**
  * `None` outside a repository, on a detached `HEAD`, or before the
  * first commit. All three mean the same thing to the panel.

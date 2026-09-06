@@ -244,6 +244,20 @@ pub enum Command {
     },
     /// Ask what the repository has. Answered with `Event::Repo`.
     RefreshRepo,
+    /// Open a place in another mode: the cross-mode jump.
+    ///
+    /// One command rather than "switch, then open, then move", because those
+    /// three separately are three redraws and two chances to end up somewhere
+    /// nobody asked for — in the new mode, at the old file.
+    #[serde(rename_all = "camelCase")]
+    JumpTo {
+        mode: ModeId,
+        path: String,
+        /// Zero-based, as every line number crossing this bus is.
+        line: usize,
+        #[serde(default)]
+        column: usize,
+    },
     /// Open a terminal in the project, or focus the one there is.
     OpenTerminal,
     /// Type at it. The front end sends what the keyboard produced; the shell
@@ -546,7 +560,15 @@ pub enum Event {
         path: String,
         /// What to put on the tab.
         name: String,
-        kind: DocumentKind,
+        kind: ViewerKind,
+    },
+    /// The active mode's four slots, verb table and document type.
+    ///
+    /// Sent when the mode changes and on connect, because it is what tells the
+    /// front end which panels belong on screen at all — a mode switch that
+    /// only changed a highlighted rail button would be a theme, not a mode.
+    Layout {
+        layout: crate::contract::Layout,
     },
     /// What the repository has, for the git panel.
     ///
@@ -699,15 +721,15 @@ pub struct DebugVariable {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
-pub enum DocumentKind {
+pub enum ViewerKind {
     Pdf,
 }
 
-impl DocumentKind {
+impl ViewerKind {
     /// What this path is, if it is one of these at all.
-    pub fn of(path: &std::path::Path) -> Option<DocumentKind> {
+    pub fn of(path: &std::path::Path) -> Option<ViewerKind> {
         match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
-            "pdf" => Some(DocumentKind::Pdf),
+            "pdf" => Some(ViewerKind::Pdf),
             _ => None,
         }
     }

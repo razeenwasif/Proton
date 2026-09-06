@@ -14,4 +14,8 @@ view: number, firstLine: number, lines: number, } | { "type": "split", vertical:
 /**
  * The line the cursor is on when absent.
  */
-line: number | null, } | { "type": "refreshRepo" } | { "type": "openTerminal" } | { "type": "terminalInput", text: string, } | { "type": "terminalSize", rows: number, cols: number, } | { "type": "terminalScroll", lines: number, } | { "type": "terminalToBottom" } | { "type": "closeTerminal" } | { "type": "debugStart" } | { "type": "debugStop" } | { "type": "debugResume" } | { "type": "debugStepOver" } | { "type": "debugStepInto" } | { "type": "debugStepOut" } | { "type": "sync" };
+line: number | null, } | { "type": "refreshRepo" } | { "type": "jumpTo", mode: ModeId, path: string, 
+/**
+ * Zero-based, as every line number crossing this bus is.
+ */
+line: number, column: number, } | { "type": "openTerminal" } | { "type": "terminalInput", text: string, } | { "type": "terminalSize", rows: number, cols: number, } | { "type": "terminalScroll", lines: number, } | { "type": "terminalToBottom" } | { "type": "closeTerminal" } | { "type": "debugStart" } | { "type": "debugStop" } | { "type": "debugResume" } | { "type": "debugStepOver" } | { "type": "debugStepInto" } | { "type": "debugStepOut" } | { "type": "sync" };

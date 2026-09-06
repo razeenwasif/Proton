@@ -1,13 +1,13 @@
 //! Workspace modes.
 //!
-//! A mode is the unit of "which application am I in". M0 carries only the
-//! identity and the verb-support question; the four view slots arrive with the
-//! mode-plugin work in M6.
+//! A mode is the unit of "which application am I in". This is its identity;
+//! its four slots, verb table and document type live in `contract`, which is
+//! where the answers to `supports` and `layout` actually come from.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::action::{Action, Verb};
+use crate::action::Action;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
@@ -62,10 +62,14 @@ impl ModeId {
     /// it, because silently doing nothing is the failure users cannot debug.
     /// Chat is the deliberate outlier: its noun is prose, so the editing verbs
     /// belong to the composer rather than to the mode.
+    /// Asked of the mode's own contract rather than answered here, so there is
+    /// one verb table and not two that can drift apart.
     pub fn supports(self, action: &Action) -> bool {
-        match self {
-            ModeId::Chat => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
-            _ => true,
-        }
+        crate::contract::Layout::of(self).supports(action)
+    }
+
+    /// The four slots, the verb table and the document — see `contract`.
+    pub fn layout(self) -> crate::contract::Layout {
+        crate::contract::Layout::of(self)
     }
 }

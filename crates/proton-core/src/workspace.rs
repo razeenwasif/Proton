@@ -13,8 +13,8 @@ use proton_lsp::client::Incoming;
 use crate::action::{Action, Object, Verb};
 use crate::agent::Agent;
 use crate::bus::{
-    BufferTab, Command, DebugFrame, DebugPhase, DebugVariable, DocumentKind, Event, Hit,
-    NoticeLevel, Selection, ServerState, SplitView, Stop, TermRun,
+    BufferTab, Command, DebugFrame, DebugPhase, DebugVariable, Event, Hit, NoticeLevel, Selection,
+    ServerState, SplitView, Stop, TermRun, ViewerKind,
 };
 use crate::debug::{self, Debugger};
 use crate::editor::Editor;
@@ -352,6 +352,9 @@ impl Workspace {
                     self.trace_event(),
                     self.tree_event(),
                     self.repo_event(),
+                    Event::Layout {
+                        layout: self.mode.layout(),
+                    },
                 ]);
                 events
             }
@@ -388,6 +391,21 @@ impl Workspace {
             }
 
             Command::RefreshRepo => vec![self.repo_event()],
+
+            // The cross-mode jump. One command, because switching, opening
+            // and moving as three would be three redraws and two chances to
+            // land in the new mode looking at the old file.
+            Command::JumpTo {
+                mode,
+                path,
+                line,
+                column,
+            } => {
+                let mut events = self.set_mode(mode);
+                events.extend(self.open_path(&path));
+                events.extend(self.apply(Command::PlaceCursor { line, column }));
+                events
+            }
 
             Command::OpenTerminal => {
                 // A shell that has exited is as good as no shell: asking for a
@@ -1499,7 +1517,7 @@ impl Workspace {
         //
         // Until this, opening one failed — `read_to_string` refuses invalid
         // UTF-8 — so the whole of the old behaviour was an error notice.
-        if let Some(kind) = DocumentKind::of(&resolved) {
+        if let Some(kind) = ViewerKind::of(&resolved) {
             return vec![Event::Document {
                 path: resolved.display().to_string(),
                 name: crate::folder::name_of(&resolved),
@@ -3070,7 +3088,15 @@ impl Workspace {
             return Vec::new();
         }
         self.mode = mode;
-        vec![Event::ModeChanged { mode }]
+        // The layout goes with it. A mode change that only moved a highlight
+        // on the rail would be a theme rather than a mode, and the panels
+        // would still be the last mode's.
+        vec![
+            Event::ModeChanged { mode },
+            Event::Layout {
+                layout: mode.layout(),
+            },
+        ]
     }
 
     /// Run an action against the active mode, reporting whether text changed.
