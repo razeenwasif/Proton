@@ -419,6 +419,32 @@ impl Workspace {
                 }
             }
 
+            Command::SelectCell { index } => {
+                self.data.select_cell(index);
+                vec![self.notebook_event()]
+            }
+
+            Command::RunAll => {
+                let cwd = self.pickers.root().to_path_buf();
+                match crate::data::python(&cwd) {
+                    Some(python) => match self.data.run_all(&python, &cwd) {
+                        Ok(0) => vec![notice(
+                            "nothing to run: no code cells".into(),
+                            NoticeLevel::Info,
+                        )],
+                        Ok(n) => vec![
+                            notice(format!("running {n} cells"), NoticeLevel::Info),
+                            self.notebook_event(),
+                        ],
+                        Err(why) => vec![notice(why, NoticeLevel::Error)],
+                    },
+                    None => vec![notice(
+                        "no python to run a notebook with — set PROTON_PYTHON".into(),
+                        NoticeLevel::Error,
+                    )],
+                }
+            }
+
             Command::SetCell { index, source } => {
                 self.data.set_source(index, &source);
                 vec![self.notebook_event()]

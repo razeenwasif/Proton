@@ -239,3 +239,64 @@ fn none_of_this_touches_the_text_editor() {
     keys(&mut space, "p");
     assert_eq!(space.editor().buffer().text().to_string(), before);
 }
+
+#[test]
+fn the_keystroke_itself_carries_the_new_selection() {
+    // The panel redraws from what a keystroke returned. If the selection only
+    // shows up on the *next* Sync, `j` moves the cursor and nothing on screen
+    // says so — which is exactly what it looked like in the app.
+    let mut space = open("live");
+    let events = keys(&mut space, "j");
+    let cells = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Notebook { cells, .. } => Some(cells.clone()),
+            _ => None,
+        })
+        .expect("pressing j should send the notebook back");
+    assert_eq!(
+        selected(&cells),
+        1,
+        "the returned cells should say where it is"
+    );
+}
+
+#[test]
+fn clicking_a_cell_moves_the_selection() {
+    // Without this the caret and the selection disagree, and `dd` deletes a
+    // cell you are not looking at.
+    let mut space = open("click");
+    space.apply(Command::SelectCell { index: 2 });
+    assert_eq!(selected(&cells(&mut space)), 2);
+
+    // And `j` carries on from where the click left it, rather than from
+    // wherever the keyboard last was.
+    keys(&mut space, "k");
+    assert_eq!(selected(&cells(&mut space)), 1);
+}
+
+#[test]
+fn selecting_a_cell_that_is_not_there_lands_somewhere_real() {
+    let mut space = open("click-far");
+    space.apply(Command::SelectCell { index: 99 });
+    let after = cells(&mut space);
+    assert_eq!(
+        selected(&after),
+        after.len() - 1,
+        "clamped to the last cell"
+    );
+}
+
+#[test]
+fn run_all_with_no_kernel_says_so_rather_than_doing_nothing_quietly() {
+    // Whatever happens, it must not be silence: a Run all that appears to do
+    // nothing is the failure people retry three times before asking.
+    std::env::set_var("PROTON_PYTHON", "/no/such/python");
+    let mut space = open("runall");
+    let events = space.apply(Command::RunAll);
+    std::env::remove_var("PROTON_PYTHON");
+    assert!(
+        events.iter().any(|e| matches!(e, Event::Notice { .. })),
+        "{events:?}"
+    );
+}

@@ -272,6 +272,13 @@ pub enum Command {
     RemoveCell {
         index: usize,
     },
+    /// Put the cursor on a cell — a click. `j`/`k` move it by a delta; a
+    /// mouse knows exactly which cell it means.
+    SelectCell {
+        index: usize,
+    },
+    /// Run every code cell, top to bottom.
+    RunAll,
     /// Write the notebook back.
     SaveNotebook,
     /// Open a place in another mode: the cross-mode jump.

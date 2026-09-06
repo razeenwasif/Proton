@@ -312,6 +312,44 @@ impl Data {
         }
     }
 
+    /// Put the cursor on a cell outright — a click.
+    ///
+    /// `j` and `k` move by a delta; a mouse knows exactly which cell it means,
+    /// and a click that moved the caret but not the selection would leave the
+    /// two disagreeing about what `dd` is about to delete.
+    pub fn select_cell(&mut self, index: usize) -> bool {
+        self.select(index)
+    }
+
+    /// Every code cell, in order.
+    ///
+    /// Sent in one go rather than waited on: the kernel runs them in the order
+    /// it received them — the queue is the kernel's, not this one's — and
+    /// waiting for each would mean blocking a core that has no clock.
+    pub fn run_all(&mut self, python: &Path, cwd: &Path) -> Result<usize, String> {
+        let Some(notebook) = &self.notebook else {
+            return Err("no notebook is open".into());
+        };
+        let code: Vec<usize> = notebook
+            .cells()
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| cell.kind == CellKind::Code)
+            .map(|(index, _)| index)
+            .collect();
+        if code.is_empty() {
+            return Ok(0);
+        }
+        self.start(python, cwd)?;
+        let mut sent = 0;
+        for index in code {
+            if self.run(index, python, cwd).is_ok() {
+                sent += 1;
+            }
+        }
+        Ok(sent)
+    }
+
     /// Move the cursor. Answers whether it went anywhere.
     fn select(&mut self, to: usize) -> bool {
         let to = to.min(self.len().saturating_sub(1));

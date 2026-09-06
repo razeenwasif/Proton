@@ -75,6 +75,7 @@ if (HAS_SHELL) {
         outputs: [],
         executionCount: null,
         running: false,
+        selected: false,
       },
       {
         kind: "code",
@@ -97,6 +98,7 @@ if (HAS_SHELL) {
         ],
         executionCount: 1,
         running: false,
+        selected: true,
       },
       {
         kind: "code",
@@ -107,6 +109,7 @@ if (HAS_SHELL) {
         ],
         executionCount: 2,
         running: false,
+        selected: false,
       },
       {
         kind: "code",
@@ -125,6 +128,7 @@ if (HAS_SHELL) {
         ],
         executionCount: 3,
         running: false,
+        selected: false,
       },
     ],
     problem: "",
@@ -311,6 +315,23 @@ if (HAS_SHELL) {
           deliver(notebookEvent());
         }, 900);
       }
+      return [notebookEvent()];
+    }
+    if (command.type === "selectCell") {
+      notebook.cells.forEach((cell, i) => (cell.selected = i === command.index));
+      return [notebookEvent()];
+    }
+    if (command.type === "runAll") {
+      notebook.cells
+        .filter((cell) => cell.kind === "code")
+        .forEach((cell) => {
+          cell.running = true;
+          setTimeout(() => {
+            cell.running = false;
+            cell.executionCount = (cell.executionCount ?? 0) + 1;
+            deliver(notebookEvent());
+          }, 700 + Math.random() * 600);
+        });
       return [notebookEvent()];
     }
     if (command.type === "setCell") {

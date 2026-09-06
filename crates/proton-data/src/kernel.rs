@@ -99,12 +99,15 @@ impl Kernel {
         // which anything else could take one is as small as it can be made.
         reserved.release();
 
-        let child = Command::new(&argv[0])
+        let mut command = Command::new(&argv[0]);
+        command
             .args(&args)
             .current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        no_window(&mut command);
+        let child = command
             .spawn()
             .map_err(|err| format!("could not start {}: {err}", argv[0]))?;
 
@@ -376,3 +379,20 @@ fn id() -> String {
     let bytes: [u8; 16] = rng.random();
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+/// Start the kernel without a console window.
+///
+/// Windows gives a new console to any process spawned from a GUI application,
+/// and a Python interpreter is exactly that. Without this, running a cell
+/// flashes a black window on screen — which looks like a crash and is the
+/// first thing anybody reports.
+#[cfg(windows)]
+fn no_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    /// `CREATE_NO_WINDOW`, from the Win32 process-creation flags.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn no_window(_command: &mut Command) {}

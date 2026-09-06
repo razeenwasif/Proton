@@ -1132,6 +1132,14 @@ let terminalFocused = false;
 /** The cells drawn last time, so only the ones that moved are redrawn. */
 let notebookPainted = [];
 
+/** Which markdown cell is showing its source, if any.
+ *
+ * View state rather than the core's: whether you are looking at prose or at
+ * the `#` that made it is a question about this window, and a second window
+ * on the same notebook should be free to disagree.
+ */
+let markdownEditing = -1;
+
 /** One output. Everything here is text or a table; no kernel markup. */
 function outputHtml(out) {
   switch (out.type) {
@@ -1203,6 +1211,60 @@ function tableHtml(table) {
   return `<div class="out" style="padding:0"><table class="df"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${more}</div>`;
 }
 
+/** Markdown, for a cell that holds prose rather than code.
+ *
+ * A small subset on purpose — headings, emphasis, code, links, lists, rules —
+ * because a notebook is a file somebody downloaded and a full renderer is a
+ * large surface to point at one. **Everything is escaped first and markup is
+ * applied to the escaped text**, so nothing in the document can become a tag:
+ * the same rule the dataframe table follows.
+ *
+ * A link's text is kept but its target is dropped. A notebook cell offering a
+ * clickable URL into the editor's own window is not something this needs to
+ * support to be useful.
+ */
+function markdownHtml(source) {
+  const inline = (text) =>
+    escapeHtml(text)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|\W)\*([^*]+)\*/g, "$1<em>$2</em>")
+      .replace(/(^|\W)_([^_]+)_/g, "$1<em>$2</em>")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "<u>$1</u>");
+
+  const out = [];
+  let list = false;
+  const closeList = () => {
+    if (list) out.push("</ul>");
+    list = false;
+  };
+
+  for (const line of source.split("\n")) {
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    const item = /^\s*[-*+]\s+(.*)$/.exec(line);
+
+    if (heading) {
+      closeList();
+      const level = Math.min(heading[1].length, 6);
+      out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+    } else if (item) {
+      if (!list) out.push("<ul>");
+      list = true;
+      out.push(`<li>${inline(item[1])}</li>`);
+    } else if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) {
+      closeList();
+      out.push("<hr>");
+    } else if (line.trim() === "") {
+      closeList();
+    } else {
+      closeList();
+      out.push(`<p>${inline(line)}</p>`);
+    }
+  }
+  closeList();
+  return out.join("");
+}
+
 function cellHtml(cell, index) {
   const number = cell.running
     ? `<span class="spin"></span>`
@@ -1218,13 +1280,28 @@ function cellHtml(cell, index) {
     `<header>${number} ${escapeHtml(cell.kind)}<span class="grow"></span>${run}` +
     `<button class="hbtn" data-drop-cell="${index}" title="Remove this cell"><svg class="i"><use href="#i-close"/></svg></button>` +
     `</header>` +
-    // Editable in place: the notebook is the document, and a cell you cannot
-    // type in is a viewer rather than a mode.
-    `<pre class="cell-src" contenteditable="plaintext-only" spellcheck="false" data-src="${index}">${escapeHtml(cell.source)}</pre>` +
+    // Prose is rendered; code is typed in. A markdown cell showing its own
+    // `#` and `**` is a notebook pretending to be a text file — but it still
+    // has to be editable, so double-clicking it puts the source back.
+    (cell.kind === "markdown" && index !== markdownEditing
+      ? `<div class="cell-md" data-md="${index}" title="Double-click to edit">${markdownHtml(cell.source)}</div>`
+      : `<pre class="cell-src" contenteditable="plaintext-only" spellcheck="false" data-src="${index}">${escapeHtml(cell.source)}</pre>`) +
     (outputs ? `<div class="out-wrap">${outputs}</div>` : "") +
     `</div>`
   );
 }
+
+// Double-click rendered prose to get its source back. Single-click selects,
+// which is what a click on any other cell does, so editing needs the stronger
+// gesture — the same bargain every notebook makes.
+document.addEventListener("dblclick", (e) => {
+  const md = e.target.closest?.("[data-md]");
+  if (!md) return;
+  markdownEditing = Number(md.dataset.md);
+  // The cache describes markup that is about to be replaced.
+  notebookPainted = [];
+  dispatch({ type: "selectCell", index: markdownEditing });
+});
 
 // A cell's source goes back to the core when you leave it, not on every
 // keystroke: the core answers an edit by re-sending the notebook, and
@@ -1289,7 +1366,15 @@ function renderNotebook(event) {
 
   const kids = box.children;
   for (let i = 0; i < rows.length; i++) {
-    if (i === editing) continue;
+    if (i === editing && kids[i]) {
+      // The cell holding the caret is never replaced — that would take the
+      // caret with it. But it must still be able to gain and lose the
+      // selection, or moving off a focused cell leaves it looking selected
+      // and moving onto one never marks it. Class only; the text is yours.
+      kids[i].classList.toggle("on", event.cells[i].selected);
+      kids[i].classList.toggle("running", event.cells[i].running);
+      continue;
+    }
     if (notebookPainted[i] === rows[i] && kids[i]) continue;
     const holder = document.createElement("div");
     holder.innerHTML = rows[i];
@@ -1567,6 +1652,23 @@ document.addEventListener("click", (e) => {
   }
   if (e.target.closest("[data-nb-save]")) {
     dispatch({ type: "saveNotebook" });
+    return;
+  }
+  if (e.target.closest("[data-nb-runall]")) {
+    dispatch({ type: "runAll" });
+    return;
+  }
+  // Clicking a cell puts the cursor on it. Without this the caret and the
+  // selection disagree, and `dd` deletes a cell you are not looking at.
+  const inCell = e.target.closest("[data-cell]");
+  if (inCell) {
+    const index = Number(inCell.dataset.cell);
+    // Leaving a rendered markdown cell puts its prose back.
+    if (markdownEditing >= 0 && markdownEditing !== index) {
+      markdownEditing = -1;
+      notebookPainted = [];
+    }
+    dispatch({ type: "selectCell", index });
     return;
   }
   // A value in a dataframe is usually a thing that exists in the code too.
@@ -2377,6 +2479,22 @@ document.addEventListener("keydown", (e) => {
     sendKey(e);
     return;
   }
+
+  // Somewhere you can actually type keeps its own keys.
+  //
+  // Everything below assumes the keyboard belongs to the modal engine, and
+  // presses `preventDefault` on anything that would otherwise reach the page.
+  // That is right for the editor, whose text is drawn rather than edited in
+  // place — and wrong for a notebook cell, which is a real editable element:
+  // it made every character vanish, and made ⇧⏎ unreachable because the cell
+  // never held the caret long enough to be typed in.
+  //
+  // The picker is checked above and returns before this, so a picker that
+  // owns the keyboard still does.
+  const typing = e.target?.closest?.(
+    "input, textarea, select, [contenteditable]:not([contenteditable=false])",
+  );
+  if (typing) return;
 
   // The popup does not own the keyboard — you are still in insert mode — but
   // the few keys it does claim must not also do what the browser thinks they

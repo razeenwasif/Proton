@@ -1649,3 +1649,20 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
    does — it just moves a cell at a time, and without a mark for it `dd` is a
    keystroke you have to guess the target of. */
 .cell.on { box-shadow: inset 2px 0 0 var(--accent), var(--spec); }
+
+/* Prose in a markdown cell, rendered rather than shown as its own `#` and
+   `**`. Double-click puts the source back. */
+.cell-md { padding: 10px 14px; color: var(--ink-2); font-size: 12.5px; line-height: 1.6; cursor: text; }
+.cell-md h1, .cell-md h2, .cell-md h3,
+.cell-md h4, .cell-md h5, .cell-md h6 { margin: 4px 0 8px; color: var(--ink); line-height: 1.3; }
+.cell-md h1 { font-size: 18px; }
+.cell-md h2 { font-size: 15.5px; }
+.cell-md h3, .cell-md h4, .cell-md h5, .cell-md h6 { font-size: 13.5px; }
+.cell-md p { margin: 0 0 7px; }
+.cell-md ul { margin: 0 0 7px; padding-left: 20px; }
+.cell-md li { margin: 2px 0; }
+.cell-md code { font: 11.5px var(--mono); background: var(--e2); padding: 1px 5px; border-radius: 5px; }
+.cell-md strong { color: var(--ink); font-weight: 640; }
+.cell-md hr { border: 0; border-top: 1px solid var(--edge); margin: 10px 0; }
+/* A link's text without its target — see `markdownHtml`. */
+.cell-md u { text-decoration-color: var(--accent); }
