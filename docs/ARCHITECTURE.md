@@ -273,6 +273,36 @@ to the live screen. And the panel says when it is looking at history, because
 a terminal scrolled back looks exactly like one whose shell has stopped
 answering.
 
+### Documents you look at
+
+**A PDF never becomes a buffer.** A buffer has an undo history, a cursor and a
+`:w`; offering any of those for a file that cannot be edited would be a promise
+the editor cannot keep. So `openBuffer` on a `.pdf` answers with
+`Event::Document` instead, and the viewer covers the panes rather than becoming
+one — closing it puts the code back because the code never went anywhere.
+
+Before this, opening one failed outright: `read_to_string` refuses invalid
+UTF-8, so the whole of the old behaviour was an error notice.
+
+`DocumentKind` is a small closed set rather than "anything that is not text".
+A format belongs in it only once something can actually draw it — treating
+every binary as a document would replace one honest error with a viewer that
+has nothing to show.
+
+**The bytes do not go through the event channel.** `Event::Document` carries a
+path; the shell answers a separate `read_document` with `ipc::Response`, which
+hands the webview an ArrayBuffer directly. Base64 through the JSON channel
+would inflate a PDF by a third and make every other event queue behind it, and
+Tauri's asset protocol would mean enabling a second scheme and choosing a path
+scope for it. This grants the page no reach it did not have: it runs only
+first-party code under a CSP that forbids remote scripts, and it could already
+ask the core to open any file and read the text back out of the viewport.
+
+`pdf.js` is vendored, because `script-src 'self'` means nothing loads from a
+CDN at run time — an editor that needs the network to open a file is one that
+stops working on a train. It is imported on first use rather than at boot: it
+is 1.7MB, and a session that never opens a PDF should never pay for it.
+
 ### Git
 
 The gutter has always had git; the *panel* is new, and it lives in the right

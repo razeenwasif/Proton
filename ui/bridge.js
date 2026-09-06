@@ -587,6 +587,19 @@ export async function dispatch(command) {
   for (const event of events ?? []) deliver(event);
 }
 
+/** The bytes of a file the page renders itself — a PDF, so far.
+ *
+ * Raw rather than base64: the shell answers with `ipc::Response`, which hands
+ * the webview an ArrayBuffer, so a large document does not inflate by a third
+ * on the way through and does not queue behind the JSON channel.
+ */
+export async function readDocument(path) {
+  if (!HAS_SHELL) throw new Error("no shell: documents need the app");
+  const body = await tauri.core.invoke("read_document", { path });
+  // Tauri hands back an ArrayBuffer, or a plain array on older transports.
+  return body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(body);
+}
+
 export const sendKey = (e) =>
   dispatch({
     type: "key",

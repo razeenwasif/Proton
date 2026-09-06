@@ -13,8 +13,8 @@ use proton_lsp::client::Incoming;
 use crate::action::{Action, Object, Verb};
 use crate::agent::Agent;
 use crate::bus::{
-    BufferTab, Command, DebugFrame, DebugPhase, DebugVariable, Event, Hit, NoticeLevel, Selection,
-    ServerState, SplitView, Stop, TermRun,
+    BufferTab, Command, DebugFrame, DebugPhase, DebugVariable, DocumentKind, Event, Hit,
+    NoticeLevel, Selection, ServerState, SplitView, Stop, TermRun,
 };
 use crate::debug::{self, Debugger};
 use crate::editor::Editor;
@@ -1490,7 +1490,24 @@ impl Workspace {
     /// binary happened to be launched from, and a path from the picker has to
     /// mean the same thing as one typed into `:e`.
     fn open_path(&mut self, path: &str) -> Vec<Event> {
-        match self.editor.open(self.pickers.resolve(path)) {
+        let resolved = self.pickers.resolve(path);
+
+        // Some files are to be looked at rather than edited, and a PDF is the
+        // first of them. It does not become a buffer: a buffer has an undo
+        // history, a cursor and a `:w`, and offering any of those for a file
+        // that cannot be edited would be a promise the editor cannot keep.
+        //
+        // Until this, opening one failed — `read_to_string` refuses invalid
+        // UTF-8 — so the whole of the old behaviour was an error notice.
+        if let Some(kind) = DocumentKind::of(&resolved) {
+            return vec![Event::Document {
+                path: resolved.display().to_string(),
+                name: crate::folder::name_of(&resolved),
+                kind,
+            }];
+        }
+
+        match self.editor.open(resolved) {
             Ok(_) => {
                 self.resync();
                 self.switched()

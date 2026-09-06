@@ -1578,3 +1578,33 @@ table.df tr:hover td { background: var(--e1); }
   text-align: right;
   color: var(--ink-4); font-size: 11px;
 }
+
+/* ── document viewer ──────────────────────────────────────────────── */
+/* Over the panes rather than inside them. A document has no cursor, no undo
+   and no `:w`, and a pane implies all three — so it covers the code instead
+   of replacing it, and closing puts things back because nothing moved. */
+.workspace > main { position: relative; }
+#doc-viewer {
+  position: absolute; inset: 0; z-index: 4;
+  display: flex; flex-direction: column;
+  background: var(--e0, var(--bg));
+}
+#doc-viewer[hidden] { display: none; }
+#doc-viewer > header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-bottom: 1px solid var(--line);
+  font-size: 12px; color: var(--ink-2);
+}
+#doc-viewer > .scroll {
+  flex: 1; min-height: 0; overflow: auto;
+  padding: 16px; display: flex; flex-direction: column;
+  align-items: center; gap: 16px;
+}
+/* A page is paper: it keeps its own ground whatever the theme is, because a
+   PDF's colours are part of the document rather than part of the editor. */
+.doc-page {
+  background: #fff; border-radius: 2px;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, .45);
+  max-width: 100%; height: auto;
+}
+.doc-note { color: var(--ink-4); font-size: 12px; padding: 30px; text-align: center; }

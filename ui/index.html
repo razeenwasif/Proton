@@ -338,6 +338,24 @@
         <!-- Built from Event::Splits. The core owns how many there are, which
              buffer each shows and which has the focus; this is where they go. -->
         <div class="splits" id="codex-splits"></div>
+
+        <!-- A document is looked at, not edited, so it covers the panes rather
+             than becoming one of them: it has no cursor, no undo and no :w,
+             and a pane implies all three. Closing it puts the code back
+             exactly as it was, because the code never went anywhere. -->
+        <div id="doc-viewer" hidden>
+          <header>
+            <svg class="i" style="opacity:.6"><use href="#i-file-doc"/></svg>
+            <span data-doc-name>document</span>
+            <span class="chip" data-doc-pages></span>
+            <span class="grow"></span>
+            <button class="hbtn" data-doc-zoom="-1" title="Zoom out">−</button>
+            <span class="chip" data-doc-zoom-level>100%</span>
+            <button class="hbtn" data-doc-zoom="1" title="Zoom in">+</button>
+            <button class="hbtn" data-doc-close title="Close — back to the code"><svg class="i"><use href="#i-close"/></svg></button>
+          </header>
+          <div class="scroll" data-doc-pages-box></div>
+        </div>
       </main>
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>

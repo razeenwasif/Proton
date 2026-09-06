@@ -8,6 +8,7 @@ import type { DebugFrame } from "./DebugFrame";
 import type { DebugPhase } from "./DebugPhase";
 import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
+import type { DocumentKind } from "./DocumentKind";
 import type { Entry } from "./Entry";
 import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
@@ -107,7 +108,16 @@ total: number, elapsedMs: number,
  * The tree is still being walked. An empty list under this flag means
  * "not yet", not "no matches" — and those look identical without it.
  */
-scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "hover", text: string, line: number, column: number, } | { "type": "hoverClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "tasks", tasks: Array<Task>, } | { "type": "plugins", items: Array<PluginView>, themes: Array<ThemeView>, } | { "type": "review", files: Array<ChangeView>, } | { "type": "repo", 
+scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "hover", text: string, line: number, column: number, } | { "type": "hoverClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "tasks", tasks: Array<Task>, } | { "type": "plugins", items: Array<PluginView>, themes: Array<ThemeView>, } | { "type": "review", files: Array<ChangeView>, } | { "type": "document", 
+/**
+ * Absolute, because the shell reads it and the shell has no idea what
+ * the workspace root is.
+ */
+path: string, 
+/**
+ * What to put on the tab.
+ */
+name: string, kind: DocumentKind, } | { "type": "repo", 
 /**
  * `None` outside a repository, on a detached `HEAD`, or before the
  * first commit. All three mean the same thing to the panel.

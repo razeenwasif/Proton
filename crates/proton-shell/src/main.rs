@@ -114,6 +114,24 @@ fn working_folder() -> Option<std::path::PathBuf> {
     (!beside_the_exe).then_some(cwd)
 }
 
+/// The bytes of a file the page renders itself.
+///
+/// Raw, through `ipc::Response`, which hands the webview an ArrayBuffer. The
+/// two alternatives are both worse: base64 through the JSON channel inflates a
+/// PDF by a third and makes every other event queue behind it, and Tauri's
+/// asset protocol would mean enabling a second scheme and choosing a path
+/// scope for it.
+///
+/// This grants the page no reach it did not already have. It runs only
+/// first-party code — the CSP forbids remote scripts — and it can already ask
+/// the core to open any file by name and read the text back out of the
+/// viewport events. What is new here is the encoding, not the access.
+#[tauri::command]
+fn read_document(path: String) -> Result<tauri::ipc::Response, String> {
+    let bytes = std::fs::read(&path).map_err(|err| format!("{path}: {err}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Give the core a heartbeat.
 ///
 /// Everything a language server says arrives on a thread the core cannot see,
@@ -169,7 +187,12 @@ fn main() {
             requested_folder(),
             working_folder(),
         )))
-        .invoke_handler(tauri::generate_handler![dispatch, backdrop, set_backdrop])
+        .invoke_handler(tauri::generate_handler![
+            dispatch,
+            backdrop,
+            set_backdrop,
+            read_document
+        ])
         .setup(|app| {
             let Some(window) = app.get_webview_window("main") else {
                 // No window means the config is wrong, not that we should limp

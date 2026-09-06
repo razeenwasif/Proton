@@ -535,6 +535,19 @@ pub enum Event {
     Review {
         files: Vec<ChangeView>,
     },
+    /// Open something to look at rather than to edit.
+    ///
+    /// Carries the path rather than the bytes: a PDF is megabytes, the shell
+    /// can hand the page an ArrayBuffer directly, and putting a file that size
+    /// through the event channel would make every other event wait behind it.
+    Document {
+        /// Absolute, because the shell reads it and the shell has no idea what
+        /// the workspace root is.
+        path: String,
+        /// What to put on the tab.
+        name: String,
+        kind: DocumentKind,
+    },
     /// What the repository has, for the git panel.
     ///
     /// Recomputed rather than kept, the way the gutter and the file tree are:
@@ -675,6 +688,29 @@ pub struct DebugVariable {
     pub value: String,
     /// It has children to expand — a struct, an array.
     pub expandable: bool,
+}
+
+/// A file that is shown rather than edited.
+///
+/// Deliberately a small closed set rather than "anything that is not text".
+/// A format only belongs here once something can actually draw it; treating
+/// every binary as a document would replace one honest error — "this is not
+/// text" — with a viewer that has nothing to show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub enum DocumentKind {
+    Pdf,
+}
+
+impl DocumentKind {
+    /// What this path is, if it is one of these at all.
+    pub fn of(path: &std::path::Path) -> Option<DocumentKind> {
+        match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+            "pdf" => Some(DocumentKind::Pdf),
+            _ => None,
+        }
+    }
 }
 
 /// One changed path, for the git panel.

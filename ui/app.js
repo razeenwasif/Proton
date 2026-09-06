@@ -14,6 +14,7 @@
 
 import { HAS_SHELL, applyBackdrop, dispatch, onEvent, sendKey, setBackdrop,
   setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
+import { closeDocument, documentIsOpen, openDocument, zoomDocument } from "./document.js";
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1348,6 +1349,16 @@ document.addEventListener(
 );
 
 document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-doc-close]")) {
+    closeDocument();
+    return;
+  }
+  const zoom = e.target.closest("[data-doc-zoom]");
+  if (zoom) {
+    zoomDocument(Number(zoom.dataset.docZoom));
+    return;
+  }
+
   // A changed file is a file: clicking one opens it, which is the only thing
   // anybody wants from a list of them.
   const changed = e.target.closest("[data-git-open]");
@@ -1962,6 +1973,10 @@ onEvent((event) => {
       renderRepo(event);
       break;
 
+    case "document":
+      openDocument(event);
+      break;
+
     case "debug":
       renderDebug(event);
       break;
@@ -2050,6 +2065,15 @@ document.addEventListener("keydown", (e) => {
   // The terminal takes the whole keyboard while it has the focus, exactly as
   // the picker does — `d` types a `d` at the shell rather than starting an
   // operator, and `⌃c` interrupts a program rather than doing nothing.
+  // A document is over the code, so Escape closes it rather than reaching the
+  // modal engine underneath — which is what Escape means over anything else
+  // that covers the stage.
+  if (documentIsOpen() && e.key === "Escape") {
+    e.preventDefault();
+    closeDocument();
+    return;
+  }
+
   if (terminalFocused) {
     // Shift+PageUp/PageDown look through the history, which is the pairing
     // every terminal uses — the unshifted keys belong to whatever is running
