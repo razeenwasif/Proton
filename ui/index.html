@@ -941,23 +941,15 @@
     <!-- ══ DATA ══════════════════════════════════════════════════ -->
     <section class="workspace" data-ws="data" style="--col-l:226px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side">
-        <header>Sources</header>
-        <div class="find"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Query anything… <kbd>␣ d q</kbd></div>
-        <div class="scroll tree">
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-data"><use href="#i-db"/></svg> warehouse</div>
-          <div class="row sel indent-1"><span class="ic"><svg class="i"><use href="#i-sprite"/></svg></span>telemetry <span class="chip" style="margin-left:auto">4.2M</span></div>
-          <div class="row indent-1"><span class="ic"><svg class="i"><use href="#i-sprite"/></svg></span>passes</div>
-          <div class="row indent-1"><span class="ic"><svg class="i"><use href="#i-sprite"/></svg></span>ground_stations</div>
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-folder-open"/></svg> files</div>
-          <div class="row indent-1"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>launch_log.csv</div>
-          <div class="row indent-1"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>telemetry.parquet</div>
-          <div class="group">Schema · telemetry</div>
-          <div class="row"><span class="ic">t</span>ts <span class="chip" style="margin-left:auto">timestamp</span></div>
-          <div class="row"><span class="ic">#</span>sat_id <span class="chip" style="margin-left:auto">int32</span></div>
-          <div class="row"><span class="ic">#</span>battery <span class="chip warn" style="margin-left:auto">3 null</span></div>
-          <div class="row"><span class="ic">#</span>temp_c <span class="chip" style="margin-left:auto">float</span></div>
-          <div class="row"><span class="ic">a</span>mode <span class="chip" style="margin-left:auto">enum 4</span></div>
-        </div>
+        <header>Sources <span class="grow"></span>
+          <button class="hbtn" data-reveal title="Reveal the file you are in — ␣e"><svg class="i"><use href="#i-target"/></svg></button>
+        </header>
+        <div class="find" data-open="telescope"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></div>
+        <!-- The same Event::Tree that Codex draws. Data's explorer is the
+             project's files, because a notebook's inputs are files in it —
+             the mock schema that used to sit here described a warehouse
+             nobody had connected. -->
+        <div class="scroll tree" data-tree></div>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
@@ -977,26 +969,12 @@
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
       <aside class="pane">
-        <div class="dock-tabs"><button class="dock-tab on">Analyst</button><button class="dock-tab">Profile</button><button class="dock-tab">History</button></div>
-        <div class="scroll">
-          <div class="sec-head">Column profile · battery</div>
-          <div class="prop-row"><span class="lbl">Rows</span><span class="val">4 213 887</span></div>
-          <div class="prop-row"><span class="lbl">Null</span><span class="val" style="color:var(--warn)">3 (0.00%)</span></div>
-          <div class="prop-row"><span class="lbl">Mean / σ</span><span class="val">3.81</span><span class="val">0.42</span></div>
-          <div class="prop-row"><span class="lbl">Min / Max</span><span class="val">2.94</span><span class="val">4.21</span></div>
-          <div class="prop-row"><span class="lbl">Outliers</span><span class="val">412 · &gt;3σ</span></div>
-          <div style="padding:6px 11px"><div class="bars" style="height:56px;gap:2px">
-            <i style="height:12%"></i><i style="height:26%"></i><i style="height:52%"></i><i style="height:84%"></i><i style="height:100%"></i><i style="height:92%"></i><i style="height:61%"></i><i style="height:33%"></i><i style="height:14%"></i><i style="height:6%"></i>
-          </div></div>
-          <div class="sec-head">Lineage</div>
-          <div class="prop-row"><span class="lbl">Source</span><span class="val">warehouse.telemetry</span></div>
-          <div class="prop-row"><span class="lbl">Cell</span><span class="val">[1] → [2] → [3]</span></div>
-          <div class="prop-row"><span class="lbl">Reproducible</span><span class="val" style="color:var(--ok)">yes · seed 7</span></div>
-          <div class="msg">
-            <div class="who"><svg class="i" width="12" height="12" style="color:var(--accent-2)"><use href="#i-spark"/></svg> Notes</div>
-            <p>Every cell records its inputs, so “Open sat 17 in Codex” jumps straight to the scheduler code that emits <code>SAFE_HOLD</code> — the analysis and the repository are one workspace.</p>
-          </div>
-        </div>
+        <header>Table <span class="grow"></span><span class="chip" data-df-shape hidden></span></header>
+        <!-- Slot::Table. The dataframe of whichever cell the focused pane is
+             on, drawn from that cell's own output rather than from anything
+             this panel works out for itself. What used to be here was a
+             profile of a column in a database nobody had opened. -->
+        <div class="scroll" data-df-dock></div>
       </aside>
     </section>
   </div>

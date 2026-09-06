@@ -1120,10 +1120,13 @@ function renderBufferBars() {
    tree and `␣ff` could disagree about what is in the project. */
 
 function renderTree(rows) {
-  const target = $("[data-tree]");
-  if (!target) return;
+  // Every mode with an explorer, not just the one on screen: they draw the
+  // same tree from the same event, and a mode that only rendered while
+  // visible would come up empty on the first switch into it.
+  const targets = $$("[data-tree]");
+  if (!targets.length) return;
 
-  target.innerHTML = rows
+  const html = rows
     .map((row) => {
       // Indentation is inline rather than a class per level, because a class
       // per level puts a ceiling on how deep a project may be nested.
@@ -1149,7 +1152,10 @@ function renderTree(rows) {
     })
     .join("");
 
-  target.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
+  for (const target of targets) {
+    target.innerHTML = html;
+    target.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
+  }
 }
 
 /* ── the terminal ─────────────────────────────────────────────────────
@@ -1172,6 +1178,8 @@ let terminalFocused = false;
 let notebookPainted = new Map();
 /** The last split layout the core sent, so any mode can redraw it. */
 let lastSplits = null;
+/** What the table dock last drew, so a heartbeat does not rebuild it. */
+let dockPainted = null;
 
 /** The last notebook the core sent, so a re-render can be asked for without
  * waiting for another event — `i` has to turn prose into source before there
@@ -1455,6 +1463,52 @@ function renderNotebook(event) {
   const boxes = $$("[data-cells]");
   if (!boxes.length) return;
   for (const box of boxes) paintCells(box, event);
+  renderTableDock(event);
+}
+
+/**
+ * The dock: the selected cell's dataframe, given room to be read.
+ *
+ * A frame is already drawn under its own cell, but in a column the width of
+ * the stage and among everything else the cell printed. The dock is the same
+ * table with the width to read it in — which is the whole reason `Slot::Table`
+ * is what Data's dock holds rather than an inspector.
+ *
+ * It follows the selection rather than the last frame produced: a panel that
+ * showed whatever ran most recently would change under you while you read it.
+ */
+function renderTableDock(event) {
+  const box = $("[data-df-dock]");
+  if (!box) return;
+  const shape = $("[data-df-shape]");
+
+  const cell = event.cells.find((it) => it.selected);
+  const table = cell?.outputs.find((out) => out.type === "table")?.table;
+
+  // Cheap, and it matters: a running cell sends a notebook every heartbeat,
+  // and rebuilding a table of thirty rows each time throws away the text
+  // selection of anyone reading it.
+  const key = table ? JSON.stringify(table) : cell ? "none" : "shut";
+  if (key === dockPainted) return;
+  dockPainted = key;
+
+  if (!table) {
+    box.innerHTML = `<div class="empty">${
+      cell
+        ? "No table in this cell. Run one that ends in a dataframe."
+        : "Open a .ipynb to start"
+    }</div>`;
+    if (shape) shape.hidden = true;
+    return;
+  }
+
+  if (shape) {
+    shape.hidden = false;
+    // Rows as the frame counted them, not as many as were sent.
+    const rows = table.total ?? table.rows.length;
+    shape.textContent = `${rows.toLocaleString()} × ${table.columns.length}`;
+  }
+  box.innerHTML = tableHtml(table);
 }
 
 /**
