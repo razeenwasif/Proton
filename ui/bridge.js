@@ -594,7 +594,14 @@ export async function dispatch(command) {
  * on the way through and does not queue behind the JSON channel.
  */
 export async function readDocument(path) {
-  if (!HAS_SHELL) throw new Error("no shell: documents need the app");
+  if (!HAS_SHELL) {
+    // The design preview has no shell to read the disk, so it fetches from
+    // the server instead — the same arrangement as every other mock in this
+    // file, and what lets the viewer be designed against a real document.
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`${path}: ${response.status}`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
   const body = await tauri.core.invoke("read_document", { path });
   // Tauri hands back an ArrayBuffer, or a plain array on older transports.
   return body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(body);

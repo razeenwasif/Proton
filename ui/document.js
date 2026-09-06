@@ -84,10 +84,36 @@ export async function openDocument(event) {
   }
 }
 
+/** Which draw is the current one.
+ *
+ * Rendering a page is asynchronous, so two draws can be in flight at once —
+ * which is what pressing `−` twice does. Without this the second clears the
+ * box while the first is still appending to it, and a three-page document
+ * ends up with six canvases. Measured, not hypothetical.
+ */
+let generation = 0;
+
+/** The render in flight, so a new draw can call it off.
+ *
+ * Abandoning is not enough on its own: pdf.js refuses to render the same page
+ * into two places at once, so an old task left running makes the new draw
+ * throw halfway and stop — which showed up as a three-page document rendering
+ * exactly one page.
+ */
+let rendering = null;
+
 /** Render every page at the current zoom. */
 async function draw() {
   const target = box();
   if (!target || !open) return;
+  const mine = ++generation;
+
+  // Stop the previous one before touching anything it might still be drawing
+  // into. `cancel` rejects its promise, which the loop below treats as an
+  // ordinary way to finish rather than as a failure.
+  rendering?.cancel();
+  rendering = null;
+
   target.innerHTML = "";
   $("[data-doc-zoom-level]").textContent = `${Math.round(ZOOM[open.zoom] * 100)}%`;
 
@@ -95,7 +121,12 @@ async function draw() {
   // drawn at the real resolution and shown at the CSS one.
   const ratio = window.devicePixelRatio || 1;
   for (let n = 1; n <= open.doc.numPages; n++) {
+    // Checked after every await: a newer draw has already cleared the box, so
+    // anything this one adds now is a page from the last zoom level.
+    if (mine !== generation) return;
     const page = await open.doc.getPage(n);
+    if (mine !== generation) return;
+
     const viewport = page.getViewport({ scale: ZOOM[open.zoom] });
     const canvas = document.createElement("canvas");
     canvas.className = "doc-page";
@@ -104,17 +135,33 @@ async function draw() {
     canvas.style.width = `${Math.floor(viewport.width)}px`;
     canvas.style.height = `${Math.floor(viewport.height)}px`;
     target.appendChild(canvas);
-    await page.render({
+
+    const task = page.render({
       canvasContext: canvas.getContext("2d"),
       viewport,
       transform: ratio === 1 ? null : [ratio, 0, 0, ratio, 0, 0],
-    }).promise;
+    });
+    rendering = task;
+    try {
+      await task.promise;
+    } catch {
+      // Either this draw was cancelled — in which case a newer one is already
+      // doing the work — or the page could not be drawn. Neither is a reason
+      // to abandon the pages after it.
+      if (mine !== generation) return;
+    }
+    if (rendering === task) rendering = null;
   }
 }
 
 export function closeDocument() {
   const panel = $("#doc-viewer");
   if (panel) panel.hidden = true;
+  // Abandons any render still in flight, so a page from the document just
+  // closed cannot appear inside the next one.
+  generation++;
+  rendering?.cancel();
+  rendering = null;
   // The pages are canvases holding a bitmap each; a long document left open
   // is real memory.
   const target = box();
