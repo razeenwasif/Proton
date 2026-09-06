@@ -8,8 +8,10 @@
 
 pub mod connection;
 pub mod kernel;
+pub mod notebook;
 pub mod wire;
 
 pub use connection::Connection;
 pub use kernel::Kernel;
+pub use notebook::{Cell, CellKind, Notebook, Output};
 pub use wire::{Header, Message, Signer};
