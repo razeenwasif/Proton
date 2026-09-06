@@ -691,6 +691,34 @@ That is the whole contract. Chat, Codex, Design, Modeling, Game, Video and Data
 are the seven that ship; nothing about them is privileged, so an eighth is an
 extension rather than a fork.
 
+**It is built, in `proton-core::contract`, and it is a struct rather than a
+trait.** Every answer above is data: none of it needs to run, and a mode that
+is a value can be compared, sent over the bus and written down in a test. The
+sketch above described the same thing in a language where the answers might
+have been computed.
+
+A `Slot` says *what* belongs in a position — the file tree, the editor, a
+notebook's cells — and never how to draw it, because the core still names no
+widget. A closed enum rather than a string, so a front end that has not
+implemented a slot fails to compile instead of rendering a blank rectangle.
+`Slot::Empty` is a real answer: Chat has no dock on purpose, and a mode with
+nothing for a slot should get the space back rather than an empty panel.
+
+The verb table is a question — `supports(action)` — because that is the only
+form of it anything has ever needed, and `ModeId::supports` now asks the
+contract rather than answering separately, so there is one table and not two
+that can drift.
+
+The test that keeps this honest is that **Data's layout is not Codex's**:
+different stage, different dock, different document. Data mode was written
+after the contract for exactly this reason — a contract that only ever
+described text editors would not have been a contract, it would have been the
+editor with extra words. If that test ever passes trivially, it has stopped
+meaning anything.
+
+`Event::Layout` goes with every mode change and with `Sync`. A mode switch that
+only moved a highlight on the rail would be a theme rather than a mode.
+
 **Every mode's document is a text file that diffs in Git.** This is the load-
 bearing rule of the entire project:
 
@@ -1388,7 +1416,7 @@ longer needs emscripten or Docker to produce a `.wasm` grammar. Since 0.25 it
 downloads a wasi-sdk clang and drives that directly, which removes the
 toolchain argument against ever regenerating one of these.
 
-**M6 — Data mode. ◐ in progress.** Closest to Codex; the first real exercise of
+**M6 — Data mode. ✅ done.** Closest to Codex; the first real exercise of
 the mode contract by something that is not a text editor.
 *Exit: a notebook runs, a dataframe renders, and "open sat 17 in Codex" jumps to
 the right line.*
@@ -1433,6 +1461,47 @@ and a client waiting for it waits forever.
 `PROTON_TEST_KERNEL`, the way the language-server and adapter tests do: code
 runs, printing and results arrive as different messages, a traceback survives,
 state persists between cells, and two cells in flight keep their output apart.
+
+**The document ships, and it is the part that had to be exact.** A notebook is
+JSON, so Data mode obeys the load-bearing rule — but that rule is only worth
+anything if a notebook Proton saved looks like one Jupyter saved. A diff in
+which every line has moved is a diff nobody reviews and Git cannot merge.
+
+So `proton-data::notebook` keeps the parsed JSON and writes back into it.
+`source` is a list of lines that each keep their newline; everything unknown is
+preserved; the formatting is nbformat's one space of indent. Measured against
+71 notebooks Jupyter really wrote — 69 come back byte for byte, and the two
+that do not were never in nbformat's shape to begin with. What is guaranteed
+for every file is weaker and more useful: nothing is lost, and the second save
+changes nothing the first did not. Cell ids are not invented, because they
+arrived in 4.5 and adding one to a 4.4 notebook makes it invalid.
+
+**A dataframe is a table, not a page of HTML.** It arrives as `text/html` and
+`text/plain` at once. The HTML is *not* put in the page — a kernel runs
+whatever code the notebook contains, and injecting its markup would leave the
+editor's chrome one `<style>` away from whatever a downloaded notebook felt
+like doing. `proton-data::table` scans out the rows and the front end draws its
+own table, which is also how it ends up themed and selectable. Pandas' `N rows
+× M columns` is carried through: showing thirty rows of a million without
+saying so is the one thing a table viewer must not do.
+
+**Which cell an output belongs to is something only this end knows.** A kernel
+answers on iopub tagged by the `msg_id` of the request, not by cell, so the
+mapping is remembered when the cell is run. Lose it and one cell's output lands
+under another — worse than no output, because it is believable. While a cell
+runs, what it has produced *so far* is shown rather than what it produced last
+time, and outputs reach the document only when the cell is done: a notebook
+saved mid-run must not hold half an answer beside a number implying a whole one.
+
+**The panel patches cell by cell, and here that is correctness rather than
+speed.** Cells are editable, so replacing the box's markup takes the caret with
+it — on every heartbeat of output that arrives while somebody is thinking. The
+cell being edited is skipped entirely.
+
+*Exit: met.* A notebook runs against a real kernel, a real pandas frame renders
+as columns and rows, and the jump works from both ends — `JumpTo` for a known
+place, and a click on any table cell to search the project for that value,
+which is "open sat 17 in Codex" as it is actually reached.
 
 **M7 — Design mode.** Two-way binding between artboard and component source.
 The hardest of the seven, because the binding has to survive a human editing
