@@ -18,4 +18,9 @@ executionCount: bigint | null,
  * a stale count, because a cell that looks done and is not is the thing
  * that makes people run it twice.
  */
-running: boolean, };
+running: boolean, 
+/**
+ * The cell the modal engine is on. A notebook has a cursor the way a
+ * buffer does; it just moves a cell at a time.
+ */
+selected: boolean, };

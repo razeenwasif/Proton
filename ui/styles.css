@@ -1645,3 +1645,7 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
   animation: spin 0.7s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+/* The cell the modal engine is on. A notebook has a cursor the way a buffer
+   does — it just moves a cell at a time, and without a mark for it `dd` is a
+   keystroke you have to guess the target of. */
+.cell.on { box-shadow: inset 2px 0 0 var(--accent), var(--spec); }

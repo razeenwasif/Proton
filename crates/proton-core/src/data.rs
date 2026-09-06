@@ -1,6 +1,6 @@
 //! Data mode: an open notebook, and the kernel running it.
 //!
-//! `proton-data` owns the file format and the wire protocol. What lidata.get("text/html").and_then(as_text)es here
+//! `proton-data` owns the file format and the wire protocol. What lives here
 //! is the editor's half — which notebook is open, which cell is running, and
 //! how a kernel's stream of messages becomes something a panel can draw.
 //!
@@ -22,6 +22,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::action::{Action, Object, Verb};
 use proton_data::notebook::{CellKind, Notebook, Output};
 use proton_data::{table, Kernel};
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,9 @@ pub struct CellView {
     /// a stale count, because a cell that looks done and is not is the thing
     /// that makes people run it twice.
     pub running: bool,
+    /// The cell the modal engine is on. A notebook has a cursor the way a
+    /// buffer does; it just moves a cell at a time.
+    pub selected: bool,
 }
 
 /// One output, already reduced to the thing worth drawing.
@@ -147,6 +151,15 @@ pub struct Data {
     /// What the kernel said when it failed to start, so the panel can say so
     /// rather than showing a notebook that silently never runs.
     problem: Option<String>,
+    /// Which cell the modal engine is on.
+    selected: usize,
+    /// The cell register — what `yy` and `dd` put somewhere `p` can reach.
+    ///
+    /// Its own register rather than the editor's: a cell carries a kind as
+    /// well as text, and pasting a markdown cell into a buffer as lines, or a
+    /// yanked line into a notebook as a cell, would be a worse answer than
+    /// keeping them apart.
+    yanked: Option<(CellKind, String)>,
 }
 
 impl std::fmt::Debug for Data {
@@ -220,9 +233,126 @@ impl Data {
                     outputs,
                     execution_count: cell.execution_count,
                     running: waiting.contains(&index),
+                    selected: index == self.selected,
                 }
             })
             .collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.notebook.as_ref().map_or(0, Notebook::len)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Which cell the modal engine is on.
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    /// Run a modal action against the notebook.
+    ///
+    /// This is the mode contract's verb table, in the place it actually does
+    /// something. `dd` in Codex deletes a line; here the same action deletes a
+    /// cell, because `Object::Line` has always meant "the mode's unit" rather
+    /// than "a line of text" — a layer in Design, a clip in Video, a cell
+    /// here. Nothing new had to be added to the engine for any of it.
+    ///
+    /// Answers whether anything changed, so the caller knows to redraw.
+    pub fn execute(&mut self, action: &Action) -> bool {
+        if self.notebook.is_none() {
+            return false;
+        }
+        let count = action.count.max(1) as usize;
+        let last = self.len().saturating_sub(1);
+
+        match (action.verb, action.object) {
+            (Verb::Move, Object::LineDown) => self.select(self.selected.saturating_add(count)),
+            (Verb::Move, Object::LineUp) => self.select(self.selected.saturating_sub(count)),
+            (Verb::Move, Object::FileStart) => self.select(0),
+            (Verb::Move, Object::FileEnd) => self.select(last),
+
+            // `dd`. Takes the cell with it, and the yank register too — the
+            // deleted thing is what `p` should put back, exactly as in vim.
+            (Verb::Delete, Object::Line) => {
+                let mut removed = false;
+                for _ in 0..count {
+                    if self.selected >= self.len() {
+                        break;
+                    }
+                    self.remember(self.selected);
+                    removed |= self.remove_cell(self.selected);
+                }
+                // The cursor stays put and the cells move up under it, which
+                // is what `dd` does; at the end of the notebook it steps back.
+                self.selected = self.selected.min(self.len().saturating_sub(1));
+                removed
+            }
+
+            (Verb::Yank, Object::Line) => {
+                self.remember(self.selected);
+                // A yank changes nothing on screen, so it is not a redraw —
+                // but it is not a failure either.
+                false
+            }
+
+            // `p` after the cell, `P` on it. The two differ only in where.
+            (Verb::Paste, Object::After) => self.paste(self.selected + 1, count),
+            (Verb::Paste, Object::Here) => self.paste(self.selected, count),
+
+            // `o` and `O`. A new cell is a code cell: it is what a notebook
+            // is mostly made of, and turning one into markdown is one keypress
+            // where writing prose in a code cell is a run that fails.
+            (Verb::Insert, Object::LineBelow) => self.insert_at(self.selected + 1),
+            (Verb::Insert, Object::LineAbove) => self.insert_at(self.selected),
+
+            _ => false,
+        }
+    }
+
+    /// Move the cursor. Answers whether it went anywhere.
+    fn select(&mut self, to: usize) -> bool {
+        let to = to.min(self.len().saturating_sub(1));
+        let moved = to != self.selected;
+        self.selected = to;
+        moved
+    }
+
+    /// Put a cell in the register.
+    fn remember(&mut self, index: usize) {
+        let Some(notebook) = &self.notebook else {
+            return;
+        };
+        if let Some(cell) = notebook.cells().get(index) {
+            self.yanked = Some((cell.kind, cell.source.clone()));
+        }
+    }
+
+    fn paste(&mut self, at: usize, count: usize) -> bool {
+        let Some((kind, source)) = self.yanked.clone() else {
+            return false;
+        };
+        let Some(notebook) = self.notebook.as_mut() else {
+            return false;
+        };
+        for n in 0..count {
+            notebook.insert(at + n, kind, &source);
+        }
+        // On the first of what was pasted, which is where you want to be if
+        // you are about to run it.
+        self.selected = at.min(self.len().saturating_sub(1));
+        true
+    }
+
+    fn insert_at(&mut self, at: usize) -> bool {
+        let Some(notebook) = self.notebook.as_mut() else {
+            return false;
+        };
+        notebook.insert(at, CellKind::Code, "");
+        self.selected = at;
+        true
     }
 
     pub fn set_source(&mut self, index: usize, source: &str) -> bool {

@@ -183,6 +183,14 @@ pub struct Notebook {
     /// Remembered rather than assumed, because it costs nothing and a missing
     /// newline is otherwise a one-character whole-file diff.
     trailing_newline: bool,
+    /// Whether the file's own line endings were CRLF.
+    ///
+    /// Jupyter writes LF, but a notebook that has been through a Windows tool
+    /// may not have, and rewriting every line ending is the largest possible
+    /// diff for the smallest possible reason. Only the JSON's own newlines are
+    /// affected: a newline *inside* a cell's source is escaped as `\n` within
+    /// the string and never appears literally.
+    crlf: bool,
 }
 
 impl Notebook {
@@ -193,6 +201,7 @@ impl Notebook {
         }
         Ok(Notebook {
             trailing_newline: text.ends_with('\n'),
+            crlf: text.contains("\r\n"),
             json,
         })
     }
@@ -213,6 +222,8 @@ impl Notebook {
                 "nbformat_minor": 5,
             }),
             trailing_newline: true,
+            // A notebook Proton made is written the way Jupyter writes one.
+            crlf: false,
         }
     }
 
@@ -232,6 +243,12 @@ impl Notebook {
         let mut text = String::from_utf8(buffer).expect("serde_json emits utf-8");
         if self.trailing_newline {
             text.push('\n');
+        }
+        // Safe as a blanket replace: `serde_json` escapes a newline inside a
+        // string as `\n`, two characters, so the only literal newlines here
+        // are the ones it put between elements.
+        if self.crlf {
+            text = text.replace('\n', "\r\n");
         }
         text
     }
@@ -343,6 +360,26 @@ impl Notebook {
             .expect("checked on parse");
         cells.push(cell);
         cells.len() - 1
+    }
+
+    /// Put a cell at `index`, shaped like the ones already there.
+    ///
+    /// Clamped to the end rather than refused: "after the last cell" is the
+    /// ordinary way to add one, and an index one past the end is what that
+    /// looks like from the caller.
+    pub fn insert(&mut self, index: usize, kind: CellKind, source: &str) -> usize {
+        let at = self.push(kind, source);
+        let index = index.min(at);
+        if index != at {
+            let cells = self
+                .json
+                .get_mut("cells")
+                .and_then(Value::as_array_mut)
+                .expect("checked on parse");
+            let cell = cells.remove(at);
+            cells.insert(index, cell);
+        }
+        index
     }
 
     pub fn remove(&mut self, index: usize) -> bool {

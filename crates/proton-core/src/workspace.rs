@@ -354,6 +354,10 @@ impl Workspace {
                     self.trace_event(),
                     self.tree_event(),
                     self.repo_event(),
+                    // A window that has just connected to a session with a
+                    // notebook open would otherwise show an empty stage until
+                    // something happened to change a cell.
+                    self.notebook_event(),
                     Event::Layout {
                         layout: self.mode.layout(),
                     },
@@ -3206,6 +3210,22 @@ impl Workspace {
                 description,
             }];
             events.extend(ask(self));
+            return (events, false);
+        }
+
+        // The verb table, where it stops being a table. `dd` in Codex deletes
+        // a line and in Data deletes a cell, and the engine above knows about
+        // neither — `Object::Line` has always meant "the mode's unit", which
+        // is what makes this a routing decision rather than a second engine.
+        if self.mode == ModeId::Data {
+            let changed = self.data.execute(action);
+            let mut events = vec![Event::Action {
+                action: action.clone(),
+                description,
+            }];
+            if changed || matches!(action.verb, Verb::Move | Verb::Yank) {
+                events.push(self.notebook_event());
+            }
             return (events, false);
         }
 

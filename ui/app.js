@@ -1214,7 +1214,7 @@ function cellHtml(cell, index) {
       : "";
 
   return (
-    `<div class="cell${cell.running ? " running" : ""}" data-cell="${index}">` +
+    `<div class="cell${cell.running ? " running" : ""}${cell.selected ? " on" : ""}" data-cell="${index}">` +
     `<header>${number} ${escapeHtml(cell.kind)}<span class="grow"></span>${run}` +
     `<button class="hbtn" data-drop-cell="${index}" title="Remove this cell"><svg class="i"><use href="#i-close"/></svg></button>` +
     `</header>` +

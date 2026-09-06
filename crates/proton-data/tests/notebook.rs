@@ -259,3 +259,19 @@ fn json_that_is_not_a_notebook_is_refused() {
     // And an empty one is a notebook, not an error.
     assert!(Notebook::parse(&Notebook::blank().to_text()).is_ok());
 }
+
+#[test]
+fn a_notebook_with_windows_line_endings_keeps_them() {
+    // Jupyter writes LF, but a notebook that has been through a Windows tool
+    // may not have — and rewriting every line ending is the largest possible
+    // diff for the smallest possible reason. Found by a real file, not by
+    // imagining one.
+    let windows = REAL.replace('\n', "\r\n");
+    let notebook = Notebook::parse(&windows).expect("a notebook");
+    assert_eq!(notebook.to_text(), windows);
+
+    // And a newline *inside* a cell is escaped in the JSON, so it is not
+    // touched by any of this.
+    assert!(notebook.cells()[0].source.contains('\n'));
+    assert!(!notebook.cells()[0].source.contains('\r'));
+}
