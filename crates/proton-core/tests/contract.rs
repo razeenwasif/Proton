@@ -136,3 +136,48 @@ fn a_jump_to_a_file_that_is_gone_says_so_rather_than_moving_the_cursor() {
         "{events:?}"
     );
 }
+
+#[test]
+fn a_value_from_a_table_can_be_searched_for_across_the_project() {
+    // The other end of the cross-mode jump. A dataframe cell holds a value —
+    // "17" — and the useful question is where that appears in the code. The
+    // panel seeds the query rather than typing it, because typing it would
+    // re-run the search once per character of a term nobody is typing.
+    let root = project("seed");
+    std::fs::write(
+        root.join("fleet.py"),
+        "STATIONS = {}\nSAT_17_STATION = \"KIR-2\"\nother = 1\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("readme.md"), "nothing to see\n").unwrap();
+
+    let mut space = Workspace::rooted(&root);
+    // The index is walked in the background, so a search run before it lands
+    // finds nothing — which is what keeps a cold index on a large repository
+    // from freezing the window, and what a test has to wait out by hand.
+    space.apply(Command::Sync);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while space.pickers().is_scanning() {
+        space.apply(Command::Poll);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the file walk never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+
+    space.apply(Command::OpenPicker {
+        kind: proton_core::picker::PickerKind::Grep,
+    });
+    let events = space.apply(Command::PickerQuery {
+        text: "SAT_17".into(),
+    });
+
+    let picker = events.iter().find_map(|event| match event {
+        Event::Picker { query, items, .. } => Some((query.clone(), items.len())),
+        _ => None,
+    });
+    let (query, hits) = picker.expect("the picker should have answered");
+    assert_eq!(query, "SAT_17", "the query should be in the box, whole");
+    assert!(hits > 0, "the search should have found the line");
+}

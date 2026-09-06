@@ -9,6 +9,7 @@ pub mod agent;
 pub mod block;
 pub mod bus;
 pub mod contract;
+pub mod data;
 pub mod debug;
 pub mod editor;
 pub mod ex;

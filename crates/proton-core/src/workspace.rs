@@ -69,6 +69,8 @@ pub struct Workspace {
     /// The terminal, once something has asked for one. Not started on boot:
     /// a shell nobody opened is a process nobody wanted.
     terminal: Option<proton_term::Terminal>,
+    /// The notebook Data mode has open, and the kernel running it.
+    data: crate::data::Data,
     /// How big the panel is. Kept even with no terminal, so the one opened
     /// next starts the right size rather than at a default nobody chose.
     term_size: (u16, u16),
@@ -390,7 +392,51 @@ impl Workspace {
                 events
             }
 
+            Command::PickerQuery { text } => {
+                let labels = self.buffer_labels();
+                self.pickers.seed(&text, labels);
+                vec![self.picker_event()]
+            }
+
             Command::RefreshRepo => vec![self.repo_event()],
+
+            /* ── notebooks ────────────────────────────────────────── */
+            Command::RunCell { index } => {
+                let cwd = self.pickers.root().to_path_buf();
+                match crate::data::python() {
+                    Some(python) => match self.data.run(index, &python, &cwd) {
+                        Ok(()) => vec![self.notebook_event()],
+                        Err(why) => vec![notice(why, NoticeLevel::Error)],
+                    },
+                    None => vec![notice(
+                        "no python to run a notebook with — set PROTON_PYTHON".into(),
+                        NoticeLevel::Error,
+                    )],
+                }
+            }
+
+            Command::SetCell { index, source } => {
+                self.data.set_source(index, &source);
+                vec![self.notebook_event()]
+            }
+
+            Command::AddCell { code } => {
+                self.data.add_cell(code);
+                vec![self.notebook_event()]
+            }
+
+            Command::RemoveCell { index } => {
+                self.data.remove_cell(index);
+                vec![self.notebook_event()]
+            }
+
+            Command::SaveNotebook => match self.data.save() {
+                Ok(()) => vec![
+                    notice("notebook written".into(), NoticeLevel::Info),
+                    self.notebook_event(),
+                ],
+                Err(why) => vec![notice(why, NoticeLevel::Error)],
+            },
 
             // The cross-mode jump. One command, because switching, opening
             // and moving as three would be three redraws and two chances to
@@ -1510,6 +1556,20 @@ impl Workspace {
     fn open_path(&mut self, path: &str) -> Vec<Event> {
         let resolved = self.pickers.resolve(path);
 
+        // A notebook is Data mode's document, so opening one is a mode switch
+        // as much as a file open — the cells belong on the stage, and the
+        // editor has nothing useful to do with a page of JSON.
+        if resolved.extension().is_some_and(|e| e == "ipynb") {
+            return match self.data.open(&resolved) {
+                Ok(()) => {
+                    let mut events = self.set_mode(ModeId::Data);
+                    events.push(self.notebook_event());
+                    events
+                }
+                Err(why) => vec![notice(why, NoticeLevel::Error)],
+            };
+        }
+
         // Some files are to be looked at rather than edited, and a PDF is the
         // first of them. It does not become a buffer: a buffer has an undo
         // history, a cursor and a `:w`, and offering any of those for a file
@@ -1589,6 +1649,10 @@ impl Workspace {
 
         // The shell is on the same heartbeat as everything else that happens
         // on a thread the core cannot see.
+        // The kernel, on the same heartbeat as everything else out of process.
+        if self.data.poll() {
+            events.push(self.notebook_event());
+        }
         if self.terminal.as_mut().is_some_and(|t| t.poll()) {
             events.push(self.terminal_event());
         }
@@ -3045,6 +3109,19 @@ impl Workspace {
     fn tree_event(&self) -> Event {
         Event::Tree {
             rows: self.tree.rows(self.editor.buffer().path()),
+        }
+    }
+
+    /// The notebook that is open, and what its cells have produced.
+    fn notebook_event(&self) -> Event {
+        Event::Notebook {
+            path: self
+                .data
+                .path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            cells: self.data.cells(),
+            problem: self.data.problem().unwrap_or_default().to_string(),
         }
     }
 

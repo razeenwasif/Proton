@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 proton-agent = { workspace = true }
+proton-data = { workspace = true }
 proton-dap = { workspace = true }
 proton-index = { workspace = true }
 proton-lsp = { workspace = true }

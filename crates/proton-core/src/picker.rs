@@ -439,6 +439,20 @@ impl Pickers {
         self.requery(buffers);
     }
 
+    /// Put a whole query in at once.
+    ///
+    /// Typing it a character at a time would work and would re-query on every
+    /// letter — which for a grep means one search per character of a term
+    /// nobody is typing. This is for a search something else already knows
+    /// the whole of: a value clicked in a dataframe, or a term the agent
+    /// picked.
+    pub fn seed(&mut self, query: &str, buffers: Vec<(String, Option<String>)>) {
+        if let Some(picker) = &mut self.open {
+            picker.set_query(query.to_string());
+        }
+        self.requery(buffers);
+    }
+
     pub fn push(&mut self, c: char, buffers: Vec<(String, Option<String>)>) {
         if let Some(picker) = &mut self.open {
             picker.type_char(c);

@@ -1608,3 +1608,40 @@ table.df tr:hover td { background: var(--e1); }
   max-width: 100%; height: auto;
 }
 .doc-note { color: var(--ink-4); font-size: 12px; padding: 30px; text-align: center; }
+
+/* ── notebook cells, live ─────────────────────────────────────────── */
+/* A cell you cannot type in is a viewer rather than a mode, so the source is
+   editable in place. `plaintext-only` because a paste carrying markup into a
+   contenteditable is how a code cell ends up holding a `<div>`. */
+.cell-src { outline: none; white-space: pre-wrap; }
+.cell-src:focus { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.cell.running { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.out-wrap { border-top: 1px solid var(--edge); }
+.out-stream {
+  margin: 0; padding: 9px 13px; font: 11.5px/1.55 var(--mono);
+  color: var(--ink-2); white-space: pre-wrap; word-break: break-word;
+}
+/* stderr is not an error — warnings and progress bars arrive this way — but
+   it is worth telling apart from what the cell meant to print. */
+.out-stream.err { color: var(--warn); }
+.out-err { padding: 9px 13px; color: var(--err); font: 11.5px/1.55 var(--mono); }
+.out-err pre { margin: 6px 0 0; padding: 0; color: var(--ink-2); white-space: pre-wrap; }
+.out-img { display: block; max-width: 100%; padding: 9px 13px; }
+/* What the frame said it had. Showing thirty rows of a million without
+   mentioning the million is the one thing a table must not do. */
+.df-more {
+  padding: 6px 11px; font-size: 11px; color: var(--ink-4);
+  border-top: 1px solid var(--edge);
+}
+table.df td[data-df-cell] { cursor: pointer; }
+table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--ink); }
+/* A cell that is running says so where the number goes, rather than showing
+   the last run's number as if it were this one's. */
+/* `spin` is already defined twice above; this reuses it rather than adding a
+   third copy of the same rotation. */
+.spin {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  border: 1.5px solid var(--accent); border-right-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }

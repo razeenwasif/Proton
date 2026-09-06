@@ -62,6 +62,80 @@ if (HAS_SHELL) {
   ];
   const tasksEvent = () => ({ type: "tasks", tasks: queue });
 
+  /* A notebook for the design preview, in the shape the core sends one: a
+     dataframe as rows rather than HTML, a stream, and a traceback. The
+     fleet numbers are the ones the prototype used, so "open sat 17 in
+     Codex" still means something to look at. */
+  const notebook = {
+    path: "C:/fleet/fleet_health.ipynb",
+    cells: [
+      {
+        kind: "markdown",
+        source: "# Fleet health\n\nBattery mean, by satellite.",
+        outputs: [],
+        executionCount: null,
+        running: false,
+      },
+      {
+        kind: "code",
+        source:
+          'import pandas as pd\ndf = pd.read_parquet("telemetry.parquet")\ndf.groupby("sat_id").battery.mean().head()',
+        outputs: [
+          {
+            type: "table",
+            table: {
+              columns: ["sat_id", "mean_v", "n"],
+              rows: [
+                ["17", "3.41", "128400"],
+                ["31", "3.58", "128112"],
+                ["4", "3.74", "129001"],
+                ["22", "3.88", "127980"],
+              ],
+              total: 4213887,
+            },
+          },
+        ],
+        executionCount: 1,
+        running: false,
+      },
+      {
+        kind: "code",
+        source: 'print("checked", len(df), "rows")\ndf.battery.min()',
+        outputs: [
+          { type: "stream", name: "stdout", text: "checked 4213887 rows\n" },
+          { type: "text", text: "2.94" },
+        ],
+        executionCount: 2,
+        running: false,
+      },
+      {
+        kind: "code",
+        source: 'df["missing"].mean()',
+        outputs: [
+          {
+            type: "error",
+            ename: "KeyError",
+            evalue: "'missing'",
+            traceback: [
+              "Traceback (most recent call last):",
+              '  File "<stdin>", line 1, in <module>',
+              "KeyError: 'missing'",
+            ],
+          },
+        ],
+        executionCount: 3,
+        running: false,
+      },
+    ],
+    problem: "",
+  };
+  const notebookEvent = () => ({
+    type: "notebook",
+    path: notebook.path,
+    cells: notebook.cells,
+    problem: notebook.problem,
+  });
+
   // A canned pair of plugins, so the settings panel and the theme strip can
   // be designed against. The real ones are wasm components loaded by
   // crates/proton-plugin; this only has to show the chrome.
@@ -222,7 +296,41 @@ if (HAS_SHELL) {
         terminalEvent(),
         tasksEvent(),
         pluginsEvent(),
+        notebookEvent(),
       ];
+    }
+    if (command.type === "runCell") {
+      // The shape of a real run: the cell goes busy, and the answer arrives
+      // later on its own — which is what the panel has to survive.
+      const cell = notebook.cells[command.index];
+      if (cell) {
+        cell.running = true;
+        setTimeout(() => {
+          cell.running = false;
+          cell.executionCount = (cell.executionCount ?? 0) + 1;
+          deliver(notebookEvent());
+        }, 900);
+      }
+      return [notebookEvent()];
+    }
+    if (command.type === "setCell") {
+      const cell = notebook.cells[command.index];
+      if (cell) cell.source = command.source;
+      return [notebookEvent()];
+    }
+    if (command.type === "addCell") {
+      notebook.cells.push({
+        kind: command.code ? "code" : "markdown",
+        source: "",
+        outputs: [],
+        executionCount: null,
+        running: false,
+      });
+      return [notebookEvent()];
+    }
+    if (command.type === "removeCell") {
+      notebook.cells.splice(command.index, 1);
+      return [notebookEvent()];
     }
     if (command.type === "dropTask") {
       queue = queue.filter((t) => t.id !== command.id || t.state === "running");

@@ -118,6 +118,14 @@ pub enum Command {
     OpenPicker {
         kind: PickerKind,
     },
+    /// Put a whole query into the open picker at once.
+    ///
+    /// For a search something else already knows the whole of — a value
+    /// clicked in a dataframe, a term the agent picked. Typing it a letter at
+    /// a time would re-query on every one.
+    PickerQuery {
+        text: String,
+    },
     /// Select a row directly, for a click. The keyboard moves by delta; a
     /// mouse knows exactly which row it is on.
     SelectPick {
@@ -244,6 +252,28 @@ pub enum Command {
     },
     /// Ask what the repository has. Answered with `Event::Repo`.
     RefreshRepo,
+
+    /* ── notebooks ────────────────────────────────────────────────── */
+    /// Run one cell. Answers when it has been sent, not when it is done —
+    /// the output arrives on the heartbeat like everything else.
+    RunCell {
+        index: usize,
+    },
+    /// Replace a cell's code.
+    #[serde(rename_all = "camelCase")]
+    SetCell {
+        index: usize,
+        source: String,
+    },
+    /// Add one at the end. `code` false makes it markdown.
+    AddCell {
+        code: bool,
+    },
+    RemoveCell {
+        index: usize,
+    },
+    /// Write the notebook back.
+    SaveNotebook,
     /// Open a place in another mode: the cross-mode jump.
     ///
     /// One command rather than "switch, then open, then move", because those
@@ -561,6 +591,21 @@ pub enum Event {
         /// What to put on the tab.
         name: String,
         kind: ViewerKind,
+    },
+    /// The notebook that is open, and what its cells have produced.
+    ///
+    /// Sent whole, like the agent transcript and for the same reason: a
+    /// notebook is tens of cells, the panel redraws from it, and a delta
+    /// protocol for something that size is a synchronisation bug waiting to
+    /// be written.
+    #[serde(rename_all = "camelCase")]
+    Notebook {
+        /// Empty when no notebook is open, which is how the panel knows to
+        /// say so rather than showing the last one.
+        path: String,
+        cells: Vec<crate::data::CellView>,
+        /// Why there is no kernel, when there is a reason worth showing.
+        problem: String,
     },
     /// The active mode's four slots, verb table and document type.
     ///

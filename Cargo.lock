@@ -4142,6 +4142,7 @@ version = "0.0.1"
 dependencies = [
  "proton-agent",
  "proton-dap",
+ "proton-data",
  "proton-index",
  "proton-lsp",
  "proton-plugin",

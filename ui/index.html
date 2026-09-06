@@ -963,58 +963,15 @@
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
         <div class="canvas-bar">
-          <span class="chip accent">fleet_health.ipynb</span>
-          <div class="seg"><button class="on">Notebook</button><button>SQL</button><button>Grid</button><button>Charts</button></div>
-          <span class="chip ok" style="margin-left:auto">kernel · python 3.13</span>
-          <button class="btn">Run all</button>
+          <!-- Rendered from Event::Notebook. Empty until a .ipynb is opened,
+               which is a mode switch as much as a file open. -->
+          <span class="chip accent" data-nb-name>no notebook</span>
+          <span class="chip" data-nb-kernel hidden></span>
+          <span class="grow"></span>
+          <button class="btn" data-nb-add title="Add a code cell">+ Cell</button>
+          <button class="btn" data-nb-save title="Write the notebook back">Save</button>
         </div>
-        <div class="scroll">
-          <div class="cell">
-            <header>[1] sql <span class="grow"></span><span class="chip">duckdb</span><span class="chip">0.4 s</span></header>
-            <pre><span class="k">SELECT</span> sat_id, <span class="fn">avg</span>(battery) <span class="k">AS</span> mean_v, <span class="fn">count</span>(<span class="op">*</span>) <span class="k">AS</span> n
-<span class="k">FROM</span> telemetry <span class="k">WHERE</span> ts <span class="op">&gt;</span> <span class="str">'2026-03-01'</span>
-<span class="k">GROUP BY</span> <span class="num">1</span> <span class="k">ORDER BY</span> mean_v <span class="k">ASC</span> <span class="k">LIMIT</span> <span class="num">6</span>;</pre>
-            <div class="out" style="padding:0">
-              <table class="df">
-                <thead><tr><th>sat_id</th><th>mean_v</th><th>n</th><th>trend</th></tr></thead>
-                <tbody>
-                  <tr><td class="n">17</td><td class="n">3.41</td><td class="n">128 400</td><td style="color:var(--err)">▼ −0.18 / mo</td></tr>
-                  <tr><td class="n">31</td><td class="n">3.58</td><td class="n">128 112</td><td style="color:var(--err)">▼ −0.11 / mo</td></tr>
-                  <tr><td class="n">4</td><td class="n">3.74</td><td class="n">129 001</td><td style="color:var(--warn)">▼ −0.04 / mo</td></tr>
-                  <tr><td class="n">22</td><td class="n">3.88</td><td class="n">127 980</td><td style="color:var(--ink-3)">— flat</td></tr>
-                  <tr><td class="n">9</td><td class="n">3.95</td><td class="n">128 655</td><td style="color:var(--ok)">▲ +0.02 / mo</td></tr>
-                  <tr><td class="n">40</td><td class="n">4.02</td><td class="n">128 210</td><td style="color:var(--ok)">▲ +0.05 / mo</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="cell">
-            <header>[2] python <span class="grow"></span><span class="chip info">chart</span><span class="chip">1.2 s</span></header>
-            <pre><span class="k">import</span> polars <span class="k">as</span> pl
-df <span class="op">=</span> pl<span class="op">.</span><span class="fn">read_parquet</span>(<span class="str">"telemetry.parquet"</span>)
-<span class="pn">(</span>df<span class="op">.</span><span class="fn">group_by_dynamic</span>(<span class="str">"ts"</span>, every<span class="op">=</span><span class="str">"1mo"</span>)
-   <span class="op">.</span><span class="fn">agg</span>(pl<span class="op">.</span><span class="fn">col</span>(<span class="str">"battery"</span>)<span class="op">.</span><span class="fn">mean</span>())<span class="op">.</span><span class="fn">plot</span>()<span class="pn">)</span></pre>
-            <div class="out">
-              <div class="bars">
-                <i style="height:96%"></i><i style="height:91%"></i><i style="height:87%"></i><i style="height:84%"></i>
-                <i style="height:78%"></i><i style="height:74%"></i><i style="height:66%"></i><i style="height:61%"></i>
-                <i style="height:57%"></i><i style="height:49%"></i><i style="height:44%"></i><i style="height:38%"></i>
-              </div>
-              <div class="legend"><span><b style="background:var(--accent)"></b>mean battery (V)</span><span style="margin-left:auto">Apr 26 → Mar 27</span></div>
-            </div>
-          </div>
-
-          <div class="cell">
-            <header>[3] <svg class="i ft-ai"><use href="#i-spark"/></svg> proton <span class="grow"></span><span class="chip accent">analyst</span></header>
-            <div class="out" style="border-top:0">
-              <p style="margin:0 0 8px;color:var(--ink-2)">Battery mean falls 24% over twelve months, but it is not fleet-wide: <b>sat 17 and 31 carry 71% of the decline</b> and both share ground station <code>KIR-2</code>. The other 38 satellites drift within noise.</p>
-              <p style="margin:0 0 8px;color:var(--ink-2)">Their <code>mode</code> histogram shows 4× more <code>SAFE_HOLD</code> entries than the fleet median — the batteries are probably fine and the scheduler is not.</p>
-              <div class="tool"><svg class="i"><use href="#i-target"/></svg> <b>test.mannwhitney</b> KIR-2 vs rest <span class="t">p = 0.003</span></div>
-              <div class="suggest"><span>Chart SAFE_HOLD by station</span><span>Write this up</span><span>Open sat 17 in Codex</span></div>
-            </div>
-          </div>
-        </div>
+        <div class="scroll" data-cells></div>
       </main>
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>

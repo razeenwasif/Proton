@@ -2,6 +2,7 @@
 import type { Action } from "./Action";
 import type { Activity } from "./Activity";
 import type { BufferTab } from "./BufferTab";
+import type { CellView } from "./CellView";
 import type { ChangeView } from "./ChangeView";
 import type { Completion } from "./Completion";
 import type { DebugFrame } from "./DebugFrame";
@@ -118,7 +119,16 @@ path: string,
 /**
  * What to put on the tab.
  */
-name: string, kind: ViewerKind, } | { "type": "layout", layout: Layout, } | { "type": "repo", 
+name: string, kind: ViewerKind, } | { "type": "notebook", 
+/**
+ * Empty when no notebook is open, which is how the panel knows to
+ * say so rather than showing the last one.
+ */
+path: string, cells: Array<CellView>, 
+/**
+ * Why there is no kernel, when there is a reason worth showing.
+ */
+problem: string, } | { "type": "layout", layout: Layout, } | { "type": "repo", 
 /**
  * `None` outside a repository, on a detached `HEAD`, or before the
  * first commit. All three mean the same thing to the panel.

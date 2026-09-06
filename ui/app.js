@@ -1122,6 +1122,191 @@ function renderTree(rows) {
 /** Whether the terminal has the keyboard. */
 let terminalFocused = false;
 
+/* ── notebooks ────────────────────────────────────────────────────────
+   The core owns the notebook, the kernel and the choice of which MIME
+   type is worth drawing. This draws cells and sends the buttons back —
+   it never decides what an output *is*, because a dataframe arriving as
+   both HTML and plain text is a judgement about data rather than pixels,
+   and that judgement is made once, in Rust. */
+
+/** The cells drawn last time, so only the ones that moved are redrawn. */
+let notebookPainted = [];
+
+/** One output. Everything here is text or a table; no kernel markup. */
+function outputHtml(out) {
+  switch (out.type) {
+    case "stream":
+      // stderr is not an error — warnings and progress bars come this way —
+      // but it is worth telling apart from what the cell meant to print.
+      return `<pre class="out-stream${out.name === "stderr" ? " err" : ""}">${escapeHtml(out.text)}</pre>`;
+
+    case "text":
+      return `<pre class="out-stream">${escapeHtml(out.text)}</pre>`;
+
+    case "table":
+      return tableHtml(out.table);
+
+    case "image":
+      // A data URL, which is the one place a kernel's bytes reach the page —
+      // as an image, where they can only ever be an image.
+      return `<img class="out-img" alt="output" src="data:${encodeURIComponent(out.mime)};base64,${out.base64.replace(/[^A-Za-z0-9+/=]/g, "")}">`;
+
+    case "error":
+      // The traceback carries ANSI colour from the kernel; it is stripped
+      // rather than interpreted, because a traceback is worth reading and
+      // colouring it is not worth an escape-sequence parser here.
+      return (
+        `<div class="out-err"><b>${escapeHtml(out.ename)}</b>: ${escapeHtml(out.evalue)}` +
+        `<pre>${escapeHtml(out.traceback.map(stripAnsi).join("\n"))}</pre></div>`
+      );
+
+    default:
+      return "";
+  }
+}
+
+/** ANSI escapes out of a traceback. */
+const ANSI = /\[[0-9;]*m/g;
+const stripAnsi = (text) => text.replace(ANSI, "");
+
+/** A table the core extracted, drawn with our own borders.
+ *
+ * Every cell is a jump target: a value in a dataframe is usually a thing that
+ * exists in the code too, and "open sat 17 in Codex" is the whole reason the
+ * cross-mode jump exists.
+ */
+function tableHtml(table) {
+  const head = table.columns
+    .map((c) => `<th>${escapeHtml(c)}</th>`)
+    .join("");
+  const body = table.rows
+    .map(
+      (row) =>
+        `<tr>${row
+          .map((cell, i) => {
+            const numeric = /^-?[\d.,]+$/.test(cell.trim()) && cell.trim() !== "";
+            return (
+              `<td class="${numeric ? "n" : ""}" data-df-cell="${escapeHtml(cell)}"` +
+              ` title="${escapeHtml(table.columns[i] || "")} — click to find it in the code">` +
+              `${escapeHtml(cell)}</td>`
+            );
+          })
+          .join("")}</tr>`,
+    )
+    .join("");
+  // What the frame said it had, when it said. Showing thirty of a million
+  // without mentioning the million is the one thing a table must not do.
+  const more =
+    table.total && table.total > table.rows.length
+      ? `<div class="df-more">${table.total.toLocaleString()} rows in all · showing ${table.rows.length}</div>`
+      : "";
+  return `<div class="out" style="padding:0"><table class="df"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${more}</div>`;
+}
+
+function cellHtml(cell, index) {
+  const number = cell.running
+    ? `<span class="spin"></span>`
+    : `[${cell.executionCount ?? " "}]`;
+  const outputs = cell.outputs.map(outputHtml).join("");
+  const run =
+    cell.kind === "code"
+      ? `<button class="hbtn" data-run-cell="${index}" title="Run this cell"><svg class="i"><use href="#i-play"/></svg></button>`
+      : "";
+
+  return (
+    `<div class="cell${cell.running ? " running" : ""}" data-cell="${index}">` +
+    `<header>${number} ${escapeHtml(cell.kind)}<span class="grow"></span>${run}` +
+    `<button class="hbtn" data-drop-cell="${index}" title="Remove this cell"><svg class="i"><use href="#i-close"/></svg></button>` +
+    `</header>` +
+    // Editable in place: the notebook is the document, and a cell you cannot
+    // type in is a viewer rather than a mode.
+    `<pre class="cell-src" contenteditable="plaintext-only" spellcheck="false" data-src="${index}">${escapeHtml(cell.source)}</pre>` +
+    (outputs ? `<div class="out-wrap">${outputs}</div>` : "") +
+    `</div>`
+  );
+}
+
+// A cell's source goes back to the core when you leave it, not on every
+// keystroke: the core answers an edit by re-sending the notebook, and
+// re-rendering the box you are typing in would move the caret to the start
+// of it on every character.
+document.addEventListener(
+  "blur",
+  (e) => {
+    const src = e.target.closest?.("[data-src]");
+    if (!src) return;
+    dispatch({
+      type: "setCell",
+      index: Number(src.dataset.src),
+      source: src.textContent,
+    });
+  },
+  true,
+);
+
+// ⇧⏎ runs the cell, which is what it does in every notebook there has ever
+// been. Plain ⏎ is a newline, because a cell is code.
+document.addEventListener("keydown", (e) => {
+  const src = e.target.closest?.("[data-src]");
+  if (!src || e.key !== "Enter" || !e.shiftKey) return;
+  e.preventDefault();
+  const index = Number(src.dataset.src);
+  dispatch({ type: "setCell", index, source: src.textContent });
+  dispatch({ type: "runCell", index });
+});
+
+function renderNotebook(event) {
+  const name = $("[data-nb-name]");
+  if (name) {
+    name.textContent = event.path ? event.path.split(/[\\/]/).pop() : "no notebook";
+    name.className = "chip" + (event.path ? " accent" : "");
+  }
+  const kernel = $("[data-nb-kernel]");
+  if (kernel) {
+    // Only when there is something wrong. A kernel that is working is not
+    // news, and a chip that is always there is a chip nobody reads.
+    kernel.hidden = !event.problem;
+    kernel.className = "chip warn";
+    kernel.textContent = event.problem;
+  }
+
+  const box = $("[data-cells]");
+  if (!box) return;
+  if (!event.cells.length) {
+    box.innerHTML = `<div class="empty">Open a .ipynb to start</div>`;
+    notebookPainted = [];
+    return;
+  }
+
+  // Cell by cell, for two reasons. The cheap one is the same as the editor
+  // pane's: a running cell sends a notebook every heartbeat and almost all of
+  // it is unchanged. The one that matters is that these are editable — and
+  // replacing the markup underneath somebody who is typing takes the caret
+  // with it, on every keystroke of output that arrives while they think.
+  const rows = event.cells.map(cellHtml);
+  const focused = document.activeElement?.closest?.("[data-cell]");
+  const editing = focused ? Number(focused.dataset.cell) : -1;
+
+  const kids = box.children;
+  for (let i = 0; i < rows.length; i++) {
+    if (i === editing) continue;
+    if (notebookPainted[i] === rows[i] && kids[i]) continue;
+    const holder = document.createElement("div");
+    holder.innerHTML = rows[i];
+    const fresh = holder.firstElementChild;
+    if (!fresh) continue;
+    if (kids[i]) kids[i].replaceWith(fresh);
+    else box.appendChild(fresh);
+  }
+  while (kids.length > rows.length) box.lastElementChild.remove();
+  notebookPainted = rows;
+  // The cell being typed in was skipped, so what is on screen there is not
+  // what was just painted. Forgetting that is what would leave it stale after
+  // the caret moves on.
+  if (editing >= 0) notebookPainted[editing] = null;
+}
+
+
 /* ── git ──────────────────────────────────────────────────────────────
    The core asks git; this draws the answer. A row is a path, so clicking
    one opens it — the core spells these the way `openBuffer` does, which
@@ -1348,7 +1533,55 @@ document.addEventListener(
   { passive: false },
 );
 
+/** The mode's four slots. The core says what belongs where; this shows it.
+ *
+ * Only the mode switch itself today — the workspaces were already built one
+ * per mode, so the layout event confirms what is on screen rather than
+ * rebuilding it. What it adds is the *reason*: the front end no longer has
+ * its own opinion about which mode has a dock.
+ */
+function renderLayout(layout) {
+  document.documentElement.dataset.stage = layout.stage;
+  document.documentElement.dataset.document = layout.document;
+  // A mode with nothing for its dock gets the space back rather than an
+  // empty panel — Chat is the one that means it.
+  const workspace = $(`.workspace[data-ws="${layout.mode}"]`);
+  if (workspace) workspace.dataset.dock = layout.dock;
+}
+
 document.addEventListener("click", (e) => {
+  /* ── notebooks ────────────────────────────────────────────────── */
+  const run = e.target.closest("[data-run-cell]");
+  if (run) {
+    dispatch({ type: "runCell", index: Number(run.dataset.runCell) });
+    return;
+  }
+  const drop = e.target.closest("[data-drop-cell]");
+  if (drop) {
+    dispatch({ type: "removeCell", index: Number(drop.dataset.dropCell) });
+    return;
+  }
+  if (e.target.closest("[data-nb-add]")) {
+    dispatch({ type: "addCell", code: true });
+    return;
+  }
+  if (e.target.closest("[data-nb-save]")) {
+    dispatch({ type: "saveNotebook" });
+    return;
+  }
+  // A value in a dataframe is usually a thing that exists in the code too.
+  // This is the cross-mode jump from the other end: the table says what to
+  // look for, Telescope finds where, and Codex is where you land.
+  const df = e.target.closest("[data-df-cell]");
+  if (df) {
+    const value = df.dataset.dfCell.trim();
+    if (value) {
+      dispatch({ type: "openPicker", kind: "grep" });
+      dispatch({ type: "pickerQuery", text: value });
+    }
+    return;
+  }
+
   if (e.target.closest("[data-doc-close]")) {
     closeDocument();
     return;
@@ -1971,6 +2204,14 @@ onEvent((event) => {
 
     case "repo":
       renderRepo(event);
+      break;
+
+    case "notebook":
+      renderNotebook(event);
+      break;
+
+    case "layout":
+      renderLayout(event.layout);
       break;
 
     case "document":
