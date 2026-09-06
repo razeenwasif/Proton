@@ -198,3 +198,44 @@ fn output_is_tagged_with_the_cell_that_caused_it() {
         "output crossed cells: {said:?}"
     );
 }
+
+#[test]
+#[ignore = "starts a Jupyter kernel"]
+fn a_dataframe_comes_back_as_a_table() {
+    // The whole dataframe path, against real pandas rather than a fixture of
+    // what pandas is believed to emit: run a cell, take the `text/html` out of
+    // the MIME bundle, and read a table out of it.
+    let Some(mut kernel) = start() else {
+        println!("skipping: PROTON_TEST_KERNEL not set");
+        return;
+    };
+    let messages = run(
+        &mut kernel,
+        "import pandas as pd\n\
+         pd.DataFrame({'name':['ada','alan','grace'],'score':[91.5,88.0,99.25]})",
+    );
+
+    let results = of_type(&messages, "execute_result");
+    if results.is_empty() {
+        println!("skipping: this kernel has no pandas");
+        return;
+    }
+    let html = results[0].content["data"]["text/html"]
+        .as_str()
+        .expect("pandas sends a dataframe as text/html");
+
+    let table = proton_data::table::from_html(html).expect("a table");
+    assert_eq!(
+        table.columns,
+        ["", "name", "score"],
+        "the index column keeps its empty heading"
+    );
+    assert_eq!(table.rows.len(), 3, "{:?}", table.rows);
+    assert_eq!(table.rows[0][1], "ada");
+    assert_eq!(table.rows[2][1], "grace");
+
+    // And nothing that came out is markup.
+    for cell in table.rows.iter().flatten() {
+        assert!(!cell.contains('<'), "{cell:?}");
+    }
+}
