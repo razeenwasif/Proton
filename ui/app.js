@@ -120,7 +120,12 @@ $$("[data-translucency-set]").forEach((b) =>
    front end and is the reason a second one is possible. */
 const MODES = ["chat", "codex", "design", "modeling", "game", "video", "data"];
 
+/** Which mode is on screen. The core owns it; this is a copy for the handful
+ *  of places that have to behave differently in one of them. */
+let activeMode = "codex";
+
 function renderMode(mode) {
+  activeMode = mode;
   $$(".mode").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
   $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === mode));
   closeAll();
@@ -1132,6 +1137,11 @@ let terminalFocused = false;
 /** The cells drawn last time, so only the ones that moved are redrawn. */
 let notebookPainted = [];
 
+/** The last notebook the core sent, so a re-render can be asked for without
+ * waiting for another event — `i` has to turn prose into source before there
+ * is anything to put a caret in. */
+let lastNotebook = { path: "", cells: [], problem: "" };
+
 /** Which markdown cell is showing its source, if any.
  *
  * View state rather than the core's: whether you are looking at prose or at
@@ -1291,6 +1301,44 @@ function cellHtml(cell, index) {
   );
 }
 
+/* Insert mode, in a notebook.
+ *
+ * `i` and `a` put you in the selected cell's source, and `Esc` leaves it —
+ * which is what the rest of the editor does and what fingers expect. Until
+ * this, a cell could only be entered by clicking it, which is the one gesture
+ * a modal editor should not require.
+ *
+ * The core does the modal half already: the engine enters insert on `i`, `a`,
+ * `o` and `O` whatever the mode, and Data's verb table has meanwhile added a
+ * cell for the last two. All that is missing is the caret, which lives here —
+ * the core names no widget and cannot focus one.
+ */
+function enterCell(object) {
+  const box = $("[data-cells]");
+  const cell = box?.querySelector(".cell.on");
+  if (!cell) return;
+
+  // Prose has to become source before there is anything to type in.
+  if (cell.querySelector("[data-md]")) {
+    markdownEditing = Number(cell.dataset.cell);
+    notebookPainted = [];
+    renderNotebook(lastNotebook);
+  }
+  const src = $("[data-cells]")?.querySelector(".cell.on .cell-src");
+  if (!src) return;
+  src.focus();
+
+  // `i` lands at the start and `a` after — the same distinction they make in
+  // text, applied to a cell. `o` and `O` made an empty cell, so either end is
+  // the same place.
+  const range = document.createRange();
+  range.selectNodeContents(src);
+  range.collapse(object === "Here" || object === "LineStart");
+  const selection = getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 // Double-click rendered prose to get its source back. Single-click selects,
 // which is what a click on any other cell does, so editing needs the stronger
 // gesture — the same bargain every notebook makes.
@@ -1321,18 +1369,39 @@ document.addEventListener(
   true,
 );
 
-// ⇧⏎ runs the cell, which is what it does in every notebook there has ever
-// been. Plain ⏎ is a newline, because a cell is code.
+// The keys a cell claims for itself.
+//
+// ⇧⏎ runs it, which is what it does in every notebook there has ever been;
+// plain ⏎ is a newline, because a cell is code. Escape leaves — the global
+// handler yields to editable elements now, so this is the only thing that can
+// hand the keyboard back to the modal engine.
 document.addEventListener("keydown", (e) => {
   const src = e.target.closest?.("[data-src]");
-  if (!src || e.key !== "Enter" || !e.shiftKey) return;
-  e.preventDefault();
+  if (!src) return;
   const index = Number(src.dataset.src);
-  dispatch({ type: "setCell", index, source: src.textContent });
-  dispatch({ type: "runCell", index });
+
+  if (e.key === "Escape") {
+    e.preventDefault();
+    dispatch({ type: "setCell", index, source: src.textContent });
+    src.blur();
+    // The core still thinks the engine is in insert mode, and only a key
+    // it sees will change that.
+    sendKey(e);
+    return;
+  }
+  if (e.key === "Enter" && e.shiftKey) {
+    e.preventDefault();
+    dispatch({ type: "setCell", index, source: src.textContent });
+    dispatch({ type: "runCell", index });
+    // Back to normal mode, so `j` moves to the next cell rather than typing
+    // a `j` into the one that just ran.
+    src.blur();
+    sendKey(new KeyboardEvent("keydown", { key: "Escape" }));
+  }
 });
 
 function renderNotebook(event) {
+  lastNotebook = event;
   const name = $("[data-nb-name]");
   if (name) {
     name.textContent = event.path ? event.path.split(/[\\/]/).pop() : "no notebook";
@@ -2312,6 +2381,15 @@ onEvent((event) => {
       renderNotebook(event);
       break;
 
+    case "action":
+      // `i`, `a`, `o` and `O` in Data mode put the caret in a cell. The core
+      // has already switched the engine to insert and, for `o`/`O`, added the
+      // cell; this is the half it cannot do.
+      if (activeMode === "data" && event.action.verb === "Insert") {
+        requestAnimationFrame(() => enterCell(event.action.object));
+      }
+      break;
+
     case "layout":
       renderLayout(event.layout);
       break;
@@ -2734,7 +2812,7 @@ new ResizeObserver(reportViewport).observe(document.body);
 // Splitting is a command now, not a function here — `dispatch` covers it.
 Object.assign(window, {
   setTheme, setTranslucency, setMode: coreSetMode, setDock, open, closeAll,
-  dispatch, drawPointerEdges, setHint,
+  dispatch, drawPointerEdges, setHint, enterCell,
 });
 
 /* ── the agent ────────────────────────────────────────────────────────

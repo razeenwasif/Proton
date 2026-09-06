@@ -300,3 +300,42 @@ fn run_all_with_no_kernel_says_so_rather_than_doing_nothing_quietly() {
         "{events:?}"
     );
 }
+
+#[test]
+fn i_and_a_report_an_insert_the_panel_can_act_on() {
+    // The core cannot focus anything — it names no widget — so `i` in a
+    // notebook has to reach the panel as an action for the caret to land in
+    // a cell. If this stops being sent, `i` silently does nothing.
+    let mut space = open("insert");
+    for (key, object) in [("i", "Here"), ("a", "After")] {
+        let events = keys(&mut space, key);
+        let acted = events.iter().any(|event| match event {
+            Event::Action { action, .. } => {
+                format!("{:?}", action.verb) == "Insert" && format!("{:?}", action.object) == object
+            }
+            _ => false,
+        });
+        assert!(acted, "`{key}` should report an insert: {events:?}");
+        // And it left the engine in insert mode, so the next `a` is a verb
+        // rather than a typed character.
+        space.apply(Command::Key {
+            key: Key::named("Escape"),
+        });
+    }
+}
+
+#[test]
+fn typing_in_a_cell_does_not_reach_the_notebook_as_verbs() {
+    // Insert mode in Data mode belongs to the cell: the panel has the caret
+    // and sends the text back with `setCell`. What must not happen is the
+    // core also treating those characters as cell verbs — `d` while typing
+    // must not delete anything.
+    let mut space = open("insert-safe");
+    let before = sources(&cells(&mut space));
+    keys(&mut space, "i");
+    keys(&mut space, "dd");
+    space.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+    assert_eq!(sources(&cells(&mut space)), before, "typing deleted a cell");
+}
