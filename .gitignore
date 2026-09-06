@@ -4,4 +4,4 @@ target/
 node_modules
 *.log
 .venv/
-scratch.ipynb
+playground.ipynb
