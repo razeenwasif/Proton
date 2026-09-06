@@ -16,6 +16,7 @@ import type { NoticeLevel } from "./NoticeLevel";
 import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
 import type { PluginView } from "./PluginView";
+import type { RepoFile } from "./RepoFile";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
 import type { Span } from "./Span";
@@ -106,7 +107,12 @@ total: number, elapsedMs: number,
  * The tree is still being walked. An empty list under this flag means
  * "not yet", not "no matches" — and those look identical without it.
  */
-scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "hover", text: string, line: number, column: number, } | { "type": "hoverClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "tasks", tasks: Array<Task>, } | { "type": "plugins", items: Array<PluginView>, themes: Array<ThemeView>, } | { "type": "review", files: Array<ChangeView>, } | { "type": "agent", transcript: Array<Entry>, activity: Activity, inputTokens: bigint, outputTokens: bigint, 
+scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "hover", text: string, line: number, column: number, } | { "type": "hoverClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "tasks", tasks: Array<Task>, } | { "type": "plugins", items: Array<PluginView>, themes: Array<ThemeView>, } | { "type": "review", files: Array<ChangeView>, } | { "type": "repo", 
+/**
+ * `None` outside a repository, on a detached `HEAD`, or before the
+ * first commit. All three mean the same thing to the panel.
+ */
+branch: string | null, files: Array<RepoFile>, } | { "type": "agent", transcript: Array<Entry>, activity: Activity, inputTokens: bigint, outputTokens: bigint, 
 /**
  * Served from cache. Surfaced because a silently invalidated prefix
  * is a cost regression rather than an error, and nothing else shows it.

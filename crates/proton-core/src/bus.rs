@@ -242,6 +242,8 @@ pub enum Command {
         /// The line the cursor is on when absent.
         line: Option<usize>,
     },
+    /// Ask what the repository has. Answered with `Event::Repo`.
+    RefreshRepo,
     /// Open a terminal in the project, or focus the one there is.
     OpenTerminal,
     /// Type at it. The front end sends what the keyboard produced; the shell
@@ -533,6 +535,19 @@ pub enum Event {
     Review {
         files: Vec<ChangeView>,
     },
+    /// What the repository has, for the git panel.
+    ///
+    /// Recomputed rather than kept, the way the gutter and the file tree are:
+    /// git's answer changes because of things that never went through this
+    /// core — a rebase in a terminal, a branch switch, another editor — so a
+    /// remembered list is a list that is wrong exactly when it matters.
+    #[serde(rename_all = "camelCase")]
+    Repo {
+        /// `None` outside a repository, on a detached `HEAD`, or before the
+        /// first commit. All three mean the same thing to the panel.
+        branch: Option<String>,
+        files: Vec<RepoFile>,
+    },
     /// The whole agent transcript, and what it is doing.
     ///
     /// Sent whole rather than as deltas: a turn is at most a few dozen
@@ -660,6 +675,21 @@ pub struct DebugVariable {
     pub value: String,
     /// It has children to expand — a struct, an array.
     pub expandable: bool,
+}
+
+/// One changed path, for the git panel.
+///
+/// The path is relative and spelled with forward slashes, which is the same
+/// spelling `openBuffer` and the file index use — so a row in this list can be
+/// clicked open without anything having to translate it first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+pub struct RepoFile {
+    pub path: String,
+    /// `M`, `A`, `D` or `?`, as git spells it. One letter because the panel is
+    /// narrow and because it is the notation anybody reading a git list
+    /// already knows.
+    pub state: String,
 }
 
 /// What git says happened to one line.

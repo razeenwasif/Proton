@@ -42,7 +42,12 @@ impl Git {
         self.repo.is_repo()
     }
 
-    /// Every path git considers changed, for `␣gg`.
+    /// The branch `HEAD` is on, if it has a name to show.
+    pub fn branch(&self) -> Option<String> {
+        self.repo.branch()
+    }
+
+    /// Every path git considers changed, for the git panel.
     pub fn changes(&self) -> Vec<proton_vcs::Change> {
         self.repo.changes()
     }

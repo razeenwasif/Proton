@@ -102,6 +102,18 @@ impl Repo {
         self.repo.is_some()
     }
 
+    /// The branch `HEAD` is on.
+    ///
+    /// `None` covers three ordinary situations that all mean "no name to
+    /// show": not a repository, a detached `HEAD`, and a repository so new it
+    /// has no commits yet. None of them is an error, and a panel with nothing
+    /// to put in that slot is the correct rendering of all three.
+    pub fn branch(&self) -> Option<String> {
+        let repo = self.repo.as_ref()?;
+        let head = repo.head_ref().ok()??;
+        Some(head.name().shorten().to_string())
+    }
+
     /// The file as `HEAD` has it.
     ///
     /// `None` when the path is untracked, outside the repository, or not text

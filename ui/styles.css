@@ -1558,3 +1558,23 @@ table.df tr:hover td { background: var(--e1); }
 .tb5 { background: var(--accent-2); } .tb13 { background: var(--accent-2); }
 .tb6 { background: var(--tone); }     .tb14 { background: var(--tone); }
 .tb7 { background: var(--ink-2); }    .tb15 { background: var(--text-hi); }
+
+/* ── git panel ────────────────────────────────────────────────────── */
+/* One letter, in the colour the gutter already uses for that state — so a
+   row here and a mark beside a line mean the same thing without a legend. */
+.gst {
+  flex: 0 0 auto; width: 13px; text-align: center;
+  font: 600 10.5px/1 var(--mono); color: var(--ink-3);
+}
+.g-modified  { color: var(--info); }
+.g-added     { color: var(--ok); }
+.g-deleted   { color: var(--err); }
+.g-untracked { color: var(--ink-4); }
+.gname { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+/* The folder is context, not the thing you are reading, and it is the half
+   that should disappear first when the panel is narrow. */
+.gdir {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  text-align: right;
+  color: var(--ink-4); font-size: 11px;
+}

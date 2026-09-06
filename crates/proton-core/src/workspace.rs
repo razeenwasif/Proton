@@ -351,6 +351,7 @@ impl Workspace {
                     self.agent_event(),
                     self.trace_event(),
                     self.tree_event(),
+                    self.repo_event(),
                 ]);
                 events
             }
@@ -385,6 +386,8 @@ impl Workspace {
                 }
                 events
             }
+
+            Command::RefreshRepo => vec![self.repo_event()],
 
             Command::OpenTerminal => {
                 // A shell that has exited is as good as no shell: asking for a
@@ -3007,6 +3010,28 @@ impl Workspace {
     fn tree_event(&self) -> Event {
         Event::Tree {
             rows: self.tree.rows(self.editor.buffer().path()),
+        }
+    }
+
+    /// What the repository has right now.
+    ///
+    /// Asked of git each time rather than kept, which is the same discipline
+    /// the gutter and the file tree follow. Git's answer moves for reasons
+    /// that never pass through this core — a commit in the terminal panel, a
+    /// branch switched from outside — so a remembered list would be stale
+    /// exactly when somebody looked at it to find out what had happened.
+    fn repo_event(&self) -> Event {
+        Event::Repo {
+            branch: self.git.branch(),
+            files: self
+                .git
+                .changes()
+                .into_iter()
+                .map(|change| crate::bus::RepoFile {
+                    path: change.path,
+                    state: change.state.letter().to_string(),
+                })
+                .collect(),
         }
     }
 

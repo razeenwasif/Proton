@@ -273,6 +273,28 @@ to the live screen. And the panel says when it is looking at history, because
 a terminal scrolled back looks exactly like one whose shell has stopped
 answering.
 
+### Git
+
+The gutter has always had git; the *panel* is new, and it lives in the right
+dock beside the agent, the debugger and the terminal rather than on the left
+rail. The rail button is a jump to it, the way the debugger's and the
+visualizer's already were — the left rail names things, the dock holds them.
+
+**The list is asked for, never remembered.** Git's answer moves for reasons
+that never pass through this core: a commit made in the terminal panel, a
+branch switched in another window, a rebase. A remembered list would be stale
+exactly when somebody opened the panel to find out what had happened. So
+opening it asks, and `Sync` carries one too — a panel that is empty until you
+click it twice is one people conclude is broken.
+
+Paths are relative and spelled with forward slashes, which is the spelling
+`openBuffer` and the file index already use. That is what lets a row be
+clicked open with nothing in between translating it.
+
+A folder that is not a repository, a detached `HEAD`, and a checkout with no
+commits yet are all `None`, and all mean the same thing to the panel: there is
+no name to show. None of them is an error.
+
 ### Debugging
 
 `proton-dap` is layered the way `proton-lsp` is and for the same reasons: an

@@ -211,7 +211,7 @@
       <button title="Chat  ␣aa" data-mode-go="chat"><svg class="i"><use href="#i-chat"/></svg></button>
       <button class="on" title="Explorer  ␣e"><svg class="i"><use href="#i-files"/></svg></button>
       <button title="Telescope  ␣ff" data-open="telescope"><svg class="i"><use href="#i-search"/></svg></button>
-      <button title="Git  ␣gg"><svg class="i"><use href="#i-git"/></svg></button>
+      <button title="Git  ␣gg" data-dock="git"><svg class="i"><use href="#i-git"/></svg></button>
       <button title="Debug — ␣db sets a breakpoint, ␣dr runs" data-dock="debug"><svg class="i"><use href="#i-bug"/></svg></button>
       <button title="Code Visualizer  ␣cv" data-dock="visualizer"><svg class="i"><use href="#i-proton"/></svg></button>
       <button title="Database  ␣dd"><svg class="i"><use href="#i-db"/></svg></button>
@@ -348,6 +348,7 @@
           <button class="dock-tab"     data-dockpanel="debug">Debug</button>
           <button class="dock-tab"     data-dockpanel="visualizer">Visualizer</button>
           <button class="dock-tab"     data-dockpanel="device">Device</button>
+          <button class="dock-tab"     data-dockpanel="git">Git</button>
           <button class="dock-tab"     data-dockpanel="term">Terminal</button>
         </div>
 
@@ -516,6 +517,20 @@
         <!-- Terminal -->
         <!-- Rendered from Event::Terminal. The core owns the pseudo-terminal
              and the screen; this draws rows of runs and sends keys back. -->
+        <!-- Git -->
+        <!-- Rendered from Event::Repo. The core asks git each time rather than
+             remembering: the answer moves for reasons that never pass through
+             it — a commit in the terminal panel, a branch switched outside. -->
+        <div class="dock-panel" data-panel="git" style="display:none;flex-direction:column;flex:1;min-height:0">
+          <header>
+            <svg class="i" style="opacity:.6"><use href="#i-git"/></svg>
+            <span class="chip" data-git-branch>—</span>
+            <span class="grow"></span>
+            <span class="chip" data-git-count>0</span>
+          </header>
+          <div class="scroll tree" data-git-files></div>
+        </div>
+
         <div class="dock-panel" data-panel="term" style="display:none;flex-direction:column;flex:1;min-height:0">
           <header>
             <span class="chip" data-term-state>closed</span>

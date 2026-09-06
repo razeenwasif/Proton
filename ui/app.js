@@ -151,6 +151,10 @@ function setDock(panel) {
       focusTerminal(true);
     });
   }
+  // Git's answer moves for reasons the core never sees — a commit in the
+  // terminal panel, a branch switched outside — so opening the panel asks
+  // again rather than showing whatever was true at the last sync.
+  if (panel === "git") dispatch({ type: "refreshRepo" });
 }
 
 $$("#codex-dock .dock-tab").forEach((t) =>
@@ -1117,6 +1121,52 @@ function renderTree(rows) {
 /** Whether the terminal has the keyboard. */
 let terminalFocused = false;
 
+/* ── git ──────────────────────────────────────────────────────────────
+   The core asks git; this draws the answer. A row is a path, so clicking
+   one opens it — the core spells these the way `openBuffer` does, which
+   is what makes that possible without translating anything here. */
+
+/** What git calls each state, for people who do not read git. */
+const GIT_STATE = { M: "modified", A: "added", D: "deleted", "?": "untracked" };
+
+function renderRepo(event) {
+  const branch = $("[data-git-branch]");
+  if (branch) {
+    // No branch is three ordinary situations — no repository, a detached
+    // HEAD, a repository with no commits — and none of them is an error.
+    branch.textContent = event.branch ?? "no branch";
+    branch.className = "chip" + (event.branch ? " accent" : "");
+  }
+
+  const count = $("[data-git-count]");
+  if (count) {
+    const n = event.files.length;
+    count.textContent = n === 1 ? "1 change" : `${n} changes`;
+    count.hidden = false;
+  }
+
+  const box = $("[data-git-files]");
+  if (!box) return;
+  box.innerHTML = event.files.length
+    ? event.files
+        .map((file) => {
+          const state = GIT_STATE[file.state] ?? "changed";
+          const name = file.path.split("/").pop();
+          // Without the trailing separator: it is the only character that
+          // would be left once the folder is ellipsised, and a lone slash
+          // is not context.
+          const folder = file.path.slice(0, -name.length).replace(/\/$/, "");
+          return (
+            `<div class="row" data-git-open="${escapeHtml(file.path)}" title="${escapeHtml(file.path)} — ${state}">` +
+            `<span class="gst g-${state}">${escapeHtml(file.state)}</span>` +
+            `<span class="gname">${escapeHtml(name)}</span>` +
+            `<span class="gdir">${escapeHtml(folder)}</span></div>`
+          );
+        })
+        .join("")
+    : `<div class="empty">Nothing changed</div>`;
+}
+
 /** The rows drawn last time, so only the ones that moved are redrawn. */
 let terminalPainted = [];
 
@@ -1298,6 +1348,14 @@ document.addEventListener(
 );
 
 document.addEventListener("click", (e) => {
+  // A changed file is a file: clicking one opens it, which is the only thing
+  // anybody wants from a list of them.
+  const changed = e.target.closest("[data-git-open]");
+  if (changed) {
+    dispatch({ type: "openBuffer", path: changed.dataset.gitOpen });
+    return;
+  }
+
   // The indicator is also the way out of history.
   if (e.target.closest("[data-term-back]")) {
     dispatch({ type: "terminalToBottom" });
@@ -1898,6 +1956,10 @@ onEvent((event) => {
 
     case "tree":
       renderTree(event.rows);
+      break;
+
+    case "repo":
+      renderRepo(event);
       break;
 
     case "debug":
