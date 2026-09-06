@@ -50,6 +50,13 @@ pub struct View {
     /// How many lines it can show. Reported by the front end, which is the
     /// only thing that knows how tall it is.
     pub lines: usize,
+    /// Where this view is in a document that has no lines — the cell, in a
+    /// notebook.
+    ///
+    /// Same rule as `cursor`, for the same reason: only meaningful while the
+    /// view is *not* focused. The focused view's cell lives on `Data`, where
+    /// every verb can reach it without knowing splits exist.
+    pub cell: usize,
 }
 
 impl Default for View {
@@ -60,6 +67,7 @@ impl Default for View {
             first_line: 0,
             // Enough to be useful before the front end reports its real height.
             lines: 80,
+            cell: 0,
         }
     }
 }

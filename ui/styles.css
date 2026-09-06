@@ -526,6 +526,12 @@ kbd {
 /* ── editor — sits directly on the window ─────────────────────────── */
 .buffers { display: flex; align-items: stretch; gap: 3px; padding: 7px 10px 0; overflow: hidden; flex: 0 0 auto; }
 
+/* Data's panes have no buffer tabs to fill the bar — one notebook sits behind
+   all of them — so the spacer is what pushes the split buttons to the right,
+   where Codex's tabs push them. `.grow` elsewhere is scoped to `.pane > header`
+   and does nothing here. */
+.buffers .grow { flex: 1; }
+
 /* The tabs are rendered into this, and it has to be a flex row of its own.
    Left as a plain span it was a block container full of block-level tabs, so
    opening a second file grew the bar downwards instead of along. */

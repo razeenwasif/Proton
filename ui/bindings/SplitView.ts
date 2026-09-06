@@ -7,4 +7,10 @@ export type SplitView = {
 /**
  * Which buffer it shows, as an index into the buffer bar.
  */
-buffer: number, name: string, };
+buffer: number, name: string, 
+/**
+ * Which cell it is on, for the modes whose document has cells. Panes
+ * onto one notebook differ only in this and in where they are scrolled,
+ * so without it every pane would draw the same selection.
+ */
+cell: number, };

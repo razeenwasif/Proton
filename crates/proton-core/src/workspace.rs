@@ -2990,9 +2990,15 @@ impl Workspace {
     fn park_cursor(&mut self) {
         let cursor = self.editor.buffer().cursor;
         let buffer = self.editor.active();
+        let cell = self.data.selected();
         let view = self.splits.view_mut();
         view.cursor = cursor;
         view.buffer = buffer;
+        // Parked for every mode, not just Data. A view is one window onto the
+        // workspace and remembers where it was in each kind of document, so
+        // splitting in Codex and switching to Data finds each pane where it
+        // left off rather than all of them on cell zero.
+        view.cell = cell;
     }
 
     /// The other half: make the newly focused view's cursor the live one.
@@ -3005,6 +3011,9 @@ impl Workspace {
         }
         let buffer = self.editor.buffer_mut();
         buffer.cursor = buffer.clamp(view.cursor);
+        // Clamped inside `set_selected`: cells can be deleted while a view is
+        // not looking, and a selection past the end panics later.
+        self.data.set_selected(view.cell);
     }
 
     /// Everything the front end has to redraw when the focused split changes.
@@ -3018,6 +3027,12 @@ impl Workspace {
         events.push(self.buffers_event());
         events.push(self.diagnostics_event());
         events.push(self.tree_event());
+        // Data's panes differ only in which cell they are on, so a focus
+        // change moves the selection without changing a character of the
+        // notebook. Without this the highlight stays on the pane you left.
+        if self.data.is_open() {
+            events.push(self.notebook_event());
+        }
         events
     }
 
@@ -3034,8 +3049,17 @@ impl Workspace {
                 .splits
                 .views()
                 .iter()
-                .map(|view| SplitView {
+                .enumerate()
+                .map(|(index, view)| SplitView {
                     buffer: view.buffer,
+                    // The focused view's cell is on `Data`, not on the view —
+                    // the view's copy is only written when focus leaves, so
+                    // reading it here would draw the focused pane wherever it
+                    // was last time it lost focus.
+                    cell: match index == self.splits.focused() {
+                        true => self.data.selected(),
+                        false => view.cell,
+                    },
                     name: self
                         .editor
                         .buffers()

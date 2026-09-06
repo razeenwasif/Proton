@@ -694,6 +694,10 @@ pub struct SplitView {
     /// Which buffer it shows, as an index into the buffer bar.
     pub buffer: usize,
     pub name: String,
+    /// Which cell it is on, for the modes whose document has cells. Panes
+    /// onto one notebook differ only in this and in where they are scrolled,
+    /// so without it every pane would draw the same selection.
+    pub cell: usize,
 }
 
 /// One run of terminal characters sharing a look.

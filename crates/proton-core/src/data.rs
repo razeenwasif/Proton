@@ -264,6 +264,15 @@ impl Data {
         self.selected
     }
 
+    /// Put the selection somewhere, clamped to a cell that exists.
+    ///
+    /// For the split machinery, which parks a view's cell while it is not
+    /// focused and hands it back when it is. Cells can be deleted while a
+    /// view is away, so the index it parked may no longer be there.
+    pub fn set_selected(&mut self, index: usize) {
+        self.selected = index.min(self.len().saturating_sub(1));
+    }
+
     /// Run a modal action against the notebook.
     ///
     /// This is the mode contract's verb table, in the place it actually does

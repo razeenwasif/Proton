@@ -129,6 +129,12 @@ function renderMode(mode) {
   $$(".mode").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
   $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === mode));
   closeAll();
+  // The container that was just revealed is empty — the splits were drawn
+  // into the mode we came from. Redraw them here, and the notebook with them.
+  if (lastSplits) {
+    renderSplits(lastSplits.views, lastSplits.focused, lastSplits.vertical);
+  }
+  if (mode === "data" && lastNotebook) renderNotebook(lastNotebook);
 }
 
 $$(".mode").forEach((b) => b.addEventListener("click", () => coreSetMode(b.dataset.mode)));
@@ -226,20 +232,45 @@ document.addEventListener("click", (e) => {
    It used to clone the markup, which made two panes onto one document and
    two panes onto two copies indistinguishable — and neither of them a split. */
 function splits() {
-  return $("#codex-splits");
+  // One split layout in the core, drawn into whichever mode is on screen.
+  // Codex splits a buffer and Data splits a notebook, but the arithmetic of
+  // how many panes there are and which has the focus is the same for both,
+  // so there is one of it.
+  return activeMode === "data" ? $("#data-splits") : $("#codex-splits");
+}
+
+/** The pane that has the focus, in Data mode. */
+function focusedCells() {
+  const view = lastSplits?.focused ?? 0;
+  return $(`[data-cells][data-view="${view}"]`) ?? $("[data-cells]");
 }
 
 /** The markup of one pane. Everything in it is addressed by view index. */
 function splitHtml(view, focused) {
-  return (
-    `<section class="split${view === focused ? " on" : ""}" data-view="${view}">` +
-    `<div class="buffers">` +
-    `<span data-buffers></span>` +
+  const actions =
     `<span class="split-actions">` +
     `<button data-split="v" title="Split right — :vsplit or ␣wv"><svg class="i"><use href="#i-split-v"/></svg></button>` +
     `<button data-split="s" title="Split down — :split or ␣ws"><svg class="i"><use href="#i-split-h"/></svg></button>` +
     `<button data-split="close" title="Close this split — :close or ␣wq"><svg class="i"><use href="#i-close"/></svg></button>` +
-    `</span></div>` +
+    `</span>`;
+  const on = view === focused ? " on" : "";
+
+  // There is one notebook behind every Data pane, so there are no buffer tabs
+  // to draw — the panes differ only in which cell they are on.
+  if (activeMode === "data") {
+    return (
+      `<section class="split${on}" data-view="${view}">` +
+      `<div class="buffers"><span class="grow"></span>${actions}</div>` +
+      `<div class="scroll" data-cells data-view="${view}"></div>` +
+      `</section>`
+    );
+  }
+  return (
+    `<section class="split${on}" data-view="${view}">` +
+    `<div class="buffers">` +
+    `<span data-buffers></span>` +
+    actions +
+    `</div>` +
     `<div class="scroll code" data-editor data-view="${view}"></div>` +
     `</section>`
   );
@@ -253,6 +284,9 @@ function splitHtml(view, focused) {
  * pane's scroll position and make switching splits scroll them all to the top.
  */
 function renderSplits(views, focused, vertical) {
+  // Kept because each mode draws this same layout into its own container, and
+  // a mode that has just come on screen has never drawn it.
+  lastSplits = { views, focused, vertical };
   const box = splits();
   if (!box) return;
 
@@ -1135,7 +1169,9 @@ let terminalFocused = false;
    and that judgement is made once, in Rust. */
 
 /** The cells drawn last time, so only the ones that moved are redrawn. */
-let notebookPainted = [];
+let notebookPainted = new Map();
+/** The last split layout the core sent, so any mode can redraw it. */
+let lastSplits = null;
 
 /** The last notebook the core sent, so a re-render can be asked for without
  * waiting for another event — `i` has to turn prose into source before there
@@ -1314,17 +1350,17 @@ function cellHtml(cell, index) {
  * the core names no widget and cannot focus one.
  */
 function enterCell(object) {
-  const box = $("[data-cells]");
+  const box = focusedCells();
   const cell = box?.querySelector(".cell.on");
   if (!cell) return;
 
   // Prose has to become source before there is anything to type in.
   if (cell.querySelector("[data-md]")) {
     markdownEditing = Number(cell.dataset.cell);
-    notebookPainted = [];
+    notebookPainted.clear();
     renderNotebook(lastNotebook);
   }
-  const src = $("[data-cells]")?.querySelector(".cell.on .cell-src");
+  const src = focusedCells()?.querySelector(".cell.on .cell-src");
   if (!src) return;
   src.focus();
 
@@ -1347,7 +1383,7 @@ document.addEventListener("dblclick", (e) => {
   if (!md) return;
   markdownEditing = Number(md.dataset.md);
   // The cache describes markup that is about to be replaced.
-  notebookPainted = [];
+  notebookPainted.clear();
   dispatch({ type: "selectCell", index: markdownEditing });
 });
 
@@ -1416,22 +1452,46 @@ function renderNotebook(event) {
     kernel.textContent = event.problem;
   }
 
-  const box = $("[data-cells]");
-  if (!box) return;
+  const boxes = $$("[data-cells]");
+  if (!boxes.length) return;
+  for (const box of boxes) paintCells(box, event);
+}
+
+/**
+ * Paint one pane.
+ *
+ * Every pane shows the same notebook — there is one document and one kernel
+ * behind all of them — so they differ only in which cell is marked. The
+ * focused pane takes that from the notebook itself, where the core keeps the
+ * live selection; the others take it from the split layout, which is where a
+ * pane's cell is parked while it is not focused.
+ */
+function paintCells(box, event) {
+  const view = Number(box.dataset.view ?? 0);
   if (!event.cells.length) {
     box.innerHTML = `<div class="empty">Open a .ipynb to start</div>`;
-    notebookPainted = [];
+    notebookPainted.delete(view);
     return;
   }
+
+  const mine =
+    view === (lastSplits?.focused ?? 0)
+      ? event.cells.findIndex((cell) => cell.selected)
+      : (lastSplits?.views?.[view]?.cell ?? 0);
 
   // Cell by cell, for two reasons. The cheap one is the same as the editor
   // pane's: a running cell sends a notebook every heartbeat and almost all of
   // it is unchanged. The one that matters is that these are editable — and
   // replacing the markup underneath somebody who is typing takes the caret
   // with it, on every keystroke of output that arrives while they think.
-  const rows = event.cells.map(cellHtml);
-  const focused = document.activeElement?.closest?.("[data-cell]");
-  const editing = focused ? Number(focused.dataset.cell) : -1;
+  const rows = event.cells.map((cell, i) =>
+    cellHtml({ ...cell, selected: i === mine }, i),
+  );
+  const painted = notebookPainted.get(view) ?? [];
+  // Only this pane's caret matters here. A caret in the *other* pane must not
+  // stop this one from being redrawn.
+  const held = document.activeElement?.closest?.("[data-cell]");
+  const editing = held && box.contains(held) ? Number(held.dataset.cell) : -1;
 
   const kids = box.children;
   for (let i = 0; i < rows.length; i++) {
@@ -1440,11 +1500,11 @@ function renderNotebook(event) {
       // caret with it. But it must still be able to gain and lose the
       // selection, or moving off a focused cell leaves it looking selected
       // and moving onto one never marks it. Class only; the text is yours.
-      kids[i].classList.toggle("on", event.cells[i].selected);
+      kids[i].classList.toggle("on", i === mine);
       kids[i].classList.toggle("running", event.cells[i].running);
       continue;
     }
-    if (notebookPainted[i] === rows[i] && kids[i]) continue;
+    if (painted[i] === rows[i] && kids[i]) continue;
     const holder = document.createElement("div");
     holder.innerHTML = rows[i];
     const fresh = holder.firstElementChild;
@@ -1453,11 +1513,11 @@ function renderNotebook(event) {
     else box.appendChild(fresh);
   }
   while (kids.length > rows.length) box.lastElementChild.remove();
-  notebookPainted = rows;
   // The cell being typed in was skipped, so what is on screen there is not
   // what was just painted. Forgetting that is what would leave it stale after
   // the caret moves on.
-  if (editing >= 0) notebookPainted[editing] = null;
+  if (editing >= 0) rows[editing] = null;
+  notebookPainted.set(view, rows);
 }
 
 
@@ -1735,7 +1795,15 @@ document.addEventListener("click", (e) => {
     // Leaving a rendered markdown cell puts its prose back.
     if (markdownEditing >= 0 && markdownEditing !== index) {
       markdownEditing = -1;
-      notebookPainted = [];
+      notebookPainted.clear();
+    }
+    // A click is also a way of choosing a pane. Without this, clicking a cell
+    // in the pane that does not have the focus moves the *other* pane's
+    // selection, and the cell you clicked stays unmarked.
+    const pane = inCell.closest("[data-cells]");
+    const view = pane ? Number(pane.dataset.view ?? 0) : 0;
+    if (lastSplits && view !== lastSplits.focused) {
+      dispatch({ type: "focusSplit", index: view });
     }
     dispatch({ type: "selectCell", index });
     return;
