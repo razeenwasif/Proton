@@ -257,3 +257,35 @@ fn a_cell_that_raises_shows_the_traceback() {
         cells[1].outputs
     );
 }
+
+#[test]
+fn the_kernel_is_looked_for_under_the_project_not_beside_the_editor() {
+    // The bug this exists for is invisible in a test run from the repository
+    // root and certain in an installed app: a relative `.venv` is resolved
+    // against the *process's* working directory, which for an installed
+    // editor is its own install folder. The venv that matters belongs to the
+    // project the notebook is in.
+    let root = project("venv");
+    let bin = root
+        .join(".venv")
+        .join(if cfg!(windows) { "Scripts" } else { "bin" });
+    std::fs::create_dir_all(&bin).unwrap();
+    let exe = bin.join(if cfg!(windows) {
+        "python.exe"
+    } else {
+        "python3"
+    });
+    std::fs::write(&exe, "not really python").unwrap();
+
+    // Nothing may be leaning on an environment variable for this.
+    std::env::remove_var("PROTON_PYTHON");
+    let found = proton_core::data::python(&root).expect("the project venv should be found");
+    assert!(
+        found.ends_with(exe.file_name().unwrap()),
+        "found {found:?}, wanted the one under the project"
+    );
+    assert!(
+        found.to_string_lossy().contains(".venv"),
+        "found {found:?}, which is not the project's"
+    );
+}

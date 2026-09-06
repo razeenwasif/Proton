@@ -410,16 +410,20 @@ impl Data {
 ///
 /// `None` is an ordinary answer. It means the panel says there is no kernel,
 /// which is more useful than starting one that cannot import anything.
-pub fn python() -> Option<PathBuf> {
+pub fn python(root: &Path) -> Option<PathBuf> {
     if let Some(named) = std::env::var_os("PROTON_PYTHON") {
         let path = PathBuf::from(named);
         if path.is_file() {
             return Some(path);
         }
     }
+    // Under the *project*, not the process's working directory. An installed
+    // editor is started from its own folder or from a Start-menu shortcut, so
+    // a relative `.venv` would look next to the executable and never find the
+    // one belonging to the notebook that is open.
     for venv in [".venv", "venv", ".env"] {
         for exe in ["Scripts/python.exe", "bin/python3", "bin/python"] {
-            let path = PathBuf::from(venv).join(exe);
+            let path = root.join(venv).join(exe);
             if path.is_file() {
                 return std::fs::canonicalize(&path).ok().or(Some(path));
             }

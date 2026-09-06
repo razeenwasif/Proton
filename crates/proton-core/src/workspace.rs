@@ -403,7 +403,7 @@ impl Workspace {
             /* ── notebooks ────────────────────────────────────────── */
             Command::RunCell { index } => {
                 let cwd = self.pickers.root().to_path_buf();
-                match crate::data::python() {
+                match crate::data::python(&cwd) {
                     Some(python) => match self.data.run(index, &python, &cwd) {
                         Ok(()) => vec![self.notebook_event()],
                         Err(why) => vec![notice(why, NoticeLevel::Error)],
