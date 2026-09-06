@@ -151,6 +151,12 @@ pub struct Data {
     /// What the kernel said when it failed to start, so the panel can say so
     /// rather than showing a notebook that silently never runs.
     problem: Option<String>,
+    /// A problem discovered on the heartbeat and not yet told to anybody.
+    ///
+    /// Separate from `problem`, which is the standing state drawn as a chip.
+    /// This one is taken once and shown as a notice, because a kernel dying
+    /// under a running cell is an event, not a condition.
+    complaint: Option<String>,
     /// Which cell the modal engine is on.
     selected: usize,
     /// The cell register — what `yy` and `dd` put somewhere `p` can reach.
@@ -183,6 +189,12 @@ impl Data {
 
     pub fn problem(&self) -> Option<&str> {
         self.problem.as_deref()
+    }
+
+    /// The complaint, once. Taken rather than read: a notice repeated every
+    /// heartbeat is a notice nobody can read.
+    pub fn complaint(&mut self) -> Option<String> {
+        self.complaint.take()
     }
 
     /// Open a notebook. Does not start a kernel — that waits until something
@@ -441,6 +453,26 @@ impl Data {
         Ok(())
     }
 
+    /// The kernel is gone. Say why, and stop the cells that were waiting.
+    ///
+    /// Dropped rather than kept, so the next run starts a fresh one: a user
+    /// who fixes their python should not have to reopen the notebook.
+    fn lost_the_kernel(&mut self) -> bool {
+        let Some(kernel) = self.kernel.as_mut() else {
+            return false;
+        };
+        // Asked before the kernel is dropped — this is its stderr, and it is
+        // the only place the real reason is written down.
+        let why = format!("the kernel exited: {}", kernel.said());
+        self.kernel = None;
+        self.problem = Some(why.clone());
+        self.complaint = Some(why);
+        // Nothing is coming for these. Leaving them spinning would say to
+        // keep waiting for an answer that was never sent.
+        self.running.clear();
+        true
+    }
+
     /// Start a kernel if there is not one already.
     fn start(&mut self, python: &Path, cwd: &Path) -> Result<(), String> {
         if self.kernel.as_mut().is_some_and(Kernel::is_alive) {
@@ -470,6 +502,18 @@ impl Data {
     ///
     /// Called on the heartbeat, like every other foreign process here.
     pub fn poll(&mut self) -> bool {
+        // A kernel that has exited will never answer, and every cell waiting
+        // on it waits forever. Noticing costs one `try_wait` per beat; not
+        // noticing costs a spinner that never stops and no reason given —
+        // which is what a missing `ipykernel`, or Windows' Store stub of a
+        // python, looks like from the outside.
+        if self
+            .kernel
+            .as_mut()
+            .is_some_and(|kernel| !kernel.is_alive())
+        {
+            return self.lost_the_kernel();
+        }
         let Some(kernel) = self.kernel.as_mut() else {
             return false;
         };

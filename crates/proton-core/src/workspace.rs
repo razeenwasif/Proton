@@ -1681,6 +1681,12 @@ impl Workspace {
         // on a thread the core cannot see.
         // The kernel, on the same heartbeat as everything else out of process.
         if self.data.poll() {
+            // A kernel that died under a running cell is news, not a state:
+            // the chip says what is wrong now, but only a notice tells
+            // somebody who is looking at the cell rather than at the header.
+            if let Some(why) = self.data.complaint() {
+                events.push(notice(why, NoticeLevel::Error));
+            }
             events.push(self.notebook_event());
         }
         if self.terminal.as_mut().is_some_and(|t| t.poll()) {
