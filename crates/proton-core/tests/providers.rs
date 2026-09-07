@@ -66,9 +66,9 @@ fn a_named_model_wins_over_the_providers_default() {
     });
     space.apply(Command::SetSetting {
         key: "agent.model".into(),
-        value: json!("gemini-2.5-flash"),
+        value: json!("gemini-3.8-flash"),
     });
-    assert_eq!(shown(&mut space).1, "gemini-2.5-flash");
+    assert_eq!(shown(&mut space).1, "gemini-3.8-flash");
 }
 
 #[test]

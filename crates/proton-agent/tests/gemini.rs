@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 fn profile() -> Profile {
     Profile {
         provider: Provider::Gemini,
-        model: "gemini-3-pro".into(),
+        model: "gemini-pro-latest".into(),
         max_tokens: 4096,
         effort: proton_agent::wire::Effort::High,
         thinking: true,

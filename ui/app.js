@@ -3834,7 +3834,15 @@ document.addEventListener("click", (e) => {
    is not on this list. */
 const MODELS = {
   claude: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"],
-  gemini: ["gemini-3-pro", "gemini-2.5-pro", "gemini-2.5-flash"],
+  // Aliases first, then the pinned ids they currently resolve to. Every
+  // one of these was checked against `:streamGenerateContent` — the list
+  // this replaced held three ids and all three were dead.
+  gemini: [
+    "gemini-pro-latest",
+    "gemini-flash-latest",
+    "gemini-3.1-pro-preview",
+    "gemini-3.8-flash",
+  ],
 };
 
 // Choosing one writes the setting, which is the same thing the settings panel

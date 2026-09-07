@@ -716,7 +716,7 @@ if (HAS_SHELL) {
         // be showing the exact bug this pane is meant to make visible.
         model:
           settings.agent?.model ??
-          (settings.agent?.provider === "gemini" ? "gemini-3-pro" : "claude-opus-5"),
+          (settings.agent?.provider === "gemini" ? "gemini-pro-latest" : "claude-opus-5"),
         credential: "ANTHROPIC_API_KEY is set",
         transcript: [you, { ...reply, ...extra }],
       });

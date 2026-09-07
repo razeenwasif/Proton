@@ -70,12 +70,29 @@ impl Provider {
     ///
     /// `agent` is the careful one the pane runs on; `quick` is for completion
     /// and the semantic index, where latency costs more than depth buys.
+    ///
+    /// ## Why Gemini's are aliases and Claude's are not
+    ///
+    /// Because Google retires ids out from under you and Anthropic does not.
+    /// All three ids this used to name were dead at once: `gemini-3-pro` never
+    /// existed, and `gemini-2.5-pro` and `gemini-2.5-flash` answer
+    ///
+    /// ```text
+    /// This model models/gemini-2.5-pro is no longer available to new users.
+    /// ```
+    ///
+    /// while still being listed by `ListModels`, so nothing short of sending a
+    /// request finds out. `gemini-pro-latest` and `gemini-flash-latest` are
+    /// Google's own aliases for whatever is current, which is the property a
+    /// *default* wants: it has to keep working without anybody editing it.
+    /// Somebody who needs a fixed model types its id into the settings, which
+    /// is exactly what the settings are for.
     pub fn default_model(self, quick: bool) -> &'static str {
         match (self, quick) {
             (Provider::Claude, false) => "claude-opus-5",
             (Provider::Claude, true) => "claude-haiku-4-5-20251001",
-            (Provider::Gemini, false) => "gemini-3-pro",
-            (Provider::Gemini, true) => "gemini-2.5-flash",
+            (Provider::Gemini, false) => "gemini-pro-latest",
+            (Provider::Gemini, true) => "gemini-flash-latest",
         }
     }
 
@@ -135,9 +152,9 @@ mod tests {
 
     #[test]
     fn gemini_puts_the_model_in_the_path() {
-        let url = Provider::Gemini.url("gemini-3-pro");
+        let url = Provider::Gemini.url("gemini-pro-latest");
         assert!(
-            url.contains("/models/gemini-3-pro:streamGenerateContent"),
+            url.contains("/models/gemini-pro-latest:streamGenerateContent"),
             "{url}"
         );
         // Without `alt=sse` the endpoint answers with a JSON array rather than
