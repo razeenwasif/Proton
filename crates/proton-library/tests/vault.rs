@@ -21,10 +21,31 @@ use std::path::{Path, PathBuf};
 
 use proton_library::Library;
 
+/// Every root named in `PROTON_TEST_VAULT`, comma-separated.
+///
+/// An entry that is not a directory is dropped rather than skipping the whole
+/// run: the point of a list is that the roots are independent.
+fn vaults() -> Vec<PathBuf> {
+    std::env::var("PROTON_TEST_VAULT")
+        .unwrap_or_default()
+        .split(',')
+        .map(|part| PathBuf::from(part.trim()))
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+/// The first root, for the tests that only want one corpus.
+///
+/// Written to *say* when it is skipping. An earlier version of this file
+/// resolved a relative path against the crate directory and silently reported
+/// a pass on every run without ever having read anything, which is worse than
+/// a failure — it is a green tick for work that did not happen.
 fn vault() -> Option<PathBuf> {
-    let path = std::env::var("PROTON_TEST_VAULT").ok()?;
-    let path = PathBuf::from(path);
-    path.is_dir().then_some(path)
+    let first = vaults().into_iter().next();
+    if first.is_none() {
+        eprintln!("PROTON_TEST_VAULT names no readable directory — skipping");
+    }
+    first
 }
 
 /// Every markdown file under a root, depth-limited so a stray `node_modules`
@@ -71,7 +92,6 @@ fn load(root: &Path) -> Library {
 #[ignore = "needs a vault"]
 fn a_real_vault_indexes_into_passages() {
     let Some(root) = vault() else {
-        eprintln!("PROTON_TEST_VAULT not set — skipping");
         return;
     };
     let library = load(&root);
@@ -198,5 +218,74 @@ fn what_it_finds_is_worth_looking_at() {
         for hit in library.search(query, 4) {
             println!("    {:>6.2}  {}", hit.score, hit.cite);
         }
+    }
+}
+
+#[test]
+#[ignore = "needs a vault"]
+fn the_walker_reads_the_same_vault_the_test_harness_does() {
+    // Everything above hands the library a file list this test built. This
+    // one lets the `Shelf` find the files itself, which is the code that
+    // actually runs — with the gitignore rules, the hidden-directory skip and
+    // the size cap that the harness's own walk does not have. The two agreeing
+    // on a real corpus is what says those rules are not quietly dropping half
+    // of it.
+    //
+    // Several roots at once, comma-separated, because that is the arrangement
+    // in use: a vault, a courses folder and a projects folder together.
+    let Some(first) = vault() else {
+        return;
+    };
+    let roots = vaults();
+
+    let mut shelf = proton_library::Shelf::new();
+    shelf.set_roots(roots.clone());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while !shelf.poll() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the walk never landed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    println!(
+        "walked {} roots: {} passages from {} documents in {:?}",
+        roots.len(),
+        shelf.len(),
+        shelf.documents(),
+        shelf.elapsed().unwrap_or_default()
+    );
+    assert!(shelf.missing().is_empty(), "{:?}", shelf.missing());
+    assert!(shelf.documents() > 50, "{}", shelf.documents());
+
+    // And every citation it produces finds its file again, which is the whole
+    // round trip: a passage is cited relative to a root, and clicking it has
+    // to turn those words back into a path that exists.
+    let mut checked = 0;
+    for query in ["attention", "gradient", "memory", "network"] {
+        for hit in shelf.search(query, 10) {
+            let cited = proton_library::chunk::parse_cite(&hit.cite).expect(&hit.cite);
+            assert!(
+                shelf.locate(&cited.path).is_some(),
+                "{} does not point at a file",
+                hit.cite
+            );
+            checked += 1;
+        }
+    }
+    println!("{checked} citations found their file again");
+    assert!(checked > 0);
+
+    if roots.len() > 1 {
+        // A single-root walk must be a subset of the multi-root one, or the
+        // roots are interfering with each other.
+        let mut one = proton_library::Shelf::new();
+        one.set_roots(vec![first]);
+        while !one.poll() {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(one.documents() <= shelf.documents());
+        println!("the first root alone holds {} documents", one.documents());
     }
 }

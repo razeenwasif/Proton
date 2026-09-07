@@ -6,3 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Your own documents, cut into passages and searched with citations."
+
+[dependencies]
+ignore = "0.4"

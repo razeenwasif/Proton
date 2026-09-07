@@ -140,7 +140,25 @@ current: string, } | { "type": "settings", values: Record<string, unknown>,
 /**
  * Where they are stored, for the panel to show and for a `:e` on it.
  */
-path: string, } | { "type": "theme", 
+path: string, } | { "type": "library", 
+/**
+ * The roots, resolved — `~/OnyxVault` as the directory it means.
+ */
+roots: Array<string>, 
+/**
+ * Roots that were named and are not there. A typo in a settings file
+ * otherwise reads exactly like a vault with nothing in it.
+ */
+missing: Array<string>, documents: number, passages: number, 
+/**
+ * True while a walk is in flight, so "reading" and "empty" are
+ * different things on screen.
+ */
+indexing: boolean, 
+/**
+ * How long the last walk took. Zero if none has finished.
+ */
+elapsedMs: bigint, } | { "type": "theme", 
 /**
  * Empty when none is open, which is how the panel knows to say so.
  */

@@ -333,6 +333,36 @@ impl Agent {
                     "required": ["path", "cell"]
                 }),
             },
+            // The user's own writing, which is not in the project and is not
+            // reachable by any of the tools above. `grep` searches the
+            // repository; this searches the notes they have been keeping for
+            // years, and answers with somewhere to look rather than with a
+            // claim.
+            Tool {
+                name: "search_library".into(),
+                description: "Search the user's own notes and documents — their vault, their \
+                              course notes, their writing — for passages about something. This \
+                              is NOT the project: use grep and read_file for code, and this for \
+                              what the user has written down. Ask in the words the notes would \
+                              use, not the words of the question. Each result begins with a \
+                              citation in double brackets: quote it back exactly as given, \
+                              [[like this]], whenever you use what a passage says. The user \
+                              clicks it to open the note at that line, so an answer without \
+                              citations is one they cannot check."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Terms to look for. Matching is lexical, so the exact \
+                                            words matter: prefer the terms the notes would use."
+                        },
+                        "limit": { "type": "integer", "description": "Defaults to 6." }
+                    },
+                    "required": ["query"]
+                }),
+            },
             Tool {
                 name: "diagnostics".into(),
                 description: "Errors and warnings the language server has reported for a \
@@ -779,6 +809,13 @@ copy. What it produces is staged for review, hunk by hunk, and nothing is \
 written until they accept it — so describe what you changed and leave the \
 deciding to them. Never say a change is done.
 
+When the question is about what the user knows rather than what the code does \
+— their notes, their reading, a course they took — search the library. Cite \
+what you find, in the double brackets the results give you, and put the \
+citation next to the claim it supports rather than in a list at the end. If \
+the library has nothing on it, say so and answer from what you know; a \
+citation to a passage that does not say the thing is worse than no citation.
+
 Keep answers short. The user is reading this in a side panel next to the code, \
 not in a document.";
 
@@ -813,7 +850,17 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 9);
+        assert_eq!(tools.len(), 10);
+        // `search_library` has to say how to cite, because the bracketed
+        // citation is the only thing that makes a result clickable — and an
+        // answer about somebody's notes that they cannot check against the
+        // note is the failure this whole tool exists to avoid.
+        let library = tools.iter().find(|t| t.name == "search_library").unwrap();
+        assert!(
+            library.description.contains("[[like this]]"),
+            "it must show the citation format: {}",
+            library.description
+        );
         // `edit_file` has to say that it stages rather than applies. A model
         // told only "edit a file" reports the job as done, and the user reads
         // that as a file that has changed.

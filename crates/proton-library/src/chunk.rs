@@ -51,6 +51,47 @@ impl Passage {
     }
 }
 
+/// A citation read back: which file it names, and where in it.
+///
+/// The inverse of [`Passage::cite`], and it exists because a citation is the
+/// only thing that crosses out of here and comes back. The model writes one
+/// into its answer, the user clicks it, and something has to turn those words
+/// into a file and a line again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cited {
+    /// Relative to whichever root the passage came from.
+    pub path: String,
+    /// 1-based, as it was written.
+    pub from: usize,
+    pub to: usize,
+}
+
+/// Read a citation back, if that is what this text is.
+///
+/// Tolerant of the `[[…]]` an answer wraps it in — an Obsidian vault's own
+/// link syntax, which is what makes an answer pasted back into the vault a
+/// working link rather than a sentence about one.
+pub fn parse_cite(cite: &str) -> Option<Cited> {
+    let text = cite.trim();
+    let text = text.strip_prefix("[[").unwrap_or(text);
+    let text = text.strip_suffix("]]").unwrap_or(text).trim();
+
+    // From the right: a heading is free to contain " L", and the line range is
+    // always last.
+    let (head, lines) = text.rsplit_once(" L")?;
+    let (from, to) = lines.split_once('-')?;
+    let from: usize = from.trim().parse().ok()?;
+    let to: usize = to.trim().parse().ok()?;
+
+    // The heading is for the reader; the path is the part that opens.
+    let path = head.split(" § ").next()?.trim();
+    (!path.is_empty() && from >= 1 && to >= from).then(|| Cited {
+        path: path.to_string(),
+        from,
+        to,
+    })
+}
+
 /// How many lines a passage may run to before it is split again.
 ///
 /// A section can be a page or it can be a chapter. One that runs to hundreds
@@ -299,6 +340,51 @@ mod tests {
         let out = at("# One\n\n\n# Two\nreal\n");
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].title, "Two");
+    }
+
+    #[test]
+    fn a_citation_reads_back_into_a_file_and_a_line() {
+        // The round trip that makes a citation clickable.
+        let out = markdown(
+            Path::new("/vault/00 - ML/Attention.md"),
+            "# Attention\n## Sparse patterns\nx\n",
+        );
+        let cite = out.last().unwrap().cite(Path::new("/vault"));
+        let read = parse_cite(&cite).unwrap();
+        assert_eq!(read.path, "00 - ML/Attention.md");
+        assert_eq!((read.from, read.to), (2, 3));
+    }
+
+    #[test]
+    fn the_wiki_link_an_answer_wraps_it_in_is_tolerated() {
+        // What the model is asked to write, and what an Obsidian vault reads
+        // as a link on its own.
+        let read = parse_cite("[[notes/Caching.md § Caching › Sets L124-143]]").unwrap();
+        assert_eq!(read.path, "notes/Caching.md");
+        assert_eq!(read.from, 124);
+    }
+
+    #[test]
+    fn a_heading_containing_an_l_does_not_confuse_it() {
+        let read = parse_cite("a.md § L1 and L2 caches L7-9").unwrap();
+        assert_eq!(read.path, "a.md");
+        assert_eq!((read.from, read.to), (7, 9));
+    }
+
+    #[test]
+    fn a_path_with_spaces_survives() {
+        // Half this vault's folders are named "00 - High Performance
+        // Computing", so this is the ordinary case rather than the odd one.
+        let read = parse_cite("00 - High Performance Computing/Lab 2.md L16-19").unwrap();
+        assert_eq!(read.path, "00 - High Performance Computing/Lab 2.md");
+    }
+
+    #[test]
+    fn a_sentence_is_not_a_citation() {
+        assert_eq!(parse_cite("see the caching note"), None);
+        assert_eq!(parse_cite("a.md L0-3"), None, "lines are 1-based");
+        assert_eq!(parse_cite("a.md L9-3"), None, "backwards");
+        assert_eq!(parse_cite(" L1-2"), None, "no file");
     }
 
     #[test]

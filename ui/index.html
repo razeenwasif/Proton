@@ -985,6 +985,7 @@
       <div class="row" data-st-nav="plugins"><span class="ic"><svg class="i"><use href="#i-ext"/></svg></span>Plugins</div>
       <div class="group">Agent</div>
       <div class="row" data-st-nav="models"><span class="ic"><svg class="i ft-ai"><use href="#i-spark"/></svg></span>AI &amp; models</div>
+      <div class="row" data-st-nav="library"><span class="ic"><svg class="i"><use href="#i-book"/></svg></span>Library</div>
       <div class="group">About</div>
       <div class="row" data-st-nav="about"><span class="ic"><svg class="i"><use href="#i-gear"/></svg></span>Configuration</div>
     </div>
@@ -1098,6 +1099,29 @@
         <div class="setting">
           <h4>Credential</h4>
           <p data-agent-auth>Checking…</p>
+        </div>
+      </div>
+
+      <div data-st-panel="library" hidden>
+        <div class="st-head">Library</div>
+        <div class="setting">
+          <h4>Roots</h4>
+          <p>Directories of your own writing — a vault, course notes, a papers folder — that the agent may search and cite. Nothing is read until you list it here, and nothing outside a listed directory is ever read: no symlink is followed out of one, and hidden folders and anything <code>.gitignore</code> excludes are skipped.</p>
+          <div data-library-roots></div>
+          <div class="lib-add">
+            <input type="text" data-library-new spellcheck="false" placeholder="C:\Users\you\Vault  or  ~/Vault">
+            <button class="btn" data-library-add>Add</button>
+          </div>
+        </div>
+        <div class="setting">
+          <h4>What has been read</h4>
+          <p>Read when the session starts, so a question asked a second later is not waiting on a disk. Notes written since are found after a re-read.</p>
+          <p data-library-status>No roots listed.</p>
+          <button class="btn" data-library-refresh>Re-read</button>
+        </div>
+        <div class="setting">
+          <h4>Citing</h4>
+          <p>Answers quote a passage's citation in double brackets — <code>[[Attention.md § Sparse patterns L42-58]]</code> — which is clickable in the agent pane and is a working link if you paste the answer back into Obsidian.</p>
         </div>
       </div>
 

@@ -114,6 +114,93 @@ function renderSettings(event) {
   }
 }
 
+/* ── the library ──────────────────────────────────────────────────────
+   The roots are the whole permission model: a directory listed here is one
+   the agent may read and cite, and one that is not listed is unreachable.
+   So it is drawn as a list you can see and remove from, not as a switch. */
+
+/** The roots as the settings file has them, which is what an edit rewrites.
+ *  Index-aligned with the resolved ones the core reports back. */
+function libraryRoots() {
+  const roots = setting("library.roots");
+  return Array.isArray(roots) ? roots.filter((r) => typeof r === "string") : [];
+}
+
+function renderLibrary(event) {
+  const list = $("[data-library-roots]");
+  if (list) {
+    const missing = new Set(event.missing ?? []);
+    list.innerHTML = event.roots.length
+      ? event.roots
+          .map(
+            (root, i) =>
+              `<div class="lib-root"><span class="path" title="${escapeHtml(root)}">${escapeHtml(root)}</span>` +
+              (missing.has(root) ? `<span class="gone">not found</span>` : "") +
+              `<button data-library-drop="${i}" title="Stop reading this directory">&times;</button></div>`,
+          )
+          .join("")
+      : `<div class="lib-root"><span class="path" style="color:var(--ink-3)">Nothing listed — the agent cannot read any of your notes.</span></div>`;
+  }
+
+  const status = $("[data-library-status]");
+  if (!status) return;
+  if (!event.roots.length) {
+    status.textContent = "No roots listed.";
+  } else if (event.indexing) {
+    status.textContent = "Reading…";
+  } else {
+    // "Nothing found" and "not read yet" are different answers, and the
+    // count is what tells them apart.
+    const n = (x) => x.toLocaleString();
+    status.textContent =
+      `${n(event.passages)} passage${event.passages === 1 ? "" : "s"} from ` +
+      `${n(event.documents)} document${event.documents === 1 ? "" : "s"}` +
+      (event.elapsedMs ? `, read in ${n(event.elapsedMs)} ms` : "");
+  }
+}
+
+document.addEventListener("click", (e) => {
+  if (e.target.closest?.("[data-library-refresh]")) {
+    dispatch({ type: "refreshLibrary" });
+    return;
+  }
+  const add = e.target.closest?.("[data-library-add]");
+  if (add) {
+    const field = $("[data-library-new]");
+    const path = field?.value.trim();
+    if (!path) return;
+    keep("library.roots", [...libraryRoots(), path]);
+    field.value = "";
+    return;
+  }
+  const drop = e.target.closest?.("[data-library-drop]");
+  if (drop) {
+    const roots = libraryRoots();
+    roots.splice(Number(drop.dataset.libraryDrop), 1);
+    // An emptied list is written as an empty array rather than removed: the
+    // difference between "no roots" and "no opinion" does not matter to the
+    // core, and a key that vanishes reads as a settings file that lost it.
+    keep("library.roots", roots);
+  }
+});
+
+// Enter in the field is the same as clicking Add — nobody reaches for the
+// mouse after typing a path.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (!e.target.closest?.("[data-library-new]")) return;
+  e.preventDefault();
+  $("[data-library-add]")?.click();
+});
+
+// A citation in an answer opens the note it names. The core resolves it,
+// because turning those words back into a file needs the roots — and needs
+// to refuse a citation that points outside them.
+document.addEventListener("click", (e) => {
+  const cite = e.target.closest?.("[data-cite]");
+  if (cite) dispatch({ type: "openCitation", cite: cite.dataset.cite });
+});
+
 /* The settings page. Each nav row shows one panel; nothing else is hidden or
    shown, so a panel that has not been built cannot be reached. */
 document.addEventListener("click", (e) => {
@@ -2967,6 +3054,10 @@ onEvent((event) => {
       renderSettings(event);
       break;
 
+    case "library":
+      renderLibrary(event);
+      break;
+
     case "theme":
       renderTheme(event);
       renderArtboard(event);
@@ -3410,6 +3501,7 @@ const TOOL_ICON = {
   grep: "search",
   find_files: "files",
   open_buffer: "split-v",
+  search_library: "book",
   diagnostics: "d-warning",
 };
 
@@ -3430,13 +3522,29 @@ function toolHtml(call) {
   );
 }
 
-/** Minimal inline markup: backticks and paragraphs. Nothing more — this is a
- *  side panel, not a document viewer. */
+/** Minimal inline markup: backticks, citations and paragraphs. Nothing more —
+ *  this is a side panel, not a document viewer.
+ *
+ *  A citation is `[[path § heading L12-34]]`, which is what `search_library`
+ *  hands the model and what it is asked to quote back. The brackets are worth
+ *  the trouble: a path can contain spaces and an en dash, so there is no way
+ *  to find where one starts in a sentence otherwise — and they are also
+ *  Obsidian's own link syntax, so an answer pasted into the vault is already
+ *  a working link. Text that is not a citation stays text. */
 function proseHtml(text) {
   return escapeHtml(text)
     .split(/\n{2,}/)
     .filter((p) => p.trim())
-    .map((p) => `<p>${p.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\n/g, "<br>")}</p>`)
+    .map(
+      (p) =>
+        `<p>${p
+          .replace(/`([^`]+)`/g, "<code>$1</code>")
+          .replace(
+            /\[\[([^[\]\n]+)\]\]/g,
+            (_, cite) => `<span class="cite" data-cite="${cite}" title="Open this note">${cite}</span>`,
+          )
+          .replace(/\n/g, "<br>")}</p>`,
+    )
     .join("");
 }
 

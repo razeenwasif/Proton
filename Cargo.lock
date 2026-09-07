@@ -4145,6 +4145,7 @@ dependencies = [
  "proton-data",
  "proton-design",
  "proton-index",
+ "proton-library",
  "proton-lsp",
  "proton-plugin",
  "proton-syntax",
@@ -4200,6 +4201,9 @@ dependencies = [
 [[package]]
 name = "proton-library"
 version = "0.0.1"
+dependencies = [
+ "ignore",
+]
 
 [[package]]
 name = "proton-lsp"

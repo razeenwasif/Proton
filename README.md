@@ -28,6 +28,7 @@ counts, not mode switches — that collision is why the mode chord is `⌃`.
 | `crates/proton-core/` | The headless core — command/event bus, mode registry, modal input engine, editor |
 | `crates/proton-text/` | Rope buffers, the undo tree, motions and text objects |
 | `crates/proton-index/` | Telescope's index — file walking, fuzzy matching, grep |
+| `crates/proton-library/` | Your own notes — passages, BM25, and answers that cite where they came from |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
 | `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, four live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |

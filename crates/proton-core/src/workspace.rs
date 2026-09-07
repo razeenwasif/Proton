@@ -73,6 +73,11 @@ pub struct Workspace {
     data: crate::data::Data,
     design: crate::design::Design,
     settings: crate::settings::Settings,
+    /// The user's own documents, from the roots the settings name. Empty
+    /// unless somebody listed one: nothing here discovers a vault, because a
+    /// library that could reach anywhere under the home directory is one that
+    /// can put a medical record in a prompt by accident.
+    library: proton_library::Shelf,
     /// Tool calls waiting on a kernel.
     ///
     /// A cell run is the one tool that cannot answer when it is asked: the
@@ -200,6 +205,10 @@ impl Workspace {
         // they say, or the first question of every session goes to whatever
         // the default provider is regardless of what was chosen.
         space.follow_agent_settings();
+        // And the library, which starts its walk here rather than on the first
+        // question: a vault takes the better part of a second to read, and the
+        // moment somebody asks about their notes is the worst one to spend it.
+        space.follow_library_settings();
         space
     }
 
@@ -427,6 +436,7 @@ impl Workspace {
                     self.notebook_event(),
                     self.theme_event(),
                     self.settings_event(),
+                    self.library_event(),
                     self.chats_event(),
                     Event::Layout {
                         layout: self.mode.layout(),
@@ -536,6 +546,14 @@ impl Workspace {
                         self.follow_agent_settings();
                     }
                     let mut events = vec![self.settings_event()];
+                    // A root added here starts a walk here. The panel says
+                    // "reading" until the heartbeat brings the answer, which
+                    // is the difference between a slow library and an empty
+                    // one.
+                    if key.starts_with("library.") {
+                        self.follow_library_settings();
+                        events.push(self.library_event());
+                    }
                     // The pane's header names the provider, so it has to be
                     // told when the provider changed under it.
                     events.push(self.agent_event());
@@ -601,6 +619,44 @@ impl Workspace {
                 events.extend(self.open_path(&path));
                 events.extend(self.apply(Command::PlaceCursor { line, column }));
                 events
+            }
+
+            Command::RefreshLibrary => {
+                if self.library.roots().is_empty() {
+                    return vec![notice(
+                        "no library roots: add one in Settings › Library".into(),
+                        NoticeLevel::Info,
+                    )];
+                }
+                self.library.refresh();
+                vec![self.library_event()]
+            }
+
+            Command::OpenCitation { cite } => {
+                let Some(cited) = proton_library::chunk::parse_cite(&cite) else {
+                    return vec![notice(
+                        format!("{cite}: not a citation"),
+                        NoticeLevel::Error,
+                    )];
+                };
+                // Through the library's roots rather than the workspace's: a
+                // citation names a file in somebody's vault, which is nowhere
+                // near the project. `locate` is also what refuses to leave the
+                // roots, and the path in a citation is text a model wrote.
+                let Some(path) = self.library.locate(&cited.path) else {
+                    return vec![notice(
+                        format!("{}: not in any library root", cited.path),
+                        NoticeLevel::Error,
+                    )];
+                };
+                self.apply(Command::JumpTo {
+                    mode: ModeId::Codex,
+                    path: path.display().to_string(),
+                    // The citation counts from one, as a gutter does; every
+                    // line number crossing this bus counts from zero.
+                    line: cited.from - 1,
+                    column: 0,
+                })
             }
 
             Command::OpenTerminal => {
@@ -1911,6 +1967,12 @@ impl Workspace {
         let labels = self.buffer_labels();
         if self.pickers.poll(labels) {
             events.push(self.picker_event());
+        }
+
+        // And the library's walk, which is the same shape again: a second of
+        // reading somebody's vault, on a thread with nothing to call back to.
+        if self.library.poll() {
+            events.push(self.library_event());
         }
 
         // The agent runs on the same heartbeat. It has to: a turn takes tens
@@ -3246,6 +3308,39 @@ impl Workspace {
                 Ok(found.join("\n"))
             }
 
+            "search_library" => {
+                let query = text("query")?;
+                if self.library.roots().is_empty() {
+                    return Ok("there is no library: the user has not listed any roots in \
+                               Settings › Library, so there are no notes to search"
+                        .into());
+                }
+                // A walk takes about a second on a vault of a thousand notes,
+                // and it started when the session did — so this is only ever
+                // hit by a question asked immediately after launch. Saying so
+                // is better than answering "nothing found" about a library
+                // that has not been read yet.
+                if !self.library.is_built() {
+                    return Ok("the library is still being read — ask again in a moment".into());
+                }
+
+                let hits = self.library.search(&query, count("limit", 6));
+                if hits.is_empty() {
+                    return Ok(format!(
+                        "nothing in the library about {query:?} ({} passages searched)",
+                        self.library.len()
+                    ));
+                }
+                // The citation on its own line above the passage, so what to
+                // quote back is unambiguous even after the text runs to
+                // sixty lines.
+                Ok(hits
+                    .iter()
+                    .map(|hit| format!("[[{}]]\n{}", hit.cite, hit.passage.text))
+                    .collect::<Vec<_>>()
+                    .join("\n\n---\n\n"))
+            }
+
             "open_buffer" => {
                 let path = text("path")?;
                 self.editor
@@ -3599,6 +3694,47 @@ impl Workspace {
             .collect()
     }
 
+    /// Point the library at whatever roots the settings name.
+    ///
+    /// `library.roots` is an array of directories, written by hand or by the
+    /// settings panel. Everything about it is deliberately explicit: no root
+    /// is guessed, none is added because a directory looked like a vault, and
+    /// removing one here removes its documents from the next answer.
+    ///
+    /// A leading `~/` is expanded and a relative path is taken against the
+    /// project, because those are the two ways somebody writes a path by hand
+    /// and neither should silently mean "the directory the process started
+    /// in".
+    fn follow_library_settings(&mut self) {
+        let roots: Vec<PathBuf> = self
+            .settings
+            .get("library.roots")
+            .and_then(|value| value.as_array())
+            .map(|list| {
+                list.iter()
+                    .filter_map(|value| value.as_str())
+                    .filter(|text| !text.trim().is_empty())
+                    .map(|text| self.expand(text))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.library.set_roots(roots);
+    }
+
+    /// A path as a person writes one: `~/OnyxVault`, `../notes`, or absolute.
+    fn expand(&self, text: &str) -> PathBuf {
+        let text = text.trim();
+        if let Some(rest) = text.strip_prefix("~/").or_else(|| text.strip_prefix("~\\")) {
+            // `USERPROFILE` first on Windows, where `HOME` is set by MSYS2 to
+            // something that is not where anybody's documents are.
+            let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+            if let Some(home) = home {
+                return PathBuf::from(home).join(rest);
+            }
+        }
+        self.pickers.resolve(text)
+    }
+
     /// Point the agent at whatever the settings name.
     ///
     /// Called on startup and after any `agent.*` change, so switching provider
@@ -3673,6 +3809,32 @@ impl Workspace {
         Event::Settings {
             values: self.settings.all().clone(),
             path: self.settings.path().display().to_string(),
+        }
+    }
+
+    /// What the library has read, for the panel that lists the roots.
+    fn library_event(&self) -> Event {
+        Event::Library {
+            roots: self
+                .library
+                .roots()
+                .iter()
+                .map(|root| root.display().to_string())
+                .collect(),
+            missing: self
+                .library
+                .missing()
+                .iter()
+                .map(|root| root.display().to_string())
+                .collect(),
+            documents: self.library.documents(),
+            passages: self.library.len(),
+            indexing: self.library.is_building(),
+            elapsed_ms: self
+                .library
+                .elapsed()
+                .map(|took| took.as_millis() as u64)
+                .unwrap_or_default(),
         }
     }
 

@@ -325,6 +325,19 @@ pub enum Command {
         #[ts(type = "unknown")]
         value: serde_json::Value,
     },
+    /// Read the library's roots again.
+    ///
+    /// Notes get written while the editor is open, and the walk happens once
+    /// at startup. This is the button that says "I just wrote that down".
+    RefreshLibrary,
+    /// Open what a citation names.
+    ///
+    /// The citation as it was written — `Attention.md § Sparse patterns
+    /// L42-58` — because that is the string the front end has, and turning it
+    /// back into a file needs the library's roots, which only the core knows.
+    OpenCitation {
+        cite: String,
+    },
     /// Write the notebook back.
     SaveNotebook,
     /// Open a place in another mode: the cross-mode jump.
@@ -681,6 +694,26 @@ pub enum Event {
         values: serde_json::Value,
         /// Where they are stored, for the panel to show and for a `:e` on it.
         path: String,
+    },
+    /// What the library has read, and from where.
+    ///
+    /// Counts rather than contents: the panel says how much is there and
+    /// whether it is still reading, and the passages themselves only ever
+    /// leave through a search.
+    #[serde(rename_all = "camelCase")]
+    Library {
+        /// The roots, resolved — `~/OnyxVault` as the directory it means.
+        roots: Vec<String>,
+        /// Roots that were named and are not there. A typo in a settings file
+        /// otherwise reads exactly like a vault with nothing in it.
+        missing: Vec<String>,
+        documents: usize,
+        passages: usize,
+        /// True while a walk is in flight, so "reading" and "empty" are
+        /// different things on screen.
+        indexing: bool,
+        /// How long the last walk took. Zero if none has finished.
+        elapsed_ms: u64,
     },
     /// The theme Design mode is editing.
     #[serde(rename_all = "camelCase")]

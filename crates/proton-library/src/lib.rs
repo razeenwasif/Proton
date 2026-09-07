@@ -32,10 +32,12 @@
 
 pub mod chunk;
 pub mod score;
+pub mod shelf;
 
 use std::path::{Path, PathBuf};
 
 pub use chunk::Passage;
+pub use shelf::Shelf;
 
 /// One result: a passage, and why it was chosen.
 #[derive(Debug, Clone, PartialEq)]
