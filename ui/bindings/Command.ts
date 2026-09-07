@@ -14,7 +14,7 @@ view: number, firstLine: number, lines: number, } | { "type": "split", vertical:
 /**
  * The line the cursor is on when absent.
  */
-line: number | null, } | { "type": "refreshRepo" } | { "type": "runCell", index: number, } | { "type": "setCell", index: number, source: string, } | { "type": "addCell", code: boolean, } | { "type": "removeCell", index: number, } | { "type": "selectCell", index: number, } | { "type": "runAll" } | { "type": "saveNotebook" } | { "type": "jumpTo", mode: ModeId, path: string, 
+line: number | null, } | { "type": "refreshRepo" } | { "type": "runCell", index: number, } | { "type": "setCell", index: number, source: string, } | { "type": "addCell", code: boolean, } | { "type": "removeCell", index: number, } | { "type": "selectCell", index: number, } | { "type": "runAll" } | { "type": "openTheme", path: string, } | { "type": "setToken", name: string, scope: string, value: string, } | { "type": "selectToken", index: number, } | { "type": "saveNotebook" } | { "type": "jumpTo", mode: ModeId, path: string, 
 /**
  * Zero-based, as every line number crossing this bus is.
  */

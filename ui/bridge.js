@@ -133,6 +133,41 @@ if (HAS_SHELL) {
     ],
     problem: "",
   };
+  /* A theme, so Design mode has a palette to show without a core behind it.
+     These are the real tokens from `styles.css`, in the scopes they are
+     actually declared in — a mock palette of invented names would be the same
+     mistake Data mode's sidebar used to make. */
+  const theme = {
+    path: "C:/proton/ui/styles.css",
+    selected: 0,
+    problem: "",
+    tokens: [
+      { name: "--bg", value: "#16161e", scope: ":root", line: 20 },
+      { name: "--bg-deep", value: "#0f0f16", scope: ":root", line: 21 },
+      { name: "--accent", value: "#7aa2f7", scope: ":root", line: 26 },
+      { name: "--accent-2", value: "#bb9af7", scope: ":root", line: 27 },
+      { name: "--ok", value: "#9ece6a", scope: ":root", line: 28 },
+      { name: "--warn", value: "#e0af68", scope: ":root", line: 29 },
+      { name: "--err", value: "#f7768e", scope: ":root", line: 30 },
+      {
+        name: "--shadow",
+        value: "0 1px 2px rgba(0, 0, 0, .4)",
+        scope: ":root",
+        line: 31,
+      },
+      { name: "--accent", value: "#89b4fa", scope: ':root[data-theme="catppuccin"]', line: 62 },
+      { name: "--accent", value: "#83a598", scope: ':root[data-theme="gruvbox-dark"]', line: 104 },
+    ],
+  };
+
+  const themeEvent = () => ({
+    type: "theme",
+    path: theme.path,
+    tokens: theme.tokens,
+    selected: theme.selected,
+    problem: theme.problem,
+  });
+
   const notebookEvent = () => ({
     type: "notebook",
     path: notebook.path,
@@ -301,6 +336,7 @@ if (HAS_SHELL) {
         tasksEvent(),
         pluginsEvent(),
         notebookEvent(),
+        themeEvent(),
       ];
     }
     if (command.type === "runCell") {
@@ -316,6 +352,17 @@ if (HAS_SHELL) {
         }, 900);
       }
       return [notebookEvent()];
+    }
+    if (command.type === "setToken") {
+      const hit = theme.tokens.find(
+        (t) => t.name === command.name && t.scope === command.scope,
+      );
+      if (hit) hit.value = command.value;
+      return [themeEvent()];
+    }
+    if (command.type === "selectToken") {
+      theme.selected = Math.min(command.index, theme.tokens.length - 1);
+      return [themeEvent()];
     }
     if (command.type === "selectCell") {
       notebook.cells.forEach((cell, i) => (cell.selected = i === command.index));

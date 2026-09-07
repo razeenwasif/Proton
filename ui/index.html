@@ -637,30 +637,12 @@
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
       <aside class="pane">
-        <div class="dock-tabs"><button class="dock-tab on">Style</button><button class="dock-tab">Props</button><button class="dock-tab">Events</button><button class="dock-tab">States</button></div>
-        <div class="scroll">
-          <div class="sec-head">Layout <span class="grow"></span><span class="chip">grid</span></div>
-          <div class="prop-row"><span class="lbl">Columns</span><span class="val">repeat(2, 1fr)</span></div>
-          <div class="prop-row"><span class="lbl">Gap</span><span class="val">12px</span></div>
-          <div class="prop-row"><span class="lbl">Align</span><span class="val">stretch</span></div>
-          <div class="sec-head">Appearance</div>
-          <div class="prop-row"><span class="lbl">Background</span><span class="swatch" style="background:#f6d6da"></span><span class="val">--surface-2</span></div>
-          <div class="prop-row"><span class="lbl">Radius</span><span class="val">8px</span></div>
-          <div class="prop-row"><span class="lbl">Shadow</span><span class="val">elevation.2</span></div>
-          <div class="sec-head">Typography</div>
-          <div class="prop-row"><span class="lbl">Family</span><span class="val">Inter</span></div>
-          <div class="prop-row"><span class="lbl">Size / LH</span><span class="val">14 / 1.5</span></div>
-          <div class="sec-head">Generated code <span class="grow"></span><span class="chip ok">in sync</span></div>
-          <div class="diff" style="margin:8px 11px">
-            <header>components/Grid.tsx<span class="acts"><button>Open</button></span></header>
-            <pre><span class="c">&lt;div className="grid grid-cols-2 gap-3"&gt;</span><span class="c">  {children}</span><span class="c">&lt;/div&gt;</span></pre>
-          </div>
-          <div class="msg">
-            <div class="who"><svg class="i" width="12" height="12" style="color:var(--accent-2)"><use href="#i-spark"/></svg> Pagepilot</div>
-            <p>This grid drops to one column below 640px but the video keeps a 16:9 box — it will overflow by 24px. Want me to add <code>aspect-video</code> and a <code>min-w-0</code>?</p>
-            <div class="suggest"><span>Fix it</span><span>Show me the breakpoint</span></div>
-          </div>
-        </div>
+        <header>Tokens <span class="grow"></span><span class="chip" data-theme-name>no theme</span></header>
+        <!-- Slot::Inspector, from Event::Theme. Every custom property in the
+             project's stylesheet, grouped by the selector that declares it,
+             because a theme states the same token once per palette and they
+             are different tokens. Editing one writes that file. -->
+        <div class="scroll" data-tokens></div>
       </aside>
     </section>
 

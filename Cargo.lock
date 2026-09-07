@@ -4143,6 +4143,7 @@ dependencies = [
  "proton-agent",
  "proton-dap",
  "proton-data",
+ "proton-design",
  "proton-index",
  "proton-lsp",
  "proton-plugin",

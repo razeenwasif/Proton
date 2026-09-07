@@ -279,6 +279,25 @@ pub enum Command {
     },
     /// Run every code cell, top to bottom.
     RunAll,
+
+    /* ── themes ────────────────────────────────────────────── */
+    /// Point Design mode at a stylesheet. Answered with `Event::Theme`.
+    OpenTheme {
+        path: String,
+    },
+    /// Change one token and write the file.
+    ///
+    /// Scope as well as name, because a theme states the same token once per
+    /// palette and a name alone would edit whichever came first.
+    SetToken {
+        name: String,
+        scope: String,
+        value: String,
+    },
+    /// Put the inspector on a token — a click.
+    SelectToken {
+        index: usize,
+    },
     /// Write the notebook back.
     SaveNotebook,
     /// Open a place in another mode: the cross-mode jump.
@@ -612,6 +631,17 @@ pub enum Event {
         path: String,
         cells: Vec<crate::data::CellView>,
         /// Why there is no kernel, when there is a reason worth showing.
+        problem: String,
+    },
+    /// The theme Design mode is editing.
+    #[serde(rename_all = "camelCase")]
+    Theme {
+        /// Empty when none is open, which is how the panel knows to say so.
+        path: String,
+        tokens: Vec<proton_design::Token>,
+        /// Which one the inspector is on.
+        selected: usize,
+        /// Why there is no theme, when there is a reason worth showing.
         problem: String,
     },
     /// The active mode's four slots, verb table and document type.

@@ -28,6 +28,7 @@ import type { Stop } from "./Stop";
 import type { Task } from "./Task";
 import type { TermRun } from "./TermRun";
 import type { ThemeView } from "./ThemeView";
+import type { Token } from "./Token";
 import type { TraceState } from "./TraceState";
 import type { TreeRow } from "./TreeRow";
 import type { ViewerKind } from "./ViewerKind";
@@ -127,6 +128,18 @@ name: string, kind: ViewerKind, } | { "type": "notebook",
 path: string, cells: Array<CellView>, 
 /**
  * Why there is no kernel, when there is a reason worth showing.
+ */
+problem: string, } | { "type": "theme", 
+/**
+ * Empty when none is open, which is how the panel knows to say so.
+ */
+path: string, tokens: Array<Token>, 
+/**
+ * Which one the inspector is on.
+ */
+selected: number, 
+/**
+ * Why there is no theme, when there is a reason worth showing.
  */
 problem: string, } | { "type": "layout", layout: Layout, } | { "type": "repo", 
 /**

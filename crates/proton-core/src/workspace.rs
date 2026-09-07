@@ -71,6 +71,7 @@ pub struct Workspace {
     terminal: Option<proton_term::Terminal>,
     /// The notebook Data mode has open, and the kernel running it.
     data: crate::data::Data,
+    design: crate::design::Design,
     /// How big the panel is. Kept even with no terminal, so the one opened
     /// next starts the right size rather than at a default nobody chose.
     term_size: (u16, u16),
@@ -358,6 +359,7 @@ impl Workspace {
                     // notebook open would otherwise show an empty stage until
                     // something happened to change a cell.
                     self.notebook_event(),
+                    self.theme_event(),
                     Event::Layout {
                         layout: self.mode.layout(),
                     },
@@ -422,6 +424,38 @@ impl Workspace {
             Command::SelectCell { index } => {
                 self.data.select_cell(index);
                 vec![self.notebook_event()]
+            }
+
+            /* ── themes ────────────────────────────────────── */
+            Command::OpenTheme { path } => {
+                let full = self.pickers.root().join(&path);
+                match self.design.open(&full) {
+                    Ok(()) => vec![self.theme_event()],
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
+                }
+            }
+
+            Command::SetToken { name, scope, value } => {
+                match self.design.set(&name, &scope, &value) {
+                    // Nothing changed: the token is not there, or it already had
+                    // that value. Neither is worth an event or a notice.
+                    Ok(false) => Vec::new(),
+                    // The file on disk moved, so anything showing it has to be
+                    // told — the gutter, the tree, and the buffer if Codex has the
+                    // same file open, which for a two-way binding it often does.
+                    Ok(true) => {
+                        let mut events = vec![self.theme_event()];
+                        events.push(self.repo_event());
+                        events.extend(self.every_view());
+                        events
+                    }
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
+                }
+            }
+
+            Command::SelectToken { index } => {
+                self.design.select(index);
+                vec![self.theme_event()]
             }
 
             Command::RunAll => {
@@ -1489,6 +1523,13 @@ impl Workspace {
                     notice(format!("wrote {name}"), NoticeLevel::Info),
                     self.buffers_event(),
                 ];
+                // The other direction of the two-way binding. Editing the
+                // theme as text in Codex and saving it has to reach the
+                // inspector, or the palette on screen is the one the file had
+                // when Design mode was opened.
+                if self.design.reload() {
+                    events.push(self.theme_event());
+                }
                 events.extend(self.request_format(true));
                 events
             }
@@ -3043,6 +3084,20 @@ impl Workspace {
             .collect()
     }
 
+    /// What Design mode's inspector draws.
+    fn theme_event(&self) -> Event {
+        Event::Theme {
+            path: self
+                .design
+                .path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+            tokens: self.design.tokens(),
+            selected: self.design.selected(),
+            problem: self.design.problem().unwrap_or_default().to_string(),
+        }
+    }
+
     fn splits_event(&self) -> Event {
         Event::Splits {
             views: self
@@ -3228,12 +3283,29 @@ impl Workspace {
         // The layout goes with it. A mode change that only moved a highlight
         // on the rail would be a theme rather than a mode, and the panels
         // would still be the last mode's.
-        vec![
+        let mut events = vec![
             Event::ModeChanged { mode },
             Event::Layout {
                 layout: mode.layout(),
             },
-        ]
+        ];
+
+        // Design with nothing open goes looking, once. Asking somebody to
+        // find their own stylesheet before the inspector will show anything
+        // is a worse first run than guessing at the conventional name and
+        // saying which one was picked.
+        if mode == ModeId::Design && !self.design.is_open() {
+            if let Some(path) = crate::design::discover(self.pickers.root()) {
+                if self.design.open(&path).is_ok() {
+                    events.push(notice(
+                        format!("theme: {}", path.display()),
+                        NoticeLevel::Info,
+                    ));
+                }
+            }
+            events.push(self.theme_event());
+        }
+        events
     }
 
     /// Run an action against the active mode, reporting whether text changed.

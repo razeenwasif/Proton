@@ -1180,6 +1180,8 @@ let notebookPainted = new Map();
 let lastSplits = null;
 /** What the table dock last drew, so a heartbeat does not rebuild it. */
 let dockPainted = null;
+/** The last theme the core sent, so a row can say which token it is. */
+let lastTheme = null;
 
 /** The last notebook the core sent, so a re-render can be asked for without
  * waiting for another event — `i` has to turn prose into source before there
@@ -1464,6 +1466,95 @@ function renderNotebook(event) {
   if (!boxes.length) return;
   for (const box of boxes) paintCells(box, event);
   renderTableDock(event);
+}
+
+/* ── Design mode's inspector ─────────────────────────────────────
+
+   Every custom property in the theme, grouped by the selector that declares
+   it. Editing a row writes the file — there is no save, because a palette
+   with unsaved changes is one the artboard disagrees with. */
+
+/** A value a colour input can actually hold. Everything else gets a text box. */
+function hexish(value) {
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim());
+}
+
+/** Something to put in a swatch, or nothing if it is not a colour at all. */
+function swatchable(value) {
+  return /^(#|rgb|hsl|oklch|oklab|lab|lch|color\()/i.test(value.trim());
+}
+
+let themePainted = null;
+
+function renderTheme(event) {
+  lastTheme = event;
+  const name = $("[data-theme-name]");
+  if (name) {
+    const file = event.path ? event.path.split(/[\/]/).pop() : "no theme";
+    name.textContent = event.problem || file;
+    name.className = "chip" + (event.problem ? " warn" : event.path ? " accent" : "");
+  }
+
+  const box = $("[data-tokens]");
+  if (!box) return;
+
+  // Rebuilt only when something actually differs. A colour input fires while
+  // it is being dragged, and replacing the markup under it would close the
+  // picker on the first move.
+  const key = JSON.stringify([event.tokens, event.selected]);
+  if (key === themePainted) return;
+  themePainted = key;
+
+  if (!event.tokens.length) {
+    box.innerHTML = `<div class="empty">${escapeHtml(
+      event.problem || "No theme. Open a stylesheet with custom properties.",
+    )}</div>`;
+    return;
+  }
+
+  let html = "";
+  let scope = null;
+  event.tokens.forEach((token, index) => {
+    if (token.scope !== scope) {
+      scope = token.scope;
+      html += `<div class="sec-head">${escapeHtml(scope || "(top level)")}</div>`;
+    }
+    // Only for colours the picker cannot hold. A hex value gets an
+    // `<input type="color">`, which *is* a swatch — drawing a second one
+    // beside it puts two squares of the same colour on every row.
+    const swatch =
+      swatchable(token.value) && !hexish(token.value)
+        ? `<span class="swatch" style="background:${escapeHtml(token.value)}"></span>`
+        : "";
+    // A colour gets the native picker; anything else — a shadow, a font
+    // stack, a `var()` — gets a text box, because converting those to a
+    // colour to show them would lose what they are.
+    const editor = hexish(token.value)
+      ? `<input class="tok-color" type="color" value="${escapeHtml(token.value.length === 4
+          ? "#" + token.value.slice(1).split("").map((c) => c + c).join("")
+          : token.value)}" data-token="${index}" title="${escapeHtml(token.value)}">`
+      : "";
+    html +=
+      `<div class="prop-row token${index === event.selected ? " on" : ""}" data-token-row="${index}">` +
+      swatch +
+      `<span class="lbl" title="${escapeHtml(token.name)}">${escapeHtml(token.name)}</span>` +
+      editor +
+      `<input class="val tok-value" value="${escapeHtml(token.value)}" data-token="${index}" spellcheck="false">` +
+      `</div>`;
+  });
+  box.innerHTML = html;
+}
+
+/** Send a token's new value, if it really is new. */
+function writeToken(index, value) {
+  const token = lastTheme?.tokens?.[index];
+  if (!token || value === token.value) return;
+  dispatch({
+    type: "setToken",
+    name: token.name,
+    scope: token.scope,
+    value,
+  });
 }
 
 /**
@@ -1816,6 +1907,32 @@ function renderLayout(layout) {
   const workspace = $(`.workspace[data-ws="${layout.mode}"]`);
   if (workspace) workspace.dataset.dock = layout.dock;
 }
+
+/* A token's new value. `change` rather than `input` on the colour picker:
+   `input` fires continuously while it is dragged, and every one of those would
+   be a write to the stylesheet. */
+document.addEventListener("change", (e) => {
+  const field = e.target.closest?.(".tok-color, .tok-value");
+  if (!field) return;
+  writeToken(Number(field.dataset.token), field.value.trim());
+});
+
+// Enter commits a text value without waiting for the field to lose focus.
+document.addEventListener("keydown", (e) => {
+  const field = e.target.closest?.(".tok-value");
+  if (!field || e.key !== "Enter") return;
+  e.preventDefault();
+  writeToken(Number(field.dataset.token), field.value.trim());
+  field.blur();
+});
+
+// Clicking a token row selects it. Deliberately its own listener rather than a
+// branch in the one below: the click is usually on the row's own input, which
+// has to go on working, so this must not swallow the event.
+document.addEventListener("click", (e) => {
+  const row = e.target.closest?.("[data-token-row]");
+  if (row) dispatch({ type: "selectToken", index: Number(row.dataset.tokenRow) });
+});
 
 document.addEventListener("click", (e) => {
   /* ── notebooks ────────────────────────────────────────────────── */
@@ -2510,6 +2627,10 @@ onEvent((event) => {
       if (activeMode === "data" && event.action.verb === "Insert") {
         requestAnimationFrame(() => enterCell(event.action.object));
       }
+      break;
+
+    case "theme":
+      renderTheme(event);
       break;
 
     case "layout":

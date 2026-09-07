@@ -11,6 +11,7 @@ pub mod bus;
 pub mod contract;
 pub mod data;
 pub mod debug;
+pub mod design;
 pub mod editor;
 pub mod ex;
 pub mod folder;

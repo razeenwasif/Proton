@@ -1672,3 +1672,32 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
 .cell-md hr { border: 0; border-top: 1px solid var(--edge); margin: 10px 0; }
 /* A link's text without its target — see `markdownHtml`. */
 .cell-md u { text-decoration-color: var(--accent); }
+
+/* Design mode's token rows. A swatch, the name, and the value as a field you
+   can type in — the row *is* the editor, because a palette you have to open a
+   dialog to change is one you stop tweaking. */
+.prop-row.token { gap: 7px; align-items: center; cursor: default; }
+.prop-row.token.on { background: var(--e2); }
+.prop-row.token .lbl {
+  font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+/* The native picker, wearing the swatch's clothes. */
+.tok-color {
+  flex: 0 0 auto; width: 20px; height: 16px; padding: 0;
+  border: 1px solid var(--edge); border-radius: 4px;
+  background: none; cursor: pointer;
+}
+.tok-color::-webkit-color-swatch-wrapper { padding: 1px; }
+.tok-color::-webkit-color-swatch { border: none; border-radius: 3px; }
+.tok-value {
+  flex: 1 1 96px; min-width: 0; max-width: 168px;
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  background: transparent; border: 1px solid transparent; border-radius: 4px;
+  padding: 2px 5px; text-align: right;
+}
+.tok-value:hover { border-color: var(--edge); }
+.tok-value:focus {
+  outline: none; border-color: var(--accent);
+  background: var(--bg-deep); color: var(--ink);
+}
