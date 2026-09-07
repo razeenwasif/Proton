@@ -241,6 +241,38 @@ fn anthropics_encrypted_reasoning_is_not_forwarded() {
 }
 
 #[test]
+fn reasoning_is_not_echoed_back() {
+    // A `thought` part is something Gemini produces, not something it accepts.
+    // Echoing one into `contents` is rejected with a 400 — and only on the
+    // *second* request of a turn, because the first has no reasoning to echo,
+    // which makes it look like tool use broke rather than this.
+    let request = Request {
+        profile: profile(),
+        system: Vec::new(),
+        tools: Vec::new(),
+        messages: vec![Message::assistant(vec![
+            Block::Thinking {
+                thinking: "let me look at the file".into(),
+                signature: String::new(),
+            },
+            Block::Text {
+                text: "I will check.".into(),
+            },
+        ])],
+    };
+    let body = gemini::body(&request);
+    let parts = body["contents"][0]["parts"].as_array().unwrap();
+
+    assert_eq!(parts.len(), 1, "the reasoning was sent back: {body:#}");
+    assert_eq!(parts[0]["text"], "I will check.");
+    // And nothing anywhere claims to be a thought.
+    assert!(
+        !body.to_string().contains("thought"),
+        "a thought part reached the body: {body:#}"
+    );
+}
+
+#[test]
 fn thinking_is_asked_for_explicitly_when_the_profile_wants_it() {
     let request = Request {
         profile: profile(),

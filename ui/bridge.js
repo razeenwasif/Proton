@@ -710,6 +710,14 @@ if (HAS_SHELL) {
       };
       const agent = (activity, extra) => ({
         type: "agent", activity, inputTokens: 4210, outputTokens: 183, cachedTokens: 3904,
+        provider: settings.agent?.provider ?? "claude",
+        // Follows the provider when no model is named, as the core does — a
+        // mock that answered "claude-opus-5" while the chip said Gemini would
+        // be showing the exact bug this pane is meant to make visible.
+        model:
+          settings.agent?.model ??
+          (settings.agent?.provider === "gemini" ? "gemini-3-pro" : "claude-opus-5"),
+        credential: "ANTHROPIC_API_KEY is set",
         transcript: [you, { ...reply, ...extra }],
       });
       // Stagger it so the streaming states are visible while designing them.

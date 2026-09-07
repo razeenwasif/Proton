@@ -156,7 +156,8 @@ fn run(
                 text: "Gemini takes an API key, not a bearer token".into(),
             };
         };
-        let call = ureq::post(url)
+        let call = agent()
+            .post(url)
             .header("x-goog-api-key", key)
             .header("content-type", "application/json")
             .header("accept", "text/event-stream");
@@ -169,7 +170,8 @@ fn run(
         );
     }
 
-    let mut call = ureq::post(url)
+    let mut call = agent()
+        .post(url)
         .header("anthropic-version", VERSION)
         .header("anthropic-beta", Request::betas())
         .header("content-type", "application/json")
@@ -237,6 +239,9 @@ fn stream(
 ) -> Reply {
     let response = match call.send_json(body) {
         Ok(response) => response,
+        // Only reachable if the status-as-error default is ever restored. It
+        // is turned off in `agent()` precisely so this is not where a failure
+        // lands: this arm knows the number and not the reason.
         Err(ureq::Error::StatusCode(code)) => {
             return Reply::Failed {
                 text: explain(code),
@@ -288,6 +293,20 @@ fn stream(
     }
 
     wire.finish()
+}
+
+/// An HTTP client that hands back error responses instead of swallowing them.
+///
+/// `ureq` treats a non-2xx as an `Err` carrying only the number, and the body
+/// — which is where the API explains what was actually wrong — is dropped. A
+/// 400 then reads as "the request was rejected (400)", which is true and
+/// useless: the reason is one field away and was thrown out. With this off,
+/// the response arrives normally and `body_hint` can read it.
+fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into()
 }
 
 /// Turn a status code into something a person can act on.

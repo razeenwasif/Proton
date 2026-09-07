@@ -1829,3 +1829,12 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
 .composer .select[data-mention].on {
   background: var(--e2); color: var(--accent);
 }
+
+/* The model picker sits in the composer's foot with the other controls, so it
+   wears their clothes rather than the browser's. */
+.model-pick {
+  font: 500 11px/1 var(--sans); color: var(--ink-2);
+  background: var(--e1); border: 1px solid var(--edge);
+  border-radius: 6px; padding: 3px 6px; max-width: 168px;
+}
+.model-pick:hover { color: var(--ink); }

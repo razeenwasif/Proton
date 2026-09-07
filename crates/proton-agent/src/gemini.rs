@@ -137,12 +137,16 @@ fn contents(messages: &[Message]) -> Vec<Value> {
 fn part(block: &Block, names: &std::collections::HashMap<&str, &str>) -> Option<Value> {
     match block {
         Block::Text { text } => Some(json!({ "text": text })),
-        // Sent back with the flag, so the model can tell its own reasoning
-        // from what it said out loud.
-        Block::Thinking { thinking, .. } => Some(json!({
-            "text": thinking,
-            "thought": true,
-        })),
+        // Not sent back. A `thought` part is something Gemini produces, not
+        // something it accepts: echoing one into `contents` is rejected, and
+        // the rejection arrives as a bare 400 on the *second* request of a
+        // turn — the first one has no reasoning to echo yet, which is what
+        // makes it look like tool use broke rather than this.
+        //
+        // Nothing is lost that the model needs. Its own reasoning is not part
+        // of the conversation it is continuing; the text it said out loud and
+        // the calls it made are, and both are still here.
+        Block::Thinking { .. } => None,
         // Opaque to us and meaningless to Gemini: it is Anthropic's encrypted
         // reasoning. Dropping it is right; forwarding it would be nonsense.
         Block::RedactedThinking { .. } => None,

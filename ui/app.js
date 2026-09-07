@@ -3440,11 +3440,16 @@ function proseHtml(text) {
     .join("");
 }
 
+/** The model that is answering, for the transcript's byline. */
+let answeringModel = "";
+
 function entryHtml(entry) {
   const you = entry.speaker === "you";
   const who = you
     ? `<svg class="i" style="color:var(--accent)"><use href="#i-proton"/></svg> You`
-    : `<svg class="i ft-ai"><use href="#i-spark"/></svg> Proton · Opus 5`;
+    : `<svg class="i ft-ai"><use href="#i-spark"/></svg> Proton${
+        answeringModel ? ` · ${escapeHtml(answeringModel)}` : ""
+      }`;
 
   const thinking = entry.thinking
     ? `<details class="thought"><summary>thought</summary>${proseHtml(entry.thinking)}</details>`
@@ -3656,6 +3661,24 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("[data-staged-reject]")) dispatch({ type: "rejectStaged", path: null });
 });
 
+/* What each provider offers, for the composer's picker.
+   A short list rather than every model either of them has ever shipped: this
+   is a control you glance at mid-question, and the settings panel takes a
+   typed name for anything else. The one in use is always shown even when it
+   is not on this list. */
+const MODELS = {
+  claude: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"],
+  gemini: ["gemini-3-pro", "gemini-2.5-pro", "gemini-2.5-flash"],
+};
+
+// Choosing one writes the setting, which is the same thing the settings panel
+// writes — one place decides which model answers.
+document.addEventListener("change", (e) => {
+  const pick = e.target.closest?.("[data-model-pick]");
+  if (!pick) return;
+  dispatch({ type: "setSetting", key: "agent.model", value: pick.value });
+});
+
 /* ── conversations ────────────────────────────────────────────────────
 
    Chat's explorer. Files in `.proton/chats`, most recently changed first,
@@ -3732,6 +3755,7 @@ document.addEventListener("click", (e) => {
 });
 
 function renderAgent(event) {
+  answeringModel = event.model ?? "";
   // Every thread: Codex's dock and Chat's stage show the same conversation,
   // and one of them is always off screen. Painting only the visible one would
   // leave the other showing whatever it had when it was last looked at.
@@ -3761,6 +3785,22 @@ function renderAgent(event) {
     who.className = "chip" + (event.provider === "gemini" ? " ok" : " accent");
   }
 
+  // The model picker: what this provider offers, plus whatever is actually
+  // set even when it is not on the list — a model typed into settings must
+  // still show as the one in use rather than silently reading as the default.
+  for (const pick of $$("[data-model-pick]")) {
+    const known = MODELS[event.provider] ?? [];
+    const options = known.includes(event.model) ? known : [event.model, ...known];
+    const want = options.join("|");
+    if (pick.dataset.built !== want) {
+      pick.dataset.built = want;
+      pick.innerHTML = options
+        .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
+        .join("");
+    }
+    pick.value = event.model;
+  }
+
   // Where the key comes from, in the settings panel. Not a promise that a
   // request will succeed — only that one will be attempted with something.
   const auth = $("[data-agent-auth]");
@@ -3785,7 +3825,9 @@ function renderAgent(event) {
     meter.innerHTML = event.inputTokens
       ? `<svg class="i ft-ai"><use href="#i-spark"/></svg> ${fmt(event.inputTokens)} in · ` +
         `${fmt(event.outputTokens)} out · <span class="cached">${fmt(event.cachedTokens)} cached</span>`
-      : `<svg class="i ft-ai"><use href="#i-spark"/></svg> Opus 5 · agent`;
+      : `<svg class="i ft-ai"><use href="#i-spark"/></svg> ${escapeHtml(
+          event.model || "agent",
+        )}`;
   }
 }
 
