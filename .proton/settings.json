@@ -1,7 +1,0 @@
-{
-  "agent": {
-    "provider": "gemini"
-  },
-  "theme": "gruvbox-dark",
-  "translucency": "heavy"
-}

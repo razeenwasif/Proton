@@ -11,3 +11,7 @@ node_modules
 # purpose, so that the agent's grep runs against the real index, and every
 # question those tests ask now writes a file.
 .proton/chats/
+# One developer's theme and provider are not the project's. The file is
+# designed to be committable — a team that wants the same editor can — but
+# that is a decision somebody makes, not something `git add -A` does.
+.proton/settings.json
