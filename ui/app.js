@@ -2702,6 +2702,19 @@ function renderPicker(event) {
   const results = $("[data-picker-results]");
   results.innerHTML = event.items
     .map((item, i) => {
+      const on = i === event.selected ? " on" : "";
+      // A library row is two lines, because its two halves are both prose and
+      // both long: the citation says which passage, and the passage itself
+      // says whether it is the one you wanted. Squeezing them onto one line
+      // the way a file row does would truncate both.
+      if (event.kind === "library") {
+        const [first = ""] = item.detail.split("\n");
+        return (
+          `<div class="res lib${on}" data-pick="${i}">` +
+          `<span class="cite">${escapeHtml(item.label)}</span>` +
+          `<span class="line">${escapeHtml(first)}</span></div>`
+        );
+      }
       // A symbol row says what kind of thing it is, using the marks the
       // completion popup already teaches — a second alphabet for the same
       // nine categories would be one to learn twice.
@@ -2709,7 +2722,7 @@ function renderPicker(event) {
         ? `<span class="k">${icon(KIND_ICON[item.kind] ?? "k-other")}</span>`
         : leader;
       return (
-        `<div class="res${i === event.selected ? " on" : ""}" data-pick="${i}">` +
+        `<div class="res${on}" data-pick="${i}">` +
         `<span>${mark}${highlight(item.label, item.positions)}</span>` +
         `<span class="dir" style="margin-left:auto">${escapeHtml(item.detail)}</span></div>`
       );
@@ -2717,6 +2730,45 @@ function renderPicker(event) {
     .join("");
 
   results.querySelector(".res.on")?.scrollIntoView({ block: "nearest" });
+  previewPassage(event);
+}
+
+/** The selected passage, in the pane beside the list.
+ *
+ *  Only the library fills this. The other pickers leave the pane's standing
+ *  contents alone — a passage is several lines and worth reading before you
+ *  open it, which is not true of a filename. */
+function previewPassage(event) {
+  const pane = $("#telescope .preview");
+  if (!pane) return;
+  if (event.kind !== "library") {
+    // Put back whatever was there, so opening the library picker does not
+    // permanently replace the pane for every other one.
+    if (pane.dataset.was !== undefined) {
+      pane.innerHTML = pane.dataset.was;
+      delete pane.dataset.was;
+    }
+    return;
+  }
+  if (pane.dataset.was === undefined) pane.dataset.was = pane.innerHTML;
+
+  const item = event.items[event.selected];
+  if (!item) {
+    pane.innerHTML =
+      `<div class="pv-head">${event.query.trim() ? "nothing found" : "your library"}</div>` +
+      `<div class="pv-empty">${
+        event.query.trim()
+          ? "No passage in your notes matches those words. Matching is exact, so try the words the note would use."
+          : "Ask a question. Results are passages from the roots listed in Settings › Library, each citing where it came from."
+      }</div>`;
+    return;
+  }
+  // Its own class rather than `pv-head`: that one uppercases and tracks out
+  // its text, which is right for a label and wrong for a citation — a file
+  // path in capitals is a file path you have to read twice.
+  pane.innerHTML =
+    `<div class="pv-cite">${escapeHtml(item.label)}</div>` +
+    `<div class="pv-passage">${escapeHtml(item.detail)}</div>`;
 }
 
 function closePicker() {

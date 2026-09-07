@@ -37,6 +37,12 @@ pub enum PickerKind {
     Actions,
     /// Everything the loaded plugins offer — `␣pc`.
     PluginCommands,
+    /// Passages from the user's own documents — `␣fl`.
+    ///
+    /// The one picker whose rows are not a narrowing of a list. Every other
+    /// kind holds candidates and filters them; this one asks a question and
+    /// the answer *is* the ranking.
+    Library,
 }
 
 impl PickerKind {
@@ -59,7 +65,18 @@ impl PickerKind {
     /// a server answers late and the plugins are already loaded, so those
     /// rows are set before the picker opens rather than after.
     pub fn is_given_its_rows(self) -> bool {
-        self.is_from_a_server() || self == PickerKind::PluginCommands
+        self.is_from_a_server() || matches!(self, PickerKind::PluginCommands | PickerKind::Library)
+    }
+
+    /// Whether typing re-asks the question rather than narrowing the answer.
+    ///
+    /// True only of the library. Every other picker holds a list of
+    /// candidates and the query filters it; the library's rows are already
+    /// the answer to the query, ranked, so running the fuzzy matcher over
+    /// them would score the same words twice by two different rules — and the
+    /// second one, which knows nothing about the documents, would win.
+    pub fn is_re_asked(self) -> bool {
+        self == PickerKind::Library
     }
 
     pub fn title(self) -> &'static str {
@@ -73,6 +90,7 @@ impl PickerKind {
             PickerKind::Symbols => "document_symbols",
             PickerKind::Actions => "code_actions",
             PickerKind::PluginCommands => "plugin_commands",
+            PickerKind::Library => "library",
         }
     }
 
@@ -90,6 +108,7 @@ impl PickerKind {
             "gg" => PickerKind::Changed,
             "ls" => PickerKind::Symbols,
             "pc" => PickerKind::PluginCommands,
+            "fl" => PickerKind::Library,
             _ => return None,
         })
     }
@@ -141,6 +160,12 @@ pub enum Accepted {
     /// Run a plugin command, addressed the same way and for the same reason.
     RunPluginCommand {
         index: usize,
+    },
+    /// Follow a citation into the library. Not an `OpenPath`, because a
+    /// citation names a place rather than a position — a page of a PDF has no
+    /// line to put a cursor on — and resolving one needs the library's roots.
+    OpenCitation {
+        cite: String,
     },
     Nothing,
 }
@@ -289,6 +314,12 @@ impl Picker {
                 .line
                 .map(|index| Accepted::RunPluginCommand { index })
                 .unwrap_or(Accepted::Nothing),
+            // The row's label *is* the citation — what you are looking at is
+            // what opens — and a citation is not always a path and a line:
+            // one into a PDF is a page, and only the library knows which.
+            PickerKind::Library => Accepted::OpenCitation {
+                cite: item.label.clone(),
+            },
             _ => match &item.path {
                 Some(path) => Accepted::OpenPath {
                     path: path.clone(),
@@ -373,6 +404,31 @@ impl Pickers {
         self.held = items;
         self.requery(Vec::new());
         true
+    }
+
+    /// Hand fresh rows to a picker that re-asks its question on every
+    /// keystroke, rather than narrowing a list it already holds.
+    ///
+    /// Separate from [`set_held`](Self::set_held), which is for an answer
+    /// that arrives once and late. This one arrives on every letter, and the
+    /// guard is the same in spirit: rows for a picker that is no longer open,
+    /// or is open on something else, are an answer to a question nobody is
+    /// asking any more.
+    pub fn refill(&mut self, rows: Vec<PickerItem>) -> bool {
+        if !self.open.as_ref().is_some_and(|p| p.kind.is_re_asked()) {
+            return false;
+        }
+        self.held = rows;
+        self.requery(Vec::new());
+        true
+    }
+
+    /// The open picker's query, for whoever has to answer it.
+    pub fn query_of(&self, kind: PickerKind) -> Option<String> {
+        self.open
+            .as_ref()
+            .filter(|p| p.kind == kind)
+            .map(|p| p.query().to_string())
     }
 
     pub fn file_count(&self) -> usize {
@@ -562,6 +618,16 @@ impl Pickers {
             // rather than ranking: symbols read down the file, references read
             // in the order the server found them. Ranking an empty pattern
             // would shuffle both into whatever the matcher considers a tie.
+            // Held verbatim, whatever the query says. The workspace has
+            // already re-asked the library with this query and handed back
+            // what it answered, in the order it answered — so there is
+            // nothing here to narrow.
+            PickerKind::Library => {
+                let mut rows = self.held.clone();
+                rows.truncate(LIMIT);
+                rows
+            }
+
             PickerKind::References
             | PickerKind::Symbols
             | PickerKind::Actions

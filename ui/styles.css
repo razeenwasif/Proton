@@ -1812,6 +1812,35 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
 .st-field input:focus { outline: none; border-color: var(--accent); }
 [data-set-choice] button.on { background: var(--e2); color: var(--ink); }
 
+/* A library row: the citation, and the passage under it. Two lines because
+   both halves are prose and both are long — a filename fits beside its
+   directory, a passage does not fit beside its citation. */
+.res.lib { flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 10px; }
+.res.lib .cite {
+  font: 400 11px var(--mono); color: var(--ink-3);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.res.lib.on .cite { color: var(--accent); }
+.res.lib .line {
+  font: 400 12.5px var(--sans); color: var(--ink-2);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.res.lib.on .line { color: var(--ink); }
+
+/* A citation over the passage it names. Not `.pv-head`, which uppercases and
+   tracks out its text — right for a label, wrong for a path and a heading. */
+.pv-cite {
+  padding: 12px 16px 6px; font: 400 11px/1.5 var(--mono); color: var(--ink-3);
+  border-bottom: 1px solid var(--edge); overflow-wrap: anywhere;
+}
+
+/* The passage itself, beside the list. */
+.pv-passage {
+  padding: 4px 16px 16px; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 400 12.5px/1.65 var(--sans); color: var(--ink-2);
+}
+.pv-empty { padding: 4px 16px; font: 400 12.5px/1.6 var(--sans); color: var(--ink-4); max-width: 46ch; }
+
 /* The library's roots. One row per directory that may be read, and the ×
    that stops it being read — the list is the whole permission model, so it
    is a list you can see rather than a switch that means something. */
