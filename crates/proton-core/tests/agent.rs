@@ -124,7 +124,23 @@ fn settle(ws: &mut Workspace) -> Vec<Event> {
 static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn exclusive() -> std::sync::MutexGuard<'static, ()> {
-    ENV.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    let guard = ENV.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Here rather than in each test, because it is a property of the whole
+    // suite: these root at `../..` on purpose, so the agent's `grep` runs
+    // against this repository's real index — and that means they also read
+    // this repository's `.proton/settings.json`. A developer who has chosen
+    // Gemini there turns "a fake API on a loopback port" into "the real Google
+    // endpoint with a fake key", because the fake server is only ever pointed
+    // at by `ANTHROPIC_BASE_URL`. It failed exactly that way, and the error it
+    // produced was about a certificate, which sent me looking at TLS.
+    //
+    // A settings file that does not exist means all-defaults, which is Claude,
+    // which is what every test here scripts.
+    std::env::set_var(
+        "PROTON_SETTINGS",
+        std::env::temp_dir().join("proton-agent-tests-no-settings.json"),
+    );
+    guard
 }
 
 fn transcript(events: &[Event]) -> Vec<proton_core::agent::Entry> {

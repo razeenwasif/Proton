@@ -249,7 +249,7 @@ fn stream(
         }
         Err(err) => {
             return Reply::Failed {
-                text: format!("could not reach the API: {err}"),
+                text: unreachable_because(&err),
             }
         }
     };
@@ -295,18 +295,82 @@ fn stream(
     wire.finish()
 }
 
-/// An HTTP client that hands back error responses instead of swallowing them.
+/// An HTTP client that hands back error responses instead of swallowing them,
+/// and that trusts what the machine trusts.
+///
+/// ## Error bodies
 ///
 /// `ureq` treats a non-2xx as an `Err` carrying only the number, and the body
 /// — which is where the API explains what was actually wrong — is dropped. A
 /// 400 then reads as "the request was rejected (400)", which is true and
 /// useless: the reason is one field away and was thrown out. With this off,
 /// the response arrives normally and `body_hint` can read it.
-fn agent() -> ureq::Agent {
+///
+/// ## Why the platform's root certificates, not Mozilla's
+///
+/// `ureq` defaults to [`RootCerts::WebPki`] — a fixed list of public roots —
+/// and its own documentation says that is the safer choice *because* it
+/// refuses a connection somebody is intercepting. That is a real property and
+/// it is the wrong trade here.
+///
+/// Antivirus and corporate proxies terminate TLS and re-sign it with a root
+/// they install in the OS trust store. On a machine running Norton's Web/Mail
+/// Shield the certificate arrives as:
+///
+/// ```text
+/// issuer=O=Norton Web/Mail Shield, CN=Norton Web/Mail Shield Root
+/// subject=CN=api.anthropic.com
+/// ```
+///
+/// The browser, `curl`, `git` and `npm` all accept it, because Windows does.
+/// Proton alone refused, and said `could not reach the API` — which points at
+/// the network, not at the scanner, and is a bug report nobody can act on.
+///
+/// The security argument for overriding the OS is weaker than it looks: the
+/// system trust store is the machine owner's own statement of what they trust,
+/// and anyone who can add a root to it has already taken the machine. What
+/// pinning Mozilla's list buys is protection from the user's own configuration;
+/// what it costs is an editor that cannot talk to a model at work or behind an
+/// antivirus. So the platform verifier wins, and the machine decides.
+pub(crate) fn agent() -> ureq::Agent {
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
     ureq::Agent::config_builder()
         .http_status_as_error(false)
+        .tls_config(tls)
         .build()
         .into()
+}
+
+/// Say why the API could not be reached, when the reason is knowable.
+///
+/// "could not reach the API: io: invalid peer certificate: UnknownIssuer"
+/// names the machinery and not the problem. The problem is that something
+/// between here and the API is opening the connection and re-signing it, and
+/// the certificate it presents is signed by a root this machine does not
+/// trust. That is a sentence somebody can act on; the other one sends them to
+/// look at their wifi.
+pub(crate) fn unreachable_because(err: &ureq::Error) -> String {
+    let text = err.to_string();
+    let lower = text.to_lowercase();
+
+    // Matched on the message because `ureq` folds the TLS error into an
+    // `io::Error` by the time it gets here — there is no variant to match.
+    // Fragile in the sense that a reworded upstream error stops being
+    // recognised; the fallback is what we said before, so it degrades to no
+    // worse than it was.
+    let certificate = lower.contains("certificate") || lower.contains("unknownissuer");
+    if certificate {
+        return format!(
+            "the API's certificate could not be verified: {text}. Something is \
+             intercepting this connection — antivirus TLS scanning or a corporate \
+             proxy — and the root it re-signs with is not trusted by this machine. \
+             Trust that root in the system store, or turn the scanning off for \
+             api.anthropic.com."
+        );
+    }
+    format!("could not reach the API: {text}")
 }
 
 /// Turn a status code into something a person can act on.
@@ -337,6 +401,46 @@ fn body_hint(detail: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_machines_own_root_certificates_are_what_is_trusted() {
+        // The regression this guards is a one-line one: `ureq` defaults to a
+        // pinned list of Mozilla roots, and going back to the default makes
+        // Proton the only application on a machine with antivirus TLS scanning
+        // that cannot reach the API — while reporting it as a network problem.
+        let agent = agent();
+        assert!(
+            matches!(
+                agent.config().tls_config().root_certs(),
+                ureq::tls::RootCerts::PlatformVerifier
+            ),
+            "the pinned root list is back: {:?}",
+            agent.config().tls_config().root_certs()
+        );
+    }
+
+    #[test]
+    fn a_certificate_failure_names_the_scanner_rather_than_the_network() {
+        // What the user saw before: "could not reach the API: io: invalid peer
+        // certificate: UnknownIssuer" — which sends somebody to look at their
+        // wifi, when the answer is that something is re-signing the connection.
+        let said = unreachable_because(&ureq::Error::Io(std::io::Error::other(
+            "invalid peer certificate: UnknownIssuer",
+        )));
+        assert!(said.contains("intercepting"), "{said}");
+        assert!(
+            said.contains("antivirus") || said.contains("proxy"),
+            "{said}"
+        );
+
+        // And anything else still reads the way it did, rather than blaming a
+        // scanner for a connection that was simply refused.
+        let other = unreachable_because(&ureq::Error::Io(std::io::Error::other(
+            "connection refused",
+        )));
+        assert!(other.starts_with("could not reach the API"), "{other}");
+        assert!(!other.contains("intercepting"), "{other}");
+    }
 
     #[test]
     fn every_status_worth_distinguishing_says_what_to_do() {

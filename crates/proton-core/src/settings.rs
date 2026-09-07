@@ -53,13 +53,29 @@ impl Settings {
     /// is missing would lose the rest of it, so the defaults are used and the
     /// file is not touched until something is deliberately set.
     pub fn load(root: &Path) -> Settings {
-        let path = root.join(".proton").join("settings.json");
+        let path = Settings::path_in(root);
         let doc = std::fs::read_to_string(&path)
             .ok()
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .filter(Value::is_object)
             .unwrap_or_else(|| Value::Object(Map::new()));
         Settings { path, doc }
+    }
+
+    /// Where a project's settings live.
+    ///
+    /// `PROTON_SETTINGS` overrides it, which exists for one reason worth
+    /// stating: a test that roots a workspace at a real repository otherwise
+    /// inherits whatever the developer happens to have chosen there. That is
+    /// how `tests/agent.rs` — a suite whose whole point is a *fake* API on a
+    /// loopback port — came to send its requests to Google, because the
+    /// repository's own settings said `"provider": "gemini"` and the fake
+    /// server is only ever pointed at by `ANTHROPIC_BASE_URL`.
+    pub fn path_in(root: &Path) -> PathBuf {
+        match std::env::var_os("PROTON_SETTINGS") {
+            Some(named) => PathBuf::from(named),
+            None => root.join(".proton").join("settings.json"),
+        }
     }
 
     pub fn path(&self) -> &Path {
