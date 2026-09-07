@@ -7,5 +7,15 @@ license.workspace = true
 repository.workspace = true
 description = "Your own documents, cut into passages and searched with citations."
 
+[features]
+# Building a small real PDF, so a test elsewhere in the workspace can have
+# one without carrying a binary fixture in the repository.
+fixture = ["dep:lopdf"]
+
 [dependencies]
 ignore = "0.4"
+pdf-extract = "0.12.0"
+lopdf = { version = "0.42", optional = true }
+
+[dev-dependencies]
+proton-library = { path = ".", features = ["fixture"] }

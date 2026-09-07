@@ -156,6 +156,16 @@ missing: Array<string>, documents: number, passages: number,
  */
 indexing: boolean, 
 /**
+ * Whether PDFs are read as well as notes.
+ */
+pdfs: boolean, 
+/**
+ * How many documents have been read and how many were found. The
+ * first walk over a corpus of PDFs takes minutes, and a panel that
+ * can only say "reading" for that long is one you assume has hung.
+ */
+read: number, found: number, 
+/**
  * How long the last walk took. Zero if none has finished.
  */
 elapsedMs: bigint, } | { "type": "theme", 

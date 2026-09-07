@@ -39,7 +39,7 @@ const COVERAGE: f32 = 0.35;
 const K1: f32 = 1.2;
 const B: f32 = 0.75;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Bm25 {
     vocab: HashMap<String, usize>,
     /// For each term, which passages hold it and how often.
@@ -146,7 +146,39 @@ impl Bm25 {
 pub fn tokens(text: &str) -> impl Iterator<Item = String> + '_ {
     text.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-'))
         .filter(|t| !t.is_empty())
-        .map(str::to_lowercase)
+        .map(|token| unligature(&token.to_lowercase()))
+}
+
+/// Split the typographic ligatures back into the letters they are.
+///
+/// The one normalisation beyond case, and it is here because of PDFs. Text
+/// extracted from a typeset document is full of `ﬁ` and `ﬂ` — they are single
+/// characters in the font and come out as single characters — so a page about
+/// "Approximation and ﬁtting" is a page nobody can find by asking for
+/// *fitting*. That is not a near miss, it is a document that is present and
+/// unreachable.
+///
+/// Only the Latin `ff`/`fi`/`fl` family, which are purely a rendering of the
+/// same letters. `œ` and `æ` are left alone: those are letters in their own
+/// right in the languages that use them, and folding them would be a claim
+/// about spelling rather than about typesetting.
+fn unligature(token: &str) -> String {
+    if !token.contains(|c| ('\u{FB00}'..='\u{FB06}').contains(&c)) {
+        return token.to_string();
+    }
+    let mut out = String::with_capacity(token.len());
+    for c in token.chars() {
+        match c {
+            '\u{FB00}' => out.push_str("ff"),
+            '\u{FB01}' => out.push_str("fi"),
+            '\u{FB02}' => out.push_str("fl"),
+            '\u{FB03}' => out.push_str("ffi"),
+            '\u{FB04}' => out.push_str("ffl"),
+            '\u{FB05}' | '\u{FB06}' => out.push_str("st"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -258,5 +290,36 @@ mod tests {
         // are three different things often enough to matter.
         let out: Vec<String> = tokens("Cache Caching CACHES").collect();
         assert_eq!(out, ["cache", "caching", "caches"]);
+    }
+
+    #[test]
+    fn a_ligature_out_of_a_pdf_is_the_letters_it_is_made_of() {
+        // Found in a real ranking: a page of Boyd titled "Approximation and
+        // ﬁtting" could not be reached by asking for *fitting*, because the
+        // extracted text has the single character the font drew.
+        let out: Vec<String> = tokens("Approximation and \u{FB01}tting").collect();
+        assert_eq!(out, ["approximation", "and", "fitting"]);
+        assert_eq!(
+            tokens("e\u{FB03}cient di\u{FB00}erence \u{FB02}ow").collect::<Vec<_>>(),
+            ["efficient", "difference", "flow"]
+        );
+    }
+
+    #[test]
+    fn a_ligature_matches_the_word_typed_the_ordinary_way() {
+        // The property that matters, rather than the transformation: indexing
+        // and querying have to agree, which is why this happens in `tokens`
+        // and not at either call site.
+        let bm = index(&[("Approximation and \u{FB01}tting", "")]);
+        assert!(bm.scores("fitting")[0] > 0.0);
+    }
+
+    #[test]
+    fn letters_that_only_look_like_ligatures_are_left_alone() {
+        // `œ` and `æ` are letters in the languages that use them, not a
+        // typesetter's rendering of two others. Folding them would be a claim
+        // about spelling.
+        let out: Vec<String> = tokens("œuvre Æther").collect();
+        assert_eq!(out, ["œuvre", "æther"]);
     }
 }

@@ -712,6 +712,13 @@ pub enum Event {
         /// True while a walk is in flight, so "reading" and "empty" are
         /// different things on screen.
         indexing: bool,
+        /// Whether PDFs are read as well as notes.
+        pdfs: bool,
+        /// How many documents have been read and how many were found. The
+        /// first walk over a corpus of PDFs takes minutes, and a panel that
+        /// can only say "reading" for that long is one you assume has hung.
+        read: usize,
+        found: usize,
         /// How long the last walk took. Zero if none has finished.
         elapsed_ms: u64,
     },

@@ -31,6 +31,7 @@
 //! explicitly and the walker refuses anything outside them.
 
 pub mod chunk;
+pub mod pdf;
 pub mod score;
 pub mod shelf;
 
@@ -49,7 +50,7 @@ pub struct Hit {
 }
 
 /// Everything indexed, and the roots it came from.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Library {
     roots: Vec<PathBuf>,
     passages: Vec<Passage>,
@@ -57,6 +58,9 @@ pub struct Library {
     /// then and would have to be looked up again on the way out.
     cites: Vec<String>,
     index: score::Bm25,
+    /// How many distinct documents are in here. Counted as they arrive; see
+    /// [`documents`](Self::documents).
+    documents: usize,
 }
 
 impl Library {
@@ -77,11 +81,13 @@ impl Library {
     }
 
     /// How many documents were read, as distinct from passages.
+    ///
+    /// Counted as they arrive rather than worked out on demand. It used to
+    /// sort and dedup every passage's path, which was fine at six thousand
+    /// passages and is not at twenty-eight thousand — the panel asks for this
+    /// on every tick of a walk that runs for minutes.
     pub fn documents(&self) -> usize {
-        let mut seen: Vec<&Path> = self.passages.iter().map(|p| p.path.as_path()).collect();
-        seen.sort_unstable();
-        seen.dedup();
-        seen.len()
+        self.documents
     }
 
     /// Note a root, so citations can be written relative to it.
@@ -91,10 +97,30 @@ impl Library {
         }
     }
 
-    /// Read one document into the library.
+    /// Read one text document into the library.
     pub fn add(&mut self, path: &Path, text: &str) {
+        self.take(path, chunk::markdown(path, text));
+    }
+
+    /// Read one PDF, already extracted to a string per page.
+    ///
+    /// Separate from [`add`](Self::add) because getting the text out of a PDF
+    /// costs the better part of a second and can panic, so it happens
+    /// elsewhere and behind a cache — and because a PDF is cut into pages
+    /// rather than into sections.
+    pub fn add_pages(&mut self, path: &Path, pages: &[String]) {
+        self.take(path, chunk::pages(path, pages));
+    }
+
+    fn take(&mut self, path: &Path, passages: Vec<Passage>) {
         let root = self.root_for(path).to_path_buf();
-        for passage in chunk::markdown(path, text) {
+        // A document that produced no passages — a note with nothing readable
+        // in it — is not one that was read, which is what keeps this the same
+        // number the sort-and-dedup used to give.
+        if !passages.is_empty() {
+            self.documents += 1;
+        }
+        for passage in passages {
             self.index.add(&passage.text, &passage.title);
             let cite = passage.cite(&root);
             self.passages.push(passage);

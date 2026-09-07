@@ -341,14 +341,18 @@ impl Agent {
             Tool {
                 name: "search_library".into(),
                 description: "Search the user's own notes and documents — their vault, their \
-                              course notes, their writing — for passages about something. This \
-                              is NOT the project: use grep and read_file for code, and this for \
-                              what the user has written down. Ask in the words the notes would \
-                              use, not the words of the question. Each result begins with a \
-                              citation in double brackets: quote it back exactly as given, \
-                              [[like this]], whenever you use what a passage says. The user \
-                              clicks it to open the note at that line, so an answer without \
-                              citations is one they cannot check."
+                              course notes, their papers and slide decks — for passages about \
+                              something. This is NOT the project: use grep and read_file for \
+                              code, and this for what the user has written down or kept. Ask in \
+                              the words the notes would use, not the words of the question. \
+                              Each result begins with a citation in double brackets: quote it \
+                              back exactly as given, [[like this]], whenever you use what a \
+                              passage says. The user clicks it to open the document where the \
+                              passage is, so an answer without citations is one they cannot \
+                              check. A citation ending in L12-34 is lines of a note; one \
+                              ending in p. 4 is a page of a PDF, whose text was extracted and \
+                              may be imperfect — quote it as what the page says, not as \
+                              something you read cleanly."
                     .into(),
                 input_schema: json!({
                     "type": "object",

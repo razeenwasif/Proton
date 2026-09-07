@@ -289,3 +289,86 @@ fn the_walker_reads_the_same_vault_the_test_harness_does() {
         println!("the first root alone holds {} documents", one.documents());
     }
 }
+
+#[test]
+#[ignore = "needs a vault"]
+fn the_pdfs_do_not_drown_the_notes() {
+    // The risk in reading PDFs at all. There are nineteen million characters
+    // of extracted slide text against a few million of hand-written notes, and
+    // extracted slide text is fragmentary — headers, page numbers, half
+    // sentences. If it swamps the ranking, the feature has made the library
+    // worse rather than larger.
+    //
+    // Printed rather than asserted, for the same reason as the ranking test
+    // above: which documents exist is the vault owner's business. What this is
+    // for is reading the output once and seeing whether a question about
+    // something the notes cover still gets the notes.
+    let roots = vaults();
+    if roots.is_empty() {
+        eprintln!("PROTON_TEST_VAULT names no readable directory — skipping");
+        return;
+    }
+
+    let mut shelf = proton_library::Shelf::new();
+    shelf.cache_in(proton_library::pdf::cache_dir());
+    shelf.set_pdfs(true);
+    shelf.set_roots(roots);
+
+    let started = std::time::Instant::now();
+    let deadline = started + std::time::Duration::from_secs(900);
+    let mut notes_at = None;
+    loop {
+        if shelf.poll() && notes_at.is_none() {
+            notes_at = Some(started.elapsed());
+        }
+        if shelf.is_built() && !shelf.is_building() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the walk never landed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    println!(
+        "\nnotes searchable after {:?}; everything after {:?}",
+        notes_at.unwrap_or_default(),
+        started.elapsed()
+    );
+    println!(
+        "{} passages from {} documents",
+        shelf.len(),
+        shelf.documents()
+    );
+
+    // A word that is typeset with a ligature in every book that contains it.
+    // Before `tokens` split them, this found nothing at all: the extracted
+    // text holds the single character the font drew, so a page titled
+    // "Approximation and fitting" was present and unreachable.
+    let ligatured = shelf.search("approximation fitting", 3);
+    println!(
+        "
+  \"approximation fitting\" (ligature probe)"
+    );
+    for hit in &ligatured {
+        println!("    {:>6.2}  {}", hit.score, hit.cite);
+    }
+    assert!(
+        !ligatured.is_empty(),
+        "a word typeset with a ligature is unreachable"
+    );
+
+    for query in [
+        "attention sparsity",
+        "memory hierarchy",
+        "naive bayes",
+        "roofline model",
+        "simplex method",
+    ] {
+        println!("\n  {query:?}");
+        for hit in shelf.search(query, 5) {
+            println!("    {:>6.2}  {}", hit.score, hit.cite);
+        }
+    }
+}

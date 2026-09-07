@@ -68,7 +68,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-vcs` | The gutter, what git considers changed, and the diff behind both | `gix` |
 | `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
 | `proton-agent` | Messages API client, SSE streaming, request building, auth | `ureq` |
-| `proton-library` | The user's own documents: markdown cut into passages, BM25 with citations, and the walk that reads only the roots the settings name | `ignore` |
+| `proton-library` | The user's own documents: markdown cut into passages and PDFs into pages, BM25 with citations, and the walk that reads only the roots the settings name | `ignore`, `pdf-extract` |
 | `proton-trace` | Code Visualizer client: trace format, pointer resolution, sidecar | `ureq` |
 | `proton-dap` | Debug adapter client: launching one, and the conversation with it | `serde_json` |
 | `proton-term` | Pseudo-terminal, and the screen it paints | `portable-pty`, `vt100` |

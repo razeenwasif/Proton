@@ -78,6 +78,10 @@ pub struct Workspace {
     /// library that could reach anywhere under the home directory is one that
     /// can put a medical record in a prompt by accident.
     library: proton_library::Shelf,
+    /// The progress last reported, so the panel is told when it moves rather
+    /// than on every heartbeat for the minutes a first walk over a corpus of
+    /// PDFs takes.
+    library_progress: (usize, usize),
     /// Tool calls waiting on a kernel.
     ///
     /// A cell run is the one tool that cannot answer when it is asked: the
@@ -649,6 +653,19 @@ impl Workspace {
                         NoticeLevel::Error,
                     )];
                 };
+                // A page is not something this editor can show. Opening a PDF
+                // as text would put a screenful of binary in a buffer, which
+                // is worse than not following the citation at all — so it goes
+                // to whatever the user already reads PDFs with.
+                if cited.place == proton_library::chunk::Place::Pages {
+                    return match open_outside(&path) {
+                        Ok(()) => vec![notice(
+                            format!("{} — page {}", cited.path, cited.from),
+                            NoticeLevel::Info,
+                        )],
+                        Err(why) => vec![notice(why, NoticeLevel::Error)],
+                    };
+                }
                 self.apply(Command::JumpTo {
                     mode: ModeId::Codex,
                     path: path.display().to_string(),
@@ -1971,7 +1988,16 @@ impl Workspace {
 
         // And the library's walk, which is the same shape again: a second of
         // reading somebody's vault, on a thread with nothing to call back to.
+        // It answers twice — the notes, then the PDFs — so this is not a
+        // one-shot.
         if self.library.poll() {
+            events.push(self.library_event());
+        }
+        // Progress, while the slow half runs. Sent when the numbers change
+        // rather than on every beat: a walk that takes minutes would otherwise
+        // send twelve hundred events saying nothing new.
+        if self.library.progress() != self.library_progress {
+            self.library_progress = self.library.progress();
             events.push(self.library_event());
         }
 
@@ -3326,8 +3352,19 @@ impl Workspace {
 
                 let hits = self.library.search(&query, count("limit", 6));
                 if hits.is_empty() {
+                    // "Nothing found" and "not all of it has been read yet"
+                    // are different answers, and a walk over a corpus of PDFs
+                    // runs for minutes after the notes are already searchable.
+                    let (read, found) = self.library.progress();
+                    let more = match self.library.is_building() {
+                        true => format!(
+                            " — still reading, {read} of {found} documents so far, \
+                             so this may not be the whole library"
+                        ),
+                        false => String::new(),
+                    };
                     return Ok(format!(
-                        "nothing in the library about {query:?} ({} passages searched)",
+                        "nothing in the library about {query:?} ({} passages searched){more}",
                         self.library.len()
                     ));
                 }
@@ -3718,6 +3755,15 @@ impl Workspace {
                     .collect()
             })
             .unwrap_or_default();
+
+        // Where extracted PDF text is kept. Set before the roots, or the walk
+        // the next line starts extracts everything again and throws it away.
+        self.library.cache_in(proton_library::pdf::cache_dir());
+        // On by default: the documents somebody keeps are as much their PDFs
+        // as their notes, and the cache means the minutes it costs are paid
+        // once rather than at every launch.
+        self.library
+            .set_pdfs(self.settings.bool("library.pdfs", true));
         self.library.set_roots(roots);
     }
 
@@ -3830,6 +3876,9 @@ impl Workspace {
             documents: self.library.documents(),
             passages: self.library.len(),
             indexing: self.library.is_building(),
+            pdfs: self.library.reads_pdfs(),
+            read: self.library.progress().0,
+            found: self.library.progress().1,
             elapsed_ms: self
                 .library
                 .elapsed()
@@ -4507,6 +4556,37 @@ impl Workspace {
 
 pub(crate) fn notice(text: String, level: NoticeLevel) -> Event {
     Event::Notice { text, level }
+}
+
+/// Hand a file to whatever the desktop opens it with.
+///
+/// The only place Proton starts something that is not Proton, and it exists
+/// for one case: a citation into a PDF. There is no PDF viewer here and
+/// opening one as text would fill a buffer with binary, so following that
+/// citation means handing the file to the reader the user already has.
+///
+/// No shell is involved. The path goes to the program as one argument rather
+/// than through `cmd /c`, so a filename with a quote or an `&` in it is a
+/// filename rather than a second command — and the caller has already
+/// established that the path is a real file inside a listed library root.
+fn open_outside(path: &Path) -> Result<(), String> {
+    if !path.is_file() {
+        return Err(format!("{}: no such file", path.display()));
+    }
+    // `explorer` rather than `cmd /c start`: it takes the path as an argument
+    // and opens it with its registered handler. Its exit status is famously
+    // not zero on success, so it is not checked — what matters is that
+    // spawning it worked.
+    let program = match () {
+        _ if cfg!(windows) => "explorer",
+        _ if cfg!(target_os = "macos") => "open",
+        _ => "xdg-open",
+    };
+    std::process::Command::new(program)
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("could not open {}: {err}", path.display()))
 }
 
 /// One terminal run, as the bridge carries it.

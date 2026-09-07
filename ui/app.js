@@ -144,18 +144,24 @@ function renderLibrary(event) {
 
   const status = $("[data-library-status]");
   if (!status) return;
+  const n = (x) => x.toLocaleString();
+  const held =
+    `${n(event.passages)} passage${event.passages === 1 ? "" : "s"} from ` +
+    `${n(event.documents)} document${event.documents === 1 ? "" : "s"}`;
+
   if (!event.roots.length) {
     status.textContent = "No roots listed.";
   } else if (event.indexing) {
-    status.textContent = "Reading…";
+    // A first walk over a corpus of PDFs runs for minutes, so it says how far
+    // it has got rather than "reading" — which after two minutes reads as a
+    // hang. What is already in is searchable while the rest arrives.
+    const far = event.found ? ` — ${n(event.read)} of ${n(event.found)} documents` : "";
+    status.textContent = `Reading${far}. ${held} so far.`;
   } else {
     // "Nothing found" and "not read yet" are different answers, and the
     // count is what tells them apart.
-    const n = (x) => x.toLocaleString();
-    status.textContent =
-      `${n(event.passages)} passage${event.passages === 1 ? "" : "s"} from ` +
-      `${n(event.documents)} document${event.documents === 1 ? "" : "s"}` +
-      (event.elapsedMs ? `, read in ${n(event.elapsedMs)} ms` : "");
+    const took = event.elapsedMs ? `, read in ${n(event.elapsedMs)} ms` : "";
+    status.textContent = `${held}${took}.`;
   }
 }
 

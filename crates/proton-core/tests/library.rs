@@ -27,6 +27,13 @@ fn open(name: &str) -> (Workspace, PathBuf, PathBuf) {
         std::thread::current().id()
     ));
     let _ = std::fs::remove_dir_all(&base);
+    // Extracted PDF text goes to a temp directory rather than the real cache,
+    // where nothing would ever reuse or remove what a test run left. Set
+    // before the workspace is built, which is what reads it.
+    std::env::set_var(
+        "PROTON_LIBRARY_CACHE",
+        std::env::temp_dir().join("proton-library-tests"),
+    );
     let project = base.join("project");
     let vault = base.join("vault");
     std::fs::create_dir_all(&project).unwrap();
@@ -308,6 +315,98 @@ fn asking_before_the_walk_lands_says_so_rather_than_saying_nothing_is_there() {
         answer.contains("still being read") || answer.contains("quadratic"),
         "an unfinished walk read as an empty library: {answer}"
     );
+}
+
+/// Beat until the walk says it has finished, rather than until it first
+/// answers — a walk with PDFs in it answers twice, notes and then documents.
+fn settle_fully(space: &mut Workspace) -> Event {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        for event in space.apply(Command::Poll) {
+            if matches!(
+                &event,
+                Event::Library {
+                    indexing: false,
+                    ..
+                }
+            ) {
+                return event;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the library never finished reading");
+}
+
+#[test]
+fn a_pdf_is_read_and_cited_by_the_page_it_is_on() {
+    // A PDF has no lines anybody can see — `L4-5` of one is a number about
+    // text that exists only inside the extractor. The page is the only place
+    // a reader can be sent.
+    let (mut space, _project, vault) = open("pdf");
+    std::fs::write(
+        vault.join("Attention.pdf"),
+        proton_library::pdf::fixture(&[
+            "Introduction\nnothing much happens on this page",
+            "Sparse Attention\nsparsity reduces the quadratic cost of attending",
+        ]),
+    )
+    .unwrap();
+
+    space.apply(Command::SetSetting {
+        key: "library.roots".into(),
+        value: json!([vault.display().to_string()]),
+    });
+    settle_fully(&mut space);
+
+    let answer = search(&mut space, "sparsity quadratic");
+    assert!(
+        answer.contains("[[Attention.pdf § Sparse Attention p. 2]]"),
+        "no page citation in: {answer}"
+    );
+}
+
+#[test]
+fn pdfs_can_be_turned_off() {
+    // The first walk over a real corpus of them took three and a half
+    // minutes, so somebody who only keeps notes must be able to not pay it.
+    let (mut space, _project, vault) = open("pdf-off");
+    std::fs::write(
+        vault.join("Attention.pdf"),
+        proton_library::pdf::fixture(&["Sparse Attention\nsparsity reduces the quadratic cost"]),
+    )
+    .unwrap();
+
+    space.apply(Command::SetSetting {
+        key: "library.pdfs".into(),
+        value: json!(false),
+    });
+    space.apply(Command::SetSetting {
+        key: "library.roots".into(),
+        value: json!([vault.display().to_string()]),
+    });
+    settle_fully(&mut space);
+
+    let answer = search(&mut space, "sparsity quadratic");
+    assert!(!answer.contains("Attention.pdf"), "{answer}");
+    // The notes beside it are still read.
+    assert!(search(&mut space, "sparsity").contains("Attention.md"));
+}
+
+#[test]
+fn the_panel_is_told_how_far_a_long_walk_has_got() {
+    // A first walk over a corpus of PDFs runs for minutes. A panel that can
+    // only say "reading" for that long is one you assume has hung.
+    let (mut space, _project, vault) = open("progress");
+    space.apply(Command::SetSetting {
+        key: "library.roots".into(),
+        value: json!([vault.display().to_string()]),
+    });
+
+    let Event::Library { read, found, .. } = settle_fully(&mut space) else {
+        unreachable!()
+    };
+    assert_eq!((read, found), (2, 2), "the two notes in the fixture vault");
 }
 
 #[test]
