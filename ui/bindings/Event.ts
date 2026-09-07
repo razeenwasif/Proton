@@ -25,6 +25,7 @@ import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
+import type { Summary } from "./Summary";
 import type { Task } from "./Task";
 import type { TermRun } from "./TermRun";
 import type { ThemeView } from "./ThemeView";
@@ -129,7 +130,13 @@ path: string, cells: Array<CellView>,
 /**
  * Why there is no kernel, when there is a reason worth showing.
  */
-problem: string, } | { "type": "settings", values: Record<string, unknown>, 
+problem: string, } | { "type": "chats", conversations: Array<Summary>, 
+/**
+ * Which one is open, as a project-relative path. Empty for a
+ * conversation that has not been saved yet — one with no question in
+ * it has nothing worth a file.
+ */
+current: string, } | { "type": "settings", values: Record<string, unknown>, 
 /**
  * Where they are stored, for the panel to show and for a `:e` on it.
  */

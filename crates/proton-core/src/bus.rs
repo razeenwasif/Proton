@@ -210,6 +210,21 @@ pub enum Command {
     /// Stop the turn in flight. What has arrived stays on screen; nothing is
     /// committed to the conversation.
     CancelTurn,
+    /// Start a new conversation. The one open is already on disk.
+    NewChat,
+    /// Open a saved conversation, by path relative to the project.
+    OpenChat {
+        path: String,
+    },
+    /// Delete one. There is no undo: it is a file, and the shell asks first.
+    DeleteChat {
+        path: String,
+    },
+    /// Give one a name of its own, rather than the first line of the question.
+    RenameChat {
+        path: String,
+        title: String,
+    },
     /// Take one task off the queue. A running one stays: removing its row
     /// would not stop the turn.
     DropTask {
@@ -644,6 +659,15 @@ pub enum Event {
         cells: Vec<crate::data::CellView>,
         /// Why there is no kernel, when there is a reason worth showing.
         problem: String,
+    },
+    /// The saved conversations, most recently changed first.
+    #[serde(rename_all = "camelCase")]
+    Chats {
+        conversations: Vec<crate::chats::Summary>,
+        /// Which one is open, as a project-relative path. Empty for a
+        /// conversation that has not been saved yet — one with no question in
+        /// it has nothing worth a file.
+        current: String,
     },
     /// Everything in `.proton/settings.json`, as one object.
     ///

@@ -493,6 +493,121 @@ impl Agent {
     }
 
     /// For tests and for the statusline: how many turns are on the wire.
+    /// Load a saved conversation, rebuilding what is drawn from what was sent.
+    ///
+    /// The transcript is not stored — the conversation is the document, and a
+    /// second record of the same thing would be free to disagree with it. So
+    /// it is rebuilt here, which is a function that has to be right rather
+    /// than a file that has to be kept in step.
+    ///
+    /// The rebuild follows the live path exactly: one user entry per question,
+    /// and *one* agent entry for the whole reply however many tool round trips
+    /// it took, because that is one thing the agent did.
+    pub fn restore(&mut self, messages: Vec<Message>) {
+        self.transcript.clear();
+        self.outstanding.clear();
+        self.answers.clear();
+        self.turn = None;
+        self.activity = Activity::Idle;
+
+        // What each call answered, so a restored transcript shows its results
+        // rather than a row of calls that look like they never returned.
+        let results: std::collections::HashMap<&str, (&str, bool)> = messages
+            .iter()
+            .flat_map(|message| &message.content)
+            .filter_map(|block| match block {
+                Block::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error,
+                } => Some((tool_use_id.as_str(), (content.as_str(), *is_error))),
+                _ => None,
+            })
+            .collect();
+
+        for message in &messages {
+            match message.role {
+                Role::User => {
+                    // A tool result is a user-role message on the wire and is
+                    // not something the user said. Showing it as one would put
+                    // words in their mouth.
+                    let text: String = message
+                        .content
+                        .iter()
+                        .filter_map(|block| match block {
+                            Block::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(
+                            "
+",
+                        );
+                    if !text.is_empty() {
+                        self.transcript.push(Entry {
+                            text,
+                            ..Entry::new(Speaker::You)
+                        });
+                    }
+                }
+                Role::Assistant => {
+                    // Continue the open agent entry rather than starting one,
+                    // so a reply that called two tools and spoke three times
+                    // is one entry.
+                    if !matches!(
+                        self.transcript.last(),
+                        Some(Entry {
+                            speaker: Speaker::Proton,
+                            ..
+                        })
+                    ) {
+                        self.transcript.push(Entry::new(Speaker::Proton));
+                    }
+                    let Some(entry) = self.transcript.last_mut() else {
+                        continue;
+                    };
+                    for block in &message.content {
+                        match block {
+                            Block::Text { text } => entry.text.push_str(text),
+                            Block::Thinking { thinking, .. } => entry.thinking.push_str(thinking),
+                            Block::ToolUse { id, name, input } => {
+                                let (result, failed) =
+                                    results.get(id.as_str()).copied().unwrap_or(("", false));
+                                entry.calls.push(ToolCall {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    detail: summarise(input),
+                                    result: short(result),
+                                    // A call with no result in the file is one
+                                    // whose turn was cut off. Saying so is
+                                    // better than showing it as finished.
+                                    state: match (result.is_empty(), failed) {
+                                        (true, _) => CallState::Running,
+                                        (false, true) => CallState::Failed,
+                                        (false, false) => CallState::Done,
+                                    },
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        self.conversation = messages;
+    }
+
+    /// The conversation as it stands, for saving.
+    pub fn conversation(&self) -> &[Message] {
+        &self.conversation
+    }
+
+    /// Start again with nothing.
+    pub fn clear(&mut self) {
+        self.restore(Vec::new());
+    }
+
     /// Point the agent at a provider and model.
     ///
     /// Takes effect on the next turn. The one in flight keeps the profile it

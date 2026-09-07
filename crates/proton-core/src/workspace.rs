@@ -73,6 +73,9 @@ pub struct Workspace {
     data: crate::data::Data,
     design: crate::design::Design,
     settings: crate::settings::Settings,
+    /// The file the open conversation lives in. `None` until it has a
+    /// question in it — a conversation with nothing said is not worth a file.
+    chat_path: Option<PathBuf>,
     /// How big the panel is. Kept even with no terminal, so the one opened
     /// next starts the right size rather than at a default nobody chose.
     term_size: (u16, u16),
@@ -368,6 +371,7 @@ impl Workspace {
                     self.notebook_event(),
                     self.theme_event(),
                     self.settings_event(),
+                    self.chats_event(),
                     Event::Layout {
                         layout: self.mode.layout(),
                     },
@@ -695,7 +699,67 @@ impl Workspace {
                 self.trace_seek(to)
             }
 
-            Command::Ask { text } => self.ask(&text),
+            Command::Ask { text } => {
+                let mut events = self.ask(&text);
+                // Saved as soon as it is asked, not when the answer lands. A
+                // question whose answer never arrived is still something you
+                // asked, and losing it because the model timed out would be
+                // the worst moment to lose it.
+                events.extend(self.save_chat());
+                events
+            }
+
+            /* ── conversations ────────────────────────────────── */
+            Command::NewChat => {
+                // Whatever was open is already on disk, so this only lets go
+                // of it. Nothing is written for an empty conversation.
+                self.agent.clear();
+                self.chat_path = None;
+                vec![self.agent_event(), self.chats_event()]
+            }
+
+            Command::OpenChat { path } => {
+                let full = self.pickers.root().join(&path);
+                match crate::chats::read(&full) {
+                    Ok(chat) => {
+                        self.agent.restore(chat.messages);
+                        self.chat_path = Some(full);
+                        vec![self.agent_event(), self.chats_event()]
+                    }
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
+                }
+            }
+
+            Command::DeleteChat { path } => {
+                let full = self.pickers.root().join(&path);
+                if let Err(why) = crate::chats::remove(&full) {
+                    return vec![notice(why, NoticeLevel::Error)];
+                }
+                // Deleting the one on screen leaves it on screen and unowned,
+                // which would silently write it back on the next question.
+                if self.chat_path.as_deref() == Some(full.as_path()) {
+                    self.agent.clear();
+                    self.chat_path = None;
+                }
+                vec![self.agent_event(), self.chats_event()]
+            }
+
+            Command::RenameChat { path, title } => {
+                let full = self.pickers.root().join(&path);
+                match crate::chats::read(&full) {
+                    Ok(mut chat) => {
+                        chat.title = title;
+                        match crate::chats::write(&full, &chat) {
+                            // The file keeps its name. A rename that moved it
+                            // would break every link to it for a cosmetic
+                            // change.
+                            Ok(()) => vec![self.chats_event()],
+                            Err(why) => vec![notice(why, NoticeLevel::Error)],
+                        }
+                    }
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
+                }
+            }
 
             Command::DropTask { id } => {
                 self.tasks.drop_task(id);
@@ -2811,6 +2875,10 @@ impl Workspace {
         // the only moment the next task may start: two turns in flight would
         // interleave into one transcript.
         if was_busy && !self.agent.is_busy() {
+            // The answer is complete: write it down. This is the other half of
+            // saving on `Ask` — between them, nothing said is ever only in
+            // memory.
+            events.extend(self.save_chat());
             events.extend(self.task_finished());
         } else if was_busy {
             // Still going. The row says what it is doing, which is the whole
@@ -3125,6 +3193,66 @@ impl Workspace {
         let provider = proton_agent::Provider::parse(&self.settings.string("agent.provider", ""));
         let model = self.settings.string("agent.model", "");
         self.agent.use_provider(provider, &model);
+    }
+
+    /// Write the open conversation, naming its file if it has none yet.
+    ///
+    /// Quiet on success: this runs after every question and every answer, and
+    /// a notice each time would be a notice nobody reads. A *failure* is worth
+    /// saying, because the alternative is believing the work is saved.
+    fn save_chat(&mut self) -> Vec<Event> {
+        let messages = self.agent.conversation().to_vec();
+        if messages.is_empty() {
+            return Vec::new();
+        }
+
+        let title = self
+            .agent
+            .transcript()
+            .iter()
+            .find(|entry| entry.speaker == crate::agent::Speaker::You)
+            .map(|entry| crate::chats::title_from(&entry.text))
+            .unwrap_or_default();
+
+        let path = match self.chat_path.clone() {
+            Some(path) => path,
+            None => {
+                let fresh = crate::chats::fresh_path(self.pickers.root(), &title);
+                self.chat_path = Some(fresh.clone());
+                fresh
+            }
+        };
+
+        // The title is only set when the file has none: renaming is a
+        // deliberate act and must not be undone by the next answer.
+        let existing = crate::chats::read(&path).ok();
+        let chat = crate::chats::Chat {
+            title: match existing.as_ref().map(|c| c.title.clone()) {
+                Some(kept) if !kept.is_empty() => kept,
+                _ => title,
+            },
+            provider: self.agent.provider().id().to_string(),
+            model: self.agent.model().to_string(),
+            messages,
+            ..crate::chats::Chat::default()
+        };
+
+        match crate::chats::write(&path, &chat) {
+            Ok(()) => vec![self.chats_event()],
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    fn chats_event(&self) -> Event {
+        Event::Chats {
+            conversations: crate::chats::list(self.pickers.root()),
+            current: self
+                .chat_path
+                .as_ref()
+                .and_then(|path| path.strip_prefix(self.pickers.root()).ok())
+                .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default(),
+        }
     }
 
     fn settings_event(&self) -> Event {
