@@ -2959,6 +2959,10 @@ onEvent((event) => {
       }
       break;
 
+    case "chats":
+      renderChats(event);
+      break;
+
     case "settings":
       renderSettings(event);
       break;
@@ -3652,33 +3656,116 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("[data-staged-reject]")) dispatch({ type: "rejectStaged", path: null });
 });
 
+/* ── conversations ────────────────────────────────────────────────────
+
+   Chat's explorer. Files in `.proton/chats`, most recently changed first,
+   from the core rather than from anything this end remembers. */
+
+let lastChats = { conversations: [], current: "" };
+
+function renderChats(event) {
+  lastChats = event;
+
+  const title = $("[data-chat-title]");
+  if (title) {
+    const open = event.conversations.find((c) => c.path === event.current);
+    title.textContent = open?.title || "New conversation";
+    title.className = "chip" + (open ? " accent" : "");
+  }
+  // Nothing to rename or delete until there is something saved.
+  for (const button of [$("[data-chat-rename]"), $("[data-chat-delete]")]) {
+    if (button) button.disabled = !event.current;
+  }
+
+  const box = $("[data-chats]");
+  if (!box) return;
+  if (!event.conversations.length) {
+    box.innerHTML = `<div class="empty">No conversations yet. Ask something.</div>`;
+    return;
+  }
+
+  box.innerHTML = event.conversations
+    .map((chat) => {
+      // The turn count is what distinguishes a question you abandoned from one
+      // you worked through, which is the thing you are scanning for.
+      const turns = chat.turns === 1 ? "1 turn" : `${chat.turns} turns`;
+      const who = chat.provider === "gemini" ? " · Gemini" : "";
+      return (
+        `<div class="row chat${chat.path === event.current ? " sel" : ""}"` +
+        ` data-chat="${escapeHtml(chat.path)}" title="${escapeHtml(chat.path)}">` +
+        `<span class="chat-name">${escapeHtml(chat.title)}</span>` +
+        `<span class="chat-meta">${turns}${escapeHtml(who)}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+}
+
+document.addEventListener("click", (e) => {
+  if (e.target.closest?.("[data-chat-new]")) {
+    dispatch({ type: "newChat" });
+    return;
+  }
+
+  if (e.target.closest?.("[data-chat-rename]")) {
+    const open = lastChats.conversations.find((c) => c.path === lastChats.current);
+    if (!open) return;
+    const title = prompt("Name this conversation", open.title);
+    // `null` is cancel; an empty string would silently un-name it.
+    if (title && title.trim()) {
+      dispatch({ type: "renameChat", path: open.path, title: title.trim() });
+    }
+    return;
+  }
+
+  if (e.target.closest?.("[data-chat-delete]")) {
+    const open = lastChats.conversations.find((c) => c.path === lastChats.current);
+    // Asked, because it is a file and there is no undo.
+    if (open && confirm(`Delete "${open.title}"? This cannot be undone.`)) {
+      dispatch({ type: "deleteChat", path: open.path });
+    }
+    return;
+  }
+
+  const row = e.target.closest?.("[data-chat]");
+  if (row) dispatch({ type: "openChat", path: row.dataset.chat });
+});
+
 function renderAgent(event) {
-  const thread = $("[data-agent-thread]");
-  if (thread && event.transcript.length) {
+  // Every thread: Codex's dock and Chat's stage show the same conversation,
+  // and one of them is always off screen. Painting only the visible one would
+  // leave the other showing whatever it had when it was last looked at.
+  const html = event.transcript.length ? event.transcript.map(entryHtml).join("") : null;
+  for (const thread of $$("[data-agent-thread]")) {
+    if (html === null) continue;
     const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60;
-    thread.innerHTML = event.transcript.map(entryHtml).join("");
+    thread.innerHTML = html;
     // Follow the answer only if the reader was already at the bottom —
     // yanking someone back down while they are reading is worse than
     // making them scroll.
     if (atBottom) thread.scrollTop = thread.scrollHeight;
+  }
+  // A conversation that was cleared has to clear the panes too, or `New chat`
+  // leaves the last one on screen.
+  if (!event.transcript.length) {
+    for (const thread of $$("[data-agent-thread]")) thread.innerHTML = "";
   }
 
   // Which service answered. Worth a permanent chip rather than a setting you
   // have to go and look up: the two give different answers to the same
   // question, and a transcript you cannot attribute is one you cannot reason
   // about a week later.
-  const who = $("[data-agent-provider]");
-  if (who) {
+  for (const who of $$("[data-agent-provider]")) {
     who.textContent = event.provider === "gemini" ? "Gemini" : "Claude";
     who.title = `${event.model} — change it in Settings > AI & models`;
     who.className = "chip" + (event.provider === "gemini" ? " ok" : " accent");
   }
 
-  const box = $(".composer .box");
-  if (box) box.classList.toggle("busy", event.activity !== "idle");
+  for (const box of $$(".composer .box")) {
+    box.classList.toggle("busy", event.activity !== "idle");
+  }
 
-  const send = $("[data-agent-send]");
-  if (send) {
+  for (const send of $$("[data-agent-send]")) {
     send.classList.toggle("stop", event.activity !== "idle");
     send.setAttribute("aria-label", event.activity === "idle" ? "Send" : "Stop");
     send.innerHTML = `<svg class="i"><use href="#i-${
@@ -3699,8 +3786,14 @@ function renderAgent(event) {
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
-function askAgent() {
-  const input = $("[data-agent-input]");
+/* There is more than one composer — Codex has one in its dock and Chat has
+   one as its whole stage — and they are the same conversation seen twice. So
+   everything here works from the composer the event came from rather than
+   from the first one in the document, which would send Chat's question from
+   Codex's empty box. */
+
+function askAgent(from) {
+  const input = from?.querySelector("[data-agent-input]") ?? $("[data-agent-input]");
   if (!input) return;
   const text = input.textContent.trim();
   if (!text) return;
@@ -3709,21 +3802,24 @@ function askAgent() {
 }
 
 document.addEventListener("click", (e) => {
-  if (!e.target.closest("[data-agent-send]")) return;
+  const button = e.target.closest("[data-agent-send]");
+  if (!button) return;
   // The same button stops a turn that is running — the thing you want when
   // an answer is going the wrong way is always in the same place.
-  const busy = $("[data-agent-send]")?.classList.contains("stop");
-  if (busy) dispatch({ type: "cancelTurn" });
-  else askAgent();
+  if (button.classList.contains("stop")) dispatch({ type: "cancelTurn" });
+  else askAgent(button.closest(".composer"));
 });
 
-// Enter sends, Shift-Enter makes a newline. The composer is not the buffer,
-// so these keys never reach the modal engine.
-$("[data-agent-input]")?.addEventListener("keydown", (e) => {
+// Enter sends, Shift-Enter makes a newline. The composer is not the buffer, so
+// these keys never reach the modal engine. Delegated rather than bound to one
+// input, because Chat's composer does not exist when this file is read.
+document.addEventListener("keydown", (e) => {
+  const input = e.target.closest?.("[data-agent-input]");
+  if (!input) return;
   e.stopPropagation();
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    askAgent();
+    askAgent(input.closest(".composer"));
   }
 });
 

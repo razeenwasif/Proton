@@ -224,97 +224,41 @@
     <!-- ══ CHAT ══════════════════════════════════════════════════ -->
     <section class="workspace" data-ws="chat" style="--col-l:260px; grid-template-columns: var(--col-l) 1px minmax(0,1fr);">
       <aside class="pane side">
-        <header>Conversations <span class="grow"></span><button class="btn" style="padding:3px 9px">New</button></header>
-        <div class="find" data-open="telescope"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Search chats… <kbd>␣ f n</kbd></div>
-        <div class="scroll tree">
-          <div class="group">Pinned</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>Proton architecture notes</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>Fleet telemetry glossary</div>
-          <div class="group">Today</div>
-          <div class="row sel"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>Why the fleet grid janks</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>Coyote time for the jump curve</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>SAFE_HOLD on KIR-2</div>
-          <div class="group">Yesterday</div>
-          <div class="row"><span class="ic"><svg class="i ft-c"><use href="#i-file-code"/></svg></span>Cross-compiling trajectory.c</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>Tailwind theme from design tokens</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>Trace format for the Rust backend</div>
-          <div class="group">Last week</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>Rough cut pacing</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>Solar array modifier stack</div>
-        </div>
+        <header>Conversations <span class="grow"></span>
+          <button class="hbtn" data-chat-new title="Start a new conversation"><svg class="i"><use href="#i-plus"/></svg></button>
+        </header>
+        <!-- From Event::Chats. Files in `.proton/chats`, most recently changed
+             first. What used to be here was a list of conversations nobody had
+             ever had. -->
+        <div class="scroll tree" data-chats></div>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
+
+      <!-- Chat's stage is the agent itself: Slot::Agent, per the mode
+           contract. It is the same conversation Codex shows in its dock — one
+           agent, seen from two places — rather than a second one that would
+           have to be kept in step. -->
       <main class="pane">
         <div class="canvas-bar">
-          <span class="chip accent">Why the fleet grid janks</span>
-          <span class="chip">6 messages</span>
-          <div class="seg" style="margin-left:auto"><button class="on">Chat</button><button>Artifacts</button><button>Sources</button></div>
-          <button class="btn">Send to Codex</button>
+          <span class="chip accent" data-chat-title>New conversation</span>
+          <span class="grow"></span>
+          <button class="btn" data-chat-rename title="Give this conversation a name">Rename</button>
+          <button class="btn" data-chat-delete title="Delete this conversation">Delete</button>
         </div>
 
-        <div class="chat-stream">
-          <div class="chat-col">
-            <div class="chat-hero">
-              <svg class="i"><use href="#i-proton"/></svg>
-              <h1>Good evening, Razeen.</h1>
-              <p>Ask anything. I can see every mode in this workspace.</p>
-            </div>
+        <div class="scroll" data-agent-thread></div>
 
-            <div class="turn you">
-              <div class="who"><svg class="i"><use href="#i-proton"/></svg> You</div>
-              <div class="bubble">The fleet grid janks at 40 satellites, and the Android build skips frames too. Same cause?</div>
-            </div>
-
-            <div class="turn">
-              <div class="who"><svg class="i" style="color:var(--accent-2)"><use href="#i-spark"/></svg> Proton · Opus 5 · thought 6s</div>
-              <div class="tool"><svg class="i"><use href="#i-search"/></svg> <b>telescope.grep</b> "sats.sort" <span class="t">6 hits</span></div>
-              <div class="tool"><svg class="i ft-perf"><use href="#i-bolt"/></svg> <b>profile.react</b> Dashboard <span class="t">re-render 41×/s</span></div>
-              <div class="tool"><svg class="i"><use href="#i-phone"/></svg> <b>logcat.read</b> com.proton.fleet <span class="t">31 skipped frames</span></div>
-              <p><strong>Yes — one cause, two symptoms.</strong> <code>useOrbit()</code> returns a fresh <code>sats</code> array every tick, so <code>ranked</code> is rebuilt on every tick and all 40 children remount.</p>
-              <ol>
-                <li>On web that is 41 re-renders a second and a visible stall in the grid.</li>
-                <li>On Android the same adapter diff runs on the main thread, which is the Choreographer warning.</li>
-              </ol>
-              <p>The fix is in <code>orbit.ts</code>, not in either view — return a stable reference and memoise the sort. I have it staged as two hunks in Codex.</p>
-              <div class="artifact"><svg class="i ft-ts"><use href="#i-file-code"/></svg> dashboard.tsx <span class="chip ok">+5 −1</span></div>
-              <div class="artifact"><svg class="i ft-ts"><use href="#i-file-code"/></svg> orbit.ts <span class="chip ok">+1 −1</span></div>
-              <div class="suggest">
-                <span>Open the diffs</span><span>Write the regression test</span><span>Show me the profile</span><span>Why not useCallback?</span>
-              </div>
-            </div>
-
-            <div class="turn you">
-              <div class="who"><svg class="i"><use href="#i-proton"/></svg> You</div>
-              <div class="bubble">Show me the profile first.</div>
-            </div>
-
-            <div class="turn">
-              <div class="who"><svg class="i" style="color:var(--accent-2)"><use href="#i-spark"/></svg> Proton</div>
-              <p>Render count per second, 40 satellites, before the change:</p>
-              <div class="bars" style="height:88px">
-                <i style="height:96%"></i><i style="height:88%"></i><i style="height:100%"></i><i style="height:92%"></i>
-                <i style="height:86%"></i><i style="height:97%"></i><i style="height:12%"></i><i style="height:9%"></i>
-                <i style="height:11%"></i><i style="height:8%"></i><i style="height:10%"></i><i style="height:9%"></i>
-              </div>
-              <div class="legend"><span><b style="background:var(--accent)"></b>Dashboard renders/s</span><span style="margin-left:auto">← before · after →</span></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="chat-composer">
-          <div class="chat-col">
-            <div class="box">
-              <div class="txt" style="color:var(--ink-3);font-size:13.5px;min-height:24px">Reply, or drop a file, a trace or an artboard…</div>
-              <div class="foot" style="display:flex;align-items:center;gap:6px;margin-top:10px">
-                <span class="select"><svg class="i" width="12" height="12"><use href="#i-plus"/></svg></span>
-                <span class="select">Opus 5 <svg class="i" width="11" height="11"><use href="#i-chev"/></svg></span>
-                <span class="select">Agent <svg class="i" width="11" height="11"><use href="#i-chev"/></svg></span>
-                <span class="select">@repo <svg class="i" width="11" height="11"><use href="#i-chev"/></svg></span>
-                <span class="select">@trace <svg class="i" width="11" height="11"><use href="#i-chev"/></svg></span>
-                <span class="select"><svg class="i" width="12" height="12"><use href="#i-mic"/></svg></span>
-                <span class="send"><svg class="i" width="13" height="13"><use href="#i-arrow-up"/></svg></span>
-              </div>
+        <div class="composer">
+          <div class="box">
+            <div class="txt" contenteditable="plaintext-only" role="textbox"
+                 aria-label="Ask Proton" data-agent-input
+                 data-placeholder="Ask Proton…"></div>
+            <div class="foot">
+              <span class="grow"></span>
+              <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
+              <span class="send" data-agent-send role="button" tabindex="0"
+                    aria-label="Send"><svg class="i" width="13" height="13"><use href="#i-arrow-up"/></svg></span>
             </div>
           </div>
         </div>

@@ -164,6 +164,31 @@ if (HAS_SHELL) {
      Starts empty on purpose: the panels have to render correctly when nothing
      has been chosen, which is every first run. */
   const settings = {};
+  /* Conversations, so Chat has a list to click without a core behind it.
+     Two of them, one from each provider, because the row shows which. */
+  const chats = {
+    current: ".proton/chats/why-the-grid-janks.json",
+    conversations: [
+      {
+        path: ".proton/chats/why-the-grid-janks.json",
+        title: "Why the fleet grid janks",
+        turns: 6,
+        provider: "claude",
+      },
+      {
+        path: ".proton/chats/telemetry-glossary.json",
+        title: "Fleet telemetry glossary",
+        turns: 2,
+        provider: "gemini",
+      },
+    ],
+  };
+  const chatsEvent = () => ({
+    type: "chats",
+    conversations: chats.conversations,
+    current: chats.current,
+  });
+
   const settingsEvent = () => ({
     type: "settings",
     values: settings,
@@ -348,6 +373,7 @@ if (HAS_SHELL) {
         notebookEvent(),
         themeEvent(),
         settingsEvent(),
+        chatsEvent(),
       ];
     }
     if (command.type === "runCell") {
@@ -363,6 +389,24 @@ if (HAS_SHELL) {
         }, 900);
       }
       return [notebookEvent()];
+    }
+    if (command.type === "openChat") {
+      chats.current = command.path;
+      return [chatsEvent()];
+    }
+    if (command.type === "newChat") {
+      chats.current = "";
+      return [chatsEvent()];
+    }
+    if (command.type === "deleteChat") {
+      chats.conversations = chats.conversations.filter((c) => c.path !== command.path);
+      if (chats.current === command.path) chats.current = "";
+      return [chatsEvent()];
+    }
+    if (command.type === "renameChat") {
+      const hit = chats.conversations.find((c) => c.path === command.path);
+      if (hit) hit.title = command.title;
+      return [chatsEvent()];
     }
     if (command.type === "setSetting") {
       const parts = command.key.split(".");
