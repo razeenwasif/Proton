@@ -215,7 +215,10 @@ impl Assembler {
                         })?;
                     }
                 }
-                if let Block::ToolUse { id, name, input } = &self.blocks[index] {
+                if let Block::ToolUse {
+                    id, name, input, ..
+                } = &self.blocks[index]
+                {
                     out.push(Delta::ToolReady {
                         id: id.clone(),
                         name: name.clone(),

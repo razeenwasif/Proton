@@ -150,9 +150,22 @@ fn part(block: &Block, names: &std::collections::HashMap<&str, &str>) -> Option<
         // Opaque to us and meaningless to Gemini: it is Anthropic's encrypted
         // reasoning. Dropping it is right; forwarding it would be nonsense.
         Block::RedactedThinking { .. } => None,
-        Block::ToolUse { name, input, .. } => Some(json!({
-            "functionCall": { "name": name, "args": input }
-        })),
+        Block::ToolUse {
+            name,
+            input,
+            signature,
+            ..
+        } => {
+            let mut out = json!({ "functionCall": { "name": name, "args": input } });
+            // Beside the call rather than inside it, which is where it arrived.
+            // Absent when the call came from Anthropic and is being replayed
+            // into a Gemini conversation — nothing to echo, and Gemini only
+            // insists on the ones it issued itself.
+            if let Some(signature) = signature {
+                out["thoughtSignature"] = json!(signature);
+            }
+            Some(out)
+        }
         // The id is dropped and the name looked up: Gemini matches a response
         // to a call by name. See the module note.
         Block::ToolResult {
@@ -257,6 +270,13 @@ impl Assembler {
                 id: id.clone(),
                 name: name.clone(),
                 input: input.clone(),
+                // A sibling of `functionCall`, not a field inside it. Kept
+                // because the next request has to hand it straight back; see
+                // the note on the field.
+                signature: part
+                    .get("thoughtSignature")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
             });
             // Both, immediately: Gemini sends a call whole, so there is no
             // window in which the name is known and the arguments are not.

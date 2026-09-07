@@ -57,6 +57,24 @@ pub enum Block {
         id: String,
         name: String,
         input: Value,
+        /// Gemini's `thoughtSignature`, when the call came from Gemini.
+        ///
+        /// The same idea as the `signature` on a thinking block, and just as
+        /// load-bearing: Gemini 3.x attaches an opaque signature to the part
+        /// carrying a function call, and echoing that call back *without* it
+        /// is a 400 —
+        ///
+        /// ```text
+        /// Function call is missing a thought_signature in functionCall parts.
+        /// This is required for tools to work correctly.
+        /// ```
+        ///
+        /// which lands on the request that returns the tool's result, so it
+        /// reads as tool use being broken rather than as a field being
+        /// dropped. Skipped when absent, so an Anthropic request — where there
+        /// is no such thing — is byte for byte what it always was.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
     },
     ToolResult {
         tool_use_id: String,
@@ -119,7 +137,9 @@ impl Message {
     /// Every tool call in this message, in order.
     pub fn tool_calls(&self) -> impl Iterator<Item = (&str, &str, &Value)> {
         self.content.iter().filter_map(|block| match block {
-            Block::ToolUse { id, name, input } => Some((id.as_str(), name.as_str(), input)),
+            Block::ToolUse {
+                id, name, input, ..
+            } => Some((id.as_str(), name.as_str(), input)),
             _ => None,
         })
     }

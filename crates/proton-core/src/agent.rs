@@ -672,7 +672,9 @@ impl Agent {
                         match block {
                             Block::Text { text } => entry.text.push_str(text),
                             Block::Thinking { thinking, .. } => entry.thinking.push_str(thinking),
-                            Block::ToolUse { id, name, input } => {
+                            Block::ToolUse {
+                                id, name, input, ..
+                            } => {
                                 let (result, failed) =
                                     results.get(id.as_str()).copied().unwrap_or(("", false));
                                 entry.calls.push(ToolCall {

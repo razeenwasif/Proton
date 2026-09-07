@@ -143,3 +143,115 @@ fn every_model_the_picker_offers_can_be_reached() {
         }
     }
 }
+
+/// Drive a turn, run any tool it asks for, and send the result back.
+///
+/// The second request is the one that matters: it echoes the assistant's own
+/// function call, and Gemini rejects that call unless the `thoughtSignature`
+/// it arrived with comes back too.
+fn ask_with_tools(provider: Provider) -> Result<String, String> {
+    let tool = proton_agent::wire::Tool {
+        name: "capital_of".into(),
+        description: "The capital city of a country. Call this rather than answering yourself."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": { "country": { "type": "string" } },
+            "required": ["country"]
+        }),
+    };
+    let mut messages = vec![Message::user(vec![Block::text(
+        "Use the tool to find the capital of France, then say its name.",
+    )])];
+
+    for _ in 0..4 {
+        let request = Request {
+            profile: Profile::for_provider(provider, "", false),
+            system: vec!["Answer with one word once you have the tool's result.".into()],
+            tools: vec![tool.clone()],
+            messages: messages.clone(),
+        };
+        let mut turn = proton_agent::send(request)?;
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let mut text = String::new();
+        let finished = 'done: loop {
+            for reply in turn.poll() {
+                match reply {
+                    Reply::Delta(Delta::Text(chunk)) => text.push_str(&chunk),
+                    Reply::Failed { text } => return Err(text),
+                    Reply::Finished { message, .. } => break 'done Some(message),
+                    _ => {}
+                }
+            }
+            if turn.is_done() {
+                break None;
+            }
+            if Instant::now() > deadline {
+                return Err("the turn never finished".into());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let Some(message) = finished else {
+            return Ok(text);
+        };
+
+        let calls: Vec<(String, String)> = message
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                Block::ToolUse { id, name, .. } => Some((id.clone(), name.clone())),
+                _ => None,
+            })
+            .collect();
+        if calls.is_empty() {
+            return Ok(text);
+        }
+        // Echo the assistant turn back untouched — signature and all — then
+        // answer every call it made.
+        messages.push(message);
+        messages.push(Message {
+            role: proton_agent::wire::Role::User,
+            content: calls
+                .into_iter()
+                .map(|(id, _)| Block::ToolResult {
+                    tool_use_id: id,
+                    content: "Paris".into(),
+                    is_error: false,
+                })
+                .collect(),
+        });
+    }
+    Err("it never stopped calling tools".into())
+}
+
+#[test]
+#[ignore = "spends money and needs a key"]
+fn a_tool_call_can_be_answered() {
+    // The failure this covers took every question with a tool call in it:
+    //
+    //   Function call is missing a thought_signature in functionCall parts.
+    //
+    // It only appears on the *second* request of a turn, so no single-shot
+    // check finds it — the model has to call something first.
+    for provider in [Provider::Claude, Provider::Gemini] {
+        if !have_a_key(provider) {
+            eprintln!("no key for {} — skipping", provider.label());
+            continue;
+        }
+        match ask_with_tools(provider) {
+            Ok(said) => {
+                println!(
+                    "  {:8} answered {:?} after its tool call",
+                    provider.id(),
+                    said.trim()
+                );
+                assert!(
+                    said.to_lowercase().contains("paris"),
+                    "{} said {said:?}",
+                    provider.id()
+                );
+            }
+            Err(why) => panic!("{} could not use a tool: {why}", provider.id()),
+        }
+    }
+}

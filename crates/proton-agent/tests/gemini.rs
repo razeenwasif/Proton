@@ -25,6 +25,69 @@ fn profile() -> Profile {
     }
 }
 
+#[test]
+fn a_thought_signature_survives_the_round_trip() {
+    // The failure this prevents, verbatim from the API:
+    //
+    //   Function call is missing a thought_signature in functionCall parts.
+    //   This is required for tools to work correctly.
+    //
+    // Gemini 3.x hangs an opaque signature off the part carrying a function
+    // call, and echoing the call back without it is a 400 — on the *second*
+    // request of the turn, the one that returns the tool's result, so it reads
+    // as tool use being broken rather than as a field being dropped. Every
+    // question with a tool call in it failed this way.
+    let stream = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"find_files\",\"args\":{\"query\":\"guide\"}},\"thoughtSignature\":\"Ep8CCpwCARFNMg-opaque\"}],\"role\":\"model\"}}]}
+
+";
+
+    let mut assembler = gemini::Assembler::new();
+    for event in Events::new(std::io::Cursor::new(stream.as_bytes().to_vec())) {
+        assembler
+            .push(&event.expect("well-formed"))
+            .expect("no fault");
+    }
+
+    // Kept on the block, because the block is what gets echoed back.
+    let message = assembler.message();
+    let Some(Block::ToolUse { signature, .. }) = message.content.first() else {
+        panic!("no tool call in {:#?}", message.content);
+    };
+    assert_eq!(signature.as_deref(), Some("Ep8CCpwCARFNMg-opaque"));
+
+    // And sent again, beside the call rather than inside it — which is where
+    // it arrived, and where Gemini looks for it.
+    let request = Request {
+        profile: profile(),
+        system: Vec::new(),
+        tools: Vec::new(),
+        messages: vec![message],
+    };
+    let part = &gemini::body(&request)["contents"][0]["parts"][0];
+    assert_eq!(part["thoughtSignature"], json!("Ep8CCpwCARFNMg-opaque"));
+    assert_eq!(part["functionCall"]["name"], json!("find_files"));
+}
+
+#[test]
+fn a_call_with_no_signature_sends_no_empty_field() {
+    // A conversation replayed from a chat file written before this existed,
+    // or one carried over from Anthropic. Sending `thoughtSignature: null`
+    // would be a new way to be rejected.
+    let request = Request {
+        profile: profile(),
+        system: Vec::new(),
+        tools: Vec::new(),
+        messages: vec![Message::assistant(vec![Block::ToolUse {
+            id: "gem-1".into(),
+            name: "read_file".into(),
+            input: json!({"path": "Cargo.toml"}),
+            signature: None,
+        }])],
+    };
+    let part = &gemini::body(&request)["contents"][0]["parts"][0];
+    assert!(part.get("thoughtSignature").is_none(), "{part}");
+}
+
 fn play(fixture: &str) -> (gemini::Assembler, Vec<Delta>) {
     let path = std::path::Path::new("tests/streams").join(fixture);
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
@@ -130,6 +193,7 @@ fn a_tool_result_names_the_call_it_answers() {
                 id: "gem-1".into(),
                 name: "read_file".into(),
                 input: json!({"path": "Cargo.toml"}),
+                signature: None,
             }]),
             Message {
                 role: Role::User,
@@ -161,6 +225,7 @@ fn a_failed_tool_says_so_rather_than_reporting_its_error_as_output() {
                 id: "gem-1".into(),
                 name: "read_file".into(),
                 input: json!({}),
+                signature: None,
             }]),
             Message {
                 role: Role::User,
@@ -200,11 +265,13 @@ fn consecutive_same_role_messages_are_merged() {
                     id: "gem-1".into(),
                     name: "read_file".into(),
                     input: json!({}),
+                    signature: None,
                 },
                 Block::ToolUse {
                     id: "gem-2".into(),
                     name: "grep".into(),
                     input: json!({}),
+                    signature: None,
                 },
             ]),
             result("gem-1"),
