@@ -265,6 +265,56 @@ impl Agent {
                     "required": ["path", "old_text", "new_text"]
                 }),
             },
+            // Notebooks. `read_file` and `edit_file` do technically work on
+            // an `.ipynb` — it is a JSON file — but only in the sense that a
+            // model can be asked to hand-edit escaped JSON with `source` as a
+            // list of lines and get the commas right. These address cells,
+            // which is the unit the file is actually made of.
+            Tool {
+                name: "read_notebook".into(),
+                description: "Read a Jupyter notebook as numbered cells: kind, source, and what each one\
+                             last printed. Use this rather than read_file for an .ipynb - read_file returns\
+                             the JSON, which is not what you want to reason about."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Path to the .ipynb, relative to the workspace root." },
+                        "from": { "type": "integer", "description": "First cell, 0-based. Defaults to the first." },
+                        "to": { "type": "integer", "description": "Last cell, inclusive. Defaults to the last." },
+                        "outputs": { "type": "boolean", "description": "Include each cell's output. Defaults to true." }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            Tool {
+                name: "edit_cell".into(),
+                description: "Replace the source of one cell in a notebook, or insert or delete a cell. The\
+                             edit is STAGED for the user to review - it is not applied and nothing is\
+                             written to disk, so say what you changed rather than claiming it is done. Cell\
+                             numbers are 0-based and are the ones read_notebook reported. Several calls in\
+                             one turn are fine and stack up into one review."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Path to the .ipynb." },
+                        "cell": { "type": "integer", "description": "Which cell, 0-based." },
+                        "source": { "type": "string", "description": "The new source. Omit when deleting." },
+                        "action": {
+                            "type": "string",
+                            "enum": ["replace", "insert", "delete"],
+                            "description": "replace the cell's source (the default), insert a new cell before it, or delete it."
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": ["code", "markdown"],
+                            "description": "For insert. Defaults to code."
+                        }
+                    },
+                    "required": ["path", "cell"]
+                }),
+            },
             Tool {
                 name: "diagnostics".into(),
                 description: "Errors and warnings the language server has reported for a \
@@ -723,17 +773,30 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 8);
         // `edit_file` has to say that it stages rather than applies. A model
         // told only "edit a file" reports the job as done, and the user reads
         // that as a file that has changed.
-        let editing = tools.iter().find(|t| t.name == "edit_file").unwrap();
-        assert!(
-            editing.description.contains("STAGED"),
-            "edit_file must say it does not apply: {}",
-            editing.description
-        );
+        // Both of them: a model told only "edit a cell" reports the job as
+        // done, and the user reads that as a notebook that has changed.
+        for name in ["edit_file", "edit_cell"] {
+            let editing = tools.iter().find(|t| t.name == name).unwrap();
+            assert!(
+                editing.description.contains("STAGED"),
+                "{name} must say it does not apply: {}",
+                editing.description
+            );
+        }
         for tool in &tools {
+            // A description written with line continuations and mangled into
+            // one long line reads to the model as a run of whitespace in the
+            // middle of a sentence. It happened to two of these.
+            assert!(
+                !tool.description.contains("   "),
+                "{} has a run of spaces in its description: {}",
+                tool.name,
+                tool.description
+            );
             assert!(
                 tool.description.len() > 40,
                 "{} needs a real description",

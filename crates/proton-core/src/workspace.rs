@@ -2892,6 +2892,22 @@ impl Workspace {
         events
     }
 
+    /// The notebook as it is *now*.
+    ///
+    /// From Data mode's copy when it is the one open, because that is what the
+    /// user is looking at and it may hold cells they have typed and not saved.
+    /// Proposing a diff against the file on disk instead would be a diff
+    /// against a notebook neither of us is looking at — the same reason
+    /// `edit_file` reads from the buffer.
+    fn notebook_now(&self, path: &Path) -> Result<proton_data::notebook::Notebook, String> {
+        if self.data.path() == Some(path) {
+            if let Some(text) = self.data.to_text() {
+                return proton_data::notebook::Notebook::parse(&text);
+            }
+        }
+        proton_data::notebook::Notebook::read(path)
+    }
+
     /// Run one tool against the workspace.
     ///
     /// Public because the tools are the *editor's* capabilities rather than
@@ -3017,6 +3033,116 @@ impl Workspace {
                     "staged {hunks} hunk{} in {} for review — nothing is applied or written \
                      until the user accepts it",
                     if hunks == 1 { "" } else { "s" },
+                    path.display()
+                ))
+            }
+
+            "read_notebook" => {
+                let path = self.pickers.resolve(&text("path")?);
+                let notebook = self.notebook_now(&path)?;
+                let cells = notebook.cells();
+                if cells.is_empty() {
+                    return Ok(format!("{} has no cells", path.display()));
+                }
+
+                let from = count("from", 0).min(cells.len().saturating_sub(1));
+                let to = count("to", cells.len().saturating_sub(1)).min(cells.len() - 1);
+                let want_outputs = input
+                    .get("outputs")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+
+                let mut out = String::new();
+                for (index, cell) in cells.iter().enumerate().take(to + 1).skip(from) {
+                    let count = cell
+                        .execution_count
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| " ".into());
+                    out.push_str(&format!(
+                        "# cell {index} [{count}] {}\n{}\n",
+                        match cell.kind {
+                            proton_data::notebook::CellKind::Code => "code",
+                            proton_data::notebook::CellKind::Markdown => "markdown",
+                            _ => "raw",
+                        },
+                        cell.source
+                    ));
+                    if want_outputs && !cell.outputs.is_empty() {
+                        // Truncated hard: a cell that printed a dataframe or a
+                        // traceback can be thousands of lines, and a notebook
+                        // of those would fill the window with what the model
+                        // has already read once.
+                        out.push_str(&format!("## out\n{}\n", short_output(&cell.outputs)));
+                    }
+                    out.push('\n');
+                }
+                Ok(out)
+            }
+
+            "edit_cell" => {
+                let path = self.pickers.resolve(&text("path")?);
+                let index = count("cell", usize::MAX);
+                if index == usize::MAX {
+                    return Err("edit_cell: `cell` is required".into());
+                }
+                let action = input
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("replace");
+
+                // Staged on top of anything already staged for this file, the
+                // way `edit_file` does: several cell edits in one turn is the
+                // ordinary case, and each one starting from the file on disk
+                // would leave only the last.
+                let current = self.notebook_now(&path)?.to_text();
+                let base = self
+                    .review
+                    .get(&path)
+                    .map(|change| change.target.clone())
+                    .unwrap_or_else(|| current.clone());
+                let mut notebook = proton_data::notebook::Notebook::parse(&base)?;
+
+                let what = match action {
+                    "delete" => {
+                        if !notebook.remove(index) {
+                            return Err(format!("there is no cell {index}"));
+                        }
+                        format!("deleted cell {index}")
+                    }
+                    "insert" => {
+                        let kind = match input.get("kind").and_then(|v| v.as_str()) {
+                            Some("markdown") => proton_data::notebook::CellKind::Markdown,
+                            _ => proton_data::notebook::CellKind::Code,
+                        };
+                        let at = notebook.insert(index, kind, &text("source")?);
+                        format!("inserted a cell at {at}")
+                    }
+                    "replace" => {
+                        if !notebook.set_source(index, &text("source")?) {
+                            return Err(format!("there is no cell {index}"));
+                        }
+                        format!("rewrote cell {index}")
+                    }
+                    other => return Err(format!("edit_cell: unknown action {other:?}")),
+                };
+
+                let target = notebook.to_text();
+                if target == current {
+                    return Ok("that is already what the cell says".into());
+                }
+
+                // Opened so the change can be looked at, exactly as `edit_file`
+                // does — staging something invisible and asking to have it
+                // reviewed is not a review.
+                self.editor
+                    .open_or_create(&path, &current)
+                    .map_err(|err| format!("{}: {err}", path.display()))?;
+                self.review.stage(&path, target, false);
+                self.resync();
+
+                Ok(format!(
+                    "{what} in {} — staged for review; nothing is written until the user \
+                     accepts it",
                     path.display()
                 ))
             }
@@ -3978,6 +4104,51 @@ fn terminal_command(prefix: &str) -> Option<Command> {
 ///
 /// A row in a queue is a row: the transcript is where the answer is read, and
 /// this only has to be enough to tell one task from another at a glance.
+/// What a cell printed, in few enough lines to be worth sending.
+///
+/// A dataframe or a traceback can be thousands of lines. The model has to know
+/// what happened, not read all of it, and a notebook of untruncated outputs
+/// would fill the context with what it has already seen once.
+fn short_output(outputs: &[proton_data::notebook::Output]) -> String {
+    const LINES: usize = 20;
+    let mut text = String::new();
+    for output in outputs {
+        match output {
+            proton_data::notebook::Output::Stream { text: it, .. } => text.push_str(it),
+            proton_data::notebook::Output::Error {
+                ename,
+                evalue,
+                traceback,
+            } => {
+                // The traceback matters more than anything else a cell can
+                // print, so it is kept whole up to the line budget rather than
+                // summarised to its first line.
+                text.push_str(&format!("{ename}: {evalue}\n"));
+                text.push_str(&traceback.join("\n"));
+            }
+            proton_data::notebook::Output::Data { data, .. } => {
+                if let Some(plain) = data.get("text/plain").and_then(|v| v.as_str()) {
+                    text.push_str(plain);
+                } else {
+                    let kinds: Vec<&str> = data.keys().map(String::as_str).collect();
+                    text.push_str(&format!("<{}>", kinds.join(", ")));
+                }
+            }
+        }
+        text.push('\n');
+    }
+
+    let lines: Vec<&str> = text.lines().collect();
+    match lines.len() > LINES {
+        true => format!(
+            "{}\n… {} more lines",
+            lines[..LINES].join("\n"),
+            lines.len() - LINES
+        ),
+        false => text.trim_end().to_string(),
+    }
+}
+
 fn first_sentence(text: &str) -> String {
     const MOST: usize = 90;
     let text = text.trim();

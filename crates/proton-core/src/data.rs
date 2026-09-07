@@ -187,6 +187,15 @@ impl Data {
         self.path.as_deref()
     }
 
+    /// The open notebook as a file, or nothing when none is open.
+    ///
+    /// For the agent, which proposes edits against what the user is looking at
+    /// rather than against what is on disk — those differ the moment a cell is
+    /// typed in and not saved.
+    pub fn to_text(&self) -> Option<String> {
+        self.notebook.as_ref().map(Notebook::to_text)
+    }
+
     pub fn problem(&self) -> Option<&str> {
         self.problem.as_deref()
     }
