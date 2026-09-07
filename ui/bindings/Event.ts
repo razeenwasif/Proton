@@ -169,7 +169,12 @@ cachedTokens: bigint,
  * does not say which one produced it is a transcript you cannot
  * reason about a week later.
  */
-provider: string, model: string, } | { "type": "trace", state: TraceState, 
+provider: string, model: string, 
+/**
+ * Where the credential was found, or what to set if there is none.
+ * Never the credential: this is drawn on screen and goes in logs.
+ */
+credential: string, } | { "type": "trace", state: TraceState, 
 /**
  * What was traced, for the header.
  */

@@ -1019,6 +1019,56 @@
           </button>
           <!-- Palettes plugins brought, from Event::Plugins. Appended to the
                same strip because a theme from a plugin is a theme. -->
+
+        </div>
+      </div>
+
+      <!-- What is installed, from Event::Plugins. -->
+      <div class="setting" data-plugins-setting hidden>
+        <h4>Plugins</h4>
+        <p>Wasm components, sandboxed and on a deadline. A plugin that will not finish a call is stopped rather than allowed to take the window with it. They live beside your session, not in a project — a repository cannot bring code with it.</p>
+        <div data-plugins></div>
+      </div>
+      <div class="setting">
+        <h4>Window background</h4>
+        <p>Mica takes its colour from your wallpaper — the compositor samples it, so the whole window tints as you move it across the desktop. Acrylic blurs whatever is actually behind the window, live, and costs more. Content surfaces stay opaque either way: code is never at the mercy of a wallpaper.</p>
+        <div class="seg" style="width:max-content" id="backdrop-picker">
+          <button class="on" data-backdrop-set="mica">Mica</button>
+          <button data-backdrop-set="mica-alt">Mica Alt</button>
+          <button data-backdrop-set="acrylic">Acrylic</button>
+          <button data-backdrop-set="solid">Solid</button>
+        </div>
+        <p style="margin:9px 0 0;font-size:11.5px" id="backdrop-note"></p>
+      </div>
+      <div class="setting">
+        <h4>Translucency</h4>
+        <p>How much of the backdrop comes through. The stage is always the most solid of the three surfaces because it is the one you read from; <b>Heavy</b> is where legibility starts to depend on your wallpaper, which is why it is a choice and not the default.</p>
+        <div class="seg" style="width:max-content" id="translucency-picker">
+          <button data-translucency-set="subtle">Subtle</button>
+          <button class="on" data-translucency-set="medium">Medium</button>
+          <button data-translucency-set="heavy">Heavy</button>
+        </div>
+      </div>
+      <div class="setting">
+        <h4>Surface blur</h4>
+        <p>How far floating layers blur the page beneath them. It cannot reach the desktop — only the compositor can do that, which is what Window background above is for. Drop it to zero on a remote session and every surface falls back to a flat fill without moving.</p>
+        <div class="field-ctl">46 px · saturate 200% <svg class="i caret"><use href="#i-chev"/></svg></div>
+      </div>
+      <div class="setting">
+        <h4>Modal editing</h4>
+        <p>Full vim semantics — operators, text objects, registers, marks, macros — dispatched to every mode, not just the editor. Off makes Proton a plain editor; the leader menu stays.</p>
+        <div style="display:flex;align-items:center;gap:10px"><span class="toggle on"></span><span style="color:var(--ink-3);font-size:12px">On · leader is <kbd>␣</kbd></span></div>
+      </div>
+      <div class="setting">
+        <h4>Editor font</h4>
+        <p>CaskaydiaMono Nerd Font — Cascadia with the Nerd Font glyph set, so devicons in the tree and the statusline resolve. Ligatures follow the family; inlay hints render at 84% of the body size.</p>
+        <div style="display:flex;gap:10px"><div class="field-ctl" style="width:240px">CaskaydiaMono Nerd Font <svg class="i caret"><use href="#i-chev"/></svg></div><div class="field-ctl" style="width:110px">13 px <svg class="i caret"><use href="#i-chev"/></svg></div></div>
+      </div>
+      <div class="setting" style="border-bottom:0">
+        <h4>Agent autonomy</h4>
+        <p>How far the agent goes before it stops for you. Every level still writes to a shadow worktree first — nothing touches your tree until you accept.</p>
+        <div class="field-ctl">Plan → propose diffs → wait <svg class="i caret"><use href="#i-chev"/></svg></div>
+      </div>
       </div><!-- /appearance -->
 
       <div data-st-panel="editing" hidden>
@@ -1069,55 +1119,6 @@
           <p>A file in the project, beside <code>.proton/debug.json</code>, so it diffs and can be committed if the team wants the same editor. Keys this build does not recognise are left alone.</p>
           <p><code data-settings-path></code></p>
         </div>
-      </div>
-        </div>
-      </div>
-
-      <!-- What is installed, from Event::Plugins. -->
-      <div class="setting" data-plugins-setting hidden>
-        <h4>Plugins</h4>
-        <p>Wasm components, sandboxed and on a deadline. A plugin that will not finish a call is stopped rather than allowed to take the window with it. They live beside your session, not in a project — a repository cannot bring code with it.</p>
-        <div data-plugins></div>
-      </div>
-      <div class="setting">
-        <h4>Window background</h4>
-        <p>Mica takes its colour from your wallpaper — the compositor samples it, so the whole window tints as you move it across the desktop. Acrylic blurs whatever is actually behind the window, live, and costs more. Content surfaces stay opaque either way: code is never at the mercy of a wallpaper.</p>
-        <div class="seg" style="width:max-content" id="backdrop-picker">
-          <button class="on" data-backdrop-set="mica">Mica</button>
-          <button data-backdrop-set="mica-alt">Mica Alt</button>
-          <button data-backdrop-set="acrylic">Acrylic</button>
-          <button data-backdrop-set="solid">Solid</button>
-        </div>
-        <p style="margin:9px 0 0;font-size:11.5px" id="backdrop-note"></p>
-      </div>
-      <div class="setting">
-        <h4>Translucency</h4>
-        <p>How much of the backdrop comes through. The stage is always the most solid of the three surfaces because it is the one you read from; <b>Heavy</b> is where legibility starts to depend on your wallpaper, which is why it is a choice and not the default.</p>
-        <div class="seg" style="width:max-content" id="translucency-picker">
-          <button data-translucency-set="subtle">Subtle</button>
-          <button class="on" data-translucency-set="medium">Medium</button>
-          <button data-translucency-set="heavy">Heavy</button>
-        </div>
-      </div>
-      <div class="setting">
-        <h4>Surface blur</h4>
-        <p>How far floating layers blur the page beneath them. It cannot reach the desktop — only the compositor can do that, which is what Window background above is for. Drop it to zero on a remote session and every surface falls back to a flat fill without moving.</p>
-        <div class="field-ctl">46 px · saturate 200% <svg class="i caret"><use href="#i-chev"/></svg></div>
-      </div>
-      <div class="setting">
-        <h4>Modal editing</h4>
-        <p>Full vim semantics — operators, text objects, registers, marks, macros — dispatched to every mode, not just the editor. Off makes Proton a plain editor; the leader menu stays.</p>
-        <div style="display:flex;align-items:center;gap:10px"><span class="toggle on"></span><span style="color:var(--ink-3);font-size:12px">On · leader is <kbd>␣</kbd></span></div>
-      </div>
-      <div class="setting">
-        <h4>Editor font</h4>
-        <p>CaskaydiaMono Nerd Font — Cascadia with the Nerd Font glyph set, so devicons in the tree and the statusline resolve. Ligatures follow the family; inlay hints render at 84% of the body size.</p>
-        <div style="display:flex;gap:10px"><div class="field-ctl" style="width:240px">CaskaydiaMono Nerd Font <svg class="i caret"><use href="#i-chev"/></svg></div><div class="field-ctl" style="width:110px">13 px <svg class="i caret"><use href="#i-chev"/></svg></div></div>
-      </div>
-      <div class="setting" style="border-bottom:0">
-        <h4>Agent autonomy</h4>
-        <p>How far the agent goes before it stops for you. Every level still writes to a shadow worktree first — nothing touches your tree until you accept.</p>
-        <div class="field-ctl">Plan → propose diffs → wait <svg class="i caret"><use href="#i-chev"/></svg></div>
       </div>
     </div>
   </div>

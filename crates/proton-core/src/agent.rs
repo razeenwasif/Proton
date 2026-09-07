@@ -685,6 +685,28 @@ impl Agent {
         self.profile = Profile::for_provider(provider, model, false);
     }
 
+    /// Where a credential for the current provider would come from.
+    ///
+    /// Reported rather than tested: this reads the environment and the CLI's
+    /// profile, which is exactly what `send` will do, so it says what will
+    /// happen without spending a request to find out. Never the credential
+    /// itself — this string is drawn on screen and would end up in a
+    /// screenshot.
+    pub fn credential(&self) -> String {
+        match proton_agent::auth::resolve_for(self.profile.provider) {
+            Ok(found) => match found.source {
+                proton_agent::auth::Source::ApiKey => {
+                    format!("{} is set", self.profile.provider.key_vars()[0])
+                }
+                proton_agent::auth::Source::AuthToken => "ANTHROPIC_AUTH_TOKEN is set".into(),
+                proton_agent::auth::Source::OauthProfile => "signed in with the Claude CLI".into(),
+            },
+            // The error already names what to set, which is the only thing
+            // worth saying about a credential that is not there.
+            Err(why) => why,
+        }
+    }
+
     /// Which service is answering, for the pane to say so.
     pub fn provider(&self) -> proton_agent::Provider {
         self.profile.provider

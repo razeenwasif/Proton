@@ -735,6 +735,9 @@ pub enum Event {
         /// reason about a week later.
         provider: String,
         model: String,
+        /// Where the credential was found, or what to set if there is none.
+        /// Never the credential: this is drawn on screen and goes in logs.
+        credential: String,
     },
     /// The Visualizer pane.
     ///

@@ -3477,6 +3477,7 @@ impl Workspace {
             output_tokens: usage.output_tokens,
             provider: self.agent.provider().id().to_string(),
             model: self.agent.model().to_string(),
+            credential: self.agent.credential(),
             cached_tokens: usage.cache_read_input_tokens,
         }
     }

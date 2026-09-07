@@ -901,11 +901,17 @@ kbd {
 #cmdline .caret { color: var(--accent); }
 
 #settings { inset: 6vh 8vw; flex-direction: column; overflow: hidden; }
-#settings .st-body { display: grid; grid-template-columns: 220px 204px 1fr; flex: 1; min-height: 0; }
+/* Two columns, because there are two: the nav and the panel. There used to be
+   a third holding a second nav that listed Preferences, Security and Updates
+   and did nothing; removing it left the track behind, so the panel sat in the
+   204px column meant for that nav while the 1fr beside it stayed empty. */
+#settings .st-body { display: grid; grid-template-columns: 220px 1fr; flex: 1; min-height: 0; }
 #settings .st-body > * { overflow: auto; }
 #settings .st-nav { border-right: 1px solid var(--edge); padding: 8px; }
-#settings .st-sub { border-right: 1px solid var(--edge); padding: 8px; }
 #settings .st-main { padding: 20px 26px; }
+/* The panels are mostly prose explaining what a setting does, so they get a
+   reading measure rather than the whole width of a wide window. */
+#settings .st-main > [data-st-panel] { max-width: 760px; }
 .setting { padding: 17px 0; border-bottom: 1px solid var(--edge); max-width: 640px; }
 .setting:last-child { border-bottom: 0; }
 .setting h4 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; color: var(--ink); }

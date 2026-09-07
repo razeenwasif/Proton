@@ -3761,6 +3761,11 @@ function renderAgent(event) {
     who.className = "chip" + (event.provider === "gemini" ? " ok" : " accent");
   }
 
+  // Where the key comes from, in the settings panel. Not a promise that a
+  // request will succeed — only that one will be attempted with something.
+  const auth = $("[data-agent-auth]");
+  if (auth) auth.textContent = event.credential || "";
+
   for (const box of $$(".composer .box")) {
     box.classList.toggle("busy", event.activity !== "idle");
   }
