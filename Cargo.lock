@@ -4179,6 +4179,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-design"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "ts-rs",
+]
+
+[[package]]
 name = "proton-index"
 version = "0.0.1"
 dependencies = [
