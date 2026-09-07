@@ -73,6 +73,14 @@ pub struct Workspace {
     data: crate::data::Data,
     design: crate::design::Design,
     settings: crate::settings::Settings,
+    /// Tool calls waiting on a kernel.
+    ///
+    /// A cell run is the one tool that cannot answer when it is asked: the
+    /// tool loop is synchronous and a kernel is not. The turn stays paused
+    /// while these sit here, because `Agent::resume` only continues once every
+    /// outstanding call has an answer — so deferring one is simply not
+    /// answering it yet.
+    waiting: Vec<Waiting>,
     /// The file the open conversation lives in. `None` until it has a
     /// question in it — a conversation with nothing said is not worth a file.
     chat_path: Option<PathBuf>,
@@ -126,6 +134,45 @@ struct Search {
     /// forwards — after `?foo`, `n` keeps going backwards.
     forward: bool,
 }
+
+/// What running a tool produced.
+///
+/// Almost every tool answers in the breath it is called. `run_cell` cannot:
+/// the tool loop is synchronous and a kernel is not. That difference deserves
+/// a type rather than a special case buried in the loop — with a type, a tool
+/// added later that also has to wait says so in the same way, and the loop
+/// does not have to know its name.
+pub enum ToolOutcome {
+    /// Done. Send this back to the model.
+    Answered(Result<String, String>),
+    /// Started, and will be answered on a later heartbeat. The turn stays
+    /// paused meanwhile, because `Agent::resume` waits for every outstanding
+    /// call — so deferring one is simply not answering it yet.
+    Deferred,
+}
+
+/// A `run_cell` that has been started and not yet answered.
+#[derive(Debug)]
+struct Waiting {
+    /// The tool call to answer when the cell stops running.
+    id: String,
+    cell: usize,
+    /// Heartbeats spent waiting.
+    ///
+    /// Beats rather than seconds, because the core has no clock. The heartbeat
+    /// is nominally 50ms, so `PATIENCE` is about ten minutes — but this is a
+    /// bound on how long one turn may be blocked, not a measurement of time,
+    /// and it does not depend on that rate being exact.
+    beats: u32,
+}
+
+/// How many beats to wait for a cell before giving up on it.
+///
+/// Generous on purpose: training a model or reading a large frame is a cell
+/// that legitimately runs for minutes, and a bound tight enough to catch a
+/// typo would break the work this is for. What it catches is the cell that
+/// never finishes at all.
+const PATIENCE: u32 = 12_000;
 
 impl Workspace {
     pub fn new() -> Self {
@@ -714,6 +761,7 @@ impl Workspace {
                 // Whatever was open is already on disk, so this only lets go
                 // of it. Nothing is written for an empty conversation.
                 self.agent.clear();
+                self.waiting.clear();
                 self.chat_path = None;
                 vec![self.agent_event(), self.chats_event()]
             }
@@ -773,6 +821,10 @@ impl Workspace {
 
             Command::CancelTurn => {
                 self.agent.cancel();
+                // The cell keeps running — it is the user's kernel and their
+                // code — but nothing is waiting on it any more. Leaving these
+                // would answer into a turn that no longer exists.
+                self.waiting.clear();
                 vec![self.agent_event()]
             }
 
@@ -1816,6 +1868,13 @@ impl Workspace {
         // The shell is on the same heartbeat as everything else that happens
         // on a thread the core cannot see.
         // The kernel, on the same heartbeat as everything else out of process.
+        // A cell that has stopped running is a tool call that can be answered.
+        // Here rather than in `poll_agent`, because what decides it is the
+        // kernel rather than the agent — and because `poll_agent` only runs
+        // while a turn is in flight, which is one condition too many for
+        // something whose whole job is to end a wait.
+        events.extend(self.answer_finished_cells());
+
         if self.data.poll() {
             // A kernel that died under a running cell is news, not a state:
             // the chip says what is wrong now, but only a notice tells
@@ -2848,7 +2907,15 @@ impl Workspace {
         let mut events = Vec::new();
 
         for call in calls {
-            let answer = self.run_tool(&call.name, &call.input);
+            let answer = match self.call_tool(&call.id, &call.name, &call.input) {
+                ToolOutcome::Answered(answer) => answer,
+                ToolOutcome::Deferred => {
+                    // The cell is drawn as running straight away, so the
+                    // notebook shows what the agent is doing to it.
+                    events.push(self.notebook_event());
+                    continue;
+                }
+            };
             // Both of these change what is on screen: `open_buffer` puts a
             // file in front of you, and `edit_file` opens the one it is
             // proposing to change so the diff has something to sit beside.
@@ -2890,6 +2957,119 @@ impl Workspace {
             events.push(self.tasks_event());
         }
         events
+    }
+
+    /// Run one tool for the agent, which may or may not answer now.
+    ///
+    /// The agent's entry point; `run_tool` is the synchronous half and is
+    /// still what everything else calls. Split so that the loop asks one
+    /// question — "is there an answer yet?" — rather than knowing which tools
+    /// are slow.
+    pub fn call_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) -> ToolOutcome {
+        if name != "run_cell" {
+            return ToolOutcome::Answered(self.run_tool(name, input));
+        }
+        match self.start_cell(input) {
+            Ok(cell) => {
+                self.waiting.push(Waiting {
+                    id: id.to_string(),
+                    cell,
+                    beats: 0,
+                });
+                ToolOutcome::Deferred
+            }
+            // A start that failed has to answer, or the turn waits for ever on
+            // a cell that never began.
+            Err(why) => ToolOutcome::Answered(Err(why)),
+        }
+    }
+
+    /// How many cell runs are waiting to be answered.
+    pub fn waiting_on_cells(&self) -> usize {
+        self.waiting.len()
+    }
+
+    /// Start a cell running, answering which one.
+    ///
+    /// Opens the notebook in Data mode if it is not the one open: a cell
+    /// running in a notebook nobody can see is a side effect with no window
+    /// onto it, and the outputs have to land somewhere the user can look.
+    fn start_cell(&mut self, input: &serde_json::Value) -> Result<usize, String> {
+        let path = input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or("run_cell: `path` is required")?;
+        let cell = input
+            .get("cell")
+            .and_then(|v| v.as_u64())
+            .ok_or("run_cell: `cell` is required")? as usize;
+
+        let full = self.pickers.resolve(path);
+        if self.data.path() != Some(full.as_path()) {
+            self.data.open(&full)?;
+        }
+
+        let cwd = self.pickers.root().to_path_buf();
+        let python = crate::data::python(&cwd)
+            .ok_or("no python to run a notebook with — set PROTON_PYTHON")?;
+        self.data.run(cell, &python, &cwd)?;
+        Ok(cell)
+    }
+
+    /// Answer every `run_cell` whose cell has stopped running.
+    fn answer_finished_cells(&mut self) -> Vec<Event> {
+        if self.waiting.is_empty() {
+            return Vec::new();
+        }
+
+        let cells = self.data.cells();
+        let problem = self.data.problem().map(str::to_string);
+        let mut done: Vec<(String, Result<String, String>)> = Vec::new();
+        self.waiting.retain_mut(|waiting| {
+            let Some(view) = cells.get(waiting.cell) else {
+                // Deleted while it ran. Saying so beats waiting forever for a
+                // cell that is not there.
+                done.push((
+                    waiting.id.clone(),
+                    Err(format!("cell {} is no longer there", waiting.cell)),
+                ));
+                return false;
+            };
+            if !view.running {
+                // A kernel that died stops the cell without running it, and
+                // "ran; no output" would be a lie about why there is nothing.
+                // Reported as a failure because this time the *tool* did
+                // break, unlike a cell that raised.
+                done.push(match problem.clone() {
+                    Some(why) => (waiting.id.clone(), Err(why)),
+                    None => (waiting.id.clone(), Ok(cell_result(view))),
+                });
+                return false;
+            }
+            waiting.beats += 1;
+            if waiting.beats >= PATIENCE {
+                // Left running rather than interrupted: it is the user's
+                // kernel and their code, and killing it to unblock a turn
+                // would be the agent deciding that its own progress matters
+                // more than what they were computing.
+                done.push((
+                    waiting.id.clone(),
+                    Ok(format!(
+                        "cell {} is still running and has been left running. What it \
+                         had printed so far:\n{}",
+                        waiting.cell,
+                        cell_result(view)
+                    )),
+                ));
+                return false;
+            }
+            true
+        });
+
+        for (id, answer) in done {
+            self.agent.answer(&id, answer);
+        }
+        vec![self.notebook_event()]
     }
 
     /// The notebook as it is *now*.
@@ -3173,6 +3353,15 @@ impl Workspace {
                     .collect::<Vec<_>>()
                     .join("\n"))
             }
+
+            // Declared to the model and dispatched by `call_tool`, which is
+            // where a tool that cannot answer immediately has to go. Saying
+            // "no such tool" here would be a lie about one that is offered.
+            "run_cell" => Err(
+                "run_cell is started by the agent loop rather than run here — call \
+                 call_tool for it"
+                    .into(),
+            ),
 
             other => Err(format!("no such tool: {other}")),
         }
@@ -4104,6 +4293,57 @@ fn terminal_command(prefix: &str) -> Option<Command> {
 ///
 /// A row in a queue is a row: the transcript is where the answer is read, and
 /// this only has to be enough to tell one task from another at a glance.
+/// What a run produced, for the tool result.
+///
+/// An error is reported as text rather than as a failed tool call: the cell
+/// ran, and a traceback is the answer to "what does this do" as much as a
+/// number is. Marking it failed would tell the model the *tool* broke.
+fn cell_result(view: &crate::data::CellView) -> String {
+    if view.outputs.is_empty() {
+        return "ran; no output".to_string();
+    }
+    let mut text = String::new();
+    for output in &view.outputs {
+        match output {
+            crate::data::OutputView::Stream { text: it, .. } => text.push_str(it),
+            crate::data::OutputView::Text { text: it } => text.push_str(it),
+            crate::data::OutputView::Error {
+                ename,
+                evalue,
+                traceback,
+            } => {
+                text.push_str(&format!("{ename}: {evalue}\n"));
+                text.push_str(&traceback.join("\n"));
+            }
+            crate::data::OutputView::Table { table } => {
+                text.push_str(&format!(
+                    "table: {} columns x {} rows shown{}",
+                    table.columns.len(),
+                    table.rows.len(),
+                    table.total.map(|n| format!(" of {n}")).unwrap_or_default()
+                ));
+            }
+            crate::data::OutputView::Image { mime, .. } => {
+                // Not the bytes: a base64 PNG is tens of thousands of tokens
+                // and the model cannot see it anyway.
+                text.push_str(&format!("<{mime}>"));
+            }
+        }
+        text.push('\n');
+    }
+
+    const LINES: usize = 40;
+    let lines: Vec<&str> = text.lines().collect();
+    match lines.len() > LINES {
+        true => format!(
+            "{}\n… {} more lines",
+            lines[..LINES].join("\n"),
+            lines.len() - LINES
+        ),
+        false => text.trim_end().to_string(),
+    }
+}
+
 /// What a cell printed, in few enough lines to be worth sending.
 ///
 /// A dataframe or a traceback can be thousands of lines. The model has to know

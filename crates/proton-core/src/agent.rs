@@ -316,6 +316,24 @@ impl Agent {
                 }),
             },
             Tool {
+                name: "run_cell".into(),
+                description: "Run one cell of a notebook in its kernel and wait for what it prints. The\
+                             kernel keeps its state between calls, so a cell that defines something is\
+                             visible to the next one, exactly as it is for a person running the notebook\
+                             by hand. This RUNS code rather than staging it: there is no review step, so\
+                             read the cell before running it and do not run one whose effects you would\
+                             not want. Cell numbers are 0-based and are the ones read_notebook reported."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Path to the .ipynb." },
+                        "cell": { "type": "integer", "description": "Which cell, 0-based." }
+                    },
+                    "required": ["path", "cell"]
+                }),
+            },
+            Tool {
                 name: "diagnostics".into(),
                 description: "Errors and warnings the language server has reported for a \
                               file, or for the active buffer when no path is given."
@@ -773,7 +791,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 9);
         // `edit_file` has to say that it stages rather than applies. A model
         // told only "edit a file" reports the job as done, and the user reads
         // that as a file that has changed.
