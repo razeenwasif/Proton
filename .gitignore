@@ -4,3 +4,10 @@ target/
 node_modules
 *.log
 .venv/
+
+# Conversations. A user's project commits these if they want them — they are
+# Chat mode's document and they diff like any other. Ignored *here* because
+# `crates/proton-core/tests/agent.rs` roots a workspace at this repo on
+# purpose, so that the agent's grep runs against the real index, and every
+# question those tests ask now writes a file.
+.proton/chats/
