@@ -298,6 +298,18 @@ pub enum Command {
     SelectToken {
         index: usize,
     },
+
+    /* ── settings ──────────────────────────────────────────── */
+    /// Change one setting, by dotted key. `null` clears it back to the
+    /// default rather than storing a null.
+    SetSetting {
+        key: String,
+        // A setting is a string, a number or a flag depending on which one it
+        // is, so the binding says so rather than inventing a union that would
+        // have to be widened for every setting added.
+        #[ts(type = "unknown")]
+        value: serde_json::Value,
+    },
     /// Write the notebook back.
     SaveNotebook,
     /// Open a place in another mode: the cross-mode jump.
@@ -632,6 +644,19 @@ pub enum Event {
         cells: Vec<crate::data::CellView>,
         /// Why there is no kernel, when there is a reason worth showing.
         problem: String,
+    },
+    /// Everything in `.proton/settings.json`, as one object.
+    ///
+    /// Sent whole rather than key by key: it is a few dozen values, the panel
+    /// redraws from it, and a per-key protocol for something this small is a
+    /// synchronisation bug waiting to be written — the same call the agent
+    /// transcript makes.
+    #[serde(rename_all = "camelCase")]
+    Settings {
+        #[ts(type = "Record<string, unknown>")]
+        values: serde_json::Value,
+        /// Where they are stored, for the panel to show and for a `:e` on it.
+        path: String,
     },
     /// The theme Design mode is editing.
     #[serde(rename_all = "camelCase")]

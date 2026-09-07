@@ -129,7 +129,11 @@ path: string, cells: Array<CellView>,
 /**
  * Why there is no kernel, when there is a reason worth showing.
  */
-problem: string, } | { "type": "theme", 
+problem: string, } | { "type": "settings", values: Record<string, unknown>, 
+/**
+ * Where they are stored, for the panel to show and for a `:e` on it.
+ */
+path: string, } | { "type": "theme", 
 /**
  * Empty when none is open, which is how the panel knows to say so.
  */

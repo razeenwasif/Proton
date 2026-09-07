@@ -45,6 +45,112 @@ const TOKENS = new Set([
   "wall-a", "wall-b", "wall-c",
 ]);
 
+/* ── settings ─────────────────────────────────────────────────────────
+
+   `.proton/settings.json` is the truth; `localStorage` is a cache in front of
+   it. The cache earns its place by being readable *before* the core answers:
+   without it the window paints in the default theme and then switches, which
+   is a flash on every launch.
+
+   `applying` is the loop guard. Applying a value the core just sent must not
+   turn round and tell the core about it — that is an echo, and with a file
+   write on the other end it is an echo that touches the disk. */
+let lastSettings = {};
+let applying = false;
+
+/** Remember a choice, in the file and in the cache in front of it. */
+function keep(key, value) {
+  if (applying) return;
+  // Only the two the window needs before the core answers are cached. Caching
+  // the rest would mean two places to disagree about what a setting is, and
+  // the file is the one that decides.
+  if (key === "theme" || key === "translucency") {
+    try {
+      localStorage.setItem(`proton.${key}`, String(value));
+    } catch {
+      /* private window, blocked storage — it just won't survive a restart */
+    }
+  }
+  dispatch({ type: "setSetting", key, value });
+}
+
+/** One value out of the settings, by dotted key. */
+function setting(key) {
+  return key.split(".").reduce((node, part) => node?.[part], lastSettings);
+}
+
+function renderSettings(event) {
+  lastSettings = event.values ?? {};
+
+  const where = $("[data-settings-path]");
+  if (where) where.textContent = event.path || "";
+
+  applying = true;
+  try {
+    if (typeof lastSettings.theme === "string") setTheme(lastSettings.theme);
+    if (typeof lastSettings.translucency === "string") {
+      setTranslucency(lastSettings.translucency);
+    }
+
+    // The controls show what is set, and a control with nothing set shows the
+    // default — which is why each one carries its own.
+    $$("[data-set-bool]").forEach((box) => {
+      const value = setting(box.dataset.setBool);
+      box.checked = typeof value === "boolean" ? value : box.defaultChecked;
+    });
+    $$("[data-set-text]").forEach((field) => {
+      if (document.activeElement === field) return; // do not type over them
+      field.value = setting(field.dataset.setText) ?? "";
+    });
+    $$("[data-set-choice]").forEach((group) => {
+      const chosen = setting(group.dataset.setChoice);
+      const buttons = $$("button", group);
+      // First option is the default when nothing has been chosen.
+      const want = chosen ?? buttons[0]?.dataset.value;
+      buttons.forEach((b) => b.classList.toggle("on", b.dataset.value === want));
+    });
+  } finally {
+    applying = false;
+  }
+}
+
+/* The settings page. Each nav row shows one panel; nothing else is hidden or
+   shown, so a panel that has not been built cannot be reached. */
+document.addEventListener("click", (e) => {
+  const nav = e.target.closest?.("[data-st-nav]");
+  if (!nav) return;
+  const want = nav.dataset.stNav;
+  $$("[data-st-nav]").forEach((r) => r.classList.toggle("sel", r === nav));
+  $$("[data-st-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.stPanel !== want;
+  });
+});
+
+/* The controls themselves. Each writes one key and nothing else knows which
+   key that was — the markup says. */
+document.addEventListener("change", (e) => {
+  const box = e.target.closest?.("[data-set-bool]");
+  if (box) {
+    keep(box.dataset.setBool, box.checked);
+    return;
+  }
+  const field = e.target.closest?.("[data-set-text]");
+  if (field) {
+    // An emptied field means "back to the default", which is a removal
+    // rather than a stored empty string.
+    const value = field.value.trim();
+    keep(field.dataset.setText, value === "" ? null : value);
+  }
+});
+
+document.addEventListener("click", (e) => {
+  const choice = e.target.closest?.("[data-set-choice] button");
+  if (!choice) return;
+  const group = choice.closest("[data-set-choice]");
+  $$("button", group).forEach((b) => b.classList.toggle("on", b === choice));
+  keep(group.dataset.setChoice, choice.dataset.value);
+});
+
 function setTheme(name) {
   const plugin = plugged.get(name);
   if (!plugin && !THEMES.includes(name)) return;
@@ -78,11 +184,7 @@ function setTheme(name) {
   }
 
   $$("[data-theme-set]").forEach((c) => c.classList.toggle("on", c.dataset.themeSet === name));
-  try {
-    localStorage.setItem("proton.theme", name);
-  } catch {
-    /* private window, blocked storage — the theme just doesn't persist */
-  }
+  keep("theme", name);
   requestAnimationFrame(drawPointerEdges); // edges are painted, not tokenised
 }
 
@@ -103,11 +205,7 @@ function setTranslucency(step) {
   $$("[data-translucency-set]").forEach((b) =>
     b.classList.toggle("on", b.dataset.translucencySet === step),
   );
-  try {
-    localStorage.setItem("proton.translucency", step);
-  } catch {
-    /* storage blocked — it just won't persist */
-  }
+  keep("translucency", step);
 }
 
 $$("[data-translucency-set]").forEach((b) =>
@@ -2859,6 +2957,10 @@ onEvent((event) => {
       if (activeMode === "data" && event.action.verb === "Insert") {
         requestAnimationFrame(() => enterCell(event.action.object));
       }
+      break;
+
+    case "settings":
+      renderSettings(event);
       break;
 
     case "theme":

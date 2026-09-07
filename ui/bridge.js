@@ -160,6 +160,16 @@ if (HAS_SHELL) {
     ],
   };
 
+  /* Settings, so the page has something to read and write without a core.
+     Starts empty on purpose: the panels have to render correctly when nothing
+     has been chosen, which is every first run. */
+  const settings = {};
+  const settingsEvent = () => ({
+    type: "settings",
+    values: settings,
+    path: "C:/proton/.proton/settings.json",
+  });
+
   const themeEvent = () => ({
     type: "theme",
     path: theme.path,
@@ -337,6 +347,7 @@ if (HAS_SHELL) {
         pluginsEvent(),
         notebookEvent(),
         themeEvent(),
+        settingsEvent(),
       ];
     }
     if (command.type === "runCell") {
@@ -352,6 +363,15 @@ if (HAS_SHELL) {
         }, 900);
       }
       return [notebookEvent()];
+    }
+    if (command.type === "setSetting") {
+      const parts = command.key.split(".");
+      const last = parts.pop();
+      let node = settings;
+      for (const part of parts) node = node[part] ??= {};
+      if (command.value === null) delete node[last];
+      else node[last] = command.value;
+      return [settingsEvent()];
     }
     if (command.type === "setToken") {
       const hit = theme.tokens.find(

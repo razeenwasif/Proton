@@ -1030,38 +1030,22 @@
     <button class="btn" data-close="settings">Close ⎋</button>
   </header>
   <div class="st-body">
+    <!-- Five sections, each of which is a panel that does something. What was
+         here listed fourteen — Members, Integrations, Cloud & sync, Audit log,
+         Access control — none of which had anything behind them. A settings
+         page that lies about what it can change is worse than a short one. -->
     <div class="st-nav tree">
-      <div class="group">General</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-clock"/></svg></span>Recent files</div>
-      <div class="row"><span class="ic">⟨⟩</span>Editor</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-term"/></svg></span>Terminal</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-palette"/></svg></span>Syntax &amp; themes</div>
-      <div class="row sel"><span class="ic"><svg class="i"><use href="#i-gear"/></svg></span>Configuration</div>
-      <div class="row"><span class="ic"><svg class="i ft-ai"><use href="#i-spark"/></svg></span>AI &amp; models</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-keyboard"/></svg></span>Keymap · vim</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-ext"/></svg></span>Plugins</div>
-      <div class="group">Workspace</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-users"/></svg></span>Members</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-link"/></svg></span>Integrations</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-cloud"/></svg></span>Cloud &amp; sync</div>
-      <div class="group">Support</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-book"/></svg></span>Documentation</div>
-      <div class="row"><span class="ic"><svg class="i"><use href="#i-buoy"/></svg></span>Help centre</div>
-    </div>
-    <div class="st-sub tree">
-      <div class="group">Preferences</div>
-      <div class="row sel">Appearance</div>
-      <div class="row">Editor management</div>
-      <div class="row">Modes &amp; workspaces</div>
-      <div class="row">Collaboration</div>
-      <div class="row">API &amp; keys</div>
-      <div class="group">Security</div>
-      <div class="row">Backup &amp; recovery</div>
-      <div class="row">Audit log</div>
-      <div class="row">Access control</div>
-      <div class="row">Updates</div>
+      <div class="group">Editor</div>
+      <div class="row sel" data-st-nav="appearance"><span class="ic"><svg class="i"><use href="#i-palette"/></svg></span>Appearance</div>
+      <div class="row" data-st-nav="editing"><span class="ic">&#10216;&#10217;</span>Editing</div>
+      <div class="row" data-st-nav="plugins"><span class="ic"><svg class="i"><use href="#i-ext"/></svg></span>Plugins</div>
+      <div class="group">Agent</div>
+      <div class="row" data-st-nav="models"><span class="ic"><svg class="i ft-ai"><use href="#i-spark"/></svg></span>AI &amp; models</div>
+      <div class="group">About</div>
+      <div class="row" data-st-nav="about"><span class="ic"><svg class="i"><use href="#i-gear"/></svg></span>Configuration</div>
     </div>
     <div class="st-main">
+      <div data-st-panel="appearance">
       <div style="font:600 10.5px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px">Appearance</div>
       <div class="setting">
         <h4>Workspace theme</h4>
@@ -1089,6 +1073,57 @@
           </button>
           <!-- Palettes plugins brought, from Event::Plugins. Appended to the
                same strip because a theme from a plugin is a theme. -->
+      </div><!-- /appearance -->
+
+      <div data-st-panel="editing" hidden>
+        <div class="st-head">Editing</div>
+        <div class="setting">
+          <h4>Format on save</h4>
+          <p>`:w` writes the file and then asks the language server to format it, writing again if anything changed. Turn this off for a project whose formatter disagrees with its own history.</p>
+          <label class="st-toggle"><input type="checkbox" data-set-bool="editor.formatOnSave" checked> Format the buffer when it is written</label>
+        </div>
+      </div>
+
+      <div data-st-panel="models" hidden>
+        <div class="st-head">AI &amp; models</div>
+        <div class="setting">
+          <h4>Provider</h4>
+          <p>Which service the agent pane talks to. The key to reach it with is never stored here — it comes from the environment, or from that provider's own CLI login.</p>
+          <div class="seg" data-set-choice="agent.provider">
+            <button data-value="claude">Claude</button>
+            <button data-value="gemini">Gemini</button>
+          </div>
+        </div>
+        <div class="setting">
+          <h4>Model</h4>
+          <p>Left blank, each provider uses its own default — the careful model for agent work, a small fast one for completion.</p>
+          <label class="st-field">Agent
+            <input type="text" data-set-text="agent.model" spellcheck="false" placeholder="provider default">
+          </label>
+        </div>
+        <div class="setting">
+          <h4>Credential</h4>
+          <p data-agent-auth>Checking…</p>
+        </div>
+      </div>
+
+      <div data-st-panel="plugins" hidden>
+        <div class="st-head">Plugins</div>
+        <div class="setting">
+          <h4>Installed</h4>
+          <p>Loaded from the project when the session starts. Installing one needs a restart, so this is what is running now rather than what is on disk.</p>
+          <div data-plugins-list></div>
+        </div>
+      </div>
+
+      <div data-st-panel="about" hidden>
+        <div class="st-head">Configuration</div>
+        <div class="setting">
+          <h4>Where settings live</h4>
+          <p>A file in the project, beside <code>.proton/debug.json</code>, so it diffs and can be committed if the team wants the same editor. Keys this build does not recognise are left alone.</p>
+          <p><code data-settings-path></code></p>
+        </div>
+      </div>
         </div>
       </div>
 

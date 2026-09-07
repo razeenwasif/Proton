@@ -72,6 +72,7 @@ pub struct Workspace {
     /// The notebook Data mode has open, and the kernel running it.
     data: crate::data::Data,
     design: crate::design::Design,
+    settings: crate::settings::Settings,
     /// How big the panel is. Kept even with no terminal, so the one opened
     /// next starts the right size rather than at a default nobody chose.
     term_size: (u16, u16),
@@ -141,6 +142,7 @@ impl Workspace {
             tree: Tree::new(root),
             git: Git::discover(root),
             debugger: Debugger::new(root),
+            settings: crate::settings::Settings::load(root),
             term_size: (24, 80),
             ..Default::default()
         }
@@ -360,6 +362,7 @@ impl Workspace {
                     // something happened to change a cell.
                     self.notebook_event(),
                     self.theme_event(),
+                    self.settings_event(),
                     Event::Layout {
                         layout: self.mode.layout(),
                     },
@@ -457,6 +460,15 @@ impl Workspace {
                 self.design.select(index);
                 vec![self.theme_event()]
             }
+
+            /* ── settings ──────────────────────────────────── */
+            Command::SetSetting { key, value } => match self.settings.set(&key, value) {
+                // Already had that value. The panel emits on every click and
+                // most clicks change nothing.
+                Ok(false) => Vec::new(),
+                Ok(true) => vec![self.settings_event()],
+                Err(why) => vec![notice(why, NoticeLevel::Error)],
+            },
 
             Command::RunAll => {
                 let cwd = self.pickers.root().to_path_buf();
@@ -1530,7 +1542,12 @@ impl Workspace {
                 if self.design.reload() {
                     events.push(self.theme_event());
                 }
-                events.extend(self.request_format(true));
+                // On by default: a formatter configured and not run is the
+                // surprise, not the other way round. Off is for a project
+                // whose formatter disagrees with its own history.
+                if self.settings.bool("editor.formatOnSave", true) {
+                    events.extend(self.request_format(true));
+                }
                 events
             }
             Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
@@ -3082,6 +3099,13 @@ impl Workspace {
         (0..self.splits.len())
             .flat_map(|view| [self.viewport_of(view), self.cursor_of(view)])
             .collect()
+    }
+
+    fn settings_event(&self) -> Event {
+        Event::Settings {
+            values: self.settings.all().clone(),
+            path: self.settings.path().display().to_string(),
+        }
     }
 
     /// What Design mode's inspector draws.

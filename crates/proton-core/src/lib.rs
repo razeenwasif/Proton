@@ -24,6 +24,7 @@ pub mod picker;
 pub mod plugins;
 pub mod review;
 pub mod session;
+pub mod settings;
 pub mod split;
 pub mod tasks;
 pub mod trace;
