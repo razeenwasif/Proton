@@ -20,6 +20,7 @@ pub mod git;
 pub mod highlights;
 pub mod key;
 pub mod lsp;
+pub mod mention;
 pub mod mode;
 pub mod picker;
 pub mod plugins;

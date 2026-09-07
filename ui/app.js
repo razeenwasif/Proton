@@ -3786,6 +3786,34 @@ function renderAgent(event) {
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
+/* Clicking a scope chip writes the mention into the question, rather than
+   toggling some state the sentence does not mention. The design's line is that
+   what the model can see is a chip you can point at — so the chip puts a word
+   in the text you can see, read back, and delete. */
+document.addEventListener("click", (e) => {
+  const chip = e.target.closest?.("[data-mention]");
+  if (!chip) return;
+  const input = chip.closest(".composer")?.querySelector("[data-agent-input]");
+  if (!input) return;
+
+  const word = chip.dataset.mention;
+  const words = input.textContent.split(' ').filter(Boolean);
+  // The second click takes it out again: a chip that only ever adds is one
+  // you cannot undo without editing the sentence by hand.
+  const has = words.includes(word);
+  input.textContent = (has ? words.filter((w) => w !== word) : [...words, word]).join(' ');
+
+  input.focus();
+  // Caret to the end, or typing continues in front of what was just added.
+  const range = document.createRange();
+  range.selectNodeContents(input);
+  range.collapse(false);
+  const selection = getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  chip.classList.toggle("on", !has);
+});
+
 /* There is more than one composer — Codex has one in its dock and Chat has
    one as its whole stage — and they are the same conversation seen twice. So
    everything here works from the composer the event came from rather than

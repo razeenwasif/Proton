@@ -242,6 +242,15 @@ impl Workspace {
         &self.editor
     }
 
+    /// The agent, for what it has been told and what it has said.
+    ///
+    /// Its `conversation` is what actually goes to the model, which is a
+    /// different thing from the transcript that gets drawn — and the one worth
+    /// asserting on when the question is whether something was really sent.
+    pub fn agent(&self) -> &crate::agent::Agent {
+        &self.agent
+    }
+
     pub fn pickers(&self) -> &Pickers {
         &self.pickers
     }
@@ -2848,6 +2857,7 @@ impl Workspace {
         if text.trim().is_empty() {
             return Vec::new();
         }
+        let text = &self.with_context(text);
         let busy = self.agent.is_busy();
         self.tasks.push(text, busy);
         if busy {
@@ -2957,6 +2967,94 @@ impl Workspace {
             events.push(self.tasks_event());
         }
         events
+    }
+
+    /// Append whatever the question pointed at.
+    ///
+    /// The typed words are kept exactly as written and the context follows
+    /// under headings. Substituting `@selection` for the selected text inline
+    /// would make a short question unreadable in the pane it is drawn in, and
+    /// would leave the reader unable to tell which half of the sentence they
+    /// wrote.
+    fn with_context(&self, text: &str) -> String {
+        let mentions = crate::mention::found(text);
+        if mentions.is_empty() {
+            return text.to_string();
+        }
+
+        let mut out = text.to_string();
+        for mention in mentions {
+            out.push_str("\n\n# ");
+            out.push_str(mention.word());
+            out.push('\n');
+            out.push_str(&match mention {
+                crate::mention::Mention::Selection => self.selected_text(),
+                crate::mention::Mention::Dataframe => self.selected_frame(),
+            });
+        }
+        out
+    }
+
+    /// The text selected in the focused editor.
+    fn selected_text(&self) -> String {
+        let buffer = self.editor.buffer();
+        let cursor = buffer.cursor;
+        if !cursor.has_selection() {
+            // Said rather than left empty. Silence would leave the model
+            // answering about whatever it could find and the user believing it
+            // had been shown something.
+            return "Nothing is selected.".into();
+        }
+
+        let range = cursor.selection();
+        let text = buffer.slice(range);
+        let from = buffer.position(range.start).line + 1;
+        let to = buffer.position(range.end).line + 1;
+        let name = buffer.name();
+        // Fenced, and told where it came from: a fragment with no file and no
+        // line numbers is a fragment the model cannot go back to.
+        format!("`{name}` lines {from}-{to}\n\n```\n{text}\n```")
+    }
+
+    /// The table the selected notebook cell produced.
+    fn selected_frame(&self) -> String {
+        if !self.data.is_open() {
+            return "No notebook is open.".into();
+        }
+        let cells = self.data.cells();
+        let Some(cell) = cells.get(self.data.selected()) else {
+            return "No cell is selected.".into();
+        };
+
+        let table = cell.outputs.iter().find_map(|output| match output {
+            crate::data::OutputView::Table { table } => Some(table),
+            _ => None,
+        });
+        let Some(table) = table else {
+            return format!(
+                "Cell {} produced no table. Run a cell that ends in a dataframe.",
+                self.data.selected()
+            );
+        };
+
+        // The shape the frame reported rather than the number of rows sent: a
+        // model told about thirty rows of a million would reason about the
+        // thirty as if they were all of it.
+        let rows = table.total.unwrap_or(table.rows.len());
+        let mut out = format!(
+            "Cell {}: {} rows x {} columns, showing {}.\n\n",
+            self.data.selected(),
+            rows,
+            table.columns.len(),
+            table.rows.len()
+        );
+        out.push_str(&table.columns.join("\t"));
+        out.push('\n');
+        for row in &table.rows {
+            out.push_str(&row.join("\t"));
+            out.push('\n');
+        }
+        out
     }
 
     /// Run one tool for the agent, which may or may not answer now.
