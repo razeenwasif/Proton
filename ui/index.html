@@ -578,60 +578,36 @@
       </nav>
 
       <aside class="pane side">
-        <header>Layers <span class="grow"></span><span class="chip warn">Draft</span></header>
-        <div class="scroll tree">
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i"><use href="#i-frame"/></svg> Container</div>
-          <div class="row indent-1"><span class="ic">T</span>Text</div>
-          <div class="row indent-1"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i"><use href="#i-frame"/></svg> Container</div>
-          <div class="row indent-2"><span class="ic">H</span>Heading</div>
-          <div class="row indent-1"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i"><use href="#i-frame"/></svg> Container</div>
-          <div class="row sel indent-2"><span class="ic"><svg class="i"><use href="#i-grid"/></svg></span>Grid</div>
-          <div class="row indent-3"><span class="ic"><svg class="i ft-image"><use href="#i-image"/></svg></span>Image</div>
-          <div class="row indent-3"><span class="ic"><svg class="i"><use href="#i-play"/></svg></span>Video</div>
-          <div class="row indent-3"><span class="ic"><svg class="i"><use href="#i-button"/></svg></span>Button</div>
-          <div class="row indent-3"><span class="ic"><svg class="i"><use href="#i-avatar"/></svg></span>Avatar</div>
-          <div class="row indent-3"><span class="ic">↗</span>Link</div>
-          <div class="row indent-3"><span class="ic">⟨⟩</span>Code</div>
-          <div class="row indent-3"><span class="ic">␣</span>Spacer</div>
-          <div class="row indent-3"><span class="ic">⋯</span>Stepper</div>
-          <div class="row indent-3"><span class="ic">—</span>Divider</div>
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i"><use href="#i-frame"/></svg> Container</div>
-          <div class="row indent-1"><span class="ic"><svg class="i"><use href="#i-columns"/></svg></span>Column</div>
-          <div class="group">Bound to code</div>
-          <div class="row"><span class="ic"><svg class="i ft-ts"><use href="#i-file-code"/></svg></span>Dashboard.tsx <span class="chip ok" style="margin-left:auto">2-way</span></div>
-          <div class="row"><span class="ic"><svg class="i ft-css"><use href="#i-file-code"/></svg></span>theme.css <span class="chip ok" style="margin-left:auto">tokens</span></div>
-        </div>
+        <header>Palettes <span class="grow"></span><span class="chip" data-pal-count></span></header>
+        <!-- Design's document is a stylesheet, so its structure is the scopes
+             it declares — one per theme. The layer tree that used to sit here
+             listed Container / Grid / Image for a component nothing was bound
+             to, and claimed a two-way binding to a `Dashboard.tsx` that does
+             not exist. -->
+        <div class="scroll tree" data-palettes></div>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
         <div class="canvas-bar">
-          <span class="chip">Layout Guide · Blog</span>
-          <span class="chip warn">Draft</span>
-          <div class="seg" style="margin-left:auto">
-            <button class="on"><svg class="i"><use href="#i-desktop"/></svg></button>
-            <button><svg class="i"><use href="#i-tablet"/></svg></button>
-            <button><svg class="i"><use href="#i-phone"/></svg></button>
+          <span class="chip accent" data-ab-file>no theme</span>
+          <!-- Which palette is being looked at. A theme declares the same
+               token once per scope, so "what does this look like" has no
+               answer until one is chosen. -->
+          <select class="seg-select" data-ab-scope title="Which palette to render"></select>
+          <span class="grow"></span>
+          <div class="seg" data-ab-size>
+            <button class="on" data-ab-width="0" title="Fill the pane"><svg class="i"><use href="#i-desktop"/></svg></button>
+            <button data-ab-width="768" title="768px"><svg class="i"><use href="#i-tablet"/></svg></button>
+            <button data-ab-width="375" title="375px"><svg class="i"><use href="#i-phone"/></svg></button>
           </div>
-          <div class="seg"><button class="on">Design</button><button>Code</button><button>Preview</button></div>
-          <button class="btn primary">Pagepilot <svg class="i"><use href="#i-spark"/></svg></button>
         </div>
         <div class="canvas">
-          <div class="artboard">
-            <div class="presence" style="color:var(--info);left:63%;top:150px"><i></i><span style="background:var(--info);color:#04222f">Ada</span></div>
-            <div class="eyebrow">This is text</div>
-            <h2>This is Heading</h2>
-            <div class="ab-grid ab-sel">
-              <div class="ab-img"></div>
-              <div class="ab-vid"><svg class="i"><use href="#i-play"/></svg></div>
-              <div style="display:flex;gap:10px;align-items:center"><div style="width:26px;height:26px;border-radius:50%;background:#d9cdd2"></div><span style="font-size:12px;color:#6b555c">Hello World</span></div>
-              <div class="ab-btn">Save</div>
-            </div>
-            <div style="height:14px"></div>
-            <div style="width:150px;height:120px;border-radius:8px;background:#f6d6da;padding:8px">
-              <div style="width:100%;height:100%;border-radius:5px;background:linear-gradient(135deg,#9fb0c4,#5c7089)"></div>
-            </div>
-          </div>
+          <!-- The theme, rendered. Every colour token as a swatch, and a
+               specimen built from them, with the palette applied as inline
+               custom properties so the cascade does the work. Change a token
+               in the inspector and this is where you see it. -->
+          <div class="artboard" data-artboard></div>
         </div>
       </main>
 

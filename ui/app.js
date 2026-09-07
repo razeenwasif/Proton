@@ -634,8 +634,25 @@ let drawing = paneState(0);
 /** The focused pane's state, for the statusline and the completion popup. */
 const focusedPane = () => paneState(view.focused);
 
+/* Quotes are escaped as well as the angle brackets, because most of what this
+   wraps ends up inside an attribute — a `title`, a `data-df-cell`, an
+   `<option value>`. A value holding a `"` closes the attribute early and the
+   rest of it becomes markup: a scope like `:root[data-theme="dark"]` arrived
+   at the browser as `:root[data-theme=`, and a dataframe cell containing a
+   quote broke the click that searches for it. Harmless in text content, where
+   `&quot;` renders as the quote it is. */
 const escapeHtml = (s) =>
-  s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[c],
+  );
 
 /* Diagnostics for the active buffer, indexed by line.
  *
@@ -1468,6 +1485,189 @@ function renderNotebook(event) {
   renderTableDock(event);
 }
 
+/* ── Design mode's artboard ───────────────────────────────────────────
+
+   What the theme actually looks like.
+
+   The milestone's exit is that editing a token in the inspector changes
+   `theme.css`. That is only half of what makes it usable: the other half is
+   seeing the change land on something. So the artboard renders the *theme* —
+   every colour token as a live swatch, and a specimen built from them.
+
+   It is not a mockup of a component. Rendering somebody's `Dashboard.tsx`
+   needs a bundler and a JSX runtime, and a hand-drawn approximation of one
+   would be the same lie Data mode's sidebar used to tell: plausible, and
+   about nothing. Everything drawn here is a value read out of the file.
+
+   The palette is applied as inline custom properties on the artboard element
+   and the specimen inside it uses `var()`, so the cascade resolves it exactly
+   as a browser would. No colour is computed here.  */
+
+/** Which scope the artboard is rendering, or null for the first one. */
+let artboardScope = null;
+/** Artboard width in px; 0 fills the pane. */
+let artboardWidth = 0;
+let artboardPainted = null;
+
+/**
+ * The tokens in force for a scope.
+ *
+ * A theme states `--accent` once per palette, and a palette is the base
+ * declarations with that scope's on top — which is what the cascade does when
+ * `[data-theme="x"]` matches. Resolving it the same way here is why a swatch
+ * shows the colour the app would actually use.
+ */
+function resolveScope(tokens, scope) {
+  const base = tokens.filter((t) => t.scope === (tokens[0]?.scope ?? ""));
+  const over = scope ? tokens.filter((t) => t.scope === scope) : [];
+  const merged = new Map();
+  for (const token of [...base, ...over]) merged.set(token.name, token.value);
+  return merged;
+}
+
+/** The scopes a theme declares, in the order it declares them. */
+function scopesOf(tokens) {
+  const seen = [];
+  for (const token of tokens) {
+    if (!seen.includes(token.scope)) seen.push(token.scope);
+  }
+  return seen;
+}
+
+/**
+ * The palettes a theme declares, as Design's structure.
+ *
+ * One row per scope, with how many tokens it states and a strip of the
+ * colours it overrides — which is what tells the difference between a palette
+ * that changes everything and one that changes an accent.
+ */
+function renderPalettes(event) {
+  const box = $("[data-palettes]");
+  if (!box) return;
+  const count = $("[data-pal-count]");
+
+  const scopes = scopesOf(event.tokens);
+  if (count) count.textContent = scopes.length ? `${scopes.length}` : "";
+
+  if (!scopes.length) {
+    box.innerHTML = `<div class="empty">${escapeHtml(
+      event.problem || "No theme.",
+    )}</div>`;
+    return;
+  }
+
+  box.innerHTML = scopes
+    .map((scope) => {
+      const mine = event.tokens.filter((t) => t.scope === scope);
+      const strip = mine
+        .filter((t) => swatchable(t.value))
+        .slice(0, 6)
+        .map((t) => `<i style="background:${escapeHtml(t.value)}"></i>`)
+        .join("");
+      return (
+        `<div class="row pal${scope === artboardScope ? " sel" : ""}"` +
+        ` data-palette="${escapeHtml(scope)}" title="${escapeHtml(scope)}">` +
+        `<span class="pal-name">${escapeHtml(scope || "(top level)")}</span>` +
+        `<span class="pal-strip">${strip}</span>` +
+        `<span class="chip">${mine.length}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+}
+
+function renderArtboard(event) {
+  const board = $("[data-artboard]");
+  if (!board) return;
+
+  const file = $("[data-ab-file]");
+  if (file) {
+    file.textContent = event.path ? event.path.split(/[\\/]/).pop() : "no theme";
+    file.className = "chip" + (event.path ? " accent" : "");
+  }
+
+  const scopes = scopesOf(event.tokens);
+  if (artboardScope === null || !scopes.includes(artboardScope)) {
+    artboardScope = scopes[0] ?? null;
+  }
+
+  // The chooser is rebuilt only when the scopes themselves change — replacing
+  // it on every token edit would close it while somebody is choosing.
+  const picker = $("[data-ab-scope]");
+  if (picker && picker.dataset.built !== scopes.join("|")) {
+    picker.dataset.built = scopes.join("|");
+    picker.innerHTML = scopes
+      .map(
+        (scope) =>
+          `<option value="${escapeHtml(scope)}"${scope === artboardScope ? " selected" : ""}>` +
+          `${escapeHtml(scope || "(top level)")}</option>`,
+      )
+      .join("");
+  }
+
+  if (!event.tokens.length) {
+    board.innerHTML = `<div class="empty">${escapeHtml(
+      event.problem || "No theme to render.",
+    )}</div>`;
+    board.removeAttribute("style");
+    artboardPainted = null;
+    return;
+  }
+
+  const palette = resolveScope(event.tokens, artboardScope);
+  const key = JSON.stringify([[...palette], artboardWidth]);
+  if (key === artboardPainted) return;
+  artboardPainted = key;
+
+  // The palette, as custom properties. Everything below reads them through
+  // `var()`, so the browser resolves the theme rather than this code.
+  const vars = [...palette]
+    .map(([name, value]) => `${name}: ${value}`)
+    .join("; ");
+  board.setAttribute(
+    "style",
+    `${vars}; background: var(--bg, #16161e); color: var(--ink, #c0caf5)` +
+      (artboardWidth ? `; width: ${artboardWidth}px; max-width: 100%` : ""),
+  );
+
+  const colours = [...palette].filter(([, value]) => swatchable(value));
+  const swatches = colours
+    .map(
+      ([name, value]) =>
+        `<div class="ab-swatch" title="${escapeHtml(name)}: ${escapeHtml(value)}">` +
+        `<i style="background:${escapeHtml(value)}"></i>` +
+        `<b>${escapeHtml(name.replace(/^--/, ""))}</b>` +
+        `<code>${escapeHtml(value)}</code>` +
+        `</div>`,
+    )
+    .join("");
+
+  // The specimen names tokens with fallbacks throughout, because it has to
+  // render somebody else's theme as well as this one — a project that calls
+  // its accent something else still gets a readable artboard.
+  board.innerHTML =
+    `<div class="ab-head">` +
+    `<h3>${escapeHtml(artboardScope || "(top level)")}</h3>` +
+    `<span>${colours.length} colours · ${palette.size} tokens</span>` +
+    `</div>` +
+    `<div class="ab-swatches">${swatches}</div>` +
+    `<div class="ab-specimen">` +
+    `<div class="ab-card">` +
+    `<div class="ab-title">Heading</div>` +
+    `<p>Body text, set in the theme's own ink over its own ground.</p>` +
+    `<div class="ab-row">` +
+    `<span class="ab-btn">Primary</span>` +
+    `<span class="ab-btn ghost">Secondary</span>` +
+    `</div>` +
+    `<div class="ab-row">` +
+    `<span class="ab-pill ok">ok</span>` +
+    `<span class="ab-pill warn">warn</span>` +
+    `<span class="ab-pill err">error</span>` +
+    `</div>` +
+    `</div>` +
+    `</div>`;
+}
+
 /* ── Design mode's inspector ─────────────────────────────────────
 
    Every custom property in the theme, grouped by the selector that declares
@@ -1907,6 +2107,38 @@ function renderLayout(layout) {
   const workspace = $(`.workspace[data-ws="${layout.mode}"]`);
   if (workspace) workspace.dataset.dock = layout.dock;
 }
+
+// The artboard's palette chooser and its breakpoints. Both only change what
+// is drawn, so neither goes near the core.
+document.addEventListener("change", (e) => {
+  const picker = e.target.closest?.("[data-ab-scope]");
+  if (!picker) return;
+  artboardScope = picker.value;
+  artboardPainted = null;
+  if (lastTheme) renderArtboard(lastTheme);
+});
+
+// Choosing a palette from the list is the same act as choosing it from the
+// artboard's own selector, so it goes through the same state.
+document.addEventListener("click", (e) => {
+  const row = e.target.closest?.("[data-palette]");
+  if (!row || !lastTheme) return;
+  artboardScope = row.dataset.palette;
+  artboardPainted = null;
+  const picker = $("[data-ab-scope]");
+  if (picker) picker.value = artboardScope;
+  renderArtboard(lastTheme);
+  renderPalettes(lastTheme);
+});
+
+document.addEventListener("click", (e) => {
+  const size = e.target.closest?.("[data-ab-width]");
+  if (!size) return;
+  $$("[data-ab-size] button").forEach((b) => b.classList.toggle("on", b === size));
+  artboardWidth = Number(size.dataset.abWidth);
+  artboardPainted = null;
+  if (lastTheme) renderArtboard(lastTheme);
+});
 
 /* A token's new value. `change` rather than `input` on the colour picker:
    `input` fires continuously while it is dragged, and every one of those would
@@ -2631,6 +2863,8 @@ onEvent((event) => {
 
     case "theme":
       renderTheme(event);
+      renderArtboard(event);
+      renderPalettes(event);
       break;
 
     case "layout":
