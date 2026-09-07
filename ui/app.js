@@ -3663,6 +3663,17 @@ function renderAgent(event) {
     if (atBottom) thread.scrollTop = thread.scrollHeight;
   }
 
+  // Which service answered. Worth a permanent chip rather than a setting you
+  // have to go and look up: the two give different answers to the same
+  // question, and a transcript you cannot attribute is one you cannot reason
+  // about a week later.
+  const who = $("[data-agent-provider]");
+  if (who) {
+    who.textContent = event.provider === "gemini" ? "Gemini" : "Claude";
+    who.title = `${event.model} — change it in Settings > AI & models`;
+    who.className = "chip" + (event.provider === "gemini" ? " ok" : " accent");
+  }
+
   const box = $(".composer .box");
   if (box) box.classList.toggle("busy", event.activity !== "idle");
 

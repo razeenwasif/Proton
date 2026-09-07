@@ -17,12 +17,15 @@
 
 pub mod auth;
 pub mod client;
+pub mod gemini;
+pub mod provider;
 pub mod request;
 pub mod sse;
 pub mod stream;
 pub mod wire;
 
 pub use client::{send, Reply, Turn};
+pub use provider::Provider;
 pub use request::{Profile, Request};
 pub use stream::{Assembler, Delta, Fault};
 pub use wire::{Block, Effort, Message, Role, StopReason, Tool, Usage};

@@ -53,6 +53,36 @@ pub fn base_url() -> String {
         .unwrap_or_else(|| crate::wire::API.to_string())
 }
 
+/// Resolve a credential for a provider, or explain what to do about it.
+///
+/// Gemini has one scheme and one place to look, which is why it is a few lines
+/// rather than a ladder: no OAuth profile on disk, and its key goes in a
+/// header of its own rather than as a bearer token.
+pub fn resolve_for(provider: crate::provider::Provider) -> Result<Found, String> {
+    use crate::provider::Provider;
+    if provider == Provider::Claude {
+        return resolve();
+    }
+
+    for name in provider.key_vars() {
+        if let Some(key) = std::env::var(name)
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        {
+            return Ok(Found {
+                auth: Auth::Key(key),
+                source: Source::ApiKey,
+            });
+        }
+    }
+    Err(format!(
+        "no credential for {}: set {}",
+        provider.label(),
+        provider.key_vars().join(" or ")
+    ))
+}
+
 /// Resolve a credential, or explain what to do about it.
 pub fn resolve() -> Result<Found, String> {
     let from_env = |name: &str| {

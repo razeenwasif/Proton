@@ -18,6 +18,10 @@ use crate::wire::{Effort, Message, Tool, BETAS};
 /// How Proton talks to the model for a given job.
 #[derive(Debug, Clone)]
 pub struct Profile {
+    /// Which service. Kept beside the model rather than looked up separately,
+    /// because a model name and an endpoint that disagree is a 404 that reads
+    /// like a bad model name.
+    pub provider: crate::provider::Provider,
     pub model: String,
     pub max_tokens: u32,
     pub effort: Effort,
@@ -27,9 +31,32 @@ pub struct Profile {
 }
 
 impl Profile {
+    /// The profile for a chosen provider, and a model if one was named.
+    ///
+    /// An empty model means "whatever that provider's default is", which is
+    /// what a settings file says by leaving the field alone — the alternative
+    /// is writing a model id into everyone's settings on first run and having
+    /// it go stale.
+    pub fn for_provider(provider: crate::provider::Provider, model: &str, quick: bool) -> Profile {
+        let named = model.trim();
+        let base = match quick {
+            true => Profile::quick(),
+            false => Profile::agent(),
+        };
+        Profile {
+            provider,
+            model: match named.is_empty() {
+                true => provider.default_model(quick).to_string(),
+                false => named.to_string(),
+            },
+            ..base
+        }
+    }
+
     /// Agent work and chat: the expensive, careful profile.
     pub fn agent() -> Profile {
         Profile {
+            provider: crate::provider::Provider::Claude,
             model: "claude-opus-5".into(),
             max_tokens: 16_000,
             effort: Effort::XHigh,
@@ -40,6 +67,7 @@ impl Profile {
     /// Completion and the semantic index: small, frequent, and latency-bound.
     pub fn quick() -> Profile {
         Profile {
+            provider: crate::provider::Provider::Claude,
             model: "claude-haiku-4-5-20251001".into(),
             max_tokens: 1_024,
             effort: Effort::Low,

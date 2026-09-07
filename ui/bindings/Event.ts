@@ -155,7 +155,14 @@ branch: string | null, files: Array<RepoFile>, } | { "type": "agent", transcript
  * Served from cache. Surfaced because a silently invalidated prefix
  * is a cost regression rather than an error, and nothing else shows it.
  */
-cachedTokens: bigint, } | { "type": "trace", state: TraceState, 
+cachedTokens: bigint, 
+/**
+ * Which service answered, and on which model. Shown because the two
+ * give different answers to the same question, and a transcript that
+ * does not say which one produced it is a transcript you cannot
+ * reason about a week later.
+ */
+provider: string, model: string, } | { "type": "trace", state: TraceState, 
 /**
  * What was traced, for the header.
  */

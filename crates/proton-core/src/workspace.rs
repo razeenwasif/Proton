@@ -133,7 +133,7 @@ impl Workspace {
     /// can point at a fixture instead of the process's working directory.
     pub fn rooted(root: impl AsRef<Path>) -> Self {
         let root = root.as_ref();
-        Self {
+        let mut space = Self {
             editor: Editor::new(),
             pickers: Pickers::new(root),
             servers: Servers::new(root),
@@ -145,7 +145,12 @@ impl Workspace {
             settings: crate::settings::Settings::load(root),
             term_size: (24, 80),
             ..Default::default()
-        }
+        };
+        // The settings were loaded a line ago; the agent has to be told what
+        // they say, or the first question of every session goes to whatever
+        // the default provider is regardless of what was chosen.
+        space.follow_agent_settings();
+        space
     }
 
     /// Opt in to language servers.
@@ -466,7 +471,16 @@ impl Workspace {
                 // Already had that value. The panel emits on every click and
                 // most clicks change nothing.
                 Ok(false) => Vec::new(),
-                Ok(true) => vec![self.settings_event()],
+                Ok(true) => {
+                    if key.starts_with("agent.") {
+                        self.follow_agent_settings();
+                    }
+                    let mut events = vec![self.settings_event()];
+                    // The pane's header names the provider, so it has to be
+                    // told when the provider changed under it.
+                    events.push(self.agent_event());
+                    events
+                }
                 Err(why) => vec![notice(why, NoticeLevel::Error)],
             },
 
@@ -2980,6 +2994,8 @@ impl Workspace {
             // miss is a cost regression rather than an error.
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
+            provider: self.agent.provider().id().to_string(),
+            model: self.agent.model().to_string(),
             cached_tokens: usage.cache_read_input_tokens,
         }
     }
@@ -3099,6 +3115,16 @@ impl Workspace {
         (0..self.splits.len())
             .flat_map(|view| [self.viewport_of(view), self.cursor_of(view)])
             .collect()
+    }
+
+    /// Point the agent at whatever the settings name.
+    ///
+    /// Called on startup and after any `agent.*` change, so switching provider
+    /// takes effect on the next question rather than the next launch.
+    fn follow_agent_settings(&mut self) {
+        let provider = proton_agent::Provider::parse(&self.settings.string("agent.provider", ""));
+        let model = self.settings.string("agent.model", "");
+        self.agent.use_provider(provider, &model);
     }
 
     fn settings_event(&self) -> Event {

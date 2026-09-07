@@ -115,6 +115,10 @@ pub struct Agent {
     /// The stable half of the prompt. Built once, because anything that
     /// changes between turns invalidates the cached prefix.
     system: Vec<String>,
+    /// Which service to ask, and which model. From the settings file, and
+    /// re-read when it changes rather than at startup only — switching
+    /// provider should take effect on the next question, not the next launch.
+    profile: Profile,
 }
 
 impl std::fmt::Debug for Agent {
@@ -138,6 +142,7 @@ impl Default for Agent {
             usage: Usage::default(),
             activity: Activity::Idle,
             system: Vec::new(),
+            profile: Profile::agent(),
         }
     }
 }
@@ -301,7 +306,7 @@ impl Agent {
     /// Send the conversation as it stands and start streaming the reply.
     fn begin(&mut self) -> Result<(), String> {
         let request = Request {
-            profile: Profile::agent(),
+            profile: self.profile.clone(),
             system: self.system.clone(),
             tools: Agent::tools(),
             messages: self.conversation.clone(),
@@ -488,6 +493,24 @@ impl Agent {
     }
 
     /// For tests and for the statusline: how many turns are on the wire.
+    /// Point the agent at a provider and model.
+    ///
+    /// Takes effect on the next turn. The one in flight keeps the profile it
+    /// started with, because a conversation half-answered by one model and
+    /// half by another is not a conversation either of them could continue.
+    pub fn use_provider(&mut self, provider: proton_agent::Provider, model: &str) {
+        self.profile = Profile::for_provider(provider, model, false);
+    }
+
+    /// Which service is answering, for the pane to say so.
+    pub fn provider(&self) -> proton_agent::Provider {
+        self.profile.provider
+    }
+
+    pub fn model(&self) -> &str {
+        &self.profile.model
+    }
+
     pub fn turns(&self) -> usize {
         self.conversation
             .iter()

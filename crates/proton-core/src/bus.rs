@@ -705,6 +705,12 @@ pub enum Event {
         /// Served from cache. Surfaced because a silently invalidated prefix
         /// is a cost regression rather than an error, and nothing else shows it.
         cached_tokens: u64,
+        /// Which service answered, and on which model. Shown because the two
+        /// give different answers to the same question, and a transcript that
+        /// does not say which one produced it is a transcript you cannot
+        /// reason about a week later.
+        provider: String,
+        model: String,
     },
     /// The Visualizer pane.
     ///

@@ -12,6 +12,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 
 use crate::auth::{self, Auth, Source};
+use crate::provider::Provider;
 use crate::request::Request;
 use crate::sse::Events;
 use crate::stream::{Assembler, Delta, Fault};
@@ -108,9 +109,13 @@ impl Drop for Turn {
 /// Returns immediately. A missing credential fails here rather than on the
 /// worker, so the caller finds out before anything is drawn as in-flight.
 pub fn send(request: Request) -> Result<Turn, String> {
-    let found = auth::resolve()?;
-    let url = auth::base_url();
-    let body = request.body();
+    let provider = request.profile.provider;
+    let found = auth::resolve_for(provider)?;
+    let url = provider.url(&request.profile.model);
+    let body = match provider {
+        Provider::Claude => request.body(),
+        Provider::Gemini => crate::gemini::body(&request),
+    };
 
     let (tx, replies) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
@@ -122,7 +127,7 @@ pub fn send(request: Request) -> Result<Turn, String> {
             let _ = tx.send(Reply::Started {
                 source: found.source,
             });
-            let outcome = run(&url, &found.auth, &body, &tx, &worker_stop);
+            let outcome = run(provider, &url, &found.auth, &body, &tx, &worker_stop);
             let _ = tx.send(outcome);
         });
 
@@ -134,12 +139,36 @@ pub fn send(request: Request) -> Result<Turn, String> {
 }
 
 fn run(
+    provider: Provider,
     url: &str,
     auth: &Auth,
     body: &serde_json::Value,
     tx: &mpsc::Sender<Reply>,
     stop: &AtomicBool,
 ) -> Reply {
+    // Gemini wants none of Anthropic's headers — a version, a beta list and
+    // an `x-api-key` it does not recognise are at best ignored and at worst a
+    // 400 — so the two are built separately rather than one being the other
+    // with fields removed.
+    if provider == Provider::Gemini {
+        let Auth::Key(key) = auth else {
+            return Reply::Failed {
+                text: "Gemini takes an API key, not a bearer token".into(),
+            };
+        };
+        let call = ureq::post(url)
+            .header("x-goog-api-key", key)
+            .header("content-type", "application/json")
+            .header("accept", "text/event-stream");
+        return stream(
+            call,
+            body,
+            tx,
+            stop,
+            &mut Wire::Gemini(crate::gemini::Assembler::new()),
+        );
+    }
+
     let mut call = ureq::post(url)
         .header("anthropic-version", VERSION)
         .header("anthropic-beta", Request::betas())
@@ -159,6 +188,53 @@ fn run(
             ),
     };
 
+    stream(call, body, tx, stop, &mut Wire::Claude(Assembler::new()))
+}
+
+/// Whichever assembler this turn is using.
+///
+/// An enum rather than a trait object: there are two, both known here, and a
+/// `Box<dyn>` would buy nothing but an allocation and a vtable.
+enum Wire {
+    Claude(Assembler),
+    Gemini(crate::gemini::Assembler),
+}
+
+impl Wire {
+    fn push(&mut self, event: &crate::sse::Event) -> Result<Vec<Delta>, Fault> {
+        match self {
+            Wire::Claude(it) => it.push(event),
+            Wire::Gemini(it) => it.push(event),
+        }
+    }
+
+    fn finish(&mut self) -> Reply {
+        match self {
+            Wire::Claude(it) => Reply::Finished {
+                message: it.message(),
+                stop: it.stop().cloned(),
+                usage: it.usage(),
+            },
+            Wire::Gemini(it) => Reply::Finished {
+                message: it.message(),
+                stop: it.stop().cloned(),
+                usage: *it.usage(),
+            },
+        }
+    }
+}
+
+/// Send the request and turn the stream into replies.
+///
+/// Shared by both providers: once the headers are built, an SSE stream is an
+/// SSE stream and the only difference is which assembler reads it.
+fn stream(
+    call: ureq::RequestBuilder<ureq::typestate::WithBody>,
+    body: &serde_json::Value,
+    tx: &mpsc::Sender<Reply>,
+    stop: &AtomicBool,
+    wire: &mut Wire,
+) -> Reply {
     let response = match call.send_json(body) {
         Ok(response) => response,
         Err(ureq::Error::StatusCode(code)) => {
@@ -181,9 +257,7 @@ fn run(
         };
     }
 
-    let mut assembler = Assembler::new();
     let reader = BufReader::new(response.into_body().into_reader());
-
     for event in Events::new(reader) {
         if stop.load(Ordering::Relaxed) {
             return Reply::Cancelled;
@@ -196,7 +270,7 @@ fn run(
                 }
             }
         };
-        match assembler.push(&event) {
+        match wire.push(&event) {
             Ok(deltas) => {
                 for delta in deltas {
                     if tx.send(Reply::Delta(delta)).is_err() {
@@ -213,11 +287,7 @@ fn run(
         }
     }
 
-    Reply::Finished {
-        message: assembler.message(),
-        stop: assembler.stop().cloned(),
-        usage: assembler.usage(),
-    }
+    wire.finish()
 }
 
 /// Turn a status code into something a person can act on.

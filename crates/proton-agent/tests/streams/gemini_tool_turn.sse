@@ -1,0 +1,10 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Let me look at the file first.","thought":true}]}}],"usageMetadata":{"promptTokenCount":812,"candidatesTokenCount":9}}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"I'll check "}]}}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"the config."}]}}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read_file","args":{"path":"Cargo.toml"}}}]}}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"grep","args":{"pattern":"edition","glob":"*.toml"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":812,"candidatesTokenCount":47,"cachedContentTokenCount":640}}
+
