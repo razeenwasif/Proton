@@ -4198,6 +4198,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-library"
+version = "0.0.1"
+
+[[package]]
 name = "proton-lsp"
 version = "0.0.1"
 dependencies = [

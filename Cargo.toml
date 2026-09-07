@@ -7,6 +7,7 @@ members = [
     "crates/proton-data",
     "crates/proton-design",
     "crates/proton-index",
+    "crates/proton-library",
     "crates/proton-lsp",
     "crates/proton-plugin",
     "crates/proton-shell",
@@ -31,6 +32,7 @@ proton-dap = { path = "crates/proton-dap" }
 proton-data = { path = "crates/proton-data" }
 proton-design = { path = "crates/proton-design" }
 proton-index = { path = "crates/proton-index" }
+proton-library = { path = "crates/proton-library" }
 proton-lsp = { path = "crates/proton-lsp" }
 proton-plugin = { path = "crates/proton-plugin" }
 proton-syntax = { path = "crates/proton-syntax" }
