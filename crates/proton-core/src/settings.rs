@@ -82,6 +82,31 @@ impl Settings {
         &self.path
     }
 
+    /// The library roots this file names, resolved against `project`.
+    ///
+    /// Here rather than in the workspace because two programs read it now: the
+    /// editor, and the MCP server that offers the same library to whatever
+    /// else the user has a subscription to. Two copies of "what counts as a
+    /// root" would drift, and the thing they would drift about is which
+    /// directories a model may read.
+    ///
+    /// A leading `~/` is expanded and a relative path is taken against the
+    /// project, because those are the two ways somebody writes a path by hand
+    /// and neither should silently mean "the directory the process started
+    /// in".
+    pub fn library_roots(&self, project: &Path) -> Vec<PathBuf> {
+        self.get("library.roots")
+            .and_then(|value| value.as_array())
+            .map(|list| {
+                list.iter()
+                    .filter_map(|value| value.as_str())
+                    .filter(|text| !text.trim().is_empty())
+                    .map(|text| expand(text, project))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Everything set, as one object — what the front end draws the panels
     /// from. Defaults are *not* merged in: the difference between "chosen" and
     /// "left alone" is worth keeping, or a settings file fills up with every
@@ -176,6 +201,24 @@ impl Settings {
         }
         std::fs::write(&self.path, self.to_text())
             .map_err(|err| format!("{}: {err}", self.path.display()))
+    }
+}
+
+/// A path as a person writes one: `~/OnyxVault`, `../notes`, or absolute.
+fn expand(text: &str, project: &Path) -> PathBuf {
+    let text = text.trim();
+    if let Some(rest) = text.strip_prefix("~/").or_else(|| text.strip_prefix("~\\")) {
+        // `USERPROFILE` first on Windows, where `HOME` is set by MSYS2 to
+        // something that is not where anybody's documents are.
+        let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+        if let Some(home) = home {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    let path = Path::new(text);
+    match path.is_absolute() {
+        true => path.to_path_buf(),
+        false => project.join(path),
     }
 }
 

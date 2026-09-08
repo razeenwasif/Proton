@@ -1,0 +1,17 @@
+[package]
+name = "proton-mcp"
+description = "Proton's library, offered to any MCP client over stdio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "proton-mcp"
+path = "src/main.rs"
+
+[dependencies]
+proton-core = { workspace = true }
+proton-library = { workspace = true }
+serde_json = { workspace = true }

@@ -4401,6 +4401,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-mcp"
+version = "0.0.1"
+dependencies = [
+ "proton-core",
+ "proton-library",
+ "serde_json",
+]
+
+[[package]]
 name = "proton-plugin"
 version = "0.0.1"
 dependencies = [

@@ -3813,18 +3813,7 @@ impl Workspace {
     /// and neither should silently mean "the directory the process started
     /// in".
     fn follow_library_settings(&mut self) {
-        let roots: Vec<PathBuf> = self
-            .settings
-            .get("library.roots")
-            .and_then(|value| value.as_array())
-            .map(|list| {
-                list.iter()
-                    .filter_map(|value| value.as_str())
-                    .filter(|text| !text.trim().is_empty())
-                    .map(|text| self.expand(text))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let roots = self.settings.library_roots(self.pickers.root());
 
         // Where extracted PDF text is kept. Set before the roots, or the walk
         // the next line starts extracts everything again and throws it away.
@@ -3835,20 +3824,6 @@ impl Workspace {
         self.library
             .set_pdfs(self.settings.bool("library.pdfs", true));
         self.library.set_roots(roots);
-    }
-
-    /// A path as a person writes one: `~/OnyxVault`, `../notes`, or absolute.
-    fn expand(&self, text: &str) -> PathBuf {
-        let text = text.trim();
-        if let Some(rest) = text.strip_prefix("~/").or_else(|| text.strip_prefix("~\\")) {
-            // `USERPROFILE` first on Windows, where `HOME` is set by MSYS2 to
-            // something that is not where anybody's documents are.
-            let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
-            if let Some(home) = home {
-                return PathBuf::from(home).join(rest);
-            }
-        }
-        self.pickers.resolve(text)
     }
 
     /// Point the agent at whatever the settings name.
