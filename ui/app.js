@@ -477,6 +477,18 @@ $$(".seg, .builder-rail").forEach((group) => {
   );
 });
 
+// Design's left panel: two things that exist, and a rail that switches
+// between them. The generic handler above has already moved the `on` class;
+// this is what makes the click mean something.
+$$("[data-design-panel]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const want = button.dataset.designPanel;
+    $$("[data-design-side]").forEach((el) => {
+      el.hidden = el.dataset.designSide !== want;
+    });
+  });
+});
+
 $$(".tree").forEach((tree) => {
   $$(".row", tree).forEach((r) =>
     r.addEventListener("click", () => {

@@ -1,7 +1,7 @@
 # Proton — architecture
 
-The build document. **M0 through M4 are implemented and M5 is half-built**;
-M6 and M7 are a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
+The build document. **M0 through M7 are implemented**; Modeling, Game and
+Video are a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
 reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
 **what we build and in what order**, and is the one to argue with before writing
 code.
@@ -1507,8 +1507,45 @@ which is "open sat 17 in Codex" as it is actually reached.
 **M7 — Design mode.** Two-way binding between artboard and component source.
 The hardest of the seven, because the binding has to survive a human editing
 both sides.
-*Exit: editing a token in the inspector changes `theme.css`, and editing the
-component in Codex updates the artboard.*
+
+**Both documents are held as text and edited by splice.** `proton-design`
+owns two formats — a stylesheet's custom properties and a component's markup —
+and neither is ever re-printed from a model. A `Token` carries the span its
+value occupies and a `Layer` carries the span its element occupies, so a change
+replaces those bytes and moves nothing else. That is the load-bearing decision
+and it is the same one Data mode made about `.ipynb`: a palette editor that
+reformatted, or a layer inspector that re-emitted the tree, would turn every
+colour tweak and every rename into a whole-file diff — and a diff in which
+every line has moved is one nobody reviews. The markup tests use a fixture
+with single quotes, odd indentation and a comment in it, and assert the result
+is byte for byte the original apart from the change.
+
+**The markup parser is deliberately not a conforming one.** It handles what
+people write — nesting, void elements, self-closing syntax, comments,
+doctypes, raw-text elements, `>` inside quoted attributes — plus the tags that
+close each other without being told to. That last part is not pedantry: the
+browser applies those rules when it renders the artboard, so a tree without
+them would show a nesting the picture does not have and clicking a layer would
+outline the wrong element. Beyond that it does not guess; an unclosed `<div>`
+closes when its parent does, which leaves the tree wrong in the same shape the
+file is wrong. It is tested against this repo's own 92 KB `index.html`.
+
+**The artboard is a sandboxed frame, and that is a security boundary.** The
+source is somebody's file and `withGlobalTauri` puts the filesystem and the
+shell in the app's document, so rendering markup there with `innerHTML` would
+hand anything in it those keys — no malice required, an analytics snippet is
+enough. It renders in an iframe with `allow-scripts` and *not*
+`allow-same-origin`, so the origin stays opaque, and a CSP with a per-render
+nonce admits only the one script that reports clicks — the component's own
+scripts do not run, and `default-src 'none'` means no network. Messages coming
+back are checked against `event.source`, which cannot be forged, rather than
+against an origin that is the string `"null"`.
+
+*Exit: met.* `crates/proton-core/tests/theming.rs` sets a token through the
+inspector and reads it back off the disk; opens the component in Codex, types
+into it, saves, and finds the artboard holding the new markup; and edits a
+layer from the design side and finds the file changed and otherwise untouched.
+Clicking the picture selects the layer, which the milestone did not ask for.
 
 **Later — Modeling, Game, Video.** Each needs a renderer and each is a real
 project. Do not start one until M0–M7 are shipped and stable.

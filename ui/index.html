@@ -528,12 +528,14 @@
 
     <!-- ══ DESIGN ════════════════════════════════════════════════ -->
     <section class="workspace" data-ws="design" style="--col-l:246px; --col-r:268px; grid-template-columns: 66px var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <!-- Two, because two things exist. This rail had Style / Layout /
+           Inspect / Layers / Pagepilot, and four of the five lit up when
+           clicked and did nothing — the same claim-without-a-capability the
+           old fake layer tree was deleted for, sitting next to panels that
+           work. A button appears here when there is something behind it. -->
       <nav class="builder-rail side">
-        <button><svg class="i"><use href="#i-sliders"/></svg>Style</button>
-        <button><svg class="i"><use href="#i-grid"/></svg>Layout</button>
-        <button><svg class="i"><use href="#i-eye"/></svg>Inspect</button>
-        <button class="on"><svg class="i"><use href="#i-layers"/></svg>Layers</button>
-        <button><svg class="i"><use href="#i-spark"/></svg>Pagepilot</button>
+        <button class="on" data-design-panel="layers"><svg class="i"><use href="#i-layers"/></svg>Layers</button>
+        <button data-design-panel="style"><svg class="i"><use href="#i-sliders"/></svg>Style</button>
       </nav>
 
       <aside class="pane side">
@@ -547,11 +549,11 @@
              This one is read out of the file on the artboard: every row is an
              element that is really there, and clicking one goes to the line
              that wrote it. -->
-        <header>Layers <span class="grow"></span><span class="chip" data-layer-count></span></header>
-        <div class="scroll tree" data-layers></div>
+        <header data-design-side="layers">Layers <span class="grow"></span><span class="chip" data-layer-count></span></header>
+        <div class="scroll tree" data-design-side="layers" data-layers></div>
 
-        <header class="second">Palettes <span class="grow"></span><span class="chip" data-pal-count></span></header>
-        <div class="scroll tree" data-palettes></div>
+        <header data-design-side="style" hidden>Palettes <span class="grow"></span><span class="chip" data-pal-count></span></header>
+        <div class="scroll tree" data-design-side="style" data-palettes hidden></div>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>

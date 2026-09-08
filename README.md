@@ -6,9 +6,10 @@ A code editor that is also a chat client, a design tool, a 3D workspace, a game
 editor, a video editor and a data notebook — one window, seven modes, Neovim
 underneath all of them, and an agent that can act in any of them.
 
-**M0 through M6 are built.** The editor, Telescope and language servers, the
-agent, the Code Visualizer, the plugin host and Data mode all ship. M7 —
-Design mode's two-way binding — is the first one that is still a plan.
+**M0 through M7 are built.** The editor, Telescope and language servers, the
+agent, the Code Visualizer, the plugin host, Data mode and Design mode all
+ship. Modeling, Game and Video are the ones still to come; each needs a
+renderer and each is a real project.
 
 ```bash
 cargo run -p proton-shell      # the app
@@ -42,7 +43,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-term/` | The pseudo-terminal, and the screen it paints |
 | `crates/proton-plugin/` | The Wasmtime host, WIT interfaces and capability grants |
 | `crates/proton-trace/` | The Code Visualizer client |
-| `crates/proton-design/` | Theme tokens, for Design mode |
+| `crates/proton-design/` | Theme tokens and component markup, for Design mode |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
 | `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, four live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
@@ -119,11 +120,14 @@ and works on a train.
 
 ## Status
 
-**M0–M6 done; M7 next.** Real: buffers, splits, Telescope, tree-sitter
-highlighting, language servers, git gutters, the debugger, the terminal, the
-agent with tool use and per-hunk review, the Code Visualizer, the Wasm plugin
-host, Data mode with a live Jupyter kernel, and the library above. Not yet real:
-Design mode's two-way binding, and the Modeling, Game and Video modes, which are
+**M0–M7 done.** Real: buffers, splits, Telescope, tree-sitter highlighting,
+language servers, git gutters, the debugger, the terminal, the agent with tool
+use and per-hunk review, the Code Visualizer, the Wasm plugin host, Data mode
+with a live Jupyter kernel, the library above, and Design mode — a layer tree
+read out of your component, an artboard that renders it in a sandboxed frame,
+and edits that go both ways: a token or a layer changed here rewrites the file
+by splicing the bytes that one thing occupies, and a save in Codex comes back
+the other way. Not yet real: the Modeling, Game and Video modes, which are
 still hand-built screens behind a live statusline.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.
