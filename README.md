@@ -6,18 +6,21 @@ A code editor that is also a chat client, a design tool, a 3D workspace, a game
 editor, a video editor and a data notebook — one window, seven modes, Neovim
 underneath all of them, and an agent that can act in any of them.
 
-**M0 is built.** The window opens, the modal engine is real, and every keystroke
-round-trips through `proton-core`. Everything from M1 on is still a plan.
+**M0 through M6 are built.** The editor, Telescope and language servers, the
+agent, the Code Visualizer, the plugin host and Data mode all ship. M7 —
+Design mode's two-way binding — is the first one that is still a plan.
 
 ```bash
-cargo run -p proton-shell     # the app
-cargo test --workspace         # 86 tests, headless
-node ui/serve.mjs             # the front end alone → http://localhost:5178
+cargo run -p proton-shell      # the app
+cargo test --workspace         # 971 tests, headless
+cargo tauri build              # the installer
+node ui/serve.mjs              # the front end alone → http://localhost:5178
 ```
 
 Best at 1440px or wider. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
-`:` command line · `i` `v` `⎋` vim modes · `␣w` splits · `⌘,` settings. Bare digits are vim
-counts, not mode switches — that collision is why the mode chord is `⌃`.
+`␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
+`␣w` splits · `⌘,` settings. Bare digits are vim counts, not mode switches — that
+collision is why the mode chord is `⌃`.
 
 ---
 
@@ -28,7 +31,18 @@ counts, not mode switches — that collision is why the mode chord is `⌃`.
 | `crates/proton-core/` | The headless core — command/event bus, mode registry, modal input engine, editor |
 | `crates/proton-text/` | Rope buffers, the undo tree, motions and text objects |
 | `crates/proton-index/` | Telescope's index — file walking, fuzzy matching, grep |
+| `crates/proton-syntax/` | Tree-sitter parsing and viewport-scoped highlighting |
+| `crates/proton-lsp/` | The language-server client, and the supervision around it |
+| `crates/proton-agent/` | The model client — Claude and Gemini, streaming, tool use |
 | `crates/proton-library/` | Your own notes and PDFs — passages, BM25, and answers that cite the note and line or the paper and page |
+| `crates/proton-mcp/` | The library, served over MCP to any client you already pay for |
+| `crates/proton-data/` | Notebooks and the Jupyter kernel behind Data mode |
+| `crates/proton-vcs/` | The gutter, and what git considers changed |
+| `crates/proton-dap/` | The debug-adapter client |
+| `crates/proton-term/` | The pseudo-terminal, and the screen it paints |
+| `crates/proton-plugin/` | The Wasmtime host, WIT interfaces and capability grants |
+| `crates/proton-trace/` | The Code Visualizer client |
+| `crates/proton-design/` | Theme tokens, for Design mode |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
 | `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, four live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
@@ -67,16 +81,49 @@ symbols, artboards, scene objects, cells and traces.
 artboards included. That is what lets the agent edit them by writing a patch
 instead of driving a GUI, and what makes any of it reviewable.
 
-**The agent proposes, you apply.** It works in a shadow worktree and surfaces
-per-hunk diffs with Refer / Apply. Its scope is a chip you can point at, and it
-shows its tool calls with results and timings so its claims can be checked.
+**The agent proposes, you apply.** An edit it asks for is staged in memory and
+surfaced as a diff, hunk by hunk — nothing is written to disk until you accept
+it, so "I changed that file" is never something it can say truthfully before
+you have looked. It shows its tool calls with results and timings, and what it
+says about your notes carries a citation you can open.
+
+## Your own library
+
+The one piece that is not an editor feature. Point Proton at directories of your
+own writing — a vault, course notes, a papers folder — and it cuts them into
+passages, ranks them with BM25, and answers with a citation you can click:
+
+```
+[[01 - Systems/COMP2310 - The Memory Hierarchy.md § 4. Caching L124-143]]
+[[Computer Systems A Programmer's Perspective.pdf § Chapter 6 p. 701]]
+```
+
+Notes are cited by line and PDFs by page, because a page is the only place in a
+PDF a reader can be sent. `␣fl` searches it, the agent searches it, and it is
+checked for changes while the editor runs.
+
+Nothing is read until you list it in `.proton/settings.json`, and nothing outside
+a listed directory is ever read — no symlink is followed out of one. A library
+that could reach anywhere under your home directory is one that can put a medical
+record in a prompt by accident.
+
+**It also works outside Proton.** `proton-mcp` serves the same library over MCP,
+so the CLI you already have a subscription to can search and cite your notes:
+
+```bash
+claude mcp add proton -- <path>/proton-mcp.exe
+```
+
+Retrieval is BM25 over local files, so it needs no key, costs nothing per query,
+and works on a train.
 
 ## Status
 
-**M0.5.** Real: the window (Mica-backed on Windows 11), the command/event seam,
-the vertical mode rail, and the modal engine — counts,
-operators, doubled operators, registers, visual mode, the leader, the command
-line. Not yet real: buffers, language servers, model calls, renderers. The seven
-modes are still hand-built screens behind a live statusline.
+**M0–M6 done; M7 next.** Real: buffers, splits, Telescope, tree-sitter
+highlighting, language servers, git gutters, the debugger, the terminal, the
+agent with tool use and per-hunk review, the Code Visualizer, the Wasm plugin
+host, Data mode with a live Jupyter kernel, and the library above. Not yet real:
+Design mode's two-way binding, and the Modeling, Game and Video modes, which are
+still hand-built screens behind a live statusline.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.
