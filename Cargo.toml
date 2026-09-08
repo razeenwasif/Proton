@@ -35,6 +35,7 @@ proton-core = { path = "crates/proton-core" }
 proton-dap = { path = "crates/proton-dap" }
 proton-data = { path = "crates/proton-data" }
 proton-design = { path = "crates/proton-design" }
+proton-scene = { path = "crates/proton-scene" }
 proton-index = { path = "crates/proton-index" }
 proton-library = { path = "crates/proton-library" }
 proton-mcp = { path = "crates/proton-mcp" }

@@ -22,6 +22,7 @@ pub mod key;
 pub mod lsp;
 pub mod mention;
 pub mod mode;
+pub mod modeling;
 pub mod picker;
 pub mod plugins;
 pub mod review;

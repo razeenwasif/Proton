@@ -4333,6 +4333,7 @@ dependencies = [
  "proton-library",
  "proton-lsp",
  "proton-plugin",
+ "proton-scene",
  "proton-syntax",
  "proton-term",
  "proton-text",

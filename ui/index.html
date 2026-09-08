@@ -613,23 +613,20 @@
     <!-- ══ MODELING ══════════════════════════════════════════════ -->
     <section class="workspace" data-ws="modeling" style="--col-l:226px; --col-r:268px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side">
-        <header>Outliner</header>
-        <div class="scroll tree">
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-chev"/></svg></span><svg class="i ft-video"><use href="#i-film"/></svg> Scene</div>
-          <div class="row indent-1"><span class="ic"><svg class="i ft-light"><use href="#i-light"/></svg></span>Key Light</div>
-          <div class="row indent-1"><span class="ic"><svg class="i ft-scene"><use href="#i-camera"/></svg></span>Camera</div>
-          <div class="row sel indent-1"><span class="ic"><svg class="i ft-mesh"><use href="#i-mesh"/></svg></span>Satellite.001</div>
-          <div class="row indent-2"><span class="ic"><svg class="i"><use href="#i-sprite"/></svg></span>Mesh · 4.2k tris</div>
-          <div class="row indent-2"><span class="ic"><svg class="i ft-mesh"><use href="#i-material"/></svg></span>Mat · brushed-alu</div>
-          <div class="row indent-1"><span class="ic"><svg class="i ft-mesh"><use href="#i-mesh"/></svg></span>SolarArray</div>
-          <div class="row indent-1"><span class="ic"><svg class="i ft-mesh"><use href="#i-sphere"/></svg></span>OrbitPath</div>
-          <div class="group">Primitives</div>
-          <div class="row"><span class="ic"><svg class="i ft-mesh"><use href="#i-mesh"/></svg></span>Cube</div>
-          <div class="row"><span class="ic"><svg class="i ft-mesh"><use href="#i-sphere"/></svg></span>Sphere</div>
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-button"/></svg></span>Plane</div>
-          <div class="group">Assets</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>satellite.glb</div>
-          <div class="row"><span class="ic"><svg class="i ft-plain"><use href="#i-file"/></svg></span>alu.ktx2</div>
+        <!-- Slot::Layers, from Event::Scene. Every row is an object really in
+             `scene.proton.json`; clicking one selects it and the inspector on
+             the right edits it, which writes the file.
+
+             What was here listed Satellite.001, a Key Light, some primitives
+             and two asset files for a scene that did not exist — the same
+             claim-without-a-capability as Design's old layer tree, and deleted
+             for the same reason. -->
+        <header>Outliner <span class="grow"></span><span class="chip" data-scene-count></span></header>
+        <div class="scroll tree" data-outliner></div>
+        <div class="pane-foot">
+          <button class="btn" data-add-node="mesh" title="Add a mesh under the selection">+ Mesh</button>
+          <button class="btn" data-add-node="light" title="Add a light under the selection">+ Light</button>
+          <button class="btn" data-add-node="empty" title="Add an empty under the selection">+ Empty</button>
         </div>
       </aside>
 
@@ -693,14 +690,38 @@
       <aside class="pane">
         <div class="dock-tabs"><button class="dock-tab on">Object</button><button class="dock-tab">Modifiers</button><button class="dock-tab">Physics</button><button class="dock-tab">Agent</button></div>
         <div class="scroll">
-          <div class="sec-head">Transform</div>
-          <div class="prop-row"><span class="lbl">Position</span><span class="val">0.0</span><span class="val">1.4</span><span class="val">0.0</span></div>
-          <div class="prop-row"><span class="lbl">Rotation</span><span class="val">0°</span><span class="val">32°</span><span class="val">0°</span></div>
-          <div class="prop-row"><span class="lbl">Scale</span><span class="val">1.0</span><span class="val">1.0</span><span class="val">1.0</span></div>
-          <div class="sec-head">Modifier stack</div>
-          <div class="prop-row"><span class="lbl">Subdivision</span><span class="val">levels 2</span></div>
-          <div class="prop-row"><span class="lbl">Bevel</span><span class="val">0.02 m</span></div>
-          <div class="prop-row"><span class="lbl">Array</span><span class="val">×4 · solar</span></div>
+          <!-- The selected node, from Event::Scene. Typing here writes
+               `scene.proton.json` — there is no save, for the reason the theme
+               inspector has none: a scene with unsaved changes is a tree the
+               viewport disagrees with.
+
+               The modifier stack that sat below this listed a Subdivision, a
+               Bevel and an Array for an object that did not exist. It is gone
+               until there is a modifier to show. -->
+          <div data-node-empty class="empty">Nothing selected.</div>
+          <div data-node-form hidden>
+            <div class="sec-head">Object</div>
+            <label class="st-field">Name
+              <input type="text" data-node-name spellcheck="false">
+            </label>
+            <div class="sec-head">Transform</div>
+            <div class="prop-row"><span class="lbl">Position</span>
+              <input class="num" data-node-xyz="position" data-axis="0" inputmode="decimal">
+              <input class="num" data-node-xyz="position" data-axis="1" inputmode="decimal">
+              <input class="num" data-node-xyz="position" data-axis="2" inputmode="decimal">
+            </div>
+            <div class="prop-row"><span class="lbl">Rotation</span>
+              <input class="num" data-node-xyz="rotation" data-axis="0" inputmode="decimal">
+              <input class="num" data-node-xyz="rotation" data-axis="1" inputmode="decimal">
+              <input class="num" data-node-xyz="rotation" data-axis="2" inputmode="decimal">
+            </div>
+            <div class="prop-row"><span class="lbl">Scale</span>
+              <input class="num" data-node-xyz="scale" data-axis="0" inputmode="decimal">
+              <input class="num" data-node-xyz="scale" data-axis="1" inputmode="decimal">
+              <input class="num" data-node-xyz="scale" data-axis="2" inputmode="decimal">
+            </div>
+            <p class="st-hint" data-node-note></p>
+          </div>
           <div class="msg">
             <div class="who"><svg class="i" width="12" height="12" style="color:var(--accent-2)"><use href="#i-spark"/></svg> Proton</div>
             <p>“Give the solar array four panels on a 0.6 m pitch.”</p>

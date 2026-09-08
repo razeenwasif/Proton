@@ -1996,6 +1996,125 @@ function artboardDoc(source, isDocument, vars, pick, nonce) {
     : source.slice(0, at) + csp + style + source.slice(at) + picker;
 }
 
+/* ── Modeling's outliner ────────────────────────────────
+
+   Every row is an object really in `scene.proton.json`. Clicking one selects
+   it; the inspector edits it; editing writes the file. Nothing here is
+   invented, which is the difference between this and what it replaced. */
+
+/** Which glyph a kind gets. Unknown kinds get the generic one rather than
+    nothing, because a scene from a later version may hold a kind this build
+    has never heard of and an empty column reads as a broken row. */
+const NODE_ICON = {
+  mesh: "i-mesh",
+  light: "i-light",
+  camera: "i-camera",
+  empty: "i-sphere",
+};
+
+let lastScene = null;
+
+function renderOutliner(event) {
+  const box = $("[data-outliner]");
+  if (!box) return;
+  const count = $("[data-scene-count]");
+  const nodes = event.nodes ?? [];
+  if (count) count.textContent = nodes.length ? `${nodes.length}` : "";
+
+  if (!nodes.length) {
+    box.innerHTML = `<div class="empty">${escapeHtml(
+      event.problem || "No scene in this project.",
+    )}</div>`;
+    return;
+  }
+
+  box.innerHTML = nodes
+    .map((node, i) => {
+      const icon = NODE_ICON[node.kind] ?? "i-sphere";
+      // The count is worth showing because a collapsed branch is the next
+      // thing this panel will want, and because "3" beside a name answers
+      // "did my delete take the children with it".
+      const kids = node.children
+        ? `<span class="node-kids">${node.children}</span>`
+        : "";
+      return (
+        `<div class="row scene-node${i === event.selected ? " sel" : ""}" data-node="${i}"` +
+        ` style="padding-left:${8 + node.depth * 12}px"` +
+        ` title="${escapeHtml(node.kind)} · ${escapeHtml(node.id)}">` +
+        `<span class="ic"><svg class="i"><use href="#${icon}"/></svg></span>` +
+        `${escapeHtml(node.name)}<span class="grow"></span>${kids}</div>`
+      );
+    })
+    .join("");
+}
+
+/** The inspector for the selected node. */
+function renderNodeInspector(event) {
+  const form = $("[data-node-form]");
+  const nothing = $("[data-node-empty]");
+  if (!form || !nothing) return;
+
+  const node = event.nodes?.[event.selected];
+  form.hidden = !node;
+  nothing.hidden = !!node;
+  if (!node) return;
+
+  // Not while it is being typed in: replacing the value under the caret moves
+  // it to the end, on every event the core sends.
+  const put = (box, value) => {
+    if (box && document.activeElement !== box) box.value = value;
+  };
+  put($("[data-node-name]"), node.name);
+  for (const box of $$("[data-node-xyz]")) {
+    put(box, String(node[box.dataset.nodeXyz][Number(box.dataset.axis)]));
+  }
+  $("[data-node-note]").textContent = `${node.kind} · ${node.id}`;
+}
+
+document.addEventListener("click", (e) => {
+  const row = e.target.closest?.("[data-node]");
+  if (row) {
+    dispatch({ type: "selectNode", index: Number(row.dataset.node) });
+    return;
+  }
+  const add = e.target.closest?.("[data-add-node]");
+  if (add) {
+    const kind = add.dataset.addNode;
+    dispatch({
+      type: "addNode",
+      kind,
+      // Capitalised, because it is a name a person will read in a tree.
+      name: kind[0].toUpperCase() + kind.slice(1),
+    });
+  }
+});
+
+// Written on `change` rather than on every keystroke, for the reason the layer
+// inspector is: `input` would put the disk in the typing loop and fill the
+// undo history with one entry per letter.
+document.addEventListener("change", (e) => {
+  const index = lastScene?.selected;
+  if (index === undefined || index < 0 || index === null) return;
+
+  if (e.target.matches?.("[data-node-name]")) {
+    dispatch({ type: "renameNode", index, name: e.target.value });
+    return;
+  }
+  const box = e.target.closest?.("[data-node-xyz]");
+  if (!box) return;
+
+  const part = box.dataset.nodeXyz;
+  const to = [...$$(`[data-node-xyz="${part}"]`)].map((one) => Number(one.value));
+  // A box somebody typed a word into would otherwise send NaN, which JSON
+  // cannot hold and the core would have to guess about. Put back instead.
+  if (to.some((n) => !Number.isFinite(n))) {
+    renderNodeInspector(lastScene);
+    renderStatus(`${part} needs three numbers`, "warn");
+    return;
+  }
+  dispatch({ type: "setNodeTransform", index, part, to });
+});
+
 /* ── The layer tree ──────────────────────────────────────────────
 
    Every row is an element that is really in the file on the artboard, read
@@ -3524,6 +3643,12 @@ onEvent((event) => {
 
     case "council":
       renderCouncil(event);
+      break;
+
+    case "scene":
+      lastScene = event;
+      renderOutliner(event);
+      renderNodeInspector(event);
       break;
 
     case "artboard":

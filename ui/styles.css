@@ -991,6 +991,37 @@ kbd {
    purpose. */
 [hidden] { display: none !important; }
 
+/* Outliner rows. Indent comes from the node's depth, set inline, so this only
+   says how a row reads: the name plain, the child count tucked right.
+
+   `scene-node` and not `node`: `.node` is the shader graph's box, which is
+   `position: absolute`, so a row wearing that class stacked on top of every
+   other row at one point on the screen. Five objects drawn exactly on top of
+   each other look like one object. */
+.row.scene-node { gap: 7px; cursor: default; }
+.row.scene-node .node-kids {
+  color: var(--ink-4); font: 10.5px var(--mono);
+  padding: 0 5px; border-radius: 5px; background: rgba(0, 0, 0, .22);
+}
+
+/* A number box that lines up with the .val spans it replaced, so the transform
+   rows read as a grid whether or not they are editable. */
+.prop-row .num {
+  flex: 1; min-width: 0; padding: 4px 9px; border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2); box-shadow: var(--spec);
+  border: 1px solid transparent; color: var(--ink);
+  font: 11.5px var(--mono); text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.prop-row .num:focus { outline: none; border-color: var(--accent); }
+
+/* The add buttons under the outliner. */
+.pane-foot {
+  display: flex; gap: 6px; padding: 8px 10px;
+  border-top: 1px solid var(--edge);
+}
+.pane-foot .btn { flex: 1; font-size: 11px; padding: 5px 0; }
+
 .ab-frame {
   display: block; width: 100%; min-height: 420px; border: 0; border-radius: 12px;
   background: transparent; color-scheme: normal;

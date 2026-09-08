@@ -17,6 +17,7 @@ import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
 import type { LibrarySource } from "./LibrarySource";
 import type { ModeId } from "./ModeId";
+import type { Node } from "./Node";
 import type { NoticeLevel } from "./NoticeLevel";
 import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
@@ -254,7 +255,23 @@ layers: Array<Layer>,
  * when none is — an index nothing can equal, rather than an
  * `Option`, because every consumer of this is comparing.
  */
-selected: number, } | { "type": "theme", 
+selected: number, } | { "type": "scene", 
+/**
+ * Empty when none is open.
+ */
+path: string, 
+/**
+ * Every object, parents before children, with depth filled in.
+ */
+nodes: Array<Node>, 
+/**
+ * Which one is selected, or `usize::MAX` for none.
+ */
+selected: number, 
+/**
+ * Why there is no scene, when there is a reason worth showing.
+ */
+problem: string, } | { "type": "theme", 
 /**
  * Empty when none is open, which is how the panel knows to say so.
  */

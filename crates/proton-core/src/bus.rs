@@ -332,6 +332,41 @@ pub enum Command {
         name: String,
         value: String,
     },
+    /* ── scenes ────────────────────────────────────────────── */
+    /// Point Modeling at a scene. Answered with `Event::Scene`.
+    OpenScene {
+        path: String,
+    },
+    /// Pick a node — a click in the outliner.
+    SelectNode {
+        index: usize,
+    },
+    /// Rename the node at `index`.
+    RenameNode {
+        index: usize,
+        name: String,
+    },
+    /// Move, turn or resize the node at `index`.
+    SetNodeTransform {
+        index: usize,
+        part: proton_scene::Part,
+        to: [f64; 3],
+    },
+    /// Put a node under another. An empty `parent` moves it to the root.
+    ReparentNode {
+        index: usize,
+        parent: String,
+    },
+    /// Add a node under the selection.
+    AddNode {
+        kind: String,
+        name: String,
+    },
+    /// Remove the node at `index`, and everything under it.
+    RemoveNode {
+        index: usize,
+    },
+
     /// Open the line that wrote a layer, in Codex.
     ///
     /// The binding pointing the other way from the artboard: a layer is a
@@ -825,6 +860,18 @@ pub enum Event {
         /// when none is — an index nothing can equal, rather than an
         /// `Option`, because every consumer of this is comparing.
         selected: usize,
+    },
+    /// The scene Modeling mode is editing.
+    #[serde(rename_all = "camelCase")]
+    Scene {
+        /// Empty when none is open.
+        path: String,
+        /// Every object, parents before children, with depth filled in.
+        nodes: Vec<proton_scene::Node>,
+        /// Which one is selected, or `usize::MAX` for none.
+        selected: usize,
+        /// Why there is no scene, when there is a reason worth showing.
+        problem: String,
     },
     /// The theme Design mode is editing.
     #[serde(rename_all = "camelCase")]

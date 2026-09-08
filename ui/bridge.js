@@ -249,6 +249,35 @@ if (HAS_SHELL) {
       path: "style:nth-child(2)" },
   ];
 
+  // A scene for the outliner, so Modeling can be designed against a real
+  // tree. Written out rather than parsed, like every other fixture here; the
+  // real one is read from `scene.proton.json` by proton-scene.
+  const scene = {
+    path: "C:/proton/scene.proton.json",
+    problem: "",
+    selected: -1,
+    nodes: [
+      { id: "rig-1", name: "Satellite", kind: "empty", parent: "", depth: 0,
+        children: 3, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      { id: "body-1", name: "Body", kind: "mesh", parent: "rig-1", depth: 1,
+        children: 0, position: [0, 1.4, 0], rotation: [0, 32, 0], scale: [1, 1, 1] },
+      { id: "array-1", name: "SolarArray", kind: "mesh", parent: "rig-1", depth: 1,
+        children: 0, position: [1.8, 1.4, 0], rotation: [0, 0, 0], scale: [4, 1, 1] },
+      { id: "key-1", name: "Key Light", kind: "light", parent: "rig-1", depth: 1,
+        children: 0, position: [3, 4, 2], rotation: [-40, 25, 0], scale: [1, 1, 1] },
+      { id: "cam-1", name: "Camera", kind: "camera", parent: "", depth: 0,
+        children: 0, position: [6, 3, 6], rotation: [-12, 45, 0], scale: [1, 1, 1] },
+    ],
+  };
+
+  const sceneEvent = () => ({
+    type: "scene",
+    path: scene.path,
+    nodes: scene.nodes,
+    selected: scene.selected,
+    problem: scene.problem,
+  });
+
   const artboardEvent = () => ({
     type: "artboard",
     path: component.path,
@@ -429,6 +458,7 @@ if (HAS_SHELL) {
         notebookEvent(),
         themeEvent(),
         artboardEvent(),
+        sceneEvent(),
         settingsEvent(),
         chatsEvent(),
       ];
@@ -464,6 +494,20 @@ if (HAS_SHELL) {
       const hit = chats.conversations.find((c) => c.path === command.path);
       if (hit) hit.title = command.title;
       return [chatsEvent()];
+    }
+    if (command.type === "selectNode") {
+      scene.selected = command.index;
+      return [sceneEvent()];
+    }
+    if (command.type === "renameNode") {
+      const node = scene.nodes[command.index];
+      if (node) node.name = command.name;
+      return [sceneEvent()];
+    }
+    if (command.type === "setNodeTransform") {
+      const node = scene.nodes[command.index];
+      if (node) node[command.part] = command.to;
+      return [sceneEvent()];
     }
     if (command.type === "selectLayer") {
       component.selected = command.index;

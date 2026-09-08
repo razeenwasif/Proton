@@ -86,6 +86,8 @@ pub struct Workspace {
     /// them. Read from the settings so it survives a restart — somebody
     /// working through one subject for a week should not re-tick it daily.
     library_scope: proton_library::Scope,
+    /// The scene Modeling mode is editing.
+    modeling: crate::modeling::Modeling,
     /// The local model that turns a question into a vector, when the settings
     /// name one. `None` is lexical search, which is a complete answer.
     embedder: Option<proton_library::Embedder>,
@@ -487,6 +489,7 @@ impl Workspace {
                     self.notebook_event(),
                     self.theme_event(),
                     self.artboard_event(),
+                    self.scene_event(),
                     self.settings_event(),
                     self.library_event(),
                     self.council_event(),
@@ -600,6 +603,57 @@ impl Workspace {
             Command::SetLayerAttribute { index, name, value } => {
                 let done = self.design.set_layer_attribute(index, &name, &value);
                 self.after_layer_write(done)
+            }
+
+            /* ── scenes ────────────────────────────────────── */
+            Command::OpenScene { path } => {
+                let full = self.pickers.resolve(&path);
+                // The event goes out either way: "that file is not a scene"
+                // belongs in the outliner, where somebody is looking for the
+                // objects, and not only in a notice.
+                match self.modeling.open(&full) {
+                    Ok(()) => vec![self.scene_event()],
+                    Err(why) => vec![self.scene_event(), notice(why, NoticeLevel::Warn)],
+                }
+            }
+
+            Command::SelectNode { index } => match self.modeling.select(index) {
+                true => vec![self.scene_event()],
+                false => Vec::new(),
+            },
+
+            Command::RenameNode { index, name } => {
+                let done = self.node_at(index, |space, id| space.modeling.rename(&id, &name));
+                self.after_scene_write(done)
+            }
+
+            Command::SetNodeTransform { index, part, to } => {
+                let done = self.node_at(index, |space, id| {
+                    space.modeling.set_transform(&id, part, to)
+                });
+                self.after_scene_write(done)
+            }
+
+            Command::ReparentNode { index, parent } => {
+                let done = self.node_at(index, |space, id| space.modeling.reparent(&id, &parent));
+                self.after_scene_write(done)
+            }
+
+            Command::AddNode { kind, name } => {
+                // Under whatever is selected, which is what "add" means when
+                // something is highlighted. Nothing selected adds at the root.
+                let parent = self.modeling.selected_id().unwrap_or_default();
+                match self.modeling.add(&kind, &name, &parent) {
+                    Ok(_) => self.after_scene_write(Ok(true)),
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
+                }
+            }
+
+            Command::RemoveNode { index } => {
+                let done = self.node_at(index, |space, id| {
+                    space.modeling.remove(&id).map(|gone| gone > 0)
+                });
+                self.after_scene_write(done)
             }
 
             Command::SelectLayer { index } => match self.design.select_layer(index) {
@@ -1980,6 +2034,11 @@ impl Workspace {
                 // theme as text in Codex and saving it has to reach the
                 // inspector, or the palette on screen is the one the file had
                 // when Design mode was opened.
+                // A scene edited as text in Codex, or patched by the agent,
+                // has to reach the outliner.
+                if self.modeling.reload() {
+                    events.push(self.scene_event());
+                }
                 if self.design.reload() {
                     events.push(self.theme_event());
                     // *Editing the component in Codex updates the artboard* —
@@ -4452,6 +4511,56 @@ impl Workspace {
         }
     }
 
+    /// Run something against the node at an outliner row.
+    ///
+    /// By index because that is what a click gives, and by id inside because
+    /// that is what survives the tree being rebuilt underneath.
+    fn node_at(
+        &mut self,
+        index: usize,
+        change: impl FnOnce(&mut Workspace, String) -> Result<bool, String>,
+    ) -> Result<bool, String> {
+        let Some(id) = self
+            .modeling
+            .nodes()
+            .into_iter()
+            .nth(index)
+            .map(|one| one.id)
+        else {
+            return Err(format!("there is no node at row {index}"));
+        };
+        change(self, id)
+    }
+
+    /// What everything that writes the scene has to say afterwards.
+    fn after_scene_write(&mut self, done: Result<bool, String>) -> Vec<Event> {
+        match done {
+            Ok(false) => Vec::new(),
+            Ok(true) => {
+                // The file on disk moved, so the same things have to be told
+                // as when a token is written: the gutter, the tree, and the
+                // buffer if Codex has this file open.
+                let mut events = vec![self.scene_event(), self.repo_event()];
+                events.extend(self.every_view());
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    fn scene_event(&self) -> Event {
+        Event::Scene {
+            path: self
+                .modeling
+                .path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+            nodes: self.modeling.nodes(),
+            selected: self.modeling.selected(),
+            problem: self.modeling.problem().unwrap_or_default().to_string(),
+        }
+    }
+
     fn artboard_event(&self) -> Event {
         let component = self.design.component();
         Event::Artboard {
@@ -4687,6 +4796,18 @@ impl Workspace {
                 }
             }
             events.push(self.theme_event());
+        }
+        // Modeling goes looking on the same terms, once.
+        if mode == ModeId::Modeling && !self.modeling.is_open() {
+            if let Some(path) = crate::modeling::discover(self.pickers.root()) {
+                if self.modeling.open(&path).is_ok() {
+                    events.push(notice(
+                        format!("scene: {}", path.display()),
+                        NoticeLevel::Info,
+                    ));
+                }
+            }
+            events.push(self.scene_event());
         }
         // The artboard goes looking on the same terms, and separately: a
         // project can have a palette and no component, or a component and no
