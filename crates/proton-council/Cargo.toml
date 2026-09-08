@@ -1,0 +1,19 @@
+[package]
+name = "proton-council"
+description = "A debate between the models you already pay for, orchestrated through files."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "proton-council"
+path = "src/main.rs"
+
+[lib]
+name = "proton_council"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = { workspace = true }
