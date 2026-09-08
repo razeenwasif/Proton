@@ -104,9 +104,21 @@ pub fn resolve() -> Result<Found, String> {
             source: Source::AuthToken,
         });
     }
-    if let Some(token) = oauth_profile() {
+    if let Some(stored) = oauth_profile() {
+        // Said rather than sent. An expired token comes back as a 401 —
+        // "the credential was rejected, check ANTHROPIC_API_KEY" — which is
+        // the wrong instruction entirely: there is no key to check, the
+        // sign-in lapsed, and the fix is one command. The file says when it
+        // expires, so there is no reason to find out from the API.
+        if stored.expired() {
+            return Err(
+                "the Claude CLI's sign-in has expired — run `claude` and sign in again, \
+                 or set ANTHROPIC_API_KEY to use the API instead"
+                    .into(),
+            );
+        }
         return Ok(Found {
-            auth: Auth::Bearer(token),
+            auth: Auth::Bearer(stored.token),
             source: Source::OauthProfile,
         });
     }
@@ -125,32 +137,139 @@ fn profile_path() -> Option<PathBuf> {
 ///
 /// Best-effort on purpose: the file is the CLI's, its shape is not ours to
 /// depend on, and guessing wrong should degrade to "set an API key" rather
-/// than to a confusing failure. An expired token is not detected here — it
-/// comes back as a 401, which says so.
-fn oauth_profile() -> Option<String> {
+/// than to a confusing failure.
+fn oauth_profile() -> Option<Stored> {
     let text = std::fs::read_to_string(profile_path()?).ok()?;
     let json: serde_json::Value = serde_json::from_str(&text).ok()?;
 
-    // Look in the documented place first, then one level down for any of the
+    // The documented place first, then one level down for any of the
     // spellings the field has had.
-    let direct = json
+    if let Some(token) = json
         .pointer("/claudeAiOauth/accessToken")
-        .and_then(|v| v.as_str());
-    if let Some(token) = direct {
-        return Some(token.to_string());
+        .and_then(|v| v.as_str())
+    {
+        return Some(Stored {
+            token: token.to_string(),
+            expires_at: json
+                .pointer("/claudeAiOauth/expiresAt")
+                .and_then(serde_json::Value::as_u64),
+        });
     }
     json.as_object()?.values().find_map(|section| {
-        section
+        let token = section
             .get("accessToken")
             .or_else(|| section.get("access_token"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
+            .and_then(|v| v.as_str())?;
+        Some(Stored {
+            token: token.to_string(),
+            expires_at: section
+                .get("expiresAt")
+                .or_else(|| section.get("expires_at"))
+                .and_then(serde_json::Value::as_u64),
+        })
     })
+}
+
+/// A token found in the CLI's file, and when it stops working.
+struct Stored {
+    token: String,
+    /// Absent when the file does not say, which is treated as "still good" —
+    /// refusing to use a token because its expiry was not stated would break
+    /// a working setup over a missing field.
+    expires_at: Option<u64>,
+}
+
+/// How long before the stated expiry a token is treated as already gone.
+///
+/// A turn takes tens of seconds. Starting one against a token with four
+/// seconds left produces a 401 halfway through an answer, which is a worse
+/// failure than not starting: the partial reply stays on screen and nothing
+/// says why it stopped.
+const MARGIN: u64 = 120;
+
+impl Stored {
+    fn expired(&self) -> bool {
+        let Some(at) = self.expires_at else {
+            return false;
+        };
+        // Milliseconds in the file this was written for, but the shape is the
+        // CLI's rather than ours — a plain seconds value would otherwise read
+        // as 1970 and every token would look expired.
+        let at = match at > 100_000_000_000 {
+            true => at / 1000,
+            false => at,
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        now + MARGIN >= at
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn at(offset: i64) -> Stored {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        Stored {
+            token: "t".into(),
+            expires_at: Some(((now + offset) * 1000) as u64),
+        }
+    }
+
+    #[test]
+    fn an_expired_sign_in_is_known_before_the_api_says_so() {
+        // The failure this replaces: a lapsed session came back as a 401,
+        // which Proton reported as "the credential was rejected — check
+        // ANTHROPIC_API_KEY". There is no key to check. The file says when it
+        // expires, so there is no reason to ask the API.
+        assert!(at(-60).expired());
+        assert!(!at(3600).expired());
+    }
+
+    #[test]
+    fn a_token_about_to_expire_counts_as_expired() {
+        // A turn takes tens of seconds. Starting one with four seconds left
+        // produces a 401 halfway through an answer — the partial reply stays
+        // on screen and nothing says why it stopped.
+        assert!(
+            at(30).expired(),
+            "it should not start a turn it cannot finish"
+        );
+        assert!(!at(600).expired());
+    }
+
+    #[test]
+    fn seconds_are_read_as_seconds_and_not_as_1970() {
+        // The file this was written for stores milliseconds, but the shape is
+        // the CLI's rather than ours. Reading a plain seconds value as
+        // milliseconds would put every expiry in 1970 and refuse every token.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let seconds = Stored {
+            token: "t".into(),
+            expires_at: Some(now + 3600),
+        };
+        assert!(!seconds.expired());
+    }
+
+    #[test]
+    fn a_file_that_does_not_say_when_is_treated_as_still_good() {
+        // Refusing to use a token because its expiry was not stated would
+        // break a working setup over a missing field.
+        let quiet = Stored {
+            token: "t".into(),
+            expires_at: None,
+        };
+        assert!(!quiet.expired());
+    }
 
     #[test]
     fn a_credential_never_prints_itself() {
