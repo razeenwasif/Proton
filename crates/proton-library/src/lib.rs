@@ -32,12 +32,14 @@
 
 pub mod chunk;
 pub mod pdf;
+pub mod scope;
 pub mod score;
 pub mod shelf;
 
 use std::path::{Path, PathBuf};
 
 pub use chunk::Passage;
+pub use scope::{Scope, Source};
 pub use shelf::Shelf;
 
 /// One result: a passage, and why it was chosen.
@@ -58,9 +60,13 @@ pub struct Library {
     /// then and would have to be looked up again on the way out.
     cites: Vec<String>,
     index: score::Bm25,
-    /// How many distinct documents are in here. Counted as they arrive; see
-    /// [`documents`](Self::documents).
-    documents: usize,
+    /// Every document read, by the path a citation names it with. Kept once
+    /// rather than per passage: there are twenty-eight thousand passages and
+    /// thirteen hundred documents, and both the count and the scope want the
+    /// document rather than the passage.
+    docs: Vec<String>,
+    /// Which document each passage came from, as an index into `docs`.
+    doc_of: Vec<usize>,
 }
 
 impl Library {
@@ -87,7 +93,41 @@ impl Library {
     /// passages and is not at twenty-eight thousand — the panel asks for this
     /// on every tick of a walk that runs for minutes.
     pub fn documents(&self) -> usize {
-        self.documents
+        self.docs.len()
+    }
+
+    /// The folders a search can be narrowed to, with how much is in each.
+    ///
+    /// Grouped at the first segment, which on a real vault is the subject —
+    /// twenty-three folders in one root and nine in the other, which is a list
+    /// somebody can read. Deeper would be a file tree, and a file tree of
+    /// thirteen hundred documents is not something anybody ticks through. A
+    /// document sitting loose at the top of a root is its own source, having
+    /// no folder to belong to.
+    pub fn sources(&self) -> Vec<Source> {
+        let mut documents: std::collections::HashMap<&str, usize> = Default::default();
+        let mut passages: std::collections::HashMap<&str, usize> = Default::default();
+        for doc in &self.docs {
+            *documents.entry(Self::head(doc)).or_default() += 1;
+        }
+        for doc in &self.doc_of {
+            *passages.entry(Self::head(&self.docs[*doc])).or_default() += 1;
+        }
+
+        let mut out: Vec<Source> = documents
+            .into_iter()
+            .map(|(path, documents)| Source {
+                label: path.rsplit('/').next().unwrap_or(path).to_string(),
+                documents,
+                passages: passages.get(path).copied().unwrap_or_default(),
+                path: path.to_string(),
+            })
+            .collect();
+        // By name, so the panel does not reshuffle between walks — and the
+        // vault's own numbering (`00 - `, `01 - `) then does the ordering it
+        // was written to do.
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        out
     }
 
     /// Note a root, so citations can be written relative to it.
@@ -115,11 +155,18 @@ impl Library {
     fn take(&mut self, path: &Path, passages: Vec<Passage>) {
         let root = self.root_for(path).to_path_buf();
         // A document that produced no passages — a note with nothing readable
-        // in it — is not one that was read, which is what keeps this the same
-        // number the sort-and-dedup used to give.
-        if !passages.is_empty() {
-            self.documents += 1;
+        // in it — is not one that was read.
+        if passages.is_empty() {
+            return;
         }
+        let doc = self.docs.len();
+        self.docs.push(
+            path.strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/"),
+        );
+
         for passage in passages {
             self.index.add(&passage.text, &passage.title);
             let cite = passage.cite(&root);
@@ -128,17 +175,36 @@ impl Library {
             // root a document came from is known now and would have to be
             // looked up again later.
             self.cites.push(cite);
+            self.doc_of.push(doc);
         }
     }
 
     /// The best passages for a query, most relevant first.
     pub fn search(&self, query: &str, limit: usize) -> Vec<Hit> {
+        self.search_in(query, limit, &Scope::everything())
+    }
+
+    /// The best passages a scope admits.
+    ///
+    /// The whole library is scored and the scope applied after, never before.
+    /// BM25 weighs a term by how rare it is, and rarity is a property of the
+    /// corpus — re-deriving it per subset would make a passage's score depend
+    /// on what else happened to be selected, so the same question would rank
+    /// the same passage differently on different days. See [`crate::scope`].
+    pub fn search_in(&self, query: &str, limit: usize, scope: &Scope) -> Vec<Hit> {
         let mut scored: Vec<(usize, f32)> = self
             .index
             .scores(query)
             .into_iter()
             .enumerate()
             .filter(|(_, s)| *s > 0.0)
+            .filter(|(i, _)| {
+                scope.is_everything()
+                    || self
+                        .doc_of
+                        .get(*i)
+                        .is_some_and(|doc| scope.admits(&self.docs[*doc]))
+            })
             .collect();
 
         // Ties broken by position so the same query gives the same answer
@@ -154,6 +220,12 @@ impl Library {
                 cite: self.cites[i].clone(),
             })
             .collect()
+    }
+
+    /// The first segment of a path — the subject folder, or the file itself
+    /// when it sits loose at the top of a root.
+    fn head(path: &str) -> &str {
+        path.split_once('/').map(|(head, _)| head).unwrap_or(path)
     }
 
     /// Which root a path came from, for writing its citation.

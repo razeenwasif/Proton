@@ -275,6 +275,16 @@ impl Shelf {
         self.library.search(query, limit)
     }
 
+    /// The best passages a scope admits.
+    pub fn search_in(&self, query: &str, limit: usize, scope: &crate::Scope) -> Vec<Hit> {
+        self.library.search_in(query, limit, scope)
+    }
+
+    /// The folders a search can be narrowed to, with how much is in each.
+    pub fn sources(&self) -> Vec<crate::Source> {
+        self.library.sources()
+    }
+
     /// Turn the path out of a citation back into a file on disk.
     ///
     /// A citation is written relative to the root it came from, because that
@@ -730,6 +740,155 @@ mod tests {
 
         let (done, total) = shelf.progress();
         assert_eq!((done, total), (5, 5), "{shelf:?}");
+    }
+
+    #[test]
+    fn a_search_can_be_narrowed_to_one_subject() {
+        // The whole point: a real library spans subjects, and BM25 knows which
+        // words are rare rather than which field they belong to.
+        let dir = root("scope");
+        write(
+            &dir,
+            "hpc/Roofline.md",
+            "# Roofline
+convergence of the two ceilings
+",
+        );
+        write(
+            &dir,
+            "ml/Training.md",
+            "# Training
+convergence of the loss curve
+",
+        );
+
+        let mut shelf = Shelf::new();
+        shelf.set_roots(vec![dir.clone()]);
+        settle(&mut shelf);
+
+        assert_eq!(shelf.search("convergence", 5).len(), 2);
+
+        let only = shelf.search_in("convergence", 5, &crate::Scope::of(["ml"]));
+        assert_eq!(only.len(), 1, "{only:#?}");
+        assert!(only[0].cite.starts_with("ml/Training.md"), "{only:#?}");
+    }
+
+    #[test]
+    fn a_scoped_passage_keeps_the_score_it_had_unscoped() {
+        // Scoring happens over the whole corpus and the scope is applied
+        // after. Re-deriving the weights per subset would make a passage's
+        // score depend on what else was selected, so the same question would
+        // rank the same passage differently on different days.
+        let dir = root("stable-score");
+        write(
+            &dir,
+            "a/One.md",
+            "# One
+gradient descent and convergence
+",
+        );
+        write(
+            &dir,
+            "b/Two.md",
+            "# Two
+gradient boosting
+",
+        );
+        write(
+            &dir,
+            "b/Three.md",
+            "# Three
+unrelated prose about tuesday
+",
+        );
+
+        let mut shelf = Shelf::new();
+        shelf.set_roots(vec![dir.clone()]);
+        settle(&mut shelf);
+
+        let wide = shelf.search("gradient descent", 5);
+        let narrow = shelf.search_in("gradient descent", 5, &crate::Scope::of(["a"]));
+        let same = wide
+            .iter()
+            .find(|h| h.cite.starts_with("a/One.md"))
+            .unwrap();
+        assert_eq!(
+            narrow[0].score, same.score,
+            "the score moved with the scope"
+        );
+    }
+
+    #[test]
+    fn the_sources_are_the_subjects_with_their_sizes() {
+        let dir = root("sources");
+        write(
+            &dir,
+            "00 - HPC/Roofline.md",
+            "# Roofline
+prose
+",
+        );
+        write(
+            &dir,
+            "00 - HPC/Memory.md",
+            "# Memory
+prose
+",
+        );
+        write(
+            &dir,
+            "02 - Data Science/Bayes.md",
+            "# Bayes
+prose
+",
+        );
+        write(
+            &dir,
+            "Loose.md",
+            "# Loose
+prose at the top of the root
+",
+        );
+
+        let mut shelf = Shelf::new();
+        shelf.set_roots(vec![dir.clone()]);
+        settle(&mut shelf);
+
+        let sources = shelf.sources();
+        let named: Vec<(&str, usize)> = sources
+            .iter()
+            .map(|s| (s.path.as_str(), s.documents))
+            .collect();
+        // Sorted by path, so the vault's own numbering does the ordering, and
+        // a loose document is its own source since it has no folder.
+        assert_eq!(
+            named,
+            [("00 - HPC", 2), ("02 - Data Science", 1), ("Loose.md", 1)],
+            "{sources:#?}"
+        );
+        assert!(sources[0].passages >= 2);
+        assert_eq!(sources[0].label, "00 - HPC");
+    }
+
+    #[test]
+    fn a_scope_naming_nothing_that_exists_finds_nothing() {
+        // Rather than silently falling back to everything, which would be an
+        // answer from sources nobody selected.
+        let dir = root("empty-scope");
+        write(
+            &dir,
+            "a/One.md",
+            "# One
+prose about gradients
+",
+        );
+        let mut shelf = Shelf::new();
+        shelf.set_roots(vec![dir.clone()]);
+        settle(&mut shelf);
+
+        assert!(shelf
+            .search_in("gradients", 5, &crate::Scope::of(["nowhere"]))
+            .is_empty());
     }
 
     #[test]

@@ -176,6 +176,7 @@ fn handle(call: &Call, shelf: &mut proton_library::Shelf) -> Option<Value> {
                     rpc::result(&id, rpc::tool_output(text, failed))
                 }
                 "library_status" => rpc::result(&id, rpc::tool_output(status(shelf), false)),
+                "library_sources" => rpc::result(&id, rpc::tool_output(sources(shelf), false)),
                 other => rpc::failure(&id, rpc::INVALID_PARAMS, &format!("no tool named {other}")),
             }
         }
@@ -207,10 +208,20 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Terms to look for." },
-                    "limit": { "type": "integer", "description": "Defaults to 6." }
+                    "limit": { "type": "integer", "description": "Defaults to 6." },
+                    "sources": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Narrow the search to these folders or documents, named                                         exactly as library_sources lists them. Use it when the                                         question belongs to one subject: the library spans                                         several, matching is by word rather than by topic, and                                         the same term means different things in different                                         fields. Omit to search everything."
+                    }
                 },
                 "required": ["query"]
             }
+        },
+        {
+            "name": "library_sources",
+            "description": "The folders the library is made of, with how many documents and                             passages are in each. Call this first when a question clearly                             belongs to one subject, then pass the folder to search_library as                             `sources` — it is how you ask a question of one field rather than                             of everything the user has ever written down.",
+            "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "library_status",
@@ -267,12 +278,31 @@ fn search(shelf: &mut proton_library::Shelf, args: &Value) -> (String, bool) {
         .unwrap_or(6)
         .clamp(1, 25);
 
-    let hits = shelf.search(query, limit);
+    let scope = proton_library::Scope::of(
+        args.get("sources")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    );
+    let hits = shelf.search_in(query, limit, &scope);
     if hits.is_empty() {
         return (
             format!(
-                "nothing in the library about {query:?} ({} passages searched){partial}",
-                shelf.len()
+                "nothing in the library about {query:?}{}{partial}",
+                match scope.is_everything() {
+                    true => format!(" ({} passages searched)", shelf.len()),
+                    // Said, because the likeliest reason an answer is empty is
+                    // that the question was put to the wrong shelf.
+                    false => format!(
+                        " within {} — try again without `sources` to search everything",
+                        scope.prefixes().join(", ")
+                    ),
+                }
             ),
             false,
         );
@@ -318,6 +348,36 @@ fn status(shelf: &mut proton_library::Shelf) -> String {
             true => String::new(),
             false => " (still reading)".into(),
         },
+    )
+}
+
+fn sources(shelf: &mut proton_library::Shelf) -> String {
+    if ready(shelf) == Ready::None {
+        return "the library is still being read — ask again in a moment".into();
+    }
+    let sources = shelf.sources();
+    if sources.is_empty() {
+        return "the library is empty".into();
+    }
+    let rows = sources
+        .iter()
+        .map(|s| {
+            format!(
+                "  {}  ({} document{}, {} passages)",
+                s.path,
+                s.documents,
+                if s.documents == 1 { "" } else { "s" },
+                s.passages
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    format!(
+        "pass any of these to search_library as `sources`:
+{rows}"
     )
 }
 
@@ -383,7 +443,14 @@ mod tests {
         let out = handle(&call("tools/list", json!({})), &mut shelf()).unwrap();
         let tools = out["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["search_library", "library_status"]);
+        assert_eq!(
+            names,
+            ["search_library", "library_sources", "library_status"]
+        );
+        // The one that makes narrowing usable: the model cannot pass a folder
+        // it has no way to learn the name of.
+        let search = &tools[0];
+        assert!(search["inputSchema"]["properties"]["sources"].is_object());
         for tool in tools {
             assert_eq!(tool["inputSchema"]["type"], json!("object"));
             // The description is the only thing the model has to decide
@@ -441,6 +508,49 @@ mod tests {
         .unwrap();
         assert!(out.get("error").is_none(), "{out}");
         assert_eq!(out["result"]["isError"], json!(true));
+    }
+
+    #[test]
+    fn a_scope_that_matches_nothing_says_how_to_widen_it() {
+        // The likeliest reason a scoped answer is empty is that the question
+        // was put to the wrong shelf, and the model has to be told it can ask
+        // again rather than concluding the user has written nothing.
+        let dir = std::env::temp_dir().join(format!(
+            "proton-mcp-scope-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("ml")).unwrap();
+        std::fs::write(
+            dir.join("ml/One.md"),
+            "# One
+gradients and descent
+",
+        )
+        .unwrap();
+
+        let mut shelf = proton_library::Shelf::new();
+        shelf.set_roots(vec![dir]);
+        while !shelf.is_built() {
+            shelf.poll();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let out = handle(
+            &call(
+                "tools/call",
+                json!({
+                    "name": "search_library",
+                    "arguments": { "query": "gradients", "sources": ["physics"] }
+                }),
+            ),
+            &mut shelf,
+        )
+        .unwrap();
+        let text = out["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("within physics"), "{text}");
+        assert!(text.contains("without `sources`"), "{text}");
     }
 
     #[test]
