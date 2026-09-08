@@ -387,6 +387,13 @@ pub enum Command {
         from: String,
         to: String,
     },
+    /// Move a wire from one input to another. One gesture, one line.
+    #[serde(rename_all = "camelCase")]
+    RewirePort {
+        material: String,
+        from_input: String,
+        to_input: String,
+    },
     /// Remove whatever feeds an input.
     DisconnectPort {
         material: String,

@@ -139,6 +139,10 @@ impl Modeling {
         self.write(|scene| scene.connect(material, from, to))
     }
 
+    pub fn rewire(&mut self, material: &str, from: &str, to: &str) -> Result<bool, String> {
+        self.write(|scene| scene.rewire(material, from, to))
+    }
+
     pub fn disconnect(&mut self, material: &str, to: &str) -> Result<bool, String> {
         self.write(|scene| scene.disconnect(material, to))
     }

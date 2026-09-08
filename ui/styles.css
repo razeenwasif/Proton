@@ -1022,6 +1022,13 @@ canvas[data-viewport]:active { cursor: grabbing; }
 .node .sock {
   width: 9px; height: 9px; border-radius: 50%;
   background: var(--raise-2, #2a2f42); border: 1px solid var(--edge-hi);
+  cursor: crosshair;
+}
+/* The socket a drop would land on. Named while the wire is still in flight,
+   because a nine-pixel target needs to say "here" before the button comes up. */
+.node .sock.hot {
+  background: var(--accent); border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* A number in a node, editable in place. */

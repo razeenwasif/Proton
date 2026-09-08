@@ -2202,6 +2202,122 @@ document.addEventListener("change", (e) => {
   });
 });
 
+/* Dragging a wire between sockets.
+ *
+ * A wire runs from an output to an input, and the gesture works from either
+ * end because that is what every node editor does and nobody remembers which
+ * way round they are supposed to start.
+ *
+ * Dragging *out* of an input that already has a wire picks that wire up rather
+ * than starting a second one: an input takes one wire, so beginning a new one
+ * there would only ever end in replacing what is already attached, and picking
+ * it up lets the same gesture move it somewhere else or drop it in empty space
+ * to remove it. */
+
+/** The socket nearest a point, within reach, or null.
+ *
+ * By nearest-within-radius rather than by what is exactly under the pointer: a
+ * socket is nine pixels across and a wire is a gesture people make quickly.
+ * `elementFromPoint` alone would miss by two pixels and do nothing, which
+ * reads as the feature being broken rather than as a near miss. */
+function socketNear(x, y, box) {
+  let best = null;
+  let bestD = 18;
+  for (const el of $$("[data-sock]", box)) {
+    const r = el.getBoundingClientRect();
+    const d = Math.hypot(r.left + r.width / 2 - x, r.top + r.height / 2 - y);
+    if (d < bestD) {
+      bestD = d;
+      best = el;
+    }
+  }
+  return best;
+}
+
+(() => {
+  /** The drag in progress: which output it comes from, and — when a wire was
+      picked up — which input it used to feed. */
+  let wiring = null;
+
+  const box = () => $("[data-graph]");
+  const wires = () => $("[data-graph-wires]");
+
+  document.addEventListener("pointerdown", (e) => {
+    const sock = e.target.closest?.("[data-sock]");
+    if (!sock) return;
+    const material = materialFor(lastScene ?? {});
+    if (!material) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const port = sock.dataset.sock;
+    if (sock.classList.contains("out")) {
+      wiring = { material, from: port, was: null };
+      return;
+    }
+    // An input. If something feeds it, pick that wire up; otherwise there is
+    // nothing here to drag.
+    const existing = material.links.find((l) => l.to === port);
+    if (!existing) return;
+    wiring = { material, from: existing.from, was: port };
+  });
+
+  document.addEventListener("pointermove", (e) => {
+    if (!wiring) return;
+    const frame = box().getBoundingClientRect();
+    const start = $(`[data-sock="${CSS.escape(wiring.from)}"]`, box());
+    if (!start) return;
+    const r = start.getBoundingClientRect();
+    const a = [r.left + r.width / 2 - frame.left, r.top + r.height / 2 - frame.top];
+    const b = [e.clientX - frame.left, e.clientY - frame.top];
+
+    // The socket the drop would land on, marked so the target is obvious
+    // before the button comes up.
+    const over = socketNear(e.clientX, e.clientY, box());
+    for (const el of $$("[data-sock]", box())) el.classList.toggle("hot", el === over);
+
+    const bend = Math.max(30, Math.abs(b[0] - a[0]) * 0.5);
+    // Drawn on top of the settled wires, dashed, so it reads as a thing in
+    // flight rather than as a wire that already exists.
+    wires().insertAdjacentHTML(
+      "beforeend",
+      `<path data-ghost d="M${a[0]} ${a[1]} C ${a[0] + bend} ${a[1]}, ${b[0] - bend} ${b[1]}, ${b[0]} ${b[1]}"` +
+        ` stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="4 3" fill="none"/>`,
+    );
+    // One ghost, not one per move.
+    for (const old of $$("[data-ghost]", wires()).slice(0, -1)) old.remove();
+  });
+
+  document.addEventListener("pointerup", (e) => {
+    if (!wiring) return;
+    const { material, from, was } = wiring;
+    wiring = null;
+    for (const el of $$("[data-sock]", box())) el.classList.remove("hot");
+    for (const ghost of $$("[data-ghost]", wires())) ghost.remove();
+
+    const over = socketNear(e.clientX, e.clientY, box());
+    // Dropped on nothing. A wire that was picked up is let go — that is how
+    // one is removed — and a wire that was only ever being drawn is abandoned.
+    if (!over || !over.classList.contains("in")) {
+      if (was) dispatch({ type: "disconnectPort", material: material.id, to: was });
+      return;
+    }
+    const to = over.dataset.sock;
+    if (to === was) {
+      // Put back exactly where it came from: nothing happened.
+      return;
+    }
+    // A wire that was picked up *moves*. Sending a connect on its own would
+    // leave the old one attached and make one gesture into two wires — which
+    // is what this did until somebody dragged one and counted.
+    if (was) {
+      dispatch({ type: "rewirePort", material: material.id, fromInput: was, toInput: to });
+      return;
+    }
+    dispatch({ type: "connectPorts", material: material.id, from, to });
+  });
+})();
+
 /* Dragging a box. The position is written to the file when the drag ends, not
    while it moves — a write per pointermove would be a hundred saves for one
    nudge, and a hundred entries in the undo history. */

@@ -545,6 +545,49 @@ if (HAS_SHELL) {
       if (node) node.at = command.at;
       return [sceneEvent()];
     }
+    if (command.type === "connectPorts") {
+      const m = materials.find((one) => one.id === command.material);
+      if (m) {
+        // The same two rules the real one enforces, so the preview refuses
+        // what the core would refuse rather than showing a wire that will not
+        // survive a reload.
+        const node = (port) => port.split(":")[0];
+        const reaches = (from, to) => {
+          const seen = new Set();
+          const stack = [from];
+          while (stack.length) {
+            const at = stack.pop();
+            if (at === to) return true;
+            if (seen.has(at)) continue;
+            seen.add(at);
+            for (const l of m.links) {
+              if (node(l.from) === at) stack.push(node(l.to));
+            }
+          }
+          return false;
+        };
+        if (node(command.from) === node(command.to)) return [];
+        if (reaches(node(command.to), node(command.from))) return [];
+        const existing = m.links.find((l) => l.to === command.to);
+        if (existing) existing.from = command.from;
+        else m.links.push({ from: command.from, to: command.to });
+      }
+      return [sceneEvent()];
+    }
+    if (command.type === "rewirePort") {
+      const m = materials.find((one) => one.id === command.material);
+      const moving = m?.links.find((l) => l.to === command.fromInput);
+      if (m && moving) {
+        m.links = m.links.filter((l) => l.to !== command.toInput);
+        moving.to = command.toInput;
+      }
+      return [sceneEvent()];
+    }
+    if (command.type === "disconnectPort") {
+      const m = materials.find((one) => one.id === command.material);
+      if (m) m.links = m.links.filter((l) => l.to !== command.to);
+      return [sceneEvent()];
+    }
     if (command.type === "setNodeTransform") {
       const node = scene.nodes[command.index];
       if (node) node[command.part] = command.to;

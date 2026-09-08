@@ -676,6 +676,15 @@ impl Workspace {
                 self.after_scene_write(done)
             }
 
+            Command::RewirePort {
+                material,
+                from_input,
+                to_input,
+            } => {
+                let done = self.modeling.rewire(&material, &from_input, &to_input);
+                self.after_scene_write(done)
+            }
+
             Command::DisconnectPort { material, to } => {
                 let done = self.modeling.disconnect(&material, &to);
                 self.after_scene_write(done)

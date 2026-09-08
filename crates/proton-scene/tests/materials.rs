@@ -302,3 +302,72 @@ fn a_scene_with_no_materials_is_not_an_error() {
     let bare = r#"{"format":"proton.scene","version":1,"objects":[]}"#;
     assert!(Scene::parse(bare).unwrap().materials().is_empty());
 }
+
+#[test]
+fn moving_a_wire_is_one_line_and_leaves_one_wire() {
+    // Picking a wire up and dropping it on another input is one gesture and
+    // one link whose `to` changed. Done as a disconnect and a connect it would
+    // be two writes and a worse diff — and the first version of the gesture
+    // sent only the connect, which left the old wire attached and turned one
+    // drag into two wires.
+    let mut one = scene();
+    let before = one.materials()[0].links.len();
+    assert!(one
+        .rewire("alu", "bsdf-1:roughness", "bsdf-1:metallic")
+        .unwrap());
+
+    assert_eq!(
+        one.materials()[0].links.len(),
+        before,
+        "a wire was duplicated"
+    );
+    assert_eq!(
+        one.to_text(),
+        SCENE.replace(
+            "\"to\": \"bsdf-1:roughness\"",
+            "\"to\": \"bsdf-1:metallic\""
+        )
+    );
+}
+
+#[test]
+fn moving_a_wire_onto_an_occupied_input_displaces_what_was_there() {
+    let mut one = scene();
+    // `bsdf-1:bsdf` feeds `out-1:surface`; move `bsdf-1:roughness`'s wire onto
+    // that same input and the old one goes.
+    assert!(one
+        .rewire("alu", "bsdf-1:roughness", "out-1:surface")
+        .unwrap());
+    let links = &one.materials()[0].links;
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].from, "noise-1:fac");
+    assert_eq!(links[0].to, "out-1:surface");
+}
+
+#[test]
+fn moving_a_wire_that_would_loop_is_refused() {
+    let mut one = scene();
+    // `noise-1:fac` feeds `bsdf-1:roughness`. Moving it to `noise-1:scale`
+    // would make noise feed itself.
+    assert!(one
+        .rewire("alu", "bsdf-1:roughness", "noise-1:scale")
+        .is_err());
+    assert_eq!(one.to_text(), SCENE);
+}
+
+#[test]
+fn moving_a_wire_from_an_input_that_has_none_says_so() {
+    let mut one = scene();
+    let why = one
+        .rewire("alu", "bsdf-1:metallic", "bsdf-1:baseColor")
+        .expect_err("nothing to move");
+    assert!(why.contains("nothing feeds"), "{why}");
+}
+
+#[test]
+fn putting_a_wire_back_where_it_was_is_not_a_change() {
+    let mut one = scene();
+    assert!(!one
+        .rewire("alu", "bsdf-1:roughness", "bsdf-1:roughness")
+        .unwrap());
+}

@@ -202,6 +202,64 @@ impl crate::Scene {
         Ok(true)
     }
 
+    /// Move a wire from one input to another.
+    ///
+    /// One operation rather than a disconnect and a connect, because it is one
+    /// gesture and — more to the point — one line in the file: the link that
+    /// was there has its `to` changed. Done as a pair it would be a wire
+    /// removed and a different-looking wire added, which is a worse diff for
+    /// the same change, and two writes where the user made one edit.
+    pub fn rewire(
+        &mut self,
+        material: &str,
+        from_input: &str,
+        to_input: &str,
+    ) -> Result<bool, String> {
+        if from_input == to_input {
+            return Ok(false);
+        }
+        let found = self
+            .materials()
+            .into_iter()
+            .find(|one| one.id == material)
+            .ok_or_else(|| format!("there is no material {material:?}"))?;
+        let moving = found
+            .links
+            .iter()
+            .find(|l| l.to == from_input)
+            .ok_or_else(|| format!("nothing feeds {from_input:?}"))?
+            .clone();
+
+        let (source, _) = split(&moving.from)?;
+        let (target, _) = split(to_input)?;
+        if source == target {
+            return Err("a node cannot feed itself".into());
+        }
+        if !found.nodes.iter().any(|one| one.id == target) {
+            return Err(format!("there is no node {target:?} in {material:?}"));
+        }
+        // The same loop question as `connect`, asked about where the wire is
+        // going rather than where it was.
+        if reaches(&found, &target, &source) {
+            return Err(format!(
+                "{target:?} already feeds {source:?} — that would make a loop"
+            ));
+        }
+
+        let list = self.links_mut(material)?;
+        // Whatever fed the destination is displaced: an input takes one wire.
+        list.retain(|link| link.get("to").and_then(Value::as_str) != Some(to_input));
+        if let Some(one) = list
+            .iter_mut()
+            .filter_map(Value::as_object_mut)
+            .find(|link| link.get("to").and_then(Value::as_str) == Some(from_input))
+        {
+            one.insert("to".into(), json!(to_input));
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     /// Remove whatever feeds an input.
     pub fn disconnect(&mut self, material: &str, to: &str) -> Result<bool, String> {
         let list = self.links_mut(material)?;
