@@ -246,7 +246,7 @@ preamble, under eight hundred words.";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Answers, Prompt};
+    use crate::{Answers, Prompt, Wiring};
 
     fn room(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -275,6 +275,7 @@ mod tests {
             },
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         }
     }
 
@@ -287,6 +288,7 @@ mod tests {
             args: Vec::new(),
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         }
     }
 
@@ -349,6 +351,7 @@ mod tests {
             args: Vec::new(),
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         };
         let debate = Debate::new("q", vec![saying("one", "alpha"), broken], &dir).unwrap();
         let said = debate.open();
@@ -373,6 +376,7 @@ mod tests {
             },
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         };
         let debate = Debate::new("q", vec![slow("a"), slow("b"), slow("c")], &dir).unwrap();
 

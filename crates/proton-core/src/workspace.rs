@@ -86,6 +86,16 @@ pub struct Workspace {
     /// them. Read from the settings so it survives a restart — somebody
     /// working through one subject for a week should not re-tick it daily.
     library_scope: proton_library::Scope,
+    /// A council debate in flight, and what it has said so far. Two minutes of
+    /// three subscriptions, so the rounds are shown as they land rather than
+    /// all at the end.
+    council: Option<proton_council::Running>,
+    council_progress: Vec<String>,
+    council_round: usize,
+    /// The brief on screen, and which past debate it came from.
+    council_brief: String,
+    council_showing: String,
+    council_problem: String,
     /// Tool calls waiting on a kernel.
     ///
     /// A cell run is the one tool that cannot answer when it is asked: the
@@ -445,6 +455,7 @@ impl Workspace {
                     self.theme_event(),
                     self.settings_event(),
                     self.library_event(),
+                    self.council_event(),
                     self.chats_event(),
                     Event::Layout {
                         layout: self.mode.layout(),
@@ -630,6 +641,32 @@ impl Workspace {
                 events.extend(self.open_path(&path));
                 events.extend(self.apply(Command::PlaceCursor { line, column }));
                 events
+            }
+
+            Command::Convene { question } => self.convene(&question),
+
+            Command::OpenDebate { name } => {
+                let at = self.council_room().join(&name);
+                match std::fs::read_to_string(at.join("brief.md")) {
+                    Ok(text) => {
+                        self.council_brief = text;
+                        self.council_problem.clear();
+                    }
+                    Err(_) => {
+                        // No brief means it did not finish. The rounds are
+                        // still there and are most of the value, so show those
+                        // rather than an empty pane.
+                        self.council_brief = ["01-positions.md", "02-responses.md"]
+                            .iter()
+                            .filter_map(|file| std::fs::read_to_string(at.join(file)).ok())
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+                        self.council_problem =
+                            "this debate has no brief \u{2014} its rounds are below".into();
+                    }
+                }
+                self.council_showing = name;
+                vec![self.council_event()]
             }
 
             Command::SetLibraryScope { sources } => {
@@ -2085,6 +2122,8 @@ impl Workspace {
         if self.pickers.poll(labels) {
             events.push(self.picker_event());
         }
+
+        events.extend(self.poll_council());
 
         // And the library's walk, which is the same shape again: a second of
         // reading somebody's vault, on a thread with nothing to call back to.
@@ -4001,6 +4040,130 @@ impl Workspace {
         }
     }
 
+    /// Where debates are kept: beside the conversations, for the same reason.
+    /// A debate is a document about this project and belongs with it.
+    fn council_room(&self) -> PathBuf {
+        self.pickers.root().join(".proton").join("council")
+    }
+
+    /// Put a question to every model that has a subscription.
+    fn convene(&mut self, question: &str) -> Vec<Event> {
+        if question.trim().is_empty() {
+            return Vec::new();
+        }
+        if self.council.as_ref().is_some_and(|one| !one.is_done()) {
+            return vec![notice(
+                "a debate is already running, and each one spends three subscriptions".into(),
+                NoticeLevel::Warn,
+            )];
+        }
+
+        // Only members whose CLI is installed, and each handed the library
+        // where its CLI can take one for a single run \u{2014} so the council
+        // argues about this project's notes and cites them.
+        let server = server_beside_us();
+        let members: Vec<proton_council::Member> = proton_council::Member::usual()
+            .into_iter()
+            .filter(proton_council::Member::is_installed)
+            .map(|member| match &server {
+                Some(server) => member.with_library(server, self.pickers.root()),
+                None => member,
+            })
+            .collect();
+
+        if members.len() < 2 {
+            return vec![notice(
+                format!(
+                    "a council needs at least two of claude, codex and agy on PATH; {} found",
+                    members.len()
+                ),
+                NoticeLevel::Error,
+            )];
+        }
+
+        let room = self.council_room().join(slugged(question));
+        match proton_council::Running::start(question, members, &room) {
+            Ok(running) => {
+                self.council = Some(running);
+                self.council_progress.clear();
+                self.council_round = 1;
+                self.council_brief.clear();
+                self.council_showing.clear();
+                self.council_problem.clear();
+                vec![self.council_event()]
+            }
+            Err(why) => {
+                self.council_problem = why.clone();
+                vec![notice(why, NoticeLevel::Error), self.council_event()]
+            }
+        }
+    }
+
+    /// Drain a debate, on the same heartbeat as everything else that happens
+    /// on a thread the core cannot see.
+    fn poll_council(&mut self) -> Vec<Event> {
+        let Some(running) = self.council.as_mut() else {
+            return Vec::new();
+        };
+        let updates = running.poll();
+        if updates.is_empty() {
+            return Vec::new();
+        }
+        for update in updates {
+            match update {
+                proton_council::Update::Round { round, said } => {
+                    for one in said {
+                        self.council_progress.push(match &one.text {
+                            Ok(text) => format!(
+                                "round {round} \u{2022} {} \u{2022} {} words",
+                                one.member,
+                                text.split_whitespace().count()
+                            ),
+                            Err(why) => format!(
+                                "round {round} \u{2022} {} \u{2022} did not answer: {why}",
+                                one.member
+                            ),
+                        });
+                    }
+                    self.council_round = round + 1;
+                }
+                proton_council::Update::Brief(Ok(brief)) => {
+                    self.council_brief = brief;
+                    self.council_round = 0;
+                }
+                proton_council::Update::Brief(Err(why)) => {
+                    self.council_problem = why;
+                    self.council_round = 0;
+                }
+            }
+        }
+        vec![self.council_event()]
+    }
+
+    fn council_event(&self) -> Event {
+        Event::Council {
+            held: proton_council::held(&self.council_room())
+                .into_iter()
+                .map(|one| crate::bus::DebateSummary {
+                    name: one.name,
+                    question: one.question,
+                    finished: one.finished,
+                })
+                .collect(),
+            running: self
+                .council
+                .as_ref()
+                .filter(|one| !one.is_done())
+                .map(|one| one.question().to_string())
+                .unwrap_or_default(),
+            round: self.council_round,
+            progress: self.council_progress.clone(),
+            brief: self.council_brief.clone(),
+            showing: self.council_showing.clone(),
+            problem: self.council_problem.clone(),
+        }
+    }
+
     /// What the library has read, for the panel that lists the roots.
     fn library_event(&self) -> Event {
         Event::Library {
@@ -4746,6 +4909,48 @@ fn snippet(text: &str) -> String {
     match out.char_indices().nth(PREVIEW) {
         Some((at, _)) => format!("{}…", out[..at].trim_end()),
         None => out,
+    }
+}
+
+/// Where `proton-mcp` is, so a council member can be handed the library.
+///
+/// Beside the running executable, which is where the build leaves it and where
+/// the installer keeps it. `None` when it is not there, and the council still
+/// runs \u{2014} the members answer from what they know rather than from the
+/// user's notes, which is worse and is not a reason to refuse.
+fn server_beside_us() -> Option<PathBuf> {
+    if let Some(named) = std::env::var_os("PROTON_MCP") {
+        let path = PathBuf::from(named);
+        return path.is_file().then_some(path);
+    }
+    let here = std::env::current_exe().ok()?;
+    let beside = here.with_file_name(match cfg!(windows) {
+        true => "proton-mcp.exe",
+        false => "proton-mcp",
+    });
+    beside.is_file().then_some(beside)
+}
+
+/// A directory name out of a question.
+///
+/// Windows refuses `?` in a filename and a question usually ends in one, so
+/// this is the difference between keeping the debate and losing it.
+fn slugged(question: &str) -> String {
+    let words: String = question
+        .chars()
+        .map(|c| match c.is_alphanumeric() {
+            true => c.to_ascii_lowercase(),
+            false => '-',
+        })
+        .collect();
+    let short: Vec<&str> = words
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .take(8)
+        .collect();
+    match short.is_empty() {
+        true => "debate".into(),
+        false => short.join("-"),
     }
 }
 

@@ -4325,6 +4325,7 @@ name = "proton-core"
 version = "0.0.1"
 dependencies = [
  "proton-agent",
+ "proton-council",
  "proton-dap",
  "proton-data",
  "proton-design",

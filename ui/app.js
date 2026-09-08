@@ -3190,6 +3190,10 @@ onEvent((event) => {
       renderLibrary(event);
       break;
 
+    case "council":
+      renderCouncil(event);
+      break;
+
     case "theme":
       renderTheme(event);
       renderArtboard(event);
@@ -3619,6 +3623,80 @@ new ResizeObserver(reportViewport).observe(document.body);
 Object.assign(window, {
   setTheme, setTranslucency, setMode: coreSetMode, setDock, open, closeAll,
   dispatch, drawPointerEdges, setHint, enterCell,
+});
+
+/* ── the council ───────────────────────────────────
+   A debate is a question put to every model with a subscription: each
+   answers alone, then having read the others, then one writes the brief.
+   It takes about two minutes and spends three subscriptions, so the rounds
+   are drawn as they land rather than behind a spinner. */
+
+function renderCouncil(event) {
+  const list = $("[data-council-list]");
+  if (list) {
+    const running = event.running
+      ? `<div class="row council on"><span class="ic spin"><svg class="i"><use href="#i-users"/></svg></span>` +
+        `<span class="chat-name">${escapeHtml(event.running)}</span>` +
+        `<span class="chat-when">${
+          event.round === 3 ? "writing the brief" : `round ${event.round}`
+        }</span></div>`
+      : "";
+    const past = event.held
+      .map(
+        (one) =>
+          `<div class="row council${one.name === event.showing ? " sel" : ""}" data-debate="${escapeHtml(one.name)}">` +
+          `<span class="chat-name">${escapeHtml(one.question)}</span>` +
+          `<span class="chat-when">${one.finished ? "brief" : "no brief"}</span></div>`,
+      )
+      .join("");
+    list.innerHTML =
+      running + past ||
+      `<div class="empty-note">No debates yet. Type a question and press Convene.</div>`;
+  }
+
+  // The stage shows a debate when there is one to show, and the conversation
+  // otherwise — one place to look rather than two panes competing.
+  const view = $("[data-council-view]");
+  const thread = $("[data-agent-thread]");
+  if (!view || !thread) return;
+  const showing = Boolean(event.running || event.brief || event.problem);
+  view.hidden = !showing;
+  thread.hidden = showing;
+  if (!showing) return;
+
+  const problem = event.problem
+    ? `<p class="council-problem">${escapeHtml(event.problem)}</p>`
+    : "";
+  // Progress is a list of what each member did, so a member that failed is as
+  // visible as one that answered — a round that quietly loses a voice
+  // reads as agreement.
+  const progress = event.progress.length
+    ? `<ul class="council-progress">${event.progress
+        .map((line) => `<li>${escapeHtml(line)}</li>`)
+        .join("")}</ul>`
+    : "";
+  const heading = event.running
+    ? `<div class="council-head">${escapeHtml(event.running)}<span class="chip spin-chip">${
+        event.round === 3 ? "writing the brief" : `round ${event.round} of 2`
+      }</span></div>`
+    : "";
+
+  view.innerHTML = heading + problem + progress + proseHtml(event.brief);
+}
+
+/* Convene, from the button or the side pane's +. The question is whatever is
+   in the composer, because that is where a question already is. */
+document.addEventListener("click", (e) => {
+  if (e.target.closest?.("[data-council-ask]") || e.target.closest?.("[data-council-new]")) {
+    const box = $("[data-agent-input]");
+    const question = (box?.textContent ?? "").trim();
+    if (!question) return;
+    dispatch({ type: "convene", question });
+    if (box) box.textContent = "";
+    return;
+  }
+  const row = e.target.closest?.("[data-debate]");
+  if (row) dispatch({ type: "openDebate", name: row.dataset.debate });
 });
 
 /* ── the agent ────────────────────────────────────────────────────────

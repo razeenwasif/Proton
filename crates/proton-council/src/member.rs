@@ -44,14 +44,57 @@ pub enum Prompt {
     Argv,
 }
 
+/// How a member is told about Proton's library.
+///
+/// Three CLIs, three answers, and the differences are not cosmetic: two can be
+/// handed a server for one invocation and the third cannot be handed one at
+/// all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wiring {
+    /// `--mcp-config <json>`, plus the tools it may call without asking —
+    /// a headless run has nobody to approve a permission prompt, so a tool
+    /// that is not allow-listed is a tool the member silently does without.
+    Flag,
+    /// `-c mcp_servers.<name>.command=…`, which is Codex's way of overriding
+    /// one key of its config file for a single run.
+    Config,
+    /// Nothing per run. `agy mcp add` writes to its own configuration and has
+    /// no scope flag, so wiring it up is something the user does once rather
+    /// than something a debate does behind their back.
+    Preregistered,
+}
+
 /// How a member's answer comes back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Answers {
     /// On stdout, which is the whole of it.
     Stdout,
-    /// In a file the command is told to write, named by `-o`. The path is
-    /// appended to the arguments.
+    /// In a file the command is told to write. `-o <path>` is added as a pair
+    /// at spawn time rather than living in the static arguments, so that
+    /// anything appended later — the library wiring, for one — cannot land
+    /// between the flag and its value. It did: adding `--mcp-config` turned
+    /// `-o` into a flag with no argument and Codex refused every round.
     File,
+}
+
+/// What a member that succeeded and said nothing is reported as.
+///
+/// Its own constant because it is the one failure worth asking about twice.
+const NOTHING: &str = "answered with nothing";
+
+/// The last few lines of what a program complained about.
+///
+/// These print progress to stderr, so the reason — when there is one — is at
+/// the end rather than the beginning.
+fn tail(text: &str) -> String {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .rev()
+        .take(3)
+        .collect();
+    lines.into_iter().rev().collect::<Vec<_>>().join(" ")
 }
 
 /// One member of the council.
@@ -64,6 +107,7 @@ pub struct Member {
     pub args: Vec<String>,
     pub prompt: Prompt,
     pub answers: Answers,
+    pub wiring: Wiring,
 }
 
 impl Member {
@@ -79,6 +123,7 @@ impl Member {
                 args: vec!["-p".into()],
                 prompt: Prompt::Stdin,
                 answers: Answers::Stdout,
+                wiring: Wiring::Flag,
             },
             Member {
                 name: "codex".into(),
@@ -89,10 +134,10 @@ impl Member {
                     // been told to trust, and a debate happens in a scratch
                     // directory by design.
                     "--skip-git-repo-check".into(),
-                    "-o".into(),
                 ],
                 prompt: Prompt::Stdin,
                 answers: Answers::File,
+                wiring: Wiring::Config,
             },
             Member {
                 name: "antigravity".into(),
@@ -102,6 +147,7 @@ impl Member {
                 // nothing after it prints the help.
                 prompt: Prompt::Argv,
                 answers: Answers::Stdout,
+                wiring: Wiring::Preregistered,
             },
         ]
     }
@@ -140,6 +186,66 @@ impl Member {
         })
     }
 
+    /// The same member, able to reach Proton's library.
+    ///
+    /// `server` is the `proton-mcp` binary and `project` the directory whose
+    /// `.proton/settings.json` says which roots may be read — so what the
+    /// council can see is exactly what the editor can see, decided in the same
+    /// file.
+    ///
+    /// A member whose CLI has no per-run switch comes back unchanged. That is
+    /// not a failure: it answers from what it knows instead of from the user's
+    /// notes, which is worth having in a council and worth saying out loud
+    /// rather than pretending everybody is equally informed.
+    pub fn with_library(&self, server: &Path, project: &Path) -> Member {
+        let server = server.display().to_string().replace('\\', "/");
+        let project = project.display().to_string().replace('\\', "/");
+        let mut member = self.clone();
+
+        match self.wiring {
+            Wiring::Flag => {
+                let config = format!(
+                    r#"{{"mcpServers":{{"proton":{{"command":"{server}","args":["--project","{project}"]}}}}}}"#
+                );
+                member.args.push("--mcp-config".into());
+                member.args.push(config);
+                // Without this a headless run has no way to approve the call
+                // and quietly answers without ever having looked.
+                member.args.push("--allowedTools".into());
+                member.args.push(
+                    "mcp__proton__search_library mcp__proton__library_sources                      mcp__proton__library_status"
+                        .into(),
+                );
+            }
+            Wiring::Config => {
+                member.args.push("-c".into());
+                member
+                    .args
+                    .push(format!(r#"mcp_servers.proton.command="{server}""#));
+                member.args.push("-c".into());
+                member.args.push(format!(
+                    r#"mcp_servers.proton.args=["--project","{project}"]"#
+                ));
+            }
+            Wiring::Preregistered => {}
+        }
+        member
+    }
+
+    /// What to run, once, so a member with no per-run switch can reach the
+    /// library too. `None` when it needs nothing.
+    pub fn registration(&self, server: &Path, project: &Path) -> Option<String> {
+        match self.wiring {
+            Wiring::Preregistered => Some(format!(
+                "{} mcp add proton {} --project {}",
+                self.program,
+                server.display(),
+                project.display()
+            )),
+            _ => None,
+        }
+    }
+
     /// Put a question and wait for the answer.
     ///
     /// `within` is a real ceiling rather than a formality: one member hanging
@@ -148,29 +254,66 @@ impl Member {
     /// all read stdin when it is a terminal, and a closed one is what tells
     /// them they are being driven.
     pub fn ask(&self, prompt: &str, cwd: &Path, within: Duration) -> Result<String, String> {
-        let out = match self.answers {
-            Answers::File => {
-                let path = cwd.join(format!("{}.answer", self.name));
-                let _ = std::fs::remove_file(&path);
-                self.run(prompt, cwd, within, Some(&path))?;
-                std::fs::read_to_string(&path)
-                    .map_err(|err| format!("{}: {err}", path.display()))?
+        match self.ask_once(prompt, cwd, within) {
+            Ok(said) => Ok(said),
+            // Asked again, once, and only for the one failure that is known to
+            // be intermittent: a member that succeeded and said nothing.
+            //
+            // Measured rather than assumed. Across eight real rounds `agy`
+            // did this three times — exit zero, empty output, nothing on
+            // stderr — and it could not be reproduced in fourteen controlled
+            // attempts: not with a short prompt, not with a six-kilobyte one,
+            // not with three running at once. So the cause is still unknown,
+            // and until it is, one retry turns a lost voice into a few extra
+            // seconds. A member that *failed* is not retried: that is a real
+            // error with a real reason, and asking twice would only spend the
+            // subscription twice to read it again.
+            Err(why) if why == NOTHING => {
+                self.ask_once(prompt, cwd, within)
+                    .map_err(|second| match second == NOTHING {
+                        true => format!("{NOTHING}, twice"),
+                        false => second,
+                    })
             }
-            Answers::Stdout => self.run(prompt, cwd, within, None)?,
-        };
-        match out.trim().is_empty() {
-            true => Err("answered with nothing".into()),
-            false => Ok(out.trim().to_string()),
+            Err(why) => Err(why),
         }
     }
 
+    fn ask_once(&self, prompt: &str, cwd: &Path, within: Duration) -> Result<String, String> {
+        let (out, complained) = match self.answers {
+            Answers::File => {
+                let path = cwd.join(format!("{}.answer", self.name));
+                let _ = std::fs::remove_file(&path);
+                let (_, complained) = self.run(prompt, cwd, within, Some(&path))?;
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|err| format!("{}: {err}", path.display()))?;
+                (text, complained)
+            }
+            Answers::Stdout => self.run(prompt, cwd, within, None)?,
+        };
+        if !out.trim().is_empty() {
+            return Ok(out.trim().to_string());
+        }
+        // Whatever it said on the way out, if anything. Discarding stderr on a
+        // *successful* exit is what made "answered with nothing" a dead end
+        // three times over: the process said nothing useful on stdout and
+        // whatever it may have said elsewhere was thrown away.
+        Err(match complained.trim().is_empty() {
+            true => NOTHING.to_string(),
+            false => format!("{NOTHING} (it did say: {})", tail(&complained)),
+        })
+    }
+
+    /// Run it once. Answers with what it wrote to stdout and to stderr — the
+    /// second only matters when the first is empty, and that is exactly the
+    /// case that used to have no explanation.
     fn run(
         &self,
         prompt: &str,
         cwd: &Path,
         within: Duration,
         into: Option<&PathBuf>,
-    ) -> Result<String, String> {
+    ) -> Result<(String, String), String> {
         // Resolved rather than assumed, for the `.cmd` shim reason in
         // `runnable`. Falls back to the plain name so a failure to start says
         // so with the name the user recognises.
@@ -179,7 +322,8 @@ impl Member {
         command.current_dir(cwd);
         command.args(&self.args);
         if let Some(path) = into {
-            command.arg(path);
+            // The pair together, so nothing can be inserted between them.
+            command.arg("-o").arg(path);
         }
         if self.prompt == Prompt::Argv {
             // Last, because the CLIs that take it this way take it positionally.
@@ -233,19 +377,19 @@ impl Member {
         let done = child
             .wait_with_output()
             .map_err(|err| format!("{}: {err}", self.program))?;
+        let complained = String::from_utf8_lossy(&done.stderr).to_string();
         if !done.status.success() {
-            // The tail of stderr, because these print progress there and the
-            // reason is always at the end.
-            let why = String::from_utf8_lossy(&done.stderr);
-            let why: Vec<&str> = why.lines().rev().take(3).collect();
             return Err(format!(
                 "{} exited {}: {}",
                 self.program,
                 done.status.code().unwrap_or(-1),
-                why.into_iter().rev().collect::<Vec<_>>().join(" ")
+                tail(&complained)
             ));
         }
-        Ok(String::from_utf8_lossy(&done.stdout).to_string())
+        Ok((
+            String::from_utf8_lossy(&done.stdout).to_string(),
+            complained,
+        ))
     }
 }
 
@@ -254,10 +398,15 @@ mod tests {
     use super::*;
 
     fn dir(name: &str) -> PathBuf {
+        // No punctuation in the name. `ThreadId(5)` has brackets in it, and a
+        // path with brackets inside a `cmd` if-block closes the block early —
+        // which shows up as "the filename, directory name, or volume label
+        // syntax is incorrect" and looks nothing like the cause.
+        let thread = format!("{:?}", std::thread::current().id());
+        let thread: String = thread.chars().filter(char::is_ascii_digit).collect();
         let dir = std::env::temp_dir().join(format!(
-            "proton-council-{name}-{}-{:?}",
+            "proton-council-{name}-{}-{thread}",
             std::process::id(),
-            std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -276,6 +425,7 @@ mod tests {
             },
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         }
     }
 
@@ -305,9 +455,80 @@ mod tests {
             },
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         };
         let out = quiet.ask("x", &dir("quiet"), Duration::from_secs(30));
         assert!(out.is_err(), "{out:?}");
+    }
+
+    #[test]
+    fn a_member_that_says_nothing_is_asked_once_more() {
+        // The one failure known to be intermittent. `agy` did this three times
+        // in eight real rounds and could not be reproduced in fourteen
+        // controlled attempts, so until the cause is known one retry turns a
+        // lost voice into a few extra seconds.
+        //
+        // The fixture is a script *file* rather than a `cmd /C` one-liner:
+        // branching on a path inside a command line runs into `cmd`'s own
+        // quoting and bracket rules, which is a fight about the fixture rather
+        // than about the retry.
+        let dir = dir("retry");
+        let flag = dir.join("asked-once");
+        let script = dir.join(match cfg!(windows) {
+            true => "flaky.cmd",
+            false => "flaky.sh",
+        });
+        let body = match cfg!(windows) {
+            true => format!(
+                "@echo off
+if exist \"{0}\" echo second
+if not exist \"{0}\" type nul > \"{0}\"
+",
+                flag.display()
+            ),
+            false => format!(
+                "#!/bin/sh
+if [ -f '{0}' ]; then echo second; else : > '{0}'; fi
+",
+                flag.display()
+            ),
+        };
+        std::fs::write(&script, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let member = Member {
+            name: "flaky".into(),
+            program: script.display().to_string(),
+            args: Vec::new(),
+            prompt: Prompt::Stdin,
+            answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
+        };
+        let said = member.ask("x", &dir, Duration::from_secs(30)).unwrap();
+        assert_eq!(said, "second", "it did not ask again");
+    }
+
+    #[test]
+    fn a_member_that_says_nothing_twice_says_so() {
+        let quiet = Member {
+            name: "quiet".into(),
+            program: if cfg!(windows) { "cmd" } else { "sh" }.into(),
+            args: match cfg!(windows) {
+                true => vec!["/C".into(), "rem".into()],
+                false => vec!["-c".into(), "true".into()],
+            },
+            prompt: Prompt::Argv,
+            answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
+        };
+        let why = quiet
+            .ask("x", &dir("twice"), Duration::from_secs(30))
+            .unwrap_err();
+        assert!(why.contains("twice"), "{why}");
     }
 
     #[test]
@@ -318,6 +539,7 @@ mod tests {
             args: Vec::new(),
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         };
         let why = broken
             .ask("x", &dir("broken"), Duration::from_secs(5))
@@ -341,6 +563,7 @@ mod tests {
             },
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         };
         let started = std::time::Instant::now();
         let why = slow
@@ -360,6 +583,7 @@ mod tests {
             args: Vec::new(),
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         };
         let said = member
             .ask("the whole question", &dir("stdin"), Duration::from_secs(30))
@@ -380,6 +604,7 @@ mod tests {
             args: Vec::new(),
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
         };
         if std::process::Command::new("codex.cmd")
             .arg("--help")
@@ -413,6 +638,9 @@ mod tests {
         // carries a banner and a token count around the answer.
         let codex = &usual[1];
         assert_eq!(codex.answers, Answers::File);
-        assert_eq!(codex.args.last().unwrap(), "-o");
+        // `-o` is deliberately *not* here: it is added with its value at spawn
+        // time, so library wiring appended later cannot land between the flag
+        // and the path. It did once, and Codex refused every round.
+        assert!(!codex.args.iter().any(|a| a == "-o"), "{:?}", codex.args);
     }
 }

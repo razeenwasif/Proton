@@ -325,6 +325,15 @@ pub enum Command {
         #[ts(type = "unknown")]
         value: serde_json::Value,
     },
+    /// Put a question to the council: every model with a subscription answers
+    /// it, reads the others, and one writes the brief.
+    Convene {
+        question: String,
+    },
+    /// Show a debate that already happened, by its directory name.
+    OpenDebate {
+        name: String,
+    },
     /// Narrow the library to these folders, or widen it again with an empty
     /// list. Named as `library_sources` lists them.
     SetLibraryScope {
@@ -700,6 +709,25 @@ pub enum Event {
         /// Where they are stored, for the panel to show and for a `:e` on it.
         path: String,
     },
+    /// The council: what has been debated, and what is being debated now.
+    #[serde(rename_all = "camelCase")]
+    Council {
+        /// Past debates, newest first.
+        held: Vec<DebateSummary>,
+        /// The question being debated now, empty when none is.
+        running: String,
+        /// Which round is in flight — 1 or 2 — or 3 while the brief is being
+        /// written. Zero when nothing is running.
+        round: usize,
+        /// One line per member per round so far, in order.
+        progress: Vec<String>,
+        /// The brief on screen, as markdown. Empty when there is none.
+        brief: String,
+        /// Which past debate is being shown, by directory name.
+        showing: String,
+        /// Why the last debate could not be run or finished.
+        problem: String,
+    },
     /// What the library has read, and from where.
     ///
     /// Counts rather than contents: the panel says how much is there and
@@ -976,6 +1004,18 @@ pub struct BufferTab {
     pub name: String,
     pub path: Option<String>,
     pub modified: bool,
+}
+
+/// One debate that already happened, for the list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct DebateSummary {
+    /// The directory it lives in, which is also how it is asked for.
+    pub name: String,
+    pub question: String,
+    /// Whether it got as far as a brief.
+    pub finished: bool,
 }
 
 /// One folder of the library, as the sources panel draws it.

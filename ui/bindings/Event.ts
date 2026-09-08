@@ -5,6 +5,7 @@ import type { BufferTab } from "./BufferTab";
 import type { CellView } from "./CellView";
 import type { ChangeView } from "./ChangeView";
 import type { Completion } from "./Completion";
+import type { DebateSummary } from "./DebateSummary";
 import type { DebugFrame } from "./DebugFrame";
 import type { DebugPhase } from "./DebugPhase";
 import type { DebugVariable } from "./DebugVariable";
@@ -141,7 +142,36 @@ current: string, } | { "type": "settings", values: Record<string, unknown>,
 /**
  * Where they are stored, for the panel to show and for a `:e` on it.
  */
-path: string, } | { "type": "library", 
+path: string, } | { "type": "council", 
+/**
+ * Past debates, newest first.
+ */
+held: Array<DebateSummary>, 
+/**
+ * The question being debated now, empty when none is.
+ */
+running: string, 
+/**
+ * Which round is in flight — 1 or 2 — or 3 while the brief is being
+ * written. Zero when nothing is running.
+ */
+round: number, 
+/**
+ * One line per member per round so far, in order.
+ */
+progress: Array<string>, 
+/**
+ * The brief on screen, as markdown. Empty when there is none.
+ */
+brief: string, 
+/**
+ * Which past debate is being shown, by directory name.
+ */
+showing: string, 
+/**
+ * Why the last debate could not be run or finished.
+ */
+problem: string, } | { "type": "library", 
 /**
  * The roots, resolved — `~/OnyxVault` as the directory it means.
  */

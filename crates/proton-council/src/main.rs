@@ -22,7 +22,7 @@ use std::time::Instant;
 use proton_council::{Debate, Member, Said};
 
 fn main() -> std::process::ExitCode {
-    let (question, out) = match arguments() {
+    let (question, out, library) = match arguments() {
         Ok(parsed) => parsed,
         Err(why) => {
             eprintln!("{why}\n\n{USAGE}");
@@ -42,7 +42,27 @@ fn main() -> std::process::ExitCode {
             }
             there
         })
+        // Given the library, where the CLI has a way to be given one for a
+        // single run. The two that do get the user's notes; the third answers
+        // from what it knows, which is said out loud below rather than left to
+        // be inferred from a brief with fewer citations in it.
+        .map(|member| match &library {
+            Some((server, project)) => member.with_library(server, project),
+            None => member,
+        })
         .collect();
+
+    if let Some((server, project)) = &library {
+        for member in &members {
+            if let Some(once) = member.registration(server, project) {
+                eprintln!(
+                    "  {} takes no library per run — it will answer without one.\n    \
+                     To wire it up permanently, run once:  {once}",
+                    member.name
+                );
+            }
+        }
+    }
     if members.len() < 2 {
         eprintln!(
             "a council needs at least two members; {} found",
@@ -123,14 +143,23 @@ fn report(said: &[Said]) {
     }
 }
 
+/// What the command line asked for: the question, where to write it, and —
+/// when the library was asked for — the server and the project whose settings
+/// say which roots it may read.
+type Asked = (String, PathBuf, Option<(PathBuf, PathBuf)>);
+
 const USAGE: &str = "\
-Usage: proton-council [--out <dir>] <question>
+Usage: proton-council [--out <dir>] [--library <project>] <question>
 
-  --out <dir>   Where to write the rounds and the brief.
-                Defaults to a dated directory under the working directory.";
+  --out <dir>          Where to write the rounds and the brief.
+                       Defaults to a directory named after the question.
+  --library <project>  Let the members search that project's library and cite
+                       it. Needs `proton-mcp` beside this binary, or named by
+                       PROTON_MCP.";
 
-fn arguments() -> Result<(String, PathBuf), String> {
+fn arguments() -> Result<Asked, String> {
     let mut out: Option<PathBuf> = None;
+    let mut library: Option<PathBuf> = None;
     let mut question: Vec<String> = Vec::new();
 
     let mut args = std::env::args().skip(1);
@@ -138,6 +167,11 @@ fn arguments() -> Result<(String, PathBuf), String> {
         match arg.as_str() {
             "--out" | "-o" => {
                 out = Some(PathBuf::from(args.next().ok_or("--out needs a directory")?));
+            }
+            "--library" | "-l" => {
+                library = Some(PathBuf::from(
+                    args.next().ok_or("--library needs a project directory")?,
+                ));
             }
             "--help" | "-h" => return Err("".into()),
             _ => question.push(arg),
@@ -153,7 +187,34 @@ fn arguments() -> Result<(String, PathBuf), String> {
         // as a list of what was asked rather than a list of timestamps.
         PathBuf::from("council").join(slug(&question))
     });
-    Ok((question, out))
+    let library = match library {
+        None => None,
+        Some(project) => {
+            let server = server_path().ok_or(
+                "--library needs proton-mcp: put it beside this binary, or set PROTON_MCP",
+            )?;
+            Some((server, project))
+        }
+    };
+    Ok((question, out, library))
+}
+
+/// Where `proton-mcp` is.
+///
+/// Beside this binary by default, because that is where a build leaves them
+/// and where an install keeps them together. `PROTON_MCP` overrides it for
+/// anyone whose layout differs.
+fn server_path() -> Option<PathBuf> {
+    if let Some(named) = std::env::var_os("PROTON_MCP") {
+        let path = PathBuf::from(named);
+        return path.is_file().then_some(path);
+    }
+    let here = std::env::current_exe().ok()?;
+    let beside = here.with_file_name(match cfg!(windows) {
+        true => "proton-mcp.exe",
+        false => "proton-mcp",
+    });
+    beside.is_file().then_some(beside)
 }
 
 /// A directory name out of a question.
