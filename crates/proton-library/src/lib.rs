@@ -179,6 +179,21 @@ impl Library {
         }
     }
 
+    /// How many passages a scope admits — what a search actually looks at.
+    ///
+    /// The picker's header says "4 of N", and N being the whole library while
+    /// the search saw a tenth of it is a header that lies about the thing it
+    /// is describing.
+    pub fn passages_in(&self, scope: &Scope) -> usize {
+        if scope.is_everything() {
+            return self.passages.len();
+        }
+        self.doc_of
+            .iter()
+            .filter(|doc| scope.admits(&self.docs[**doc]))
+            .count()
+    }
+
     /// The best passages for a query, most relevant first.
     pub fn search(&self, query: &str, limit: usize) -> Vec<Hit> {
         self.search_in(query, limit, &Scope::everything())

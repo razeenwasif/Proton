@@ -280,6 +280,11 @@ impl Shelf {
         self.library.search_in(query, limit, scope)
     }
 
+    /// How many passages a scope admits.
+    pub fn passages_in(&self, scope: &crate::Scope) -> usize {
+        self.library.passages_in(scope)
+    }
+
     /// The folders a search can be narrowed to, with how much is in each.
     pub fn sources(&self) -> Vec<crate::Source> {
         self.library.sources()

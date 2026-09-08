@@ -277,6 +277,49 @@ fn a_pdf_row_is_cited_by_page_and_does_not_open_as_text() {
     );
 }
 
+/// The header's own numbers, which describe a different list for this picker
+/// than for every other one.
+fn header(events: &[Event]) -> Option<(usize, bool)> {
+    events.iter().find_map(|event| match event {
+        Event::Picker {
+            total, scanning, ..
+        } => Some((*total, *scanning)),
+        _ => None,
+    })
+}
+
+#[test]
+fn the_header_counts_passages_rather_than_the_projects_files() {
+    // Every other picker is choosing from the file index, and this one is not.
+    // "4 of 218" where 218 is the number of source files in the repository is
+    // a header describing something else entirely.
+    let (mut space, _vault) = stocked("total");
+    let opened = open_it(&mut space);
+    let (total, scanning) = header(&opened).expect("a picker event");
+    assert!(!scanning, "the library had finished reading");
+    // Two notes, each of which chunks into more than one passage.
+    assert!(total >= 2, "{total} passages");
+    assert!(
+        total < 50,
+        "that is the file index, not the library: {total}"
+    );
+}
+
+#[test]
+fn a_narrowed_library_counts_only_what_it_will_search() {
+    // The scope marker says *that* it is narrowed; this is the header not
+    // lying about how much was looked at.
+    let (mut space, _vault) = stocked("total-scoped");
+    let wide = header(&open_it(&mut space)).unwrap().0;
+
+    space.apply(Command::SetLibraryScope {
+        sources: vec!["02 - ML".into()],
+    });
+    let narrow = header(&open_it(&mut space)).unwrap().0;
+    assert!(narrow < wide, "{narrow} is not fewer than {wide}");
+    assert!(narrow > 0);
+}
+
 #[test]
 fn opening_it_with_no_roots_says_where_to_add_one() {
     // Rather than an empty picker, which reads as a library with nothing in

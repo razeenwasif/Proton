@@ -119,6 +119,12 @@ function renderSettings(event) {
    the agent may read and cite, and one that is not listed is unreachable.
    So it is drawn as a list you can see and remove from, not as a switch. */
 
+/** Which sources the library is narrowed to, as the last library event said.
+ *  Kept here so the `␣fl` picker can say so in its header: a scope set days
+ *  ago is the quietest possible reason for a thin answer, and the settings
+ *  panel is not where you are looking when you get one. */
+let libraryScope = [];
+
 /** The roots as the settings file has them, which is what an edit rewrites.
  *  Index-aligned with the resolved ones the core reports back. */
 function libraryRoots() {
@@ -147,6 +153,9 @@ function renderLibrary(event) {
   // markup under a pointer mid-click loses the click.
   const picks = $("[data-library-sources]");
   const scope = new Set(event.scope ?? []);
+  // Remembered, because the picker's header needs it and the picker's own
+  // event has no business carrying a field about the library.
+  libraryScope = [...scope];
   if (picks) {
     const shape = (event.sources ?? []).map((s) => `${s.path}:${s.documents}`).join("|");
     if (picks.dataset.built !== shape) {
@@ -2744,8 +2753,20 @@ function renderPicker(event) {
   // "no matches". Saying so is the difference between waiting a beat and
   // deciding the file isn't there.
   $("[data-picker-count]").textContent = event.scanning
-    ? "scanning…"
+    ? "reading…"
     : `${event.items.length}/${event.total} · ${event.elapsedMs.toFixed(1)} ms`;
+
+  // What the library is narrowed to, said where the question is being typed.
+  const narrowed = $("[data-picker-scope]");
+  if (narrowed) {
+    const on = event.kind === "library" && libraryScope.length > 0;
+    narrowed.hidden = !on;
+    if (on) {
+      narrowed.textContent =
+        libraryScope.length === 1 ? libraryScope[0] : `${libraryScope.length} sources`;
+      narrowed.title = `Only ${libraryScope.join(", ")} is being searched. Settings › Library changes it.`;
+    }
+  }
 
   // A folder prompt lists folders, and a row that looks like a file in a list
   // of projects is a row you have to read twice.

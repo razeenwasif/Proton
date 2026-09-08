@@ -1410,10 +1410,20 @@ impl Workspace {
             selected: picker.selected(),
             total: match picker.kind() {
                 PickerKind::Buffers => self.editor.buffers().len(),
+                // Passages, and only the ones the scope admits. The project's
+                // file count is what every other picker is choosing from and
+                // has nothing to do with this one.
+                PickerKind::Library => self.library.passages_in(&self.library_scope),
                 _ => self.pickers.file_count(),
             },
             elapsed_ms: picker.elapsed_ms(),
-            scanning: self.pickers.is_scanning(),
+            // Whose walk is still running depends on which list is being
+            // searched. Saying "scanning" because the *file* index is warming
+            // would be the wrong reassurance about the wrong thing.
+            scanning: match picker.kind() {
+                PickerKind::Library => self.library.is_building(),
+                _ => self.pickers.is_scanning(),
+            },
         }
     }
 
