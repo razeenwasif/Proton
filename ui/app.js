@@ -15,6 +15,7 @@
 import { HAS_SHELL, applyBackdrop, dispatch, onEvent, sendKey, setBackdrop,
   setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
 import { closeDocument, documentIsOpen, openDocument, zoomDocument } from "./document.js";
+import { drawViewport, frameAll, startViewport } from "./viewport.js";
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -480,6 +481,12 @@ $$(".seg, .builder-rail").forEach((group) => {
 // Design's left panel: two things that exist, and a rail that switches
 // between them. The generic handler above has already moved the `on` class;
 // this is what makes the click mean something.
+// Clicking an object in the viewport selects it, exactly as clicking its row
+// does — one selection, owned by the core, however it was chosen.
+startViewport($("[data-viewport]"), (index) => {
+  if (index >= 0) dispatch({ type: "selectNode", index });
+});
+
 $$("[data-design-panel]").forEach((button) => {
   button.addEventListener("click", () => {
     const want = button.dataset.designPanel;
@@ -2013,6 +2020,27 @@ const NODE_ICON = {
 };
 
 let lastScene = null;
+
+/** Whether the viewport has been pointed at a scene yet, so the camera is
+    framed once rather than on every event — a repaint that moved the camera
+    would fight whoever is dragging it. */
+let framed = false;
+
+function renderViewport(event) {
+  const badge = $("[data-vp-count]");
+  if (badge) {
+    const n = event.nodes?.length ?? 0;
+    badge.textContent = n ? `${n} object${n === 1 ? "" : "s"}` : "";
+  }
+  // Framed first, then drawn — `frameAll` only moves the camera, and returning
+  // here left the renderer with the empty node list it started with, so the
+  // grid appeared and the objects did not.
+  if (!framed && event.nodes?.length) {
+    framed = true;
+    frameAll(event.nodes);
+  }
+  drawViewport(event.nodes ?? [], event.selected);
+}
 
 function renderOutliner(event) {
   const box = $("[data-outliner]");
@@ -3649,6 +3677,7 @@ onEvent((event) => {
       lastScene = event;
       renderOutliner(event);
       renderNodeInspector(event);
+      renderViewport(event);
       break;
 
     case "artboard":

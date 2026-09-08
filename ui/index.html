@@ -640,21 +640,18 @@
         </div>
         <div class="viewport">
           <div class="grid-floor"></div>
-          <svg style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true">
-            <g stroke="var(--accent)" fill="none" stroke-width="1.4" opacity="0.92" transform="translate(0,-14)">
-              <path d="M300 190 L380 150 L460 190 L460 280 L380 320 L300 280 Z"/>
-              <path d="M300 190 L380 230 L460 190 M380 230 L380 320"/>
-              <path d="M300 210 L190 176 L190 236 L300 262" opacity=".8"/>
-              <path d="M460 210 L570 176 L570 236 L460 262" opacity=".8"/>
-            </g>
-            <g stroke-width="2" opacity=".9" transform="translate(0,-14)">
-              <path d="M380 230 L470 230" stroke="var(--err)"/><path d="M380 230 L380 140" stroke="var(--ok)"/><path d="M380 230 L310 272" stroke="var(--info)"/>
-            </g>
-          </svg>
+          <!-- The scene, drawn. Proxies rather than meshes — the format holds
+               transforms and kinds and no geometry — at each object's real
+               world transform, so the picture answers where things are, how
+               big, which way round and what is inside what. Drag to orbit,
+               shift-drag to pan, wheel to dolly, click to select.
+
+               What was here was a fixed SVG of a satellite. -->
+          <canvas data-viewport></canvas>
           <div class="vp-overlay">
             <div class="vp-badge" style="left:14px;top:14px">Perspective · 50mm</div>
-            <div class="vp-badge" style="left:14px;bottom:14px">G move · R rotate · S scale · ⇥ edit mode</div>
-            <div class="vp-badge" style="right:14px;bottom:14px">Cycles · 128 spp</div>
+            <div class="vp-badge" style="left:14px;bottom:14px">Drag orbit · shift-drag pan · wheel dolly</div>
+            <div class="vp-badge" style="right:14px;bottom:14px" data-vp-count></div>
             <div class="vp-badge" style="right:14px;top:14px">+Y up</div>
           </div>
         </div>
