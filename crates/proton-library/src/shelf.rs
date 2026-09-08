@@ -521,14 +521,21 @@ fn read(
 
     // The text half, now. Cloned rather than rebuilt: one copy of a few
     // megabytes against reading a thousand files twice.
+    //
+    // Whole only if there is nothing left to do — no PDFs *and* no vectors to
+    // make. This used to say `papers.is_empty()` alone and return on it, which
+    // meant a vault of notes with no PDFs in it never reached the embedder at
+    // all: the walk announced itself finished and stopped one phase early.
+    // A library of pure Markdown is the ordinary case, not the exotic one.
+    let more = !papers.is_empty() || embedder.is_some();
     let sent = done.send(Built {
         library: library.clone(),
         elapsed: started.elapsed(),
         missing: missing.clone(),
-        whole: papers.is_empty(),
+        whole: !more,
         stamp,
     });
-    if sent.is_err() || papers.is_empty() {
+    if sent.is_err() || !more {
         return;
     }
 
@@ -563,8 +570,18 @@ fn read(
         stamp,
     });
 
-    if let Ok(vectors) = embedder.vectors(&library.texts()) {
-        let _ = library.take_vectors(vectors);
+    // Said out loud when it fails. It was silent for one afternoon, and the
+    // symptom — searches answering in a tenth of a second instead of two —
+    // looks exactly like everything working, because the lexical fallback it
+    // drops to is a perfectly good answer. A failure nobody can see is worse
+    // than one that costs a line of output.
+    match embedder.vectors(&library.texts()) {
+        Ok(vectors) => {
+            if let Err(why) = library.take_vectors(vectors) {
+                eprintln!("proton-library: vectors do not match the passages: {why}");
+            }
+        }
+        Err(why) => eprintln!("proton-library: no vectors ({why}); searching by word only"),
     }
     let _ = done.send(Built {
         library,
@@ -1317,6 +1334,41 @@ ferromagnetic
         assert!(
             !shelf.is_built(),
             "naming a model left the old library in place"
+        );
+    }
+
+    #[test]
+    fn a_vault_of_pure_notes_still_reaches_the_embedder() {
+        // The walk used to stop after the notes when there were no PDFs to
+        // read — it announced itself whole and returned, one phase early, so
+        // a vault of plain Markdown never got vectors however it was
+        // configured. That is the ordinary shape of a vault, not an exotic
+        // one.
+        //
+        // Asserted through the *phase*, not through Ollama: the model may not
+        // be running, and what broke was the walk ending early, which is
+        // visible without one. A shelf that reaches the embedder reports
+        // itself unfinished after the notes land.
+        let vault = root("embed-no-pdfs");
+        write(&vault, "note.md", "# One\n\nsparsity\n");
+
+        let mut shelf = Shelf::new();
+        shelf.embed_with(Some(crate::Embedder::new("nothing-is-pulled")));
+        shelf.set_roots(vec![vault]);
+
+        // The first answer carries the notes and must not claim to be the
+        // last one.
+        for _ in 0..2000 {
+            shelf.poll();
+            if !shelf.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(shelf.len(), 1, "the notes never landed");
+        assert!(
+            shelf.is_building(),
+            "the walk called itself finished before the embedder ran"
         );
     }
 
