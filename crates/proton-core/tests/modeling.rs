@@ -283,3 +283,157 @@ fn selecting_a_row_that_is_no_longer_there_selects_nothing() {
     space.apply(Command::SelectNode { index: 99 });
     assert_eq!(tree(&mut space).1, usize::MAX);
 }
+
+/* ── shader graphs ────────────────────────────────────────────────── */
+
+const SHADED: &str = r#"{
+  "format": "proton.scene",
+  "materials": [
+    {
+      "id": "alu",
+      "links": [
+        {
+          "from": "noise-1:fac",
+          "to": "bsdf-1:roughness"
+        }
+      ],
+      "name": "Aluminium",
+      "nodes": [
+        {
+          "at": [20, 30],
+          "id": "noise-1",
+          "kind": "noise"
+        },
+        {
+          "at": [220, 40],
+          "id": "bsdf-1",
+          "kind": "principled",
+          "params": {
+            "metallic": 0.9
+          }
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "id": "body-1",
+      "kind": "mesh",
+      "material": "alu",
+      "name": "Body"
+    }
+  ],
+  "version": 1
+}
+"#;
+
+fn shaded(name: &str) -> (Workspace, PathBuf) {
+    let root = std::env::temp_dir().join(format!(
+        "proton-shader-{name}-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("scene.proton.json");
+    std::fs::write(&path, SHADED).unwrap();
+    let mut space = Workspace::rooted(&root);
+    space.apply(Command::SetMode {
+        mode: ModeId::Modeling,
+    });
+    (space, path)
+}
+
+fn graphs(space: &mut Workspace) -> Vec<proton_scene::Material> {
+    space
+        .apply(Command::Sync)
+        .iter()
+        .find_map(|event| match event {
+            Event::Scene { materials, .. } => Some(materials.clone()),
+            _ => None,
+        })
+        .expect("a scene event")
+}
+
+#[test]
+fn the_panel_is_sent_the_graph_and_which_object_wears_it() {
+    let (mut space, _) = shaded("read");
+    let materials = graphs(&mut space);
+    assert_eq!(materials.len(), 1);
+    assert_eq!(materials[0].nodes.len(), 2);
+    assert_eq!(materials[0].links.len(), 1);
+
+    // And the outliner row knows which material to show.
+    let node = space
+        .apply(Command::Sync)
+        .iter()
+        .find_map(|e| match e {
+            Event::Scene { nodes, .. } => nodes.first().cloned(),
+            _ => None,
+        })
+        .expect("a node");
+    assert_eq!(node.material, "alu");
+}
+
+#[test]
+fn setting_a_graph_param_reaches_the_disk() {
+    let (mut space, path) = shaded("param");
+    space.apply(Command::SetMaterialParam {
+        material: "alu".into(),
+        node: "bsdf-1".into(),
+        param: "metallic".into(),
+        value: proton_scene::ParamValue::Number(0.2),
+    });
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        SHADED.replace("\"metallic\": 0.9", "\"metallic\": 0.2")
+    );
+}
+
+#[test]
+fn moving_a_graph_node_writes_where_it_moved_to() {
+    let (mut space, path) = shaded("move");
+    space.apply(Command::MoveGraphNode {
+        material: "alu".into(),
+        node: "noise-1".into(),
+        at: [60.0, 120.0],
+    });
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        SHADED.replace("\"at\": [20, 30]", "\"at\": [60, 120]")
+    );
+}
+
+#[test]
+fn a_wire_that_would_loop_is_refused_with_a_reason() {
+    let (mut space, path) = shaded("loop");
+    let events = space.apply(Command::ConnectPorts {
+        material: "alu".into(),
+        from: "bsdf-1:bsdf".into(),
+        to: "noise-1:scale".into(),
+    });
+    let said: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Notice { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(said.iter().any(|t| t.contains("loop")), "{said:?}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), SHADED);
+}
+
+#[test]
+fn disconnecting_an_input_that_had_nothing_is_not_a_write() {
+    let (mut space, path) = shaded("nowire");
+    let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let events = space.apply(Command::DisconnectPort {
+        material: "alu".into(),
+        to: "bsdf-1:metallic".into(),
+    });
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().modified().unwrap(),
+        before
+    );
+}

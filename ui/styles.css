@@ -1006,6 +1006,36 @@ canvas[data-viewport] {
 }
 canvas[data-viewport]:active { cursor: grabbing; }
 
+/* The shader graph pane: wires behind, boxes in front. */
+.shader-pane {
+  flex: 0 0 190px; position: relative; overflow: hidden;
+  border-top: 1px solid var(--edge); background: rgba(0, 0, 0, .2);
+}
+.graph-wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.node > .nh { cursor: grab; user-select: none; }
+.node:active > .nh { cursor: grabbing; }
+
+/* Sockets down each edge of a box, so a wire has somewhere to land. */
+.node .socks { position: absolute; top: 26px; display: flex; flex-direction: column; gap: 6px; }
+.node .socks.in { left: -5px; }
+.node .socks.out { right: -5px; }
+.node .sock {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--raise-2, #2a2f42); border: 1px solid var(--edge-hi);
+}
+
+/* A number in a node, editable in place. */
+.node .rt.num {
+  width: 52px; padding: 1px 4px; border-radius: 4px; text-align: right;
+  background: rgba(0, 0, 0, .28); border: 1px solid transparent;
+  color: var(--ink); font: 10.5px var(--mono); font-variant-numeric: tabular-nums;
+}
+.node .rt.num:focus { outline: none; border-color: var(--accent); }
+.node .sw {
+  width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+  margin-left: auto; border: 1px solid var(--edge-hi);
+}
+
 .row.scene-node { gap: 7px; cursor: default; }
 .row.scene-node .node-kids {
   color: var(--ink-4); font: 10.5px var(--mono);

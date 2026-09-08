@@ -37,6 +37,7 @@
 //! - **The second save changes nothing the first did not.** Idempotent, so a
 //!   file only ever appears in a diff because somebody changed it.
 
+mod material;
 mod write;
 
 use std::path::Path;
@@ -52,7 +53,7 @@ const FORMAT: &str = "proton.scene";
 /// A scene, and the JSON it was read from.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scene {
-    json: Value,
+    pub(crate) json: Value,
 }
 
 /// One object in the scene, as the outliner draws it.
@@ -79,6 +80,9 @@ pub struct Node {
     pub kind: String,
     /// Empty for a root object.
     pub parent: String,
+    /// The material this object wears, by id. Empty for one that wears none,
+    /// which is most objects and every light and camera.
+    pub material: String,
     /// Metres, degrees, and a multiplier, in that order.
     pub position: [f64; 3],
     pub rotation: [f64; 3],
@@ -192,6 +196,7 @@ impl Scene {
                 name: string_of(one, "name", &id),
                 kind: string_of(one, "kind", "empty"),
                 parent: parent_of(one),
+                material: string_of(one, "material", ""),
                 position: triple(one, "position", [0.0; 3]),
                 rotation: triple(one, "rotation", [0.0; 3]),
                 scale: triple(one, "scale", [1.0; 3]),
@@ -388,6 +393,8 @@ impl Default for Scene {
         Scene::new()
     }
 }
+
+pub use material::{GraphNode, Link, Material, Param, ParamValue};
 
 /// Which part of a transform is being set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

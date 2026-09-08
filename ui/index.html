@@ -655,33 +655,21 @@
             <div class="vp-badge" style="right:14px;top:14px">+Y up</div>
           </div>
         </div>
-        <div style="flex:0 0 190px;position:relative;border-top:1px solid var(--edge);overflow:hidden;background:rgba(0,0,0,.2)">
-          <svg style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true">
-            <path d="M170 56 C 210 56, 210 66, 250 66" stroke="var(--err)" stroke-width="1.6" fill="none"/>
-            <path d="M170 122 C 212 122, 212 92, 250 92" stroke="var(--accent-2)" stroke-width="1.6" fill="none"/>
-            <path d="M410 78 C 450 78, 450 96, 490 96" stroke="var(--info)" stroke-width="1.6" fill="none"/>
-          </svg>
-          <div class="graph">
-            <div class="node c-a" style="left:14px;top:30px">
-              <div class="nh">Noise Texture</div>
-              <div class="nb"><div class="port"><i></i>Scale <span class="rt">6.4</span></div><div class="port"><i></i>Detail <span class="rt">2.0</span></div></div>
-            </div>
-            <div class="node c-c" style="left:14px;top:96px">
-              <div class="nh">Color Ramp</div>
-              <div class="nb"><div class="port"><i style="background:var(--accent-2)"></i>Fac <span class="rt">0.31</span></div></div>
-            </div>
-            <div class="node c-b" style="left:252px;top:44px">
-              <div class="nh">Principled BSDF</div>
-              <div class="nb"><div class="port"><i style="background:var(--info)"></i>Base <span class="rt">#8C8F93</span></div><div class="port"><i style="background:var(--info)"></i>Metallic <span class="rt">0.90</span></div><div class="port"><i style="background:var(--info)"></i>Rough <span class="rt">0.24</span></div></div>
-            </div>
-            <div class="node c-d" style="left:492px;top:70px">
-              <div class="nh">Material Output</div>
-              <div class="nb"><div class="port"><i style="background:var(--ok)"></i>Surface</div></div>
-            </div>
-          </div>
-          <div class="vp-badge" style="right:12px;top:12px">Shader graph · ␣ns to add</div>
+        <div class="shader-pane">
+          <!-- The material of whichever object is selected, read out of
+               `scene.proton.json`. Every box is a node really in the file and
+               every wire a link; editing a value writes it, dragging a box
+               writes where it moved to.
+
+               What was here was four fixed boxes — a Noise Texture, a Color
+               Ramp, a Principled BSDF and a Material Output — wired to each
+               other with hand-drawn curves, for a material that did not
+               exist. -->
+          <svg class="graph-wires" data-graph-wires aria-hidden="true"></svg>
+          <div class="graph" data-graph></div>
+          <div class="vp-badge" style="right:12px;top:12px" data-graph-name>No material</div>
         </div>
-      </main>
+        </main>
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
       <aside class="pane">

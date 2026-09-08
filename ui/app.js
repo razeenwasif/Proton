@@ -2042,6 +2042,215 @@ function renderViewport(event) {
   drawViewport(event.nodes ?? [], event.selected);
 }
 
+/* ── The shader graph ──────────────────────────────────
+
+   The material of whichever object is selected. Every box is a node really in
+   `scene.proton.json` and every wire a link in it; editing a value writes the
+   file, dragging a box writes where it moved to.
+
+   Boxes are DOM and wires are one SVG behind them, which is what the mock
+   this replaces did and is right for a handful of nodes: the boxes get text
+   selection, focus and inputs for free, and the wires need curves that DOM
+   cannot draw. */
+
+/** Which ports a kind has, so a box can show its sockets. Unknown kinds get
+    whatever the links mention, because a graph from a later version has to
+    keep working rather than lose its wires. */
+const GRAPH_PORTS = {
+  noise: { in: ["scale", "detail"], out: ["fac", "color"] },
+  ramp: { in: ["fac"], out: ["color"] },
+  principled: { in: ["baseColor", "metallic", "roughness"], out: ["bsdf"] },
+  output: { in: ["surface", "displacement"], out: [] },
+};
+
+/** A colour param as CSS, for the swatch. Linear 0..1 to sRGB 0..255 is a
+    gamma curve, not a multiply — 0.5 linear is mid-*light*, not mid-grey, and
+    showing it as #808080 would misreport every colour in the file. */
+function paramColor([r, g, b]) {
+  const to8 = (v) => {
+    const c = Math.max(0, Math.min(1, v));
+    const s = c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+    return Math.round(s * 255);
+  };
+  return `rgb(${to8(r)}, ${to8(g)}, ${to8(b)})`;
+}
+
+/** The material the selected object wears, or null. */
+function materialFor(event) {
+  const node = event.nodes?.[event.selected];
+  if (!node?.material) return null;
+  return event.materials?.find((m) => m.id === node.material) ?? null;
+}
+
+function renderGraph(event) {
+  const box = $("[data-graph]");
+  const wires = $("[data-graph-wires]");
+  const name = $("[data-graph-name]");
+  if (!box || !wires) return;
+
+  const material = materialFor(event);
+  if (name) {
+    name.textContent = material
+      ? material.name
+      : event.nodes?.[event.selected]
+        ? "No material on this object"
+        : "No material";
+  }
+  if (!material) {
+    box.innerHTML = "";
+    wires.innerHTML = "";
+    return;
+  }
+
+  const ports = (node) => {
+    const known = GRAPH_PORTS[node.kind];
+    if (known) return known;
+    // Whatever the wires mention, so an unfamiliar node still shows sockets.
+    const mine = (end) =>
+      material.links
+        .map((l) => l[end])
+        .filter((p) => p.startsWith(`${node.id}:`))
+        .map((p) => p.slice(node.id.length + 1));
+    return { in: mine("to"), out: mine("from") };
+  };
+
+  box.innerHTML = material.nodes
+    .map((node) => {
+      const { in: ins, out: outs } = ports(node);
+      const rows = node.params
+        .map((p) => {
+          const value =
+            "color" in p.value
+              ? `<i class="sw" style="background:${paramColor(p.value.color)}"></i>` +
+                `<span class="rt">${p.value.color.map((n) => n.toFixed(2)).join(" ")}</span>`
+              : `<input class="rt num" data-gp="${escapeHtml(node.id)}|${escapeHtml(p.name)}"` +
+                ` value="${escapeHtml(String(p.value.number))}" inputmode="decimal">`;
+          return `<div class="port"><i></i>${escapeHtml(p.name)}${value}</div>`;
+        })
+        .join("");
+      const sockets = (list, side) =>
+        list
+          .map(
+            (port) =>
+              `<span class="sock ${side}" data-sock="${escapeHtml(node.id)}:${escapeHtml(port)}"` +
+              ` title="${escapeHtml(port)}"></span>`,
+          )
+          .join("");
+      return (
+        `<div class="node" data-gn="${escapeHtml(node.id)}"` +
+        ` style="left:${node.at[0]}px;top:${node.at[1]}px">` +
+        `<div class="nh">${escapeHtml(node.kind)}</div>` +
+        `<div class="nb">${rows}</div>` +
+        `<div class="socks in">${sockets(ins, "in")}</div>` +
+        `<div class="socks out">${sockets(outs, "out")}</div>` +
+        `</div>`
+      );
+    })
+    .join("");
+
+  drawWires(material, box, wires);
+}
+
+/** The wires, drawn from where the sockets actually ended up.
+ *
+ * Measured from the DOM rather than computed from the node positions, so a
+ * box that grew a row — an extra param, a longer name — keeps its wires
+ * attached instead of having them land where the socket used to be. */
+function drawWires(material, box, wires) {
+  const frame = box.getBoundingClientRect();
+  const at = (port) => {
+    const el = box.querySelector(`[data-sock="${CSS.escape(port)}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return [r.left + r.width / 2 - frame.left, r.top + r.height / 2 - frame.top];
+  };
+
+  wires.innerHTML = material.links
+    .map((link) => {
+      const a = at(link.from);
+      const b = at(link.to);
+      // A wire to a socket the node does not have is a fact about the file,
+      // not something to draw a guess for.
+      if (!a || !b) return "";
+      const bend = Math.max(30, Math.abs(b[0] - a[0]) * 0.5);
+      return (
+        `<path d="M${a[0]} ${a[1]} C ${a[0] + bend} ${a[1]}, ${b[0] - bend} ${b[1]}, ${b[0]} ${b[1]}"` +
+        ` stroke="var(--accent-2)" stroke-width="1.6" fill="none"/>`
+      );
+    })
+    .join("");
+}
+
+document.addEventListener("change", (e) => {
+  const field = e.target.closest?.("[data-gp]");
+  if (!field) return;
+  const material = materialFor(lastScene ?? {});
+  if (!material) return;
+  const [node, param] = field.dataset.gp.split("|");
+  const number = Number(field.value);
+  if (!Number.isFinite(number)) {
+    renderGraph(lastScene);
+    renderStatus(`${param} needs a number`, "warn");
+    return;
+  }
+  dispatch({
+    type: "setMaterialParam",
+    material: material.id,
+    node,
+    param,
+    value: { number },
+  });
+});
+
+/* Dragging a box. The position is written to the file when the drag ends, not
+   while it moves — a write per pointermove would be a hundred saves for one
+   nudge, and a hundred entries in the undo history. */
+(() => {
+  let dragging = null;
+  document.addEventListener("pointerdown", (e) => {
+    const head = e.target.closest?.(".node > .nh");
+    if (!head) return;
+    const node = head.parentElement;
+    dragging = {
+      id: node.dataset.gn,
+      el: node,
+      x: e.clientX,
+      y: e.clientY,
+      at: [parseFloat(node.style.left) || 0, parseFloat(node.style.top) || 0],
+    };
+    e.preventDefault();
+  });
+
+  document.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    dragging.at = [
+      dragging.at[0] + (e.clientX - dragging.x),
+      dragging.at[1] + (e.clientY - dragging.y),
+    ];
+    dragging.x = e.clientX;
+    dragging.y = e.clientY;
+    dragging.el.style.left = `${dragging.at[0]}px`;
+    dragging.el.style.top = `${dragging.at[1]}px`;
+    const material = materialFor(lastScene ?? {});
+    if (material) drawWires(material, $("[data-graph]"), $("[data-graph-wires]"));
+  });
+
+  document.addEventListener("pointerup", () => {
+    if (!dragging) return;
+    const material = materialFor(lastScene ?? {});
+    const { id, at } = dragging;
+    dragging = null;
+    if (material) {
+      dispatch({
+        type: "moveGraphNode",
+        material: material.id,
+        node: id,
+        at: [Math.round(at[0]), Math.round(at[1])],
+      });
+    }
+  });
+})();
+
 function renderOutliner(event) {
   const box = $("[data-outliner]");
   if (!box) return;
@@ -3678,6 +3887,7 @@ onEvent((event) => {
       renderOutliner(event);
       renderNodeInspector(event);
       renderViewport(event);
+      renderGraph(event);
       break;
 
     case "artboard":

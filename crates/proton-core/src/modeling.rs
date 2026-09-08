@@ -24,7 +24,7 @@
 
 use std::path::{Path, PathBuf};
 
-use proton_scene::{Node, Part, Scene};
+use proton_scene::{Material, Node, ParamValue, Part, Scene};
 
 /// The scene that is open, and where the outliner is in it.
 #[derive(Debug, Default)]
@@ -106,6 +106,41 @@ impl Modeling {
         let moved = to != self.selected;
         self.selected = to;
         moved
+    }
+
+    /// Every material in the scene, with its graph.
+    pub fn materials(&self) -> Vec<Material> {
+        self.scene
+            .as_ref()
+            .map(Scene::materials)
+            .unwrap_or_default()
+    }
+
+    pub fn set_param(
+        &mut self,
+        material: &str,
+        node: &str,
+        param: &str,
+        value: ParamValue,
+    ) -> Result<bool, String> {
+        self.write(|scene| scene.set_param(material, node, param, value))
+    }
+
+    pub fn move_graph_node(
+        &mut self,
+        material: &str,
+        node: &str,
+        at: [f64; 2],
+    ) -> Result<bool, String> {
+        self.write(|scene| scene.move_node(material, node, at))
+    }
+
+    pub fn connect(&mut self, material: &str, from: &str, to: &str) -> Result<bool, String> {
+        self.write(|scene| scene.connect(material, from, to))
+    }
+
+    pub fn disconnect(&mut self, material: &str, to: &str) -> Result<bool, String> {
+        self.write(|scene| scene.disconnect(material, to))
     }
 
     pub fn rename(&mut self, id: &str, name: &str) -> Result<bool, String> {

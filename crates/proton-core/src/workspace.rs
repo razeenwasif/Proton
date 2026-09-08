@@ -656,6 +656,31 @@ impl Workspace {
                 self.after_scene_write(done)
             }
 
+            Command::SetMaterialParam {
+                material,
+                node,
+                param,
+                value,
+            } => {
+                let done = self.modeling.set_param(&material, &node, &param, value);
+                self.after_scene_write(done)
+            }
+
+            Command::MoveGraphNode { material, node, at } => {
+                let done = self.modeling.move_graph_node(&material, &node, at);
+                self.after_scene_write(done)
+            }
+
+            Command::ConnectPorts { material, from, to } => {
+                let done = self.modeling.connect(&material, &from, &to);
+                self.after_scene_write(done)
+            }
+
+            Command::DisconnectPort { material, to } => {
+                let done = self.modeling.disconnect(&material, &to);
+                self.after_scene_write(done)
+            }
+
             Command::SelectLayer { index } => match self.design.select_layer(index) {
                 true => vec![self.artboard_event()],
                 false => Vec::new(),
@@ -4558,6 +4583,7 @@ impl Workspace {
             nodes: self.modeling.nodes(),
             selected: self.modeling.selected(),
             problem: self.modeling.problem().unwrap_or_default().to_string(),
+            materials: self.modeling.materials(),
         }
     }
 

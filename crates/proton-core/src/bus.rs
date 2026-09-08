@@ -367,6 +367,32 @@ pub enum Command {
         index: usize,
     },
 
+    /* ── shader graphs ────────────────────────── */
+    /// Change one setting on one node of a material's graph.
+    SetMaterialParam {
+        material: String,
+        node: String,
+        param: String,
+        value: proton_scene::ParamValue,
+    },
+    /// Move a graph node's box on the canvas.
+    MoveGraphNode {
+        material: String,
+        node: String,
+        at: [f64; 2],
+    },
+    /// Wire an output to an input. Both are written `node:port`.
+    ConnectPorts {
+        material: String,
+        from: String,
+        to: String,
+    },
+    /// Remove whatever feeds an input.
+    DisconnectPort {
+        material: String,
+        to: String,
+    },
+
     /// Open the line that wrote a layer, in Codex.
     ///
     /// The binding pointing the other way from the artboard: a layer is a
@@ -872,6 +898,13 @@ pub enum Event {
         selected: usize,
         /// Why there is no scene, when there is a reason worth showing.
         problem: String,
+        /// Every material in the scene, with its graph.
+        ///
+        /// All of them rather than only the selected object's: they are small,
+        /// the panel switches between them as the selection moves, and sending
+        /// one at a time would mean a round trip on every click in the
+        /// outliner.
+        materials: Vec<proton_scene::Material>,
     },
     /// The theme Design mode is editing.
     #[serde(rename_all = "camelCase")]

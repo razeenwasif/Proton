@@ -32,6 +32,11 @@ kind: string,
  */
 parent: string, 
 /**
+ * The material this object wears, by id. Empty for one that wears none,
+ * which is most objects and every light and camera.
+ */
+material: string, 
+/**
  * Metres, degrees, and a multiplier, in that order.
  */
 position: [number, number, number], rotation: [number, number, number], scale: [number, number, number], 

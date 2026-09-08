@@ -259,7 +259,7 @@ if (HAS_SHELL) {
     nodes: [
       { id: "rig-1", name: "Satellite", kind: "empty", parent: "", depth: 0,
         children: 3, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-      { id: "body-1", name: "Body", kind: "mesh", parent: "rig-1", depth: 1,
+      { id: "body-1", name: "Body", kind: "mesh", parent: "rig-1", depth: 1, material: "alu",
         children: 0, position: [0, 1.4, 0], rotation: [0, 32, 0], scale: [1, 1, 1] },
       { id: "array-1", name: "SolarArray", kind: "mesh", parent: "rig-1", depth: 1,
         children: 0, position: [1.8, 1.4, 0], rotation: [0, 0, 0], scale: [4, 1, 1] },
@@ -270,8 +270,36 @@ if (HAS_SHELL) {
     ],
   };
 
+  // One material, wired, so the graph panel can be designed against a real
+  // shape. `body-1` wears it; every other object wears none, which is the
+  // ordinary case and the one the panel has to handle too.
+  const materials = [
+    {
+      id: "alu",
+      name: "Brushed aluminium",
+      nodes: [
+        { id: "noise-1", kind: "noise", at: [14, 26],
+          params: [{ name: "detail", value: { number: 2 } },
+                   { name: "scale", value: { number: 6.4 } }] },
+        { id: "ramp-1", kind: "ramp", at: [14, 104],
+          params: [{ name: "fac", value: { number: 0.31 } }] },
+        { id: "bsdf-1", kind: "principled", at: [244, 34],
+          params: [{ name: "baseColor", value: { color: [0.28, 0.29, 0.31] } },
+                   { name: "metallic", value: { number: 0.9 } },
+                   { name: "roughness", value: { number: 0.24 } }] },
+        { id: "out-1", kind: "output", at: [470, 62], params: [] },
+      ],
+      links: [
+        { from: "noise-1:fac", to: "ramp-1:fac" },
+        { from: "ramp-1:color", to: "bsdf-1:roughness" },
+        { from: "bsdf-1:bsdf", to: "out-1:surface" },
+      ],
+    },
+  ];
+
   const sceneEvent = () => ({
     type: "scene",
+    materials,
     path: scene.path,
     nodes: scene.nodes,
     selected: scene.selected,
@@ -502,6 +530,19 @@ if (HAS_SHELL) {
     if (command.type === "renameNode") {
       const node = scene.nodes[command.index];
       if (node) node.name = command.name;
+      return [sceneEvent()];
+    }
+    if (command.type === "setMaterialParam") {
+      const m = materials.find((one) => one.id === command.material);
+      const node = m?.nodes.find((one) => one.id === command.node);
+      const param = node?.params.find((one) => one.name === command.param);
+      if (param) param.value = command.value;
+      return [sceneEvent()];
+    }
+    if (command.type === "moveGraphNode") {
+      const m = materials.find((one) => one.id === command.material);
+      const node = m?.nodes.find((one) => one.id === command.node);
+      if (node) node.at = command.at;
       return [sceneEvent()];
     }
     if (command.type === "setNodeTransform") {

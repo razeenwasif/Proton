@@ -16,6 +16,7 @@ import type { Hit } from "./Hit";
 import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
 import type { LibrarySource } from "./LibrarySource";
+import type { Material } from "./Material";
 import type { ModeId } from "./ModeId";
 import type { Node } from "./Node";
 import type { NoticeLevel } from "./NoticeLevel";
@@ -271,7 +272,16 @@ selected: number,
 /**
  * Why there is no scene, when there is a reason worth showing.
  */
-problem: string, } | { "type": "theme", 
+problem: string, 
+/**
+ * Every material in the scene, with its graph.
+ *
+ * All of them rather than only the selected object's: they are small,
+ * the panel switches between them as the selection moves, and sending
+ * one at a time would mean a round trip on every click in the
+ * outliner.
+ */
+materials: Array<Material>, } | { "type": "theme", 
 /**
  * Empty when none is open, which is how the panel knows to say so.
  */
