@@ -13,6 +13,7 @@ import type { Entry } from "./Entry";
 import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
 import type { Layout } from "./Layout";
+import type { LibrarySource } from "./LibrarySource";
 import type { ModeId } from "./ModeId";
 import type { NoticeLevel } from "./NoticeLevel";
 import type { PickerItem } from "./PickerItem";
@@ -168,7 +169,17 @@ read: number, found: number,
 /**
  * How long the last walk took. Zero if none has finished.
  */
-elapsedMs: bigint, } | { "type": "theme", 
+elapsedMs: bigint, 
+/**
+ * The folders the library is made of, for the panel to tick through.
+ */
+sources: Array<LibrarySource>, 
+/**
+ * Which of them a search is currently narrowed to. Empty is
+ * everything — a panel with no ticks is "no restriction", not "no
+ * sources".
+ */
+scope: Array<string>, } | { "type": "theme", 
 /**
  * Empty when none is open, which is how the panel knows to say so.
  */

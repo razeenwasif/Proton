@@ -325,6 +325,11 @@ pub enum Command {
         #[ts(type = "unknown")]
         value: serde_json::Value,
     },
+    /// Narrow the library to these folders, or widen it again with an empty
+    /// list. Named as `library_sources` lists them.
+    SetLibraryScope {
+        sources: Vec<String>,
+    },
     /// Read the library's roots again.
     ///
     /// Notes get written while the editor is open, and the walk happens once
@@ -721,6 +726,12 @@ pub enum Event {
         found: usize,
         /// How long the last walk took. Zero if none has finished.
         elapsed_ms: u64,
+        /// The folders the library is made of, for the panel to tick through.
+        sources: Vec<LibrarySource>,
+        /// Which of them a search is currently narrowed to. Empty is
+        /// everything — a panel with no ticks is "no restriction", not "no
+        /// sources".
+        scope: Vec<String>,
     },
     /// The theme Design mode is editing.
     #[serde(rename_all = "camelCase")]
@@ -965,6 +976,19 @@ pub struct BufferTab {
     pub name: String,
     pub path: Option<String>,
     pub modified: bool,
+}
+
+/// One folder of the library, as the sources panel draws it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySource {
+    /// What selects it: the prefix a citation starts with.
+    pub path: String,
+    /// What to show.
+    pub label: String,
+    pub documents: usize,
+    pub passages: usize,
 }
 
 /// One entry in the workspace switcher.

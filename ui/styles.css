@@ -1812,6 +1812,26 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
 .st-field input:focus { outline: none; border-color: var(--accent); }
 [data-set-choice] button.on { background: var(--e2); color: var(--ink); }
 
+/* One source you can tick. A checkbox, a name, and how much is behind it —
+   the size is what tells you whether narrowing to it will leave anything. */
+.lib-source {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 9px; max-width: 560px; border-radius: 6px;
+  font: 400 12.5px var(--sans); color: var(--ink-2); cursor: pointer;
+}
+.lib-source:hover { background: var(--e1); }
+.lib-source input { accent-color: var(--accent); width: 14px; height: 14px; flex: none; }
+.lib-source .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-source .size {
+  font: 400 10.5px var(--mono); color: var(--ink-4);
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.lib-source:has(input:checked) { background: var(--accent-soft); color: var(--ink); }
+
+/* The composer's reminder that the library is narrowed. Not a decoration:
+   a scope that says so nowhere is one you forget you set. */
+.scope-chip { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
 /* A library row: the citation, and the passage under it. Two lines because
    both halves are prose and both are long — a filename fits beside its
    directory, a passage does not fit beside its citation. */

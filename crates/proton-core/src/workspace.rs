@@ -82,6 +82,10 @@ pub struct Workspace {
     /// than on every heartbeat for the minutes a first walk over a corpus of
     /// PDFs takes.
     library_progress: (usize, usize),
+    /// Which folders of the library a search may draw on. Empty is all of
+    /// them. Read from the settings so it survives a restart — somebody
+    /// working through one subject for a week should not re-tick it daily.
+    library_scope: proton_library::Scope,
     /// Tool calls waiting on a kernel.
     ///
     /// A cell run is the one tool that cannot answer when it is asked: the
@@ -626,6 +630,22 @@ impl Workspace {
                 events.extend(self.open_path(&path));
                 events.extend(self.apply(Command::PlaceCursor { line, column }));
                 events
+            }
+
+            Command::SetLibraryScope { sources } => {
+                // Through the settings rather than straight onto the field, so
+                // one place decides and the choice survives a restart. The
+                // write comes back around and sets the scope.
+                match self
+                    .settings
+                    .set("library.scope", serde_json::json!(sources))
+                {
+                    Ok(_) => {
+                        self.follow_library_settings();
+                        vec![self.settings_event(), self.library_event()]
+                    }
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
+                }
             }
 
             Command::RefreshLibrary => {
@@ -1301,7 +1321,7 @@ impl Workspace {
             true => Vec::new(),
             false => self
                 .library
-                .search(&query, Self::SHELVES)
+                .search_in(&query, Self::SHELVES, &self.library_scope)
                 .into_iter()
                 .map(|hit| crate::picker::PickerItem {
                     // The citation is the label because it is both what
@@ -3404,6 +3424,33 @@ impl Workspace {
                 Ok(found.join("\n"))
             }
 
+            "list_sources" => {
+                if self.library.roots().is_empty() {
+                    return Ok("there is no library: the user has not listed any roots in                                Settings › Library"
+                        .into());
+                }
+                let sources = self.library.sources();
+                if sources.is_empty() {
+                    return Ok("the library is empty".into());
+                }
+                Ok(sources
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "{}  ({} document{}, {} passages)",
+                            s.path,
+                            s.documents,
+                            if s.documents == 1 { "" } else { "s" },
+                            s.passages
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(
+                        "
+",
+                    ))
+            }
+
             "search_library" => {
                 let query = text("query")?;
                 if self.library.roots().is_empty() {
@@ -3420,7 +3467,25 @@ impl Workspace {
                     return Ok("the library is still being read — ask again in a moment".into());
                 }
 
-                let hits = self.library.search(&query, count("limit", 6));
+                // The user's own narrowing, unless the model named its own.
+                // Their choice is the default because they made it in a panel
+                // they can see; a model that wants one subject can still ask.
+                let asked = input
+                    .get("sources")
+                    .and_then(|v| v.as_array())
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(str::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let scope = match asked.is_empty() {
+                    true => self.library_scope.clone(),
+                    false => proton_library::Scope::of(asked),
+                };
+
+                let hits = self.library.search_in(&query, count("limit", 6), &scope);
                 if hits.is_empty() {
                     // "Nothing found" and "not all of it has been read yet"
                     // are different answers, and a walk over a corpus of PDFs
@@ -3433,9 +3498,15 @@ impl Workspace {
                         ),
                         false => String::new(),
                     };
+                    // Which shelf was asked, when it was not all of them: the
+                    // likeliest reason an answer is empty is that the question
+                    // went to the wrong one.
+                    let where_ = match scope.is_everything() {
+                        true => format!(" ({} passages searched)", self.library.len()),
+                        false => format!(" within {}", scope.prefixes().join(", ")),
+                    };
                     return Ok(format!(
-                        "nothing in the library about {query:?} ({} passages searched){more}",
-                        self.library.len()
+                        "nothing in the library about {query:?}{where_}{more}"
                     ));
                 }
                 // The citation on its own line above the passage, so what to
@@ -3824,6 +3895,18 @@ impl Workspace {
         self.library
             .set_pdfs(self.settings.bool("library.pdfs", true));
         self.library.set_roots(roots);
+        self.library_scope = proton_library::Scope::of(
+            self.settings
+                .get("library.scope")
+                .and_then(|v| v.as_array())
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|v| v.as_str())
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        );
     }
 
     /// Point the agent at whatever the settings name.
@@ -3929,6 +4012,18 @@ impl Workspace {
                 .elapsed()
                 .map(|took| took.as_millis() as u64)
                 .unwrap_or_default(),
+            sources: self
+                .library
+                .sources()
+                .into_iter()
+                .map(|source| crate::bus::LibrarySource {
+                    path: source.path,
+                    label: source.label,
+                    documents: source.documents,
+                    passages: source.passages,
+                })
+                .collect(),
+            scope: self.library_scope.prefixes().to_vec(),
         }
     }
 

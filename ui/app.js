@@ -142,6 +142,40 @@ function renderLibrary(event) {
       : `<div class="lib-root"><span class="path" style="color:var(--ink-3)">Nothing listed — the agent cannot read any of your notes.</span></div>`;
   }
 
+  // The sources, and which are ticked. Rebuilt only when the list itself
+  // changes — a walk reports progress many times a second, and replacing the
+  // markup under a pointer mid-click loses the click.
+  const picks = $("[data-library-sources]");
+  const scope = new Set(event.scope ?? []);
+  if (picks) {
+    const shape = (event.sources ?? []).map((s) => `${s.path}:${s.documents}`).join("|");
+    if (picks.dataset.built !== shape) {
+      picks.dataset.built = shape;
+      picks.innerHTML = (event.sources ?? []).length
+        ? event.sources
+            .map(
+              (s) =>
+                `<label class="lib-source"><input type="checkbox" data-library-pick="${escapeHtml(s.path)}">` +
+                `<span class="name">${escapeHtml(s.label)}</span>` +
+                `<span class="size">${s.documents.toLocaleString()} doc${s.documents === 1 ? "" : "s"} · ${s.passages.toLocaleString()}</span></label>`,
+            )
+            .join("")
+        : `<p style="color:var(--ink-4)">Nothing read yet.</p>`;
+    }
+    // Ticks are set every time, since they change without the list changing.
+    for (const box of $$("[data-library-pick]", picks)) {
+      box.checked = scope.has(box.dataset.libraryPick);
+    }
+  }
+  // Where the questions are asked, not only where they are configured: a
+  // narrowed library that says so nowhere is one you forget you narrowed.
+  for (const chip of $$("[data-scope-chip]")) {
+    chip.hidden = scope.size === 0;
+    chip.textContent =
+      scope.size === 1 ? [...scope][0] : `${scope.size} sources`;
+    chip.title = `Answers are drawn from ${[...scope].join(", ")}. Click to use everything.`;
+  }
+
   const status = $("[data-library-status]");
   if (!status) return;
   const n = (x) => x.toLocaleString();
@@ -165,7 +199,26 @@ function renderLibrary(event) {
   }
 }
 
+/** What is ticked now, read off the panel rather than kept in a second place
+ *  that could disagree with it. */
+function pickedSources() {
+  return $$("[data-library-pick]")
+    .filter((box) => box.checked)
+    .map((box) => box.dataset.libraryPick);
+}
+
+document.addEventListener("change", (e) => {
+  const pick = e.target.closest?.("[data-library-pick]");
+  if (pick) dispatch({ type: "setLibraryScope", sources: pickedSources() });
+});
+
 document.addEventListener("click", (e) => {
+  // The chip in the composer and the button in the panel do the same thing:
+  // stop narrowing. An empty selection is "no restriction".
+  if (e.target.closest?.("[data-library-all]") || e.target.closest?.("[data-scope-chip]")) {
+    dispatch({ type: "setLibraryScope", sources: [] });
+    return;
+  }
   if (e.target.closest?.("[data-library-refresh]")) {
     dispatch({ type: "refreshLibrary" });
     return;

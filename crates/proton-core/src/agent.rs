@@ -362,10 +362,30 @@ impl Agent {
                             "description": "Terms to look for. Matching is lexical, so the exact \
                                             words matter: prefer the terms the notes would use."
                         },
-                        "limit": { "type": "integer", "description": "Defaults to 6." }
+                        "limit": { "type": "integer", "description": "Defaults to 6." },
+                        "sources": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Narrow to these folders of the library, named as \
+                                            list_sources gives them. Use it when the question \
+                                            belongs to one subject: the library spans several, \
+                                            matching is by word rather than by topic, and the \
+                                            same term means different things in different \
+                                            fields. Omit to use whatever the user has selected \
+                                            in the sources panel, which is usually right."
+                        }
                     },
                     "required": ["query"]
                 }),
+            },
+            Tool {
+                name: "list_sources".into(),
+                description: "The folders the user's library is made of, with how many documents \
+                              and passages are in each. Call this when a question clearly \
+                              belongs to one subject and you want to narrow search_library to \
+                              it — you cannot name a folder you have not seen listed."
+                    .into(),
+                input_schema: json!({ "type": "object", "properties": {} }),
             },
             Tool {
                 name: "diagnostics".into(),
@@ -856,7 +876,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 10);
+        assert_eq!(tools.len(), 11);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the

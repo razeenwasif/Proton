@@ -409,6 +409,110 @@ fn the_panel_is_told_how_far_a_long_walk_has_got() {
     assert_eq!((read, found), (2, 2), "the two notes in the fixture vault");
 }
 
+fn sources(space: &mut Workspace) -> Vec<(String, usize)> {
+    space
+        .apply(Command::Sync)
+        .iter()
+        .find_map(|event| match event {
+            Event::Library { sources, .. } => Some(
+                sources
+                    .iter()
+                    .map(|s| (s.path.clone(), s.documents))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn the_panel_is_told_which_folders_the_library_is_made_of() {
+    let (mut space, _project, vault) = open("sources");
+    point_at(&mut space, &[&vault]);
+    assert_eq!(
+        sources(&mut space),
+        [("01 - Systems".to_string(), 1), ("02 - ML".to_string(), 1)]
+    );
+}
+
+#[test]
+fn narrowing_to_a_folder_changes_what_comes_back() {
+    // The whole point. BM25 knows which words are rare, not which subject
+    // they belong to, so a term that appears in two fields reaches both.
+    let (mut space, _project, vault) = open("narrow");
+    point_at(&mut space, &[&vault]);
+    assert!(search(&mut space, "cache line").contains("01 - Systems"));
+
+    space.apply(Command::SetLibraryScope {
+        sources: vec!["02 - ML".into()],
+    });
+    let answer = search(&mut space, "cache line");
+    assert!(!answer.contains("01 - Systems"), "{answer}");
+    // And it says which shelf it asked, because the likeliest reason an
+    // answer is empty is that the question went to the wrong one.
+    assert!(answer.contains("within 02 - ML"), "{answer}");
+}
+
+#[test]
+fn widening_again_is_an_empty_selection() {
+    // A panel with no ticks is "no restriction", not "no sources" — the
+    // alternative is an editor that answers nothing until configured.
+    let (mut space, _project, vault) = open("widen");
+    point_at(&mut space, &[&vault]);
+    space.apply(Command::SetLibraryScope {
+        sources: vec!["02 - ML".into()],
+    });
+    assert!(!search(&mut space, "cache line").contains("01 - Systems"));
+
+    space.apply(Command::SetLibraryScope { sources: vec![] });
+    assert!(search(&mut space, "cache line").contains("01 - Systems"));
+}
+
+#[test]
+fn the_scope_survives_a_restart() {
+    // Somebody working through one subject for a week should not re-tick it
+    // every morning. It lives in the settings file for the same reason
+    // everything else here does.
+    let (mut space, project, vault) = open("persist");
+    point_at(&mut space, &[&vault]);
+    space.apply(Command::SetLibraryScope {
+        sources: vec!["02 - ML".into()],
+    });
+
+    let mut again = Workspace::rooted(&project);
+    settle(&mut again);
+    let answer = search(&mut again, "cache line");
+    assert!(!answer.contains("01 - Systems"), "{answer}");
+}
+
+#[test]
+fn the_model_can_narrow_for_itself_when_it_knows_better() {
+    // The user's choice is the default because they made it in a panel they
+    // can see. A model that has worked out the question is about one subject
+    // can still say so.
+    let (mut space, _project, vault) = open("model-scope");
+    point_at(&mut space, &[&vault]);
+
+    let answer = space
+        .run_tool(
+            "search_library",
+            &json!({ "query": "cache line", "sources": ["01 - Systems"] }),
+        )
+        .unwrap();
+    assert!(answer.contains("01 - Systems/Caching.md"), "{answer}");
+}
+
+#[test]
+fn the_model_can_ask_what_the_folders_are() {
+    // It cannot narrow to a folder it has no way to learn the name of.
+    let (mut space, _project, vault) = open("list");
+    point_at(&mut space, &[&vault]);
+    let listed = space.run_tool("list_sources", &json!({})).unwrap();
+    assert!(listed.contains("01 - Systems"), "{listed}");
+    assert!(listed.contains("02 - ML"), "{listed}");
+    assert!(listed.contains("document"), "{listed}");
+}
+
 #[test]
 fn refreshing_with_no_roots_says_where_to_add_one() {
     let (mut space, _project, _vault) = open("refresh-empty");

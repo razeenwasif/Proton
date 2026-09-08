@@ -358,6 +358,7 @@
                 <select class="model-pick" data-model-pick title="Which model answers. Blank uses the provider's default."></select>
                 <span class="select" data-mention="@selection" title="Send the selected text with the question">@selection</span>
                 <span class="select" data-mention="@dataframe" title="Send the selected cell's table with the question">@dataframe</span>
+                <span class="select scope-chip" data-scope-chip hidden></span>
                 <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
                 <span class="send" data-agent-send role="button" tabindex="0"
                       aria-label="Send"><svg class="i" width="13" height="13"><use href="#i-arrow-up"/></svg></span>
@@ -1112,6 +1113,12 @@
             <input type="text" data-library-new spellcheck="false" placeholder="C:\Users\you\Vault  or  ~/Vault">
             <button class="btn" data-library-add>Add</button>
           </div>
+        </div>
+        <div class="setting">
+          <h4>Sources</h4>
+          <p>Which parts of the library a question may draw on. Nothing ticked means all of it. Narrowing is worth doing when a question belongs to one subject: matching is by word rather than by topic, so the same term reaches every field that uses it — <em>convergence</em> finds optimisation, training and numerical methods at once.</p>
+          <div data-library-sources></div>
+          <button class="btn" data-library-all>Use everything</button>
         </div>
         <div class="setting">
           <h4>PDFs</h4>
