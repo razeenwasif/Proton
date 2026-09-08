@@ -4329,6 +4329,7 @@ dependencies = [
  "proton-dap",
  "proton-data",
  "proton-design",
+ "proton-game",
  "proton-index",
  "proton-library",
  "proton-lsp",
@@ -4375,6 +4376,14 @@ dependencies = [
 
 [[package]]
 name = "proton-design"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "ts-rs",
+]
+
+[[package]]
+name = "proton-game"
 version = "0.0.1"
 dependencies = [
  "serde",

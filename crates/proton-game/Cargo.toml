@@ -1,0 +1,12 @@
+[package]
+name = "proton-game"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Game mode's document: a Godot scene, read and written without reformatting it."
+
+[dependencies]
+serde = { workspace = true }
+ts-rs = { workspace = true }

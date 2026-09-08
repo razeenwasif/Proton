@@ -297,6 +297,54 @@ if (HAS_SHELL) {
     },
   ];
 
+  // A Godot scene for the hierarchy, so Game mode can be designed against a
+  // real tree. Written out like every other fixture here; the real one is read
+  // from a `.tscn` by proton-game.
+  const levelSource = `[gd_scene load_steps=2 format=3 uid="uid://bq2x8k1n0v"]
+
+[ext_resource type="Texture2D" path="res://art/tiles.png" id="1_x8k"]
+
+[node name="World" type="Node2D"]
+
+[node name="Player" type="CharacterBody2D" parent="."]
+position = Vector2(196, 286)
+speed = 400.0
+
+[node name="Sprite" type="Sprite2D" parent="Player"]
+texture = ExtResource("1_x8k")
+
+[node name="Camera" type="Camera2D" parent="."]
+`;
+
+  const level = {
+    path: "C:/game/scenes/world.tscn",
+    problem: "",
+    selected: -1,
+    source: levelSource,
+    nodes: [
+      { name: "World", kind: "Node2D", path: "", parent: "", depth: 0, children: 2, line: 5,
+        properties: [] },
+      { name: "Player", kind: "CharacterBody2D", path: "Player", parent: ".", depth: 1,
+        children: 1, line: 7,
+        properties: [{ name: "position", value: "Vector2(196, 286)", line: 8 },
+                     { name: "speed", value: "400.0", line: 9 }] },
+      { name: "Sprite", kind: "Sprite2D", path: "Player/Sprite", parent: "Player", depth: 2,
+        children: 0, line: 11,
+        properties: [{ name: "texture", value: 'ExtResource("1_x8k")', line: 12 }] },
+      { name: "Camera", kind: "Camera2D", path: "Camera", parent: ".", depth: 1,
+        children: 0, line: 14, properties: [] },
+    ],
+  };
+
+  const levelEvent = () => ({
+    type: "level",
+    path: level.path,
+    nodes: level.nodes,
+    source: level.source,
+    selected: level.selected,
+    problem: level.problem,
+  });
+
   const sceneEvent = () => ({
     type: "scene",
     materials,
@@ -487,6 +535,7 @@ if (HAS_SHELL) {
         themeEvent(),
         artboardEvent(),
         sceneEvent(),
+        levelEvent(),
         settingsEvent(),
         chatsEvent(),
       ];
@@ -522,6 +571,22 @@ if (HAS_SHELL) {
       const hit = chats.conversations.find((c) => c.path === command.path);
       if (hit) hit.title = command.title;
       return [chatsEvent()];
+    }
+    if (command.type === "selectGameNode") {
+      level.selected = command.index;
+      return [levelEvent()];
+    }
+    if (command.type === "setGameProperty") {
+      const node = level.nodes[command.index];
+      const prop = node?.properties.find((one) => one.name === command.name);
+      if (prop) {
+        level.source = level.source.replace(
+          `${prop.name} = ${prop.value}`,
+          `${prop.name} = ${command.value}`,
+        );
+        prop.value = command.value;
+      }
+      return [levelEvent()];
     }
     if (command.type === "selectNode") {
       scene.selected = command.index;

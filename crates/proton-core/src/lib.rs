@@ -16,6 +16,7 @@ pub mod design;
 pub mod editor;
 pub mod ex;
 pub mod folder;
+pub mod game;
 pub mod git;
 pub mod highlights;
 pub mod key;

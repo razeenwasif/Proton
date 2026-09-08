@@ -11,6 +11,7 @@ import type { DebugPhase } from "./DebugPhase";
 import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
+import type { GameNode } from "./GameNode";
 import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
 import type { Layer } from "./Layer";
@@ -281,7 +282,27 @@ problem: string,
  * one at a time would mean a round trip on every click in the
  * outliner.
  */
-materials: Array<Material>, } | { "type": "theme", 
+materials: Array<Material>, } | { "type": "level", 
+/**
+ * Empty when none is open.
+ */
+path: string, nodes: Array<GameNode>, 
+/**
+ * The file's text.
+ *
+ * Sent whole, like Design's component source and for the same reason:
+ * what Game mode can honestly show in the middle of the screen is
+ * Godot's file, until there is an engine process to run the scene.
+ */
+source: string, 
+/**
+ * Which one is selected, or `usize::MAX`.
+ */
+selected: number, 
+/**
+ * Why there is no scene, when there is a reason worth showing.
+ */
+problem: string, } | { "type": "theme", 
 /**
  * Empty when none is open, which is how the panel knows to say so.
  */

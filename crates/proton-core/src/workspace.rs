@@ -88,6 +88,8 @@ pub struct Workspace {
     library_scope: proton_library::Scope,
     /// The scene Modeling mode is editing.
     modeling: crate::modeling::Modeling,
+    /// The Godot scene Game mode is showing.
+    game: crate::game::Game,
     /// The local model that turns a question into a vector, when the settings
     /// name one. `None` is lexical search, which is a complete answer.
     embedder: Option<proton_library::Embedder>,
@@ -490,6 +492,7 @@ impl Workspace {
                     self.theme_event(),
                     self.artboard_event(),
                     self.scene_event(),
+                    self.level_event(),
                     self.settings_event(),
                     self.library_event(),
                     self.council_event(),
@@ -606,6 +609,39 @@ impl Workspace {
             }
 
             /* ── scenes ────────────────────────────────────── */
+            Command::OpenLevel { path } => {
+                let full = self.pickers.resolve(&path);
+                match self.game.open(&full) {
+                    Ok(()) => vec![self.level_event()],
+                    Err(why) => vec![self.level_event(), notice(why, NoticeLevel::Warn)],
+                }
+            }
+
+            Command::SelectGameNode { index } => match self.game.select(index) {
+                true => vec![self.level_event()],
+                false => Vec::new(),
+            },
+
+            Command::SetGameProperty { index, name, value } => {
+                let Some(node) = self.game.nodes().into_iter().nth(index) else {
+                    return vec![notice(
+                        format!("there is no node at row {index}"),
+                        NoticeLevel::Error,
+                    )];
+                };
+                match self.game.set_property(&node.path, &name, &value) {
+                    Ok(false) => Vec::new(),
+                    Ok(true) => {
+                        // Somebody else's file just moved on disk, so the
+                        // gutter, the tree and any buffer holding it are told.
+                        let mut events = vec![self.level_event(), self.repo_event()];
+                        events.extend(self.every_view());
+                        events
+                    }
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
+                }
+            }
+
             Command::OpenScene { path } => {
                 let full = self.pickers.resolve(&path);
                 // The event goes out either way: "that file is not a scene"
@@ -2072,6 +2108,10 @@ impl Workspace {
                 // has to reach the outliner.
                 if self.modeling.reload() {
                     events.push(self.scene_event());
+                }
+                // A `.tscn` is Godot's file, and Godot may be open beside us.
+                if self.game.reload() {
+                    events.push(self.level_event());
                 }
                 if self.design.reload() {
                     events.push(self.theme_event());
@@ -4582,6 +4622,20 @@ impl Workspace {
         }
     }
 
+    fn level_event(&self) -> Event {
+        Event::Level {
+            path: self
+                .game
+                .path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+            nodes: self.game.nodes(),
+            source: self.game.source(),
+            selected: self.game.selected(),
+            problem: self.game.problem().unwrap_or_default().to_string(),
+        }
+    }
+
     fn scene_event(&self) -> Event {
         Event::Scene {
             path: self
@@ -4831,6 +4885,18 @@ impl Workspace {
                 }
             }
             events.push(self.theme_event());
+        }
+        // Game goes looking on the same terms, once.
+        if mode == ModeId::Game && !self.game.is_open() {
+            if let Some(path) = crate::game::discover(self.pickers.root()) {
+                if self.game.open(&path).is_ok() {
+                    events.push(notice(
+                        format!("scene: {}", path.display()),
+                        NoticeLevel::Info,
+                    ));
+                }
+            }
+            events.push(self.level_event());
         }
         // Modeling goes looking on the same terms, once.
         if mode == ModeId::Modeling && !self.modeling.is_open() {

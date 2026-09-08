@@ -9,8 +9,8 @@ underneath all of them, and an agent that can act in any of them.
 **M0 through M7 are built**, and Modeling has its document, outliner,
 viewport and shader graph. The editor, Telescope and language servers, the
 agent, the Code Visualizer, the plugin host, Data mode and Design mode all
-ship. Game and Video are the ones still to come; each needs a renderer and
-each is a real project.
+ship, and Game reads and writes a Godot project's scenes. Video is the one
+still to come, and running a game engine is a real project of its own.
 
 ```bash
 cargo run -p proton-shell      # the app
@@ -45,6 +45,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-plugin/` | The Wasmtime host, WIT interfaces and capability grants |
 | `crates/proton-trace/` | The Code Visualizer client |
 | `crates/proton-design/` | Theme tokens and component markup, for Design mode |
+| `crates/proton-game/` | Godot `.tscn` scenes, for Game mode |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
 | `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, four live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
@@ -65,8 +66,10 @@ real component source and design tokens.
 **Modeling** · 3D — outliner, viewport and shader graph over a scene
 serialised to diffable JSON. Objects are drawn as proxies; there is no mesh
 loader yet, and the modifier stack is still to come.
-**Game** · hierarchy, play transport, inspector, profiler, hot reload, and an
-agent that verifies changes by replaying recorded input.
+**Game** · a Godot project's scene tree and an inspector that edits the
+`.tscn` without reformatting it. The play transport, profiler, hot reload and
+the agent that verifies changes by replaying recorded input all need an engine
+process, and wait on one.
 **Video** · media bin, program monitor, multitrack timeline, with generated
 assets always marked as generated.
 **Data** · notebook + SQL + dataframe grid + charts, with real cell lineage back
@@ -138,7 +141,13 @@ What it draws are *proxies* — a box where a mesh is, a frustum for a camera �
 because the format holds transforms and no geometry. There is no mesh loader
 and nothing renders a shader.
 
-Not yet real: the Game and Video modes, which are still hand-built screens
-behind a live statusline.
+Game reads a Godot project: `project.godot` says which scene starts, the
+hierarchy is that `.tscn`'s node tree, and the inspector edits it by splicing
+the file Godot will open next. What it cannot do is run one — the play
+transport, hot reload, the profiler and replaying recorded input all need an
+engine process on the other end of a pipe, and none of them is mimed.
+
+Not yet real: the Video mode, which is still a hand-built screen behind a live
+statusline.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.

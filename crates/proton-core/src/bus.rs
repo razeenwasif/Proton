@@ -368,6 +368,22 @@ pub enum Command {
     },
 
     /* ── shader graphs ────────────────────────── */
+    /// Point Game mode at a `.tscn`. Answered with `Event::Level`.
+    OpenLevel {
+        path: String,
+    },
+    /// Pick a node — a click in the hierarchy.
+    SelectGameNode {
+        index: usize,
+    },
+    /// Change one property on the node at `index`.
+    #[serde(rename_all = "camelCase")]
+    SetGameProperty {
+        index: usize,
+        name: String,
+        value: String,
+    },
+
     /// Change one setting on one node of a material's graph.
     SetMaterialParam {
         material: String,
@@ -912,6 +928,26 @@ pub enum Event {
         /// one at a time would mean a round trip on every click in the
         /// outliner.
         materials: Vec<proton_scene::Material>,
+    },
+    /// The Godot scene Game mode is showing.
+    ///
+    /// `Level` rather than `Scene`, because `Event::Scene` is Modeling's and
+    /// two events with one name is a front end that draws the wrong panel.
+    #[serde(rename_all = "camelCase")]
+    Level {
+        /// Empty when none is open.
+        path: String,
+        nodes: Vec<proton_game::GameNode>,
+        /// The file's text.
+        ///
+        /// Sent whole, like Design's component source and for the same reason:
+        /// what Game mode can honestly show in the middle of the screen is
+        /// Godot's file, until there is an engine process to run the scene.
+        source: String,
+        /// Which one is selected, or `usize::MAX`.
+        selected: usize,
+        /// Why there is no scene, when there is a reason worth showing.
+        problem: String,
     },
     /// The theme Design mode is editing.
     #[serde(rename_all = "camelCase")]

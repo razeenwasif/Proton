@@ -2003,6 +2003,122 @@ function artboardDoc(source, isDocument, vars, pick, nonce) {
     : source.slice(0, at) + csp + style + source.slice(at) + picker;
 }
 
+/* ── Game's hierarchy ────────────────────────────────
+
+   Every row is a node really in the project's `.tscn`. The inspector edits
+   Godot's file by splicing it; the pane in the middle shows the file's text,
+   which is the honest thing to show until there is an engine on the other end
+   of a pipe to actually run the scene. */
+
+let lastLevel = null;
+
+function renderHierarchy(event) {
+  const box = $("[data-hierarchy]");
+  if (!box) return;
+  const count = $("[data-level-count]");
+  const nodes = event.nodes ?? [];
+  if (count) count.textContent = nodes.length ? `${nodes.length}` : "";
+
+  const file = $("[data-level-file]");
+  if (file) {
+    file.textContent = event.path ? event.path.split(/[\\/]/).pop() : "no scene";
+    file.className = "chip" + (event.path ? " accent" : "");
+  }
+
+  if (!nodes.length) {
+    box.innerHTML = `<div class="empty">${escapeHtml(
+      event.problem || "No Godot scene in this project.",
+    )}</div>`;
+    return;
+  }
+
+  box.innerHTML = nodes
+    .map((node, i) => {
+      const kids = node.children
+        ? `<span class="node-kids">${node.children}</span>`
+        : "";
+      // The Godot class beside the name, quiet, because in a Godot hierarchy
+      // that is how you tell a Sprite2D from an AnimatedSprite2D when both
+      // are called "Sprite".
+      return (
+        `<div class="row scene-node${i === event.selected ? " sel" : ""}" data-level-node="${i}"` +
+        ` style="padding-left:${8 + node.depth * 12}px"` +
+        ` title="${escapeHtml(node.kind || "instance")} · line ${node.line}">` +
+        `${escapeHtml(node.name)}<span class="lay-text">${escapeHtml(node.kind)}</span>` +
+        `<span class="grow"></span>${kids}</div>`
+      );
+    })
+    .join("");
+}
+
+/** The selected node's properties, exactly as Godot wrote their values. */
+function renderLevelInspector(event) {
+  const box = $("[data-level-props]");
+  const nothing = $("[data-level-empty]");
+  if (!box || !nothing) return;
+
+  const node = event.nodes?.[event.selected];
+  const picked = $("[data-level-selected]");
+  if (picked) picked.textContent = node ? `${node.kind} · ${node.name}` : "";
+  const kind = $("[data-level-kind]");
+  if (kind) kind.textContent = node?.kind ?? "";
+
+  box.hidden = !node;
+  nothing.hidden = !!node;
+  if (!node) return;
+
+  if (!node.properties.length) {
+    box.innerHTML = `<div class="empty">This node sets no properties.</div>`;
+    return;
+  }
+  // One text box per value, because a `.tscn` value is an expression —
+  // `Vector2(196, 286)`, `ExtResource("1_x8k")` — and a widget per type would
+  // have to understand a language this deliberately does not parse.
+  box.innerHTML = node.properties
+    .map(
+      (p) =>
+        `<div class="prop-row"><span class="lbl" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>` +
+        `<input class="num" data-level-prop="${escapeHtml(p.name)}" spellcheck="false"` +
+        ` style="text-align:left" value="${escapeHtml(p.value)}"></div>`,
+    )
+    .join("");
+}
+
+/** The scene file itself, which is what Game mode can honestly show. */
+function renderLevelSource(event) {
+  const box = $("[data-level-source]");
+  if (!box) return;
+  if (!event.path) {
+    box.innerHTML = `<div class="empty">${escapeHtml(
+      event.problem || "No Godot scene in this project.",
+    )}</div>`;
+    return;
+  }
+  box.innerHTML =
+    `<div class="level-note">Godot's file. Running the scene, hot reload and the ` +
+    `profiler need an engine process; there is not one.</div>` +
+    `<pre class="level-src">${escapeHtml(event.source ?? "")}</pre>`;
+}
+
+document.addEventListener("click", (e) => {
+  const row = e.target.closest?.("[data-level-node]");
+  if (!row) return;
+  dispatch({ type: "selectGameNode", index: Number(row.dataset.levelNode) });
+});
+
+document.addEventListener("change", (e) => {
+  const field = e.target.closest?.("[data-level-prop]");
+  if (!field) return;
+  const index = lastLevel?.selected;
+  if (index === undefined || index < 0) return;
+  dispatch({
+    type: "setGameProperty",
+    index,
+    name: field.dataset.levelProp,
+    value: field.value,
+  });
+});
+
 /* ── Modeling's outliner ────────────────────────────────
 
    Every row is an object really in `scene.proton.json`. Clicking one selects
@@ -4009,6 +4125,13 @@ onEvent((event) => {
 
     case "council":
       renderCouncil(event);
+      break;
+
+    case "level":
+      lastLevel = event;
+      renderHierarchy(event);
+      renderLevelInspector(event);
+      renderLevelSource(event);
       break;
 
     case "scene":
