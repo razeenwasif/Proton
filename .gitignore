@@ -15,3 +15,7 @@ node_modules
 # designed to be committable — a team that wants the same editor can — but
 # that is a decision somebody makes, not something `git add -A` does.
 .proton/settings.json
+# Same again, and swept in by exactly the `git add -A` that line warns about.
+# It registers this checkout's `proton-mcp.exe` with the Codex CLI by absolute
+# path, so it is true on one machine and wrong on every other.
+.codex/
