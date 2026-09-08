@@ -2,11 +2,11 @@
 //!
 //! M7's exit is stated in two directions: editing a token in the inspector
 //! changes `theme.css`, and editing the component in Codex updates the
-//! artboard. The artboard does not exist yet, but the *file* half of both
-//! directions does, and it is what everything drawn later will sit on:
+//! artboard. Both are here now:
 //!
-//! - a token set through the inspector reaches the disk, and
-//! - the same file saved as text in Codex reaches the inspector.
+//! - a token set through the inspector reaches the disk,
+//! - the same file saved as text in Codex reaches the inspector, and
+//! - a component saved in Codex reaches the artboard.
 //!
 //! The thing worth guarding hardest is that neither direction reformats. A
 //! palette editor that rewrote the stylesheet would make every colour tweak a
@@ -14,7 +14,15 @@
 //! project is built on.
 
 use proton_core::bus::Event;
+use proton_core::key::Key;
 use proton_core::{Command, ModeId, Workspace};
+
+/// Type, the way somebody types.
+fn keys(space: &mut Workspace, text: &str) {
+    for c in text.chars() {
+        space.apply(Command::Key { key: Key::char(c) });
+    }
+}
 
 const SHEET: &str = r#"/* The project's palette. */
 :root {
@@ -42,6 +50,35 @@ fn open(name: &str) -> (Workspace, std::path::PathBuf) {
     std::fs::write(&path, SHEET).unwrap();
 
     (Workspace::rooted(&root), path)
+}
+
+/// The same, with a component for the artboard to draw.
+fn open_with_component(name: &str, markup: &str) -> (Workspace, std::path::PathBuf) {
+    let (_space, theme) = open(name);
+    let root = theme.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(root.join("components")).unwrap();
+    let path = root.join("components").join("card.html");
+    std::fs::write(&path, markup).unwrap();
+    // Rebuilt so the walk that looks for a component sees the one just
+    // written — `open` made the workspace before this existed.
+    (Workspace::rooted(&root), path)
+}
+
+/// What the artboard would draw.
+fn artboard(space: &mut Workspace) -> (String, String, String) {
+    space
+        .apply(Command::Sync)
+        .iter()
+        .find_map(|event| match event {
+            Event::Artboard {
+                path,
+                source,
+                problem,
+                ..
+            } => Some((path.clone(), source.clone(), problem.clone())),
+            _ => None,
+        })
+        .expect("an artboard event")
 }
 
 /// The tokens the inspector would draw.
@@ -267,4 +304,98 @@ fn design_mode_does_not_take_css_away_from_the_editor() {
         .text()
         .to_string()
         .contains("--accent"));
+}
+
+#[test]
+fn entering_design_mode_finds_a_component_for_the_artboard() {
+    // Same reasoning as finding the theme: an artboard that is blank until
+    // somebody navigates to their own file is a worse first run than one that
+    // guesses at a conventional place and shows what it picked.
+    let (mut space, path) = open_with_component("find-component", "<div class=card>Hi</div>");
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+
+    let (shown, source, problem) = artboard(&mut space);
+    assert!(problem.is_empty(), "{problem}");
+    assert!(
+        shown.ends_with("card.html"),
+        "{shown} — wanted {}",
+        path.display()
+    );
+    assert_eq!(source, "<div class=card>Hi</div>");
+}
+
+#[test]
+fn a_component_saved_in_codex_reaches_the_artboard() {
+    // The direction the milestone is stated in, and the one that cannot be
+    // faked: the file is edited as text in the editor, saved, and the artboard
+    // has to be holding the new markup afterwards.
+    let (mut space, path) = open_with_component("codex-to-artboard", "<div>before</div>");
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+    assert_eq!(artboard(&mut space).1, "<div>before</div>");
+
+    // Opened, edited and saved the way any other file is: real keystrokes
+    // through the editor, not a write behind its back. `o` opens a line below
+    // and starts insert.
+    // In Codex, because that is where the milestone says the editing happens
+    // and because keystrokes in Design mode belong to the inspector.
+    space.apply(Command::SetMode {
+        mode: ModeId::Codex,
+    });
+    space.apply(Command::OpenBuffer {
+        path: path.display().to_string(),
+    });
+    keys(&mut space, "o<p>added</p>");
+    space.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+    space.apply(Command::Save);
+
+    let (_, source, problem) = artboard(&mut space);
+    assert!(problem.is_empty(), "{problem}");
+    assert!(
+        source.contains("<p>added</p>"),
+        "the artboard is still showing the file as it was when Design mode \
+         opened: {source:?}"
+    );
+}
+
+#[test]
+fn a_component_that_needs_building_says_so_on_the_artboard() {
+    // The answer belongs where somebody is looking for the component. A blank
+    // artboard would read as "your component renders to nothing", which is a
+    // different and much more alarming thing than "this file is JSX".
+    let (mut space, _) = open_with_component("needs-building", "<div>fine</div>");
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+    space.apply(Command::ShowComponent {
+        path: "components/Card.jsx".into(),
+    });
+
+    let (_, source, problem) = artboard(&mut space);
+    assert!(source.is_empty(), "it drew something it cannot render");
+    assert!(problem.contains("built"), "{problem}");
+}
+
+#[test]
+fn the_artboard_sends_source_rather_than_anything_rendered() {
+    // The security property the iframe depends on. If the core ever starts
+    // handing the shell assembled markup, the temptation to write it straight
+    // into the document — where `window.__TAURI__` lives — becomes very hard
+    // to resist. What crosses the seam is the file, byte for byte.
+    let markup = "<div>\n  <script>alert(1)</script>\n</div>";
+    let (mut space, _) = open_with_component("verbatim", markup);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+
+    assert_eq!(
+        artboard(&mut space).1,
+        markup,
+        "the core altered the source on its way out"
+    );
 }

@@ -1779,6 +1779,9 @@ let artboardScope = null;
 /** Artboard width in px; 0 fills the pane. */
 let artboardWidth = 0;
 let artboardPainted = null;
+/** The component the artboard is drawing, kept because the palette and the
+    markup arrive in separate events and the frame needs both. */
+let lastArtboard = null;
 
 /**
  * The tokens in force for a scope.
@@ -1847,6 +1850,58 @@ function renderPalettes(event) {
     .join("");
 }
 
+/* ── The component on the artboard ───────────────────────────────
+
+   ## Why this is an iframe and not a div
+
+   The source is somebody's file. It arrives from disk, it may have come from
+   a teammate or a template, and `tauri.conf.json` sets `withGlobalTauri`,
+   which puts `window.__TAURI__` — the filesystem, the shell — in this
+   document. Writing that markup into this document with `innerHTML` would
+   hand anything in it those keys. That is not a hypothetical about malice; a
+   component that pulls in an analytics snippet is enough.
+
+   A frame with an opaque origin cannot reach any of it. It also stops
+   Proton's own stylesheet leaking into the preview, which a div cannot: the
+   whole point of the artboard is to show what the component looks like with
+   *its* theme, not with the editor's.
+
+   ## Scripts do not run, deliberately
+
+   `sandbox=""` — no flags at all — is the strictest setting: no scripts, no
+   forms, no navigation, opaque origin. A preview of layout and palette does
+   not need behaviour, and starting closed and opening deliberately is the
+   right order for a thing that renders other people's files. The CSP inside
+   the document is the second lock: no network, so a preview cannot phone
+   home or leak the fact that a file was opened.
+
+   Both are worth revisiting when the artboard grows interaction. Neither is
+   worth loosening quietly. */
+
+/** The document to put in the frame: the component, wrapped in its palette. */
+function artboardDoc(source, isDocument, vars) {
+  // `default-src 'none'` and no `script-src` means nothing loads and nothing
+  // runs; styles and data: images are what a preview actually needs.
+  const csp =
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; ` +
+    `style-src 'unsafe-inline'; img-src data:; font-src data:">`;
+  const style =
+    `<style>:root{${vars}}` +
+    `html,body{margin:0}` +
+    `body{background:var(--bg,#16161e);color:var(--ink,#c0caf5);` +
+    `font:14px/1.5 system-ui,sans-serif;padding:18px}</style>`;
+
+  if (!isDocument) {
+    return `<!doctype html><html><head><meta charset="utf-8">${csp}${style}</head>` +
+      `<body>${source}</body></html>`;
+  }
+  // A whole page brings its own head, so the palette goes in at the end of it
+  // and wins over what the page set. A page with no head at all is rendered as
+  // written rather than guessed at.
+  const at = source.search(/<\/head>/i);
+  return at === -1 ? source + style : source.slice(0, at) + csp + style + source.slice(at);
+}
+
 function renderArtboard(event) {
   const board = $("[data-artboard]");
   if (!board) return;
@@ -1886,7 +1941,11 @@ function renderArtboard(event) {
   }
 
   const palette = resolveScope(event.tokens, artboardScope);
-  const key = JSON.stringify([[...palette], artboardWidth]);
+  const shown = lastArtboard || {};
+  const key = JSON.stringify([[...palette], artboardWidth, shown.path, shown.source, shown.problem]);
+  // Repainted only when something it draws actually changed. The frame is
+  // reloaded by writing `srcdoc`, and reloading it on every heartbeat would
+  // reset a scroll position somebody was reading from.
   if (key === artboardPainted) return;
   artboardPainted = key;
 
@@ -1900,6 +1959,22 @@ function renderArtboard(event) {
     `${vars}; background: var(--bg, #16161e); color: var(--ink, #c0caf5)` +
       (artboardWidth ? `; width: ${artboardWidth}px; max-width: 100%` : ""),
   );
+
+  // A component, if one is on the artboard. The swatches below are what a
+  // project with no component gets — a palette is still worth looking at.
+  if (shown.source) {
+    const frame = document.createElement("iframe");
+    frame.className = "ab-frame";
+    frame.setAttribute("sandbox", "");
+    frame.setAttribute("title", "component preview");
+    frame.srcdoc = artboardDoc(shown.source, shown.document, vars);
+    board.replaceChildren(frame);
+    return;
+  }
+  if (shown.problem) {
+    board.innerHTML = `<div class="empty">${escapeHtml(shown.problem)}</div>`;
+    return;
+  }
 
   const colours = [...palette].filter(([, value]) => swatchable(value));
   const swatches = colours
@@ -3210,6 +3285,13 @@ onEvent((event) => {
 
     case "council":
       renderCouncil(event);
+      break;
+
+    case "artboard":
+      lastArtboard = event;
+      // Drawn from the theme event, which carries the palette. Nothing to
+      // paint on until one has arrived; the next one will pick this up.
+      if (lastTheme) renderArtboard(lastTheme);
       break;
 
     case "theme":

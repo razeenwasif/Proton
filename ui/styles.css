@@ -965,6 +965,15 @@ kbd {
   width: 100%; max-width: 720px; background: #fbfbfd; color: #14161d; border-radius: 12px;
   padding: 24px; box-shadow: 0 30px 70px -26px rgba(0, 0, 0, 0.8); position: relative;
 }
+/* The component preview. It brings its own background from its own palette,
+   so the artboard's padding would frame it in the wrong colour — the frame
+   fills the board instead. */
+.ab-frame {
+  display: block; width: 100%; min-height: 420px; border: 0; border-radius: 12px;
+  background: transparent; color-scheme: normal;
+}
+.artboard:has(> .ab-frame) { padding: 0; background: transparent; }
+
 .artboard h2 { margin: 6px 0 15px; font: 700 25px/1.15 var(--sans); }
 .artboard .eyebrow { font-size: 11px; color: #6b7280; }
 .ab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

@@ -28,6 +28,8 @@
 //! Three tokens named `--bg` that are one token would be a palette that could
 //! only be edited in whichever place happened to be found first.
 
+mod component;
 mod theme;
 
+pub use component::{is_markup, Component};
 pub use theme::{Theme, Token};

@@ -203,6 +203,42 @@ if (HAS_SHELL) {
     problem: theme.problem,
   });
 
+  // A component for the artboard, so Design mode can be designed against
+  // something with real markup in it rather than an empty frame. It names
+  // tokens through `var()` with fallbacks, the way somebody else's component
+  // would — the artboard has to look right against a palette it did not
+  // choose.
+  const component = {
+    path: "C:/proton/ui/components/card.html",
+    document: false,
+    problem: "",
+    source: [
+      '<article class="card">',
+      '  <h3>Pricing</h3>',
+      '  <p>A component file, drawn with the project\u2019s own palette.</p>',
+      '  <button>Choose plan</button>',
+      '</article>',
+      '<style>',
+      '  .card { max-width: 340px; padding: 20px; border-radius: 12px;',
+      '          border: 1px solid var(--accent, #7aa2f7);',
+      '          background: var(--bg-deep, #0f0f16); }',
+      '  .card h3 { margin: 0 0 6px; color: var(--accent, #7aa2f7); }',
+      '  .card p { margin: 0 0 14px; opacity: .8; }',
+      '  .card button { border: 0; border-radius: 7px; padding: 9px 16px;',
+      '                 font: 600 13px system-ui;',
+      '                 background: var(--accent, #7aa2f7); color: var(--bg, #16161e); }',
+      '</style>',
+    ].join("\n"),
+  };
+
+  const artboardEvent = () => ({
+    type: "artboard",
+    path: component.path,
+    source: component.source,
+    document: component.document,
+    problem: component.problem,
+  });
+
   const notebookEvent = () => ({
     type: "notebook",
     path: notebook.path,
@@ -372,6 +408,7 @@ if (HAS_SHELL) {
         pluginsEvent(),
         notebookEvent(),
         themeEvent(),
+        artboardEvent(),
         settingsEvent(),
         chatsEvent(),
       ];

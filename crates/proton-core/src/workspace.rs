@@ -486,6 +486,7 @@ impl Workspace {
                     // something happened to change a cell.
                     self.notebook_event(),
                     self.theme_event(),
+                    self.artboard_event(),
                     self.settings_event(),
                     self.library_event(),
                     self.council_event(),
@@ -589,6 +590,18 @@ impl Workspace {
             Command::SelectToken { index } => {
                 self.design.select(index);
                 vec![self.theme_event()]
+            }
+
+            Command::ShowComponent { path } => {
+                let full = self.pickers.resolve(&path);
+                // The event goes out either way. A failure is a thing to draw
+                // on the artboard — "that file has to be built first" belongs
+                // where somebody is looking for the component, not only in a
+                // notice.
+                match self.design.show(&full) {
+                    Ok(()) => vec![self.artboard_event()],
+                    Err(why) => vec![self.artboard_event(), notice(why, NoticeLevel::Warn)],
+                }
             }
 
             /* ── settings ──────────────────────────────────── */
@@ -1930,6 +1943,11 @@ impl Workspace {
                 // when Design mode was opened.
                 if self.design.reload() {
                     events.push(self.theme_event());
+                    // *Editing the component in Codex updates the artboard* —
+                    // the half of M7 that runs in this direction. The saved
+                    // file is usually the one on the artboard, and `reload`
+                    // has already decided whether anything actually moved.
+                    events.push(self.artboard_event());
                 }
                 // On by default: a formatter configured and not run is the
                 // surprise, not the other way round. Off is for a project
@@ -4378,6 +4396,20 @@ impl Workspace {
     }
 
     /// What Design mode's inspector draws.
+    fn artboard_event(&self) -> Event {
+        let component = self.design.component();
+        Event::Artboard {
+            path: component
+                .map(|one| one.path().display().to_string())
+                .unwrap_or_default(),
+            source: component
+                .map(|one| one.source().to_string())
+                .unwrap_or_default(),
+            document: component.is_some_and(|one| one.is_document()),
+            problem: self.design.trouble().unwrap_or_default().to_string(),
+        }
+    }
+
     fn theme_event(&self) -> Event {
         Event::Theme {
             path: self
@@ -4597,6 +4629,15 @@ impl Workspace {
                 }
             }
             events.push(self.theme_event());
+        }
+        // The artboard goes looking on the same terms, and separately: a
+        // project can have a palette and no component, or a component and no
+        // palette, and neither absence should stop the other being found.
+        if mode == ModeId::Design && self.design.component().is_none() {
+            if let Some(path) = crate::design::discover_component(self.pickers.root()) {
+                let _ = self.design.show(&path);
+            }
+            events.push(self.artboard_event());
         }
         events
     }

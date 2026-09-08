@@ -221,7 +221,29 @@ meaning: string,
  * Whether the vectors are still being made. The panel says so; the
  * distinction between "not yet" and "never" is the whole point.
  */
-learning: boolean, } | { "type": "theme", 
+learning: boolean, } | { "type": "artboard", 
+/**
+ * Empty when nothing is on the artboard.
+ */
+path: string, 
+/**
+ * The markup, exactly as the file has it.
+ *
+ * Sent as source rather than as anything pre-rendered, because the
+ * only safe place to render it is inside a sandboxed frame in the
+ * webview — the core has no business building markup, and the shell
+ * must not be handed something that looks ready to inject.
+ */
+source: string, 
+/**
+ * Whether the source is a whole page, which is wrapped differently
+ * from a fragment.
+ */
+document: boolean, 
+/**
+ * Why there is nothing to draw, when there is a reason worth showing.
+ */
+problem: string, } | { "type": "theme", 
 /**
  * Empty when none is open, which is how the panel knows to say so.
  */

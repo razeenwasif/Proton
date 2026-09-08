@@ -23,7 +23,7 @@
 
 use std::path::{Path, PathBuf};
 
-use proton_design::{Theme, Token};
+use proton_design::{Component, Theme, Token};
 
 /// The theme that is open, and where the inspector is in it.
 #[derive(Debug, Default)]
@@ -34,6 +34,15 @@ pub struct Design {
     selected: usize,
     /// Why there is no theme, when there is a reason worth showing.
     problem: Option<String>,
+    /// The component the artboard draws, when one has been opened. Separate
+    /// from the theme because they are two files with two lifetimes: a project
+    /// has one palette and many components, and switching which component is
+    /// on the artboard must not disturb the palette being edited beside it.
+    component: Option<Component>,
+    /// Why there is no component. Kept apart from `problem` for the same
+    /// reason — "no theme" and "that file needs building first" are different
+    /// sentences about different halves of the screen.
+    trouble: Option<String>,
 }
 
 impl Design {
@@ -59,6 +68,38 @@ impl Design {
             .as_ref()
             .map(|theme| theme.tokens().to_vec())
             .unwrap_or_default()
+    }
+
+    /// The component on the artboard, if there is one.
+    pub fn component(&self) -> Option<&Component> {
+        self.component.as_ref()
+    }
+
+    pub fn trouble(&self) -> Option<&str> {
+        self.trouble.as_deref()
+    }
+
+    /// Put a component on the artboard.
+    ///
+    /// A failure is remembered rather than only returned: pointing the
+    /// artboard at a `.jsx` is an ordinary mistake, and the answer belongs on
+    /// the artboard where somebody is looking, not only in a notice that
+    /// scrolls away.
+    pub fn show(&mut self, path: &Path) -> Result<(), String> {
+        match Component::read(path) {
+            Ok(component) => {
+                self.component = Some(component);
+                self.trouble = None;
+                Ok(())
+            }
+            Err(why) => {
+                // The old component is dropped. Leaving it up would mean the
+                // artboard showing one file while the header named another.
+                self.component = None;
+                self.trouble = Some(why.clone());
+                Err(why)
+            }
+        }
     }
 
     /// Read a stylesheet as the theme.
@@ -120,6 +161,15 @@ impl Design {
     /// like any other file, and the inspector has to notice rather than keep
     /// showing the palette as it was when the mode was opened.
     pub fn reload(&mut self) -> bool {
+        // Both halves, and both asked every time — `||` would skip the second
+        // whenever the first had changed, which is exactly the save that
+        // touched a component and its stylesheet together.
+        let theme = self.reload_theme();
+        let component = self.reload_component();
+        theme || component
+    }
+
+    fn reload_theme(&mut self) -> bool {
         let Some(path) = self.path.clone() else {
             return false;
         };
@@ -134,6 +184,71 @@ impl Design {
         self.selected = self.selected.min(self.tokens().len().saturating_sub(1));
         true
     }
+
+    /// The half the milestone is stated in terms of: *editing the component in
+    /// Codex updates the artboard*.
+    fn reload_component(&mut self) -> bool {
+        let Some(path) = self.component.as_ref().map(|one| one.path().to_path_buf()) else {
+            return false;
+        };
+        match Component::read(&path) {
+            // Compared rather than assigned: this runs on every save in the
+            // project, and repainting the artboard for a save that touched
+            // something else would reload an iframe under somebody's cursor.
+            Ok(fresh) if self.component.as_ref() != Some(&fresh) => {
+                self.component = Some(fresh);
+                self.trouble = None;
+                true
+            }
+            Ok(_) => false,
+            // Deleted or renamed while open. Said, rather than leaving the
+            // last good render up as though it were still the file.
+            Err(why) => {
+                let changed = self.trouble.as_deref() != Some(why.as_str());
+                self.component = None;
+                self.trouble = Some(why);
+                changed
+            }
+        }
+    }
+}
+
+/// Look for a component to put on the artboard.
+///
+/// Shallow and conventional, like [`discover`]: the point is to have something
+/// on the artboard the first time Design mode is opened, not to guess right
+/// about somebody's project. Anything found here is a starting point they can
+/// change, and finding nothing is not a failure.
+pub fn discover_component(root: &Path) -> Option<PathBuf> {
+    // Components directories only. `ui/` and `src/` were in this list and are
+    // not any more: they hold entry points, and pointing a *component*
+    // artboard at a project's `index.html` puts the whole application shell on
+    // it. Finding nothing is the better answer — the artboard falls back to
+    // drawing the palette, which is still worth looking at.
+    const DIRS: &[&str] = &[
+        "components",
+        "ui/components",
+        "src/components",
+        "app/components",
+    ];
+
+    for dir in DIRS {
+        let Ok(entries) = std::fs::read_dir(root.join(dir)) else {
+            continue;
+        };
+        // Sorted, so the same project opens the same component twice. A
+        // directory listing is in whatever order the filesystem felt like.
+        let mut found: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file() && proton_design::is_markup(path))
+            .collect();
+        found.sort();
+        if let Some(first) = found.into_iter().next() {
+            return Some(first);
+        }
+    }
+    None
 }
 
 /// Look for a theme under the project.

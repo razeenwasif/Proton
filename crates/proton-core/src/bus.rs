@@ -313,6 +313,10 @@ pub enum Command {
     SelectToken {
         index: usize,
     },
+    /// Put a component on the artboard. Answered with `Event::Artboard`.
+    ShowComponent {
+        path: String,
+    },
 
     /* ── settings ──────────────────────────────────────────── */
     /// Change one setting, by dotted key. `null` clears it back to the
@@ -768,6 +772,30 @@ pub enum Event {
         /// Whether the vectors are still being made. The panel says so; the
         /// distinction between "not yet" and "never" is the whole point.
         learning: bool,
+    },
+    /// The component the artboard is drawing.
+    ///
+    /// Separate from `Theme` because they are two files that change for two
+    /// reasons: a token edit repaints the palette without touching the markup,
+    /// and a save in Codex repaints the markup without touching the palette.
+    /// One event for both would reload the component's iframe every time
+    /// somebody dragged a colour.
+    #[serde(rename_all = "camelCase")]
+    Artboard {
+        /// Empty when nothing is on the artboard.
+        path: String,
+        /// The markup, exactly as the file has it.
+        ///
+        /// Sent as source rather than as anything pre-rendered, because the
+        /// only safe place to render it is inside a sandboxed frame in the
+        /// webview — the core has no business building markup, and the shell
+        /// must not be handed something that looks ready to inject.
+        source: String,
+        /// Whether the source is a whole page, which is wrapped differently
+        /// from a fragment.
+        document: bool,
+        /// Why there is nothing to draw, when there is a reason worth showing.
+        problem: String,
     },
     /// The theme Design mode is editing.
     #[serde(rename_all = "camelCase")]
