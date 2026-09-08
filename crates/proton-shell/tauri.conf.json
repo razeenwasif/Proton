@@ -41,7 +41,8 @@
     "resources": {
       "../../vendor/code-visualizer/server": "code-visualizer/server",
       "../../vendor/code-visualizer/backends": "code-visualizer/backends",
-      "../../vendor/code-visualizer/examples": "code-visualizer/examples"
+      "../../vendor/code-visualizer/examples": "code-visualizer/examples",
+      "../../target/release/proton-mcp.exe": "proton-mcp.exe"
     }
   }
 }
