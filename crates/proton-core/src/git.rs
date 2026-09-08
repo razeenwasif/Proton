@@ -97,9 +97,16 @@ impl Git {
             return Vec::new();
         }
 
-        // The window, padded to the line count the viewport is sending so the
-        // two can be walked together.
-        (first_line..first_line + count)
+        // The window, and no longer than the file — `Buffer::lines` stops at
+        // the last line, so padding to the full window height would hand the
+        // front end more marks than lines whenever a file is shorter than the
+        // pane. It says these are walked together, and they have to be.
+        //
+        // Missed for a long time because the test that checks it opened this
+        // repository's own README, which is longer than any window it was
+        // asked about.
+        let last = (first_line + count).min(buf.len_lines());
+        (first_line..last)
             .map(|line| whole.get(line).copied().flatten())
             .collect()
     }

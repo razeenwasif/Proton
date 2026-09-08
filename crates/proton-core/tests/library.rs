@@ -63,11 +63,33 @@ fn write(root: &Path, name: &str, text: &str) {
 /// Beat the heartbeat until the walk lands, the way the shell does. The walk
 /// is on a worker precisely so that `apply` never waits for it, which means a
 /// test cannot either.
+/// Beat the heartbeat until the walk says it has *finished*.
+///
+/// ## Why this waits for `indexing: false` and not for an event
+///
+/// It used to return on the first `Event::Library` it saw. That reads like
+/// "wait for the library", and it is not: the same event carries progress, so
+/// it also fires part-way through a walk, and a walk answers separately for
+/// notes and for PDFs. On a fixture of four files the walk almost always
+/// finished inside one poll, so the first event was the finished one and the
+/// tests passed — until a machine under load delivered a progress event first,
+/// and a search then ran against a library that had read nothing.
+///
+/// That is the shape of every flaky test worth the name: it passes for a
+/// reason nobody wrote down, and fails when that reason stops holding.
 fn settle(space: &mut Workspace) -> Event {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // Generous, because a walk that reads PDFs legitimately takes seconds.
+    // This is a bound on a hang, not a measurement of anything.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
         for event in space.apply(Command::Poll) {
-            if matches!(event, Event::Library { .. }) {
+            if matches!(
+                event,
+                Event::Library {
+                    indexing: false,
+                    ..
+                }
+            ) {
                 return event;
             }
         }
@@ -317,27 +339,6 @@ fn asking_before_the_walk_lands_says_so_rather_than_saying_nothing_is_there() {
     );
 }
 
-/// Beat until the walk says it has finished, rather than until it first
-/// answers — a walk with PDFs in it answers twice, notes and then documents.
-fn settle_fully(space: &mut Workspace) -> Event {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while Instant::now() < deadline {
-        for event in space.apply(Command::Poll) {
-            if matches!(
-                &event,
-                Event::Library {
-                    indexing: false,
-                    ..
-                }
-            ) {
-                return event;
-            }
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("the library never finished reading");
-}
-
 #[test]
 fn a_pdf_is_read_and_cited_by_the_page_it_is_on() {
     // A PDF has no lines anybody can see — `L4-5` of one is a number about
@@ -357,7 +358,7 @@ fn a_pdf_is_read_and_cited_by_the_page_it_is_on() {
         key: "library.roots".into(),
         value: json!([vault.display().to_string()]),
     });
-    settle_fully(&mut space);
+    settle(&mut space);
 
     let answer = search(&mut space, "sparsity quadratic");
     assert!(
@@ -385,7 +386,7 @@ fn pdfs_can_be_turned_off() {
         key: "library.roots".into(),
         value: json!([vault.display().to_string()]),
     });
-    settle_fully(&mut space);
+    settle(&mut space);
 
     let answer = search(&mut space, "sparsity quadratic");
     assert!(!answer.contains("Attention.pdf"), "{answer}");
@@ -403,7 +404,7 @@ fn the_panel_is_told_how_far_a_long_walk_has_got() {
         value: json!([vault.display().to_string()]),
     });
 
-    let Event::Library { read, found, .. } = settle_fully(&mut space) else {
+    let Event::Library { read, found, .. } = settle(&mut space) else {
         unreachable!()
     };
     assert_eq!((read, found), (2, 2), "the two notes in the fixture vault");
