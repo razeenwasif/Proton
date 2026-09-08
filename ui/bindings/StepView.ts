@@ -2,7 +2,7 @@
 import type { BlockView } from "./BlockView";
 import type { EdgeView } from "./EdgeView";
 import type { FrameView } from "./FrameView";
-import type { Slot } from "./Slot";
+import type { TraceSlot } from "./TraceSlot";
 
 /**
  * Everything needed to draw one step.
@@ -11,7 +11,7 @@ export type StepView = { index: number, line: number, func: string,
 /**
  * The crash, when this is where it happened.
  */
-signal: boolean, frames: Array<FrameView>, globals: Array<Slot>, heap: Array<BlockView>, edges: Array<EdgeView>, 
+signal: boolean, frames: Array<FrameView>, globals: Array<TraceSlot>, heap: Array<BlockView>, edges: Array<EdgeView>, 
 /**
  * Everything the program had printed by this step — the format carries a
  * byte offset rather than a copy per step, which is how output can be

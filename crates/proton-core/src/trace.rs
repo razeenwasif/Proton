@@ -39,7 +39,13 @@ pub enum TraceState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
-pub struct Slot {
+/// `TraceSlot` rather than `TraceSlot`, which is what this is: a slot in a stack
+/// frame. `contract::TraceSlot` had the name, and `ts-rs` writes both into one flat
+/// directory as `Slot.ts` — so whichever test ran last decided what the front
+/// end was told, and for a while it was told that `FrameView.slots` is an
+/// array of layout positions. Nothing failed to build; the types were simply
+/// wrong about the Visualizer.
+pub struct TraceSlot {
     /// A stable path: `fib@3:n`, `heap:0x7c8700.next`.
     pub id: String,
     pub name: String,
@@ -50,7 +56,7 @@ pub struct Slot {
     pub addr: Option<String>,
     /// Set when this slot is a pointer, so the pane knows to draw an edge.
     pub points_to: Option<String>,
-    pub children: Vec<Slot>,
+    pub children: Vec<TraceSlot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -61,7 +67,7 @@ pub struct FrameView {
     pub func: String,
     pub line: u32,
     pub depth: u32,
-    pub slots: Vec<Slot>,
+    pub slots: Vec<TraceSlot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -74,7 +80,7 @@ pub struct BlockView {
     /// The source line that allocated it.
     pub line: Option<u32>,
     pub type_name: String,
-    pub slots: Vec<Slot>,
+    pub slots: Vec<TraceSlot>,
     /// Freed at this step. Still drawn, because the arrow into it is the bug.
     pub freed: bool,
 }
@@ -111,7 +117,7 @@ pub struct StepView {
     /// The crash, when this is where it happened.
     pub signal: bool,
     pub frames: Vec<FrameView>,
-    pub globals: Vec<Slot>,
+    pub globals: Vec<TraceSlot>,
     pub heap: Vec<BlockView>,
     pub edges: Vec<EdgeView>,
     /// Everything the program had printed by this step — the format carries a
@@ -382,7 +388,7 @@ fn render(trace: &Trace, step: &Step, index: usize) -> StepView {
     }
 }
 
-fn slot(id: &str, name: &str, value: &Value) -> Slot {
+fn slot(id: &str, name: &str, value: &Value) -> TraceSlot {
     let (repr, points_to) = match value {
         Value::Prim { repr, .. } => (repr.clone(), None),
         Value::Ptr { target, repr, .. } => (
@@ -409,7 +415,7 @@ fn slot(id: &str, name: &str, value: &Value) -> Slot {
         _ => Vec::new(),
     };
 
-    Slot {
+    TraceSlot {
         id: id.to_string(),
         name: name.to_string(),
         type_name: value.type_name().to_string(),

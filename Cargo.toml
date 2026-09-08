@@ -12,6 +12,7 @@ members = [
     "crates/proton-mcp",
     "crates/proton-lsp",
     "crates/proton-plugin",
+    "crates/proton-scene",
     "crates/proton-shell",
     "crates/proton-syntax",
     "crates/proton-term",
