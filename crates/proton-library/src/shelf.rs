@@ -48,6 +48,48 @@ const READ: [&str; 4] = ["md", "markdown", "mdx", "txt"];
 const CHECK: Duration = Duration::from_secs(20);
 
 /// The result of one walk, assembled off-thread.
+/// Whether a search can draw on meaning as well as words, and if not, why.
+///
+/// ## Why this is worth a type
+///
+/// The library announces itself built when the *text* lands, and the vectors
+/// arrive a phase later — so for the minutes in between there is a working
+/// library that quietly answers from words alone. That is a good answer, just
+/// a narrower one, which is exactly what makes it dangerous: there is no
+/// error, nothing looks wrong, and the only outward sign is a search returning
+/// in a tenth of a second instead of two.
+///
+/// It cost an hour of debugging to somebody reading the source. Anybody else
+/// would simply have concluded the vectors were not worth much.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Meaning {
+    /// No model named. Words only, and that is the whole story — not a
+    /// failure and not a stage on the way to something.
+    Off,
+    /// A model is named and the vectors are not made yet. Searches work and
+    /// answer by word until they are.
+    Coming,
+    /// Both halves are live.
+    Ready,
+    /// A model is named and making the vectors failed. Distinguished from
+    /// `Coming` because they read identically from outside — a library that
+    /// will never have vectors looks exactly like one that is about to, and
+    /// waiting for the second is the wrong thing to do about the first.
+    Failed(String),
+}
+
+impl Meaning {
+    /// One line for a panel or a status tool.
+    pub fn say(&self) -> String {
+        match self {
+            Meaning::Off => "matching by word".into(),
+            Meaning::Coming => "matching by word; still learning what it means".into(),
+            Meaning::Ready => "matching by word and by meaning".into(),
+            Meaning::Failed(why) => format!("matching by word only — {why}"),
+        }
+    }
+}
+
 struct Built {
     library: Library,
     elapsed: Duration,
@@ -61,6 +103,10 @@ struct Built {
     /// than by the caller afterwards, or a note written during the walk would
     /// be stamped as already read and never picked up.
     stamp: (usize, u64),
+    /// Why there are no vectors, when a model was named and there are none.
+    /// Carried rather than only printed, because the panel is where somebody
+    /// is looking when they wonder.
+    trouble: Option<String>,
 }
 
 /// How far a walk has got, shared with the thread doing it.
@@ -107,6 +153,8 @@ pub struct Shelf {
     /// A change check in flight, and when the last one started.
     checking: Option<Receiver<(usize, u64)>>,
     looked: Option<Instant>,
+    /// Why the last walk made no vectors, when it was asked to.
+    trouble: Option<String>,
 }
 
 impl std::fmt::Debug for Shelf {
@@ -181,6 +229,16 @@ impl Shelf {
         self.library.has_vectors()
     }
 
+    /// What a search can currently draw on, and why.
+    pub fn meaning(&self) -> Meaning {
+        match (&self.embedder, self.library.has_vectors(), &self.trouble) {
+            (None, _, _) => Meaning::Off,
+            (Some(_), true, _) => Meaning::Ready,
+            (Some(_), false, Some(why)) => Meaning::Failed(why.clone()),
+            (Some(_), false, None) => Meaning::Coming,
+        }
+    }
+
     /// The best passages for a query and its vector, using both.
     pub fn search_both(
         &self,
@@ -249,6 +307,7 @@ impl Shelf {
         self.stamp = None;
         self.checking = None;
         self.looked = None;
+        self.trouble = None;
         // A walk already running was for the old roots, or the old setting.
         self.stale = self.building.is_some();
         self.start();
@@ -397,6 +456,7 @@ impl Shelf {
                 self.built = Some(built.elapsed);
                 self.missing = built.missing;
                 self.stamp = Some(built.stamp);
+                self.trouble = built.trouble;
                 true
             }
             Err(TryRecvError::Empty) => false,
@@ -534,6 +594,7 @@ fn read(
         missing: missing.clone(),
         whole: !more,
         stamp,
+        trouble: None,
     });
     if sent.is_err() || !more {
         return;
@@ -558,6 +619,7 @@ fn read(
             missing,
             whole: true,
             stamp,
+            trouble: None,
         });
         return;
     };
@@ -568,6 +630,7 @@ fn read(
         missing: missing.clone(),
         whole: false,
         stamp,
+        trouble: None,
     });
 
     // Said out loud when it fails. It was silent for one afternoon, and the
@@ -575,13 +638,15 @@ fn read(
     // looks exactly like everything working, because the lexical fallback it
     // drops to is a perfectly good answer. A failure nobody can see is worse
     // than one that costs a line of output.
-    match embedder.vectors(&library.texts()) {
-        Ok(vectors) => {
-            if let Err(why) = library.take_vectors(vectors) {
-                eprintln!("proton-library: vectors do not match the passages: {why}");
-            }
-        }
-        Err(why) => eprintln!("proton-library: no vectors ({why}); searching by word only"),
+    let trouble = match embedder.vectors(&library.texts()) {
+        Ok(vectors) => library
+            .take_vectors(vectors)
+            .err()
+            .map(|why| format!("the vectors did not match the passages ({why})")),
+        Err(why) => Some(why),
+    };
+    if let Some(why) = &trouble {
+        eprintln!("proton-library: no vectors ({why}); searching by word only");
     }
     let _ = done.send(Built {
         library,
@@ -589,6 +654,7 @@ fn read(
         missing,
         whole: true,
         stamp,
+        trouble,
     });
 }
 
@@ -707,6 +773,24 @@ mod tests {
     fn settle(shelf: &mut Shelf) {
         for _ in 0..2000 {
             if shelf.poll() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("the walk never finished");
+    }
+
+    /// Drive the heartbeat until *every* phase is done, vectors included.
+    ///
+    /// [`settle`] stops at the first answer, which is the notes — right for a
+    /// test about what is searchable early, wrong for one about the end state.
+    /// Worth its own helper rather than a flag: the difference between the two
+    /// is the same one the `Meaning` type exists to make visible, and a test
+    /// that picks the wrong one gets a library that looks finished and is not.
+    fn finish(shelf: &mut Shelf) {
+        for _ in 0..4000 {
+            shelf.poll();
+            if shelf.is_built() && !shelf.is_building() {
                 return;
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -1370,6 +1454,42 @@ ferromagnetic
             shelf.is_building(),
             "the walk called itself finished before the embedder ran"
         );
+    }
+
+    #[test]
+    fn a_library_says_whether_it_can_answer_by_meaning() {
+        // The three states have to be told apart from outside, because they
+        // are indistinguishable from the *results*: all three answer, and all
+        // three answer well. Only the last two are the same shape — a model
+        // named and no vectors — and confusing them is the difference between
+        // "wait a minute" and "it is never going to work".
+        let vault = root("meaning-states");
+        write(&vault, "note.md", "# One\n\nsparsity\n");
+
+        // Nobody asked for meaning. Not a failure, not a stage.
+        let mut shelf = Shelf::new();
+        shelf.set_roots(vec![vault.clone()]);
+        finish(&mut shelf);
+        assert_eq!(shelf.meaning(), Meaning::Off);
+        assert_eq!(shelf.meaning().say(), "matching by word");
+
+        // A model that is not there. The walk finishes, the library works,
+        // and it says why the other half is missing rather than looking like
+        // it is still on its way.
+        let mut shelf = Shelf::new();
+        shelf.embed_with(Some(crate::Embedder::new("nothing-is-pulled")));
+        shelf.set_roots(vec![vault]);
+        finish(&mut shelf);
+        match shelf.meaning() {
+            Meaning::Failed(why) => assert!(
+                !why.is_empty(),
+                "a failure with no reason is no better than silence"
+            ),
+            other => panic!("a model that cannot run should report a failure, got {other:?}"),
+        }
+        assert!(shelf.meaning().say().contains("by word only"));
+        // And the library still answers.
+        assert_eq!(shelf.search("sparsity", 1).len(), 1);
     }
 
     #[test]

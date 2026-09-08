@@ -1804,6 +1804,10 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
    seen the box to type it into. */
 .st-hint { margin-top: 9px !important; }
 
+/* Only for a state somebody should act on — a model named that is not
+   working. "Matching by word" because nobody asked for more is not a warning. */
+.st-warn { color: var(--warn) !important; }
+
 .st-field {
   display: flex; flex-direction: column; gap: 5px;
   font: 500 11px/1 var(--sans); color: var(--ink-3); max-width: 380px;

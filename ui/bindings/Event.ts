@@ -209,7 +209,19 @@ sources: Array<LibrarySource>,
  * everything — a panel with no ticks is "no restriction", not "no
  * sources".
  */
-scope: Array<string>, } | { "type": "theme", 
+scope: Array<string>, 
+/**
+ * What a search can draw on: "matching by word", "…and by meaning",
+ * or why it cannot. A sentence rather than a flag because the failure
+ * case has to carry its reason, and the panel is where somebody is
+ * looking when they wonder why answers changed.
+ */
+meaning: string, 
+/**
+ * Whether the vectors are still being made. The panel says so; the
+ * distinction between "not yet" and "never" is the whole point.
+ */
+learning: boolean, } | { "type": "theme", 
 /**
  * Empty when none is open, which is how the panel knows to say so.
  */

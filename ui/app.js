@@ -185,6 +185,10 @@ function renderLibrary(event) {
     chip.title = `Answers are drawn from ${[...scope].join(", ")}. Click to use everything.`;
   }
 
+  // "matching by word" -> "Matching by word". The core writes these lowercase
+  // because it does not know whether they start a sentence; here they do.
+  const sentence = (text) => (text ? text[0].toUpperCase() + text.slice(1) : "");
+
   const status = $("[data-library-status]");
   if (!status) return;
   const n = (x) => x.toLocaleString();
@@ -194,6 +198,17 @@ function renderLibrary(event) {
 
   if (!event.roots.length) {
     status.textContent = "No roots listed.";
+  } else if (event.learning) {
+    // Reading has finished and the vectors are being made. Said separately
+    // because the old text called this "Reading", which was wrong twice over:
+    // the documents were all in — it would have read "1,307 of 1,307" — and
+    // the thing actually taking the time was not reading at all.
+    //
+    // The second sentence is the one that matters. A search works right now
+    // and answers by word, which is a good answer, and nothing in the results
+    // reveals that the other half is missing.
+    status.textContent =
+      `${held}. Learning what they mean — searches answer by word until it finishes.`;
   } else if (event.indexing) {
     // A first walk over a corpus of PDFs runs for minutes, so it says how far
     // it has got rather than "reading" — which after two minutes reads as a
@@ -204,8 +219,11 @@ function renderLibrary(event) {
     // "Nothing found" and "not read yet" are different answers, and the
     // count is what tells them apart.
     const took = event.elapsedMs ? `, read in ${n(event.elapsedMs)} ms` : "";
-    status.textContent = `${held}${took}.`;
+    status.textContent = `${held}${took}. ${sentence(event.meaning)}.`;
   }
+  // Only worth colouring when something is wrong: a library matching by word
+  // because nobody asked for more is not a warning.
+  status.classList.toggle("st-warn", /—/.test(event.meaning || ""));
 }
 
 /** What is ticked now, read off the panel rather than kept in a second place

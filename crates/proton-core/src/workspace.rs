@@ -4372,6 +4372,8 @@ impl Workspace {
                 })
                 .collect(),
             scope: self.library_scope.prefixes().to_vec(),
+            meaning: self.library.meaning().say(),
+            learning: self.library.meaning() == proton_library::Meaning::Coming,
         }
     }
 

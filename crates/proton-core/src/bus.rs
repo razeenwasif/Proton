@@ -760,6 +760,14 @@ pub enum Event {
         /// everything — a panel with no ticks is "no restriction", not "no
         /// sources".
         scope: Vec<String>,
+        /// What a search can draw on: "matching by word", "…and by meaning",
+        /// or why it cannot. A sentence rather than a flag because the failure
+        /// case has to carry its reason, and the panel is where somebody is
+        /// looking when they wonder why answers changed.
+        meaning: String,
+        /// Whether the vectors are still being made. The panel says so; the
+        /// distinction between "not yet" and "never" is the whole point.
+        learning: bool,
     },
     /// The theme Design mode is editing.
     #[serde(rename_all = "camelCase")]

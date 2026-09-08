@@ -42,7 +42,7 @@ use std::path::{Path, PathBuf};
 pub use chunk::Passage;
 pub use embed::Embedder;
 pub use scope::{Scope, Source};
-pub use shelf::Shelf;
+pub use shelf::{Meaning, Shelf};
 
 /// The constant in reciprocal rank fusion.
 ///

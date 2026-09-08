@@ -385,13 +385,18 @@ fn status(shelf: &mut proton_library::Shelf) -> String {
         ),
     };
     format!(
-        "{} passages from {} documents{}\nroots:\n{roots}{missing}",
+        "{} passages from {} documents{}\n{}\nroots:\n{roots}{missing}",
         shelf.len(),
         shelf.documents(),
         match done {
             true => String::new(),
             false => " (still reading)".into(),
         },
+        // Said every time, including when it is off. A client asking what the
+        // library can do deserves to know it is answering by word alone —
+        // that is a good answer and a narrower one, and it is invisible from
+        // the results.
+        shelf.meaning().say(),
     )
 }
 
