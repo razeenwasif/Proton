@@ -105,6 +105,42 @@ impl Design {
         moved
     }
 
+    /// Change a layer's text, and write the file.
+    ///
+    /// Both halves or neither, the same as [`set`](Self::set) does for a
+    /// token: a component whose markup changed in memory and not on disk is
+    /// one the next read puts back, and the artboard and the file would
+    /// disagree about what the component is.
+    pub fn set_layer_text(&mut self, index: usize, text: &str) -> Result<bool, String> {
+        self.write(|one| one.set_text(index, text))
+    }
+
+    /// Set or clear an attribute on a layer, and write the file.
+    pub fn set_layer_attribute(
+        &mut self,
+        index: usize,
+        name: &str,
+        value: &str,
+    ) -> Result<bool, String> {
+        self.write(|one| one.set_attribute(index, name, value))
+    }
+
+    fn write(
+        &mut self,
+        change: impl FnOnce(&mut Component) -> Result<bool, String>,
+    ) -> Result<bool, String> {
+        let Some(component) = self.component.as_mut() else {
+            return Err("nothing is on the artboard".into());
+        };
+        if !change(component)? {
+            return Ok(false);
+        }
+        let path = component.path().to_path_buf();
+        std::fs::write(&path, component.text())
+            .map_err(|err| format!("{}: {err}", path.display()))?;
+        Ok(true)
+    }
+
     /// Where a layer was written: the file, and the line.
     pub fn layer_place(&self, index: usize) -> Option<(std::path::PathBuf, usize)> {
         let component = self.component.as_ref()?;

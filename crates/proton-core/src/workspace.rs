@@ -592,6 +592,16 @@ impl Workspace {
                 vec![self.theme_event()]
             }
 
+            Command::SetLayerText { index, text } => {
+                let done = self.design.set_layer_text(index, &text);
+                self.after_layer_write(done)
+            }
+
+            Command::SetLayerAttribute { index, name, value } => {
+                let done = self.design.set_layer_attribute(index, &name, &value);
+                self.after_layer_write(done)
+            }
+
             Command::SelectLayer { index } => match self.design.select_layer(index) {
                 true => vec![self.artboard_event()],
                 false => Vec::new(),
@@ -4425,6 +4435,23 @@ impl Workspace {
     }
 
     /// What Design mode's inspector draws.
+    /// What everything that writes the component has to say afterwards.
+    ///
+    /// The file on disk moved, so the same things have to be told as when a
+    /// token is written: the artboard, the gutter, the tree, and the buffer if
+    /// Codex has this file open — which, for a two-way binding, it often does.
+    fn after_layer_write(&mut self, done: Result<bool, String>) -> Vec<Event> {
+        match done {
+            Ok(false) => Vec::new(),
+            Ok(true) => {
+                let mut events = vec![self.artboard_event(), self.repo_event()];
+                events.extend(self.every_view());
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
     fn artboard_event(&self) -> Event {
         let component = self.design.component();
         Event::Artboard {

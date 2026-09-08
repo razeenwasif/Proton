@@ -580,6 +580,25 @@
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
       <aside class="pane">
+        <!-- The selected layer, when there is one. Editing a box here splices
+             the component file: the bytes that one thing occupies are replaced
+             and nothing else in the file moves. Empty until a layer is picked,
+             because an inspector showing nothing in particular is a panel
+             taking up room. -->
+        <header data-layer-head hidden>Layer <span class="grow"></span><span class="chip" data-layer-tag></span></header>
+        <div class="setting" data-layer-form hidden>
+          <label class="st-field">Text
+            <input type="text" data-layer-text spellcheck="false" placeholder="—">
+          </label>
+          <label class="st-field">Id
+            <input type="text" data-layer-id spellcheck="false" placeholder="none">
+          </label>
+          <label class="st-field">Class
+            <input type="text" data-layer-class spellcheck="false" placeholder="none">
+          </label>
+          <p class="st-hint" data-layer-note></p>
+        </div>
+
         <header>Tokens <span class="grow"></span><span class="chip" data-theme-name>no theme</span></header>
         <!-- Slot::Inspector, from Event::Theme. Every custom property in the
              project's stylesheet, grouped by the selector that declares it,

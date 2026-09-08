@@ -41,4 +41,13 @@ depth: number,
  * artboard cannot be handed a modified copy of somebody's markup, so the
  * highlight has to be reachable by selector.
  */
-path: string, };
+path: string, 
+/**
+ * Whether it has no element children.
+ *
+ * Public because it decides what the inspector will let somebody edit: a
+ * leaf's contents are text and can be replaced, and a branch's contents
+ * are other layers — writing text over those would delete them, which is
+ * not what typing in a text box means.
+ */
+leaf: boolean, };

@@ -321,6 +321,17 @@ pub enum Command {
     SelectLayer {
         index: usize,
     },
+    /// Rename a layer's text, from the inspector.
+    SetLayerText {
+        index: usize,
+        text: String,
+    },
+    /// Set or clear one of a layer's attributes. An empty value removes it.
+    SetLayerAttribute {
+        index: usize,
+        name: String,
+        value: String,
+    },
     /// Open the line that wrote a layer, in Codex.
     ///
     /// The binding pointing the other way from the artboard: a layer is a

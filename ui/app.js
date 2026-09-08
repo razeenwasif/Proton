@@ -1962,6 +1962,64 @@ function renderLayers(event) {
     .join("");
 }
 
+/* ── The selected layer's inspector ──────────────────────────────
+
+   The reverse binding: what is typed here is spliced into the component file,
+   replacing the bytes that one thing occupies and moving nothing else. There
+   is no save button, for the same reason the token rows have none — a
+   component with unsaved changes is one the artboard disagrees with.
+
+   Written on `change` rather than on every keystroke. `input` would put the
+   disk in the typing loop and fill the undo history with one entry per letter;
+   `change` fires when the box is left or Enter is pressed, which is when
+   somebody has decided what they meant. */
+
+function renderLayerInspector(event) {
+  const head = $("[data-layer-head]");
+  const form = $("[data-layer-form]");
+  if (!head || !form) return;
+
+  const layer = event.layers?.[event.selected];
+  head.hidden = !layer;
+  form.hidden = !layer;
+  if (!layer) return;
+
+  $("[data-layer-tag]").textContent = layer.tag;
+  const text = $("[data-layer-text]");
+  const id = $("[data-layer-id]");
+  const cls = $("[data-layer-class]");
+
+  // Not while it is being typed in: replacing the value under the caret moves
+  // it to the end, on every repaint the core sends.
+  const put = (box, value) => {
+    if (document.activeElement !== box) box.value = value;
+  };
+  put(text, layer.text);
+  put(id, layer.id);
+  put(cls, layer.classes.join(" "));
+
+  // An element with layers inside it cannot have its text replaced — doing so
+  // would delete them. Said here rather than only refused on the way in, so
+  // the box does not look like it will work.
+  text.disabled = !layer.leaf;
+  $("[data-layer-note]").textContent = layer.leaf
+    ? `line ${layer.line}`
+    : `line ${layer.line} — has elements inside it, so its text is edited in Codex`;
+}
+
+document.addEventListener("change", (e) => {
+  const box = e.target;
+  const index = lastArtboard?.selected;
+  if (index === undefined || index < 0) return;
+  if (box.matches?.("[data-layer-text]")) {
+    dispatch({ type: "setLayerText", index, text: box.value });
+  } else if (box.matches?.("[data-layer-id]")) {
+    dispatch({ type: "setLayerAttribute", index, name: "id", value: box.value.trim() });
+  } else if (box.matches?.("[data-layer-class]")) {
+    dispatch({ type: "setLayerAttribute", index, name: "class", value: box.value.trim() });
+  }
+});
+
 function renderArtboard(event) {
   const board = $("[data-artboard]");
   if (!board) return;
@@ -3378,6 +3436,7 @@ onEvent((event) => {
     case "artboard":
       lastArtboard = event;
       renderLayers(event);
+      renderLayerInspector(event);
       // Drawn from the theme event, which carries the palette. Nothing to
       // paint on until one has arrived; the next one will pick this up.
       if (lastTheme) renderArtboard(lastTheme);

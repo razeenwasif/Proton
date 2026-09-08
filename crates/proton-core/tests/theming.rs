@@ -522,3 +522,121 @@ fn editing_the_component_moves_the_layers_with_it() {
         layers.iter().map(|l| &l.tag).collect::<Vec<_>>()
     );
 }
+
+/// Markup with everything a careless writer would disturb.
+const FUSSY: &str = "<!-- do not reformat me -->\n<section  class='panel'   id=\"card\">\n\n  <h3>Pricing</h3>\n\n  <p>Body copy.</p>\n</section>\n";
+
+#[test]
+fn editing_a_layer_writes_the_component_and_moves_nothing_else() {
+    // The reverse binding, in one test: a change made on the design side
+    // reaches the file, and the file is otherwise byte for byte what it was.
+    let (mut space, path) = open_with_component("write-back", FUSSY);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+
+    // The `<h3>`, layer 1.
+    space.apply(Command::SelectLayer { index: 1 });
+    space.apply(Command::SetLayerText {
+        index: 1,
+        text: "Plans".into(),
+    });
+
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        on_disk,
+        FUSSY.replace(">Pricing<", ">Plans<"),
+        "the writer reformatted somebody's file"
+    );
+    // And the artboard is showing what was written, not what was there.
+    assert!(artboard(&mut space).1.contains(">Plans<"));
+}
+
+#[test]
+fn an_attribute_typed_in_the_inspector_reaches_the_file() {
+    let (mut space, path) = open_with_component("write-attr", FUSSY);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+    space.apply(Command::SetLayerAttribute {
+        index: 0,
+        name: "class".into(),
+        value: "panel wide".into(),
+    });
+
+    // The author's single quotes are theirs; only what is between them moves.
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        FUSSY.replace("'panel'", "'panel wide'")
+    );
+}
+
+#[test]
+fn the_layer_tree_and_the_artboard_both_follow_a_write() {
+    // Three views of one file. A write that updated the disk and left the
+    // panels showing the old markup would be the same class of bug as the
+    // library reporting itself built before its vectors existed: everything
+    // looks fine and one of them is lying.
+    let (mut space, _) = open_with_component("follow-write", FUSSY);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+    space.apply(Command::SetLayerAttribute {
+        index: 2,
+        name: "id".into(),
+        value: "body".into(),
+    });
+
+    let (layers, _) = tree(&mut space);
+    assert_eq!(layers[2].id, "body", "the tree kept the old markup");
+    assert!(artboard(&mut space).1.contains(r#"<p id="body">"#));
+}
+
+#[test]
+fn a_refused_edit_says_why_and_leaves_the_file_alone() {
+    // Refusing is only better than obeying if the reason arrives. A box that
+    // silently does nothing is the failure people cannot debug.
+    let (mut space, path) = open_with_component("refused", FUSSY);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+    // Layer 0 is the <section>, which has elements inside it.
+    let events = space.apply(Command::SetLayerText {
+        index: 0,
+        text: "gone".into(),
+    });
+
+    let said: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Notice { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        said.iter().any(|t| t.contains("delete")),
+        "no reason was given: {said:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), FUSSY);
+}
+
+#[test]
+fn writing_the_same_value_again_does_not_touch_the_disk() {
+    // Every keystroke that leaves a box arrives here. Rewriting the file each
+    // time would churn the mtime, the git gutter and the watcher for nothing.
+    let (mut space, path) = open_with_component("no-op", FUSSY);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+    let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+    let events = space.apply(Command::SetLayerText {
+        index: 1,
+        text: "Pricing".into(),
+    });
+    assert!(events.is_empty(), "a no-op produced events: {events:?}");
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().modified().unwrap(),
+        before
+    );
+}

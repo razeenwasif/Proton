@@ -68,6 +68,13 @@ pub struct Layer {
     /// artboard cannot be handed a modified copy of somebody's markup, so the
     /// highlight has to be reachable by selector.
     pub path: String,
+    /// Whether it has no element children.
+    ///
+    /// Public because it decides what the inspector will let somebody edit: a
+    /// leaf's contents are text and can be replaced, and a branch's contents
+    /// are other layers — writing text over those would delete them, which is
+    /// not what typing in a text box means.
+    pub leaf: bool,
     /// The bytes the whole element occupies, open tag through close.
     ///
     /// Not sent to the front end, for the reason [`Token`](crate::Token)'s is
@@ -77,6 +84,14 @@ pub struct Layer {
     #[ts(skip)]
     #[allow(dead_code)]
     span: Range<usize>,
+    /// The open tag alone, `<` through `>`. Where an attribute is written.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub(crate) open: Range<usize>,
+    /// Between the tags. Where the text is.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub(crate) inner: Range<usize>,
 }
 
 /// Elements that never have children or a closing tag.
@@ -197,7 +212,17 @@ impl Parser<'_> {
         let end = self.bytes.len();
         while let Some(open) = self.open.pop() {
             self.out[open.slot].span = open.start..end;
+            self.out[open.slot].inner = self.out[open.slot].open.end..end;
             self.finish_text(open.slot, open.start, end);
+        }
+        // A layer is a leaf when the next one in document order is not inside
+        // it. Cheaper and less error-prone than counting children while
+        // parsing, where implicit closing moves the answer around.
+        for i in 0..self.out.len() {
+            self.out[i].leaf = self
+                .out
+                .get(i + 1)
+                .is_none_or(|next| next.depth <= self.out[i].depth);
         }
         self.out
     }
@@ -248,6 +273,7 @@ impl Parser<'_> {
         while self.open.last().is_some_and(|one| closes(&one.tag, &tag)) {
             let one = self.open.pop().expect("checked");
             self.out[one.slot].span = one.start..start;
+            self.out[one.slot].inner = self.out[one.slot].open.end..start;
             self.finish_text(one.slot, one.start, start);
         }
 
@@ -279,6 +305,11 @@ impl Parser<'_> {
             depth,
             path,
             span: start..self.at,
+            open: start..self.at,
+            // Empty until a close tag says otherwise, which is correct as it
+            // stands for a void or self-closing element: they have no inside.
+            inner: self.at..self.at,
+            leaf: true,
             tag: tag.clone(),
         });
 
@@ -291,6 +322,7 @@ impl Parser<'_> {
                 .find_slice(format!("</{tag}").as_bytes(), self.at)
                 .unwrap_or(self.bytes.len());
             self.finish_text(slot, self.at, end);
+            self.out[slot].inner = self.at..end;
             self.out[slot].span = start..end;
             self.at = self
                 .find(b'>')
@@ -331,6 +363,10 @@ impl Parser<'_> {
                 false => start,
             };
             self.out[one.slot].span = one.start..closes;
+            // The inside ends where the close tag begins, not where it ends —
+            // `start` either way, since an element closed only because its
+            // parent did has no close tag of its own to sit before.
+            self.out[one.slot].inner = self.out[one.slot].open.end..start;
             self.finish_text(one.slot, one.start, closes);
         }
     }
@@ -389,6 +425,70 @@ impl Parser<'_> {
             .position(|w| w.eq_ignore_ascii_case(needle))
             .map(|at| at + from)
     }
+}
+
+/// Where an attribute sits inside an open tag.
+pub(crate) struct Found {
+    /// The whole attribute including any leading space: what is removed when
+    /// the value is cleared. Taking the space with it is the difference
+    /// between `<div class="a" id="b">` losing an attribute and losing an
+    /// attribute plus leaving a double space behind.
+    pub whole: Range<usize>,
+    /// Just the value, between the quotes: what is replaced.
+    pub value: Range<usize>,
+}
+
+/// Find an attribute in an open tag, by byte span.
+///
+/// Separate from [`attribute`] because reading a value and editing one need
+/// different answers, and a writer built on "find the text and hope it is
+/// unique" is a writer that eventually replaces the wrong `id`.
+pub(crate) fn attribute_span(tag: &str, name: &str) -> Option<Found> {
+    let lower = tag.to_lowercase();
+    let bytes = lower.as_bytes();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find(name) {
+        let at = from + at;
+        from = at + name.len();
+        // A whole word, so `class` does not match inside `data-class`.
+        if at > 0 && (bytes[at - 1].is_ascii_alphanumeric() || matches!(bytes[at - 1], b'-' | b'_'))
+        {
+            continue;
+        }
+        let after = &lower[at + name.len()..];
+        let gap = after.len() - after.trim_start().len();
+        if !after[gap..].starts_with('=') {
+            continue;
+        }
+        let eq = at + name.len() + gap;
+        let rest = &tag[eq + 1..];
+        let pad = rest.len() - rest.trim_start().len();
+        let value_at = eq + 1 + pad;
+        let quote = tag[value_at..].chars().next()?;
+        let (value, end) = match quote {
+            '"' | '\'' => {
+                let inside = tag[value_at + 1..].find(quote)?;
+                (value_at + 1..value_at + 1 + inside, value_at + 2 + inside)
+            }
+            _ => {
+                let inside = tag[value_at..]
+                    .find(|c: char| c.is_whitespace() || c == '>' || c == '/')
+                    .unwrap_or(tag.len() - value_at);
+                (value_at..value_at + inside, value_at + inside)
+            }
+        };
+        // Back over the whitespace that separated this attribute from the one
+        // before it.
+        let mut whole_start = at;
+        while whole_start > 0 && tag.as_bytes()[whole_start - 1].is_ascii_whitespace() {
+            whole_start -= 1;
+        }
+        return Some(Found {
+            whole: whole_start..end,
+            value,
+        });
+    }
+    None
 }
 
 /// One attribute's value out of an open tag's attribute text.
@@ -593,5 +693,52 @@ mod tests {
         // And the whole file must not have ended up inside one element.
         let top = found.iter().filter(|l| l.depth == 0).count();
         assert!(top >= 1, "no top-level elements");
+    }
+}
+
+#[cfg(test)]
+mod writing {
+    use super::*;
+
+    fn span(tag: &str, name: &str) -> (String, String) {
+        let found = attribute_span(tag, name).expect("attribute");
+        (
+            tag[found.whole.clone()].to_string(),
+            tag[found.value.clone()].to_string(),
+        )
+    }
+
+    #[test]
+    fn an_attribute_is_found_by_span_not_by_guessing() {
+        let tag = r#"<div id="one" class="a b" data-x=3>"#;
+        assert_eq!(span(tag, "id"), (" id=\"one\"".into(), "one".into()));
+        assert_eq!(span(tag, "class"), (" class=\"a b\"".into(), "a b".into()));
+        // Unquoted values are legal and people write them.
+        assert_eq!(span(tag, "data-x"), (" data-x=3".into(), "3".into()));
+    }
+
+    #[test]
+    fn the_span_takes_the_space_before_it() {
+        // So removing an attribute does not leave a double space, which would
+        // put a whitespace change in somebody's diff for no reason.
+        let tag = r#"<div id="one" class="a">"#;
+        let found = attribute_span(tag, "class").unwrap();
+        let mut out = tag.to_string();
+        out.replace_range(found.whole, "");
+        assert_eq!(out, r#"<div id="one">"#);
+    }
+
+    #[test]
+    fn a_name_inside_another_attributes_name_is_not_it() {
+        // Replacing the value of `data-id` when asked for `id` writes the
+        // change into the wrong attribute, and nothing about the result looks
+        // wrong until much later.
+        let tag = r#"<div data-id="no" id="yes">"#;
+        assert_eq!(span(tag, "id").1, "yes");
+    }
+
+    #[test]
+    fn an_attribute_that_is_not_there_is_not_invented() {
+        assert!(attribute_span(r#"<div class="a">"#, "id").is_none());
     }
 }
