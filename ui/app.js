@@ -1782,6 +1782,30 @@ let artboardPainted = null;
 /** The component the artboard is drawing, kept because the palette and the
     markup arrive in separate events and the frame needs both. */
 let lastArtboard = null;
+/** The frame currently on the artboard, so a posted message can be checked
+    against its window rather than merely believed. */
+let artboardFrame = null;
+
+/* Clicking the picture selects the layer.
+ *
+ * Everything arriving here is untrusted. The frame has an opaque origin, so
+ * `event.origin` is the string "null" and proves nothing; what does prove
+ * something is `event.source`, which is a window reference the sender cannot
+ * forge. Anything not from the frame currently on the artboard is dropped,
+ * and the shape is checked before the path is used — the path itself is only
+ * ever compared against paths the core computed, never executed or injected. */
+window.addEventListener("message", (e) => {
+  if (!artboardFrame || e.source !== artboardFrame.contentWindow) return;
+  const said = e.data;
+  if (!said || said.proton !== "pick" || typeof said.path !== "string") return;
+
+  const index = lastArtboard?.layers?.findIndex((l) => l.path === said.path);
+  // -1 is an element the parser never produced — a `tbody` the browser
+  // inserted, most likely. Selecting nothing is right; selecting a neighbour
+  // would outline the wrong thing and look deliberate.
+  if (index === undefined || index < 0) return;
+  dispatch({ type: "selectLayer", index });
+});
 
 /**
  * The tokens in force for a scope.
@@ -1878,18 +1902,37 @@ function renderPalettes(event) {
    Both are worth revisiting when the artboard grows interaction. Neither is
    worth loosening quietly. */
 
+/** A fresh nonce for one render. Random per render so a component cannot
+ *  carry a `<script nonce=…>` that guesses it. */
+function artboardNonce() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** The document to put in the frame: the component, wrapped in its palette.
  *
  * `pick` is the selected layer's CSS path, or empty. It is applied as a rule
  * rather than by marking up the element, because the frame must be given the
  * author's markup unaltered — the moment this starts editing the source on
  * its way to the screen, the artboard stops showing the file. */
-function artboardDoc(source, isDocument, vars, pick) {
-  // `default-src 'none'` and no `script-src` means nothing loads and nothing
-  // runs; styles and data: images are what a preview actually needs.
+function artboardDoc(source, isDocument, vars, pick, nonce) {
+  // ## What this CSP is doing, and why it is a nonce
+  //
+  // The frame needs one script — the one below, which reports what was
+  // clicked. Allowing `'unsafe-inline'` would run that *and* every script the
+  // component happens to contain, and those could post the same messages this
+  // one does, so the panel could be told a different element was clicked.
+  //
+  // A nonce, fresh for each render, admits exactly the script carrying it.
+  // The component's own scripts have no nonce and do not run. `default-src
+  // 'none'` still means no network of any kind, so nothing in the frame can
+  // fetch, beacon, or load a remote font — a preview cannot phone home or
+  // report that a file was opened.
   const csp =
     `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; ` +
-    `style-src 'unsafe-inline'; img-src data:; font-src data:">`;
+    `style-src 'unsafe-inline'; img-src data:; font-src data:; ` +
+    `script-src 'nonce-${nonce}'">`;
   const style =
     `<style>:root{${vars}}` +
     `html,body{margin:0}` +
@@ -1902,15 +1945,43 @@ function artboardDoc(source, isDocument, vars, pick) {
       : "") +
     `</style>`;
 
+  // Reports what was clicked, as the same `nth-child` path proton-design
+  // builds from the source, so the two can be compared without either side
+  // trusting the other's numbering.
+  //
+  // It walks to `body` for a fragment and to the root for a whole page,
+  // matching where the parser starts counting. Where a browser inserts
+  // elements the source never had — `tbody` inside a table is the usual one —
+  // the two disagree and the click selects nothing rather than the wrong
+  // thing. Saying so plainly beats a highlight that is quietly off by one.
+  const picker =
+    `<script nonce="${nonce}">document.addEventListener("click",function(e){` +
+    `var el=e.target,parts=[];` +
+    `while(el&&el.nodeType===1){` +
+    `if(el===document.body&&${!isDocument})break;` +
+    `var p=el.parentNode,n=1;` +
+    // Among *all* element siblings, not among same-tag ones: the parser
+    // numbers children the same way, and `nth-of-type` here against
+    // `nth-child` there disagrees the moment an element has a sibling of
+    // another tag — which is nearly always.
+    `if(p){var k=p.children;for(var i=0;i<k.length;i++){` +
+    `if(k[i]===el)break;n++;}}` +
+    `parts.unshift(el.tagName.toLowerCase()+":nth-child("+n+")");` +
+    `el=el.parentElement;}` +
+    `parent.postMessage({proton:"pick",path:parts.join(" > ")},"*");` +
+    `e.preventDefault();},true);<\/script>`;
+
   if (!isDocument) {
     return `<!doctype html><html><head><meta charset="utf-8">${csp}${style}</head>` +
-      `<body>${source}</body></html>`;
+      `<body>${source}${picker}</body></html>`;
   }
   // A whole page brings its own head, so the palette goes in at the end of it
   // and wins over what the page set. A page with no head at all is rendered as
   // written rather than guessed at.
   const at = source.search(/<\/head>/i);
-  return at === -1 ? source + style : source.slice(0, at) + csp + style + source.slice(at);
+  return at === -1
+    ? source + style + picker
+    : source.slice(0, at) + csp + style + source.slice(at) + picker;
 }
 
 /* ── The layer tree ──────────────────────────────────────────────
@@ -2090,13 +2161,23 @@ function renderArtboard(event) {
   if (shown.source) {
     const frame = document.createElement("iframe");
     frame.className = "ab-frame";
-    frame.setAttribute("sandbox", "");
+    // Loosened by exactly one flag, and deliberately. The frame needs to run
+    // one script to report a click; it still has no `allow-same-origin`, so
+    // its origin stays opaque, it cannot read this document, and
+    // `window.__TAURI__` is not reachable from it. No forms, no navigation,
+    // no popups. The CSP nonce above is what keeps the *component's* own
+    // scripts from running alongside.
+    frame.setAttribute("sandbox", "allow-scripts");
     frame.setAttribute("title", "component preview");
+    // Kept so a message can be checked against the frame that is actually on
+    // screen, not merely against "some frame".
+    artboardFrame = frame;
     frame.srcdoc = artboardDoc(
       shown.source,
       shown.document,
       vars,
       shown.layers?.[shown.selected]?.path ?? "",
+      artboardNonce(),
     );
     board.replaceChildren(frame);
     return;
