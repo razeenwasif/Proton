@@ -132,3 +132,39 @@ fn what_the_real_pdfs_cost() {
         );
     }
 }
+
+#[test]
+#[ignore = "needs real documents"]
+fn how_long_does_a_stat_only_scan_take() {
+    // Deciding between a filesystem watcher and a periodic check: if simply
+    // asking the disk "has anything changed" is cheap, the periodic check
+    // wins on simplicity and adds no dependency.
+    let roots = roots();
+    if roots.is_empty() {
+        eprintln!("PROTON_TEST_VAULT names no readable directory — skipping");
+        return;
+    }
+    for _ in 0..2 {
+        let started = Instant::now();
+        let mut files = 0usize;
+        let mut newest = std::time::UNIX_EPOCH;
+        for root in &roots {
+            for entry in ignore::WalkBuilder::new(root)
+                .hidden(true)
+                .build()
+                .flatten()
+            {
+                let Ok(meta) = entry.metadata() else { continue };
+                if !meta.is_file() {
+                    continue;
+                }
+                files += 1;
+                if let Ok(at) = meta.modified() {
+                    newest = newest.max(at);
+                }
+            }
+        }
+        println!("  stat-only scan: {files} files in {:?}", started.elapsed());
+        let _ = newest;
+    }
+}

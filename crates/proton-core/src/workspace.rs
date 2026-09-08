@@ -3904,6 +3904,11 @@ impl Workspace {
         // once rather than at every launch.
         self.library
             .set_pdfs(self.settings.bool("library.pdfs", true));
+        // Notes get written while the editor is open — that is what a vault is
+        // for — and until this they stayed invisible until somebody remembered
+        // to press a button.
+        self.library
+            .set_watching(self.settings.bool("library.watch", true));
         self.library.set_roots(roots);
         self.library_scope = proton_library::Scope::of(
             self.settings

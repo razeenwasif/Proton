@@ -1127,9 +1127,10 @@
         </div>
         <div class="setting">
           <h4>What has been read</h4>
-          <p>Notes are searchable as soon as they are read; the PDFs land after. Documents written since are found after a re-read.</p>
+          <p>Notes are searchable as soon as they are read; the PDFs land after. The roots are checked for changes every twenty seconds — a stat-only look that costs about 180&nbsp;ms over 36,000 files — and re-read when something moved. What is already indexed stays searchable throughout.</p>
           <p data-library-status>No roots listed.</p>
-          <button class="btn" data-library-refresh>Re-read</button>
+          <label class="st-toggle"><input type="checkbox" data-set-bool="library.watch" checked> Notice changes while Proton is open</label>
+          <button class="btn" data-library-refresh style="margin-top:10px">Re-read now</button>
         </div>
         <div class="setting">
           <h4>Citing</h4>

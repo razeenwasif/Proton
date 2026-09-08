@@ -99,6 +99,9 @@ fn main() {
     let mut shelf = proton_library::Shelf::new();
     shelf.cache_in(proton_library::pdf::cache_dir());
     shelf.set_pdfs(settings.bool("library.pdfs", true));
+    // A client keeps this process alive for the length of a session, and notes
+    // get written during one.
+    shelf.set_watching(settings.bool("library.watch", true));
     // Starts the walk on a worker and returns. The first question waits for
     // it; `initialize` does not.
     shelf.set_roots(roots);
