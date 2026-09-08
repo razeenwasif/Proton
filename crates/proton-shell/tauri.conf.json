@@ -4,7 +4,8 @@
   "version": "0.0.1",
   "identifier": "dev.razeen.proton",
   "build": {
-    "frontendDist": "../../ui"
+    "frontendDist": "../../ui",
+    "beforeBuildCommand": "cargo build --release -p proton-mcp"
   },
   "app": {
     "withGlobalTauri": true,

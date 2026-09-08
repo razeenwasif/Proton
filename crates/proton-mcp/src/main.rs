@@ -14,6 +14,18 @@
 //! the user is signed in to, on whatever plan they already pay for; this only
 //! hands it better material to answer from.
 //!
+//! ## How it gets into an install
+//!
+//! As a bundle resource named in `tauri.conf.json`, not as a dependency of the
+//! shell — nothing links against it, it is a separate process. So cargo does
+//! not build it when the shell is built, and for one release it did not:
+//! `tauri build` bundled whatever binary happened to be sitting in
+//! `target/release` from some earlier run. A fix can be committed, built and
+//! installed and still not reach the server that runs.
+//!
+//! The `beforeBuildCommand` in that config is what stops it. JSON cannot hold
+//! the reason, so it is here.
+//!
 //! ## Running it
 //!
 //! ```bash
