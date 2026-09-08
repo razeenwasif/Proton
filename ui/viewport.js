@@ -33,6 +33,19 @@
 
 const DEG = Math.PI / 180;
 
+/** The vertical angle the camera sees, in radians.
+ *
+ * The badge in the corner says "50mm", so this has to be the angle a 50mm
+ * lens covers on full frame *vertically*: 2·atan(12/50), about 27°. It was
+ * 39.6° — which is the number a search for "50mm field of view" returns,
+ * because that is the *horizontal* angle across a 36mm frame. Applied to the
+ * height it made a 33mm lens wearing a 50mm label.
+ *
+ * One constant, used by the projection, the picking and the framing, so those
+ * three can never disagree about what the camera is.
+ */
+const FOV = 2 * Math.atan(12 / 50);
+
 function multiply(a, b) {
   const out = new Array(16).fill(0);
   for (let col = 0; col < 4; col++) {
@@ -239,8 +252,7 @@ export function drawViewport(nodes = lastNodes, selected = lastSelected) {
   ctx.clearRect(0, 0, width, height);
 
   const view = lookAt(eye(), camera.target);
-  // 50mm on full frame, which is what the badge in the corner claims.
-  const focal = (height * 0.5) / Math.tan(0.5 * 39.6 * DEG);
+  const focal = height * 0.5 / Math.tan(FOV / 2);
   const project = (world) => {
     const p = apply(view, world);
     // Behind the eye: no honest place to put it on screen.
@@ -337,7 +349,7 @@ function pick(x, y) {
   const view = lookAt(eye(), camera.target);
   const height = canvas.clientHeight;
   const width = canvas.clientWidth;
-  const focal = (height * 0.5) / Math.tan(0.5 * 39.6 * DEG);
+  const focal = height * 0.5 / Math.tan(FOV / 2);
   const matrices = worlds(lastNodes);
 
   let best = -1;
@@ -445,7 +457,11 @@ export function frameAll(nodes) {
     }
   }
   camera.target = lo.map((v, axis) => (v + hi[axis]) / 2);
-  const size = Math.max(...hi.map((v, axis) => v - lo[axis]), 1);
-  // Room for the proxies themselves, which stick out past their origins.
-  camera.dist = size * 2.2 + 4;
+  // The radius that has to fit, plus room for the proxies themselves, which
+  // stick out past the origins these bounds were measured from.
+  const radius = Math.max(...hi.map((v, axis) => v - lo[axis]), 1) / 2 + 1;
+  // What distance puts a sphere of that radius inside the view: it subtends
+  // the whole angle at exactly `radius / sin(fov/2)`. Derived rather than
+  // tuned, so changing the lens reframes correctly instead of cropping.
+  camera.dist = radius / Math.sin(FOV / 2);
 }

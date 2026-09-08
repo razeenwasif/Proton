@@ -6,10 +6,11 @@ A code editor that is also a chat client, a design tool, a 3D workspace, a game
 editor, a video editor and a data notebook — one window, seven modes, Neovim
 underneath all of them, and an agent that can act in any of them.
 
-**M0 through M7 are built.** The editor, Telescope and language servers, the
+**M0 through M7 are built**, and Modeling has its document, outliner,
+viewport and shader graph. The editor, Telescope and language servers, the
 agent, the Code Visualizer, the plugin host, Data mode and Design mode all
-ship. Modeling, Game and Video are the ones still to come; each needs a
-renderer and each is a real project.
+ship. Game and Video are the ones still to come; each needs a renderer and
+each is a real project.
 
 ```bash
 cargo run -p proton-shell      # the app
@@ -61,8 +62,9 @@ reading column, and **Send to Codex** when it is time to act on what you decided
 target's device / layout-inspector / Logcat panel.
 **Design** · a web builder with a layer tree and an artboard, two-way bound to
 real component source and design tokens.
-**Modeling** · 3D — outliner, viewport, shader graph, modifier stack, scene
-serialised to diffable JSON.
+**Modeling** · 3D — outliner, viewport and shader graph over a scene
+serialised to diffable JSON. Objects are drawn as proxies; there is no mesh
+loader yet, and the modifier stack is still to come.
 **Game** · hierarchy, play transport, inspector, profiler, hot reload, and an
 agent that verifies changes by replaying recorded input.
 **Video** · media bin, program monitor, multitrack timeline, with generated
@@ -127,7 +129,16 @@ with a live Jupyter kernel, the library above, and Design mode — a layer tree
 read out of your component, an artboard that renders it in a sandboxed frame,
 and edits that go both ways: a token or a layer changed here rewrites the file
 by splicing the bytes that one thing occupies, and a save in Codex comes back
-the other way. Not yet real: the Modeling, Game and Video modes, which are
-still hand-built screens behind a live statusline.
+the other way.
+
+Modeling is real too, up to a point worth stating: `scene.proton.json`, an
+outliner over it, an inspector that writes it, a viewport you can orbit and
+click, and a shader graph whose boxes and wires are the material in the file.
+What it draws are *proxies* — a box where a mesh is, a frustum for a camera —
+because the format holds transforms and no geometry. There is no mesh loader
+and nothing renders a shader.
+
+Not yet real: the Game and Video modes, which are still hand-built screens
+behind a live statusline.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.

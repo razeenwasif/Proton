@@ -632,11 +632,15 @@
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
+        <!-- Two facts, both from Event::Scene. What was here was an
+             Object/Edit/Sculpt/Shading switch for modes that do not exist, a
+             Cube/Sphere/Plane chip duplicating the buttons under the outliner,
+             "4.2k tris · 60 fps" for a scene with no triangles and no frame
+             loop, and a Generate button wired to nothing. -->
         <div class="canvas-bar">
-          <div class="seg"><button class="on">Object</button><button>Edit</button><button>Sculpt</button><button>Shading</button></div>
-          <span class="chip"><svg class="i"><use href="#i-mesh"/></svg> Cube · <svg class="i"><use href="#i-sphere"/></svg> Sphere · <svg class="i"><use href="#i-plane"/></svg> Plane</span>
-          <span class="chip info" style="margin-left:auto">4.2k tris · 60 fps</span>
-          <button class="btn primary">Generate <svg class="i"><use href="#i-spark"/></svg></button>
+          <span class="chip accent" data-scene-file>no scene</span>
+          <span class="grow"></span>
+          <span class="chip" data-scene-selected></span>
         </div>
         <div class="viewport">
           <div class="grid-floor"></div>
@@ -673,7 +677,10 @@
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
       <aside class="pane">
-        <div class="dock-tabs"><button class="dock-tab on">Object</button><button class="dock-tab">Modifiers</button><button class="dock-tab">Physics</button><button class="dock-tab">Agent</button></div>
+        <!-- One panel, so no tabs. Object was the only one of
+             Object/Modifiers/Physics/Agent with anything behind it, and three
+             tabs that change nothing when clicked are three claims. -->
+        <header>Object <span class="grow"></span><span class="chip" data-node-kind></span></header>
         <div class="scroll">
           <!-- The selected node, from Event::Scene. Typing here writes
                `scene.proton.json` — there is no save, for the reason the theme
@@ -706,13 +713,6 @@
               <input class="num" data-node-xyz="scale" data-axis="2" inputmode="decimal">
             </div>
             <p class="st-hint" data-node-note></p>
-          </div>
-          <div class="msg">
-            <div class="who"><svg class="i" width="12" height="12" style="color:var(--accent-2)"><use href="#i-spark"/></svg> Proton</div>
-            <p>“Give the solar array four panels on a 0.6 m pitch.”</p>
-            <div class="tool"><svg class="i ft-mesh"><use href="#i-mesh"/></svg> <b>mesh.array</b> count=4 offset=0.6 <span class="t">applied</span></div>
-            <p>The array modifier is non-destructive — <kbd>u</kbd> undoes it, and the whole stack is written to <code>scene.proton.json</code> so it diffs in Git.</p>
-            <div class="artifact"><svg class="i ft-data"><use href="#i-sliders"/></svg> scene.proton.json <span class="chip ok">+18 −0</span></div>
           </div>
         </div>
       </aside>

@@ -2403,11 +2403,24 @@ function renderOutliner(event) {
 
 /** The inspector for the selected node. */
 function renderNodeInspector(event) {
+  // The bar over the viewport: which file, and what is selected. Both are
+  // facts from this event rather than the invented statistics that were here.
+  const file = $("[data-scene-file]");
+  if (file) {
+    file.textContent = event.path ? event.path.split(/[\/]/).pop() : "no scene";
+    file.className = "chip" + (event.path ? " accent" : "");
+  }
+
   const form = $("[data-node-form]");
   const nothing = $("[data-node-empty]");
+  const chosen = event.nodes?.[event.selected];
+  const picked = $("[data-scene-selected]");
+  if (picked) picked.textContent = chosen ? `${chosen.kind} · ${chosen.name}` : "";
+  const kind = $("[data-node-kind]");
+  if (kind) kind.textContent = chosen?.kind ?? "";
   if (!form || !nothing) return;
 
-  const node = event.nodes?.[event.selected];
+  const node = chosen;
   form.hidden = !node;
   nothing.hidden = !!node;
   if (!node) return;
