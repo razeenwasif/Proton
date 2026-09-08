@@ -86,6 +86,11 @@ pub struct Workspace {
     /// them. Read from the settings so it survives a restart — somebody
     /// working through one subject for a week should not re-tick it daily.
     library_scope: proton_library::Scope,
+    /// The local model that turns a question into a vector, when the settings
+    /// name one. `None` is lexical search, which is a complete answer.
+    embedder: Option<proton_library::Embedder>,
+    /// Library searches waiting on a query vector.
+    asking: Vec<Asking>,
     /// A council debate in flight, and what it has said so far. Two minutes of
     /// three subscriptions, so the rounds are shown as they land rather than
     /// all at the end.
@@ -188,6 +193,34 @@ struct Waiting {
     /// and it does not depend on that rate being exact.
     beats: u32,
 }
+
+/// A `search_library` waiting on the vector for its question.
+///
+/// Embedding one query against a local model measured at two seconds, and the
+/// core answers a tool call on the heartbeat that delivers it — so doing it
+/// inline would stop the editor dead for two seconds every time the agent
+/// looked something up. It waits here instead, on exactly the mechanism a cell
+/// run already uses.
+#[derive(Debug)]
+struct Asking {
+    /// The tool call to answer once the vector lands.
+    id: String,
+    /// Everything needed to finish the search, kept because the library will
+    /// be searched on a later beat than the one that asked.
+    query: String,
+    limit: usize,
+    scope: proton_library::Scope,
+    vector: std::sync::mpsc::Receiver<Result<Vec<f32>, String>>,
+    beats: u32,
+}
+
+/// How many beats to wait for a query vector before searching without one.
+///
+/// Twenty seconds. Unlike a cell, there is a good answer available the moment
+/// this runs out: the lexical search, which is what the library did before
+/// vectors existed. So the bound is tight, and missing it costs a worse
+/// ranking rather than a failure.
+const PATIENCE_ASKING: u32 = 400;
 
 /// How many beats to wait for a cell before giving up on it.
 ///
@@ -1354,6 +1387,13 @@ impl Workspace {
         // An empty query has no answer. Every other picker lists everything
         // when nothing is typed; a library cannot, because there is no order
         // to list a corpus in that means anything.
+        //
+        // Words only, even when the vectors exist. This runs on every
+        // keystroke, and embedding one query against a local model measured at
+        // two seconds — so the picker would be two seconds behind the letter
+        // being typed, which is not a picker. The vectors are for
+        // `search_library`, where a question is asked once and the wait is
+        // hidden inside a turn that was already going to take longer.
         let rows = match query.trim().is_empty() {
             true => Vec::new(),
             false => self
@@ -2093,6 +2133,7 @@ impl Workspace {
         // while a turn is in flight, which is one condition too many for
         // something whose whole job is to end a wait.
         events.extend(self.answer_finished_cells());
+        self.answer_embedded_searches();
 
         if self.data.poll() {
             // A kernel that died under a running cell is news, not a state:
@@ -3291,6 +3332,11 @@ impl Workspace {
     /// question — "is there an answer yet?" — rather than knowing which tools
     /// are slow.
     pub fn call_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) -> ToolOutcome {
+        if name == "search_library" {
+            if let Some(deferred) = self.start_library_search(id, input) {
+                return deferred;
+            }
+        }
         if name != "run_cell" {
             return ToolOutcome::Answered(self.run_tool(name, input));
         }
@@ -3306,6 +3352,90 @@ impl Workspace {
             // A start that failed has to answer, or the turn waits for ever on
             // a cell that never began.
             Err(why) => ToolOutcome::Answered(Err(why)),
+        }
+    }
+
+    /// Begin embedding a question, if this search would be better for it.
+    ///
+    /// `None` means "not this one" and the caller answers it synchronously —
+    /// which covers every case where there is nothing to gain: no model
+    /// configured, no vectors made yet, or a library that cannot be searched
+    /// at all and should say so now rather than after a two-second wait.
+    fn start_library_search(&mut self, id: &str, input: &serde_json::Value) -> Option<ToolOutcome> {
+        let embedder = self.embedder.clone()?;
+        if !self.library.has_vectors() || self.library_excuse().is_some() {
+            return None;
+        }
+        let query = input.get("query").and_then(|v| v.as_str())?.to_string();
+
+        let (done, vector) = std::sync::mpsc::channel();
+        let asked = query.clone();
+        // Detached: it holds nothing the editor needs, and a send into a
+        // dropped receiver is how it learns the question was abandoned.
+        std::thread::Builder::new()
+            .name("proton-embed-query".into())
+            .spawn(move || {
+                let made = embedder
+                    .vectors(&[asked])
+                    .map(|mut all| all.pop().unwrap_or_default());
+                let _ = done.send(made);
+            })
+            .ok()?;
+
+        self.asking.push(Asking {
+            id: id.to_string(),
+            limit: input
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map_or(6, |n| n as usize),
+            scope: self.asked_scope(input),
+            query,
+            vector,
+            beats: 0,
+        });
+        Some(ToolOutcome::Deferred)
+    }
+
+    /// Answer every library search whose vector has arrived.
+    fn answer_embedded_searches(&mut self) {
+        if self.asking.is_empty() {
+            return;
+        }
+        let mut ready: Vec<(String, String, usize, proton_library::Scope, Vec<f32>)> = Vec::new();
+        self.asking.retain_mut(|asking| {
+            let vector = match asking.vector.try_recv() {
+                Ok(Ok(vector)) => vector,
+                // A model that is not running is not a reason to answer
+                // nothing: the words still work. Same for running out of
+                // patience, which is why both fall through to an empty vector
+                // rather than to an error.
+                Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    asking.beats += 1;
+                    if asking.beats < PATIENCE_ASKING {
+                        return true;
+                    }
+                    Vec::new()
+                }
+            };
+            ready.push((
+                asking.id.clone(),
+                asking.query.clone(),
+                asking.limit,
+                asking.scope.clone(),
+                vector,
+            ));
+            false
+        });
+
+        let done: Vec<(String, Result<String, String>)> = ready
+            .into_iter()
+            .map(|(id, query, limit, scope, vector)| {
+                (id, self.library_answer(&query, limit, &scope, &vector))
+            })
+            .collect();
+        for (id, answer) in done {
+            self.agent.answer(&id, answer);
         }
     }
 
@@ -3502,70 +3632,14 @@ impl Workspace {
 
             "search_library" => {
                 let query = text("query")?;
-                if self.library.roots().is_empty() {
-                    return Ok("there is no library: the user has not listed any roots in \
-                               Settings › Library, so there are no notes to search"
-                        .into());
+                if let Some(why) = self.library_excuse() {
+                    return Ok(why);
                 }
-                // A walk takes about a second on a vault of a thousand notes,
-                // and it started when the session did — so this is only ever
-                // hit by a question asked immediately after launch. Saying so
-                // is better than answering "nothing found" about a library
-                // that has not been read yet.
-                if !self.library.is_built() {
-                    return Ok("the library is still being read — ask again in a moment".into());
-                }
-
-                // The user's own narrowing, unless the model named its own.
-                // Their choice is the default because they made it in a panel
-                // they can see; a model that wants one subject can still ask.
-                let asked = input
-                    .get("sources")
-                    .and_then(|v| v.as_array())
-                    .map(|list| {
-                        list.iter()
-                            .filter_map(|v| v.as_str())
-                            .map(str::to_string)
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                let scope = match asked.is_empty() {
-                    true => self.library_scope.clone(),
-                    false => proton_library::Scope::of(asked),
-                };
-
-                let hits = self.library.search_in(&query, count("limit", 6), &scope);
-                if hits.is_empty() {
-                    // "Nothing found" and "not all of it has been read yet"
-                    // are different answers, and a walk over a corpus of PDFs
-                    // runs for minutes after the notes are already searchable.
-                    let (read, found) = self.library.progress();
-                    let more = match self.library.is_building() {
-                        true => format!(
-                            " — still reading, {read} of {found} documents so far, \
-                             so this may not be the whole library"
-                        ),
-                        false => String::new(),
-                    };
-                    // Which shelf was asked, when it was not all of them: the
-                    // likeliest reason an answer is empty is that the question
-                    // went to the wrong one.
-                    let where_ = match scope.is_everything() {
-                        true => format!(" ({} passages searched)", self.library.len()),
-                        false => format!(" within {}", scope.prefixes().join(", ")),
-                    };
-                    return Ok(format!(
-                        "nothing in the library about {query:?}{where_}{more}"
-                    ));
-                }
-                // The citation on its own line above the passage, so what to
-                // quote back is unambiguous even after the text runs to
-                // sixty lines.
-                Ok(hits
-                    .iter()
-                    .map(|hit| format!("[[{}]]\n{}", hit.cite, hit.passage.text))
-                    .collect::<Vec<_>>()
-                    .join("\n\n---\n\n"))
+                let scope = self.asked_scope(input);
+                // No vector: either embeddings are off, or this call arrived
+                // by a path that does not defer. Lexical is the answer then,
+                // and it is a complete one.
+                self.library_answer(&query, count("limit", 6), &scope, &[])
             }
 
             "open_buffer" => {
@@ -3948,6 +4022,15 @@ impl Workspace {
         // to press a button.
         self.library
             .set_watching(self.settings.bool("library.watch", true));
+        // Off unless a model is named. It needs Ollama running and costs
+        // minutes of local compute the first time, so it is not something to
+        // start on somebody's behalf — and lexical search without it is a
+        // complete answer, just a narrower one.
+        let model = self.settings.string("library.embeddings", "");
+        self.embedder = (!model.is_empty()).then(|| {
+            proton_library::Embedder::new(&model).caching_in(proton_library::pdf::cache_dir())
+        });
+        self.library.embed_with(self.embedder.clone());
         self.library.set_roots(roots);
         self.library_scope = proton_library::Scope::of(
             self.settings
@@ -3961,6 +4044,93 @@ impl Workspace {
                 })
                 .unwrap_or_default(),
         );
+    }
+
+    /// Why the library cannot answer at all, when it cannot.
+    ///
+    /// Said rather than returning nothing, because "there is no library" and
+    /// "nothing in the library about that" are different facts and only one of
+    /// them is about the question.
+    fn library_excuse(&self) -> Option<String> {
+        if self.library.roots().is_empty() {
+            return Some(
+                "there is no library: the user has not listed any roots in \
+                 Settings › Library, so there are no notes to search"
+                    .into(),
+            );
+        }
+        // A walk takes about a second on a vault of a thousand notes, and it
+        // started when the session did — so this is only ever hit by a question
+        // asked immediately after launch. Saying so is better than answering
+        // "nothing found" about a library that has not been read yet.
+        (!self.library.is_built())
+            .then(|| "the library is still being read — ask again in a moment".into())
+    }
+
+    /// The scope a tool call asked for, or the user's own.
+    ///
+    /// Their choice is the default because they made it in a panel they can
+    /// see; a model that wants one subject can still ask.
+    fn asked_scope(&self, input: &serde_json::Value) -> proton_library::Scope {
+        let asked: Vec<String> = input
+            .get("sources")
+            .and_then(|v| v.as_array())
+            .map(|list| {
+                list.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        match asked.is_empty() {
+            true => self.library_scope.clone(),
+            false => proton_library::Scope::of(asked),
+        }
+    }
+
+    /// The passages that answer a question, by words and — given a vector —
+    /// by meaning too.
+    fn library_answer(
+        &self,
+        query: &str,
+        limit: usize,
+        scope: &proton_library::Scope,
+        vector: &[f32],
+    ) -> Result<String, String> {
+        let hits = match vector.is_empty() {
+            true => self.library.search_in(query, limit, scope),
+            false => self.library.search_both(query, vector, limit, scope),
+        };
+        if hits.is_empty() {
+            // "Nothing found" and "not all of it has been read yet" are
+            // different answers, and a walk over a corpus of PDFs runs for
+            // minutes after the notes are already searchable.
+            let (read, found) = self.library.progress();
+            let more = match self.library.is_building() {
+                true => format!(
+                    " — still reading, {read} of {found} documents so far, \
+                     so this may not be the whole library"
+                ),
+                false => String::new(),
+            };
+            // Which shelf was asked, when it was not all of them: the likeliest
+            // reason an answer is empty is that the question went to the wrong
+            // one.
+            let where_ = match scope.is_everything() {
+                true => format!(" ({} passages searched)", self.library.len()),
+                false => format!(" within {}", scope.prefixes().join(", ")),
+            };
+            return Ok(format!(
+                "nothing in the library about {query:?}{where_}{more}"
+            ));
+        }
+        // The citation on its own line above the passage, so what to quote back
+        // is unambiguous even after the text runs to sixty lines.
+        Ok(hits
+            .iter()
+            .map(|hit| format!("[[{}]]\n{}", hit.cite, hit.passage.text))
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n"))
     }
 
     /// Point the agent at whatever the settings name.

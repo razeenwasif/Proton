@@ -15,6 +15,10 @@ fixture = ["dep:lopdf"]
 [dependencies]
 ignore = "0.4"
 pdf-extract = "0.12.0"
+# For the local embedding model. No TLS features: it talks to
+# localhost, and a vector never leaves the machine.
+ureq = { version = "3", default-features = false, features = ["json"] }
+serde_json = { workspace = true }
 lopdf = { version = "0.42", optional = true }
 
 [dev-dependencies]

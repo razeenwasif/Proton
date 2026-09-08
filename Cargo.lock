@@ -4398,6 +4398,8 @@ dependencies = [
  "lopdf",
  "pdf-extract",
  "proton-library",
+ "serde_json",
+ "ureq",
 ]
 
 [[package]]

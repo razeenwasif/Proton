@@ -102,11 +102,19 @@ fn main() {
     // A client keeps this process alive for the length of a session, and notes
     // get written during one.
     shelf.set_watching(settings.bool("library.watch", true));
+    // Whatever the editor's settings say, so the same library answers the
+    // same way in both places. Off unless a model is named.
+    let model = settings.string("library.embeddings", "");
+    let embedder = (!model.is_empty()).then(|| {
+        eprintln!("proton-mcp: embedding with {model}");
+        proton_library::Embedder::new(&model).caching_in(proton_library::pdf::cache_dir())
+    });
+    shelf.embed_with(embedder.clone());
     // Starts the walk on a worker and returns. The first question waits for
     // it; `initialize` does not.
     shelf.set_roots(roots);
 
-    serve(&mut shelf);
+    serve(&mut shelf, embedder.as_ref());
 }
 
 /// `--project <path>`, or the working directory.
@@ -122,7 +130,7 @@ fn project_from_args() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-fn serve(shelf: &mut proton_library::Shelf) {
+fn serve(shelf: &mut proton_library::Shelf, embedder: Option<&proton_library::Embedder>) {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
 
@@ -131,7 +139,7 @@ fn serve(shelf: &mut proton_library::Shelf) {
         let Some(call) = Call::parse(&line) else {
             continue;
         };
-        let Some(answer) = handle(&call, shelf) else {
+        let Some(answer) = handle(&call, shelf, embedder) else {
             continue;
         };
         // Flushed every time. A buffered answer is an answer the client waits
@@ -141,7 +149,11 @@ fn serve(shelf: &mut proton_library::Shelf) {
     }
 }
 
-fn handle(call: &Call, shelf: &mut proton_library::Shelf) -> Option<Value> {
+fn handle(
+    call: &Call,
+    shelf: &mut proton_library::Shelf,
+    embedder: Option<&proton_library::Embedder>,
+) -> Option<Value> {
     // A notification is acted on and never answered.
     if !call.wants_an_answer() {
         return None;
@@ -175,7 +187,7 @@ fn handle(call: &Call, shelf: &mut proton_library::Shelf) -> Option<Value> {
                 .unwrap_or_else(|| json!({}));
             match name {
                 "search_library" => {
-                    let (text, failed) = search(shelf, &args);
+                    let (text, failed) = search(shelf, embedder, &args);
                     rpc::result(&id, rpc::tool_output(text, failed))
                 }
                 "library_status" => rpc::result(&id, rpc::tool_output(status(shelf), false)),
@@ -238,7 +250,11 @@ fn tools() -> Value {
     ])
 }
 
-fn search(shelf: &mut proton_library::Shelf, args: &Value) -> (String, bool) {
+fn search(
+    shelf: &mut proton_library::Shelf,
+    embedder: Option<&proton_library::Embedder>,
+    args: &Value,
+) -> (String, bool) {
     let Some(query) = args.get("query").and_then(Value::as_str) else {
         return (
             "search_library: `query` is required and must be a string".into(),
@@ -292,7 +308,20 @@ fn search(shelf: &mut proton_library::Shelf, args: &Value) -> (String, bool) {
             })
             .unwrap_or_default(),
     );
-    let hits = shelf.search_in(query, limit, &scope);
+    // Blocking on the embed is right here in a way it is not in the editor:
+    // this process answers one question at a time down a pipe, and there is no
+    // window to freeze. A model that is not running costs a moment and then
+    // the lexical answer, which is the answer this tool gave before vectors
+    // existed.
+    let vector = embedder
+        .filter(|_| shelf.has_vectors())
+        .and_then(|one| one.vectors(&[query.to_string()]).ok())
+        .and_then(|mut all| all.pop())
+        .unwrap_or_default();
+    let hits = match vector.is_empty() {
+        true => shelf.search_in(query, limit, &scope),
+        false => shelf.search_both(query, &vector, limit, &scope),
+    };
     if hits.is_empty() {
         return (
             format!(
@@ -434,6 +463,7 @@ mod tests {
         let out = handle(
             &call("initialize", json!({ "protocolVersion": "2024-11-05" })),
             &mut shelf(),
+            None,
         )
         .unwrap();
         assert_eq!(out["result"]["protocolVersion"], json!("2024-11-05"));
@@ -443,7 +473,7 @@ mod tests {
 
     #[test]
     fn the_tools_are_listed_with_schemas() {
-        let out = handle(&call("tools/list", json!({})), &mut shelf()).unwrap();
+        let out = handle(&call("tools/list", json!({})), &mut shelf(), None).unwrap();
         let tools = out["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(
@@ -467,17 +497,18 @@ mod tests {
         // Replying to one is a protocol error, not a harmless extra.
         let note =
             Call::parse(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).unwrap();
-        assert!(handle(&note, &mut shelf()).is_none());
+        assert!(handle(&note, &mut shelf(), None).is_none());
     }
 
     #[test]
     fn an_unknown_method_is_an_error_and_an_unknown_tool_is_too() {
-        let out = handle(&call("wat", json!({})), &mut shelf()).unwrap();
+        let out = handle(&call("wat", json!({})), &mut shelf(), None).unwrap();
         assert_eq!(out["error"]["code"], json!(rpc::METHOD_NOT_FOUND));
 
         let out = handle(
             &call("tools/call", json!({ "name": "delete_everything" })),
             &mut shelf(),
+            None,
         )
         .unwrap();
         assert_eq!(out["error"]["code"], json!(rpc::INVALID_PARAMS));
@@ -493,6 +524,7 @@ mod tests {
                 json!({ "name": "search_library", "arguments": { "query": "sparsity" } }),
             ),
             &mut shelf(),
+            None,
         )
         .unwrap();
         let text = out["result"]["content"][0]["text"].as_str().unwrap();
@@ -507,6 +539,7 @@ mod tests {
         let out = handle(
             &call("tools/call", json!({ "name": "search_library" })),
             &mut shelf(),
+            None,
         )
         .unwrap();
         assert!(out.get("error").is_none(), "{out}");
@@ -549,6 +582,7 @@ gradients and descent
                 }),
             ),
             &mut shelf,
+            None,
         )
         .unwrap();
         let text = out["result"]["content"][0]["text"].as_str().unwrap();
@@ -558,7 +592,7 @@ gradients and descent
 
     #[test]
     fn ping_is_answered() {
-        let out = handle(&call("ping", json!({})), &mut shelf()).unwrap();
+        let out = handle(&call("ping", json!({})), &mut shelf(), None).unwrap();
         assert!(out["result"].is_object());
     }
 }

@@ -1147,6 +1147,15 @@
           <button class="btn" data-library-refresh style="margin-top:10px">Re-read now</button>
         </div>
         <div class="setting">
+          <h4>Meaning</h4>
+          <p>Matching by word finds a passage only when it uses the words you did. <em>Why is my loop slow when the array is big</em> shares no term with a section on cache blocking, so it cannot reach it — no amount of tuning changes that. Naming a local embedding model here adds a second ranking by meaning and fuses the two, which does reach it.</p>
+          <p>It runs on your machine through <code>ollama</code>, so nothing leaves it and nothing is billed. The cost is time: it embeds about 60 passages a second, so a vault of 16,000 takes four or five minutes the first time. What it makes is kept, and keyed on the text of the passage rather than on where it lives — so re-reading a file, or moving one, costs nothing. Leave it empty for words only, which is a complete answer and a narrower one.</p>
+          <label class="st-field">Embedding model
+            <input type="text" data-set-text="library.embeddings" placeholder="empty — words only" spellcheck="false">
+          </label>
+          <p class="st-hint"><code>ollama pull embeddinggemma</code> gets one. A question is embedded when the agent searches, which adds about two seconds to that one call; the <code>␣fl</code> picker stays on words, because two seconds a keystroke is not a picker.</p>
+        </div>
+        <div class="setting">
           <h4>Citing</h4>
           <p>Answers quote a passage's citation in double brackets — <code>[[Attention.md § Sparse patterns L42-58]]</code> — which is clickable in the agent pane and is a working link if you paste the answer back into Obsidian.</p>
         </div>

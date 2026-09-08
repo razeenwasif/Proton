@@ -91,6 +91,10 @@ pub struct Shelf {
     pdfs: bool,
     /// Where extracted PDF text is kept between runs.
     cache: Option<PathBuf>,
+    /// The local model that makes vectors, when one has been asked for.
+    /// `None` means lexical search only, which is a complete answer and a
+    /// narrower one.
+    embedder: Option<crate::Embedder>,
     counted: Arc<Counted>,
     /// Whether the roots are checked for changes while the editor runs.
     watching: bool,
@@ -157,6 +161,35 @@ impl Shelf {
             self.counted.done.load(Ordering::Relaxed),
             self.counted.total.load(Ordering::Relaxed),
         )
+    }
+
+    /// Make vectors as well as an index, using this model. `None` turns it
+    /// off. Either way it restarts the walk, because the vectors are made
+    /// from the passages and the passages are made by the walk.
+    pub fn embed_with(&mut self, embedder: Option<crate::Embedder>) {
+        let was = self.embedder.as_ref().map(|one| one.model().to_string());
+        let now = embedder.as_ref().map(|one| one.model().to_string());
+        if was == now {
+            return;
+        }
+        self.embedder = embedder;
+        self.restart();
+    }
+
+    /// Whether the library can answer by meaning as well as by word.
+    pub fn has_vectors(&self) -> bool {
+        self.library.has_vectors()
+    }
+
+    /// The best passages for a query and its vector, using both.
+    pub fn search_both(
+        &self,
+        query: &str,
+        vector: &[f32],
+        limit: usize,
+        scope: &crate::Scope,
+    ) -> Vec<Hit> {
+        self.library.search_both(query, vector, limit, scope)
     }
 
     /// Whether PDFs are read.
@@ -254,6 +287,7 @@ impl Shelf {
         let roots = self.roots.clone();
         let pdfs = self.pdfs;
         let cache = self.cache.clone();
+        let embedder = self.embedder.clone();
         let counted = Arc::clone(&self.counted);
         // Detached, like the picker's walk: it holds nothing the editor needs,
         // and if the window closes first the send fails and the thread ends.
@@ -263,7 +297,15 @@ impl Shelf {
                 // Before reading, so a note written *during* the walk is not
                 // stamped as already read and then never picked up.
                 let stamp = fingerprint(&roots);
-                read(&roots, pdfs, cache.as_deref(), &counted, &done, stamp)
+                read(
+                    &roots,
+                    pdfs,
+                    cache.as_deref(),
+                    &counted,
+                    &done,
+                    stamp,
+                    embedder.as_ref(),
+                )
             });
         self.building = Some(waiting);
     }
@@ -373,6 +415,15 @@ impl Shelf {
         self.library.search(query, limit)
     }
 
+    /// The library itself, for whoever wants to add vectors to it.
+    pub fn into_library(self) -> Library {
+        self.library
+    }
+
+    pub fn library(&self) -> &Library {
+        &self.library
+    }
+
     /// The best passages a scope admits.
     pub fn search_in(&self, query: &str, limit: usize, scope: &crate::Scope) -> Vec<Hit> {
         self.library.search_in(query, limit, scope)
@@ -431,6 +482,7 @@ fn read(
     counted: &Counted,
     done: &mpsc::Sender<Built>,
     stamp: (usize, u64),
+    embedder: Option<&crate::Embedder>,
 ) {
     let started = Instant::now();
     let mut library = Library::new();
@@ -485,6 +537,34 @@ fn read(
             library.add_pages(&path, &out.pages);
         }
         counted.done.fetch_add(1, Ordering::Relaxed);
+    }
+    // A third answer, when there is a model to make vectors with. It is last
+    // because it is by far the slowest — about sixty passages a second, so
+    // minutes over a real vault the first time against seconds for everything
+    // above — and because everything above it is already a working library.
+    // A failure here loses the vectors and keeps the index, which is the right
+    // way round: lexical search is a complete answer.
+    let Some(embedder) = embedder else {
+        let _ = done.send(Built {
+            library,
+            elapsed: started.elapsed(),
+            missing,
+            whole: true,
+            stamp,
+        });
+        return;
+    };
+
+    let _ = done.send(Built {
+        library: library.clone(),
+        elapsed: started.elapsed(),
+        missing: missing.clone(),
+        whole: false,
+        stamp,
+    });
+
+    if let Ok(vectors) = embedder.vectors(&library.texts()) {
+        let _ = library.take_vectors(vectors);
     }
     let _ = done.send(Built {
         library,
@@ -1211,5 +1291,46 @@ ferromagnetic
 
         let hits = shelf.search("sparsity", 1);
         assert_eq!(hits[0].cite, "sub/note.md § Attention L1-2", "{hits:#?}");
+    }
+
+    #[test]
+    fn asking_for_the_same_embedder_twice_does_not_re_read_the_disk() {
+        // The settings are re-applied whenever any of them changes, and
+        // `embed_with` restarts the walk — so if it restarted on being told
+        // what it already knew, a corpus of PDFs would be re-read on every
+        // keystroke in the settings panel, for ever. Both directions matter:
+        // the common case is `None` being set again and again.
+        let vault = root("embed-idempotent");
+        write(&vault, "note.md", "# One\n\nsparsity\n");
+
+        let mut shelf = Shelf::new();
+        shelf.set_roots(vec![vault]);
+        settle(&mut shelf);
+
+        shelf.embed_with(None);
+        assert!(shelf.is_built(), "setting no embedder threw the walk away");
+        assert!(!shelf.is_building());
+
+        // And a real change does restart, because the vectors are made from
+        // the passages and there are none yet.
+        shelf.embed_with(Some(crate::Embedder::new("nothing-is-pulled")));
+        assert!(
+            !shelf.is_built(),
+            "naming a model left the old library in place"
+        );
+    }
+
+    #[test]
+    fn a_shelf_with_no_embedder_has_no_vectors_and_searches_anyway() {
+        // The default, and the guarantee that goes with it: turning this on is
+        // opt-in, and everything works without it.
+        let vault = root("embed-absent");
+        write(&vault, "note.md", "# One\n\nsparsity\n");
+
+        let mut shelf = Shelf::new();
+        shelf.set_roots(vec![vault]);
+        settle(&mut shelf);
+        assert!(!shelf.has_vectors());
+        assert_eq!(shelf.search("sparsity", 1).len(), 1);
     }
 }
