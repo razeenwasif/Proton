@@ -87,10 +87,9 @@ fn main() {
     // Reported on stderr, which the client shows as server logs. Never
     // stdout: that carries the protocol, and one stray line ends the session.
     eprintln!(
-        "proton-mcp: project {}, {} librar{} root{}",
+        "proton-mcp: project {}, {} library root{}",
         project.display(),
         roots.len(),
-        if roots.len() == 1 { "y" } else { "ies" },
         if roots.len() == 1 { "" } else { "s" },
     );
     for root in &roots {
