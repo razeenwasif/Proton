@@ -43,6 +43,10 @@ pub struct Design {
     /// reason — "no theme" and "that file needs building first" are different
     /// sentences about different halves of the screen.
     trouble: Option<String>,
+    /// Which layer the tree has selected. `usize::MAX` for none, which is what
+    /// a fresh component has: opening a file should not assert that its first
+    /// element is interesting.
+    layer: usize,
 }
 
 impl Design {
@@ -75,6 +79,39 @@ impl Design {
         self.component.as_ref()
     }
 
+    /// The element tree the layer panel draws.
+    pub fn layers(&self) -> Vec<proton_design::Layer> {
+        self.component
+            .as_ref()
+            .map(Component::layers)
+            .unwrap_or_default()
+    }
+
+    /// Which layer is selected, or `usize::MAX`.
+    pub fn layer(&self) -> usize {
+        self.layer
+    }
+
+    /// Pick a layer. Out of range clears the selection rather than clamping:
+    /// a click on a tree that has since changed under it should select
+    /// nothing, not something else.
+    pub fn select_layer(&mut self, index: usize) -> bool {
+        let to = match index < self.layers().len() {
+            true => index,
+            false => usize::MAX,
+        };
+        let moved = to != self.layer;
+        self.layer = to;
+        moved
+    }
+
+    /// Where a layer was written: the file, and the line.
+    pub fn layer_place(&self, index: usize) -> Option<(std::path::PathBuf, usize)> {
+        let component = self.component.as_ref()?;
+        let layer = component.layers().into_iter().nth(index)?;
+        Some((component.path().to_path_buf(), layer.line))
+    }
+
     pub fn trouble(&self) -> Option<&str> {
         self.trouble.as_deref()
     }
@@ -90,6 +127,7 @@ impl Design {
             Ok(component) => {
                 self.component = Some(component);
                 self.trouble = None;
+                self.layer = usize::MAX;
                 Ok(())
             }
             Err(why) => {
@@ -198,6 +236,10 @@ impl Design {
             Ok(fresh) if self.component.as_ref() != Some(&fresh) => {
                 self.component = Some(fresh);
                 self.trouble = None;
+                // The file changed under the selection, so the index means
+                // something else now. Cleared rather than kept: outlining the
+                // wrong element is worse than outlining none.
+                self.layer = usize::MAX;
                 true
             }
             Ok(_) => false,
@@ -207,6 +249,7 @@ impl Design {
                 let changed = self.trouble.as_deref() != Some(why.as_str());
                 self.component = None;
                 self.trouble = Some(why);
+                self.layer = usize::MAX;
                 changed
             }
         }

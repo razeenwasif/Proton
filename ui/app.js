@@ -1878,8 +1878,13 @@ function renderPalettes(event) {
    Both are worth revisiting when the artboard grows interaction. Neither is
    worth loosening quietly. */
 
-/** The document to put in the frame: the component, wrapped in its palette. */
-function artboardDoc(source, isDocument, vars) {
+/** The document to put in the frame: the component, wrapped in its palette.
+ *
+ * `pick` is the selected layer's CSS path, or empty. It is applied as a rule
+ * rather than by marking up the element, because the frame must be given the
+ * author's markup unaltered — the moment this starts editing the source on
+ * its way to the screen, the artboard stops showing the file. */
+function artboardDoc(source, isDocument, vars, pick) {
   // `default-src 'none'` and no `script-src` means nothing loads and nothing
   // runs; styles and data: images are what a preview actually needs.
   const csp =
@@ -1889,7 +1894,13 @@ function artboardDoc(source, isDocument, vars) {
     `<style>:root{${vars}}` +
     `html,body{margin:0}` +
     `body{background:var(--bg,#16161e);color:var(--ink,#c0caf5);` +
-    `font:14px/1.5 system-ui,sans-serif;padding:18px}</style>`;
+    `font:14px/1.5 system-ui,sans-serif;padding:18px}` +
+    // `outline` rather than `border`, because a border would move the element
+    // it is drawn on and the artboard would stop showing the real layout.
+    (pick
+      ? `${pick}{outline:2px solid var(--accent,#7aa2f7);outline-offset:2px}`
+      : "") +
+    `</style>`;
 
   if (!isDocument) {
     return `<!doctype html><html><head><meta charset="utf-8">${csp}${style}</head>` +
@@ -1900,6 +1911,55 @@ function artboardDoc(source, isDocument, vars) {
   // written rather than guessed at.
   const at = source.search(/<\/head>/i);
   return at === -1 ? source + style : source.slice(0, at) + csp + style + source.slice(at);
+}
+
+/* ── The layer tree ──────────────────────────────────────────────
+
+   Every row is an element that is really in the file on the artboard, read
+   out of it by proton-design::markup. Clicking one selects it and outlines it
+   in the frame; double-clicking opens the line that wrote it, in Codex.
+
+   Selection is sent to the core rather than kept here, because the outline is
+   drawn from the layer's CSS path and the core is what knows the tree. Two
+   copies of "which layer" is two things to disagree. */
+
+function renderLayers(event) {
+  const box = $("[data-layers]");
+  if (!box) return;
+  const count = $("[data-layer-count]");
+  const layers = event.layers ?? [];
+  if (count) count.textContent = layers.length ? `${layers.length}` : "";
+
+  if (!layers.length) {
+    box.innerHTML = `<div class="empty">${escapeHtml(
+      event.problem || "No component on the artboard.",
+    )}</div>`;
+    return;
+  }
+
+  box.innerHTML = layers
+    .map((layer, i) => {
+      // What the element is called, in the order somebody looks for it: the
+      // id if it has one, then classes, then its text. A tree of bare `div`
+      // is a tree nobody can navigate.
+      const name = layer.id
+        ? `<b>#${escapeHtml(layer.id)}</b>`
+        : layer.classes.length
+          ? `<i>.${escapeHtml(layer.classes[0])}</i>`
+          : "";
+      const text = layer.text
+        ? `<span class="lay-text">${escapeHtml(layer.text)}</span>`
+        : "";
+      return (
+        `<div class="row lay${i === event.selected ? " sel" : ""}" data-layer="${i}"` +
+        ` style="padding-left:${8 + layer.depth * 11}px"` +
+        ` title="${escapeHtml(layer.tag)} — line ${layer.line}">` +
+        `<span class="lay-tag">${escapeHtml(layer.tag)}</span>${name}${text}` +
+        `<span class="grow"></span><span class="lay-line">${layer.line}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
 }
 
 function renderArtboard(event) {
@@ -1942,7 +2002,14 @@ function renderArtboard(event) {
 
   const palette = resolveScope(event.tokens, artboardScope);
   const shown = lastArtboard || {};
-  const key = JSON.stringify([[...palette], artboardWidth, shown.path, shown.source, shown.problem]);
+  const key = JSON.stringify([
+    [...palette],
+    artboardWidth,
+    shown.path,
+    shown.source,
+    shown.problem,
+    shown.selected,
+  ]);
   // Repainted only when something it draws actually changed. The frame is
   // reloaded by writing `srcdoc`, and reloading it on every heartbeat would
   // reset a scroll position somebody was reading from.
@@ -1967,7 +2034,12 @@ function renderArtboard(event) {
     frame.className = "ab-frame";
     frame.setAttribute("sandbox", "");
     frame.setAttribute("title", "component preview");
-    frame.srcdoc = artboardDoc(shown.source, shown.document, vars);
+    frame.srcdoc = artboardDoc(
+      shown.source,
+      shown.document,
+      vars,
+      shown.layers?.[shown.selected]?.path ?? "",
+    );
     board.replaceChildren(frame);
     return;
   }
@@ -2462,6 +2534,22 @@ document.addEventListener("change", (e) => {
   artboardScope = picker.value;
   artboardPainted = null;
   if (lastTheme) renderArtboard(lastTheme);
+});
+
+// A layer: click to select and outline it, double-click to open the line that
+// wrote it. Both go to the core, which owns which layer is selected — the
+// outline is drawn from the layer's CSS path, and the core is what has the
+// tree that path came from.
+document.addEventListener("click", (e) => {
+  const row = e.target.closest?.("[data-layer]");
+  if (!row) return;
+  dispatch({ type: "selectLayer", index: Number(row.dataset.layer) });
+});
+
+document.addEventListener("dblclick", (e) => {
+  const row = e.target.closest?.("[data-layer]");
+  if (!row) return;
+  dispatch({ type: "revealLayer", index: Number(row.dataset.layer) });
 });
 
 // Choosing a palette from the list is the same act as choosing it from the
@@ -3289,6 +3377,7 @@ onEvent((event) => {
 
     case "artboard":
       lastArtboard = event;
+      renderLayers(event);
       // Drawn from the theme event, which carries the palette. Nothing to
       // paint on until one has arrived; the next one will pick this up.
       if (lastTheme) renderArtboard(lastTheme);

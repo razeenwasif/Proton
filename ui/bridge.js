@@ -231,12 +231,32 @@ if (HAS_SHELL) {
     ].join("\n"),
   };
 
+  // Written out rather than parsed. Everywhere else in this file a mock is a
+  // fixture, and a second markup parser living here to serve one fixed
+  // component would be a second thing to keep correct — the real one is
+  // proton-design::markup and it has its own tests. The lines match the
+  // source above; change one and change the other.
+  const componentLayers = [
+    { tag: "article", id: "", classes: ["card"], text: "", line: 1, depth: 0,
+      path: "article:nth-child(1)" },
+    { tag: "h3", id: "", classes: [], text: "Pricing", line: 2, depth: 1,
+      path: "article:nth-child(1) > h3:nth-child(1)" },
+    { tag: "p", id: "", classes: [], text: "A component file, drawn with the project\u2019s own p\u2026",
+      line: 3, depth: 1, path: "article:nth-child(1) > p:nth-child(2)" },
+    { tag: "button", id: "", classes: [], text: "Choose plan", line: 4, depth: 1,
+      path: "article:nth-child(1) > button:nth-child(3)" },
+    { tag: "style", id: "", classes: [], text: "", line: 6, depth: 0,
+      path: "style:nth-child(2)" },
+  ];
+
   const artboardEvent = () => ({
     type: "artboard",
     path: component.path,
     source: component.source,
     document: component.document,
     problem: component.problem,
+    layers: componentLayers,
+    selected: component.selected ?? -1,
   });
 
   const notebookEvent = () => ({
@@ -444,6 +464,10 @@ if (HAS_SHELL) {
       const hit = chats.conversations.find((c) => c.path === command.path);
       if (hit) hit.title = command.title;
       return [chatsEvent()];
+    }
+    if (command.type === "selectLayer") {
+      component.selected = command.index;
+      return [artboardEvent()];
     }
     if (command.type === "setSetting") {
       const parts = command.key.split(".");

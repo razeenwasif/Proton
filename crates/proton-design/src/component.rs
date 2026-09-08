@@ -6,18 +6,19 @@
 //! changes `theme.css`, and editing the component in Codex updates the
 //! artboard.*
 //!
-//! ## Why this holds text and not a tree
+//! ## The text is what is held; the tree is derived from it
 //!
-//! It would be easy to parse the markup into a node tree — a layer tree wants
-//! one, and the eventual reverse binding (drag on the artboard, write the
-//! source) will need one. It is deliberately not done here yet, because a tree
-//! that can be *written back* has to reproduce the author's file byte for
-//! byte apart from the change, the way [`Theme`](crate::Theme) does with
-//! spans. A tree that can only be read is a tree that will be rewritten when
-//! the writing half arrives, and building the wrong one first is how the
-//! document format ends up serving the widget instead of the other way round.
+//! This owns the source, byte for byte. [`layers`](Component::layers) reads a
+//! tree out of it on demand — see [`markup`](crate::markup) — rather than the
+//! tree being the thing stored and the text being printed back from it.
 //!
-//! So: the source, and the questions that can be answered honestly from it.
+//! That order is deliberate and it is the same one [`Theme`](crate::Theme)
+//! uses. A tree that can be *written back* has to reproduce the author's file
+//! exactly apart from the change, so its nodes carry the spans they came from;
+//! a tree that *is* the document has to be printed, and printing produces a
+//! diff touching every line. Every mode's document diffing in Git is the rule
+//! this project is built on, so the file stays the truth and the tree stays a
+//! view of it.
 //!
 //! ## Only HTML, and that is a real limit
 //!
@@ -81,6 +82,16 @@ impl Component {
     /// The markup, exactly as the file has it.
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// The element tree, for the layer panel.
+    ///
+    /// Parsed on demand rather than kept: a component is re-read whenever it
+    /// changes, and a tree cached beside the text is one more thing that can
+    /// disagree with it. Parsing this file's own 92 KB takes under a
+    /// millisecond, which is not worth a cache that can go stale.
+    pub fn layers(&self) -> Vec<crate::Layer> {
+        crate::layers(&self.source)
     }
 
     /// Whether the file is a whole page rather than a fragment.

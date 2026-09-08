@@ -81,6 +81,22 @@ fn artboard(space: &mut Workspace) -> (String, String, String) {
         .expect("an artboard event")
 }
 
+/// The layer tree, and which row is selected.
+fn tree(space: &mut Workspace) -> (Vec<proton_design::Layer>, usize) {
+    space
+        .apply(Command::Sync)
+        .iter()
+        .find_map(|event| match event {
+            Event::Artboard {
+                layers, selected, ..
+            } => Some((layers.clone(), *selected)),
+            _ => None,
+        })
+        .expect("an artboard event")
+}
+
+const NESTED: &str = "<section class=\"panel\">\n  <h2 id=\"title\">Heading</h2>\n                        <p>Body</p>\n</section>\n";
+
 /// The tokens the inspector would draw.
 fn theme(space: &mut Workspace) -> (Vec<(String, String, String)>, usize) {
     space
@@ -397,5 +413,112 @@ fn the_artboard_sends_source_rather_than_anything_rendered() {
         artboard(&mut space).1,
         markup,
         "the core altered the source on its way out"
+    );
+}
+
+#[test]
+fn the_layer_tree_is_read_out_of_the_component_on_the_artboard() {
+    // Every row has to be an element that is really in the file. The tree this
+    // replaces listed Container / Grid / Image for a component nothing was
+    // bound to, which is the failure worth not repeating.
+    let (mut space, _) = open_with_component("layers", NESTED);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+
+    let (layers, selected) = tree(&mut space);
+    let shape: Vec<(usize, &str)> = layers.iter().map(|l| (l.depth, l.tag.as_str())).collect();
+    assert_eq!(shape, [(0, "section"), (1, "h2"), (1, "p")], "{layers:#?}");
+    assert_eq!(layers[0].classes, ["panel"]);
+    assert_eq!(layers[1].id, "title");
+    assert_eq!(layers[1].text, "Heading");
+    // Opening a file must not assert that its first element is interesting.
+    assert_eq!(
+        selected,
+        usize::MAX,
+        "something was selected before a click"
+    );
+}
+
+#[test]
+fn selecting_a_layer_is_remembered_and_selecting_a_missing_one_clears_it() {
+    // The outline is drawn from the selected layer's path, so an index that
+    // means nothing has to select nothing rather than clamp onto a neighbour
+    // and outline the wrong element.
+    let (mut space, _) = open_with_component("select", NESTED);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+
+    space.apply(Command::SelectLayer { index: 1 });
+    assert_eq!(tree(&mut space).1, 1);
+
+    space.apply(Command::SelectLayer { index: 99 });
+    assert_eq!(tree(&mut space).1, usize::MAX);
+}
+
+#[test]
+fn revealing_a_layer_opens_the_line_that_wrote_it() {
+    // The binding pointing from the picture back to the file, and the reason
+    // the parser keeps line numbers at all.
+    let (mut space, path) = open_with_component("reveal", NESTED);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+
+    // The `<p>`, which the fixture puts on line 3.
+    space.apply(Command::RevealLayer { index: 2 });
+
+    assert_eq!(space.mode(), ModeId::Codex, "it stayed in Design");
+    let open = space
+        .apply(Command::Sync)
+        .iter()
+        .find_map(|event| match event {
+            Event::Buffers { names, active, .. } => {
+                names.get(*active).and_then(|tab| tab.path.clone())
+            }
+            _ => None,
+        })
+        .expect("a buffers event");
+    assert!(
+        open.ends_with("card.html"),
+        "{open} is not the component — wanted {}",
+        path.display()
+    );
+    assert_eq!(
+        tree(&mut space).1,
+        2,
+        "the tree stopped agreeing with Codex"
+    );
+}
+
+#[test]
+fn editing_the_component_moves_the_layers_with_it() {
+    // The tree is a view of the file, so it has to follow the file. A stale
+    // tree is one whose line numbers point at the wrong places — worse than
+    // no tree, because it looks right.
+    let (mut space, path) = open_with_component("layers-follow", NESTED);
+    space.apply(Command::SetMode {
+        mode: ModeId::Design,
+    });
+    assert_eq!(tree(&mut space).0.len(), 3);
+
+    space.apply(Command::SetMode {
+        mode: ModeId::Codex,
+    });
+    space.apply(Command::OpenBuffer {
+        path: path.display().to_string(),
+    });
+    keys(&mut space, "o<b>more</b>");
+    space.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+    space.apply(Command::Save);
+
+    let (layers, _) = tree(&mut space);
+    assert!(
+        layers.iter().any(|l| l.tag == "b"),
+        "the new element never reached the tree: {:?}",
+        layers.iter().map(|l| &l.tag).collect::<Vec<_>>()
     );
 }

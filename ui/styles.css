@@ -968,6 +968,23 @@ kbd {
 /* The component preview. It brings its own background from its own palette,
    so the artboard's padding would frame it in the wrong colour — the frame
    fills the board instead. */
+/* Layer rows. Indent is set inline from the element's depth, so this only
+   has to say how the parts read: the tag quiet, the name it is known by
+   bright, its text quieter still, the line number tucked right. */
+.row.lay { gap: 6px; font: 11.5px/1 var(--mono); cursor: default; }
+.row.lay .lay-tag { color: var(--ink-3); }
+.row.lay b { color: var(--accent); font-weight: 600; }
+.row.lay i { color: var(--accent-2); font-style: normal; }
+.row.lay .lay-text {
+  color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.row.lay .lay-line { color: var(--ink-4); font-size: 10.5px; }
+.row.lay.sel { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* A second section in one aside: the header needs a rule above it or the two
+   trees read as one long list. */
+.pane > header.second { border-top: 1px solid var(--edge, rgba(255,255,255,.08)); }
+
 .ab-frame {
   display: block; width: 100%; min-height: 420px; border: 0; border-radius: 12px;
   background: transparent; color-scheme: normal;

@@ -29,7 +29,9 @@
 //! only be edited in whichever place happened to be found first.
 
 mod component;
+pub mod markup;
 mod theme;
 
 pub use component::{is_markup, Component};
+pub use markup::{layers, Layer};
 pub use theme::{Theme, Token};

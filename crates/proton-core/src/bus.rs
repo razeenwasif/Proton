@@ -317,6 +317,18 @@ pub enum Command {
     ShowComponent {
         path: String,
     },
+    /// Pick a layer — a click in the layer tree.
+    SelectLayer {
+        index: usize,
+    },
+    /// Open the line that wrote a layer, in Codex.
+    ///
+    /// The binding pointing the other way from the artboard: a layer is a
+    /// place in a file, and the point of knowing that is being able to go
+    /// there.
+    RevealLayer {
+        index: usize,
+    },
 
     /* ── settings ──────────────────────────────────────────── */
     /// Change one setting, by dotted key. `null` clears it back to the
@@ -796,6 +808,12 @@ pub enum Event {
         document: bool,
         /// Why there is nothing to draw, when there is a reason worth showing.
         problem: String,
+        /// The element tree, in document order, for the layer panel.
+        layers: Vec<proton_design::Layer>,
+        /// Which layer is selected, as an index into `layers`. `usize::MAX`
+        /// when none is — an index nothing can equal, rather than an
+        /// `Option`, because every consumer of this is comparing.
+        selected: usize,
     },
     /// The theme Design mode is editing.
     #[serde(rename_all = "camelCase")]

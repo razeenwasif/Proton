@@ -537,12 +537,20 @@
       </nav>
 
       <aside class="pane side">
-        <header>Palettes <span class="grow"></span><span class="chip" data-pal-count></span></header>
-        <!-- Design's document is a stylesheet, so its structure is the scopes
-             it declares — one per theme. The layer tree that used to sit here
-             listed Container / Grid / Image for a component nothing was bound
-             to, and claimed a two-way binding to a `Dashboard.tsx` that does
-             not exist. -->
+        <!-- Two documents, two structures, so two sections rather than a
+             chooser: a component's elements and a stylesheet's scopes are both
+             worth seeing while the other is being edited.
+
+             A layer tree used to sit here listing Container / Grid / Image for
+             a component nothing was bound to, and claiming a two-way binding
+             to a `Dashboard.tsx` that did not exist. It was deleted for that.
+             This one is read out of the file on the artboard: every row is an
+             element that is really there, and clicking one goes to the line
+             that wrote it. -->
+        <header>Layers <span class="grow"></span><span class="chip" data-layer-count></span></header>
+        <div class="scroll tree" data-layers></div>
+
+        <header class="second">Palettes <span class="grow"></span><span class="chip" data-pal-count></span></header>
         <div class="scroll tree" data-palettes></div>
       </aside>
 

@@ -592,6 +592,35 @@ impl Workspace {
                 vec![self.theme_event()]
             }
 
+            Command::SelectLayer { index } => match self.design.select_layer(index) {
+                true => vec![self.artboard_event()],
+                false => Vec::new(),
+            },
+
+            Command::RevealLayer { index } => {
+                let Some((path, line)) = self.design.layer_place(index) else {
+                    return Vec::new();
+                };
+                // Selected as well as revealed. Going to a layer's source and
+                // leaving the tree pointing somewhere else would be two panels
+                // disagreeing about what is being looked at.
+                self.design.select_layer(index);
+                // Through `jump_to`, which is what every other "go to this
+                // place in a file" already uses — it opens the buffer, moves
+                // the cursor, and resyncs the views. A second path would be a
+                // second set of bugs about which pane ends up focused.
+                let mut events = self.set_mode(ModeId::Codex);
+                events.extend(self.jump_to(Some(proton_lsp::Jump {
+                    path,
+                    // `Jump` counts from zero, as LSP does; a `Layer` counts
+                    // from one, as an editor's gutter does.
+                    line: line.saturating_sub(1) as u32,
+                    character: 0,
+                })));
+                events.push(self.artboard_event());
+                events
+            }
+
             Command::ShowComponent { path } => {
                 let full = self.pickers.resolve(&path);
                 // The event goes out either way. A failure is a thing to draw
@@ -4407,6 +4436,8 @@ impl Workspace {
                 .unwrap_or_default(),
             document: component.is_some_and(|one| one.is_document()),
             problem: self.design.trouble().unwrap_or_default().to_string(),
+            layers: self.design.layers(),
+            selected: self.design.layer(),
         }
     }
 

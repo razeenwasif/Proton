@@ -13,6 +13,7 @@ import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
 import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
+import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
 import type { LibrarySource } from "./LibrarySource";
 import type { ModeId } from "./ModeId";
@@ -243,7 +244,17 @@ document: boolean,
 /**
  * Why there is nothing to draw, when there is a reason worth showing.
  */
-problem: string, } | { "type": "theme", 
+problem: string, 
+/**
+ * The element tree, in document order, for the layer panel.
+ */
+layers: Array<Layer>, 
+/**
+ * Which layer is selected, as an index into `layers`. `usize::MAX`
+ * when none is — an index nothing can equal, rather than an
+ * `Option`, because every consumer of this is comparing.
+ */
+selected: number, } | { "type": "theme", 
 /**
  * Empty when none is open, which is how the panel knows to say so.
  */
