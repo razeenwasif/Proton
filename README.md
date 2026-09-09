@@ -11,12 +11,12 @@ a real document. The editor, Telescope and language servers, the agent, the
 Code Visualizer, the plugin host, Data mode and Design mode all ship; Modeling
 has its scene, outliner, viewport and shader graph; Game reads and writes a
 Godot project's scenes; Video reads and writes a cut and its captions. What is
-still to come is the machinery underneath three of them — a mesh loader, a game
-engine, and ffmpeg — and each of those is a real project of its own.
+still to come is the machinery underneath two of them — a game engine and
+ffmpeg — and each of those is a real project of its own.
 
 ```bash
 cargo run -p proton-shell      # the app
-cargo test --workspace         # 1216 tests, headless
+cargo test --workspace         # 1248 tests, headless
 cargo tauri build              # the installer
 node ui/serve.mjs              # the front end alone → http://localhost:5178
 ```
@@ -66,8 +66,9 @@ target's device / layout-inspector / Logcat panel.
 **Design** · a web builder with a layer tree and an artboard, two-way bound to
 real component source and design tokens.
 **Modeling** · 3D — outliner, viewport and shader graph over a scene
-serialised to diffable JSON. Objects are drawn as proxies; there is no mesh
-loader yet, and the modifier stack is still to come.
+serialised to diffable JSON. An object names the `.obj` its geometry is in and
+the viewport draws that surface, flat shaded. The modifier stack is still to
+come, and nothing renders a shader.
 **Game** · a Godot project's scene tree and an inspector that edits the
 `.tscn` without reformatting it. The play transport, profiler, hot reload and
 the agent that verifies changes by replaying recorded input all need an engine
@@ -141,9 +142,29 @@ the other way.
 Modeling is real too, up to a point worth stating: `scene.proton.json`, an
 outliner over it, an inspector that writes it, a viewport you can orbit and
 click, and a shader graph whose boxes and wires are the material in the file.
-What it draws are *proxies* — a box where a mesh is, a frustum for a camera —
-because the format holds transforms and no geometry. There is no mesh loader
-and nothing renders a shader.
+Geometry lives beside the scene rather than in it: an object names the `.obj`
+its surface is in, one relative path, and the viewport draws that surface —
+flat shaded, sorted back to front, back faces dropped only for a mesh that is
+actually closed, because culling a sheet would make a wall vanish when you
+orbited past its edge. A mesh nobody copied, one that will not parse, or one
+too big to draw falls back to a box — its *real* box, from the file, not a unit
+cube standing in for the loader's ignorance — and the inspector says which of
+those it is.
+
+How big is too big was measured rather than guessed. A 2D canvas charges about
+0.8 µs per drawn triangle, because a solid is one `fill()` each, and 80,000
+triangles is where orbiting stops holding 30 fps; the table is in
+`proton-core::modeling`. Past that the core sends the bounding box and not the
+vertices. The fix is not a larger number, it is WebGL — which is also what a
+painter's sort wants, since it is not a depth buffer and two triangles that
+intersect will show through one another.
+
+A mesh path is confined to the scene's own folder, checked both when this
+writes one and when it reads one back. A scene arrives from somewhere — an
+asset pack, a colleague, the agent — and one naming `../../.ssh/id_rsa` as a
+mesh would otherwise have this editor open that file and put it on screen.
+
+Still missing: the modifier stack, and nothing renders a shader.
 
 Game reads a Godot project: `project.godot` says which scene starts, the
 hierarchy is that `.tscn`'s node tree, and the inspector edits it by splicing
@@ -171,7 +192,7 @@ need ffmpeg in a process of its own — which the process model already accounts
 for and which is not installed here. None of it is mimed.
 
 So: no screen in this window claims to do something it cannot. What remains is
-three real projects — a mesh loader for Modeling, an engine process for Game,
-and an ffmpeg sidecar for Video.
+two real projects — an engine process for Game and an ffmpeg sidecar for
+Video — plus the modifier stack and a shader renderer for Modeling.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.

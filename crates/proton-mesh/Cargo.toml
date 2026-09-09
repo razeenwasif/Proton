@@ -1,0 +1,15 @@
+[package]
+name = "proton-mesh"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Geometry for Modeling mode: Wavefront OBJ, read into triangles."
+
+[dependencies]
+serde = { workspace = true }
+ts-rs = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

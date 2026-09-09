@@ -14,6 +14,7 @@ import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
 import type { GameNode } from "./GameNode";
+import type { Geometry } from "./Geometry";
 import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
 import type { Layer } from "./Layer";
@@ -286,7 +287,12 @@ problem: string,
  * one at a time would mean a round trip on every click in the
  * outliner.
  */
-materials: Array<Material>, } | { "type": "level", 
+materials: Array<Material>, 
+/**
+ * Every distinct mesh the scene names, so the front end can ask for
+ * the ones it does not already hold.
+ */
+meshes: Array<string>, } | { "type": "geometry" } & Geometry | { "type": "level", 
 /**
  * Empty when none is open.
  */

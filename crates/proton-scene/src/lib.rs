@@ -83,6 +83,14 @@ pub struct Node {
     /// The material this object wears, by id. Empty for one that wears none,
     /// which is most objects and every light and camera.
     pub material: String,
+    /// Where its geometry is: a path relative to the scene file, or empty.
+    ///
+    /// A path and not the vertices. A scene is a file somebody reads in a
+    /// diff, and a quarter of a million coordinates pasted into it is a file
+    /// nothing can usefully diff — moving a lamp two metres would show as a
+    /// change to a document that is almost entirely numbers nobody edited.
+    /// Geometry is authored in Blender and transforms are authored here.
+    pub mesh: String,
     /// Metres, degrees, and a multiplier, in that order.
     pub position: [f64; 3],
     pub rotation: [f64; 3],
@@ -197,6 +205,7 @@ impl Scene {
                 kind: string_of(one, "kind", "empty"),
                 parent: parent_of(one),
                 material: string_of(one, "material", ""),
+                mesh: string_of(one, "mesh", ""),
                 position: triple(one, "position", [0.0; 3]),
                 rotation: triple(one, "rotation", [0.0; 3]),
                 scale: triple(one, "scale", [1.0; 3]),
@@ -224,6 +233,27 @@ impl Scene {
             return Ok(false);
         }
         one.insert(key.to_string(), now);
+        Ok(true)
+    }
+
+    /// Point an object at its geometry, or at nothing when `path` is empty.
+    ///
+    /// The path is relative to the scene and is kept inside the scene's own
+    /// folder — see [`mesh_path`], which guards this and the resolver both.
+    pub fn set_mesh(&mut self, id: &str, path: &str) -> Result<bool, String> {
+        let clean = mesh_path(path)?;
+        let one = self.find_mut(id)?;
+        if string_of(one, "mesh", "") == clean {
+            return Ok(false);
+        }
+        match clean.is_empty() {
+            true => {
+                one.remove("mesh");
+            }
+            false => {
+                one.insert("mesh".into(), json!(clean));
+            }
+        }
         Ok(true)
     }
 
@@ -414,6 +444,36 @@ impl Part {
             Part::Scale => "scale",
         }
     }
+}
+
+/// Normalise a mesh reference, refusing one that leaves the scene's folder.
+///
+/// Called on the way in by [`Scene::set_mesh`] *and* by whatever resolves the
+/// path against the disk, because those guard two different things.
+/// `set_mesh` guards what this editor writes; the resolver guards what it
+/// reads, and a scene arrives from somewhere — an asset pack, a colleague,
+/// the agent, a hand edit. A scene naming `../../.ssh/id_rsa` as a mesh would
+/// have this editor open that file and put it on screen, and the `..` that
+/// matters is precisely the one nobody typed here.
+pub fn mesh_path(path: &str) -> Result<String, String> {
+    // A path typed on Windows arrives with backslashes; the file keeps forward
+    // ones so a scene opens on either machine.
+    let clean = path.replace('\\', "/");
+    let clean = clean.trim().trim_start_matches("./").to_string();
+    if clean.is_empty() {
+        return Ok(clean);
+    }
+    // `/mesh.obj`, and `C:/mesh.obj` — a drive letter is the Windows spelling
+    // of the same idea.
+    if clean.starts_with('/') || clean.chars().nth(1) == Some(':') {
+        return Err(format!("{path:?} is not relative to the scene"));
+    }
+    // On whole components, not on characters: a folder called `..archive` is
+    // an ordinary folder.
+    if clean.split('/').any(|part| part == "..") {
+        return Err(format!("{path:?} climbs out of the scene's folder"));
+    }
+    Ok(clean)
 }
 
 fn id_of(one: &Map<String, Value>) -> String {

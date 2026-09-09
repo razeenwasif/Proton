@@ -37,6 +37,16 @@ parent: string,
  */
 material: string, 
 /**
+ * Where its geometry is: a path relative to the scene file, or empty.
+ *
+ * A path and not the vertices. A scene is a file somebody reads in a
+ * diff, and a quarter of a million coordinates pasted into it is a file
+ * nothing can usefully diff — moving a lamp two metres would show as a
+ * change to a document that is almost entirely numbers nobody edited.
+ * Geometry is authored in Blender and transforms are authored here.
+ */
+mesh: string, 
+/**
  * Metres, degrees, and a multiplier, in that order.
  */
 position: [number, number, number], rotation: [number, number, number], scale: [number, number, number], 

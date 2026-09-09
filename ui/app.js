@@ -15,7 +15,13 @@
 import { HAS_SHELL, applyBackdrop, dispatch, onEvent, sendKey, setBackdrop,
   setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
 import { closeDocument, documentIsOpen, openDocument, zoomDocument } from "./document.js";
-import { drawViewport, frameAll, startViewport } from "./viewport.js";
+import {
+  drawViewport,
+  frameAll,
+  hasGeometry,
+  setGeometry,
+  startViewport,
+} from "./viewport.js";
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -483,9 +489,13 @@ $$(".seg, .builder-rail").forEach((group) => {
 // this is what makes the click mean something.
 // Clicking an object in the viewport selects it, exactly as clicking its row
 // does — one selection, owned by the core, however it was chosen.
-startViewport($("[data-viewport]"), (index) => {
-  if (index >= 0) dispatch({ type: "selectNode", index });
-});
+startViewport(
+  $("[data-viewport]"),
+  (index) => {
+    if (index >= 0) dispatch({ type: "selectNode", index });
+  },
+  showViewportCount,
+);
 
 $$("[data-design-panel]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -2441,11 +2451,13 @@ let lastScene = null;
 let framed = false;
 
 function renderViewport(event) {
-  const badge = $("[data-vp-count]");
-  if (badge) {
-    const n = event.nodes?.length ?? 0;
-    badge.textContent = n ? `${n} object${n === 1 ? "" : "s"}` : "";
+  // Ask for the geometry this scene names and the viewport does not already
+  // hold. Asked for rather than pushed: a mesh is the one thing on this seam
+  // measured in megabytes, and the front end is the end that knows what it has.
+  for (const path of event.meshes ?? []) {
+    if (!hasGeometry(path)) dispatch({ type: "loadMesh", path });
   }
+
   // Framed first, then drawn — `frameAll` only moves the camera, and returning
   // here left the renderer with the empty node list it started with, so the
   // grid appeared and the objects did not.
@@ -2454,6 +2466,22 @@ function renderViewport(event) {
     frameAll(event.nodes);
   }
   drawViewport(event.nodes ?? [], event.selected);
+}
+
+/** What the picture is actually made of: objects, and triangles really drawn.
+ *
+ * The triangle count is what was filled this frame, after the faces pointing
+ * away from the camera were dropped — not what the files contain. A badge
+ * reading the file's number while the screen shows half of it is the kind of
+ * number that makes the next performance question unanswerable. */
+function showViewportCount(tris, objects) {
+  const badge = $("[data-vp-count]");
+  if (!badge) return;
+  const said = [
+    objects ? `${objects} object${objects === 1 ? "" : "s"}` : "",
+    tris ? `${tris.toLocaleString()} tri${tris === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  badge.textContent = said.join(" · ");
 }
 
 /* ── The shader graph ──────────────────────────────────
@@ -2848,8 +2876,41 @@ function renderNodeInspector(event) {
   for (const box of $$("[data-node-xyz]")) {
     put(box, String(node[box.dataset.nodeXyz][Number(box.dataset.axis)]));
   }
+  // Only a mesh has geometry. Showing the field on a light would invite
+  // somebody to fill it in and wonder why nothing happened.
+  const meshRow = $("[data-mesh-row]");
+  if (meshRow) meshRow.hidden = node.kind !== "mesh";
+  if (node.kind === "mesh") put($("[data-node-mesh]"), node.mesh ?? "");
+
+  const meshNote = $("[data-mesh-note]");
+  if (meshNote) {
+    const said = node.kind === "mesh" ? meshProblem(node.mesh) : "";
+    meshNote.textContent = said;
+    meshNote.className = "st-hint" + (said ? " warn" : "");
+  }
+
   $("[data-node-note]").textContent = `${node.kind} · ${node.id}`;
 }
+
+/** What is wrong with a node's geometry, if anything is.
+ *
+ * The empty string covers both "it is fine" and "it has not arrived yet",
+ * which is right: a mesh still loading is not a fault to report, and the box
+ * on screen already says the surface is not there.
+ */
+const meshProblems = new Map();
+function meshProblem(path) {
+  if (!path) return "";
+  return meshProblems.get(path) ?? "";
+}
+
+document.addEventListener("change", (e) => {
+  const box = e.target.closest?.("[data-node-mesh]");
+  if (!box) return;
+  const index = lastScene?.selected;
+  if (index === undefined || index < 0) return;
+  dispatch({ type: "setNodeMesh", index, path: box.value });
+});
 
 document.addEventListener("click", (e) => {
   const row = e.target.closest?.("[data-node]");
@@ -4440,6 +4501,14 @@ onEvent((event) => {
       renderHierarchy(event);
       renderLevelInspector(event);
       renderLevelSource(event);
+      break;
+
+    case "geometry":
+      // One mesh, arriving on its own schedule — asked for when a scene names
+      // it, and again by itself when the file it came from is re-exported.
+      setGeometry(event);
+      meshProblems.set(event.path, event.problem ?? "");
+      if (lastScene) renderNodeInspector(lastScene);
       break;
 
     case "scene":

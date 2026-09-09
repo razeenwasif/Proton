@@ -727,6 +727,13 @@ impl Workspace {
                 self.after_scene_write(done)
             }
 
+            Command::SetNodeMesh { index, path } => {
+                let done = self.node_at(index, |space, id| space.modeling.set_mesh(&id, &path));
+                self.after_scene_write(done)
+            }
+
+            Command::LoadMesh { path } => vec![Event::Geometry(self.modeling.geometry(&path))],
+
             Command::ReparentNode { index, parent } => {
                 let done = self.node_at(index, |space, id| space.modeling.reparent(&id, &parent));
                 self.after_scene_write(done)
@@ -2166,6 +2173,10 @@ impl Workspace {
                 if self.modeling.reload() {
                     events.push(self.scene_event());
                 }
+                // Geometry lives in files this editor does not own — a mesh is
+                // re-exported from Blender, not edited here — so the ones
+                // already read are checked for having moved.
+                events.extend(self.modeling.restale().into_iter().map(Event::Geometry));
                 // A `.tscn` is Godot's file, and Godot may be open beside us.
                 if self.game.reload() {
                     events.push(self.level_event());
@@ -4734,6 +4745,7 @@ impl Workspace {
             selected: self.modeling.selected(),
             problem: self.modeling.problem().unwrap_or_default().to_string(),
             materials: self.modeling.materials(),
+            meshes: self.modeling.wanted(),
         }
     }
 
@@ -5003,16 +5015,26 @@ impl Workspace {
             }
             events.push(self.cut_event());
         }
-        // Modeling goes looking on the same terms, once.
-        if mode == ModeId::Modeling && !self.modeling.is_open() {
-            if let Some(path) = crate::modeling::discover(self.pickers.root()) {
-                if self.modeling.open(&path).is_ok() {
-                    events.push(notice(
-                        format!("scene: {}", path.display()),
-                        NoticeLevel::Info,
-                    ));
+        // Modeling goes looking on the same terms, once — and re-checks its
+        // geometry on the way back in. A mesh is authored somewhere else and
+        // re-exported, and coming back to this mode is exactly when somebody
+        // has just done that. (Sitting in Modeling while Blender writes the
+        // file still needs a trip out and back; noticing sooner would mean a
+        // watcher thread, which is a bigger thing than this buys.)
+        if mode == ModeId::Modeling {
+            if !self.modeling.is_open() {
+                if let Some(path) = crate::modeling::discover(self.pickers.root()) {
+                    if self.modeling.open(&path).is_ok() {
+                        events.push(notice(
+                            format!("scene: {}", path.display()),
+                            NoticeLevel::Info,
+                        ));
+                    }
                 }
+            } else if self.modeling.reload() {
+                events.push(self.scene_event());
             }
+            events.extend(self.modeling.restale().into_iter().map(Event::Geometry));
             events.push(self.scene_event());
         }
         // The artboard goes looking on the same terms, and separately: a

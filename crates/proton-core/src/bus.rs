@@ -352,6 +352,20 @@ pub enum Command {
         part: proton_scene::Part,
         to: [f64; 3],
     },
+    /// Point a node at its geometry. An empty `path` clears it.
+    SetNodeMesh {
+        index: usize,
+        path: String,
+    },
+    /// Ask for one mesh's geometry, by the path the scene writes.
+    ///
+    /// Asked for rather than pushed with the scene: geometry is the one thing
+    /// here large enough to be worth sending once and keeping. The front end
+    /// knows what it already holds; the core does not, and would otherwise
+    /// re-send megabytes on every click in the outliner.
+    LoadMesh {
+        path: String,
+    },
     /// Put a node under another. An empty `parent` moves it to the root.
     ReparentNode {
         index: usize,
@@ -962,7 +976,17 @@ pub enum Event {
         /// one at a time would mean a round trip on every click in the
         /// outliner.
         materials: Vec<proton_scene::Material>,
+        /// Every distinct mesh the scene names, so the front end can ask for
+        /// the ones it does not already hold.
+        meshes: Vec<String>,
     },
+    /// One mesh's geometry, in answer to `Command::LoadMesh`.
+    ///
+    /// Its own event rather than a field of `Scene`, because it is the only
+    /// thing this seam carries that is measured in megabytes, and because it
+    /// arrives on its own schedule: a mesh re-exported from Blender while the
+    /// scene is open comes back through here without the scene having moved.
+    Geometry(crate::modeling::Geometry),
     /// The Godot scene Game mode is showing.
     ///
     /// `Level` rather than `Scene`, because `Event::Scene` is Modeling's and

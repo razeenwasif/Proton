@@ -712,6 +712,14 @@
               <input class="num" data-node-xyz="scale" data-axis="1" inputmode="decimal">
               <input class="num" data-node-xyz="scale" data-axis="2" inputmode="decimal">
             </div>
+            <div class="prop-row" data-mesh-row hidden><span class="lbl">Mesh</span>
+              <!-- The path its geometry is in, relative to the scene. A path
+                   and not the vertices: a scene is a file somebody reads in a
+                   diff, and geometry is authored in Blender. -->
+              <input class="num" data-node-mesh spellcheck="false" style="text-align:left"
+                     placeholder="meshes/lamp.obj">
+            </div>
+            <p class="st-hint" data-mesh-note></p>
             <p class="st-hint" data-node-note></p>
           </div>
         </div>

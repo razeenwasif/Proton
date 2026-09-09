@@ -260,9 +260,16 @@ if (HAS_SHELL) {
       { id: "rig-1", name: "Satellite", kind: "empty", parent: "", depth: 0,
         children: 3, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
       { id: "body-1", name: "Body", kind: "mesh", parent: "rig-1", depth: 1, material: "alu",
+        mesh: "meshes/body.obj",
         children: 0, position: [0, 1.4, 0], rotation: [0, 32, 0], scale: [1, 1, 1] },
       { id: "array-1", name: "SolarArray", kind: "mesh", parent: "rig-1", depth: 1,
+        mesh: "meshes/panel.obj",
         children: 0, position: [1.8, 1.4, 0], rotation: [0, 0, 0], scale: [4, 1, 1] },
+      // A mesh naming a file nobody copied — the ordinary failure, and the one
+      // the viewport has to keep drawing something for.
+      { id: "dish-1", name: "Dish", kind: "mesh", parent: "rig-1", depth: 1,
+        mesh: "meshes/dish.obj",
+        children: 0, position: [-2, 1.4, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
       { id: "key-1", name: "Key Light", kind: "light", parent: "rig-1", depth: 1,
         children: 0, position: [3, 4, 2], rotation: [-40, 25, 0], scale: [1, 1, 1] },
       { id: "cam-1", name: "Camera", kind: "camera", parent: "", depth: 0,
@@ -427,6 +434,70 @@ FCM: NON-DROP FRAME
     problem: level.problem,
   });
 
+  /* ── geometry ─────────────────────────────────────
+   *
+   * Built here rather than read from a file, because the preview has no disk.
+   * The shapes are the two the mock's objects wear: a solid, so culling is
+   * exercised, and a sheet, so the case that must *not* be culled is too. */
+
+  /** A box, as eight corners and twelve triangles. Closed. */
+  const boxMesh = (w, h, d) => {
+    const positions = [];
+    for (const x of [-w / 2, w / 2]) {
+      for (const y of [-h / 2, h / 2]) {
+        for (const z of [-d / 2, d / 2]) positions.push(x, y, z);
+      }
+    }
+    // Corner n is bit 2 = x, bit 1 = y, bit 0 = z.
+    const quad = (a, b, c, e) => [a, b, c, a, c, e];
+    const triangles = [
+      ...quad(0, 1, 3, 2), ...quad(4, 6, 7, 5),
+      ...quad(0, 4, 5, 1), ...quad(2, 3, 7, 6),
+      ...quad(0, 2, 6, 4), ...quad(1, 5, 7, 3),
+    ];
+    return {
+      positions, triangles, skipped: 0, closed: true,
+      bounds: [-w / 2, -h / 2, -d / 2, w / 2, h / 2, d / 2],
+    };
+  };
+
+  /** A flat panel: two triangles and a rim, so it is *not* closed. */
+  const panelMesh = (w, d) => ({
+    positions: [-w / 2, 0, -d / 2, w / 2, 0, -d / 2, w / 2, 0, d / 2, -w / 2, 0, d / 2],
+    triangles: [0, 1, 2, 0, 2, 3],
+    skipped: 0,
+    closed: false,
+    bounds: [-w / 2, 0, -d / 2, w / 2, 0, d / 2],
+  });
+
+  const meshes = {
+    "meshes/body.obj": boxMesh(1.2, 1.6, 1.2),
+    "meshes/panel.obj": panelMesh(1, 0.5),
+  };
+
+  const geometryEvent = (path) => {
+    const mesh = meshes[path];
+    if (!mesh) {
+      // Exactly what the core sends for a mesh nobody copied.
+      return {
+        type: "geometry",
+        path,
+        mesh: null,
+        bounds: [0, 0, 0, 0, 0, 0],
+        triangles: 0,
+        problem: `${path}: not there`,
+      };
+    }
+    return {
+      type: "geometry",
+      path,
+      mesh,
+      bounds: mesh.bounds,
+      triangles: mesh.triangles.length / 3,
+      problem: "",
+    };
+  };
+
   const sceneEvent = () => ({
     type: "scene",
     materials,
@@ -434,6 +505,7 @@ FCM: NON-DROP FRAME
     nodes: scene.nodes,
     selected: scene.selected,
     problem: scene.problem,
+    meshes: [...new Set(scene.nodes.map((one) => one.mesh).filter(Boolean))],
   });
 
   const artboardEvent = () => ({
@@ -702,6 +774,14 @@ FCM: NON-DROP FRAME
         prop.value = command.value;
       }
       return [levelEvent()];
+    }
+    if (command.type === "loadMesh") {
+      return [geometryEvent(command.path)];
+    }
+    if (command.type === "setNodeMesh") {
+      const node = scene.nodes[command.index];
+      if (node) node.mesh = command.path;
+      return [sceneEvent()];
     }
     if (command.type === "selectNode") {
       scene.selected = command.index;

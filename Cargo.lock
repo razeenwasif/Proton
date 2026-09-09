@@ -4333,6 +4333,7 @@ dependencies = [
  "proton-index",
  "proton-library",
  "proton-lsp",
+ "proton-mesh",
  "proton-plugin",
  "proton-scene",
  "proton-syntax",
@@ -4428,6 +4429,15 @@ dependencies = [
  "proton-core",
  "proton-library",
  "serde_json",
+]
+
+[[package]]
+name = "proton-mesh"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
 ]
 
 [[package]]

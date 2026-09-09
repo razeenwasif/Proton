@@ -728,7 +728,7 @@ bearing rule of the entire project:
 | Chat | `.proton/chats/*.json` — messages, tool calls, artifact refs |
 | Codex | Source files |
 | Design | Component source + `theme.css` tokens |
-| Modeling | `scene.proton.json` |
+| Modeling | `scene.proton.json` + the `.obj` files it names |
 | Game | Engine-native scene files |
 | Video | `.edl` + sidecar `.srt` |
 | Data | `.ipynb` + `.sql` |
@@ -1554,10 +1554,13 @@ project. Do not start one until M0–M7 are shipped and stable.
 read and write them: `scene.proton.json` with an outliner, viewport and shader
 graph; Godot's `.tscn` with a hierarchy and an inspector; a CMX3600 `.edl` and
 its `.srt` sidecar with a multitrack timeline and captions. The renderers are
-what is left, and the note above still holds for each: a mesh loader for
-Modeling, an engine process for Game, and an ffmpeg process for Video. Doing
-the document first was what made these possible at all — none of the three
-needed a renderer to become real, and none of them mimes one now.
+what is left, and the note above still holds for each: an engine process for
+Game and an ffmpeg process for Video. Modeling has since grown a mesh loader —
+`proton-mesh` reads a Wavefront OBJ, which keeps the diffable-document rule
+true all the way down, since the geometry file is text as well — and the
+viewport draws real surfaces up to a measured budget. Doing the document first
+was what made all of this possible: none of the three needed a renderer to
+become real, and none of them mimes one now.
 
 ---
 

@@ -311,3 +311,85 @@ fn a_malformed_transform_is_shown_rather_than_refused() {
     assert_eq!(one.position, [0.0, 0.0, 0.0]);
     assert_eq!(one.scale, [1.0, 1.0, 1.0]);
 }
+
+/* ── geometry ─────────────────────────────────────────────────────── */
+
+#[test]
+fn an_object_can_be_pointed_at_its_geometry() {
+    let mut scene = Scene::new();
+    let id = scene.add("mesh", "Lamp", "");
+    assert_eq!(scene.set_mesh(&id, "meshes/lamp.obj"), Ok(true));
+    assert_eq!(scene.objects()[0].mesh, "meshes/lamp.obj");
+    // And the file says so in one line, which is the whole point of a path
+    // rather than the vertices.
+    assert!(scene.to_text().contains("\"mesh\": \"meshes/lamp.obj\""));
+}
+
+#[test]
+fn setting_the_same_mesh_again_changes_nothing() {
+    let mut scene = Scene::new();
+    let id = scene.add("mesh", "Lamp", "");
+    scene.set_mesh(&id, "meshes/lamp.obj").unwrap();
+    assert_eq!(scene.set_mesh(&id, "meshes/lamp.obj"), Ok(false));
+}
+
+#[test]
+fn clearing_a_mesh_removes_the_key_rather_than_emptying_it() {
+    // An empty string in the file is a fact nobody needs, the same reasoning
+    // that keeps a root object from carrying `"parent": ""`.
+    let mut scene = Scene::new();
+    let id = scene.add("mesh", "Lamp", "");
+    scene.set_mesh(&id, "meshes/lamp.obj").unwrap();
+    assert_eq!(scene.set_mesh(&id, ""), Ok(true));
+    // The *key*, not the word: `"kind": "mesh"` is still in the file and
+    // should be.
+    assert!(
+        !scene.to_text().contains("\"mesh\":"),
+        "{}",
+        scene.to_text()
+    );
+    assert_eq!(scene.objects()[0].mesh, "");
+}
+
+#[test]
+fn a_mesh_path_is_written_with_forward_slashes() {
+    // Typed on Windows, opened on anything.
+    let mut scene = Scene::new();
+    let id = scene.add("mesh", "Lamp", "");
+    scene.set_mesh(&id, r"meshes\lamp.obj").unwrap();
+    assert_eq!(scene.objects()[0].mesh, "meshes/lamp.obj");
+}
+
+#[test]
+fn a_mesh_path_cannot_climb_out_of_the_scenes_folder() {
+    // A scene arrives from somewhere — an asset pack, a colleague, the agent.
+    // One naming a file outside its own folder would have this editor open it
+    // and put it on screen.
+    let mut scene = Scene::new();
+    let id = scene.add("mesh", "Lamp", "");
+    for bad in [
+        "../../.ssh/id_rsa",
+        "meshes/../../secrets.obj",
+        r"..\..\secrets.obj",
+        "/etc/passwd",
+        r"C:\Users\someone\Documents\private.obj",
+    ] {
+        assert!(
+            scene.set_mesh(&id, bad).is_err(),
+            "{bad:?} was accepted as a mesh path"
+        );
+    }
+    assert_eq!(
+        scene.objects()[0].mesh,
+        "",
+        "one of them was written anyway"
+    );
+}
+
+#[test]
+fn a_folder_merely_called_dotdot_something_is_fine() {
+    // The check is on path *components*, not on the characters in them.
+    let mut scene = Scene::new();
+    let id = scene.add("mesh", "Lamp", "");
+    assert_eq!(scene.set_mesh(&id, "..archive/lamp.obj"), Ok(true));
+}
