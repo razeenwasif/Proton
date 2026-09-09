@@ -4340,6 +4340,7 @@ dependencies = [
  "proton-text",
  "proton-trace",
  "proton-vcs",
+ "proton-video",
  "serde",
  "serde_json",
  "ts-rs",
@@ -4514,6 +4515,14 @@ version = "0.0.1"
 dependencies = [
  "gix",
  "gix-imara-diff",
+]
+
+[[package]]
+name = "proton-video"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "ts-rs",
 ]
 
 [[package]]

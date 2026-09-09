@@ -2,8 +2,10 @@
 import type { Action } from "./Action";
 import type { Activity } from "./Activity";
 import type { BufferTab } from "./BufferTab";
+import type { Caption } from "./Caption";
 import type { CellView } from "./CellView";
 import type { ChangeView } from "./ChangeView";
+import type { Clip } from "./Clip";
 import type { Completion } from "./Completion";
 import type { DebateSummary } from "./DebateSummary";
 import type { DebugFrame } from "./DebugFrame";
@@ -18,12 +20,14 @@ import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
 import type { LibrarySource } from "./LibrarySource";
 import type { Material } from "./Material";
+import type { MediaItem } from "./MediaItem";
 import type { ModeId } from "./ModeId";
 import type { Node } from "./Node";
 import type { NoticeLevel } from "./NoticeLevel";
 import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
 import type { PluginView } from "./PluginView";
+import type { Rate } from "./Rate";
 import type { RepoFile } from "./RepoFile";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
@@ -301,6 +305,51 @@ source: string,
 selected: number, 
 /**
  * Why there is no scene, when there is a reason worth showing.
+ */
+problem: string, } | { "type": "cut", 
+/**
+ * Empty when none is open.
+ */
+path: string, 
+/**
+ * From the list's `TITLE:` line.
+ */
+title: string, clips: Array<Clip>, 
+/**
+ * The lanes, top to bottom, as an NLE stacks them.
+ */
+tracks: Array<string>, captions: Array<Caption>, 
+/**
+ * Empty when the cut has no caption file beside it, which is
+ * ordinary rather than a problem.
+ */
+captionsPath: string, 
+/**
+ * The sources the cut refers to, and whether they are on disk.
+ */
+media: Array<MediaItem>, 
+/**
+ * How the list is being counted.
+ *
+ * Sent so the front end can *show* it. An EDL does not record its
+ * rate, so this is an assumption, and an assumption nobody can see is
+ * indistinguishable from a fact.
+ */
+rate: Rate, 
+/**
+ * Where the programme ends, in frames — the width of the ruler.
+ */
+length: bigint, 
+/**
+ * The list's text.
+ */
+source: string, 
+/**
+ * Which event is selected, or `usize::MAX`.
+ */
+selected: number, 
+/**
+ * Why there is no cut, when there is a reason worth showing.
  */
 problem: string, } | { "type": "theme", 
 /**

@@ -33,6 +33,7 @@ pub mod split;
 pub mod tasks;
 pub mod trace;
 pub mod tree;
+pub mod video;
 pub mod vim;
 pub mod workspace;
 

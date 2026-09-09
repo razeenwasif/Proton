@@ -367,7 +367,7 @@ pub enum Command {
         index: usize,
     },
 
-    /* ── shader graphs ────────────────────────── */
+    /* ── Godot scenes ─────────────────────────── */
     /// Point Game mode at a `.tscn`. Answered with `Event::Level`.
     OpenLevel {
         path: String,
@@ -384,6 +384,40 @@ pub enum Command {
         value: String,
     },
 
+    /* ── cuts and captions ────────────────────── */
+    /// Point Video mode at an `.edl`. Answered with `Event::Cut`.
+    OpenTimeline {
+        path: String,
+    },
+    /// Pick an event — a click on a clip in the timeline.
+    SelectClip {
+        index: usize,
+    },
+    /// Change one field of the event at `index`: a reel or one of its four
+    /// timecodes.
+    #[serde(rename_all = "camelCase")]
+    SetClipField {
+        index: usize,
+        field: String,
+        value: String,
+    },
+    /// Change one field of the caption at `index`: its words or its times.
+    #[serde(rename_all = "camelCase")]
+    SetCaptionField {
+        index: usize,
+        field: String,
+        value: String,
+    },
+    /// Read the list at a different rate.
+    ///
+    /// An EDL does not record the rate its timecodes are counted at, so the
+    /// one on screen is an assumption and this is how a person corrects it.
+    /// Nothing is written: the file does not change, only what it means.
+    SetTimelineRate {
+        fps: u32,
+    },
+
+    /* ── shader graphs ────────────────────────── */
     /// Change one setting on one node of a material's graph.
     SetMaterialParam {
         material: String,
@@ -947,6 +981,41 @@ pub enum Event {
         /// Which one is selected, or `usize::MAX`.
         selected: usize,
         /// Why there is no scene, when there is a reason worth showing.
+        problem: String,
+    },
+    /// The cut Video mode is showing, and the captions beside it.
+    ///
+    /// `Cut` rather than `Timeline`, because the timeline is the widget and
+    /// this is the document — and because `Event::Scene` and `Event::Level`
+    /// already taught this enum what two events with one name cost.
+    #[serde(rename_all = "camelCase")]
+    Cut {
+        /// Empty when none is open.
+        path: String,
+        /// From the list's `TITLE:` line.
+        title: String,
+        clips: Vec<proton_video::Clip>,
+        /// The lanes, top to bottom, as an NLE stacks them.
+        tracks: Vec<String>,
+        captions: Vec<proton_video::Caption>,
+        /// Empty when the cut has no caption file beside it, which is
+        /// ordinary rather than a problem.
+        captions_path: String,
+        /// The sources the cut refers to, and whether they are on disk.
+        media: Vec<crate::video::MediaItem>,
+        /// How the list is being counted.
+        ///
+        /// Sent so the front end can *show* it. An EDL does not record its
+        /// rate, so this is an assumption, and an assumption nobody can see is
+        /// indistinguishable from a fact.
+        rate: proton_video::Rate,
+        /// Where the programme ends, in frames — the width of the ruler.
+        length: u64,
+        /// The list's text.
+        source: String,
+        /// Which event is selected, or `usize::MAX`.
+        selected: usize,
+        /// Why there is no cut, when there is a reason worth showing.
         problem: String,
     },
     /// The theme Design mode is editing.

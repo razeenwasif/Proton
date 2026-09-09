@@ -772,76 +772,63 @@
     </section>
 
     <!-- ══ VIDEO ═════════════════════════════════════════════════ -->
-    <section class="workspace" data-ws="video" style="--col-l:226px; --col-r:268px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+    <section class="workspace" data-ws="video" style="--col-l:226px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side">
-        <header>Media bin</header>
-        <div class="scroll tree">
-          <div class="group">Footage</div>
-          <div class="row sel"><span class="ic"><svg class="i"><use href="#i-play"/></svg></span>launch_a.mov <span class="chip" style="margin-left:auto">4K</span></div>
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-play"/></svg></span>launch_b.mov</div>
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-play"/></svg></span>ground_cam.mp4</div>
-          <div class="row"><span class="ic"><svg class="i"><use href="#i-play"/></svg></span>screen_capture.mov</div>
-          <div class="group">Audio</div>
-          <div class="row"><span class="ic"><svg class="i ft-audio"><use href="#i-audio"/></svg></span>vo_take3.wav</div>
-          <div class="row"><span class="ic"><svg class="i ft-audio"><use href="#i-audio"/></svg></span>bed_ambient.wav</div>
-          <div class="group">Generated</div>
-          <div class="row"><span class="ic"><svg class="i ft-ai"><use href="#i-spark"/></svg></span>lower_third.mogrt</div>
-          <div class="row"><span class="ic"><svg class="i ft-ai"><use href="#i-spark"/></svg></span>captions.srt <span class="chip ok" style="margin-left:auto">auto</span></div>
-          <div class="row"><span class="ic"><svg class="i ft-ai"><use href="#i-spark"/></svg></span>b_roll_orbit.mp4 <span class="chip accent" style="margin-left:auto">gen</span></div>
-        </div>
+        <!-- Slot::Explorer, from Event::Cut. Every row is a source the cut
+             actually refers to, and the chip says whether the file is really
+             there — which is the one thing about the media this can know
+             without decoding any of it.
+
+             What was here listed nine files for a cut that did not exist,
+             including a `b_roll_orbit.mp4` marked "gen" that nothing had
+             generated. -->
+        <header>Media bin <span class="grow"></span><span class="chip" data-media-count></span></header>
+        <div class="scroll tree" data-media></div>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
+        <!-- No program monitor, no Render button, no Edit/Color/Audio/Deliver
+             tabs. A frame of the programme is a decoded frame of video, and
+             decoding needs ffmpeg in a process of its own — which the process
+             model already accounts for and which is not installed here.
+
+             What was here drew a rocket with an SVG ellipse for a trajectory,
+             captioned it "Orbital insertion — T+00:14", and put a line of
+             dialogue under it that no transcription had produced.
+
+             The timeline below is real: every clip is an event in the `.edl`,
+             positioned by its record timecode. -->
         <div class="canvas-bar">
-          <div class="seg"><button class="on">Edit</button><button>Color</button><button>Audio</button><button>Deliver</button></div>
-          <span class="chip">1920×1080 · 24p</span>
-          <span class="chip info" style="margin-left:auto">00:00:14:08</span>
-          <button class="btn primary">Render</button>
+          <span class="chip accent" data-cut-file>no cut</span>
+          <span class="chip" data-cut-title></span>
+          <span class="grow"></span>
+          <span class="chip" data-cut-length></span>
+          <!-- The rate is an assumption. An EDL does not record the rate its
+               timecodes are counted at, so this is shown rather than hidden,
+               and changing it re-reads the list without writing a byte. -->
+          <select class="rate" data-cut-rate title="An EDL does not record its frame rate. This is the rate its timecodes are being read at."></select>
         </div>
-        <div class="viewport" style="flex:1">
-          <div style="position:absolute;inset:22px;border-radius:8px;border:1px solid var(--edge);overflow:hidden;background:linear-gradient(160deg,color-mix(in srgb,var(--wall-a) 55%,black),var(--bg-deep))">
-            <svg style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true">
-              <circle cx="46%" cy="62%" r="88" fill="color-mix(in srgb, var(--bg-deep) 80%, black)" stroke="rgba(255,255,255,.14)"/>
-              <ellipse cx="46%" cy="62%" rx="150" ry="42" fill="none" stroke="var(--err)" stroke-width="1.6" opacity=".8"/>
-              <circle cx="62%" cy="52%" r="6" fill="var(--err)"/>
-              <g opacity=".5" fill="#fff"><circle cx="18%" cy="22%" r="1.4"/><circle cx="28%" cy="38%" r="1"/><circle cx="72%" cy="26%" r="1.6"/><circle cx="86%" cy="44%" r="1.1"/></g>
-            </svg>
-            <div style="position:absolute;left:26px;bottom:52px;padding:8px 14px;border-radius:8px;background:color-mix(in srgb, var(--accent) 78%, transparent); color:var(--bg-deep);font:600 15px var(--sans)">Orbital insertion — T+00:14</div>
-            <div style="position:absolute;left:50%;transform:translateX(-50%);bottom:16px;font:500 13px var(--sans);color:rgba(255,255,255,.9)">“…and that is the burn complete.”</div>
-          </div>
-          <div class="vp-badge" style="left:32px;top:32px">Program</div>
-          <div class="vp-badge" style="right:32px;top:32px">Safe margins on</div>
-        </div>
-        <div class="tl">
-          <div class="playhead" style="left:38%"></div>
-          <div class="tl-ruler"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span><span>00:20</span><span>00:25</span></div>
-          <div class="track"><div class="name"><svg class="i ft-ai"><use href="#i-spark"/></svg> Text</div><div class="lane"><div class="clip t" style="flex:0 0 16%">Lower third</div><div style="flex:0 0 26%"></div><div class="clip t" style="flex:0 0 20%">Captions · auto</div></div></div>
-          <div class="track"><div class="name"><svg class="i"><use href="#i-play"/></svg> V2</div><div class="lane"><div style="flex:0 0 30%"></div><div class="clip ai" style="flex:0 0 24%"><svg class="i"><use href="#i-spark"/></svg> b_roll_orbit · generated</div></div></div>
-          <div class="track"><div class="name"><svg class="i"><use href="#i-play"/></svg> V1</div><div class="lane"><div class="clip v" style="flex:0 0 34%">launch_a.mov</div><div class="clip v" style="flex:0 0 28%">ground_cam</div><div class="clip v" style="flex:1">launch_b</div></div></div>
-          <div class="track" style="border-bottom:0"><div class="name"><svg class="i ft-audio"><use href="#i-audio"/></svg> A1</div><div class="lane"><div class="clip a" style="flex:0 0 46%">vo_take3 · ducked</div><div class="clip a" style="flex:1">bed_ambient</div></div></div>
-        </div>
+        <div class="tl" data-timeline></div>
+        <div class="scroll" data-cut-source></div>
       </main>
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
       <aside class="pane">
-        <div class="dock-tabs"><button class="dock-tab on">Agent</button><button class="dock-tab">Effects</button><button class="dock-tab">Color</button></div>
+        <!-- The selected event's fields, as the list wrote them. Typing here
+             splices the `.edl`: the bytes one timecode occupies are replaced
+             and no column is re-aligned.
+
+             The Agent/Effects/Color tabs are gone — only one had anything
+             behind it — along with a tool transcript describing a scene
+             detection, a transcription, a rough cut and a b-roll generation
+             that never ran. -->
+        <header>Event <span class="grow"></span><span class="chip" data-cut-selected></span></header>
         <div class="scroll">
-          <div class="msg">
-            <div class="who"><svg class="i" width="12" height="12" style="color:var(--accent)"><use href="#i-proton"/></svg> You</div>
-            <p>Cut this to 90 seconds, keep every ignition, and caption it.</p>
-          </div>
-          <div class="msg">
-            <div class="who"><svg class="i" width="12" height="12" style="color:var(--accent-2)"><use href="#i-spark"/></svg> Proton · thought 11s</div>
-            <div class="tool"><svg class="i"><use href="#i-target"/></svg> <b>scene.detect</b> 214 cuts <span class="t">4.1s</span></div>
-            <div class="tool"><svg class="i ft-audio"><use href="#i-audio"/></svg> <b>transcribe</b> vo_take3.wav <span class="t">98.4%</span></div>
-            <div class="tool"><svg class="i"><use href="#i-scissors"/></svg> <b>rough.cut</b> target 90s <span class="t">1:28 · 6 ignitions kept</span></div>
-            <div class="tool"><svg class="i ft-ai"><use href="#i-spark"/></svg> <b>generate</b> b-roll for the 8s gap <span class="t">1 take</span></div>
-            <p>Three silences over 2 s are trimmed, the VO is ducked under the bed by 9 dB, and captions are burned to a sidecar so they stay editable.</p>
-            <div class="artifact"><svg class="i ft-doc"><use href="#i-file-doc"/></svg> captions.srt</div>
-            <div class="artifact"><svg class="i ft-data"><use href="#i-sliders"/></svg> rough_cut_v3.edl</div>
-            <div class="suggest"><span>Show me the cuts it dropped</span><span>Punch up the ignition audio</span><span>Vertical 9:16 version</span></div>
-          </div>
+          <div data-cut-empty class="empty">Nothing selected.</div>
+          <div data-cut-props hidden></div>
+          <header class="sub" data-captions-head hidden>Captions <span class="grow"></span><span class="chip" data-captions-file></span></header>
+          <div data-captions></div>
         </div>
       </aside>
     </section>

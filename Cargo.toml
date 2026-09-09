@@ -20,6 +20,7 @@ members = [
     "crates/proton-text",
     "crates/proton-trace",
     "crates/proton-vcs",
+    "crates/proton-video",
 ]
 
 [workspace.package]
@@ -48,6 +49,7 @@ proton-term = { path = "crates/proton-term" }
 proton-text = { path = "crates/proton-text" }
 proton-trace = { path = "crates/proton-trace" }
 proton-vcs = { path = "crates/proton-vcs" }
+proton-video = { path = "crates/proton-video" }
 gix = "0.87"
 portable-pty = "0.9"
 vt100 = "0.16"

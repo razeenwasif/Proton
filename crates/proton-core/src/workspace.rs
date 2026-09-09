@@ -90,6 +90,8 @@ pub struct Workspace {
     modeling: crate::modeling::Modeling,
     /// The Godot scene Game mode is showing.
     game: crate::game::Game,
+    /// The cut Video mode is showing, and the captions beside it.
+    video: crate::video::Video,
     /// The local model that turns a question into a vector, when the settings
     /// name one. `None` is lexical search, which is a complete answer.
     embedder: Option<proton_library::Embedder>,
@@ -493,6 +495,7 @@ impl Workspace {
                     self.artboard_event(),
                     self.scene_event(),
                     self.level_event(),
+                    self.cut_event(),
                     self.settings_event(),
                     self.library_event(),
                     self.council_event(),
@@ -607,6 +610,60 @@ impl Workspace {
                 let done = self.design.set_layer_attribute(index, &name, &value);
                 self.after_layer_write(done)
             }
+
+            /* ── cuts and captions ─────────────────────────── */
+            Command::OpenTimeline { path } => {
+                let full = self.pickers.resolve(&path);
+                // The event goes out either way: "that file is not a cut"
+                // belongs on the timeline, where somebody is looking for it.
+                match self.video.open(&full) {
+                    Ok(()) => vec![self.cut_event()],
+                    Err(why) => vec![self.cut_event(), notice(why, NoticeLevel::Warn)],
+                }
+            }
+
+            Command::SelectClip { index } => match self.video.select(index) {
+                true => vec![self.cut_event()],
+                false => Vec::new(),
+            },
+
+            Command::SetClipField {
+                index,
+                field,
+                value,
+            } => match self.video.set_clip_field(index, &field, &value) {
+                Ok(false) => Vec::new(),
+                Ok(true) => {
+                    // The list just moved on disk, so the gutter, the tree and
+                    // any buffer holding it are told.
+                    let mut events = vec![self.cut_event(), self.repo_event()];
+                    events.extend(self.every_view());
+                    events
+                }
+                Err(why) => vec![notice(why, NoticeLevel::Error)],
+            },
+
+            Command::SetCaptionField {
+                index,
+                field,
+                value,
+            } => match self.video.set_caption_field(index, &field, &value) {
+                Ok(false) => Vec::new(),
+                Ok(true) => {
+                    let mut events = vec![self.cut_event(), self.repo_event()];
+                    events.extend(self.every_view());
+                    events
+                }
+                Err(why) => vec![notice(why, NoticeLevel::Error)],
+            },
+
+            Command::SetTimelineRate { fps } => match self.video.set_rate(fps) {
+                Ok(false) => Vec::new(),
+                // Nothing was written — the file is the same file. What
+                // changed is what its timecodes are taken to mean.
+                Ok(true) => vec![self.cut_event()],
+                Err(why) => vec![notice(why, NoticeLevel::Error)],
+            },
 
             /* ── scenes ────────────────────────────────────── */
             Command::OpenLevel { path } => {
@@ -2112,6 +2169,11 @@ impl Workspace {
                 // A `.tscn` is Godot's file, and Godot may be open beside us.
                 if self.game.reload() {
                     events.push(self.level_event());
+                }
+                // A cut edited as text, and the caption file whatever
+                // transcribed the dialogue may have only just written.
+                if self.video.reload() {
+                    events.push(self.cut_event());
                 }
                 if self.design.reload() {
                     events.push(self.theme_event());
@@ -4622,6 +4684,31 @@ impl Workspace {
         }
     }
 
+    fn cut_event(&self) -> Event {
+        Event::Cut {
+            path: self
+                .video
+                .path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+            captions_path: self
+                .video
+                .captions_path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+            title: self.video.title(),
+            clips: self.video.clips(),
+            tracks: self.video.tracks(),
+            captions: self.video.captions(),
+            media: self.video.media(),
+            rate: self.video.rate(),
+            length: self.video.length(),
+            source: self.video.source(),
+            selected: self.video.selected(),
+            problem: self.video.problem().unwrap_or_default().to_string(),
+        }
+    }
+
     fn level_event(&self) -> Event {
         Event::Level {
             path: self
@@ -4897,6 +4984,24 @@ impl Workspace {
                 }
             }
             events.push(self.level_event());
+        }
+        // Video goes looking on the same terms, once — and re-reads on the way
+        // back in. Its second document is the difference: a transcription is
+        // usually written by something else, minutes after the cut was opened,
+        // and a caption file that appeared while somebody was in another mode
+        // should be there when they come back rather than after a save.
+        if mode == ModeId::Video {
+            if self.video.is_open() {
+                self.video.reload();
+            } else if let Some(path) = crate::video::discover(self.pickers.root()) {
+                if self.video.open(&path).is_ok() {
+                    events.push(notice(
+                        format!("cut: {}", path.display()),
+                        NoticeLevel::Info,
+                    ));
+                }
+            }
+            events.push(self.cut_event());
         }
         // Modeling goes looking on the same terms, once.
         if mode == ModeId::Modeling && !self.modeling.is_open() {

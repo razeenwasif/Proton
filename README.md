@@ -6,15 +6,17 @@ A code editor that is also a chat client, a design tool, a 3D workspace, a game
 editor, a video editor and a data notebook — one window, seven modes, Neovim
 underneath all of them, and an agent that can act in any of them.
 
-**M0 through M7 are built**, and Modeling has its document, outliner,
-viewport and shader graph. The editor, Telescope and language servers, the
-agent, the Code Visualizer, the plugin host, Data mode and Design mode all
-ship, and Game reads and writes a Godot project's scenes. Video is the one
-still to come, and running a game engine is a real project of its own.
+**M0 through M7 are built**, and every mode in the window now reads and writes
+a real document. The editor, Telescope and language servers, the agent, the
+Code Visualizer, the plugin host, Data mode and Design mode all ship; Modeling
+has its scene, outliner, viewport and shader graph; Game reads and writes a
+Godot project's scenes; Video reads and writes a cut and its captions. What is
+still to come is the machinery underneath three of them — a mesh loader, a game
+engine, and ffmpeg — and each of those is a real project of its own.
 
 ```bash
 cargo run -p proton-shell      # the app
-cargo test --workspace         # 971 tests, headless
+cargo test --workspace         # 1216 tests, headless
 cargo tauri build              # the installer
 node ui/serve.mjs              # the front end alone → http://localhost:5178
 ```
@@ -70,8 +72,10 @@ loader yet, and the modifier stack is still to come.
 `.tscn` without reformatting it. The play transport, profiler, hot reload and
 the agent that verifies changes by replaying recorded input all need an engine
 process, and wait on one.
-**Video** · media bin, program monitor, multitrack timeline, with generated
-assets always marked as generated.
+**Video** · a multitrack timeline over a CMX3600 edit decision list, with the
+captions from the `.srt` beside it. Both files are spliced, never re-printed.
+There is no program monitor: a frame of the programme is a decoded frame of
+video, and decoding needs ffmpeg.
 **Data** · notebook + SQL + dataframe grid + charts, with real cell lineage back
 into the codebase.
 
@@ -147,7 +151,27 @@ the file Godot will open next. What it cannot do is run one — the play
 transport, hot reload, the profiler and replaying recorded input all need an
 engine process on the other end of a pipe, and none of them is mimed.
 
-Not yet real: the Video mode, which is still a hand-built screen behind a live
-statusline.
+Video reads a cut: an `.edl` is one line per event and four timecodes per line,
+plain text that has diffed in Git since before Git, and the timeline draws each
+clip where its record timecode puts it. The captions come from the `.srt`
+beside it, and the media bin says which of the sources the cut refers to are
+actually on disk. An edit — a timecode, a reel, a line of dialogue — replaces
+the bytes that one field occupies and re-aligns no column, because these are
+interchange files and something else opens them next.
+
+The rate is the interesting part. An EDL does not record the rate its timecodes
+are counted at; `FCM:` says only whether the count drops frame *numbers*. So
+the rate is shown on the bar and can be changed there, and changing it writes
+nothing — the file is the same file, and what moves is what its timecodes mean.
+An assumption nobody can see is indistinguishable from a fact.
+
+What Video cannot do is show you the picture. The program monitor, waveforms,
+thumbnails, durations read from the media itself and any kind of render all
+need ffmpeg in a process of its own — which the process model already accounts
+for and which is not installed here. None of it is mimed.
+
+So: no screen in this window claims to do something it cannot. What remains is
+three real projects — a mesh loader for Modeling, an engine process for Game,
+and an ffmpeg sidecar for Video.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.

@@ -1550,6 +1550,15 @@ Clicking the picture selects the layer, which the milestone did not ask for.
 **Later — Modeling, Game, Video.** Each needs a renderer and each is a real
 project. Do not start one until M0–M7 are shipped and stable.
 
+*Where these stand.* All three now have their documents and the panels that
+read and write them: `scene.proton.json` with an outliner, viewport and shader
+graph; Godot's `.tscn` with a hierarchy and an inspector; a CMX3600 `.edl` and
+its `.srt` sidecar with a multitrack timeline and captions. The renderers are
+what is left, and the note above still holds for each: a mesh loader for
+Modeling, an engine process for Game, and an ffmpeg process for Video. Doing
+the document first was what made these possible at all — none of the three
+needed a renderer to become real, and none of them mimes one now.
+
 ---
 
 ## 8. Risks, named

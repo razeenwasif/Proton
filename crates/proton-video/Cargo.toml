@@ -1,0 +1,12 @@
+[package]
+name = "proton-video"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Video mode's document: an edit decision list and its caption sidecar."
+
+[dependencies]
+serde = { workspace = true }
+ts-rs = { workspace = true }

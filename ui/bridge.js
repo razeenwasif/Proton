@@ -336,6 +336,88 @@ texture = ExtResource("1_x8k")
     ],
   };
 
+  // A cut and its captions, so Video mode can be designed against real
+  // documents. Written out like every other fixture here; the real ones are
+  // read from an `.edl` and an `.srt` by proton-video.
+  const cutSource = `TITLE: LAUNCH SEQUENCE
+FCM: NON-DROP FRAME
+
+001  AX       V     C        00:00:00:00 00:00:12:10 00:00:00:00 00:00:12:10
+* FROM CLIP NAME: launch_a.mov
+
+002  BX       V     C        00:00:04:00 00:00:09:12 00:00:12:10 00:00:17:22
+* FROM CLIP NAME: ground_cam.mp4
+
+003  AX       AA    C        00:00:00:00 00:00:17:22 00:00:00:00 00:00:17:22
+* FROM CLIP NAME: vo_take3.wav
+`;
+
+  // The rate is what turns a timecode into a frame number, so it lives in a
+  // variable the conversion reads rather than being baked into it. The real
+  // one re-parses the whole list when the rate changes; a mock that kept its
+  // frame counts would draw a timeline the core would never produce.
+  let fps = 24;
+  const at = (tc) => {
+    const [h, m, sec, f] = tc.split(":").map(Number);
+    return ((h * 60 + m) * 60 + sec) * fps + f;
+  };
+  const clip = (event, reel, channel, tracks, name, sIn, sOut, rIn, rOut) => ({
+    event, reel, channel, tracks, name, transition: "C", duration: "", source: "",
+    sourceIn: sIn, sourceOut: sOut, recordIn: rIn, recordOut: rOut,
+    start: at(rIn), end: at(rOut), line: 0,
+  });
+
+  const cut = {
+    path: "C:/launch/edit/launch.edl",
+    captionsPath: "C:/launch/edit/launch.srt",
+    title: "LAUNCH SEQUENCE",
+    problem: "",
+    selected: -1,
+    source: cutSource,
+    rate: { fps, drop: false },
+    clips: [
+      clip("001", "AX", "V", ["V1"], "launch_a.mov",
+           "00:00:00:00", "00:00:12:10", "00:00:00:00", "00:00:12:10"),
+      clip("002", "BX", "V", ["V1"], "ground_cam.mp4",
+           "00:00:04:00", "00:00:09:12", "00:00:12:10", "00:00:17:22"),
+      clip("003", "AX", "AA", ["A1", "A2"], "vo_take3.wav",
+           "00:00:00:00", "00:00:17:22", "00:00:00:00", "00:00:17:22"),
+    ],
+    tracks: ["V1", "A1", "A2"],
+    captions: [
+      { index: "1", start: "00:00:02,000", end: "00:00:05,500", startMs: 2000,
+        endMs: 5500, text: "...and that is the burn complete.", line: 2 },
+      { index: "2", start: "00:00:06,120", end: "00:00:09,000", startMs: 6120,
+        endMs: 9000, text: "Orbital insertion confirmed.", line: 6 },
+    ],
+    // One source really on disk and two not, which is the state a cut handed
+    // over on its own always arrives in.
+    media: [
+      { name: "launch_a.mov", path: "C:/launch/edit/media/launch_a.mov", reel: "AX",
+        uses: 1, found: true, audio: false },
+      { name: "ground_cam.mp4", path: "", reel: "BX", uses: 1, found: false, audio: false },
+      { name: "vo_take3.wav", path: "", reel: "AX", uses: 1, found: false, audio: true },
+    ],
+  };
+  cut.length = Math.max(...cut.clips.map((one) => one.end));
+
+  /** The event line one clip is on, for splicing it the way the real one does. */
+  const cutSourceLine = (one) =>
+    cut.source
+      .split("\n")
+      .find((line) => line.startsWith(one.event) && line.includes(one.recordIn)) ?? "";
+
+  /** Frame numbers, from the timecodes, at whatever rate is current. */
+  const recount = () => {
+    for (const one of cut.clips) {
+      one.start = at(one.recordIn);
+      one.end = at(one.recordOut);
+    }
+    cut.length = Math.max(...cut.clips.map((one) => one.end));
+  };
+
+  const cutEvent = () => ({ type: "cut", ...cut });
+
   const levelEvent = () => ({
     type: "level",
     path: level.path,
@@ -536,6 +618,7 @@ texture = ExtResource("1_x8k")
         artboardEvent(),
         sceneEvent(),
         levelEvent(),
+        cutEvent(),
         settingsEvent(),
         chatsEvent(),
       ];
@@ -571,6 +654,38 @@ texture = ExtResource("1_x8k")
       const hit = chats.conversations.find((c) => c.path === command.path);
       if (hit) hit.title = command.title;
       return [chatsEvent()];
+    }
+    if (command.type === "selectClip") {
+      cut.selected = command.index;
+      return [cutEvent()];
+    }
+    if (command.type === "setClipField") {
+      const one = cut.clips[command.index];
+      if (one) {
+        // Spliced, like the real one: the bytes that field occupies in the
+        // line are replaced and no column is re-aligned.
+        const was = one[command.field];
+        if (was && was !== command.value) {
+          const line = cutSourceLine(one);
+          cut.source = cut.source.replace(line, line.replace(was, command.value));
+          one[command.field] = command.value;
+          if (command.field === "recordIn") one.start = at(command.value);
+          if (command.field === "recordOut") one.end = at(command.value);
+          cut.length = Math.max(...cut.clips.map((c) => c.end));
+        }
+      }
+      return [cutEvent()];
+    }
+    if (command.type === "setCaptionField") {
+      const cue = cut.captions[command.index];
+      if (cue) cue[command.field] = command.value;
+      return [cutEvent()];
+    }
+    if (command.type === "setTimelineRate") {
+      fps = command.fps;
+      cut.rate = { fps, drop: cut.rate.drop };
+      recount();
+      return [cutEvent()];
     }
     if (command.type === "selectGameNode") {
       level.selected = command.index;

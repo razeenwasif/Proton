@@ -2003,6 +2003,304 @@ function artboardDoc(source, isDocument, vars, pick, nonce) {
     : source.slice(0, at) + csp + style + source.slice(at) + picker;
 }
 
+/* ── Video's timeline ─────────────────────────────────
+
+   Every clip on the timeline is an event in the project's `.edl`, placed by
+   its record timecode. The inspector edits that file by splicing it, and the
+   captions come from the `.srt` beside it.
+
+   There is no program monitor: a frame of the programme is a decoded frame of
+   video, and nothing here can decode one. */
+
+let lastCut = null;
+
+/** `HH:MM:SS:FF` from a frame count, which is what the ruler counts in. */
+function asTimecode(frames, rate) {
+  const fps = Math.max(1, rate?.fps ?? 24);
+  // Drop-frame puts back the numbers it skipped — two a minute, given back
+  // every tenth minute — before the count is split into fields.
+  let n = frames;
+  if (rate?.drop) {
+    const d = Math.floor(fps / 15);
+    const perTen = fps * 600 - 9 * d;
+    const perOne = fps * 60 - d;
+    const tens = Math.floor(frames / perTen);
+    const rest = frames % perTen;
+    n += 9 * d * tens;
+    if (rest >= d) n += d * Math.floor((rest - d) / perOne);
+  }
+  const pad = (v) => String(v).padStart(2, "0");
+  return (
+    `${pad(Math.floor(n / (fps * 3600)))}:` +
+    `${pad(Math.floor(n / (fps * 60)) % 60)}:` +
+    `${pad(Math.floor(n / fps) % 60)}:${pad(n % fps)}`
+  );
+}
+
+/** The sources the cut refers to, and whether they are on disk. */
+function renderMediaBin(event) {
+  const box = $("[data-media]");
+  if (!box) return;
+  const count = $("[data-media-count]");
+  const media = event.media ?? [];
+  if (count) count.textContent = media.length ? `${media.length}` : "";
+
+  if (!media.length) {
+    box.innerHTML = `<div class="empty">${escapeHtml(
+      event.problem || "No edit decision list in this project.",
+    )}</div>`;
+    return;
+  }
+  box.innerHTML = media
+    .map((item) => {
+      // Missing is the useful state to shout about: a cut handed over on its
+      // own almost always arrives with its media somewhere else.
+      const where = item.found
+        ? `<span class="chip ok" title="${escapeHtml(item.path)}">on disk</span>`
+        : `<span class="chip warn">missing</span>`;
+      const icon = item.audio ? "i-audio" : "i-play";
+      const tint = item.audio ? " ft-audio" : "";
+      return (
+        `<div class="row media" title="${escapeHtml(item.reel)} · ${item.uses} event${
+          item.uses === 1 ? "" : "s"
+        }">` +
+        `<span class="ic"><svg class="i${tint}"><use href="#${icon}"/></svg></span>` +
+        `${escapeHtml(item.name)}<span class="grow"></span>${where}</div>`
+      );
+    })
+    .join("");
+}
+
+/** The timeline: lanes of clips, positioned by record timecode. */
+function renderTimeline(event) {
+  const box = $("[data-timeline]");
+  if (!box) return;
+  const clips = event.clips ?? [];
+  const captions = event.captions ?? [];
+  const length = Math.max(1, Number(event.length ?? 0));
+  const rate = event.rate;
+
+  if (!clips.length) {
+    box.innerHTML = "";
+    return;
+  }
+
+  // Six marks, on whole seconds, because a ruler labelled in frames is a ruler
+  // nobody reads.
+  const fps = Math.max(1, rate?.fps ?? 24);
+  const seconds = Math.max(1, Math.round(length / fps / 6));
+  const marks = [];
+  for (let at = 0; at < length; at += seconds * fps) {
+    marks.push(
+      `<span style="left:${(at / length) * 100}%">${escapeHtml(asTimecode(at, rate))}</span>`,
+    );
+  }
+
+  const lane = (name, icon, tint, inner) =>
+    `<div class="track"><div class="name"><svg class="i${tint}"><use href="#${icon}"/></svg> ${escapeHtml(
+      name,
+    )}</div><div class="lane">${inner}</div></div>`;
+
+  const tracks = (event.tracks ?? []).map((name) => {
+    const kind = name.startsWith("A") ? "a" : "v";
+    const inner = clips
+      .map((clip, i) => [clip, i])
+      .filter(([clip]) => (clip.tracks ?? []).includes(name))
+      .map(([clip, i]) => {
+        // An out point is the first frame *not* included, so a clip's width is
+        // the difference and two touching clips share an edge exactly.
+        const left = (clip.start / length) * 100;
+        const width = Math.max(0.4, ((clip.end - clip.start) / length) * 100);
+        const label = clip.name || clip.reel || clip.event;
+        return (
+          `<div class="clip ${kind}${i === event.selected ? " sel" : ""}" data-clip="${i}"` +
+          ` style="left:${left}%;width:${width}%"` +
+          ` title="${escapeHtml(clip.event)} · ${escapeHtml(clip.transition)}${
+            clip.duration ? " " + escapeHtml(clip.duration) : ""
+          } · ${escapeHtml(clip.recordIn)} → ${escapeHtml(clip.recordOut)}"` +
+          `>${escapeHtml(label)}</div>`
+        );
+      })
+      .join("");
+    return lane(name, kind === "a" ? "i-audio" : "i-play", kind === "a" ? " ft-audio" : "", inner);
+  });
+
+  // The captions are a second file, so they get a lane of their own rather
+  // than being drawn as if they were events in the cut.
+  if (captions.length) {
+    const inner = captions
+      .map((cue) => {
+        const from = ((cue.startMs / 1000) * fps) / length;
+        const to = ((cue.endMs / 1000) * fps) / length;
+        return (
+          `<div class="clip t" style="left:${from * 100}%;width:${Math.max(
+            0.4,
+            (to - from) * 100,
+          )}%" title="${escapeHtml(cue.start)} → ${escapeHtml(cue.end)}">${escapeHtml(
+            cue.text.replace(/\n/g, " "),
+          )}</div>`
+        );
+      })
+      .join("");
+    tracks.push(lane("Captions", "i-file-doc", " ft-doc", inner));
+  }
+
+  box.innerHTML = `<div class="tl-ruler">${marks.join("")}</div>${tracks.join("")}`;
+}
+
+/** The list's own text, which is what Video mode can honestly show. */
+function renderCutSource(event) {
+  const box = $("[data-cut-source]");
+  if (!box) return;
+  if (!event.path) {
+    box.innerHTML = `<div class="empty">${escapeHtml(
+      event.problem || "No edit decision list in this project.",
+    )}</div>`;
+    return;
+  }
+  box.innerHTML =
+    `<div class="level-note">The cut itself. A program monitor, waveforms and ` +
+    `any kind of render need ffmpeg in a process of its own; there is not one.</div>` +
+    `<pre class="level-src">${escapeHtml(event.source ?? "")}</pre>`;
+}
+
+/** The selected event's fields, exactly as the list wrote them. */
+function renderCutInspector(event) {
+  const box = $("[data-cut-props]");
+  const nothing = $("[data-cut-empty]");
+  if (!box || !nothing) return;
+
+  const clip = event.clips?.[event.selected];
+  const picked = $("[data-cut-selected]");
+  if (picked) picked.textContent = clip ? `${clip.event} · ${clip.channel}` : "";
+
+  box.hidden = !clip;
+  nothing.hidden = !!clip;
+  if (!clip) return;
+
+  // Read-only above, editable below. A transition and its length change what
+  // an event *is*, not merely when it happens, and neither is a text box.
+  const said = (label, value) =>
+    `<div class="prop-row"><span class="lbl">${escapeHtml(label)}</span>` +
+    `<span class="val">${escapeHtml(value)}</span></div>`;
+  const field = (label, name, value) =>
+    `<div class="prop-row"><span class="lbl">${escapeHtml(label)}</span>` +
+    // Left-aligned: `.num` is right-aligned for the numbers Modeling's
+    // inspector holds, and a clip name reading toward the right edge is a
+    // field that looks broken.
+    `<input class="num" data-clip-field="${name}" spellcheck="false" style="text-align:left"` +
+    ` value="${escapeHtml(value)}"></div>`;
+
+  box.innerHTML =
+    said("channel", clip.channel) +
+    said(
+      "transition",
+      clip.duration ? `${clip.transition} ${clip.duration}` : clip.transition,
+    ) +
+    field("clip", "name", clip.name) +
+    field("reel", "reel", clip.reel) +
+    field("source in", "sourceIn", clip.sourceIn) +
+    field("source out", "sourceOut", clip.sourceOut) +
+    field("record in", "recordIn", clip.recordIn) +
+    field("record out", "recordOut", clip.recordOut);
+}
+
+/** The captions, editable, from the file beside the cut. */
+function renderCaptions(event) {
+  const box = $("[data-captions]");
+  const head = $("[data-captions-head]");
+  if (!box || !head) return;
+  const captions = event.captions ?? [];
+  head.hidden = !captions.length;
+  if (!captions.length) {
+    box.innerHTML = "";
+    return;
+  }
+  const file = $("[data-captions-file]");
+  if (file) file.textContent = (event.captionsPath || "").split(/[\\/]/).pop();
+
+  box.innerHTML = captions
+    .map(
+      (cue, i) =>
+        `<div class="cue"><div class="cue-at">${escapeHtml(cue.start)} → ${escapeHtml(
+          cue.end,
+        )}</div>` +
+        `<textarea class="cue-text" data-caption="${i}" spellcheck="false" rows="2">${escapeHtml(
+          cue.text,
+        )}</textarea></div>`,
+    )
+    .join("");
+}
+
+/** The bar above the timeline, including the rate that is an assumption. */
+function renderCutBar(event) {
+  const file = $("[data-cut-file]");
+  if (file) {
+    file.textContent = event.path ? event.path.split(/[\\/]/).pop() : "no cut";
+    file.className = "chip" + (event.path ? " accent" : "");
+  }
+  const title = $("[data-cut-title]");
+  if (title) title.textContent = event.title ?? "";
+  const length = $("[data-cut-length]");
+  if (length) {
+    length.textContent = event.path
+      ? `${asTimecode(Number(event.length ?? 0), event.rate)}`
+      : "";
+  }
+
+  const rate = $("[data-cut-rate]");
+  if (!rate) return;
+  const fps = event.rate?.fps ?? 24;
+  const RATES = [24, 25, 30, 48, 50, 60];
+  // The list's own rate is offered even when it is not one of the usual ones,
+  // so that changing something else does not silently change this too.
+  const offer = RATES.includes(fps) ? RATES : [...RATES, fps].sort((a, b) => a - b);
+  rate.innerHTML = offer
+    .map(
+      (one) =>
+        `<option value="${one}"${one === fps ? " selected" : ""}>${one} fps${
+          one === fps && event.rate?.drop ? " · drop" : ""
+        }</option>`,
+    )
+    .join("");
+  rate.disabled = !event.path;
+}
+
+document.addEventListener("click", (e) => {
+  const clip = e.target.closest?.("[data-clip]");
+  if (!clip) return;
+  dispatch({ type: "selectClip", index: Number(clip.dataset.clip) });
+});
+
+document.addEventListener("change", (e) => {
+  const field = e.target.closest?.("[data-clip-field]");
+  if (field) {
+    const index = lastCut?.selected;
+    if (index === undefined || index < 0) return;
+    dispatch({
+      type: "setClipField",
+      index,
+      field: field.dataset.clipField,
+      value: field.value,
+    });
+    return;
+  }
+
+  const cue = e.target.closest?.("[data-caption]");
+  if (cue) {
+    dispatch({
+      type: "setCaptionField",
+      index: Number(cue.dataset.caption),
+      field: "text",
+      value: cue.value,
+    });
+    return;
+  }
+
+  const rate = e.target.closest?.("[data-cut-rate]");
+  if (rate) dispatch({ type: "setTimelineRate", fps: Number(rate.value) });
+});
+
 /* ── Game's hierarchy ────────────────────────────────
 
    Every row is a node really in the project's `.tscn`. The inspector edits
@@ -4125,6 +4423,16 @@ onEvent((event) => {
 
     case "council":
       renderCouncil(event);
+      break;
+
+    case "cut":
+      lastCut = event;
+      renderCutBar(event);
+      renderMediaBin(event);
+      renderTimeline(event);
+      renderCutInspector(event);
+      renderCaptions(event);
+      renderCutSource(event);
       break;
 
     case "level":
