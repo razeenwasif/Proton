@@ -1558,7 +1558,9 @@ what is left, and the note above still holds for each: an engine process for
 Game and an ffmpeg process for Video. Modeling has since grown a mesh loader —
 `proton-mesh` reads a Wavefront OBJ, which keeps the diffable-document rule
 true all the way down, since the geometry file is text as well — and the
-viewport draws real surfaces up to a measured budget. Doing the document first
+viewport draws real surfaces up to a measured budget, with a non-destructive
+modifier stack over them — kept in the scene, so it is a few diffable lines
+describing a change to a mesh file it never writes. Doing the document first
 was what made all of this possible: none of the three needed a renderer to
 become real, and none of them mimes one now.
 

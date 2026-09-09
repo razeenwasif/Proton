@@ -475,8 +475,101 @@ FCM: NON-DROP FRAME
     "meshes/panel.obj": panelMesh(1, 0.5),
   };
 
+  /* ── the modifier stack ──────────────────────────────
+   *
+   * Enough of an evaluator for the panel to be designed against geometry that
+   * really changes. Mirror and array are exact and are three lines each.
+   *
+   * Subdivide here splits every triangle at its edge midpoints and stops: the
+   * count goes up four times a level, as it should, and the shape does *not*
+   * smooth. The real one is Loop subdivision in `proton-mesh`, and this is a
+   * stand-in for a preview with no Rust behind it — said out loud so that a
+   * picture from this file is never mistaken for a picture from the core. */
+
+  const stackOf = (node) =>
+    (node?.modifiers ?? []).filter((one) => one.known && !one.off);
+
+  const runStack = (mesh, stack) => {
+    let out = { ...mesh, positions: [...mesh.positions], triangles: [...mesh.triangles] };
+    for (const one of stack) {
+      if (one.kind === "mirror") {
+        const axis = { x: 0, y: 1, z: 2 }[one.axis] ?? 0;
+        const was = out.positions.length / 3;
+        const twin = [];
+        for (let v = 0; v < was; v++) {
+          const p = out.positions.slice(v * 3, v * 3 + 3);
+          if (one.weld && Math.abs(p[axis]) < 1e-6) {
+            twin.push(v);
+            continue;
+          }
+          twin.push(out.positions.length / 3);
+          p[axis] = -p[axis];
+          out.positions.push(...p);
+        }
+        const faces = [...out.triangles];
+        for (let t = 0; t < faces.length; t += 3) {
+          // Two corners swapped: a reflection reverses orientation.
+          out.triangles.push(twin[faces[t]], twin[faces[t + 2]], twin[faces[t + 1]]);
+        }
+      } else if (one.kind === "array") {
+        const count = Math.max(1, one.count | 0);
+        const was = out.positions.length / 3;
+        const pos = [...out.positions];
+        const tri = [...out.triangles];
+        out.positions = [];
+        out.triangles = [];
+        for (let copy = 0; copy < count; copy++) {
+          for (let i = 0; i < pos.length; i++) {
+            out.positions.push(pos[i] + one.offset[i % 3] * copy);
+          }
+          out.triangles.push(...tri.map((corner) => corner + was * copy));
+        }
+      } else if (one.kind === "subdivide") {
+        for (let level = 0; level < Math.min(4, one.levels | 0); level++) {
+          const mid = new Map();
+          const tri = [...out.triangles];
+          out.triangles = [];
+          const between = (a, b) => {
+            const at = `${Math.min(a, b)}:${Math.max(a, b)}`;
+            if (mid.has(at)) return mid.get(at);
+            const made = out.positions.length / 3;
+            for (let k = 0; k < 3; k++) {
+              out.positions.push((out.positions[a * 3 + k] + out.positions[b * 3 + k]) / 2);
+            }
+            mid.set(at, made);
+            return made;
+          };
+          for (let t = 0; t < tri.length; t += 3) {
+            const [a, b, c] = [tri[t], tri[t + 1], tri[t + 2]];
+            const [ab, bc, ca] = [between(a, b), between(b, c), between(c, a)];
+            out.triangles.push(a, ab, ca, b, bc, ab, c, ca, bc, ab, bc, ca);
+          }
+        }
+      }
+    }
+    // The box moved, and framing reads it.
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (const v of out.triangles) {
+      for (let k = 0; k < 3; k++) {
+        lo[k] = Math.min(lo[k], out.positions[v * 3 + k]);
+        hi[k] = Math.max(hi[k], out.positions[v * 3 + k]);
+      }
+    }
+    out.bounds = [...lo, ...hi];
+    return out;
+  };
+
+  /** The key an object asks for its geometry by — the same rule the core uses. */
+  const keyOf = (node) =>
+    !node.mesh || !stackOf(node).length ? node.mesh ?? "" : `${node.mesh}@${node.id}`;
+
   const geometryEvent = (path) => {
-    const mesh = meshes[path];
+    // `chair.obj@chair-3` is that object's copy of it.
+    const [file, id] = path.includes("@") ? path.split("@") : [path, null];
+    const base = meshes[file];
+    const node = id ? scene.nodes.find((one) => one.id === id) : null;
+    const mesh = base ? runStack(base, stackOf(node)) : null;
     if (!mesh) {
       // Exactly what the core sends for a mesh nobody copied.
       return {
@@ -485,7 +578,7 @@ FCM: NON-DROP FRAME
         mesh: null,
         bounds: [0, 0, 0, 0, 0, 0],
         triangles: 0,
-        problem: `${path}: not there`,
+        problem: `${file}: not there`,
       };
     }
     return {
@@ -502,10 +595,12 @@ FCM: NON-DROP FRAME
     type: "scene",
     materials,
     path: scene.path,
-    nodes: scene.nodes,
+    // `geometry` is derived, not stored — the same rule the core follows, so
+    // the viewport looks a result up by the same key either way.
+    nodes: scene.nodes.map((one) => ({ ...one, geometry: keyOf(one) })),
     selected: scene.selected,
     problem: scene.problem,
-    meshes: [...new Set(scene.nodes.map((one) => one.mesh).filter(Boolean))],
+    meshes: [...new Set(scene.nodes.map(keyOf).filter(Boolean))],
   });
 
   const artboardEvent = () => ({
@@ -777,6 +872,57 @@ FCM: NON-DROP FRAME
     }
     if (command.type === "loadMesh") {
       return [geometryEvent(command.path)];
+    }
+    if (command.type === "setNodeModifier") {
+      const node = scene.nodes[command.index];
+      const fresh = {
+        mirror: { kind: "mirror", axis: "x", weld: true, known: true, off: false,
+                  count: 2, offset: [1, 0, 0], levels: 1 },
+        array: { kind: "array", axis: "x", weld: true, known: true, off: false,
+                 count: 2, offset: [1, 0, 0], levels: 1 },
+        subdivide: { kind: "subdivide", axis: "x", weld: true, known: true, off: false,
+                     count: 2, offset: [1, 0, 0], levels: 1 },
+      }[command.kind];
+      if (!node || !fresh) {
+        return [{ type: "notice", text: `${command.kind} is not a modifier this build knows`,
+                  level: "error" }];
+      }
+      node.modifiers = [...(node.modifiers ?? []), { ...fresh }];
+      return [sceneEvent(), geometryEvent(keyOf(node))];
+    }
+    if (command.type === "removeNodeModifier") {
+      const node = scene.nodes[command.index];
+      if (node?.modifiers) node.modifiers.splice(command.row, 1);
+      return [sceneEvent(), geometryEvent(keyOf(node))];
+    }
+    if (command.type === "moveNodeModifier") {
+      const node = scene.nodes[command.index];
+      const stack = node?.modifiers;
+      if (stack && command.row < stack.length) {
+        const to = Math.min(Math.max(0, command.to), stack.length - 1);
+        stack.splice(to, 0, ...stack.splice(command.row, 1));
+      }
+      return [sceneEvent(), geometryEvent(keyOf(node))];
+    }
+    if (command.type === "setModifierField") {
+      const one = scene.nodes[command.index]?.modifiers?.[command.row];
+      if (one) {
+        const number = Number(command.value);
+        if (command.field === "off" || command.field === "weld") {
+          one[command.field] = command.value === "true";
+        } else if (command.field === "axis") {
+          one.axis = command.value;
+        } else if (command.field === "count") {
+          one.count = Math.max(1, Math.min(4096, number | 0));
+        } else if (command.field === "levels") {
+          one.levels = Math.max(0, Math.min(6, number | 0));
+        } else if (command.field.startsWith("offset")) {
+          const axis = { offsetX: 0, offsetY: 1, offsetZ: 2 }[command.field];
+          if (Number.isFinite(number)) one.offset[axis] = number;
+        }
+      }
+      const node = scene.nodes[command.index];
+      return [sceneEvent(), geometryEvent(keyOf(node))];
     }
     if (command.type === "setNodeMesh") {
       const node = scene.nodes[command.index];

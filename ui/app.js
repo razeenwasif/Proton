@@ -2884,13 +2884,162 @@ function renderNodeInspector(event) {
 
   const meshNote = $("[data-mesh-note]");
   if (meshNote) {
-    const said = node.kind === "mesh" ? meshProblem(node.mesh) : "";
+    const said = node.kind === "mesh" ? meshProblem(node.geometry || node.mesh) : "";
     meshNote.textContent = said;
     meshNote.className = "st-hint" + (said ? " warn" : "");
   }
 
   $("[data-node-note]").textContent = `${node.kind} · ${node.id}`;
+  renderStack(event);
 }
+
+/** The modifier stack of whichever object is selected.
+ *
+ * Every row is a modifier really in `scene.proton.json`; the arrows change the
+ * order it runs in, the dot switches it off without removing it, and every
+ * field writes the file. A kind this build cannot apply is shown greyed with
+ * what it is, because a bevel that quietly does nothing is a worse answer than
+ * one that says it did nothing.
+ */
+function renderStack(event) {
+  const box = $("[data-stack]");
+  const head = $("[data-stack-head]");
+  if (!box || !head) return;
+
+  const node = event.nodes?.[event.selected];
+  // Only a mesh has geometry to modify. Offering the panel on a light would
+  // invite somebody to fill it in and wonder why nothing happened.
+  const shown = node?.kind === "mesh";
+  head.hidden = !shown;
+  if (!shown) {
+    box.innerHTML = "";
+    return;
+  }
+
+  const stack = node.modifiers ?? [];
+  if (!stack.length) {
+    box.innerHTML = `<div class="empty">No modifiers.</div>`;
+    return;
+  }
+
+  const num = (label, field, value, row) =>
+    `<div class="prop-row"><span class="lbl">${escapeHtml(label)}</span>` +
+    `<input class="num" data-mod-field="${field}" data-mod-row="${row}"` +
+    ` inputmode="decimal" value="${escapeHtml(String(value))}"></div>`;
+
+  box.innerHTML = stack
+    .map((one, row) => {
+      const bar =
+        `<div class="mod-bar">` +
+        `<button class="mod-dot${one.off ? "" : " on"}" data-mod-off="${row}"` +
+        ` title="${one.off ? "Switch on" : "Switch off"}"></button>` +
+        `<span class="mod-kind">${escapeHtml(one.kind)}</span>` +
+        (one.known ? "" : `<span class="chip warn">not applied</span>`) +
+        `<span class="grow"></span>` +
+        `<button class="mod-btn" data-mod-up="${row}" title="Earlier in the stack">\u2191</button>` +
+        `<button class="mod-btn" data-mod-down="${row}" title="Later in the stack">\u2193</button>` +
+        `<button class="mod-btn" data-mod-del="${row}" title="Remove">\u00d7</button>` +
+        `</div>`;
+
+      let body = "";
+      if (!one.known) {
+        body =
+          `<p class="st-hint">This build cannot apply a ` +
+          `${escapeHtml(one.kind)}. It is kept in the file exactly as it was.</p>`;
+      } else if (one.kind === "mirror") {
+        body =
+          `<div class="prop-row"><span class="lbl">Axis</span>` +
+          `<select class="num" data-mod-field="axis" data-mod-row="${row}">` +
+          ["x", "y", "z"]
+            .map(
+              (axis) =>
+                `<option value="${axis}"${axis === one.axis ? " selected" : ""}>${axis}</option>`,
+            )
+            .join("") +
+          `</select></div>` +
+          `<div class="prop-row"><span class="lbl">Weld</span>` +
+          `<label class="mod-check"><input type="checkbox" data-mod-field="weld"` +
+          ` data-mod-row="${row}"${one.weld ? " checked" : ""}>` +
+          `<span>merge the seam</span></label></div>`;
+      } else if (one.kind === "array") {
+        body =
+          num("Count", "count", one.count, row) +
+          `<div class="prop-row"><span class="lbl">Offset</span>` +
+          ["offsetX", "offsetY", "offsetZ"]
+            .map(
+              (field, axis) =>
+                `<input class="num" data-mod-field="${field}" data-mod-row="${row}"` +
+                ` inputmode="decimal" value="${escapeHtml(String(one.offset[axis]))}">`,
+            )
+            .join("") +
+          `</div>`;
+      } else if (one.kind === "subdivide") {
+        body = num("Levels", "levels", one.levels, row);
+      }
+
+      return `<div class="mod${one.off ? " off" : ""}">${bar}${body}</div>`;
+    })
+    .join("");
+}
+
+document.addEventListener("click", (e) => {
+  const index = lastScene?.selected;
+  if (index === undefined || index < 0) return;
+  const hit = (what) => {
+    const button = e.target.closest?.(`[data-mod-${what}]`);
+    return button ? Number(button.dataset[`mod${what[0].toUpperCase()}${what.slice(1)}`]) : null;
+  };
+
+  const off = hit("off");
+  if (off !== null) {
+    const now = lastScene.nodes[index].modifiers[off]?.off ?? false;
+    dispatch({
+      type: "setModifierField",
+      index,
+      row: off,
+      field: "off",
+      value: String(!now),
+    });
+    return;
+  }
+  const up = hit("up");
+  if (up !== null) {
+    dispatch({ type: "moveNodeModifier", index, row: up, to: Math.max(0, up - 1) });
+    return;
+  }
+  const down = hit("down");
+  if (down !== null) {
+    dispatch({ type: "moveNodeModifier", index, row: down, to: down + 1 });
+    return;
+  }
+  const gone = hit("del");
+  if (gone !== null) dispatch({ type: "removeNodeModifier", index, row: gone });
+});
+
+document.addEventListener("change", (e) => {
+  const index = lastScene?.selected;
+  if (index === undefined || index < 0) return;
+
+  const add = e.target.closest?.("[data-add-modifier]");
+  if (add) {
+    if (add.value) dispatch({ type: "setNodeModifier", index, kind: add.value });
+    // Back to the prompt, so the control reads as an action and not as a
+    // setting that is now stuck on "Mirror".
+    add.value = "";
+    return;
+  }
+
+  const field = e.target.closest?.("[data-mod-field]");
+  if (!field) return;
+  const value = field.type === "checkbox" ? String(field.checked) : field.value;
+  dispatch({
+    type: "setModifierField",
+    index,
+    row: Number(field.dataset.modRow),
+    field: field.dataset.modField,
+    value,
+  });
+});
 
 /** What is wrong with a node's geometry, if anything is.
  *

@@ -16,7 +16,7 @@ ffmpeg — and each of those is a real project of its own.
 
 ```bash
 cargo run -p proton-shell      # the app
-cargo test --workspace         # 1248 tests, headless
+cargo test --workspace         # 1289 tests, headless
 cargo tauri build              # the installer
 node ui/serve.mjs              # the front end alone → http://localhost:5178
 ```
@@ -65,10 +65,10 @@ reading column, and **Send to Codex** when it is time to act on what you decided
 target's device / layout-inspector / Logcat panel.
 **Design** · a web builder with a layer tree and an artboard, two-way bound to
 real component source and design tokens.
-**Modeling** · 3D — outliner, viewport and shader graph over a scene
-serialised to diffable JSON. An object names the `.obj` its geometry is in and
-the viewport draws that surface, flat shaded. The modifier stack is still to
-come, and nothing renders a shader.
+**Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a
+scene serialised to diffable JSON. An object names the `.obj` its geometry is
+in, a stack of operations says what to do to it, and the viewport draws the
+result flat shaded. Nothing renders a shader.
 **Game** · a Godot project's scene tree and an inspector that edits the
 `.tscn` without reformatting it. The play transport, profiler, hot reload and
 the agent that verifies changes by replaying recorded input all need an engine
@@ -164,7 +164,25 @@ writes one and when it reads one back. A scene arrives from somewhere — an
 asset pack, a colleague, the agent — and one naming `../../.ssh/id_rsa` as a
 mesh would otherwise have this editor open that file and put it on screen.
 
-Still missing: the modifier stack, and nothing renders a shader.
+The stack is non-destructive, which is the whole point of one: the `.obj` is
+read and never written, so mirroring a character does not double the vertices
+in anybody's export and switching the mirror off gets the original back
+exactly. It lives in `scene.proton.json` as a handful of lines describing a
+change to a file it does not touch. Mirror, array and subdivide, each exact
+— Loop subdivision, boundary rule and all, so the rim of a plane is refined
+along itself rather than dragged toward the middle. Order is editable because
+order is the point: mirror then array is two rows of paired objects, array
+then mirror is one row reflected into two.
+
+How far a stack grows a mesh is known exactly before it runs — a mirror
+doubles, an array multiplies by its count, a level of subdivision is four
+times the last — so a stack that would make 1.6 million triangles is refused
+with that number in the message, rather than by running out of memory finding
+out. A modifier of a kind this build has never heard of is kept in the file,
+shown in the stack, and marked *not applied*: a bevel that quietly does
+nothing is a worse answer than one that says it did nothing.
+
+Still missing: nothing renders a shader.
 
 Game reads a Godot project: `project.godot` says which scene starts, the
 hierarchy is that `.tscn`'s node tree, and the inspector edits it by splicing
@@ -193,6 +211,6 @@ for and which is not installed here. None of it is mimed.
 
 So: no screen in this window claims to do something it cannot. What remains is
 two real projects — an engine process for Game and an ffmpeg sidecar for
-Video — plus the modifier stack and a shader renderer for Modeling.
+Video — plus a shader renderer for Modeling.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.

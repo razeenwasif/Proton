@@ -241,3 +241,247 @@ fn a_file_that_is_not_geometry_says_what_is_wrong_with_it() {
     assert!(what.mesh.is_none());
     assert!(what.problem.contains("no vertices"), "{}", what.problem);
 }
+
+/* ── the modifier stack ───────────────────────────────────────────── */
+
+/// Every geometry event a command produced.
+fn produced(space: &mut Workspace, command: Command) -> Vec<proton_core::modeling::Geometry> {
+    space
+        .apply(command)
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::Geometry(what) => Some(what),
+            _ => None,
+        })
+        .collect()
+}
+
+fn stack_of(space: &mut Workspace) -> Vec<(String, bool)> {
+    match scene(space) {
+        Event::Scene { nodes, .. } => nodes[0]
+            .modifiers
+            .iter()
+            .map(|one| (one.kind.clone(), one.off))
+            .collect(),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn a_stack_is_asked_for_under_a_key_of_its_own() {
+    // Ten chairs sharing one `.obj` share one copy of it. A chair with a stack
+    // does not: that result belongs to the object, not to the file.
+    let (mut space, _) = open("key");
+    let Event::Scene { meshes, nodes, .. } = scene(&mut space) else {
+        unreachable!()
+    };
+    assert_eq!(meshes, ["meshes/lamp.obj"]);
+    assert_eq!(nodes[0].geometry, "meshes/lamp.obj");
+
+    space.apply(Command::SetNodeModifier {
+        index: 0,
+        kind: "mirror".into(),
+    });
+    let Event::Scene { meshes, nodes, .. } = scene(&mut space) else {
+        unreachable!()
+    };
+    assert_eq!(nodes[0].geometry, "meshes/lamp.obj@lamp-1");
+    assert_eq!(meshes, ["meshes/lamp.obj@lamp-1"]);
+}
+
+#[test]
+fn the_stack_is_run_and_the_result_is_what_arrives() {
+    // Four triangles mirrored is eight. A stack that did not change the
+    // geometry would be the whole feature mimed.
+    let (mut space, _) = open("run");
+    assert_eq!(load(&mut space, "meshes/lamp.obj").triangles, 4);
+
+    space.apply(Command::SetNodeModifier {
+        index: 0,
+        kind: "mirror".into(),
+    });
+    let what = load(&mut space, "meshes/lamp.obj@lamp-1");
+    assert_eq!(what.triangles, 8);
+    assert_eq!(what.mesh.expect("the vertices").triangles.len(), 24);
+}
+
+#[test]
+fn changing_a_setting_sends_the_new_geometry_without_being_asked() {
+    // A key is the mesh and the object, not the settings, so it does not move
+    // when a setting changes — and a front end that only asks for keys it has
+    // never seen would go on drawing the old result forever.
+    let (mut space, _) = open("resend");
+    space.apply(Command::SetNodeModifier {
+        index: 0,
+        kind: "array".into(),
+    });
+    let fresh = produced(
+        &mut space,
+        Command::SetModifierField {
+            index: 0,
+            row: 0,
+            field: "count".into(),
+            value: "5".into(),
+        },
+    );
+    assert_eq!(
+        fresh.first().map(|what| what.triangles),
+        Some(20),
+        "the change never reached the viewport: {fresh:?}"
+    );
+}
+
+#[test]
+fn turning_a_modifier_off_gives_back_exactly_the_file() {
+    // What non-destructive means. The `.obj` was never written, so the
+    // original is still there to come back to.
+    let (mut space, path) = open("off");
+    let obj = path.with_file_name("meshes").join("lamp.obj");
+    let before = std::fs::read_to_string(&obj).unwrap();
+
+    space.apply(Command::SetNodeModifier {
+        index: 0,
+        kind: "subdivide".into(),
+    });
+    assert_eq!(load(&mut space, "meshes/lamp.obj@lamp-1").triangles, 16);
+
+    space.apply(Command::SetModifierField {
+        index: 0,
+        row: 0,
+        field: "off".into(),
+        value: "true".into(),
+    });
+    // The key falls back to the plain mesh, because nothing is being run.
+    let Event::Scene { nodes, .. } = scene(&mut space) else {
+        unreachable!()
+    };
+    assert_eq!(nodes[0].geometry, "meshes/lamp.obj");
+    assert_eq!(load(&mut space, "meshes/lamp.obj").triangles, 4);
+    assert_eq!(
+        std::fs::read_to_string(&obj).unwrap(),
+        before,
+        "the stack wrote to the mesh file"
+    );
+}
+
+#[test]
+fn the_order_of_the_stack_is_editable() {
+    let (mut space, _) = open("order");
+    for kind in ["mirror", "array", "subdivide"] {
+        space.apply(Command::SetNodeModifier {
+            index: 0,
+            kind: kind.into(),
+        });
+    }
+    let kinds = |space: &mut Workspace| {
+        stack_of(space)
+            .into_iter()
+            .map(|(kind, _)| kind)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(kinds(&mut space), ["mirror", "array", "subdivide"]);
+    space.apply(Command::MoveNodeModifier {
+        index: 0,
+        row: 2,
+        to: 0,
+    });
+    assert_eq!(kinds(&mut space), ["subdivide", "mirror", "array"]);
+}
+
+#[test]
+fn a_stack_that_would_be_too_big_is_refused_with_the_number() {
+    // How far a stack grows a mesh is exactly known before running it, so this
+    // is answered rather than discovered by running out of memory.
+    let (mut space, _) = open("too-big");
+    space.apply(Command::SetNodeModifier {
+        index: 0,
+        kind: "subdivide".into(),
+    });
+    space.apply(Command::SetModifierField {
+        index: 0,
+        row: 0,
+        field: "levels".into(),
+        value: "6".into(),
+    });
+
+    // Four triangles, four to the sixth, is 16,384 — which fits. An array of a
+    // hundred on top of it is 1,638,400, which does not.
+    let what = load(&mut space, "meshes/lamp.obj@lamp-1");
+    assert_eq!(what.triangles, 16_384);
+    assert!(what.mesh.is_some());
+
+    space.apply(Command::SetNodeModifier {
+        index: 0,
+        kind: "array".into(),
+    });
+    space.apply(Command::SetModifierField {
+        index: 0,
+        row: 1,
+        field: "count".into(),
+        value: "100".into(),
+    });
+    let what = load(&mut space, "meshes/lamp.obj@lamp-1");
+    assert!(what.mesh.is_none(), "it built the whole thing anyway");
+    assert_eq!(what.triangles, 1_638_400);
+    assert!(
+        what.problem.contains("1638400"),
+        "it did not say how big: {}",
+        what.problem
+    );
+}
+
+#[test]
+fn a_modifier_this_build_cannot_apply_is_kept_and_not_run() {
+    // A bevel that quietly does nothing is a worse answer than one that says
+    // it did nothing.
+    let (mut space, path) = open("unknown");
+    let text = std::fs::read_to_string(&path).unwrap().replace(
+        r#""mesh": "meshes/lamp.obj""#,
+        r#""mesh": "meshes/lamp.obj", "modifiers": [{"kind": "bevel", "width": 0.02}]"#,
+    );
+    std::fs::write(&path, &text).unwrap();
+    space.apply(Command::OpenScene {
+        path: path.display().to_string(),
+    });
+
+    let Event::Scene { nodes, .. } = scene(&mut space) else {
+        unreachable!()
+    };
+    assert_eq!(nodes[0].modifiers.len(), 1);
+    assert!(!nodes[0].modifiers[0].known);
+    // And the key does not move, because nothing about the geometry changed:
+    // what gets drawn is still the file.
+    assert_eq!(nodes[0].geometry, "meshes/lamp.obj");
+    assert_eq!(load(&mut space, "meshes/lamp.obj").triangles, 4);
+}
+
+#[test]
+fn a_kind_this_build_does_not_know_cannot_be_added() {
+    let (mut space, _) = open("add-unknown");
+    let events = space.apply(Command::SetNodeModifier {
+        index: 0,
+        kind: "bevel".into(),
+    });
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, Event::Notice { .. })),
+        "it was refused silently: {events:?}"
+    );
+    assert!(stack_of(&mut space).is_empty());
+}
+
+#[test]
+fn removing_the_last_modifier_puts_the_object_back_on_the_plain_mesh() {
+    let (mut space, _) = open("remove");
+    space.apply(Command::SetNodeModifier {
+        index: 0,
+        kind: "mirror".into(),
+    });
+    space.apply(Command::RemoveNodeModifier { index: 0, row: 0 });
+    let Event::Scene { nodes, .. } = scene(&mut space) else {
+        unreachable!()
+    };
+    assert!(nodes[0].modifiers.is_empty());
+    assert_eq!(nodes[0].geometry, "meshes/lamp.obj");
+}

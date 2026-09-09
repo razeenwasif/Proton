@@ -26,8 +26,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use proton_mesh::Mesh;
-use proton_scene::{Material, Node, ParamValue, Part, Scene};
+use proton_mesh::{Mesh, Step};
+use proton_scene::{Material, Modifier, Node, ParamValue, Part, Scene};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -76,10 +76,18 @@ pub struct Geometry {
     pub problem: String,
 }
 
-/// One mesh already read, and when the file it came from was last written.
+/// One result already worked out, and what it depended on.
+///
+/// Both halves matter. The file can change under us — a re-export from
+/// Blender — and so can the stack, without the key moving: a key is the mesh
+/// and the object, not the settings, so turning a mirror's weld off has to be
+/// noticed here rather than by the front end asking again.
 #[derive(Debug, Clone)]
 struct Cached {
     at: Option<SystemTime>,
+    steps: Vec<Step>,
+    /// The mesh path, kept so a re-check does not have to re-split the key.
+    path: String,
     what: Geometry,
 }
 
@@ -118,18 +126,30 @@ impl Modeling {
         self.selected
     }
 
-    /// Read one mesh, or answer why it could not be.
+    /// Read one mesh, run its stack, or answer why neither happened.
     ///
-    /// Cached by the path the scene writes, and re-read when the file's
-    /// modified time moves — which is how a mesh re-exported from Blender
-    /// while this is open reaches the viewport.
-    pub fn geometry(&mut self, path: &str) -> Geometry {
+    /// The key is a mesh path, optionally followed by `@` and an object's id
+    /// when that object has a stack to run — see `Node::geometry`. Cached on
+    /// the file's modified time *and* the steps, so a re-export from Blender
+    /// and a change to the stack are both noticed.
+    pub fn geometry(&mut self, key: &str) -> Geometry {
         let missing = |why: String| Geometry {
-            path: path.to_string(),
+            path: key.to_string(),
             mesh: None,
             bounds: [0.0; 6],
             triangles: 0,
             problem: why,
+        };
+
+        // `chair.obj@chair-3` is that object's copy; `chair.obj` is the file
+        // as it sits on disk. Split from the right, and only when the tail is
+        // really an object, because nothing stops a folder being called `@`.
+        let (path, steps) = match key.rsplit_once('@') {
+            Some((path, id)) => match self.nodes().into_iter().find(|one| one.id == id) {
+                Some(node) => (path, steps_of(&node.modifiers)),
+                None => (key, Vec::new()),
+            },
+            None => (key, Vec::new()),
         };
 
         // Checked here as well as on the way in. `set_mesh` guards what this
@@ -146,51 +166,84 @@ impl Modeling {
         let full = beside.join(&clean);
         let at = std::fs::metadata(&full).and_then(|one| one.modified()).ok();
 
-        if let Some(had) = self.meshes.get(path) {
-            if had.at == at {
+        if let Some(had) = self.meshes.get(key) {
+            if had.at == at && had.steps == steps {
                 return had.what.clone();
             }
         }
 
         let what = match Mesh::read(&full) {
             Err(why) => missing(why),
-            Ok(mesh) => Geometry {
-                path: path.to_string(),
-                bounds: mesh.bounds,
-                triangles: mesh.count(),
-                // Over budget the vertices stay here. Sending them would cost
-                // megabytes over the wire to draw a picture that arrives after
-                // the mouse has moved on; the bounds above are what the
-                // viewport draws instead, and they are the file's real ones.
-                problem: match mesh.count() > BUDGET {
-                    true => format!(
-                        "{} triangles — more than this viewport can draw",
-                        mesh.count()
-                    ),
-                    false => match mesh.skipped {
-                        0 => String::new(),
-                        n => format!("{n} faces in this file could not be read"),
+            Ok(base) => {
+                // How far a stack grows a mesh is exactly known before running
+                // it — a mirror doubles, an array multiplies by its count, and
+                // each level of subdivision is four times the last. So a stack
+                // that would make ten million triangles is refused with the
+                // number in the message, rather than by running out of memory
+                // on the way to finding out.
+                let would = base.count() as f64 * proton_mesh::growth(&steps);
+                match would > BUDGET as f64 {
+                    true => Geometry {
+                        path: key.to_string(),
+                        mesh: None,
+                        // The base mesh's box, which is the honest thing to
+                        // draw: where the stack would have put the result is
+                        // not known without running it.
+                        bounds: base.bounds,
+                        triangles: would as usize,
+                        problem: match steps.is_empty() {
+                            true => format!(
+                                "{} triangles — more than this viewport can draw",
+                                base.count()
+                            ),
+                            false => format!(
+                                "this stack would make {} triangles from {} — more \
+                                 than this viewport can draw",
+                                would as usize,
+                                base.count()
+                            ),
+                        },
                     },
-                },
-                mesh: (mesh.count() <= BUDGET).then_some(mesh),
-            },
+                    false => {
+                        let skipped = base.skipped;
+                        let mesh = match steps.is_empty() {
+                            true => base,
+                            false => base.apply(&steps),
+                        };
+                        Geometry {
+                            path: key.to_string(),
+                            bounds: mesh.bounds,
+                            triangles: mesh.count(),
+                            problem: match skipped {
+                                0 => String::new(),
+                                n => format!("{n} faces in this file could not be read"),
+                            },
+                            mesh: Some(mesh),
+                        }
+                    }
+                }
+            }
         };
         self.meshes.insert(
-            path.to_string(),
+            key.to_string(),
             Cached {
                 at,
+                steps,
+                path: path.to_string(),
                 what: what.clone(),
             },
         );
         what
     }
 
-    /// Every mesh the scene names, in outliner order and without repeats.
+    /// Every piece of geometry the scene needs, in outliner order and without
+    /// repeats — by key, so two objects wearing the same mesh with the same
+    /// stack ask for it once.
     pub fn wanted(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for node in self.nodes() {
-            if !node.mesh.is_empty() && !out.contains(&node.mesh) {
-                out.push(node.mesh);
+            if !node.geometry.is_empty() && !out.contains(&node.geometry) {
+                out.push(node.geometry);
             }
         }
         out
@@ -210,8 +263,8 @@ impl Modeling {
         let moved: Vec<String> = self
             .meshes
             .iter()
-            .filter(|(path, had)| {
-                let Ok(clean) = proton_scene::mesh_path(path) else {
+            .filter(|(_, had)| {
+                let Ok(clean) = proton_scene::mesh_path(&had.path) else {
                     return false;
                 };
                 let at = std::fs::metadata(beside.join(clean))
@@ -219,15 +272,44 @@ impl Modeling {
                     .ok();
                 at != had.at
             })
-            .map(|(path, _)| path.clone())
+            .map(|(key, _)| key.clone())
             .collect();
         moved
             .into_iter()
-            .map(|path| {
-                self.meshes.remove(&path);
-                self.geometry(&path)
+            .map(|key| {
+                self.meshes.remove(&key);
+                self.geometry(&key)
             })
             .collect()
+    }
+
+    /// The stack of the node at a row, as operations to run.
+    ///
+    /// A modifier that is switched off, or of a kind this build has never
+    /// heard of, produces no step — which is what makes an unknown one
+    /// visibly *not applied* rather than silently ignored.
+    pub fn steps(&self, id: &str) -> Vec<Step> {
+        self.nodes()
+            .into_iter()
+            .find(|one| one.id == id)
+            .map(|node| steps_of(&node.modifiers))
+            .unwrap_or_default()
+    }
+
+    /// Change the stack of one object, and write the file.
+    pub fn modify(
+        &mut self,
+        id: &str,
+        change: impl FnOnce(&mut Scene, &str) -> Result<bool, String>,
+    ) -> Result<bool, String> {
+        let Some(scene) = self.scene.as_mut() else {
+            return Err("no scene is open".into());
+        };
+        if !change(scene, id)? {
+            return Ok(false);
+        }
+        self.save()?;
+        Ok(true)
     }
 
     /// Point an object at its geometry, and write the file.
@@ -436,6 +518,36 @@ impl Modeling {
         };
         scene.write(path)
     }
+}
+
+/// Turn a stack into the operations to run, dropping what cannot be run.
+fn steps_of(stack: &[Modifier]) -> Vec<Step> {
+    stack
+        .iter()
+        .filter(|one| one.known && !one.off)
+        .filter_map(|one| match one.kind.as_str() {
+            "mirror" => Some(Step::Mirror {
+                axis: match one.axis.as_str() {
+                    "y" => 1,
+                    "z" => 2,
+                    _ => 0,
+                },
+                weld: one.weld,
+            }),
+            "array" => Some(Step::Array {
+                count: one.count,
+                offset: [
+                    one.offset[0] as f32,
+                    one.offset[1] as f32,
+                    one.offset[2] as f32,
+                ],
+            }),
+            "subdivide" => Some(Step::Subdivide { levels: one.levels }),
+            // `known` said this build could apply it and this match says it
+            // cannot, which would be a bug in one of the two.
+            _ => None,
+        })
+        .collect()
 }
 
 /// Look for a scene under the project.

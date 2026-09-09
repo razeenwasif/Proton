@@ -83,6 +83,23 @@ pub struct Node {
     /// The material this object wears, by id. Empty for one that wears none,
     /// which is most objects and every light and camera.
     pub material: String,
+    /// What is done to its geometry before it is drawn, in order.
+    ///
+    /// Non-destructive: the `.obj` is read and never written, so mirroring a
+    /// character does not double the vertices in anybody's export and turning
+    /// the mirror off gets the original back exactly. A stack is a handful of
+    /// lines in a diff describing a change to a file it does not touch.
+    pub modifiers: Vec<Modifier>,
+    /// What to ask for this object's geometry by.
+    ///
+    /// The mesh path when nothing is being done to it, so ten chairs sharing
+    /// one `.obj` share one copy of it. The path *and this object's id* when
+    /// there is a stack to run, because then the result belongs to this object
+    /// and not to the file.
+    ///
+    /// Derived rather than stored: it is a fact about the mesh and the stack,
+    /// and a second copy in the file could disagree with them.
+    pub geometry: String,
     /// Where its geometry is: a path relative to the scene file, or empty.
     ///
     /// A path and not the vertices. A scene is a file somebody reads in a
@@ -206,6 +223,36 @@ impl Scene {
                 parent: parent_of(one),
                 material: string_of(one, "material", ""),
                 mesh: string_of(one, "mesh", ""),
+                geometry: {
+                    let mesh = string_of(one, "mesh", "");
+                    // Only a modifier that is on *and* understood makes the
+                    // result differ from the file, so a stack of nothing but
+                    // a disabled bevel still shares the plain mesh.
+                    let runs = one
+                        .get("modifiers")
+                        .and_then(Value::as_array)
+                        .map(|list| {
+                            list.iter()
+                                .filter_map(Value::as_object)
+                                .map(read_modifier)
+                                .any(|one| one.known && !one.off)
+                        })
+                        .unwrap_or(false);
+                    match runs && !mesh.is_empty() {
+                        true => format!("{mesh}@{}", id_of(one)),
+                        false => mesh,
+                    }
+                },
+                modifiers: one
+                    .get("modifiers")
+                    .and_then(Value::as_array)
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(Value::as_object)
+                            .map(read_modifier)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 position: triple(one, "position", [0.0; 3]),
                 rotation: triple(one, "rotation", [0.0; 3]),
                 scale: triple(one, "scale", [1.0; 3]),
@@ -255,6 +302,160 @@ impl Scene {
             }
         }
         Ok(true)
+    }
+
+    /* ── the modifier stack ─────────────────────────────── */
+
+    /// Put a modifier on the end of an object's stack.
+    ///
+    /// On the end, because that is where a new operation goes: it acts on
+    /// everything already there. Somewhere in the middle would be a guess
+    /// about what somebody meant, and the stack can be reordered anyway.
+    pub fn add_modifier(&mut self, id: &str, kind: &str) -> Result<usize, String> {
+        let kind = kind.trim();
+        if !KINDS.contains(&kind) {
+            return Err(format!("{kind:?} is not a modifier this build knows"));
+        }
+        let fresh = fresh_modifier(kind);
+        let list = self.stack_mut(id)?;
+        list.push(fresh);
+        Ok(list.len() - 1)
+    }
+
+    /// Take one off.
+    pub fn remove_modifier(&mut self, id: &str, index: usize) -> Result<bool, String> {
+        let empty = {
+            let list = self.stack_mut(id)?;
+            if index >= list.len() {
+                return Err(format!("there is no modifier at row {index}"));
+            }
+            list.remove(index);
+            list.is_empty()
+        };
+        // An empty list in the file is a fact nobody needs, the same reasoning
+        // that keeps a root object from carrying `"parent": ""`.
+        if empty {
+            self.find_mut(id)?.remove("modifiers");
+        }
+        Ok(true)
+    }
+
+    /// Move one up or down the stack.
+    ///
+    /// Which is the whole reason it is a list: mirror then array is two rows
+    /// of paired objects, and array then mirror is one row reflected into two.
+    pub fn move_modifier(&mut self, id: &str, index: usize, to: usize) -> Result<bool, String> {
+        let list = self.stack_mut(id)?;
+        if index >= list.len() {
+            return Err(format!("there is no modifier at row {index}"));
+        }
+        let to = to.min(list.len() - 1);
+        if to == index {
+            return Ok(false);
+        }
+        let one = list.remove(index);
+        list.insert(to, one);
+        Ok(true)
+    }
+
+    /// Change one setting on one modifier.
+    ///
+    /// Answers whether anything changed, so setting a value to what it already
+    /// is does not write the file.
+    pub fn set_modifier(
+        &mut self,
+        id: &str,
+        index: usize,
+        field: &str,
+        value: &str,
+    ) -> Result<bool, String> {
+        let value = value.trim();
+        let (key, want) = match field {
+            "off" => ("off", json!(value == "true")),
+            "weld" => ("weld", json!(value == "true")),
+            "axis" => match value {
+                "x" | "y" | "z" => ("axis", json!(value)),
+                other => return Err(format!("{other:?} is not an axis")),
+            },
+            "count" => (
+                "count",
+                json!(value
+                    .parse::<u64>()
+                    .map_err(|_| format!("{value:?} is not a whole number of copies"))?
+                    .clamp(1, 4096)),
+            ),
+            "levels" => (
+                "levels",
+                // Capped rather than refused: every level is four times the
+                // triangles of the last, so seven of them is sixteen thousand
+                // times the mesh and nobody types that on purpose.
+                json!(value
+                    .parse::<u64>()
+                    .map_err(|_| format!("{value:?} is not a number of levels"))?
+                    .min(6)),
+            ),
+            "offsetX" | "offsetY" | "offsetZ" => {
+                let axis = match field {
+                    "offsetX" => 0,
+                    "offsetY" => 1,
+                    _ => 2,
+                };
+                let number: f64 = value
+                    .parse()
+                    .map_err(|_| format!("{value:?} is not a distance"))?;
+                if !number.is_finite() {
+                    return Err(format!("{value:?} is not a distance"));
+                }
+                let mut offset = {
+                    let list = self.stack_mut(id)?;
+                    let one = list
+                        .get(index)
+                        .and_then(Value::as_object)
+                        .ok_or_else(|| format!("there is no modifier at row {index}"))?;
+                    triple(one, "offset", [1.0, 0.0, 0.0])
+                };
+                offset[axis] = number;
+                ("offset", json!(offset))
+            }
+            other => return Err(format!("{other:?} is not a setting of a modifier")),
+        };
+
+        let list = self.stack_mut(id)?;
+        let one = list
+            .get_mut(index)
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| format!("there is no modifier at row {index}"))?;
+        if one.get(key) == Some(&want) {
+            return Ok(false);
+        }
+        // `off` is the one that reads better by its absence: a stack where
+        // every line says `"off": false` is noise in every diff.
+        match key == "off" && want == json!(false) {
+            true => {
+                if one.remove("off").is_none() {
+                    return Ok(false);
+                }
+            }
+            false => {
+                one.insert(key.to_string(), want);
+            }
+        }
+        Ok(true)
+    }
+
+    /// An object's stack as a mutable list, making one if it had none.
+    ///
+    /// Only ever called from an edit: reading through it would write an empty
+    /// `"modifiers": []` into the file of every object somebody looked at.
+    fn stack_mut(&mut self, id: &str) -> Result<&mut Vec<Value>, String> {
+        let one = self.find_mut(id)?;
+        let list = one
+            .entry("modifiers".to_string())
+            .or_insert_with(|| json!([]));
+        if !list.is_array() {
+            *list = json!([]);
+        }
+        Ok(list.as_array_mut().expect("just made it an array"))
     }
 
     /// Rename an object. The id does not move, so nothing is reparented.
@@ -474,6 +675,94 @@ pub fn mesh_path(path: &str) -> Result<String, String> {
         return Err(format!("{path:?} climbs out of the scene's folder"));
     }
     Ok(clean)
+}
+
+/// One entry in an object's modifier stack.
+///
+/// ## Why the parameters of every kind are on one struct
+///
+/// Because the alternative is an enum, and an enum cannot hold a kind this
+/// build has never heard of. A scene written by a later version, or annotated
+/// by a plugin, may carry a `bevel` or a `solidify`; those have to survive
+/// being read and written here, appear in the stack, and be visibly *not
+/// applied*. `known` is what the panel reads to say so.
+///
+/// The file only ever holds the keys a modifier actually uses, and any it had
+/// that this does not understand are left where they were.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct Modifier {
+    /// `mirror`, `array`, `subdivide` — free text, for the reason above.
+    pub kind: String,
+    /// Kept in the file and not applied. Absent means on, so the ordinary
+    /// case writes nothing.
+    pub off: bool,
+    /// Whether this build knows how to apply it.
+    pub known: bool,
+    /// Mirror: `x`, `y` or `z`. Named rather than numbered, because `"axis":
+    /// "x"` is a line somebody can read in a diff and `"axis": 0` is not.
+    pub axis: String,
+    /// Mirror: merge the vertices sitting on the plane.
+    pub weld: bool,
+    /// Array: how many copies, the original included.
+    pub count: usize,
+    /// Array: how far apart, in metres.
+    pub offset: [f64; 3],
+    /// Subdivide: how many times.
+    pub levels: usize,
+}
+
+/// The kinds this build can apply.
+pub const KINDS: &[&str] = &["mirror", "array", "subdivide"];
+
+/// A new modifier of a kind, with the settings that make it do something
+/// visible straight away — an array of one and a subdivision of zero levels
+/// are both just a slower way of drawing the same mesh.
+fn fresh_modifier(kind: &str) -> Value {
+    let mut one = Map::new();
+    one.insert("kind".into(), json!(kind));
+    match kind {
+        "mirror" => {
+            one.insert("axis".into(), json!("x"));
+            one.insert("weld".into(), json!(true));
+        }
+        "array" => {
+            one.insert("count".into(), json!(2));
+            one.insert("offset".into(), json!([1.0, 0.0, 0.0]));
+        }
+        "subdivide" => {
+            one.insert("levels".into(), json!(1));
+        }
+        _ => {}
+    }
+    Value::Object(one)
+}
+
+fn read_modifier(one: &Map<String, Value>) -> Modifier {
+    let kind = string_of(one, "kind", "");
+    Modifier {
+        known: KINDS.contains(&kind.as_str()),
+        off: one.get("off").and_then(Value::as_bool).unwrap_or(false),
+        axis: match string_of(one, "axis", "x").as_str() {
+            "y" => "y".into(),
+            "z" => "z".into(),
+            _ => "x".into(),
+        },
+        weld: one.get("weld").and_then(Value::as_bool).unwrap_or(true),
+        count: one
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or(2)
+            .clamp(1, 4096) as usize,
+        offset: triple(one, "offset", [1.0, 0.0, 0.0]),
+        levels: one
+            .get("levels")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .min(6) as usize,
+        kind,
+    }
 }
 
 fn id_of(one: &Map<String, Value>) -> String {

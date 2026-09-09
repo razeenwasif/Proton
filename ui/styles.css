@@ -1199,6 +1199,24 @@ header.sub { border-top: 1px solid var(--edge); }
 }
 .cue-text:focus { outline: none; border-color: var(--accent); }
 
+/* ── the modifier stack ───────────────────────────────────────────── */
+.mod { border-top: 1px solid var(--edge); }
+.mod.off { opacity: .5; }
+.mod-bar { display: flex; align-items: center; gap: 7px; padding: 6px 13px; }
+.mod-kind { font-size: 11.5px; color: var(--ink-2); text-transform: capitalize; }
+.mod-dot {
+  width: 9px; height: 9px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--ink-4); background: none; cursor: pointer;
+}
+.mod-dot.on { background: var(--accent); border-color: var(--accent); }
+.mod-btn {
+  border: 0; background: none; color: var(--ink-4); cursor: pointer;
+  font: 12px var(--mono); padding: 0 3px; line-height: 1;
+}
+.mod-btn:hover { color: var(--ink); }
+.mod-check { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-3); }
+.mod-check input { accent-color: var(--accent); }
+
 /* ── Data mode ────────────────────────────────────────────────────── */
 .cell { margin: 11px 13px; border-radius: 12px; overflow: hidden; background: rgba(0, 0, 0, 0.16); box-shadow: var(--spec); }
 .cell > header { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--edge); font: 11px var(--mono); color: var(--ink-3); }

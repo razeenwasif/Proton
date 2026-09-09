@@ -219,7 +219,7 @@ function proxyFor(node) {
     case "camera":
       return FRUSTUM;
     case "mesh": {
-      const mesh = node.mesh ? geometry.get(node.mesh) : null;
+      const mesh = node.geometry ? geometry.get(node.geometry) : null;
       if (mesh?.positions) return null;
       if (mesh && mesh.bounds && mesh.bounds[3] > mesh.bounds[0]) {
         return boxLines(mesh.bounds);
@@ -502,7 +502,7 @@ function drawSolids(ctx, nodes, matrices, view, focal, width, height, style, acc
   let faces = 0;
   let widest = 0;
   for (const node of nodes) {
-    const mesh = node.mesh ? geometry.get(node.mesh) : null;
+    const mesh = node.geometry ? geometry.get(node.geometry) : null;
     if (!mesh?.positions) continue;
     faces += mesh.triangles.length / 3;
     widest = Math.max(widest, mesh.positions.length / 3);
@@ -532,7 +532,7 @@ function drawSolids(ctx, nodes, matrices, view, focal, width, height, style, acc
   let n = 0;
 
   for (let i = 0; i < nodes.length; i++) {
-    const mesh = nodes[i].mesh ? geometry.get(nodes[i].mesh) : null;
+    const mesh = nodes[i].geometry ? geometry.get(nodes[i].geometry) : null;
     if (!mesh?.positions) continue;
     const mv = multiply(view, matrices[i]);
     const points = mesh.positions;
@@ -714,7 +714,7 @@ function drawGrid(ctx, project) {
  * ten-metre building counted for as much as an empty.
  */
 function extentOf(node) {
-  const mesh = node.mesh ? geometry.get(node.mesh) : null;
+  const mesh = node.geometry ? geometry.get(node.geometry) : null;
   if (mesh?.bounds && mesh.bounds[3] > mesh.bounds[0]) return mesh.bounds;
   switch (node.kind) {
     case "mesh":

@@ -720,6 +720,22 @@
                      placeholder="meshes/lamp.obj">
             </div>
             <p class="st-hint" data-mesh-note></p>
+            <!-- The modifier stack. Non-destructive: the `.obj` is read and
+                 never written, so these lines describe a change to a file
+                 they do not touch, and turning one off gets the original
+                 back exactly. Order is the point — mirror then array is two
+                 rows of paired objects, array then mirror is one row
+                 reflected into two. -->
+            <header class="sub" data-stack-head hidden>Modifiers
+              <span class="grow"></span>
+              <select class="rate" data-add-modifier title="Add a modifier to the end of the stack">
+                <option value="">+ add</option>
+                <option value="mirror">Mirror</option>
+                <option value="array">Array</option>
+                <option value="subdivide">Subdivide</option>
+              </select>
+            </header>
+            <div data-stack></div>
             <p class="st-hint" data-node-note></p>
           </div>
         </div>

@@ -43,6 +43,8 @@
 //! moving a vertex — would mean owning the mesh format rather than reading
 //! somebody else's, and that is a different project from this one.
 
+mod modify;
 mod obj;
 
+pub use modify::{growth, Step};
 pub use obj::Mesh;

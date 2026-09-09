@@ -357,6 +357,33 @@ pub enum Command {
         index: usize,
         path: String,
     },
+    /// Put a modifier on the end of a node's stack.
+    SetNodeModifier {
+        index: usize,
+        kind: String,
+    },
+    /// Take one off.
+    RemoveNodeModifier {
+        index: usize,
+        row: usize,
+    },
+    /// Move one up or down the stack, which is what makes it a stack: mirror
+    /// then array is two rows of pairs, array then mirror is one row
+    /// reflected into two.
+    MoveNodeModifier {
+        index: usize,
+        row: usize,
+        to: usize,
+    },
+    /// Change one setting on one modifier: `off`, `axis`, `weld`, `count`,
+    /// `levels`, or one axis of `offset`.
+    #[serde(rename_all = "camelCase")]
+    SetModifierField {
+        index: usize,
+        row: usize,
+        field: String,
+        value: String,
+    },
     /// Ask for one mesh's geometry, by the path the scene writes.
     ///
     /// Asked for rather than pushed with the scene: geometry is the one thing

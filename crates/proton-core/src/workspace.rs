@@ -734,6 +734,47 @@ impl Workspace {
 
             Command::LoadMesh { path } => vec![Event::Geometry(self.modeling.geometry(&path))],
 
+            Command::SetNodeModifier { index, kind } => {
+                let done = self.node_at(index, |space, id| {
+                    space
+                        .modeling
+                        .modify(&id, |scene, id| scene.add_modifier(id, &kind).map(|_| true))
+                });
+                self.after_stack_write(index, done)
+            }
+
+            Command::RemoveNodeModifier { index, row } => {
+                let done = self.node_at(index, |space, id| {
+                    space
+                        .modeling
+                        .modify(&id, |scene, id| scene.remove_modifier(id, row))
+                });
+                self.after_stack_write(index, done)
+            }
+
+            Command::MoveNodeModifier { index, row, to } => {
+                let done = self.node_at(index, |space, id| {
+                    space
+                        .modeling
+                        .modify(&id, |scene, id| scene.move_modifier(id, row, to))
+                });
+                self.after_stack_write(index, done)
+            }
+
+            Command::SetModifierField {
+                index,
+                row,
+                field,
+                value,
+            } => {
+                let done = self.node_at(index, |space, id| {
+                    space
+                        .modeling
+                        .modify(&id, |scene, id| scene.set_modifier(id, row, &field, &value))
+                });
+                self.after_stack_write(index, done)
+            }
+
             Command::ReparentNode { index, parent } => {
                 let done = self.node_at(index, |space, id| space.modeling.reparent(&id, &parent));
                 self.after_scene_write(done)
@@ -4693,6 +4734,25 @@ impl Workspace {
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
         }
+    }
+
+    /// A stack changed: the file moved, and so did the geometry it describes.
+    ///
+    /// The scene event alone would not be enough. A key is the mesh and the
+    /// object, not the settings — so turning a mirror off leaves the key where
+    /// it was, and a front end that only asks for keys it has never seen would
+    /// go on drawing the old result forever.
+    fn after_stack_write(&mut self, index: usize, done: Result<bool, String>) -> Vec<Event> {
+        let mut events = self.after_scene_write(done);
+        if events.is_empty() {
+            return events;
+        }
+        if let Some(node) = self.modeling.nodes().into_iter().nth(index) {
+            if !node.geometry.is_empty() {
+                events.push(Event::Geometry(self.modeling.geometry(&node.geometry)));
+            }
+        }
+        events
     }
 
     fn cut_event(&self) -> Event {
