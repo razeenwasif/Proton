@@ -1119,6 +1119,9 @@ canvas[data-viewport]:active { cursor: grabbing; }
   -webkit-mask-image: linear-gradient(#000, transparent 72%); mask-image: linear-gradient(#000, transparent 72%);
 }
 .vp-overlay { position: absolute; inset: 0; pointer-events: none; }
+/* The one badge that has to be legible when everything else has failed: it is
+   what says there is no WebGL. */
+.vp-badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .vp-badge {
   position: absolute; padding: 5px 10px; border-radius: 8px; font: 11px var(--mono);
   background: rgba(0, 0, 0, 0.36); color: var(--ink-2); box-shadow: var(--spec);

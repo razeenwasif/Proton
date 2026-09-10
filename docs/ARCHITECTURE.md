@@ -1565,9 +1565,12 @@ from the graph in the file into a short program the viewport runs per triangle.
 Doing the document first was what made all of this possible: none of the three
 needed a renderer to become real, and none of them mimes one now.
 
-Modeling's remaining limit is the 2D canvas itself, and it is the one this
-section predicted: per-face shading, no depth buffer, one light and no
-environment. The next step there is a GPU renderer, not a larger budget.
+Modeling's viewport is now WebGL, which is what this section kept predicting.
+The three limits it named are gone: occlusion is per pixel, the material runs
+per pixel, and the frame is no longer what bounds a mesh's size — a million
+triangles measured 0.3 ms. What bounds it now is the seam, at about 32 bytes of
+JSON a triangle, and the answer to *that* is a binary channel rather than a
+larger number.
 
 ---
 

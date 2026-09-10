@@ -68,7 +68,7 @@ real component source and design tokens.
 **Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a
 scene serialised to diffable JSON. An object names the `.obj` its geometry is
 in, a stack of operations says what to do to it, and the material graph is
-compiled into a program the viewport runs on every triangle.
+compiled into a program a WebGL renderer runs on every pixel.
 **Game** · a Godot project's scene tree and an inspector that edits the
 `.tscn` without reformatting it. The play transport, profiler, hot reload and
 the agent that verifies changes by replaying recorded input all need an engine
@@ -187,18 +187,29 @@ is the file's business, and a surface property that varies across a mesh is one
 value per triangle — eighty thousand colours crossing the seam on every nudge
 of a slider. A dozen instructions cross instead, and the viewport runs them.
 
-What it runs them through is the terms a metal/rough workflow is made of: a
-Lambert diffuse and a GGX specular with Smith and Schlick, metals taking their
-reflection colour from the base and losing their diffuse. What it has no way to
-do is the rest of a renderer — one light and no environment (the ambient is a
-flat grey room standing in for one, which is what makes a metal legible rather
-than a silhouette), no shadows, nothing bouncing, and the whole thing evaluated
-once per *triangle* because a 2D canvas fills flat polygons. A noise is as fine
-as the mesh is. A node kind the build cannot render is kept in the file, and
-the surface draws in a plain grey rather than a guess.
+Those instructions become GLSL, and the GPU runs them per pixel. What it runs
+them through is the terms a metal/rough workflow is made of: a Lambert diffuse
+and a GGX specular with Smith and Schlick, metals taking their reflection
+colour from the base and losing their diffuse. What it has no way to do is the
+rest of a renderer — one light and no environment (the ambient is a flat grey
+room standing in for one, which is what makes a metal legible rather than a
+silhouette), no shadows, and nothing bouncing. A node kind the build cannot
+render is kept in the file, and the surface draws plain grey rather than a
+guess.
 
-That is where this viewport ends, and all three of those limits have the same
-answer, which is WebGL.
+The 2D canvas this replaced had said for four revisions that it was the wrong
+tool and should be *replaced rather than extended*, and it was right about all
+three of its limits. Occlusion is now decided per pixel, so two things that
+interpenetrate do; the material runs per pixel, so a noise is no longer as
+coarse as the mesh; and a million triangles draws in 0.3 ms, where filling
+paths ran out at ninety thousand. About four hundred lines went with it — a
+painter's sort, a scratch-buffer pool, a colour quantiser, a batch-size
+constant tuned to a rasteriser's quirk, and a software BSDF.
+
+What is left there is vertex normals: the loader reads no `vn` and computes
+none, so a face's normal comes from how the surface changes between
+neighbouring pixels. Exact, and faceted — a subdivided mesh is smooth in its
+geometry and still shows facets in its shading.
 
 Game reads a Godot project: `project.godot` says which scene starts, the
 hierarchy is that `.tscn`'s node tree, and the inspector edits it by splicing
@@ -227,6 +238,6 @@ for and which is not installed here. None of it is mimed.
 
 So: no screen in this window claims to do something it cannot. What remains is
 two real projects — an engine process for Game and an ffmpeg sidecar for
-Video — and, when Modeling outgrows a 2D canvas, a GPU renderer.
+Video.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.

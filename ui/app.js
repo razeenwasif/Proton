@@ -19,6 +19,8 @@ import {
   drawViewport,
   frameAll,
   hasGeometry,
+  renderProblem,
+  renderer,
   setGeometry,
   setShaders,
   startViewport,
@@ -2473,18 +2475,30 @@ function renderViewport(event) {
   drawViewport(event.nodes ?? [], event.selected);
 }
 
-/** What the picture is actually made of: objects, and triangles really drawn.
+/** What the picture is made of, and what is drawing it.
  *
- * The triangle count is what was filled this frame, after the faces pointing
- * away from the camera were dropped — not what the files contain. A badge
- * reading the file's number while the screen shows half of it is the kind of
- * number that makes the next performance question unanswerable. */
+ * The triangle count is what the scene *has*, not what survived being drawn.
+ * It used to be the latter, because a painter's sort knew exactly how many
+ * polygons it filled; a depth buffer decides how much of a triangle you can
+ * see per pixel, and there is no honest count of "drawn" to report any more.
+ *
+ * The renderer's name is there because it is the one thing that would explain
+ * a slow viewport and cannot be guessed from inside: the same code on a real
+ * GPU and on a software fallback are two different programs. */
 function showViewportCount(tris, objects) {
   const badge = $("[data-vp-count]");
   if (!badge) return;
+  const stopped = renderProblem();
+  if (stopped) {
+    badge.textContent = stopped;
+    badge.className = "vp-badge warn";
+    return;
+  }
+  badge.className = "vp-badge";
   const said = [
     objects ? `${objects} object${objects === 1 ? "" : "s"}` : "",
-    tris ? `${tris.toLocaleString()} tri${tris === 1 ? "" : "s"}` : "",
+    tris ? `${tris.toLocaleString()} triangle${tris === 1 ? "" : "s"}` : "",
+    renderer(),
   ].filter(Boolean);
   badge.textContent = said.join(" · ");
 }

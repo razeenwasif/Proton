@@ -33,43 +33,40 @@ use ts_rs::TS;
 
 /// How many triangles one mesh may have before the viewport stops drawing it.
 ///
-/// Measured on this machine rather than guessed, in the browser the shell
-/// renders in, doing exactly the work a frame does — run the material at each
-/// triangle, project three corners, cull by winding, sort by depth, and fill:
+/// ## This is no longer about the frame
 ///
-/// | drawn  | median frame | fps |
-/// |---|---|---|
-/// |   5,122 |  3.0 ms | 333 |
-/// |  11,266 |  3.9 ms | 256 |
-/// |  20,482 |  7.4 ms | 135 |
-/// |  29,698 | 10.7 ms |  93 |
-/// |  60,418 | 21.9 ms |  46 |
-/// |  91,138 | 33.2 ms |  30 |
-/// | 121,858 | 46.8 ms |  21 |
+/// It used to be. A 2D canvas filled one path per triangle and the budget was
+/// wherever that stopped holding thirty frames a second. The renderer is now
+/// WebGL, and on this machine the frame time is *flat* — measured through
+/// `gl.finish()`, so it is what the GPU really took and not what it took to
+/// queue the work:
 ///
-/// Linear at 0.36 µs per drawn triangle. The line where orbiting stops holding
-/// 30 fps is 91,000 *drawn*, and roughly half a closed mesh faces away — but
-/// an open one culls nothing, so the budget is the worst case rather than the
-/// happy one. 90,000 holds 30 fps whether or not anything is culled.
+/// | triangles | frame |
+/// |---|---|
+/// |   100,000 | 0.3 ms |
+/// |   250,000 | 0.3 ms |
+/// |   500,000 | 0.2 ms |
+/// | 1,000,000 | 0.3 ms |
 ///
-/// This number was 80,000, from a measurement of 0.8 µs per triangle that was
-/// wrong for a reason worth writing down: the viewport batched consecutive
-/// same-coloured triangles into one path, and a 2D canvas charges roughly the
-/// square of a path's size to fill it. Thirty thousand triangles in one
-/// `fill()` measured 1,317 ms; the same triangles in batches of sixteen
-/// measured 2.8 ms. Capping the batch made the viewport two and a half times
-/// faster than the figure this budget had been set from — an optimisation that
-/// had been making a scene slower the more of it shared a colour.
+/// A million triangles is not a number this viewport notices. The old budget
+/// was 90,000 and it was the right number for the renderer that set it.
+///
+/// ## It is about the seam
+///
+/// What crosses is JSON, once per mesh: measured at 8,608 KB for a
+/// 270,400-triangle sphere, which is about 32 bytes a triangle for an ordinary
+/// indexed mesh. So the budget is now a *size*, converted: eight megabytes is
+/// as much as is reasonable to serialise, hand across an IPC boundary and
+/// parse for one object, and that is 250,000 triangles.
+///
+/// The honest next move is not a larger number here either. It is to stop
+/// sending geometry as JSON — a binary channel would make this limit an order
+/// of magnitude larger without changing anything a person would notice.
 ///
 /// Past the budget the viewport draws the mesh's real bounding box and says
-/// how many triangles it has, which is a smaller lie than a picture arriving a
-/// second after the mouse does. The remaining reason not to raise this much
-/// further is the seam rather than the frame: 90,000 triangles is about three
-/// megabytes of JSON, and it crosses once per mesh.
-///
-/// The fix is still not a bigger number here. It is WebGL, which the
-/// viewport's own docs already name as what should replace it.
-pub const BUDGET: usize = 90_000;
+/// how many triangles it has, which is a smaller lie than a scene that stops
+/// responding while several megabytes are parsed.
+pub const BUDGET: usize = 250_000;
 
 /// Geometry as the front end receives it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
