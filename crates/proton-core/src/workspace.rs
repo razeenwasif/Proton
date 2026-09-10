@@ -4804,6 +4804,7 @@ impl Workspace {
             nodes: self.modeling.nodes(),
             selected: self.modeling.selected(),
             problem: self.modeling.problem().unwrap_or_default().to_string(),
+            shaders: self.modeling.shaders(),
             materials: self.modeling.materials(),
             meshes: self.modeling.wanted(),
         }

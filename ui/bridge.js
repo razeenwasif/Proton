@@ -304,6 +304,54 @@ if (HAS_SHELL) {
     },
   ];
 
+  // The same material, compiled. Written out by hand rather than compiled
+  // here: `Material::compile` is Rust, and a second compiler in the preview
+  // would be a thing that can disagree with the real one about what a graph
+  // means. This is a fixture of its output — the noise into a ramp into
+  // roughness, exactly as the graph above says.
+  const shaders = [
+    {
+      id: "alu",
+      ops: [
+        { op: "position" },
+        { op: "noise", at: 0, scale: 6.4, detail: 2 },
+        { op: "constant", value: [0, 0, 0] },
+        { op: "constant", value: [1, 1, 1] },
+        { op: "mix", a: 2, b: 3, fac: 1 },
+        { op: "constant", value: [0.28, 0.29, 0.31] },
+        { op: "constant", value: [0.9, 0.9, 0.9] },
+      ],
+      base: 5,
+      metallic: 6,
+      roughness: 4,
+      problem: "",
+    },
+  ];
+
+  /* Keep the hand-written program above in step with the graph beside it.
+   *
+   * Not a compiler, and deliberately not: `Material::compile` is Rust and a
+   * second one here would be a thing that can disagree with it about what a
+   * graph means. This only knows where *this fixture* put the constants that
+   * this fixture's three settings became, which is a fact about the fixture. */
+  const WHERE = { baseColor: 5, metallic: 6, "noise.scale": 1, "noise.detail": 1 };
+  const keepShaderInStep = (node, param, value) => {
+    const shader = shaders[0];
+    if (node === "bsdf-1") {
+      const at = WHERE[param];
+      if (at === undefined) return;
+      const n = value.number ?? null;
+      shader.ops[at] = {
+        op: "constant",
+        value: n === null ? [...value.color] : [n, n, n],
+      };
+    } else if (node === "noise-1") {
+      const n = value.number;
+      if (typeof n !== "number") return;
+      shader.ops[1] = { ...shader.ops[1], [param]: n };
+    }
+  };
+
   // A Godot scene for the hierarchy, so Game mode can be designed against a
   // real tree. Written out like every other fixture here; the real one is read
   // from a `.tscn` by proton-game.
@@ -594,6 +642,7 @@ FCM: NON-DROP FRAME
   const sceneEvent = () => ({
     type: "scene",
     materials,
+    shaders,
     path: scene.path,
     // `geometry` is derived, not stored — the same rule the core follows, so
     // the viewport looks a result up by the same key either way.
@@ -943,6 +992,7 @@ FCM: NON-DROP FRAME
       const node = m?.nodes.find((one) => one.id === command.node);
       const param = node?.params.find((one) => one.name === command.param);
       if (param) param.value = command.value;
+      keepShaderInStep(command.node, command.param, command.value);
       return [sceneEvent()];
     }
     if (command.type === "moveGraphNode") {

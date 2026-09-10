@@ -16,7 +16,7 @@ ffmpeg — and each of those is a real project of its own.
 
 ```bash
 cargo run -p proton-shell      # the app
-cargo test --workspace         # 1289 tests, headless
+cargo test --workspace         # 1304 tests, headless
 cargo tauri build              # the installer
 node ui/serve.mjs              # the front end alone → http://localhost:5178
 ```
@@ -67,8 +67,8 @@ target's device / layout-inspector / Logcat panel.
 real component source and design tokens.
 **Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a
 scene serialised to diffable JSON. An object names the `.obj` its geometry is
-in, a stack of operations says what to do to it, and the viewport draws the
-result flat shaded. Nothing renders a shader.
+in, a stack of operations says what to do to it, and the material graph is
+compiled into a program the viewport runs on every triangle.
 **Game** · a Godot project's scene tree and an inspector that edits the
 `.tscn` without reformatting it. The play transport, profiler, hot reload and
 the agent that verifies changes by replaying recorded input all need an engine
@@ -182,7 +182,23 @@ out. A modifier of a kind this build has never heard of is kept in the file,
 shown in the stack, and marked *not applied*: a bevel that quietly does
 nothing is a worse answer than one that says it did nothing.
 
-Still missing: nothing renders a shader.
+The material graph is compiled, not evaluated, in the core: what a graph means
+is the file's business, and a surface property that varies across a mesh is one
+value per triangle — eighty thousand colours crossing the seam on every nudge
+of a slider. A dozen instructions cross instead, and the viewport runs them.
+
+What it runs them through is the terms a metal/rough workflow is made of: a
+Lambert diffuse and a GGX specular with Smith and Schlick, metals taking their
+reflection colour from the base and losing their diffuse. What it has no way to
+do is the rest of a renderer — one light and no environment (the ambient is a
+flat grey room standing in for one, which is what makes a metal legible rather
+than a silhouette), no shadows, nothing bouncing, and the whole thing evaluated
+once per *triangle* because a 2D canvas fills flat polygons. A noise is as fine
+as the mesh is. A node kind the build cannot render is kept in the file, and
+the surface draws in a plain grey rather than a guess.
+
+That is where this viewport ends, and all three of those limits have the same
+answer, which is WebGL.
 
 Game reads a Godot project: `project.godot` says which scene starts, the
 hierarchy is that `.tscn`'s node tree, and the inspector edits it by splicing
@@ -211,6 +227,6 @@ for and which is not installed here. None of it is mimed.
 
 So: no screen in this window claims to do something it cannot. What remains is
 two real projects — an engine process for Game and an ffmpeg sidecar for
-Video — plus a shader renderer for Modeling.
+Video — and, when Modeling outgrows a 2D canvas, a GPU renderer.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.

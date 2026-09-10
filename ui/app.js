@@ -20,6 +20,7 @@ import {
   frameAll,
   hasGeometry,
   setGeometry,
+  setShaders,
   startViewport,
 } from "./viewport.js";
 
@@ -2451,6 +2452,10 @@ let lastScene = null;
 let framed = false;
 
 function renderViewport(event) {
+  // The materials, already compiled by the core. Given to the viewport before
+  // the geometry is asked for, so the first frame of a mesh is shaded rather
+  // than grey for a moment.
+  setShaders(event.shaders ?? []);
   // Ask for the geometry this scene names and the viewport does not already
   // hold. Asked for rather than pushed: a mesh is the one thing on this seam
   // measured in megabytes, and the front end is the end that knows what it has.

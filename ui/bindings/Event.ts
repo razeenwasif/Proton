@@ -32,6 +32,7 @@ import type { Rate } from "./Rate";
 import type { RepoFile } from "./RepoFile";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
+import type { Shader } from "./Shader";
 import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
@@ -288,6 +289,15 @@ problem: string,
  * outliner.
  */
 materials: Array<Material>, 
+/**
+ * Those same materials, compiled into programs a renderer can run.
+ *
+ * Compiled here rather than evaluated here: a surface property that
+ * varies across a mesh is one value per triangle, and at this
+ * project's budget that is eighty thousand colours crossing the seam
+ * on every nudge of a slider. A dozen instructions cross instead.
+ */
+shaders: Array<Shader>, 
 /**
  * Every distinct mesh the scene names, so the front end can ask for
  * the ones it does not already hold.

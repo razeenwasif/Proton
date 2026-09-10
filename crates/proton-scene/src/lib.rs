@@ -38,6 +38,7 @@
 //!   file only ever appears in a diff because somebody changed it.
 
 mod material;
+mod shader;
 mod write;
 
 use std::path::Path;
@@ -626,6 +627,7 @@ impl Default for Scene {
 }
 
 pub use material::{GraphNode, Link, Material, Param, ParamValue};
+pub use shader::{Op, Shader, NODES};
 
 /// Which part of a transform is being set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

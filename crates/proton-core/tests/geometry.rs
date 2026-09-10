@@ -164,11 +164,29 @@ fn a_mesh_re_exported_from_blender_reaches_the_viewport() {
     assert_eq!(load(&mut space, "meshes/lamp.obj").triangles, 4);
 
     let obj = path.with_file_name("meshes").join("lamp.obj");
-    // A second later, so the modified time really moves — a filesystem whose
-    // timestamps are coarse would otherwise make this test pass by accident.
+    let before = std::fs::metadata(&obj).unwrap().modified().unwrap();
     std::fs::write(&obj, format!("{LAMP}v 2 2 2\nf 1 2 5\n")).unwrap();
-    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
-    let _ = std::fs::File::open(&obj).and_then(|file| file.set_modified(later));
+
+    // Pushed a second into the future, deliberately — and then checked.
+    //
+    // Writing a file twice within one tick of the system clock can leave the
+    // modified time exactly where it was, and this test then passes or fails
+    // on how fast the machine is. It did, about one run in five, until the
+    // handle below was opened for writing: Windows refuses to set a timestamp
+    // through a read-only handle, and the error was being thrown away. The
+    // assertion is the part that matters — if the setup ever stops working
+    // again, the test says so instead of quietly proving nothing.
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(1);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&obj)
+        .and_then(|file| file.set_modified(later))
+        .expect("a mesh file whose modified time can be set");
+    assert_ne!(
+        std::fs::metadata(&obj).unwrap().modified().unwrap(),
+        before,
+        "the re-export did not move the modified time, so this proves nothing"
+    );
 
     // Written by Blender while somebody was in another mode, which is how a
     // re-export actually happens.
@@ -178,6 +196,13 @@ fn a_mesh_re_exported_from_blender_reaches_the_viewport() {
     let events = space.apply(Command::SetMode {
         mode: ModeId::Modeling,
     });
+    eprintln!(
+        "EVENTS: {:?}",
+        events
+            .iter()
+            .map(|e| format!("{e:?}").chars().take(28).collect::<String>())
+            .collect::<Vec<_>>()
+    );
     let fresh = events.into_iter().find_map(|event| match event {
         Event::Geometry(what) => Some(what),
         _ => None,

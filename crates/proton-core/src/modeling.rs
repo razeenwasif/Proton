@@ -34,28 +34,42 @@ use ts_rs::TS;
 /// How many triangles one mesh may have before the viewport stops drawing it.
 ///
 /// Measured on this machine rather than guessed, in the browser the shell
-/// renders in, doing exactly the work a frame does — project three corners,
-/// cull by winding, sort by depth, fill one path per triangle. Roughly half a
-/// closed mesh faces away and is culled, so the drawn count is about half:
+/// renders in, doing exactly the work a frame does — run the material at each
+/// triangle, project three corners, cull by winding, sort by depth, and fill:
 ///
-/// | triangles | drawn | median frame | fps |
-/// |---|---|---|---|
-/// | 10,000  |  4,992 |  2.0 ms | 500 |
-/// | 20,000  |  9,937 |  4.8 ms | 208 |
-/// | 40,000  | 20,180 | 16.8 ms |  60 |
-/// | 80,000  | 39,890 | 31.8 ms |  31 |
-/// | 120,000 | 59,827 | 47.4 ms |  21 |
+/// | drawn  | median frame | fps |
+/// |---|---|---|
+/// |   5,122 |  3.0 ms | 333 |
+/// |  11,266 |  3.9 ms | 256 |
+/// |  20,482 |  7.4 ms | 135 |
+/// |  29,698 | 10.7 ms |  93 |
+/// |  60,418 | 21.9 ms |  46 |
+/// |  91,138 | 33.2 ms |  30 |
+/// | 121,858 | 46.8 ms |  21 |
 ///
-/// Linear at about 0.8 µs per drawn triangle, and the cost is `fill()` — one
-/// path per triangle is what a 2D canvas charges for a solid. 80,000 is where
-/// orbiting still holds 30 fps, so that is the line. Past it the viewport
-/// draws the mesh's real bounding box and says how many triangles it has,
-/// which is a smaller lie than a picture that arrives a second after the
-/// mouse does.
+/// Linear at 0.36 µs per drawn triangle. The line where orbiting stops holding
+/// 30 fps is 91,000 *drawn*, and roughly half a closed mesh faces away — but
+/// an open one culls nothing, so the budget is the worst case rather than the
+/// happy one. 90,000 holds 30 fps whether or not anything is culled.
 ///
-/// The fix is not a bigger number here. It is WebGL, which the viewport's own
-/// docs already name as what should replace it when there is geometry to push.
-pub const BUDGET: usize = 80_000;
+/// This number was 80,000, from a measurement of 0.8 µs per triangle that was
+/// wrong for a reason worth writing down: the viewport batched consecutive
+/// same-coloured triangles into one path, and a 2D canvas charges roughly the
+/// square of a path's size to fill it. Thirty thousand triangles in one
+/// `fill()` measured 1,317 ms; the same triangles in batches of sixteen
+/// measured 2.8 ms. Capping the batch made the viewport two and a half times
+/// faster than the figure this budget had been set from — an optimisation that
+/// had been making a scene slower the more of it shared a colour.
+///
+/// Past the budget the viewport draws the mesh's real bounding box and says
+/// how many triangles it has, which is a smaller lie than a picture arriving a
+/// second after the mouse does. The remaining reason not to raise this much
+/// further is the seam rather than the frame: 90,000 triangles is about three
+/// megabytes of JSON, and it crosses once per mesh.
+///
+/// The fix is still not a bigger number here. It is WebGL, which the
+/// viewport's own docs already name as what should replace it.
+pub const BUDGET: usize = 90_000;
 
 /// Geometry as the front end receives it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -281,6 +295,15 @@ impl Modeling {
                 self.geometry(&key)
             })
             .collect()
+    }
+
+    /// Every material, compiled into a program a renderer can run.
+    ///
+    /// All of them, like the materials themselves and for the same reason: a
+    /// program is a dozen instructions, the selection moves between them on
+    /// every click, and sending one at a time would be a round trip each time.
+    pub fn shaders(&self) -> Vec<proton_scene::Shader> {
+        self.materials().iter().map(Material::compile).collect()
     }
 
     /// The stack of the node at a row, as operations to run.

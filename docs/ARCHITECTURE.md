@@ -1560,9 +1560,14 @@ Game and an ffmpeg process for Video. Modeling has since grown a mesh loader —
 true all the way down, since the geometry file is text as well — and the
 viewport draws real surfaces up to a measured budget, with a non-destructive
 modifier stack over them — kept in the scene, so it is a few diffable lines
-describing a change to a mesh file it never writes. Doing the document first
-was what made all of this possible: none of the three needed a renderer to
-become real, and none of them mimes one now.
+describing a change to a mesh file it never writes — and materials compiled
+from the graph in the file into a short program the viewport runs per triangle.
+Doing the document first was what made all of this possible: none of the three
+needed a renderer to become real, and none of them mimes one now.
+
+Modeling's remaining limit is the 2D canvas itself, and it is the one this
+section predicted: per-face shading, no depth buffer, one light and no
+environment. The next step there is a GPU renderer, not a larger budget.
 
 ---
 
