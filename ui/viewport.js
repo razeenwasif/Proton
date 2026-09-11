@@ -295,12 +295,13 @@ export function setGeometry(what) {
     });
   } else {
     geometry.set(what.path, {
-      // Typed here, once. The buffers go straight to the GPU from these.
-      positions: Float32Array.from(what.mesh.positions),
-      // Absent only from a sender that does not shade — the preview's mock.
-      // The renderer then works each face's normal out for itself.
-      normals: what.mesh.normals?.length ? Float32Array.from(what.mesh.normals) : null,
-      triangles: Uint32Array.from(what.mesh.triangles),
+      // Views onto the bytes the core sent, straight to the GPU from here: no
+      // parse and no copy. See `meshbytes.js`.
+      positions: what.mesh.positions,
+      // Absent only from a sender that does not shade. The renderer then
+      // works each face's normal out for itself.
+      normals: what.mesh.normals?.length ? what.mesh.normals : null,
+      triangles: what.mesh.triangles,
       bounds: what.mesh.bounds,
       closed: what.mesh.closed,
       count: what.mesh.triangles.length / 3,
@@ -311,9 +312,26 @@ export function setGeometry(what) {
   drawViewport();
 }
 
+/** Forget every mesh, on the page and on the GPU.
+ *
+ * For when the scene itself changes. Geometry is keyed by paths relative to the
+ * scene, so two projects that both have a `meshes/lamp.obj` share a key — and
+ * switching between them would go on drawing the first project's lamp, because
+ * the viewport would believe it already held the second one's. */
+export function clearGeometry() {
+  geometry.clear();
+  gpu.forgetAll();
+  drawViewport();
+}
+
 /** Whether a mesh is already held, so nothing is asked for twice. */
 export function hasGeometry(path) {
   return geometry.has(path);
+}
+
+/** Whether a real surface is on screen for this key, not just its box. */
+export function hasSurface(path) {
+  return Boolean(geometry.get(path)?.positions);
 }
 
 /** A CSS colour as `[r, g, b, a]` in 0..1, for the line shader.

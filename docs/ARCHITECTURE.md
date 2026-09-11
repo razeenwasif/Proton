@@ -1568,9 +1568,17 @@ needed a renderer to become real, and none of them mimes one now.
 Modeling's viewport is now WebGL, which is what this section kept predicting.
 The three limits it named are gone: occlusion is per pixel, the material runs
 per pixel, and the frame is no longer what bounds a mesh's size — a million
-triangles measured 0.3 ms. What bounds it now is the seam, at about 50 bytes of
-JSON a triangle once vertex normals travel with the positions, and the answer
-to *that* is a binary channel rather than a larger number.
+triangles measured 0.3 ms. What bounded it next was the seam, at about 50 bytes
+of JSON a triangle once vertex normals travel with the positions, and the
+answer to that was a binary channel rather than a larger number. It is the one
+exception to "JSON on the seam": `Event::Geometry` describes a mesh and says
+whether it is ready, and the page then calls the shell's `read_geometry`, which
+returns a raw `ipc::Response` in the layout `proton-mesh/src/bytes.rs` pins
+down. Every section starts four-byte aligned so the page's typed arrays are
+views onto the buffer. A late answer for a key that has since been asked again
+is dropped, and switching scenes clears every mesh the last one uploaded. The
+budget — 500,000 triangles — is now set by reading and shading the mesh, not by
+moving it.
 
 ---
 

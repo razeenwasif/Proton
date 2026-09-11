@@ -43,10 +43,12 @@
 //! moving a vertex — would mean owning the mesh format rather than reading
 //! somebody else's, and that is a different project from this one.
 
+mod bytes;
 mod modify;
 mod obj;
 mod shade;
 
+pub use bytes::{HEADER, MAGIC, VERSION};
 pub use modify::{growth, Step};
 pub use obj::Mesh;
 pub use shade::CREASE;

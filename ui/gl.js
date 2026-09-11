@@ -410,6 +410,12 @@ function meshFor(key, mesh) {
   return made;
 }
 
+/** Forget every mesh on the GPU — the scene changed under all of them. */
+export function forgetAll() {
+  if (!gl) return;
+  for (const key of [...uploaded.keys()]) forget(key);
+}
+
 /** Forget a mesh nothing refers to any more. */
 export function forget(key) {
   const had = uploaded.get(key);

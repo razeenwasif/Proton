@@ -1,4 +1,5 @@
-//! What the pipe carries: parse time and wire size, per mesh.
+//! What the pipe carries: parse time, shading time, and what one mesh costs to
+//! send — as JSON and as bytes.
 //!
 //! Run against a folder of OBJs to get the numbers that set the budget in
 //! `proton-core::modeling`. Kept as an example rather than a test because it
@@ -10,7 +11,7 @@
 
 use std::time::Instant;
 
-use proton_mesh::Mesh;
+use proton_mesh::{Mesh, CREASE};
 
 fn main() {
     let folder = std::env::args().nth(1).expect("a folder of .obj files");
@@ -23,8 +24,8 @@ fn main() {
     found.sort_by_key(|path| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
 
     println!(
-        "{:<10} {:>9} {:>9} {:>9} {:>9} {:>10} {:>10}",
-        "file", "verts", "tris", "read ms", "shade ms", "on disk", "as JSON"
+        "{:<8} {:>8} {:>8} {:>8} {:>10} {:>9} {:>10} {:>9}",
+        "file", "tris", "read ms", "shade ms", "JSON", "JSON ms", "bytes", "bytes ms"
     );
     for path in found {
         let began = Instant::now();
@@ -37,26 +38,31 @@ fn main() {
         };
         let read = began.elapsed();
 
-        // What the front end would actually receive. Serialised rather than
-        // estimated, because the estimate is the thing being checked.
-        // Shaded first, as the core sends it: normals are three more floats a
-        // vertex, and splitting at creases makes more vertices.
+        // Shaded first, as the core sends it.
         let began = Instant::now();
-        let shaded = mesh.shade(proton_mesh::CREASE);
+        let shaded = mesh.shade(CREASE);
         let shade = began.elapsed();
-        let wire = serde_json::to_string(&(&shaded.positions, &shaded.normals, &shaded.triangles))
-            .map(|text| text.len())
-            .unwrap_or(0);
 
+        // Both encodings of what the front end receives. Serialised rather
+        // than estimated, because the estimate is the thing being checked.
+        let began = Instant::now();
+        let json = serde_json::to_string(&shaded).unwrap().len();
+        let json_ms = began.elapsed();
+        let began = Instant::now();
+        let bytes = shaded.to_bytes().len();
+        let bytes_ms = began.elapsed();
+
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
         println!(
-            "{:<10} {:>9} {:>9} {:>9.1} {:>9.1} {:>9.1}K {:>9.1}K",
+            "{:<8} {:>8} {:>8.1} {:>8.1} {:>9.0}K {:>9.1} {:>9.0}K {:>9.1}",
             path.file_stem().unwrap_or_default().to_string_lossy(),
-            mesh.vertices(),
-            mesh.count(),
-            read.as_secs_f64() * 1000.0,
-            shade.as_secs_f64() * 1000.0,
-            std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) as f64 / 1024.0,
-            wire as f64 / 1024.0,
+            shaded.count(),
+            ms(read),
+            ms(shade),
+            json as f64 / 1024.0,
+            ms(json_ms),
+            bytes as f64 / 1024.0,
+            ms(bytes_ms),
         );
     }
 }

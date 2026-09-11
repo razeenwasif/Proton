@@ -51,40 +51,59 @@ use ts_rs::TS;
 /// A million triangles is not a number this viewport notices. The old budget
 /// was 90,000 and it was the right number for the renderer that set it.
 ///
-/// ## It is about the seam
+/// ## It was about the seam, and now it is about getting a mesh ready
 ///
-/// What crosses is JSON, once per mesh — positions, normals and triangles.
-/// Measured at 13,257 KB for a 270,400-triangle sphere, which is about 50 bytes
-/// a triangle for an ordinary smooth indexed mesh; a faceted one splits more
-/// vertices at its creases and costs more. So the budget is a *size*,
-/// converted: eight megabytes is as much as is reasonable to serialise, hand
-/// across an IPC boundary and parse for one object, and that is 160,000
-/// triangles.
+/// With a GPU the frame stopped deciding this, and the seam took over: a mesh
+/// crossed as JSON at 50 bytes a triangle, and writing it out in Rust and
+/// parsing it back in the page cost more than moving it did. So the budget was
+/// eight megabytes, converted — 160,000 triangles.
 ///
-/// This was 250,000 until vertex normals arrived. Normals are three more
-/// floats a vertex, which took the rate from 32 bytes a triangle to 50, and
-/// the limit is the megabytes rather than the triangle count — so the count
-/// came down rather than the line moving to keep a number that had stopped
-/// meaning what it said.
+/// Geometry now crosses as bytes, through `Modeling::mesh_bytes` and the
+/// shell's `read_geometry`, and both of those costs are gone. Measured on a
+/// 270,400-triangle sphere:
 ///
-/// The honest next move is not a larger number here either. It is to stop
-/// sending geometry as JSON — a binary channel would make this limit several
-/// times larger without changing anything a person would notice.
+/// | | JSON | bytes |
+/// |---|---|---|
+/// | size | 13,257 KB | 6,423 KB |
+/// | written, in Rust | 25.4 ms | 1.5 ms |
+/// | read, in the page | 25.5 ms | nothing measurable |
+///
+/// Nothing measurable because there is nothing to do: the page lays typed
+/// arrays straight over the buffer it was handed.
+///
+/// What is left to pay for is getting the mesh ready at all, and the budget is
+/// now set by that, against a stated target — on screen within about a quarter
+/// of a second of being asked for. Reading the OBJ costs 0.21 µs a triangle,
+/// working out normals 0.20 µs, encoding 0.006 µs: about 600,000 triangles in
+/// 250 ms. The one cost not measured here is moving the bytes across the IPC
+/// boundary inside the running app, so the number leaves room for it: 500,000.
+///
+/// Worth knowing about that path: changing a modifier re-reads the OBJ before
+/// running the stack, and at this size that is about a hundred milliseconds of
+/// every edit spent reading a file that did not change. Keeping the base mesh
+/// would cut it, and is the next thing to do if a stack ever feels slow.
 ///
 /// Past the budget the viewport draws the mesh's real bounding box and says
 /// how many triangles it has, which is a smaller lie than a scene that stops
-/// responding while several megabytes are parsed.
-pub const BUDGET: usize = 160_000;
+/// responding while a mesh it cannot use is prepared.
+pub const BUDGET: usize = 500_000;
 
 /// Geometry as the front end receives it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct Geometry {
-    /// The path exactly as the scene writes it, which is how both ends key it.
+    /// The key exactly as the scene writes it, which is how both ends key it.
     pub path: String,
-    /// Absent when the file could not be read, and when it is over [`BUDGET`].
-    pub mesh: Option<Mesh>,
+    /// Whether there is a mesh to fetch over the binary channel.
+    ///
+    /// The mesh itself is not in here. This event describes geometry and the
+    /// bytes follow separately, through `Modeling::mesh_bytes`: JSON is the
+    /// right encoding for everything else on this seam, and for the one thing
+    /// measured in megabytes it cost more to write out and parse back than the
+    /// transfer itself did. False when the file could not be read, and when it
+    /// is over [`BUDGET`].
+    pub ready: bool,
     /// The box it fills, sent even when the mesh itself is not, so a viewport
     /// that cannot draw the surface can still draw the real extent instead of
     /// a unit cube pretending to be one.
@@ -108,6 +127,10 @@ struct Cached {
     /// The mesh path, kept so a re-check does not have to re-split the key.
     path: String,
     what: Geometry,
+    /// What the bytes channel sends. Kept beside the description rather than
+    /// in it, so the description can go out on every scene change without
+    /// dragging a mesh through JSON behind it.
+    mesh: Option<Mesh>,
 }
 
 /// The scene that is open, and where the outliner is in it.
@@ -154,7 +177,7 @@ impl Modeling {
     pub fn geometry(&mut self, key: &str) -> Geometry {
         let missing = |why: String| Geometry {
             path: key.to_string(),
-            mesh: None,
+            ready: false,
             bounds: [0.0; 6],
             triangles: 0,
             problem: why,
@@ -191,8 +214,8 @@ impl Modeling {
             }
         }
 
-        let what = match Mesh::read(&full) {
-            Err(why) => missing(why),
+        let (what, mesh) = match Mesh::read(&full) {
+            Err(why) => (missing(why), None),
             Ok(base) => {
                 // How far a stack grows a mesh is exactly known before running
                 // it — a mirror doubles, an array multiplies by its count, and
@@ -202,27 +225,30 @@ impl Modeling {
                 // on the way to finding out.
                 let would = base.count() as f64 * proton_mesh::growth(&steps);
                 match would > BUDGET as f64 {
-                    true => Geometry {
-                        path: key.to_string(),
-                        mesh: None,
-                        // The base mesh's box, which is the honest thing to
-                        // draw: where the stack would have put the result is
-                        // not known without running it.
-                        bounds: base.bounds,
-                        triangles: would as usize,
-                        problem: match steps.is_empty() {
-                            true => format!(
-                                "{} triangles — more than this viewport can draw",
-                                base.count()
-                            ),
-                            false => format!(
-                                "this stack would make {} triangles from {} — more \
+                    true => (
+                        Geometry {
+                            path: key.to_string(),
+                            ready: false,
+                            // The base mesh's box, which is the honest thing to
+                            // draw: where the stack would have put the result is
+                            // not known without running it.
+                            bounds: base.bounds,
+                            triangles: would as usize,
+                            problem: match steps.is_empty() {
+                                true => format!(
+                                    "{} triangles — more than this viewport can draw",
+                                    base.count()
+                                ),
+                                false => format!(
+                                    "this stack would make {} triangles from {} — more \
                                  than this viewport can draw",
-                                would as usize,
-                                base.count()
-                            ),
+                                    would as usize,
+                                    base.count()
+                                ),
+                            },
                         },
-                    },
+                        None,
+                    ),
                     false => {
                         let skipped = base.skipped;
                         let mesh = match steps.is_empty() {
@@ -232,16 +258,17 @@ impl Modeling {
                         // Normals last, after every step: any step before them
                         // would have made them wrong.
                         .shade(proton_mesh::CREASE);
-                        Geometry {
+                        let what = Geometry {
                             path: key.to_string(),
+                            ready: true,
                             bounds: mesh.bounds,
                             triangles: mesh.count(),
                             problem: match skipped {
                                 0 => String::new(),
                                 n => format!("{n} faces in this file could not be read"),
                             },
-                            mesh: Some(mesh),
-                        }
+                        };
+                        (what, Some(mesh))
                     }
                 }
             }
@@ -253,9 +280,30 @@ impl Modeling {
                 steps,
                 path: path.to_string(),
                 what: what.clone(),
+                mesh,
             },
         );
         what
+    }
+
+    /// One mesh in the layout `proton-mesh` writes, for the binary channel.
+    ///
+    /// Through [`Modeling::geometry`], so it answers exactly what the event
+    /// describing it said and passes the same checks: a key that climbs out of
+    /// the scene's folder is refused here too. The page asks for bytes by a
+    /// string it chose, and this is the one door a string it chose can reach a
+    /// file through.
+    ///
+    /// `None` when there is nothing to send — unreadable, over the budget, or
+    /// not a mesh at all — which the event for it has already explained.
+    pub fn mesh_bytes(&mut self, key: &str) -> Option<Vec<u8>> {
+        if !self.geometry(key).ready {
+            return None;
+        }
+        self.meshes
+            .get(key)
+            .and_then(|had| had.mesh.as_ref())
+            .map(Mesh::to_bytes)
     }
 
     /// Every piece of geometry the scene needs, in outliner order and without

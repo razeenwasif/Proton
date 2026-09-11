@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use proton_core::bus::Event;
 use proton_core::modeling::BUDGET;
 use proton_core::{Command, ModeId, Workspace};
+use proton_mesh::Mesh;
 
 const SCENE: &str = r#"{
   "format": "proton.scene",
@@ -60,6 +61,13 @@ fn load(space: &mut Workspace, path: &str) -> proton_core::modeling::Geometry {
         .expect("a geometry event")
 }
 
+/// A mesh as the page receives it: through the binary channel, decoded from
+/// the same bytes the shell would hand the webview.
+fn fetch(space: &mut Workspace, key: &str) -> Mesh {
+    let bytes = space.mesh_bytes(key).expect("bytes for a ready mesh");
+    Mesh::from_bytes(&bytes).expect("bytes in the layout proton-mesh writes")
+}
+
 fn scene(space: &mut Workspace) -> Event {
     space
         .apply(Command::Sync)
@@ -88,7 +96,11 @@ fn a_mesh_the_scene_names_arrives_with_its_triangles_and_its_box() {
     assert_eq!(what.problem, "");
     assert_eq!(what.triangles, 4);
     assert_eq!(what.bounds, [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
-    let mesh = what.mesh.expect("the vertices");
+    assert!(
+        what.ready,
+        "the event did not say there was a mesh to fetch"
+    );
+    let mesh = fetch(&mut space, "meshes/lamp.obj");
     assert_eq!(mesh.triangles.len(), 12);
     // Shaded on the way out, so it arrives with a normal at every vertex. A
     // tetrahedron's faces meet at about 70°, past the crease, so each of its
@@ -104,7 +116,7 @@ fn a_mesh_nobody_copied_says_so_rather_than_vanishing() {
     let (mut space, path) = open("missing");
     std::fs::remove_file(path.with_file_name("meshes").join("lamp.obj")).unwrap();
     let what = load(&mut space, "meshes/lamp.obj");
-    assert!(what.mesh.is_none());
+    assert!(!what.ready);
     assert!(what.problem.contains("not there"), "{}", what.problem);
     assert!(what.problem.contains("lamp.obj"), "{}", what.problem);
 }
@@ -122,7 +134,11 @@ fn a_mesh_too_big_to_draw_sends_its_size_and_not_its_vertices() {
     std::fs::write(path.with_file_name("meshes").join("lamp.obj"), &obj).unwrap();
 
     let what = load(&mut space, "meshes/lamp.obj");
-    assert!(what.mesh.is_none(), "it sent the vertices anyway");
+    assert!(!what.ready, "it offered the vertices anyway");
+    assert!(
+        space.mesh_bytes("meshes/lamp.obj").is_none(),
+        "the byte channel sent what the event said it would not"
+    );
     assert_eq!(what.triangles, BUDGET + 1);
     assert_eq!(what.bounds, [-2.0, -3.0, -4.0, 5.0, 6.0, 7.0]);
     assert!(
@@ -148,7 +164,13 @@ fn a_scene_cannot_name_a_file_outside_its_own_folder() {
         "..\\private.txt",
     ] {
         let what = load(&mut space, climb);
-        assert!(what.mesh.is_none(), "{climb:?} was read");
+        assert!(!what.ready, "{climb:?} was read");
+        // And through the byte channel, which is a second door a string the
+        // page chose can reach a file through. It must be the same door.
+        assert!(
+            space.mesh_bytes(climb).is_none(),
+            "{climb:?} was read through the byte channel"
+        );
         assert!(
             what.problem.contains("climbs out"),
             "{climb:?}: {}",
@@ -157,7 +179,8 @@ fn a_scene_cannot_name_a_file_outside_its_own_folder() {
     }
     // And an absolute path is the same idea spelled differently.
     let what = load(&mut space, &secret.display().to_string());
-    assert!(what.mesh.is_none(), "an absolute path was read");
+    assert!(!what.ready, "an absolute path was read");
+    assert!(space.mesh_bytes(&secret.display().to_string()).is_none());
 }
 
 #[test]
@@ -267,7 +290,7 @@ fn a_file_that_is_not_geometry_says_what_is_wrong_with_it() {
     )
     .unwrap();
     let what = load(&mut space, "meshes/lamp.obj");
-    assert!(what.mesh.is_none());
+    assert!(!what.ready);
     assert!(what.problem.contains("no vertices"), "{}", what.problem);
 }
 
@@ -331,7 +354,7 @@ fn the_stack_is_run_and_the_result_is_what_arrives() {
     });
     let what = load(&mut space, "meshes/lamp.obj@lamp-1");
     assert_eq!(what.triangles, 8);
-    assert_eq!(what.mesh.expect("the vertices").triangles.len(), 24);
+    assert_eq!(fetch(&mut space, "meshes/lamp.obj@lamp-1").count(), 8);
 }
 
 #[test]
@@ -437,7 +460,7 @@ fn a_stack_that_would_be_too_big_is_refused_with_the_number() {
     // hundred on top of it is 1,638,400, which does not.
     let what = load(&mut space, "meshes/lamp.obj@lamp-1");
     assert_eq!(what.triangles, 16_384);
-    assert!(what.mesh.is_some());
+    assert!(what.ready);
 
     space.apply(Command::SetNodeModifier {
         index: 0,
@@ -450,7 +473,7 @@ fn a_stack_that_would_be_too_big_is_refused_with_the_number() {
         value: "100".into(),
     });
     let what = load(&mut space, "meshes/lamp.obj@lamp-1");
-    assert!(what.mesh.is_none(), "it built the whole thing anyway");
+    assert!(!what.ready, "it built the whole thing anyway");
     assert_eq!(what.triangles, 1_638_400);
     assert!(
         what.problem.contains("1638400"),
@@ -513,4 +536,60 @@ fn removing_the_last_modifier_puts_the_object_back_on_the_plain_mesh() {
     };
     assert!(nodes[0].modifiers.is_empty());
     assert_eq!(nodes[0].geometry, "meshes/lamp.obj");
+}
+
+/* ── the binary channel ───────────────────────────────────────────── */
+
+#[test]
+fn the_bytes_are_the_mesh_the_event_described() {
+    // Two messages for one mesh, so they have to agree: the description goes
+    // as JSON and the geometry follows as bytes, and a page drawing one while
+    // labelling it with the other would be quietly wrong.
+    let (mut space, _) = open("agree");
+    let what = load(&mut space, "meshes/lamp.obj");
+    let mesh = fetch(&mut space, "meshes/lamp.obj");
+    assert_eq!(mesh.count(), what.triangles);
+    assert_eq!(mesh.bounds, what.bounds);
+    assert_eq!(
+        mesh.normals.len(),
+        mesh.positions.len(),
+        "shaded before sending"
+    );
+}
+
+#[test]
+fn the_event_carries_no_geometry_of_its_own() {
+    // The whole point. If the mesh still rode along in the JSON, the page
+    // would be paying for both.
+    let (mut space, _) = open("thin");
+    let events = space.apply(Command::LoadMesh {
+        path: "meshes/lamp.obj".into(),
+    });
+    let json = serde_json::to_string(&events).unwrap();
+    assert!(!json.contains("positions"), "{json}");
+    assert!(!json.contains("triangles\":["), "{json}");
+    assert!(
+        json.len() < 400,
+        "{} bytes of JSON for a description",
+        json.len()
+    );
+}
+
+#[test]
+fn a_changed_stack_sends_new_bytes_under_the_same_key() {
+    // The key does not move when a setting changes; what it answers with does.
+    let (mut space, _) = open("rekey");
+    space.apply(Command::SetNodeModifier {
+        index: 0,
+        kind: "array".into(),
+    });
+    let two = fetch(&mut space, "meshes/lamp.obj@lamp-1").count();
+    space.apply(Command::SetModifierField {
+        index: 0,
+        row: 0,
+        field: "count".into(),
+        value: "3".into(),
+    });
+    let three = fetch(&mut space, "meshes/lamp.obj@lamp-1").count();
+    assert_eq!((two, three), (8, 12));
 }

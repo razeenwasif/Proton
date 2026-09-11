@@ -14,8 +14,14 @@
  * @typedef {import("./bindings/Event").Event} Event
  */
 
+import { encodeMesh } from "./meshbytes.js";
+
 const tauri = globalThis.__TAURI__;
 export const HAS_SHELL = Boolean(tauri?.core?.invoke);
+
+/* The preview's meshes, by key, for `readGeometry` to encode. Set inside the
+   stand-in below; nothing else reads it. */
+let mockMesh = () => null;
 
 /* ── transport ────────────────────────────────────────────────────────── */
 
@@ -623,20 +629,28 @@ FCM: NON-DROP FRAME
       return {
         type: "geometry",
         path,
-        mesh: null,
+        ready: false,
         bounds: [0, 0, 0, 0, 0, 0],
         triangles: 0,
         problem: `${file}: not there`,
       };
     }
+    // A description, as the core sends it. The mesh itself follows through
+    // `readGeometry`, as bytes, the same as it does from the shell.
     return {
       type: "geometry",
       path,
-      mesh,
+      ready: true,
       bounds: mesh.bounds,
       triangles: mesh.triangles.length / 3,
       problem: "",
     };
+  };
+  mockMesh = (path) => {
+    const [file, id] = path.includes("@") ? path.split("@") : [path, null];
+    const base = meshes[file];
+    const node = id ? scene.nodes.find((one) => one.id === id) : null;
+    return base ? runStack(base, stackOf(node)) : null;
   };
 
   const sceneEvent = () => ({
@@ -1518,6 +1532,34 @@ export async function readDocument(path) {
   const body = await tauri.core.invoke("read_document", { path });
   // Tauri hands back an ArrayBuffer, or a plain array on older transports.
   return body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(body);
+}
+
+/** How long the preview's stand-in core takes to answer for a mesh, by key.
+ * Empty, and so instant, unless something sets it; the app never reads it. */
+export const mockLatency = new Map();
+
+/** One mesh, as bytes — the binary half of an `Event::Geometry`.
+ *
+ * From the shell through `ipc::Response`, which hands the webview an
+ * ArrayBuffer; the page lays typed arrays straight over it. In the preview the
+ * stand-in's mesh is encoded into the same layout first, so the decoder is
+ * exercised here exactly as it is in the app.
+ */
+export async function readGeometry(key) {
+  if (!HAS_SHELL) {
+    // Answered as it stands now, then held back for as long as the preview
+    // was told to — which is how the page's "drop the late answer" rule gets
+    // exercised at all, since the stand-in otherwise always answers in order.
+    const mesh = mockMesh(key);
+    const wait = mockLatency.get(key) ?? 0;
+    if (wait) await new Promise((done) => setTimeout(done, wait));
+    if (!mesh) throw new Error(`${key}: no geometry to send`);
+    return encodeMesh(mesh);
+  }
+  const body = await tauri.core.invoke("read_geometry", { key });
+  // An ArrayBuffer, or a plain array of bytes on an older transport — which
+  // has to be copied into one before anything can be laid over it.
+  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
 }
 
 export const sendKey = (e) =>

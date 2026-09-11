@@ -12,13 +12,16 @@
  * from the second list to the first.
  */
 
-import { HAS_SHELL, applyBackdrop, dispatch, onEvent, sendKey, setBackdrop,
+import { HAS_SHELL, applyBackdrop, dispatch, onEvent, readGeometry, sendKey, setBackdrop,
   setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
 import { closeDocument, documentIsOpen, openDocument, zoomDocument } from "./document.js";
+import { decodeMesh } from "./meshbytes.js";
 import {
+  clearGeometry,
   drawViewport,
   frameAll,
   hasGeometry,
+  hasSurface,
   renderProblem,
   renderer,
   setGeometry,
@@ -3060,6 +3063,46 @@ document.addEventListener("change", (e) => {
   });
 });
 
+/* Geometry arrives in two parts: an event that says what a mesh is, as JSON
+   like everything else, and then the mesh itself, as bytes. Every request is
+   numbered per key, so when two edits in a row send two answers and they come
+   back in the other order, the older one is dropped rather than drawn over the
+   newer. */
+const asked = new Map();
+let tickets = 0;
+
+async function receiveGeometry(event) {
+  // Numbered before anything else, so an event with no mesh also supersedes
+  // one still travelling: a stack pushed over the budget must not have the
+  // mesh from before it land afterwards and be drawn as current.
+  const ticket = ++tickets;
+  asked.set(event.path, ticket);
+
+  // The description goes in straight away, so a first load shows the object's
+  // real box while the bytes are on their way — and so a second scene event in
+  // the meantime does not ask for the same mesh again. A surface already on
+  // screen stays there instead, or every modifier edit would blink to a box.
+  if (!event.ready || !hasSurface(event.path)) setGeometry({ ...event, mesh: null });
+  if (!event.ready) return;
+
+  const scene = lastScene?.path;
+  let mesh;
+  try {
+    mesh = decodeMesh(await readGeometry(event.path));
+  } catch (err) {
+    // Only the newest request's failure is news; an older one failing after a
+    // newer one succeeded is not.
+    if (asked.get(event.path) !== ticket) return;
+    meshProblems.set(event.path, String(err?.message ?? err));
+    if (lastScene) renderNodeInspector(lastScene);
+    return;
+  }
+  // Superseded while it was travelling: a newer answer for this key is on its
+  // way, or the whole scene changed under it.
+  if (asked.get(event.path) !== ticket || lastScene?.path !== scene) return;
+  setGeometry({ ...event, mesh });
+}
+
 /** What is wrong with a node's geometry, if anything is.
  *
  * The empty string covers both "it is fine" and "it has not arrived yet",
@@ -4672,14 +4715,18 @@ onEvent((event) => {
       break;
 
     case "geometry":
-      // One mesh, arriving on its own schedule — asked for when a scene names
-      // it, and again by itself when the file it came from is re-exported.
-      setGeometry(event);
+      // One mesh, described — asked for when a scene names it, and sent again
+      // by itself when the file is re-exported or its stack changes. The mesh
+      // follows as bytes; see `receiveGeometry`.
+      receiveGeometry(event);
       meshProblems.set(event.path, event.problem ?? "");
       if (lastScene) renderNodeInspector(lastScene);
       break;
 
     case "scene":
+      // A different scene means different files behind the same relative
+      // paths. Everything held for the last one has to go.
+      if (lastScene && lastScene.path !== event.path) clearGeometry();
       lastScene = event;
       renderOutliner(event);
       renderNodeInspector(event);

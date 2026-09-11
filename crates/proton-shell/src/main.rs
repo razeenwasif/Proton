@@ -132,6 +132,31 @@ fn read_document(path: String) -> Result<tauri::ipc::Response, String> {
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// One mesh, as bytes.
+///
+/// The binary half of `Event::Geometry`: the event says what a mesh is and
+/// whether it is ready, and this sends the mesh itself through `ipc::Response`,
+/// the same way `read_document` sends a PDF. As JSON a large mesh cost more to
+/// write out in Rust and parse back in the page than it did to move; as bytes
+/// the page lays typed arrays straight over the buffer it is handed.
+///
+/// The key is a string the page chose, so it goes through the same door the
+/// event did — `Modeling::mesh_bytes` refuses a path that climbs out of the
+/// scene's folder exactly as loading one does. Nothing new is reachable here.
+#[tauri::command]
+fn read_geometry(
+    key: String,
+    session: State<'_, Mutex<Session>>,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = match session.lock() {
+        Ok(mut it) => it.mesh_bytes(&key),
+        Err(poisoned) => poisoned.into_inner().mesh_bytes(&key),
+    };
+    bytes
+        .map(tauri::ipc::Response::new)
+        .ok_or_else(|| format!("{key}: no geometry to send"))
+}
+
 /// Give the core a heartbeat.
 ///
 /// Everything a language server says arrives on a thread the core cannot see,
@@ -191,7 +216,8 @@ fn main() {
             dispatch,
             backdrop,
             set_backdrop,
-            read_document
+            read_document,
+            read_geometry
         ])
         .setup(|app| {
             let Some(window) = app.get_webview_window("main") else {

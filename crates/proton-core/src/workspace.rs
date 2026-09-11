@@ -3077,6 +3077,13 @@ impl Workspace {
             .or_else(|| std::fs::read_to_string(path).ok())
     }
 
+    /// One mesh as bytes — what `Event::Geometry` described, in the layout
+    /// `proton-mesh` writes. Outside `apply` because it is not a command: it
+    /// changes nothing and produces no events, and its answer is not JSON.
+    pub fn mesh_bytes(&mut self, key: &str) -> Option<Vec<u8>> {
+        self.modeling.mesh_bytes(key)
+    }
+
     /// Everything the agent has proposed and nobody has accepted yet.
     ///
     /// Computed on the spot, like every other view of the review: the hunks

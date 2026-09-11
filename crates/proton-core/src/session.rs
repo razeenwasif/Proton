@@ -255,6 +255,12 @@ impl Session {
         &mut self.workspaces[self.active]
     }
 
+    /// One mesh as bytes, from the workspace on screen — the binary half of
+    /// `Event::Geometry`. See `Modeling::mesh_bytes`.
+    pub fn mesh_bytes(&mut self, key: &str) -> Option<Vec<u8>> {
+        self.active_mut().mesh_bytes(key)
+    }
+
     pub fn workspaces(&self) -> &[Workspace] {
         &self.workspaces
     }
