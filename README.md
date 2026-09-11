@@ -16,7 +16,7 @@ ffmpeg — and each of those is a real project of its own.
 
 ```bash
 cargo run -p proton-shell      # the app
-cargo test --workspace         # 1327 tests, headless
+cargo test --workspace         # 1333 tests, headless
 cargo tauri build              # the installer
 node ui/serve.mjs              # the front end alone → http://localhost:5178
 ```
@@ -221,6 +221,9 @@ no copy. On a 270,400-triangle sphere that is 6.4 MB against 13.3 MB of JSON,
 Bytes from a different build are refused in words rather than drawn as garbage
 shaped like a mesh. What is left to pay for is reading the OBJ and working out
 its normals, about 0.4 µs a triangle, so the budget is 500,000 triangles.
+Each file is read once and kept for as long as an object wears it, so an edit
+to a stack runs only the stack and the normals: 56 ms on that sphere, down
+from 122 ms when every edit re-read the file.
 
 Game reads a Godot project: `project.godot` says which scene starts, the
 hierarchy is that `.tscn`'s node tree, and the inspector edits it by splicing

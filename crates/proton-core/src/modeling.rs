@@ -78,10 +78,11 @@ use ts_rs::TS;
 /// 250 ms. The one cost not measured here is moving the bytes across the IPC
 /// boundary inside the running app, so the number leaves room for it: 500,000.
 ///
-/// Worth knowing about that path: changing a modifier re-reads the OBJ before
-/// running the stack, and at this size that is about a hundred milliseconds of
-/// every edit spent reading a file that did not change. Keeping the base mesh
-/// would cut it, and is the next thing to do if a stack ever feels slow.
+/// An edit to a stack does not pay for the read: the file as read is kept
+/// (see `Base`), so only the stack and the normals run again. Measured with
+/// `examples/stack_edit.rs`, nudging an array's offset on the same sphere went
+/// from 122 ms to 56 ms, nearly all of what is left being the normals — which
+/// have to be worked out again, because the stack is what they depend on.
 ///
 /// Past the budget the viewport draws the mesh's real bounding box and says
 /// how many triangles it has, which is a smaller lie than a scene that stops
@@ -122,7 +123,7 @@ pub struct Geometry {
 /// noticed here rather than by the front end asking again.
 #[derive(Debug, Clone)]
 struct Cached {
-    at: Option<SystemTime>,
+    stamp: Option<Stamp>,
     steps: Vec<Step>,
     /// The mesh path, kept so a re-check does not have to re-split the key.
     path: String,
@@ -131,6 +132,34 @@ struct Cached {
     /// in it, so the description can go out on every scene change without
     /// dragging a mesh through JSON behind it.
     mesh: Option<Mesh>,
+}
+
+/// What a file on disk was when it was read: its modified time and length.
+///
+/// The time alone is not enough. A file rewritten inside one tick of the
+/// clock that stamps it keeps the time it had, and a re-export of a model
+/// somebody just changed is exactly the write that lands that fast after the
+/// last one. The length comes from the same `metadata` call and catches
+/// nearly all of those; an edit that changes neither is the one this cannot
+/// see, and it is rare enough to leave to the next re-export.
+type Stamp = (SystemTime, u64);
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+/// A mesh file as read from disk, before any object's stack has touched it.
+///
+/// Kept so that changing a stack does not mean reading the file again: the
+/// file did not change, only what is done to it did, and at 270,400 triangles
+/// reading it was about half of every edit. A failure is kept too, stamped
+/// the same way, so a file that will not parse is not re-parsed on every
+/// keystroke either — and is the moment somebody fixes it.
+#[derive(Debug)]
+struct Base {
+    stamp: Option<Stamp>,
+    mesh: Result<Mesh, String>,
 }
 
 /// The scene that is open, and where the outliner is in it.
@@ -149,6 +178,12 @@ pub struct Modeling {
     /// on every event would be felt, and because holding the file's modified
     /// time is what lets a re-export from Blender be noticed.
     meshes: HashMap<String, Cached>,
+    /// Files as read, by where they are on disk — not by key, so every object
+    /// wearing one file shares one read of it, with or without a stack.
+    bases: HashMap<PathBuf, Base>,
+    /// How many times a mesh file has actually been read. The test of whether
+    /// the cache above is doing its job, and not otherwise interesting.
+    reads: usize,
 }
 
 impl Modeling {
@@ -206,15 +241,15 @@ impl Modeling {
             return missing("no scene is open".into());
         };
         let full = beside.join(&clean);
-        let at = std::fs::metadata(&full).and_then(|one| one.modified()).ok();
+        let stamp = stamp(&full);
 
         if let Some(had) = self.meshes.get(key) {
-            if had.at == at && had.steps == steps {
+            if had.stamp == stamp && had.steps == steps {
                 return had.what.clone();
             }
         }
 
-        let (what, mesh) = match Mesh::read(&full) {
+        let (what, mesh) = match self.base(&full, stamp) {
             Err(why) => (missing(why), None),
             Ok(base) => {
                 // How far a stack grows a mesh is exactly known before running
@@ -251,13 +286,13 @@ impl Modeling {
                     ),
                     false => {
                         let skipped = base.skipped;
-                        let mesh = match steps.is_empty() {
-                            true => base,
-                            false => base.apply(&steps),
-                        }
                         // Normals last, after every step: any step before them
-                        // would have made them wrong.
-                        .shade(proton_mesh::CREASE);
+                        // would have made them wrong. Both make a new mesh, so
+                        // the base is left as read for the next edit.
+                        let mesh = match steps.is_empty() {
+                            true => base.shade(proton_mesh::CREASE),
+                            false => base.apply(&steps).shade(proton_mesh::CREASE),
+                        };
                         let what = Geometry {
                             path: key.to_string(),
                             ready: true,
@@ -273,10 +308,11 @@ impl Modeling {
                 }
             }
         };
+        self.forget_unworn(key);
         self.meshes.insert(
             key.to_string(),
             Cached {
-                at,
+                stamp,
                 steps,
                 path: path.to_string(),
                 what: what.clone(),
@@ -284,6 +320,56 @@ impl Modeling {
             },
         );
         what
+    }
+
+    /// A file as read from disk, from the cache when it has not moved.
+    fn base(&mut self, full: &Path, stamp: Option<Stamp>) -> Result<&Mesh, String> {
+        let fresh = self.bases.get(full).is_some_and(|had| had.stamp == stamp);
+        if !fresh {
+            self.reads += 1;
+            let mesh = Mesh::read(full);
+            self.bases.insert(full.to_path_buf(), Base { stamp, mesh });
+        }
+        match &self.bases[full].mesh {
+            Ok(mesh) => Ok(mesh),
+            Err(why) => Err(why.clone()),
+        }
+    }
+
+    /// Drop what nothing in the scene wears any more, keeping `key`.
+    ///
+    /// Run whenever real work was done, which is also when there is something
+    /// new to hold. Without it, pointing an object at one mesh after another
+    /// would keep every one of them for the rest of the session — megabytes
+    /// each, at the sizes this budget allows.
+    fn forget_unworn(&mut self, key: &str) {
+        let Some(beside) = self.path.as_ref().and_then(|one| one.parent()) else {
+            return;
+        };
+        let worn = self.wanted();
+        let files: Vec<PathBuf> = worn
+            .iter()
+            .chain(std::iter::once(&key.to_string()))
+            .filter_map(|key| {
+                let path = key.rsplit_once('@').map_or(key.as_str(), |(path, _)| path);
+                proton_scene::mesh_path(path)
+                    .ok()
+                    .map(|clean| beside.join(clean))
+            })
+            .collect();
+        self.meshes
+            .retain(|had, _| had == key || worn.contains(had));
+        self.bases.retain(|path, _| files.contains(path));
+    }
+
+    /// How many times a mesh file has been read from disk.
+    pub fn files_read(&self) -> usize {
+        self.reads
+    }
+
+    /// How many mesh files are being held as read.
+    pub fn files_held(&self) -> usize {
+        self.bases.len()
     }
 
     /// One mesh in the layout `proton-mesh` writes, for the binary channel.
@@ -337,10 +423,7 @@ impl Modeling {
                 let Ok(clean) = proton_scene::mesh_path(&had.path) else {
                     return false;
                 };
-                let at = std::fs::metadata(beside.join(clean))
-                    .and_then(|one| one.modified())
-                    .ok();
-                at != had.at
+                stamp(&beside.join(clean)) != had.stamp
             })
             .map(|(key, _)| key.clone())
             .collect();
@@ -423,6 +506,14 @@ impl Modeling {
     /// panel where somebody is looking rather than only in a notice that
     /// scrolls away.
     pub fn open(&mut self, path: &Path) -> Result<(), String> {
+        // Results are keyed by paths relative to the scene, so another scene's
+        // `meshes/lamp.obj` is another file under the same key — and a copied
+        // project keeps its modified times and lengths, so nothing about the
+        // file would tell them apart. The same scene again keeps its meshes.
+        if self.path.as_deref() != Some(path) {
+            self.meshes.clear();
+            self.bases.clear();
+        }
         match Scene::read(path) {
             Ok(scene) => {
                 self.scene = Some(scene);
