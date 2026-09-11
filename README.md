@@ -16,7 +16,7 @@ ffmpeg — and each of those is a real project of its own.
 
 ```bash
 cargo run -p proton-shell      # the app
-cargo test --workspace         # 1304 tests, headless
+cargo test --workspace         # 1316 tests, headless
 cargo tauri build              # the installer
 node ui/serve.mjs              # the front end alone → http://localhost:5178
 ```
@@ -206,10 +206,14 @@ paths ran out at ninety thousand. About four hundred lines went with it — a
 painter's sort, a scratch-buffer pool, a colour quantiser, a batch-size
 constant tuned to a rasteriser's quirk, and a software BSDF.
 
-What is left there is vertex normals: the loader reads no `vn` and computes
-none, so a face's normal comes from how the surface changes between
-neighbouring pixels. Exact, and faceted — a subdivided mesh is smooth in its
-geometry and still shows facets in its shading.
+Normals are worked out after the modifier stack rather than read from the
+file's `vn`, which every modifier would make wrong. Each vertex averages the
+faces around it by the angle they make there — not by area, which let how a
+quad happened to be triangulated tilt its corners — and faces are only
+averaged together across an edge gentler than 40°. A cube keeps its corners;
+a subdivided sphere comes out round, within 3° of radial on an actual sphere.
+They cost about half as much again on the wire, so the mesh budget is now
+160,000 triangles, and the thing that would win it back is a binary channel.
 
 Game reads a Godot project: `project.godot` says which scene starts, the
 hierarchy is that `.tscn`'s node tree, and the inspector edits it by splicing

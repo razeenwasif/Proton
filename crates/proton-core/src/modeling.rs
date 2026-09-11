@@ -53,20 +53,28 @@ use ts_rs::TS;
 ///
 /// ## It is about the seam
 ///
-/// What crosses is JSON, once per mesh: measured at 8,608 KB for a
-/// 270,400-triangle sphere, which is about 32 bytes a triangle for an ordinary
-/// indexed mesh. So the budget is now a *size*, converted: eight megabytes is
-/// as much as is reasonable to serialise, hand across an IPC boundary and
-/// parse for one object, and that is 250,000 triangles.
+/// What crosses is JSON, once per mesh — positions, normals and triangles.
+/// Measured at 13,257 KB for a 270,400-triangle sphere, which is about 50 bytes
+/// a triangle for an ordinary smooth indexed mesh; a faceted one splits more
+/// vertices at its creases and costs more. So the budget is a *size*,
+/// converted: eight megabytes is as much as is reasonable to serialise, hand
+/// across an IPC boundary and parse for one object, and that is 160,000
+/// triangles.
+///
+/// This was 250,000 until vertex normals arrived. Normals are three more
+/// floats a vertex, which took the rate from 32 bytes a triangle to 50, and
+/// the limit is the megabytes rather than the triangle count — so the count
+/// came down rather than the line moving to keep a number that had stopped
+/// meaning what it said.
 ///
 /// The honest next move is not a larger number here either. It is to stop
-/// sending geometry as JSON — a binary channel would make this limit an order
-/// of magnitude larger without changing anything a person would notice.
+/// sending geometry as JSON — a binary channel would make this limit several
+/// times larger without changing anything a person would notice.
 ///
 /// Past the budget the viewport draws the mesh's real bounding box and says
 /// how many triangles it has, which is a smaller lie than a scene that stops
 /// responding while several megabytes are parsed.
-pub const BUDGET: usize = 250_000;
+pub const BUDGET: usize = 160_000;
 
 /// Geometry as the front end receives it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -220,7 +228,10 @@ impl Modeling {
                         let mesh = match steps.is_empty() {
                             true => base,
                             false => base.apply(&steps),
-                        };
+                        }
+                        // Normals last, after every step: any step before them
+                        // would have made them wrong.
+                        .shade(proton_mesh::CREASE);
                         Geometry {
                             path: key.to_string(),
                             bounds: mesh.bounds,

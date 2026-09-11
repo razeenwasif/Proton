@@ -29,13 +29,13 @@
  * sort, a scratch-buffer pool, a colour quantiser, a batch-size constant tuned
  * to a rasteriser's quirk, and a software BSDF.
  *
- * ## What is still missing
+ * ## Normals
  *
- * Vertex normals. The loader does not read `vn` and does not compute one, so
- * the shading works the normal out from how the surface changes between
- * neighbouring pixels — which is exact, and faceted. A subdivided mesh is
- * smooth in its geometry and still shows its facets in its shading. That is
- * the next thing, and it belongs in the loader rather than here.
+ * Worked out in `proton-mesh`, after the modifier stack, and sent with the
+ * geometry: smooth across gentle edges and split along sharp ones, so a
+ * subdivided mesh shades as round as it is and a cube keeps its corners. A
+ * mesh that arrives without them — only the preview's mock sends such a thing
+ * — is shaded from each face's own normal instead, which is exact and faceted.
  */
 
 import * as gpu from "./gl.js";
@@ -249,6 +249,13 @@ const shaders = new Map();
 /** Take the compiled materials, as `Event::Scene` sends them. */
 export function setShaders(list) {
   let moved = (list?.length ?? 0) !== shaders.size;
+  // Replaced, not merged: the list is every material the scene has, so one
+  // missing from it was deleted, and keeping it here would go on rendering an
+  // object with a material the file no longer contains.
+  const current = new Set((list ?? []).map((one) => one.id));
+  for (const id of [...shaders.keys()]) {
+    if (!current.has(id)) shaders.delete(id);
+  }
   for (const one of list ?? []) {
     // Stamped, so a slider that changed nothing does not rebuild a program.
     const stamp = JSON.stringify(one);
@@ -290,6 +297,9 @@ export function setGeometry(what) {
     geometry.set(what.path, {
       // Typed here, once. The buffers go straight to the GPU from these.
       positions: Float32Array.from(what.mesh.positions),
+      // Absent only from a sender that does not shade — the preview's mock.
+      // The renderer then works each face's normal out for itself.
+      normals: what.mesh.normals?.length ? Float32Array.from(what.mesh.normals) : null,
       triangles: Uint32Array.from(what.mesh.triangles),
       bounds: what.mesh.bounds,
       closed: what.mesh.closed,

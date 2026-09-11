@@ -1568,9 +1568,9 @@ needed a renderer to become real, and none of them mimes one now.
 Modeling's viewport is now WebGL, which is what this section kept predicting.
 The three limits it named are gone: occlusion is per pixel, the material runs
 per pixel, and the frame is no longer what bounds a mesh's size — a million
-triangles measured 0.3 ms. What bounds it now is the seam, at about 32 bytes of
-JSON a triangle, and the answer to *that* is a binary channel rather than a
-larger number.
+triangles measured 0.3 ms. What bounds it now is the seam, at about 50 bytes of
+JSON a triangle once vertex normals travel with the positions, and the answer
+to *that* is a binary channel rather than a larger number.
 
 ---
 

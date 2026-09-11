@@ -49,4 +49,14 @@ skipped: number,
  * positions makes a solid look open here — slower to draw, still correct,
  * which is the direction for this to be wrong in.
  */
-closed: boolean, };
+closed: boolean, 
+/**
+ * Three floats per vertex: which way the surface faces there.
+ *
+ * Empty until [`Mesh::shade`] works them out, and emptied again by every
+ * modifier, because any of them makes the old ones wrong — a subdivision
+ * makes vertices that never had one and a mirror points half of them the
+ * wrong way. A renderer handed a mesh with none falls back to the face's
+ * own normal, which is exact and faceted.
+ */
+normals: Array<number>, };

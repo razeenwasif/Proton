@@ -132,6 +132,8 @@ impl Mesh {
             bounds: self.bounds,
             skipped: self.skipped,
             closed: self.closed,
+            // Stale the moment the positions move.
+            normals: Vec::new(),
         }
     }
 
@@ -158,6 +160,8 @@ impl Mesh {
             // a row of them is a row of separate solids. Each is still closed,
             // which is what culling asks about.
             closed: self.closed,
+            // Stale the moment the positions move.
+            normals: Vec::new(),
         }
     }
 
@@ -307,6 +311,8 @@ impl Mesh {
             // Subdivision adds no holes and closes none: every edge that had
             // two faces still has two.
             closed: self.closed,
+            // Stale the moment the positions move.
+            normals: Vec::new(),
         }
     }
 

@@ -30,12 +30,12 @@
 //!
 //! ## What is read, and what is skipped
 //!
-//! Positions and faces. Not normals — flat shading works out a face's normal
-//! from its own corners, so sending them would be half the payload again for
-//! a number the renderer can derive. Not texture coordinates, not materials,
-//! not smoothing groups, not object or group names: nothing downstream has
-//! anywhere to put them, and reading them into a struct nobody looks at is
-//! how a loader grows a shape it cannot keep.
+//! Positions and faces. Not the file's normals: they are worked out after the
+//! modifier stack instead, which would otherwise make them wrong — see
+//! `shade`. Not texture coordinates, not materials, not smoothing groups, not
+//! object or group names: nothing downstream has anywhere to put them, and
+//! reading them into a struct nobody looks at is how a loader grows a shape
+//! it cannot keep.
 //!
 //! ## What this is not
 //!
@@ -45,6 +45,8 @@
 
 mod modify;
 mod obj;
+mod shade;
 
 pub use modify::{growth, Step};
 pub use obj::Mesh;
+pub use shade::CREASE;

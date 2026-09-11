@@ -108,6 +108,10 @@ function link(vertex, fragment) {
   const program = gl.createProgram();
   gl.attachShader(program, build(gl.VERTEX_SHADER, vertex));
   gl.attachShader(program, build(gl.FRAGMENT_SHADER, fragment));
+  // Pinned, because every mesh's vertex array is built against these numbers
+  // and a driver is free to hand out attribute locations in any order it likes.
+  gl.bindAttribLocation(program, 0, "aPos");
+  gl.bindAttribLocation(program, 1, "aNormal");
   gl.linkProgram(program);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     throw new Error(gl.getProgramInfoLog(program));
@@ -123,16 +127,24 @@ function link(vertex, fragment) {
 
 const SURFACE_VERTEX = `#version 300 es
 in vec3 aPos;
+in vec3 aNormal;
 uniform mat4 uModelView;
+uniform mat3 uNormal;
 uniform mat4 uProj;
 out vec3 vEye;
 out vec3 vObj;
+out vec3 vNormal;
 void main() {
   // Kept for the material, which is authored in the object's own space so a
   // pattern stays put on a thing that is moved.
   vObj = aPos;
   vec4 eye = uModelView * vec4(aPos, 1.0);
   vEye = eye.xyz;
+  // Through the inverse transpose, not the model-view itself: a panel scaled
+  // four times wider would otherwise tip every normal toward its long axis.
+  // Zero when the mesh arrived without normals, which the fragment shader
+  // reads as "work it out from the surface instead".
+  vNormal = uNormal * aNormal;
   gl_Position = uProj * eye;
 }`;
 
@@ -148,6 +160,7 @@ precision highp float;
 
 in vec3 vEye;
 in vec3 vObj;
+in vec3 vNormal;
 out vec4 fragment;
 
 uniform vec3 uLight;
@@ -271,12 +284,21 @@ function materialSource(shader) {
   return `${PRELUDE}
 void main() {
 ${lines.join("\n")}
-  // The face's normal, from how the view-space position changes across the
-  // triangle. Exact, needs nothing in the vertex buffer, and faceted — which
-  // is honest until the loader produces vertex normals.
-  vec3 n = normalize(cross(dFdx(vEye), dFdy(vEye)));
   vec3 v = normalize(-vEye);
-  if (dot(n, v) < 0.0) n = -n;
+  vec3 n;
+  if (dot(vNormal, vNormal) > 0.25) {
+    // The vertex normals the core worked out, interpolated across the face:
+    // smooth where the surface is smooth and split along its creases. The
+    // back of a sheet faces the other way, and the rasteriser knows which
+    // side it is drawing.
+    n = normalize(vNormal);
+    if (!gl_FrontFacing) n = -n;
+  } else {
+    // None sent. The face's own normal, from how the surface changes between
+    // neighbouring pixels — exact, and faceted.
+    n = normalize(cross(dFdx(vEye), dFdy(vEye)));
+    if (dot(n, v) < 0.0) n = -n;
+  }
   vec3 colour = lit(mix(base, uTint, uPicked * 0.45), metal, rough, n, v);
   fragment = vec4(colour, 1.0);
 }`;
@@ -349,6 +371,7 @@ function meshFor(key, mesh) {
   if (had) {
     gl.deleteVertexArray(had.array);
     gl.deleteBuffer(had.positions);
+    if (had.normals) gl.deleteBuffer(had.normals);
     gl.deleteBuffer(had.indices);
   }
 
@@ -359,6 +382,16 @@ function meshFor(key, mesh) {
   gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+  let normals = null;
+  if (mesh.normals) {
+    normals = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normals);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+  } else {
+    gl.disableVertexAttribArray(1);
+  }
   const indices = gl.createBuffer();
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indices);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.triangles, gl.STATIC_DRAW);
@@ -367,6 +400,7 @@ function meshFor(key, mesh) {
   const made = {
     array,
     positions,
+    normals,
     indices,
     count: mesh.triangles.length,
     closed: mesh.closed,
@@ -382,6 +416,7 @@ export function forget(key) {
   if (!had) return;
   gl.deleteVertexArray(had.array);
   gl.deleteBuffer(had.positions);
+  if (had.normals) gl.deleteBuffer(had.normals);
   gl.deleteBuffer(had.indices);
   uploaded.delete(key);
 }
@@ -432,7 +467,13 @@ export function frame(scene) {
     const { program, where } = programFor(shader);
 
     gl.useProgram(program);
-    gl.uniformMatrix4fv(where.uModelView, false, multiply(view, matrices[i]));
+    const modelView = multiply(view, matrices[i]);
+    gl.uniformMatrix4fv(where.uModelView, false, modelView);
+    gl.uniformMatrix3fv(where.uNormal, false, normalMatrix(modelView));
+    // A disabled attribute reads this constant instead, and the constant is
+    // the context's rather than the vertex array's — so it is set every time a
+    // mesh without normals is drawn, not trusted to still be zero.
+    if (!held.normals) gl.vertexAttrib3f(1, 0, 0, 0);
     gl.uniformMatrix4fv(where.uProj, false, proj);
     gl.uniform3fv(where.uLight, light);
     gl.uniform3fv(where.uTint, tint);
@@ -498,6 +539,29 @@ function drawLines(batches, proj, view) {
   gl.bindVertexArray(null);
   gl.depthMask(true);
   gl.disable(gl.BLEND);
+}
+
+/** The inverse transpose of a model-view's rotation and scale, column-major.
+ *
+ * Its columns are the cross products of the matrix's own columns over the
+ * determinant — which is the whole of it, and also why a mirrored object's
+ * normals come out pointing the right way: a negative scale makes the
+ * determinant negative and the division turns them back round. */
+function normalMatrix(m) {
+  const c0 = [m[0], m[1], m[2]];
+  const c1 = [m[4], m[5], m[6]];
+  const c2 = [m[8], m[9], m[10]];
+  const cross = (a, b) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const x = cross(c1, c2);
+  const y = cross(c2, c0);
+  const z = cross(c0, c1);
+  const det = c0[0] * x[0] + c0[1] * x[1] + c0[2] * x[2];
+  const k = Math.abs(det) > 1e-12 ? 1 / det : 0;
+  return new Float32Array([...x, ...y, ...z].map((v) => v * k));
 }
 
 /** Column-major 4x4 product, the convention WebGL wants. */

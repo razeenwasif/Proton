@@ -23,8 +23,8 @@ fn main() {
     found.sort_by_key(|path| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
 
     println!(
-        "{:<10} {:>9} {:>9} {:>9} {:>10} {:>10}",
-        "file", "verts", "tris", "read ms", "on disk", "as JSON"
+        "{:<10} {:>9} {:>9} {:>9} {:>9} {:>10} {:>10}",
+        "file", "verts", "tris", "read ms", "shade ms", "on disk", "as JSON"
     );
     for path in found {
         let began = Instant::now();
@@ -39,16 +39,22 @@ fn main() {
 
         // What the front end would actually receive. Serialised rather than
         // estimated, because the estimate is the thing being checked.
-        let wire = serde_json::to_string(&(&mesh.positions, &mesh.triangles))
+        // Shaded first, as the core sends it: normals are three more floats a
+        // vertex, and splitting at creases makes more vertices.
+        let began = Instant::now();
+        let shaded = mesh.shade(proton_mesh::CREASE);
+        let shade = began.elapsed();
+        let wire = serde_json::to_string(&(&shaded.positions, &shaded.normals, &shaded.triangles))
             .map(|text| text.len())
             .unwrap_or(0);
 
         println!(
-            "{:<10} {:>9} {:>9} {:>9.1} {:>9.1}K {:>9.1}K",
+            "{:<10} {:>9} {:>9} {:>9.1} {:>9.1} {:>9.1}K {:>9.1}K",
             path.file_stem().unwrap_or_default().to_string_lossy(),
             mesh.vertices(),
             mesh.count(),
             read.as_secs_f64() * 1000.0,
+            shade.as_secs_f64() * 1000.0,
             std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) as f64 / 1024.0,
             wire as f64 / 1024.0,
         );

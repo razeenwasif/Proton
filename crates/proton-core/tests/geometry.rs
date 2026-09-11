@@ -89,8 +89,12 @@ fn a_mesh_the_scene_names_arrives_with_its_triangles_and_its_box() {
     assert_eq!(what.triangles, 4);
     assert_eq!(what.bounds, [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
     let mesh = what.mesh.expect("the vertices");
-    assert_eq!(mesh.vertices(), 4);
     assert_eq!(mesh.triangles.len(), 12);
+    // Shaded on the way out, so it arrives with a normal at every vertex. A
+    // tetrahedron's faces meet at about 70°, past the crease, so each of its
+    // four corners is three vertices facing three ways: twelve, not four.
+    assert_eq!(mesh.vertices(), 12);
+    assert_eq!(mesh.normals.len(), mesh.positions.len());
 }
 
 #[test]
