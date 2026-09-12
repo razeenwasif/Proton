@@ -36,6 +36,7 @@ pub enum Provider {
     #[default]
     Claude,
     Gemini,
+    Codex,
 }
 
 impl Provider {
@@ -46,6 +47,7 @@ impl Provider {
     /// and say so in the agent pane, not refuse to run.
     pub fn parse(name: &str) -> Provider {
         match name.trim().to_ascii_lowercase().as_str() {
+            "codex" | "openai" => Provider::Codex,
             "gemini" | "google" => Provider::Gemini,
             _ => Provider::Claude,
         }
@@ -53,6 +55,7 @@ impl Provider {
 
     pub fn id(self) -> &'static str {
         match self {
+            Provider::Codex => "codex",
             Provider::Claude => "claude",
             Provider::Gemini => "gemini",
         }
@@ -61,6 +64,7 @@ impl Provider {
     /// What to call it on screen.
     pub fn label(self) -> &'static str {
         match self {
+            Provider::Codex => "Codex",
             Provider::Claude => "Claude",
             Provider::Gemini => "Gemini",
         }
@@ -89,6 +93,7 @@ impl Provider {
     /// is exactly what the settings are for.
     pub fn default_model(self, quick: bool) -> &'static str {
         match (self, quick) {
+            (Provider::Codex, _) => "gpt-6-astra",
             (Provider::Claude, false) => "claude-opus-5",
             (Provider::Claude, true) => "claude-haiku-4-5-20251001",
             (Provider::Gemini, false) => "gemini-pro-latest",
@@ -99,6 +104,7 @@ impl Provider {
     /// The environment variables that hold a key for it, in order.
     pub fn key_vars(self) -> &'static [&'static str] {
         match self {
+            Provider::Codex => &[],
             Provider::Claude => &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
             // `GEMINI_API_KEY` first: `GOOGLE_API_KEY` is used by half of
             // Google's other SDKs and is more likely to be set to something
@@ -113,6 +119,7 @@ impl Provider {
     /// needs to know which one — the only place a URL depends on it.
     pub fn url(self, model: &str) -> String {
         match self {
+            Provider::Codex => String::new(), // Local app-server, never HTTP here.
             Provider::Claude => {
                 std::env::var("ANTHROPIC_BASE_URL")
                     .unwrap_or_else(|_| "https://api.anthropic.com".into())

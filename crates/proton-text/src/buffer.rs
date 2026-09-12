@@ -98,6 +98,9 @@ impl Buffer {
         std::fs::write(&path, self.text.to_string())?;
         self.saved_at = self.history.revision();
         self.disk = modified_at(&path);
+        // The saved revision must stay immutable. More typing belongs to a
+        // new node, or joining it would leave changed text marked clean.
+        self.end_group();
         Ok(())
     }
 
@@ -318,7 +321,7 @@ impl Buffer {
     /// made an edit: `c` deletes before insert mode starts, and that deletion
     /// belongs to the same undo step as the typing that follows.
     pub fn begin_group(&mut self, join_current: bool) {
-        self.group = if join_current {
+        self.group = if join_current && self.history.revision() != self.saved_at {
             Group::Joined
         } else {
             Group::Pending
@@ -327,6 +330,14 @@ impl Buffer {
 
     pub fn end_group(&mut self) {
         self.group = Group::None;
+    }
+
+    /// Continue a typing run, starting a fresh step after a boundary such as
+    /// a save or cursor movement. Unlike `begin_group`, this is idempotent.
+    pub fn ensure_group(&mut self) {
+        if self.group == Group::None {
+            self.group = Group::Pending;
+        }
     }
 
     /// Apply edits in the order given. Callers order them highest offset
@@ -463,6 +474,7 @@ impl Buffer {
     }
 
     pub fn undo(&mut self) -> bool {
+        self.end_group();
         let Some(step) = self.history.undo() else {
             return false;
         };
@@ -472,6 +484,7 @@ impl Buffer {
     }
 
     pub fn redo(&mut self) -> bool {
+        self.end_group();
         let Some(step) = self.history.redo() else {
             return false;
         };

@@ -12,10 +12,23 @@
  * from the second list to the first.
  */
 
-import { HAS_SHELL, applyBackdrop, dispatch, onEvent, readGeometry, sendKey, setBackdrop,
+import {escapeHtml, icon} from "./html.js";
+import {lineHtml} from "./editor-row.js";
+import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, readGeometry, sendKey, setBackdrop,
   setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
 import { closeDocument, documentIsOpen, openDocument, zoomDocument } from "./document.js";
 import { decodeMesh } from "./meshbytes.js";
+import { createOverlays } from "./overlays.js";
+import { createPanels } from "./panels.js";
+import { createDisplaySettings } from "./display-settings.js";
+import { createFileTree } from "./file-tree.js";
+import { createBufferTabs } from "./buffer-tabs.js";
+import { createSplitResize } from "./split-resize.js";
+import { createEditorFeedback } from "./editor-feedback.js";
+import { createEditorState, createEditorPaints } from "./editor-state.js";
+import { performanceReview, editorPainted } from "./performance.js";
+import { keyCommand, changesContext } from "./transport.js";
+import { historyCommand, historyShortcut } from "./history-controls.js";
 import {
   clearGeometry,
   drawViewport,
@@ -104,6 +117,8 @@ function renderSettings(event) {
     if (typeof lastSettings.translucency === "string") {
       setTranslucency(lastSettings.translucency);
     }
+
+    displaySettings.apply(lastSettings);
 
     // The controls show what is set, and a control with nothing set shows the
     // default — which is why each one carries its own.
@@ -334,6 +349,13 @@ document.addEventListener("click", (e) => {
   if (!choice) return;
   const group = choice.closest("[data-set-choice]");
   $$("button", group).forEach((b) => b.classList.toggle("on", b === choice));
+  if (group.dataset.setChoice === "agent.provider" && setting("agent.provider") !== choice.dataset.value) {
+    dispatchMany([
+      {type: "setSetting", key: "agent.model", value: null},
+      {type: "setSetting", key: "agent.provider", value: choice.dataset.value},
+    ]);
+    return;
+  }
   keep(group.dataset.setChoice, choice.dataset.value);
 });
 
@@ -413,12 +435,14 @@ function renderMode(mode) {
   $$(".mode").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
   $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === mode));
   closeAll();
+  panels.refresh();
   // The container that was just revealed is empty — the splits were drawn
   // into the mode we came from. Redraw them here, and the notebook with them.
   if (lastSplits) {
     renderSplits(lastSplits.views, lastSplits.focused, lastSplits.vertical);
   }
   if (mode === "data" && lastNotebook) renderNotebook(lastNotebook);
+  requestAnimationFrame(reportEveryViewport);
 }
 
 $$(".mode").forEach((b) => b.addEventListener("click", () => coreSetMode(b.dataset.mode)));
@@ -430,6 +454,7 @@ $$("[data-mode-go]").forEach((el) =>
 function setDock(panel) {
   const dock = $("#codex-dock");
   if (!dock) return;
+  panels.show("right", dock.closest(".workspace"));
   $$(".dock-tab", dock).forEach((t) => t.classList.toggle("on", t.dataset.dockpanel === panel));
   $$(".dock-panel", dock).forEach((p) => {
     const on = p.dataset.panel === panel;
@@ -505,6 +530,7 @@ startViewport(
 
 $$("[data-design-panel]").forEach((button) => {
   button.addEventListener("click", () => {
+    panels.show("left");
     const want = button.dataset.designPanel;
     $$("[data-design-side]").forEach((el) => {
       el.hidden = el.dataset.designSide !== want;
@@ -519,15 +545,6 @@ $$(".tree").forEach((tree) => {
       r.classList.add("sel");
     }),
   );
-});
-
-// Delegated, because splitting clones buffer bars and a cloned node brings no
-// listeners with it.
-document.addEventListener("click", (e) => {
-  const buf = e.target.closest(".buf");
-  if (!buf) return;
-  $$(".buf", buf.parentElement).forEach((o) => o.classList.remove("on"));
-  buf.classList.add("on");
 });
 
 /* ── splits ───────────────────────────────────────────────────────────
@@ -555,6 +572,7 @@ function focusedCells() {
 function splitHtml(view, focused) {
   const actions =
     `<span class="split-actions">` +
+    (activeMode === "codex" ? `<button data-history="undo" title="Undo" aria-label="Undo"><svg class="i" aria-hidden="true"><use href="#i-undo"/></svg></button><button data-history="redo" title="Redo" aria-label="Redo"><svg class="i" aria-hidden="true"><use href="#i-redo"/></svg></button>` : "") +
     `<button data-split="v" title="Split right — :vsplit or ␣wv"><svg class="i"><use href="#i-split-v"/></svg></button>` +
     `<button data-split="s" title="Split down — :split or ␣ws"><svg class="i"><use href="#i-split-h"/></svg></button>` +
     `<button data-split="close" title="Close this split — :close or ␣wq"><svg class="i"><use href="#i-close"/></svg></button>` +
@@ -567,7 +585,7 @@ function splitHtml(view, focused) {
     return (
       `<section class="split${on}" data-view="${view}">` +
       `<div class="buffers"><span class="grow"></span>${actions}</div>` +
-      `<div class="scroll" data-cells data-view="${view}"></div>` +
+      `<div class="scroll" tabindex="0" data-cells data-view="${view}"></div>` +
       `</section>`
     );
   }
@@ -577,7 +595,7 @@ function splitHtml(view, focused) {
     `<span data-buffers></span>` +
     actions +
     `</div>` +
-    `<div class="scroll code" data-editor data-view="${view}"></div>` +
+    `<div class="scroll code" role="tabpanel" tabindex="0" id="editor-view-${view}" data-editor data-view="${view}"></div>` +
     `</section>`
   );
 }
@@ -601,6 +619,8 @@ function renderSplits(views, focused, vertical) {
     box.classList.contains("stacked") === vertical;
 
   if (shapeChanged) {
+    restorePaneFocus ||= box.contains(document.activeElement);
+    $$("[data-editor]", box).forEach(pane => viewportObserver.unobserve(pane));
     // A divider between each pair. Rebuilt with the panes rather than kept,
     // because splitting and closing renumber everything either side of them.
     box.innerHTML = views
@@ -618,6 +638,7 @@ function renderSplits(views, focused, vertical) {
     // you asked for; carrying the old ratios over would give the new pane a
     // width nobody chose.
     $$(".split", box).forEach((pane) => pane.style.removeProperty("--share"));
+    $$("[data-editor]", box).forEach((pane) => viewportObserver.observe(pane));
     // Each pane has its own height, and the core has to be told all of them.
     requestAnimationFrame(reportEveryViewport);
   } else {
@@ -625,6 +646,8 @@ function renderSplits(views, focused, vertical) {
       pane.classList.toggle("on", Number(pane.dataset.view) === focused),
     );
   }
+  $$("[data-split=close]", box).forEach(button => { button.disabled = views.length <= 1; });
+  splitResize.refresh();
   view.focused = focused;
   // Which buffer each pane is showing, so its strip can mark the right tab.
   bufferBar.panes = views.map((v) => v.buffer);
@@ -642,10 +665,12 @@ document.addEventListener("click", (e) => {
   const action = e.target.closest("[data-split]");
   if (action) {
     e.stopPropagation();
+    if (action.disabled) return;
+    action.focus();
     const index = viewOf(action);
     const kind = action.dataset.split;
-    if (kind === "v") dispatch({ type: "split", vertical: true });
-    else if (kind === "s") dispatch({ type: "split", vertical: false });
+    if (kind === "v") dispatchMany([{ type: "focusSplit", index }, { type: "split", vertical: true }]);
+    else if (kind === "s") dispatchMany([{ type: "focusSplit", index }, { type: "split", vertical: false }]);
     else dispatch({ type: "closeSplit", index });
     return;
   }
@@ -654,8 +679,9 @@ document.addEventListener("click", (e) => {
   // to focus before it places the cursor.
   const pane = e.target.closest(".split");
   if (pane && splits()?.contains(pane)) {
+    if (e.target.closest('[data-editor], [data-history], [data-buffer], [data-buffer-close]')) return;
     const index = Number(pane.dataset.view);
-    if (index !== view.focused) dispatch({ type: "focusSplit", index });
+    dispatch({ type: "focusSplit", index });
   }
 });
 
@@ -668,183 +694,39 @@ document.addEventListener("click", (e) => {
    owns which buffer a view shows and where its cursor is, and `Command` and
    `Event` deliberately name no pixels. A second front end would size its
    panes its own way. */
-const SPLIT_MIN = 120;
+const splitResize = createSplitResize(document, reportEveryViewport);
+let restorePaneFocus = false;
 
-/** The pane before a divider and the pane after it. */
-function neighbours(gutter) {
-  return [gutter.previousElementSibling, gutter.nextElementSibling];
-}
-
-function resizeSplit(gutter, at) {
-  const [before, after] = neighbours(gutter);
-  if (!before || !after) return;
-
-  const stacked = gutter.parentElement.classList.contains("stacked");
-  const a = before.getBoundingClientRect();
-  const b = after.getBoundingClientRect();
-  const size = (r) => (stacked ? r.height : r.width);
-  const start = stacked ? a.top : a.left;
-
-  // The pair's own span, shared out by where the pointer is inside it. Only
-  // the two of them: a share is relative to its siblings, so leaving the rest
-  // alone is what keeps a drag local.
-  const span = size(a) + size(b);
-  if (span <= SPLIT_MIN * 2) return;
-  const want = Math.max(SPLIT_MIN, Math.min(at - start, span - SPLIT_MIN));
-
-  // Scaled to keep the pair's total share the same, whatever it was — the
-  // two may already be an uneven part of a row of four.
-  const total =
-    (parseFloat(before.style.getPropertyValue("--share")) || 1) +
-    (parseFloat(after.style.getPropertyValue("--share")) || 1);
-  const share = (want / span) * total;
-  before.style.setProperty("--share", share.toFixed(4));
-  after.style.setProperty("--share", (total - share).toFixed(4));
-}
-
-let splitDrag = null;
-
-document.addEventListener("pointerdown", (e) => {
-  const gutter = e.target.closest(".sp-gutter");
-  if (!gutter) return;
-  e.preventDefault();
-  splitDrag = gutter;
-  gutter.classList.add("dragging");
-  document.body.style.cursor = gutter.parentElement.classList.contains("stacked")
-    ? "row-resize"
-    : "col-resize";
-});
-
-window.addEventListener("pointermove", (e) => {
-  if (!splitDrag) return;
-  const stacked = splitDrag.parentElement.classList.contains("stacked");
-  resizeSplit(splitDrag, stacked ? e.clientY : e.clientX);
-});
-
-window.addEventListener("pointerup", () => {
-  if (!splitDrag) return;
-  splitDrag.classList.remove("dragging");
-  splitDrag = null;
-  document.body.style.cursor = "";
-  // A pane that changed size can show a different number of lines, and the
-  // core hands out exactly the ones asked for.
-  reportEveryViewport();
-});
-
-/* Double-clicking a divider evens the pair up again — the way back from a
-   drag you did not mean, without having to aim. */
-document.addEventListener("dblclick", (e) => {
-  const gutter = e.target.closest(".sp-gutter");
-  if (!gutter) return;
-  neighbours(gutter).forEach((pane) => pane?.style.removeProperty("--share"));
-  reportEveryViewport();
-});
-
-/* ── resizable panes ──────────────────────────────────────────────────
-   Each gutter writes one custom property on its workspace, and the grid
-   does the rest. Widths are remembered as *what you asked for* rather
-   than what currently fits, so narrowing the window and widening it again
-   gives your layout back instead of leaving it clamped. */
-const PANE_MIN = 172;
-const STAGE_MIN = 320;
-
-function paneWidths(ws) {
-  try {
-    return JSON.parse(localStorage.getItem(`proton.panes.${ws}`) ?? "{}");
-  } catch {
-    return {};
-  }
-}
-
-function rememberPane(ws, prop, px) {
-  try {
-    localStorage.setItem(`proton.panes.${ws}`, JSON.stringify({ ...paneWidths(ws), [prop]: px }));
-  } catch {
-    /* storage blocked — the drag still works, it just won't survive a reload */
-  }
-}
-
-function defaultPane(section, prop) {
-  // The value the markup shipped with, before any drag.
-  return parseFloat(section.dataset[prop === "--col-l" ? "defL" : "defR"]);
-}
-
-$$(".workspace").forEach((section) => {
-  section.dataset.defL = parseFloat(section.style.getPropertyValue("--col-l")) || 0;
-  section.dataset.defR = parseFloat(section.style.getPropertyValue("--col-r")) || 0;
-
-  const saved = paneWidths(section.dataset.ws);
-  for (const [prop, px] of Object.entries(saved)) section.style.setProperty(prop, `${px}px`);
-});
-
-function resizePane(section, gutter, clientX) {
-  const prop = gutter.dataset.resize;
-  const box = section.getBoundingClientRect();
-  const other = prop === "--col-l"
-    ? parseFloat(getComputedStyle(section).getPropertyValue("--col-r")) || 0
-    : parseFloat(getComputedStyle(section).getPropertyValue("--col-l")) || 0;
-  // Design mode has a fixed 66px tool rail ahead of the resizable column.
-  const fixed = section.dataset.ws === "design" ? 66 : 0;
-
-  const raw = prop === "--col-l" ? clientX - box.left - fixed : box.right - clientX;
-  const room = box.width - fixed - other - STAGE_MIN - 2;
-  const px = Math.round(Math.max(PANE_MIN, Math.min(raw, room)));
-
-  section.style.setProperty(prop, `${px}px`);
-  rememberPane(section.dataset.ws, prop, px);
-}
-
-/* The drag lives on `window`, not on the gutter. Pointer capture would be
-   tidier, but it can throw and it drops the drag the moment the pointer
-   outruns the 1px track — and losing a drag mid-gesture is worse than the
-   extra listener. */
-let drag = null;
-
-$$(".gutter").forEach((gutter) => {
-  const section = gutter.closest(".workspace");
-
-  gutter.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    drag = { gutter, section };
-    gutter.classList.add("dragging");
-    document.documentElement.classList.add("resizing");
-  });
-
-  gutter.addEventListener("dblclick", () => {
-    const prop = gutter.dataset.resize;
-    const px = defaultPane(section, prop);
-    section.style.setProperty(prop, `${px}px`);
-    rememberPane(section.dataset.ws, prop, px);
-    requestAnimationFrame(drawPointerEdges);
+/* Panel geometry is view state, independent of the document renderers. */
+const panels = createPanels(document, () => {
+  requestAnimationFrame(() => {
+    if (!$("[data-term-screen]")?.offsetParent) focusTerminal(false);
+    reportEveryViewport();
+    reportTerminalSize();
+    drawPointerEdges();
   });
 });
-
-window.addEventListener("pointermove", (e) => {
-  if (!drag) return;
-  e.preventDefault();
-  resizePane(drag.section, drag.gutter, e.clientX);
+const displaySettings = createDisplaySettings(document, keep, () => {
+  requestAnimationFrame(() => {
+    measureLineHeight();
+    if (activeMode === "codex") $$(".workspace.on [data-editor]").forEach((pane) => renderEditor(Number(pane.dataset.view)));
+    panels.refresh();
+  });
 });
-
-function endDrag() {
-  if (!drag) return;
-  drag.gutter.classList.remove("dragging");
-  document.documentElement.classList.remove("resizing");
-  drag = null;
-  requestAnimationFrame(drawPointerEdges);
-}
-
-window.addEventListener("pointerup", endDrag);
-window.addEventListener("pointercancel", endDrag);
-// A drag that ends outside the window still has to end.
-window.addEventListener("blur", endDrag);
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
+const overlays = createOverlays(document, OVERLAYS);
 
 function closeAll() {
-  OVERLAYS.forEach((id) => $("#" + id).classList.remove("on"));
-  $("#scrim").classList.remove("on");
+  overlays.hide();
+}
+
+async function dismissOverlay() {
+  const coreOwned = pickerOpen || (overlays.active && overlays.active !== "settings");
+  pickerOpen = false;
+  closeAll();
+  if (coreOwned) await sendKey({ key: "Escape" });
 }
 
 /**
@@ -854,23 +736,40 @@ function closeAll() {
  * the command line, the picker — would toggle the overlay off on every second
  * key, which looks exactly like the panel flickering. Use `show`.
  */
-function open(id) {
-  const wasOpen = $("#" + id).classList.contains("on");
-  closeAll();
+async function open(id) {
+  const wasOpen = overlays.active === id;
+  if (overlays.active || pickerOpen) await dismissOverlay();
   if (wasOpen) return;
+  if (id === "telescope") {
+    // Own input immediately, including while IPC is opening the picker.
+    pickerOpen = true;
+    $("[data-picker-query]").value = "";
+    $("[data-picker-results]").innerHTML = '<div class="empty">Opening search…</div>';
+    show(id);
+    await dispatch({ type: "openPicker", kind: "files" });
+    return;
+  }
   show(id);
 }
 
 /** Open an overlay, idempotently. Safe to call on every keystroke. */
 function show(id) {
-  closeAll();
-  $("#" + id).classList.add("on");
-  $("#scrim").classList.add("on");
+  overlays.show(id);
 }
 
 $$("[data-open]").forEach((el) => el.addEventListener("click", () => open(el.dataset.open)));
-$$("[data-close]").forEach((el) => el.addEventListener("click", closeAll));
-$("#scrim").addEventListener("click", closeAll);
+$$("[data-close]").forEach((el) => el.addEventListener("click", dismissOverlay));
+$("#scrim").addEventListener("click", dismissOverlay);
+
+function openFileAction(label, query) {
+  return `<div class="empty-actions"><button class="btn" data-find-file="${query}">${label}</button></div>`;
+}
+document.addEventListener("click", async (e) => {
+  const button = e.target.closest?.("[data-find-file]");
+  if (!button) return;
+  await open("telescope");
+  dispatch({ type: "pickerQuery", text: button.dataset.findFile });
+});
 
 /* ── the editor view ──────────────────────────────────────────────────
    The core owns the text; this only draws what the last Viewport event
@@ -901,64 +800,14 @@ const view = {
  * and a second copy of the same pane, and it has to be true here as well as
  * in the core.
  */
-const panes = new Map();
-
-function paneState(index) {
-  if (!panes.has(index)) {
-    panes.set(index, {
-      firstLine: 0,
-      lines: [],
-      totalLines: 0,
-      cursor: { line: 0, column: 0 },
-      /// The far end of the selection, or null. The near end is the cursor.
-      selection: null,
-      /// Coloured runs, parallel to `lines` — empty for a file with no grammar.
-      highlights: [],
-      // Search hits per line. A separate layer from `highlights`: a match is a
-      // background and a scope is a colour, and a match inside a string has to
-      // stay string-coloured.
-      matches: [],
-      // Git marks per line — added, modified, or lines removed here.
-      git: [],
-      // Breakpoints on visible lines, keyed by line number. A map because
-      // there are usually none and a screenful of nulls to say so is waste.
-      stops: new Map(),
-    });
-  }
-  return panes.get(index);
-}
-
-/**
- * The pane being drawn right now.
- *
- * An ambient rather than a parameter threaded through `lineHtml`,
- * `selectedOn` and `runsHtml` — they already read the view they are drawing
- * from a module-level object, and this is that object, now one per split.
- */
-let drawing = paneState(0);
+const editorState = createEditorState();
+const panes = editorState.panes;
+const paneState = editorState.pane;
+const editorPaints = createEditorPaints(paintEditor);
+function renderEditor(index = view.focused) { editorPaints.request(index); }
 
 /** The focused pane's state, for the statusline and the completion popup. */
 const focusedPane = () => paneState(view.focused);
-
-/* Quotes are escaped as well as the angle brackets, because most of what this
-   wraps ends up inside an attribute — a `title`, a `data-df-cell`, an
-   `<option value>`. A value holding a `"` closes the attribute early and the
-   rest of it becomes markup: a scope like `:root[data-theme="dark"]` arrived
-   at the browser as `:root[data-theme=`, and a dataframe cell containing a
-   quote broke the click that searches for it. Harmless in text content, where
-   `&quot;` renders as the quote it is. */
-const escapeHtml = (s) =>
-  String(s).replace(
-    /[&<>"']/g,
-    (c) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;",
-      })[c],
-  );
 
 /* Diagnostics for the active buffer, indexed by line.
  *
@@ -978,14 +827,6 @@ let completionOpen = false;
    The sprite lives in index.html; this is how the rendered parts of the
    app reach it. `class="i"` is what makes a `<use>` draw at all — see the
    comment on that rule in styles.css. */
-const icon = (id, cls = "") =>
-  `<svg class="i${cls ? " " + cls : ""}"><use href="#i-${id}"/></svg>`;
-
-/* Diagnostic signs are solid and told apart by silhouette as much as by
-   colour — a dot, a triangle, a square and a bar stay distinct for a
-   reader who cannot tell red from amber. */
-const SIGN = { error: "d-error", warning: "d-warning", info: "d-info", hint: "d-hint" };
-
 /* What each file gets in the buffer bar. A table rather than a switch
    because it is read far more often than it is changed; the static
    explorer markup in index.html mirrors it. */
@@ -1013,170 +854,6 @@ function fileIcon(name) {
   return icon(id, tint);
 }
 
-/** Wrap the diagnostic spans on one line, innermost work on a character array. */
-function markUp(chars, line) {
-  const here = marks.byLine.get(line);
-  if (!here?.length) return null;
-
-  // A per-character severity, so overlapping diagnostics resolve by
-  // seriousness rather than by whichever the server happened to send last.
-  const RANK = { error: 3, warning: 2, info: 1, hint: 0 };
-  const worst = new Array(chars.length).fill(null);
-  for (const d of here) {
-    const from = d.line === line ? d.column : 0;
-    // A diagnostic can span lines; on every line but its last it runs to the
-    // end. A zero-width range still gets one character, or it draws nothing.
-    const to = d.endLine === line ? Math.max(d.endColumn, from + 1) : chars.length;
-    for (let i = from; i < Math.min(to, chars.length); i++) {
-      if (!worst[i] || RANK[d.severity] > RANK[worst[i]]) worst[i] = d.severity;
-    }
-  }
-  return worst;
-}
-
-/* Scope names from the core to the theme's class names. The core says what a
-   run *is*; the stylesheet decides what that looks like, and neither knows
-   the other's vocabulary. */
-const SCOPE = {
-  keyword: "k", function: "fn", type: "ty", string: "str",
-  number: "num", comment: "cm", constant: "cn", variable: "va",
-  property: "pr", operator: "op", punctuation: "pn", attribute: "at",
-  // Prose. Two of these are a weight and a slope rather than a colour,
-  // because that is how the text itself says them.
-  heading: "md-h", emphasis: "md-em", strong: "md-b", link: "md-a",
-};
-
-/// Emit `[from, to)` as merged runs of identical colour and severity.
-///
-/// Merged, because one element per character is a few thousand nodes on a
-/// wide line and the browser feels every one of them. Two channels at once,
-/// because a keyword inside a diagnostic needs to be both coloured and
-/// underlined and splitting them would need twice the elements.
-function runsHtml(chars, scope, severity, picked, hit, from, to) {
-  const same = (i, j) =>
-    (scope?.[i] ?? null) === (scope?.[j] ?? null) &&
-    (severity?.[i] ?? null) === (severity?.[j] ?? null) &&
-    Boolean(picked?.[i]) === Boolean(picked?.[j]) &&
-    Boolean(hit?.[i]) === Boolean(hit?.[j]);
-
-  let html = "";
-  let i = from;
-  while (i < to) {
-    let end = i + 1;
-    while (end < to && same(i, end)) end++;
-
-    const text = escapeHtml(chars.slice(i, end).join(""));
-    const classes = [];
-    const colour = scope?.[i];
-    if (colour && SCOPE[colour]) classes.push(SCOPE[colour]);
-    if (severity?.[i]) classes.push("sq", "d-" + severity[i]);
-    if (picked?.[i]) classes.push("sel");
-    // Last, so a match reads over a scope rather than under it — the point of
-    // painting it is that you can find it.
-    if (hit?.[i]) classes.push("hit");
-    html += classes.length ? `<span class="${classes.join(" ")}">${text}</span>` : text;
-    i = end;
-  }
-  return html;
-}
-
-/* Which characters on a line are selected.
- *
- * Three shapes, and they are genuinely different questions. Charwise runs
- * from one point to another and only the first and last lines are partial.
- * Linewise takes whole lines. A block takes the same columns from every line,
- * which is the one shape a range of offsets cannot describe — and the reason
- * the mode has to know which of the three it is rather than just holding two
- * endpoints. */
-function selectedOn(line, width) {
-  const anchor = drawing.selection;
-  if (!anchor) return null;
-  const head = drawing.cursor;
-
-  const top = anchor.line <= head.line ? anchor : head;
-  const bottom = anchor.line <= head.line ? head : anchor;
-  if (line < top.line || line > bottom.line) return null;
-
-  if (view.vim === "V-LINE") return [0, width];
-  if (view.vim === "V-BLOCK") {
-    const left = Math.min(anchor.column, head.column);
-    const right = Math.max(anchor.column, head.column) + 1;
-    return [Math.min(left, width), Math.min(right, width)];
-  }
-  const from = line === top.line ? top.column : 0;
-  const to = line === bottom.line ? bottom.column + 1 : width;
-  return [Math.min(from, width), Math.min(to, width)];
-}
-
-function lineHtml(number, text, cursorColumn, highlights, hits, git, stop) {
-  // A breakpoint takes the sign column: it is a thing you put there, and a
-  // diagnostic is a thing that happened. Yours wins.
-  const here = marks.byLine.get(number);
-  const sign = stop
-    ? `<span class="s bp${stop.verified ? "" : " unset"}${stop.here ? " at" : ""}"></span>`
-    : here?.length
-    ? `<span class="s d-${here[0].severity}">${icon(SIGN[here[0].severity], "solid")}</span>`
-    : `<span class="s"></span>`;
-  // A thin bar between the number and the diagnostic sign. Its own strip
-  // rather than sharing one, because a line can be both changed and broken
-  // and you need to see both.
-  const change = git ? `<span class="g ${git}"></span>` : `<span class="g"></span>`;
-  const gutter = `<span class="n">${number + 1}</span>${change}${sign}`;
-
-  const chars = [...text];
-  const severity = markUp(chars, number);
-
-  // Spans are character columns, already merged and non-overlapping by the
-  // time they arrive, so this only has to expand them.
-  const scope = new Array(chars.length).fill(null);
-  for (const span of highlights ?? []) {
-    for (let i = span.start; i < Math.min(span.end, chars.length); i++) {
-      scope[i] = span.scope;
-    }
-  }
-
-  // Search hits, expanded the same way. `null` when nothing is being
-  // searched for, so the merge below has nothing to compare and no cost.
-  let hit = null;
-  if (hits?.length) {
-    hit = new Array(chars.length).fill(false);
-    for (const h of hits) {
-      for (let i = h.start; i < Math.min(h.end, chars.length); i++) hit[i] = true;
-    }
-  }
-
-  const range = selectedOn(number, chars.length);
-  const picked = range && new Array(chars.length).fill(false);
-  if (range) {
-    for (let i = range[0]; i < range[1]; i++) picked[i] = true;
-  }
-  // A selected empty line has nothing to paint, so the row says so instead.
-  const empty = range && chars.length === 0 ? " selected" : "";
-
-  // The text goes inside one element, not straight into the row.
-  //
-  // The row is a flex container so the gutter columns line up, and a flex
-  // container **drops text nodes that are only whitespace** — they never
-  // become anonymous flex items. Highlighting cuts a line into a span per
-  // token with bare spaces between them, so `from typing import List` laid
-  // out as flex items reads `fromtypingimportList`. One element around the
-  // whole line makes its interior ordinary inline flow again.
-  if (cursorColumn === undefined) {
-    const body = runsHtml(chars, scope, severity, picked, hit, 0, chars.length);
-    return `<div class="ln${empty}">${gutter}<span class="tx">${body}</span></div>`;
-  }
-  // The caret sits *on* a character in normal mode, so it takes the one it
-  // covers with it rather than being drawn between two.
-  const under = escapeHtml(chars[cursorColumn] ?? " ") || " ";
-  return (
-    `<div class="ln cur${empty}">${gutter}<span class="tx">` +
-    `${runsHtml(chars, scope, severity, picked, hit, 0, cursorColumn)}` +
-    `<span class="caret">${under}</span>` +
-    `${runsHtml(chars, scope, severity, picked, hit, cursorColumn + 1, chars.length)}` +
-    `</span></div>`
-  );
-}
-
 /* ── scrolling ────────────────────────────────────────────────────────
    The core sends one screen of lines, so the pane cannot simply scroll —
    there is nothing below the last line to scroll into. Instead the document
@@ -1193,22 +870,22 @@ function lineHtml(number, text, cursorColumn, highlights, hits, git, stop) {
 let lineHeight = 20;
 
 function measureLineHeight() {
-  const line = $("[data-editor] .ln");
+  const line = $(".workspace.on [data-editor] .ln");
   const measured = line?.getBoundingClientRect().height;
   if (measured > 0) lineHeight = measured;
   else {
-    const target = $("[data-editor]");
+    const target = $(".workspace.on [data-editor]");
     if (target) lineHeight = parseFloat(getComputedStyle(target).lineHeight) || 20;
   }
   return lineHeight;
 }
 
-function renderEditor(index = view.focused) {
+function paintEditor(index) {
   const target = $(`[data-editor][data-view="${index}"]`);
   if (!target) return;
-  // The ambient the drawing functions read. Set for the length of this call
-  // and never left pointing at a pane nobody is drawing.
-  drawing = paneState(index);
+  editorPainted(paneState(index).lines.length);
+  editorFeedback.empty(index, bufferBar.names[bufferBar.panes[index] ?? bufferBar.active]?.name, paneState(index).lines);
+  const drawing = paneState(index);
   // Measured before building, because the spacer's height depends on it. With
   // no line rendered yet this falls back to the pane's computed line-height,
   // which is the same number.
@@ -1224,6 +901,7 @@ function renderEditor(index = view.focused) {
       drawing.matches[i],
       drawing.git[i],
       drawing.stops.get(drawing.firstLine + i),
+      {pane: drawing, vim: view.vim, diagnostics: marks.byLine},
     ),
   );
 
@@ -1350,17 +1028,15 @@ document.addEventListener("mousedown", (e) => {
 
   // The core clamps: a click past the end of a short line is the ordinary
   // case, and the front end does not hold the document to check against.
-  const place = () => dispatch({ type: "placeCursor", ...at });
+  const place = { type: "placeCursor", ...at };
 
   // Clicking into a different split focuses it *first*. `PlaceCursor` moves
   // the focused view's cursor, so the other order would put the cursor in the
   // pane you just left.
   const index = viewOf(e.target);
-  if (index !== view.focused) {
-    dispatch({ type: "focusSplit", index }).then(place);
-  } else {
-    place();
-  }
+  // Always focus: a previously queued click may not have painted yet, so the
+  // locally rendered focus is not a safe way to omit this command.
+  dispatchMany([{ type: "focusSplit", index }, place]);
 });
 
 document.addEventListener("mousemove", (e) => {
@@ -1389,6 +1065,13 @@ document.addEventListener("mouseup", () => {
  * says which of them each pane has. Kept here so either can arrive first and
  * redraw with what the other last said. */
 const bufferBar = { names: [], active: 0, panes: [] };
+const bufferTabs = createBufferTabs(document, dispatchMany, fileIcon);
+const editorFeedback = createEditorFeedback(document);
+onCommand(editorFeedback.command);
+onCommand((command, active) => {
+  if (active && changesContext(command)) renderStatus("");
+  if (!active && changesContext(command)) requestAnimationFrame(reportEveryViewport);
+});
 
 function renderBuffers(names, active) {
   bufferBar.names = names;
@@ -1408,31 +1091,9 @@ function renderBuffers(names, active) {
  * showing a file it is not highlighting is a pane disagreeing with itself.
  */
 function renderBufferBars() {
-  $$("[data-buffers]").forEach((target) => {
+  $$("[data-buffers]").forEach(target => {
     const index = viewOf(target);
-    // The pane's own buffer when the layout has said, the editor's active one
-    // until it has — which is the case with a single pane and no splits.
-    const mine = bufferBar.panes[index] ?? bufferBar.active;
-    target.innerHTML = bufferBar.names
-      .map(
-        (b, i) =>
-          `<span class="buf${i === mine ? " on" : ""}" data-buffer="${i}">` +
-          `${fileIcon(b.name)} ${escapeHtml(b.name)}` +
-          // The unsaved dot and the close button share a slot, as they do in
-          // every tab bar: two glyphs competing for the same corner reads as
-          // clutter, and hovering is exactly when you stop needing the dot.
-          `${b.modified ? '<span class="mod"></span>' : ""}` +
-          `<span class="x" data-buffer-close="${i}" title="Close ${escapeHtml(b.name)}">` +
-          `<svg class="i"><use href="#i-close"/></svg></span></span>`,
-      )
-      .join("");
-
-    // The strip scrolls rather than wrapping, so the tab you just switched to
-    // has to be brought into view — otherwise `:bn` past the edge looks like
-    // it did nothing. Only the focused pane, or three of them fight over it.
-    if (index === view.focused) {
-      target.querySelector(".buf.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
-    }
+    bufferTabs.render(target, bufferBar.names, bufferBar.panes[index] ?? bufferBar.active, index);
   });
 }
 
@@ -1442,44 +1103,8 @@ function renderBufferBars() {
    it does not read a directory or decide what to hide, because then the
    tree and `␣ff` could disagree about what is in the project. */
 
-function renderTree(rows) {
-  // Every mode with an explorer, not just the one on screen: they draw the
-  // same tree from the same event, and a mode that only rendered while
-  // visible would come up empty on the first switch into it.
-  const targets = $$("[data-tree]");
-  if (!targets.length) return;
-
-  const html = rows
-    .map((row) => {
-      // Indentation is inline rather than a class per level, because a class
-      // per level puts a ceiling on how deep a project may be nested.
-      const pad = `padding-left:${8 + row.depth * 13}px`;
-
-      if (row.truncated) {
-        return `<div class="row more" style="${pad}">${escapeHtml(row.name)}</div>`;
-      }
-      if (row.dir) {
-        return (
-          `<div class="row dir${row.expanded ? " open" : ""}" style="${pad}"` +
-          ` data-tree-dir="${escapeHtml(row.path)}">` +
-          `<span class="ic"><svg class="i chev"><use href="#i-chev"/></svg></span>` +
-          `<svg class="i ft-folder"><use href="#i-${row.expanded ? "folder-open" : "folder"}"/></svg>` +
-          ` ${escapeHtml(row.name)}</div>`
-        );
-      }
-      return (
-        `<div class="row${row.active ? " sel" : ""}" style="${pad}"` +
-        ` data-path="${escapeHtml(row.path)}">` +
-        `<span class="ic">${fileIcon(row.name)}</span>${escapeHtml(row.name)}</div>`
-      );
-    })
-    .join("");
-
-  for (const target of targets) {
-    target.innerHTML = html;
-    target.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
-  }
-}
+const fileTree = createFileTree(document, dispatch, fileIcon);
+function renderTree(rows) { fileTree.render(rows); }
 
 /* ── the terminal ─────────────────────────────────────────────────────
    The core owns the pseudo-terminal and the screen it paints. This draws
@@ -1745,6 +1370,7 @@ document.addEventListener(
 // handler yields to editable elements now, so this is the only thing that can
 // hand the keyboard back to the modal engine.
 document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented) return;
   const src = e.target.closest?.("[data-src]");
   if (!src) return;
   const index = Number(src.dataset.src);
@@ -2064,7 +1690,7 @@ function renderMediaBin(event) {
   if (!media.length) {
     box.innerHTML = `<div class="empty">${escapeHtml(
       event.problem || "No edit decision list in this project.",
-    )}</div>`;
+    )}${openFileAction("Open edit decision list", ".edl")}</div>`;
     return;
   }
   box.innerHTML = media
@@ -2171,7 +1797,7 @@ function renderCutSource(event) {
   if (!event.path) {
     box.innerHTML = `<div class="empty">${escapeHtml(
       event.problem || "No edit decision list in this project.",
-    )}</div>`;
+    )}${openFileAction("Open edit decision list", ".edl")}</div>`;
     return;
   }
   box.innerHTML =
@@ -2342,7 +1968,7 @@ function renderHierarchy(event) {
   if (!nodes.length) {
     box.innerHTML = `<div class="empty">${escapeHtml(
       event.problem || "No Godot scene in this project.",
-    )}</div>`;
+    )}${openFileAction("Open scene", ".tscn")}</div>`;
     return;
   }
 
@@ -2405,7 +2031,7 @@ function renderLevelSource(event) {
   if (!event.path) {
     box.innerHTML = `<div class="empty">${escapeHtml(
       event.problem || "No Godot scene in this project.",
-    )}</div>`;
+    )}${openFileAction("Open scene", ".tscn")}</div>`;
     return;
   }
   box.innerHTML =
@@ -2841,7 +2467,7 @@ function renderOutliner(event) {
   if (!nodes.length) {
     box.innerHTML = `<div class="empty">${escapeHtml(
       event.problem || "No scene in this project.",
-    )}</div>`;
+    )}${openFileAction("Open scene", ".proton.json")}</div>`;
     return;
   }
 
@@ -3305,8 +2931,8 @@ function renderArtboard(event) {
 
   if (!event.tokens.length) {
     board.innerHTML = `<div class="empty">${escapeHtml(
-      event.problem || "No theme to render.",
-    )}</div>`;
+      event.problem || "Open a stylesheet to preview its colors and components.",
+    )}${openFileAction("Open stylesheet", ".css")}</div>`;
     board.removeAttribute("style");
     artboardPainted = null;
     return;
@@ -3554,7 +3180,7 @@ function renderTableDock(event) {
 function paintCells(box, event) {
   const view = Number(box.dataset.view ?? 0);
   if (!event.cells.length) {
-    box.innerHTML = `<div class="empty">Open a .ipynb to start</div>`;
+    box.innerHTML = `<div class="empty">Open a notebook to start.${openFileAction("Open notebook", ".ipynb")}</div>`;
     notebookPainted.delete(view);
     return;
   }
@@ -3615,6 +3241,10 @@ function paintCells(box, event) {
 const GIT_STATE = { M: "modified", A: "added", D: "deleted", "?": "untracked" };
 
 function renderRepo(event) {
+  const status = $("#sl-git");
+  status.hidden = !event.branch && !event.files.length;
+  status.textContent = [event.branch, event.files.length ? `${event.files.length} changed` : ""]
+    .filter(Boolean).join(" · ");
   const branch = $("[data-git-branch]");
   if (branch) {
     // No branch is three ordinary situations — no repository, a detached
@@ -4096,6 +3726,9 @@ function initials(name) {
 }
 
 function renderWorkspaces(items, active) {
+  const current = items[active];
+  $("#sl-project").textContent = current?.name ?? "No workspace";
+  $("#sl-project").title = current?.path ?? "";
   const rail = $("[data-workspaces]");
   if (!rail) return;
   rail.innerHTML = items
@@ -4124,8 +3757,8 @@ function renderWorkspaces(items, active) {
 const OVERSCAN = 4;
 
 function reportViewport(index = view.focused) {
-  const target = $(`[data-editor][data-view="${index}"]`);
-  if (!target) return;
+  const target = $(`.workspace.on [data-editor][data-view="${index}"]`);
+  if (!target || target.clientHeight <= 0) return;
   const first = Math.max(0, Math.floor(target.scrollTop / lineHeight));
   const rows = Math.max(1, Math.ceil(target.clientHeight / lineHeight) + OVERSCAN);
   dispatch({ type: "viewport", view: index, firstLine: first, lines: rows });
@@ -4133,8 +3766,10 @@ function reportViewport(index = view.focused) {
 
 /** Every pane has its own height, and the core has to be told all of them. */
 function reportEveryViewport() {
-  $$("[data-editor]").forEach((pane) => reportViewport(Number(pane.dataset.view)));
+  $$(".workspace.on [data-editor]").forEach((pane) => reportViewport(Number(pane.dataset.view)));
 }
+
+const viewportObserver = new ResizeObserver(() => reportEveryViewport());
 
 // Scroll events arrive far faster than frames, and every one of them would
 // otherwise be a round trip to the core. One per frame is enough to keep up
@@ -4165,20 +3800,24 @@ document.addEventListener(
 );
 
 document.addEventListener("click", (e) => {
+  const history = e.target.closest("[data-history]");
+  if (history && activeMode === "codex") {
+    const index = Number(history.closest("[data-view]").dataset.view);
+    dispatchMany([{ type: "focusSplit", index }, historyCommand(history.dataset.history === "redo")]);
+    return;
+  }
   const pick = e.target.closest("[data-pick]");
   if (pick) {
     // Select then accept: the click says which row, and Enter means the same
     // thing however the row got chosen.
-    dispatch({ type: "selectPick", index: Number(pick.dataset.pick) })
-      .then(() => sendKey({ key: "Enter" }));
+    dispatchMany([{ type: "selectPick", index: Number(pick.dataset.pick) }, keyCommand({key: "Enter"})]);
     return;
   }
   const candidate = e.target.closest("[data-complete]");
   if (candidate) {
     // Select then accept, exactly as the picker does: the click says which
     // row, and accepting means the same thing however the row got chosen.
-    dispatch({ type: "selectCompletion", index: Number(candidate.dataset.complete) })
-      .then(() => dispatch({ type: "acceptCompletion" }));
+    dispatchMany([{ type: "selectCompletion", index: Number(candidate.dataset.complete) }, { type: "acceptCompletion" }]);
     return;
   }
   // Closing is checked before focusing: the × sits inside the tile, so a
@@ -4201,24 +3840,6 @@ document.addEventListener("click", (e) => {
 
   // Checked before focusing, because the × sits inside the tab and a click on
   // it matches both — only one of them is what was meant.
-  const shutBuffer = e.target.closest("[data-buffer-close]");
-  if (shutBuffer) {
-    e.stopPropagation();
-    dispatch({
-      type: "closeBuffer",
-      index: Number(shutBuffer.dataset.bufferClose),
-      // Never forced from a click. Losing unsaved work must cost a deliberate
-      // `:q!`, not a mis-aimed pointer.
-      force: false,
-    });
-    return;
-  }
-
-  const folder = e.target.closest("[data-tree-dir]");
-  if (folder) {
-    dispatch({ type: "toggleTreeNode", path: folder.dataset.treeDir });
-    return;
-  }
   if (e.target.closest("[data-reveal]")) {
     dispatch({ type: "revealInTree" });
     return;
@@ -4226,8 +3847,7 @@ document.addEventListener("click", (e) => {
 
   const row = e.target.closest("[data-path]");
   if (row) dispatch({ type: "openBuffer", path: row.dataset.path });
-  const tab = e.target.closest("[data-buffer]");
-  if (tab) dispatch({ type: "focusBuffer", index: Number(tab.dataset.buffer) });
+
 });
 
 /* ── telescope ────────────────────────────────────────────────────────
@@ -4237,6 +3857,11 @@ document.addEventListener("click", (e) => {
    disagree with the score that produced the ordering. */
 
 let pickerOpen = false;
+let pickerKind = "files";
+
+$("[data-picker-query]").addEventListener("input", (e) => {
+  if (pickerOpen) dispatch({ type: "pickerQuery", text: e.target.value });
+});
 
 function highlight(label, positions) {
   if (!positions?.length) return escapeHtml(label);
@@ -4248,9 +3873,12 @@ function highlight(label, positions) {
 
 function renderPicker(event) {
   pickerOpen = true;
+  pickerKind = event.kind;
   show("telescope");
 
-  $("[data-picker-query]").textContent = event.query;
+  const query = $("[data-picker-query]");
+  query.setAttribute("aria-label", event.kind === "workspaces" ? "Search folders" : "Search");
+  if (query.value !== event.query) query.value = event.query;
   $("[data-picker-title]").textContent = event.title;
   // An empty list while the tree is still being walked means "not yet", not
   // "no matches". Saying so is the difference between waiting a beat and
@@ -4305,6 +3933,8 @@ function renderPicker(event) {
       );
     })
     .join("");
+  if (!event.items.length) results.innerHTML = `<div class="empty">${event.scanning
+    ? "Reading files…" : "No matches. Try a different search."}</div>`;
 
   results.querySelector(".res.on")?.scrollIntoView({ block: "nearest" });
   previewPassage(event);
@@ -4319,15 +3949,14 @@ function previewPassage(event) {
   const pane = $("#telescope .preview");
   if (!pane) return;
   if (event.kind !== "library") {
-    // Put back whatever was there, so opening the library picker does not
-    // permanently replace the pane for every other one.
-    if (pane.dataset.was !== undefined) {
-      pane.innerHTML = pane.dataset.was;
-      delete pane.dataset.was;
-    }
+    const item = event.items[event.selected];
+    pane.innerHTML = item
+      ? `<div class="pv-cite">${escapeHtml(item.label)}</div>` +
+        `<div class="pv-passage">${escapeHtml(item.detail || item.path || "")}</div>` +
+        `<div class="pv-empty">Enter to open · ↑ ↓ to choose · Esc to close</div>`
+      : `<div class="pv-empty">${event.scanning ? "Reading files…" : "No item selected"}</div>`;
     return;
   }
-  if (pane.dataset.was === undefined) pane.dataset.was = pane.innerHTML;
 
   const item = event.items[event.selected];
   if (!item) {
@@ -4549,7 +4178,21 @@ function renderStatus(text, level = "info") {
   el.classList.toggle("err", level === "error");
 }
 
-onEvent((event) => {
+onEvents((events) => {
+  editorPaints.begin();
+  try { events.forEach(renderEvent); }
+  finally {
+    editorPaints.flush();
+    if (restorePaneFocus && !overlays.active) {
+      const target = splits()?.querySelector(`.split.on [data-editor], .split.on [data-cells]`);
+      target?.focus();
+    }
+    restorePaneFocus = false;
+  }
+});
+
+/** @param {import('./protocol').WireEvent} event */
+function renderEvent(event) {
   switch (event.type) {
     case "state":
       renderMode(event.mode);
@@ -4624,26 +4267,10 @@ onEvent((event) => {
       renderStatus(`insert ${JSON.stringify(event.text)}`);
       break;
 
-    case "viewport": {
-      const pane = paneState(event.view);
-      pane.firstLine = event.firstLine;
-      pane.lines = event.lines;
-      pane.totalLines = event.totalLines;
-      pane.highlights = event.highlights ?? [];
-      pane.matches = event.matches ?? [];
-      pane.git = event.git ?? [];
-      pane.stops = new Map((event.stops ?? []).map((s) => [s.line, s]));
-      renderEditor(event.view);
-      break;
-    }
-
+    case "viewport":
     case "cursor": {
-      const pane = paneState(event.view);
-      pane.cursor = { line: event.line, column: event.column };
-      pane.selection = event.selection;
+      editorState.update(event);
       renderEditor(event.view);
-      // The statusline speaks for the split you are in, not whichever one
-      // happened to redraw.
       if (event.view === view.focused) renderPosition();
       break;
     }
@@ -4657,6 +4284,9 @@ onEvent((event) => {
       const active = event.names[event.active];
       const path = $("#sl-path");
       if (path && active) path.textContent = active.path ?? active.name;
+      if (path) path.title = active?.path ?? "";
+      const extension = active?.name.match(/\.([^.]+)$/)?.[1];
+      $("#sl-filetype").textContent = extension ?? "";
       break;
     }
 
@@ -4825,15 +4455,18 @@ onEvent((event) => {
       break;
 
     case "notice":
+      editorFeedback.notice(event);
       renderStatus(event.text, event.level);
       break;
   }
-});
+}
 
 function renderPosition() {
   const el = $("#sl-position");
   const at = focusedPane().cursor;
   if (el) el.textContent = `ln ${at.line + 1}, col ${at.column + 1}`;
+  const total = focusedPane().totalLines;
+  $("#sl-progress").textContent = total ? `${Math.min(100, Math.round((at.line + 1) / total * 100))}%` : "";
 }
 
 /* ── keys ─────────────────────────────────────────────────────────────
@@ -4842,6 +4475,41 @@ function renderPosition() {
    keystroke the core interprets — including the digits, which are vim
    counts, not mode switches. */
 document.addEventListener("keydown", (e) => {
+  // Modal controls own input before either the terminal or the Vim engine.
+  if (e.defaultPrevented) return;
+  if (overlays.active === "settings") {
+    if (e.key === "Escape" || (e.metaKey && e.key === ",")) {
+      e.preventDefault();
+      dismissOverlay();
+    } else overlays.tab(e);
+    return;
+  }
+  if (pickerOpen) {
+    if (e.key === "Tab" && pickerKind === "workspaces") {
+      e.preventDefault();
+      sendKey(e);
+      return;
+    }
+    if (overlays.tab(e)) return;
+    if (e.key === "Escape" || (e.metaKey && e.key.toLowerCase() === "k")) {
+      e.preventDefault();
+      dismissOverlay();
+    } else if (e.metaKey && e.key === ",") {
+      e.preventDefault();
+      open("settings");
+    } else if (e.target?.matches?.("[data-picker-query]") &&
+      !["Enter", "ArrowUp", "ArrowDown"].includes(e.key) &&
+      !(e.ctrlKey && ["n", "p"].includes(e.key))) {
+      // Native text editing supplies the entire query, including paste/IME.
+      return;
+    } else if (!e.metaKey) {
+      e.preventDefault();
+      sendKey(e);
+    }
+    return;
+  }
+  if (e.target?.closest?.("[data-tree]") && !e.metaKey && !e.ctrlKey) return;
+  if (e.target?.matches?.("[data-resize]") && !e.metaKey && !e.ctrlKey) return;
   // The terminal takes the whole keyboard while it has the focus, exactly as
   // the picker does — `d` types a `d` at the shell rather than starting an
   // operator, and `⌃c` interrupts a program rather than doing nothing.
@@ -4872,22 +4540,25 @@ document.addEventListener("keydown", (e) => {
     }
   }
 
-  const meta = e.metaKey || e.ctrlKey;
-
-  if (meta && /^[1-7]$/.test(e.key)) {
+  // ⌃1-7 and ⌘K/⌘, are deliberately two different modifiers, not
+  // interchangeable ones — aliasing them here used to let ⌃K and ⌃,
+  // trigger the shell chords too, which stole them from the modal engine
+  // below (⌃-prefixed commands are exactly what a Vim keymap is made of,
+  // and on macOS ⌃K in particular already means "kill to end of line"
+  // everywhere else on the system).
+  if (e.ctrlKey && /^[1-7]$/.test(e.key)) {
     e.preventDefault();
     coreSetMode(MODES[Number(e.key) - 1]);
     return;
   }
 
-  if (meta && e.key.toLowerCase() === "k") {
+  if (e.metaKey && e.key.toLowerCase() === "k") {
     e.preventDefault();
-    if (HAS_SHELL) dispatch({ type: "openPicker", kind: "files" });
-    else open("telescope"); // browser preview has no file system
+    open("telescope");
     return;
   }
 
-  if (meta && e.key === ",") {
+  if (e.metaKey && e.key === ",") {
     e.preventDefault();
     open("settings");
     return;
@@ -4907,15 +4578,10 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  if (meta) return; // leave the rest of the browser/OS chords alone
+  if (activeMode === "codex" && !terminalFocused && !overlays.active && !documentIsOpen()
+      && historyShortcut(e, dispatch, /Mac/.test(navigator.platform))) return;
 
-  // The picker owns the keyboard while it is open: every key goes to the core
-  // and none of the page-level bindings fire.
-  if (pickerOpen) {
-    e.preventDefault();
-    sendKey(e);
-    return;
-  }
+  if (e.metaKey) return; // leave the rest of the browser/OS chords alone
 
   // Somewhere you can actually type keeps its own keys.
   //
@@ -4932,6 +4598,8 @@ document.addEventListener("keydown", (e) => {
     "input, textarea, select, [contenteditable]:not([contenteditable=false])",
   );
   if (typing) return;
+  // Native buttons retain Tab, Space and Enter even in normal mode.
+  if (["Tab", "Enter", " "].includes(e.key) && e.target?.closest?.("button, a[href], [role=tab]")) return;
 
   // The popup does not own the keyboard — you are still in insert mode — but
   // the few keys it does claim must not also do what the browser thinks they
@@ -4949,6 +4617,8 @@ document.addEventListener("keydown", (e) => {
   // The hover panel is not an overlay and Escape in normal mode resolves to
   // nothing, so the core would never hear that it should go away.
   if (e.key === "Escape" && hoverOpen) dispatch({ type: "closeHover" });
+
+  if (e.key === "Tab") return;
 
   // Nothing that moves the cursor may also move the page.
   //
@@ -5105,6 +4775,8 @@ $(".hint-toggle")?.addEventListener("click", () =>
 
 /* ── boot ─────────────────────────────────────────────────────────────── */
 
+// Cached appearance is only an initial paint, never a project-settings write.
+applying = true;
 try {
   const theme = localStorage.getItem("proton.theme");
   if (theme) setTheme(theme);
@@ -5113,6 +4785,8 @@ try {
 } catch {
   /* nothing stored, or storage is blocked — the defaults stand */
   setTranslucency("medium");
+} finally {
+  applying = false;
 }
 
 wireWindowChrome();
@@ -5121,6 +4795,14 @@ document.documentElement.classList.toggle("shell", HAS_SHELL);
    for. Windows turns Mica off under battery saver or with transparency effects
    disabled, and the setting has to be honest when that happens. */
 function renderBackdrop(applied, wanted) {
+  const mac = /Mac/.test(navigator.platform);
+  $$("[data-backdrop-set]").forEach((button) => {
+    const kind = button.dataset.backdropSet;
+    button.hidden = kind !== "solid" && (mac ? kind !== "vibrancy" : kind === "vibrancy");
+  });
+  $("[data-backdrop-description]").textContent = mac
+    ? "Vibrancy softly blurs the desktop behind your window. Solid uses an opaque background."
+    : "Choose a desktop-tinted background or Solid for an opaque window.";
   $$("[data-backdrop-set]").forEach((b) =>
     b.classList.toggle("on", b.dataset.backdropSet === applied),
   );
@@ -5129,8 +4811,7 @@ function renderBackdrop(applied, wanted) {
   if (!HAS_SHELL) {
     note.textContent = "Browser preview — the page paints its own ground here.";
   } else if (wanted && wanted !== applied) {
-    note.textContent = `${wanted} is unavailable — Windows is compositing "${applied}" instead. `
-      + "Check Settings › Personalisation › Colours › Transparency effects.";
+    note.textContent = `${wanted} is unavailable. Using ${applied}.`;
   } else {
     note.textContent = "";
   }
@@ -5151,27 +4832,26 @@ applyBackdrop().then((applied) => {
 sync();
 drawPointerEdges();
 
-// The stage measures itself, tells the core how many lines it can show, and
-// opens a real file — M1's exit criterion is Proton editing its own source.
+// The shell keeps its restored buffers. Only the browser preview opens a fixture.
 //
 // Not inside requestAnimationFrame: rAF does not fire while the window is
 // hidden, so booting there means an app started minimised never loads
 // anything and shows an empty editor when you finally look at it.
 function boot() {
-  reportViewport();
-  dispatch({ type: "openBuffer", path: "crates/proton-core/src/vim.rs" });
+  reportEveryViewport();
+  if (!HAS_SHELL) dispatch({ type: "openBuffer", path: "crates/proton-core/src/vim.rs" });
 }
 
 if (document.readyState === "complete") boot();
 else window.addEventListener("load", boot, { once: true });
 
-new ResizeObserver(reportViewport).observe(document.body);
+viewportObserver.observe(document.body);
 
 // Exposed for the browser preview's console and for driving screenshots.
 // Splitting is a command now, not a function here — `dispatch` covers it.
 Object.assign(window, {
   setTheme, setTranslucency, setMode: coreSetMode, setDock, open, closeAll,
-  dispatch, drawPointerEdges, setHint, enterCell,
+  dispatch, drawPointerEdges, setHint, enterCell, protonPerformance: performanceReview,
 });
 
 /* ── the council ───────────────────────────────────
@@ -5406,6 +5086,9 @@ function pluginRowHtml(plugin) {
 const RING = { running: "run", queued: "", ready: "done", failed: "fail" };
 
 function renderTasks(event) {
+  const badge = $("[data-task-badge]");
+  badge.textContent = String(event.tasks.length);
+  badge.hidden = !event.tasks.length;
   const box = $("[data-tasks]");
   if (!box) return;
 
@@ -5534,6 +5217,7 @@ document.addEventListener("click", (e) => {
    typed name for anything else. The one in use is always shown even when it
    is not on this list. */
 const MODELS = {
+  codex: ["gpt-6-astra"],
   claude: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"],
   // Aliases first, then the pinned ids they currently resolve to. Every
   // one of these was checked against `:streamGenerateContent` — the list
@@ -5655,7 +5339,7 @@ function renderAgent(event) {
   // question, and a transcript you cannot attribute is one you cannot reason
   // about a week later.
   for (const who of $$("[data-agent-provider]")) {
-    who.textContent = event.provider === "gemini" ? "Gemini" : "Claude";
+    who.textContent = {claude: "Claude", gemini: "Gemini", codex: "Codex"}[event.provider] ?? event.provider;
     who.title = `${event.model} — change it in Settings > AI & models`;
     who.className = "chip" + (event.provider === "gemini" ? " ok" : " accent");
   }

@@ -21,6 +21,8 @@ use crate::wire::{Message, StopReason, Usage, VERSION};
 /// What a running turn reports back.
 #[derive(Debug, Clone)]
 pub enum Reply {
+    /// Completed tool exchanges from a locally hosted agent turn.
+    History(Vec<Message>),
     /// The request is on its way. Carries where the credential came from, so
     /// the statusline can say `api key` or `signed in`.
     Started { source: Source },
@@ -42,9 +44,10 @@ pub enum Reply {
 
 /// A turn in flight.
 pub struct Turn {
-    replies: Receiver<Reply>,
-    stop: Arc<AtomicBool>,
-    done: bool,
+    pub(crate) replies: Receiver<Reply>,
+    pub(crate) stop: Arc<AtomicBool>,
+    pub(crate) done: bool,
+    pub(crate) tool_answers: Option<mpsc::Sender<(String, Result<String, String>)>>,
 }
 
 impl std::fmt::Debug for Turn {
@@ -54,6 +57,17 @@ impl std::fmt::Debug for Turn {
 }
 
 impl Turn {
+    pub fn hosts_tools(&self) -> bool {
+        self.tool_answers.is_some()
+    }
+
+    pub fn answer_tool(&self, id: &str, result: Result<String, String>) -> Result<(), String> {
+        self.tool_answers
+            .as_ref()
+            .ok_or("this turn does not host tools")?
+            .send((id.to_string(), result))
+            .map_err(|_| "Codex disconnected before the tool answered".into())
+    }
     /// Take whatever has arrived. Never blocks.
     pub fn poll(&mut self) -> Vec<Reply> {
         let mut out = Vec::new();
@@ -110,11 +124,15 @@ impl Drop for Turn {
 /// worker, so the caller finds out before anything is drawn as in-flight.
 pub fn send(request: Request) -> Result<Turn, String> {
     let provider = request.profile.provider;
+    if provider == Provider::Codex {
+        return crate::codex::send(request);
+    }
     let found = auth::resolve_for(provider)?;
     let url = provider.url(&request.profile.model);
     let body = match provider {
         Provider::Claude => request.body(),
         Provider::Gemini => crate::gemini::body(&request),
+        Provider::Codex => unreachable!("Codex uses the local app-server"),
     };
 
     let (tx, replies) = mpsc::channel();
@@ -135,6 +153,7 @@ pub fn send(request: Request) -> Result<Turn, String> {
         replies,
         stop,
         done: false,
+        tool_answers: None,
     })
 }
 
@@ -469,6 +488,7 @@ mod tests {
             replies,
             stop: Arc::new(AtomicBool::new(false)),
             done: false,
+            tool_answers: None,
         };
         // A worker that vanishes must not leave a spinner up forever.
         assert!(matches!(turn.poll().as_slice(), [Reply::Failed { .. }]));

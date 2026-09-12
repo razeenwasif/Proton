@@ -3,7 +3,7 @@
 
 use proton_core::bus::Event;
 use proton_core::picker::PickerKind;
-use proton_core::{Command, Key, Workspace};
+use proton_core::{Command, Key, ModeId, Workspace};
 
 fn workspace() -> Workspace {
     // The tests run from the crate directory; the project root is two up.
@@ -102,11 +102,57 @@ fn accepting_opens_the_file() {
 
     assert!(events.iter().any(|e| matches!(e, Event::PickerClosed)));
     assert_eq!(ws.editor().buffer().name(), "vim.rs");
+    assert!(events.iter().any(|event| matches!(event, Event::Splits { views, focused, .. }
+        if views[*focused].buffer == ws.editor().active())), "the visible pane must follow the chosen buffer");
+    assert!(events.iter().any(|event| matches!(event, Event::Viewport { lines, .. }
+        if lines.iter().any(|line| line.contains("modal input engine")))), "the chosen file must paint immediately");
     assert!(ws
         .editor()
         .buffer()
         .contents()
         .contains("modal input engine"));
+}
+
+#[test]
+fn accepting_a_notebook_loads_cells_in_data_mode() {
+    let root = std::env::temp_dir().join(format!("proton-picker-notebook-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("review.ipynb"), r#"{
+        "cells": [{"cell_type":"code","execution_count":null,"metadata":{},"outputs":[],"source":["answer = 42"]}],
+        "metadata":{},"nbformat":4,"nbformat_minor":4
+    }"#).unwrap();
+    let mut ws = Workspace::rooted(&root);
+    opened(&mut ws, " ff");
+    ws.apply(Command::PickerQuery { text: "review.ipynb".into() });
+    let events = ws.apply(Command::Key { key: Key::named("Enter") });
+    assert_eq!(ws.mode(), ModeId::Data);
+    assert!(events.iter().any(|e| matches!(e, Event::Notebook { cells, .. } if cells.len() == 1)));
+    assert_eq!(ws.editor().buffer().name(), "[No Name]");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn design_file_search_loads_a_theme_but_grep_reveals_its_source() {
+    let root = std::env::temp_dir().join(format!("proton-picker-theme-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("palette.css"), ":root {\n  --review-accent: #123456;\n}\n").unwrap();
+    let mut ws = Workspace::rooted(&root);
+    ws.apply(Command::SetMode { mode: ModeId::Design });
+    opened(&mut ws, " ff");
+    ws.apply(Command::PickerQuery { text: "palette.css".into() });
+    let events = ws.apply(Command::Key { key: Key::named("Enter") });
+    assert_eq!(ws.mode(), ModeId::Design);
+    assert!(events.iter().any(|e| matches!(e, Event::Theme { path, .. } if path.ends_with("palette.css"))));
+    assert_eq!(ws.editor().buffer().name(), "[No Name]");
+
+    opened(&mut ws, " fg");
+    ws.apply(Command::PickerQuery { text: "review-accent".into() });
+    ws.apply(Command::Key { key: Key::named("Enter") });
+    assert_eq!(ws.mode(), ModeId::Codex);
+    assert_eq!(ws.editor().buffer().name(), "palette.css");
+    let buffer = ws.editor().buffer();
+    assert_eq!(buffer.position(buffer.cursor.offset).line, 1);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

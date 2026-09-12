@@ -351,6 +351,22 @@ fn cycling_wraps_in_both_directions() {
 /* ── the folder prompt ────────────────────────────────────────────── */
 
 #[test]
+fn a_native_input_query_updates_the_workspace_picker_and_tab_still_completes() {
+    let scratch = Scratch::new("input-query");
+    let mut session = Session::new(&scratch.root);
+    session.apply(Command::OpenWorkspacePicker);
+    let text = format!("{}/al", scratch.root.display());
+    let events = session.apply(Command::PickerQuery { text: text.clone() });
+    let (kind, names, _) = picker(&events).expect("folder query stays in the session");
+    assert_eq!(kind, PickerKind::Workspaces);
+    assert_eq!(names, ["alpha"]);
+    assert!(events.iter().any(|event| matches!(event, Event::Picker { query, .. } if query == &text)));
+    let completed = key(&mut session, "Tab");
+    assert!(completed.iter().any(|event| matches!(event, Event::Picker { query, .. }
+        if query.ends_with(std::path::MAIN_SEPARATOR) && query.contains("alpha"))));
+}
+
+#[test]
 fn the_leader_sequence_the_workspace_cannot_resolve_is_the_sessions() {
     // `␣fp` is assembled by the modal engine inside the active workspace,
     // which has no idea the session exists. The session takes the prefix back
@@ -621,6 +637,19 @@ fn a_project_that_has_since_been_deleted_is_skipped() {
     let session = Session::restore_from(Some(store), None, None);
     assert_eq!(session.workspaces().len(), 1);
     assert!(session.active().root().ends_with(dir_name(&scratch.root)));
+}
+
+#[test]
+fn removing_an_earlier_project_preserves_the_active_project_on_restore() {
+    let scratch = Scratch::new("active-after-delete");
+    let store = scratch.root.join("session.json");
+    let mut session = Session::new(scratch.at("alpha")).storing_in(&store);
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    session.apply(Command::OpenWorkspace { path: scratch.at("nested/alpha") });
+    session.apply(Command::FocusWorkspace { index: 1 });
+    std::fs::remove_dir_all(scratch.root.join("alpha")).unwrap();
+    let restored = Session::restore_from(Some(store), None, None);
+    assert_eq!(restored.active().root(), scratch.root.join("beta").canonicalize().unwrap());
 }
 
 #[test]

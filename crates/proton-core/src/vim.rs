@@ -427,6 +427,12 @@ impl Vim {
             return self.escape();
         }
 
+        if k.ctrl && k.key.eq_ignore_ascii_case("r") && self.mode == VimMode::Normal {
+            let count = self.pending.count.unwrap_or(1);
+            self.pending.clear();
+            return Outcome::Action(Action::new(Verb::Redo, Object::None, count));
+        }
+
         // `⌃w` is vim's window prefix: the next key names what to do with the
         // splits. Handled here rather than in `key_normal` because it is a
         // chord, and held in its own field rather than in `Pending` because it

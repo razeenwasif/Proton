@@ -14,5 +14,5 @@ tauri-build = { version = "2", features = [] }
 proton-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tauri = { version = "2", features = ["image-png"] }
+tauri = { version = "2", features = ["macos-private-api", "image-png"] }
 window-vibrancy = "0.8.0"

@@ -465,6 +465,7 @@ impl Agent {
 
         for reply in replies {
             match reply {
+                Reply::History(messages) => self.conversation.extend(messages),
                 Reply::Started { .. } => {}
 
                 Reply::Delta(Delta::Text(text)) => self.say(|e| e.text.push_str(&text)),
@@ -482,6 +483,9 @@ impl Agent {
                 }
 
                 Reply::Delta(Delta::ToolReady { id, name, input }) => {
+                    if self.turn.as_ref().is_some_and(Turn::hosts_tools) {
+                        self.activity = Activity::Working;
+                    }
                     let detail = summarise(&input);
                     let for_entry = (id.clone(), detail);
                     self.say(move |e| {
@@ -518,6 +522,9 @@ impl Agent {
                 }
 
                 Reply::Failed { text } => {
+                    to_run.clear();
+                    self.outstanding.clear();
+                    self.answers.clear();
                     self.activity = Activity::Idle;
                     self.say(move |e| {
                         e.streaming = false;
@@ -529,6 +536,9 @@ impl Agent {
                 }
 
                 Reply::Cancelled => {
+                    to_run.clear();
+                    self.outstanding.clear();
+                    self.answers.clear();
                     self.activity = Activity::Idle;
                     self.say(|e| e.streaming = false);
                 }
@@ -547,6 +557,11 @@ impl Agent {
     /// Nothing is sent until every outstanding call has an answer — see the
     /// note at the top of the file.
     pub fn answer(&mut self, id: &str, result: Result<String, String>) {
+        let hosted = self
+            .turn
+            .as_ref()
+            .filter(|turn| turn.hosts_tools())
+            .map(|turn| turn.answer_tool(id, result.clone()));
         let (body, failed) = match result {
             Ok(body) => (body, false),
             Err(message) => (message, true),
@@ -568,12 +583,22 @@ impl Agent {
         // A failed tool still answers. Dropping the block leaves a `tool_use`
         // with no result, which is a malformed conversation the API rejects —
         // the failure has to be reported *as* the result.
-        self.answers.push(if failed {
-            Block::error(id, body)
-        } else {
-            Block::result(id, body)
-        });
+        if hosted.is_none() {
+            self.answers.push(if failed {
+                Block::error(id, body)
+            } else {
+                Block::result(id, body)
+            });
+        }
         self.outstanding.retain(|p| p.id != id);
+        if let Some(sent) = hosted {
+            if let Err(why) = sent {
+                self.cancel();
+                self.say(|e| e.text.push_str(&format!("\n\n{why}")));
+            } else if self.outstanding.is_empty() {
+                self.activity = Activity::Thinking;
+            }
+        }
     }
 
     /// Every call answered? Then continue the turn.
@@ -749,6 +774,14 @@ impl Agent {
     /// itself — this string is drawn on screen and would end up in a
     /// screenshot.
     pub fn credential(&self) -> String {
+        if self.profile.provider == proton_agent::Provider::Codex {
+            return match proton_agent::codex::executable() {
+                Ok(_) => {
+                    "Uses your Codex sign-in; connection is verified when you send a message".into()
+                }
+                Err(why) => why,
+            };
+        }
         match proton_agent::auth::resolve_for(self.profile.provider) {
             Ok(found) => match found.source {
                 proton_agent::auth::Source::ApiKey => {
@@ -756,6 +789,7 @@ impl Agent {
                 }
                 proton_agent::auth::Source::AuthToken => "ANTHROPIC_AUTH_TOKEN is set".into(),
                 proton_agent::auth::Source::OauthProfile => "signed in with the Claude CLI".into(),
+                proton_agent::auth::Source::CodexLogin => "signed in with Codex".into(),
             },
             // The error already names what to set, which is the only thing
             // worth saying about a credential that is not there.

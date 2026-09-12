@@ -463,3 +463,15 @@ fn a_language_with_one_grammar_is_unaffected_by_the_second_pass() {
     assert!(!spans[0].is_empty());
     assert!(!scopes(&spans[0]).contains(&Scope::Heading));
 }
+#[test]
+fn an_exhausted_parse_budget_stays_plain_and_can_be_removed() {
+    let buffer = proton_text::Buffer::from_text(&"fn main() { let value = 42; }\n".repeat(2000));
+    let mut syntax = proton_syntax::Syntax::for_path(std::path::Path::new("budget.rs")).unwrap();
+    syntax.limit_parse_time(Some(std::time::Duration::ZERO));
+    assert!(syntax.spans(&buffer, 0, 10).is_empty());
+    assert!(syntax.is_limited());
+    assert!(syntax.spans(&buffer, 100, 10).is_empty());
+    syntax.limit_parse_time(None);
+    assert!(!syntax.is_limited());
+    assert_eq!(syntax.spans(&buffer, 0, 10).len(), 10);
+}

@@ -26,6 +26,7 @@ pub enum Source {
     ApiKey,
     AuthToken,
     OauthProfile,
+    CodexLogin,
 }
 
 impl std::fmt::Debug for Auth {
@@ -60,6 +61,9 @@ pub fn base_url() -> String {
 /// header of its own rather than as a bearer token.
 pub fn resolve_for(provider: crate::provider::Provider) -> Result<Found, String> {
     use crate::provider::Provider;
+    if provider == Provider::Codex {
+        return Err("Codex manages its own sign-in; use the Codex app or codex login".into());
+    }
     if provider == Provider::Claude {
         return resolve();
     }

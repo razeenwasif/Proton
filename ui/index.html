@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Proton — design preview</title>
+<title>Proton</title>
 <link rel="icon" href="../../brand/proton-icon.svg">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -47,6 +47,8 @@
     <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0013 0M12 18v3"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 4L4 9l5 5M4 9h10a6 6 0 010 12"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 4l5 5-5 5M20 9H10a6 6 0 000 12"/></symbol>
     <symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></symbol>
     <symbol id="i-desktop" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></symbol>
     <symbol id="i-tablet" viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M11 18.5h2"/></symbol>
@@ -196,20 +198,16 @@
       <div class="rail-drag" aria-hidden="true"></div>
 
       <div class="rail-actions">
-        <div class="avatars">
-          <span style="background:var(--accent)" title="Razeen — you">RW</span>
-          <span style="background:var(--info)" title="Ada — designer">AD</span>
-          <span style="background:var(--accent-2)" title="Proton Agent">AI</span>
-        </div>
-        <button class="rail-btn primary" title="Build">Build</button>
-        <button class="rail-btn" title="Share">Share</button>
+        <button class="rail-btn" disabled title="Build commands are not configured yet">Build</button>
+        <button class="rail-btn" disabled title="Sharing is not available yet">Share</button>
         <button class="rail-btn" data-open="settings" title="Settings"><svg class="i"><use href="#i-gear"/></svg></button>
       </div>
     </nav>
 
     <nav class="rail" aria-label="Panels">
       <button title="Chat  ␣aa" data-mode-go="chat"><svg class="i"><use href="#i-chat"/></svg></button>
-      <button class="on" title="Explorer  ␣e"><svg class="i"><use href="#i-files"/></svg></button>
+      <button class="on" data-panel-toggle="left" title="Hide sidebar" aria-label="Hide sidebar" aria-expanded="true"><svg class="i"><use href="#i-files"/></svg></button>
+      <button data-panel-toggle="right" title="Hide right panel" aria-label="Hide right panel" aria-expanded="true"><svg class="i"><use href="#i-sliders"/></svg></button>
       <button title="Telescope  ␣ff" data-open="telescope"><svg class="i"><use href="#i-search"/></svg></button>
       <button title="Git  ␣gg" data-dock="git"><svg class="i"><use href="#i-git"/></svg></button>
       <button title="Debug — ␣db sets a breakpoint, ␣dr runs" data-dock="debug"><svg class="i"><use href="#i-bug"/></svg></button>
@@ -286,7 +284,7 @@
         <header>Explorer <span class="grow"></span>
           <button class="hbtn" data-reveal title="Reveal the file you are in — ␣e"><svg class="i"><use href="#i-target"/></svg></button>
         </header>
-        <div class="find" data-open="telescope"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></div>
+        <button class="find" data-open="telescope"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></button>
         <!-- Rendered from Event::Tree. The core decides what is in it, what is
              open and where you are; this draws rows. -->
         <div class="scroll tree" data-tree></div>
@@ -321,7 +319,7 @@
       <aside class="pane" id="codex-dock">
         <div class="dock-tabs">
           <button class="dock-tab on"  data-dockpanel="agent">Agent</button>
-          <button class="dock-tab"     data-dockpanel="tasks">Tasks <span class="chip accent">2</span></button>
+          <button class="dock-tab"     data-dockpanel="tasks">Tasks <span class="chip accent" data-task-badge hidden></span></button>
           <button class="dock-tab"     data-dockpanel="debug">Debug</button>
           <button class="dock-tab"     data-dockpanel="visualizer">Visualizer</button>
           <button class="dock-tab"     data-dockpanel="device">Device</button>
@@ -331,32 +329,7 @@
 
         <!-- Agent -->
         <div class="dock-panel on" data-panel="agent" style="display:flex;flex-direction:column;flex:1;min-height:0">
-          <div class="scroll" data-agent-thread>
-            <div class="msg">
-              <div class="who"><svg class="i" width="12" height="12" style="color:var(--accent)"><use href="#i-proton"/></svg> You · scope <span class="chip">src/routes</span></div>
-              <p>The fleet grid janks at 40 satellites. Find it and fix it.</p>
-            </div>
-            <div class="msg">
-              <div class="who"><svg class="i" width="12" height="12" style="color:var(--accent-2)"><use href="#i-spark"/></svg> Proton · Opus 5 · thought 4s</div>
-              <div class="tool"><svg class="i"><use href="#i-search"/></svg> <b>telescope.grep</b> "sats.sort" <span class="t">6 hits</span></div>
-              <div class="tool"><svg class="i"><use href="#i-code"/></svg> <b>lsp.references</b> useTelemetry <span class="t">4 refs</span></div>
-              <div class="tool"><svg class="i ft-perf"><use href="#i-bolt"/></svg> <b>profile.react</b> Dashboard <span class="t">re-render 41×/s</span></div>
-              <p><code>ranked</code> is rebuilt on every tick, so all 40 <code>Sparkline</code>s remount. Memoise on <code>[sats, health]</code> and the grid stops re-laying out.</p>
-              <div class="diff">
-                <header>src/routes/dashboard.tsx · L9
-                  <span class="acts"><button>Refer</button><button class="go">Apply ⏎</button></span>
-                </header>
-                <pre><span class="c">  const health = useTelemetry(sats, …);</span><span class="m">- const ranked = [...sats].sort(byHealth);</span><span class="p">+ const ranked = useMemo(</span><span class="p">+   () =&gt; [...sats].sort(byHealth),</span><span class="p">+   [sats, health],</span><span class="p">+ );</span></pre>
-              </div>
-              <div class="diff">
-                <header>src/lib/orbit.ts · L54
-                  <span class="acts"><button>Refer</button><button class="go">Apply ⏎</button></span>
-                </header>
-                <pre><span class="m">- return { sats: [...store.sats], tick };</span><span class="p">+ return { sats: store.sats, tick };  // stable identity</span></pre>
-              </div>
-              <p>Both hunks land independently. Want me to add a render-count regression test?</p>
-            </div>
-          </div>
+          <div class="scroll" data-agent-thread></div>
           <!-- Staged changes, from Event::Review. Pinned above the composer
                rather than left inline with the message that proposed them: a
                review that scrolls out of sight is one you forget you owe an
@@ -367,7 +340,7 @@
             <div class="box">
               <div class="txt" contenteditable="plaintext-only" role="textbox"
                    aria-label="Ask Proton" data-agent-input
-                   data-placeholder="Ask Proton, or ⌘K for an inline edit…"></div>
+                   data-placeholder="Ask Proton about your workspace…"></div>
               <div class="foot">
                 <select class="model-pick" data-model-pick title="Which model answers. Blank uses the provider's default."></select>
                 <span class="select" data-mention="@selection" title="Send the selected text with the question">@selection</span>
@@ -863,7 +836,7 @@
         <header>Sources <span class="grow"></span>
           <button class="hbtn" data-reveal title="Reveal the file you are in — ␣e"><svg class="i"><use href="#i-target"/></svg></button>
         </header>
-        <div class="find" data-open="telescope"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></div>
+        <button class="find" data-open="telescope"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></button>
         <!-- The same Event::Tree that Codex draws. Data's explorer is the
              project's files, because a notebook's inputs are files in it —
              the mock schema that used to sit here described a warehouse
@@ -901,16 +874,16 @@
   <!-- ══ statusline ══════════════════════════════════════════════ -->
   <footer class="statusline">
     <div class="sl sl-mode" id="sl-mode">NORMAL</div>
-    <div class="sl project"><span class="dot"></span> orbital-dashboard</div>
-    <div class="sl git">  main +2 ~1</div>
+    <div class="sl project" id="sl-project">—</div>
+    <div class="sl git" id="sl-git" hidden></div>
     <div class="sl" id="sl-path">—</div>
-    <div class="sl"><svg class="i ft-ts"><use href="#i-file-code"/></svg> tsx · utf-8 · lf</div>
-    <div class="sl grow" id="sl-status"></div>
-    <div class="sl" id="sl-agent"><svg class="i ft-ai"><use href="#i-spark"/></svg> Opus 5 · agent</div>
+    <div class="sl" id="sl-filetype"></div>
+    <div class="sl grow" id="sl-status" role="status" aria-live="polite"></div>
+    <div class="sl" id="sl-agent"><svg class="i ft-ai"><use href="#i-spark"/></svg> Agent</div>
     <div class="sl" id="sl-diagnostics"></div>
     <div class="sl" id="sl-servers"></div>
     <div class="sl right" id="sl-position">ln 1, col 1</div>
-    <div class="sl sl-mode">42%</div>
+    <div class="sl" id="sl-progress"></div>
   </footer>
 </div>
 
@@ -930,29 +903,11 @@
   <div class="hov-body" data-hover-text></div>
 </div>
 
-<div class="overlay float" id="telescope">
-  <div class="prompt"><span class="caret">❯</span> <span data-picker-query></span><span class="cursor"></span><span class="chip" style="margin-left:auto" data-picker-title>find_files</span><span class="chip scope-chip" data-picker-scope hidden></span><span class="chip" data-picker-count></span></div>
+<div class="overlay float" id="telescope" role="dialog" aria-modal="true" aria-label="Find files" tabindex="-1">
+  <div class="prompt"><span class="caret">❯</span> <input data-picker-query type="search" aria-label="Search files" autocomplete="off" spellcheck="false" placeholder="Search files…"><span class="chip" style="margin-left:auto" data-picker-title>find_files</span><span class="chip scope-chip" data-picker-scope hidden></span><span class="chip" data-picker-count></span></div>
   <div class="cols">
     <div class="results" data-picker-results></div>
-    <div class="preview">
-      <div class="pv-head">src/routes/dashboard.tsx · 22 lines</div>
-      <div class="ln"><span class="n">4</span><span class="cm">// Fleet health, sampled once per tick.</span></div>
-      <div class="ln"><span class="n">5</span><span class="k">export default function</span> <span class="fn">Dashboard</span><span class="pn">() {</span></div>
-      <div class="ln"><span class="n">6</span>  <span class="k">const</span> <span class="pn">{</span> sats<span class="pn">,</span> tick <span class="pn">}</span> <span class="op">=</span> <span class="fn">useOrbit</span><span class="pn">();</span></div>
-      <div class="ln"><span class="n">7</span>  <span class="k">const</span> health <span class="op">=</span> <span class="fn">useTelemetry</span><span class="pn">(</span>sats<span class="pn">, {</span> window<span class="pn">:</span> <span class="num">120</span> <span class="pn">});</span></div>
-      <div class="ln cur"><span class="n">10</span>  <span class="k">const</span> ranked <span class="op">=</span> <span class="fn">useMemo</span><span class="pn">(</span></div>
-      <div class="ln"><span class="n">11</span>    <span class="pn">()</span> <span class="op">=&gt;</span> <span class="pn">[</span><span class="op">...</span>sats<span class="pn">].</span><span class="fn">sort</span><span class="pn">(</span>byHealth<span class="pn">),</span></div>
-      <div class="ln"><span class="n">12</span>    <span class="pn">[</span>sats<span class="pn">,</span> health<span class="pn">],</span></div>
-      <div class="ln"><span class="n">13</span>  <span class="pn">);</span></div>
-      <div style="padding:14px 14px 4px;font:600 9.5px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-4)">Pickers</div>
-      <div style="padding:0 14px;color:var(--ink-3);font:12px var(--mono);line-height:1.9">
-        <div><span style="color:var(--accent)">␣ f f</span>  files       <span style="color:var(--accent)">␣ f g</span>  live grep</div>
-        <div><span style="color:var(--accent)">␣ f b</span>  buffers     <span style="color:var(--accent)">␣ f h</span>  help tags</div>
-        <div><span style="color:var(--accent)">␣ f s</span>  symbols     <span style="color:var(--accent)">␣ f d</span>  diagnostics</div>
-        <div><span style="color:var(--accent)">␣ f a</span>  <svg class="i ft-ai"><use href="#i-spark"/></svg> semantic  <span style="color:var(--accent)">␣ f t</span>  traces</div>
-        <div><span style="color:var(--accent)">␣ f m</span>  artboards   <span style="color:var(--accent)">␣ f c</span>  cells</div>
-      </div>
-    </div>
+    <div class="preview"><div class="pv-empty">Choose a file to open.</div></div>
   </div>
 </div>
 
@@ -982,12 +937,11 @@
   <span class="chip" style="margin-left:auto">↹ ProtonTrace · ProtonMode · ProtonAgent</span>
 </div>
 
-<div class="overlay float" id="settings">
+<div class="overlay float" id="settings" role="dialog" aria-modal="true" aria-label="Settings" tabindex="-1">
   <header style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--edge)">
     <div class="brand"><svg class="i"><use href="#i-proton"/></svg> PROTON</div>
     <span style="color:var(--ink-3)">Settings</span>
     <span class="grow" style="flex:1"></span>
-    <span class="find" style="margin:0;width:240px"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Search settings</span>
     <button class="btn" data-close="settings">Close ⎋</button>
   </header>
   <div class="st-body">
@@ -997,21 +951,21 @@
          page that lies about what it can change is worse than a short one. -->
     <div class="st-nav tree">
       <div class="group">Editor</div>
-      <div class="row sel" data-st-nav="appearance"><span class="ic"><svg class="i"><use href="#i-palette"/></svg></span>Appearance</div>
-      <div class="row" data-st-nav="editing"><span class="ic">&#10216;&#10217;</span>Editing</div>
-      <div class="row" data-st-nav="plugins"><span class="ic"><svg class="i"><use href="#i-ext"/></svg></span>Plugins</div>
+      <button class="row sel" data-st-nav="appearance"><span class="ic"><svg class="i"><use href="#i-palette"/></svg></span>Appearance</button>
+      <button class="row" data-st-nav="editing"><span class="ic">&#10216;&#10217;</span>Editing</button>
+      <button class="row" data-st-nav="plugins"><span class="ic"><svg class="i"><use href="#i-ext"/></svg></span>Plugins</button>
       <div class="group">Agent</div>
-      <div class="row" data-st-nav="models"><span class="ic"><svg class="i ft-ai"><use href="#i-spark"/></svg></span>AI &amp; models</div>
-      <div class="row" data-st-nav="library"><span class="ic"><svg class="i"><use href="#i-book"/></svg></span>Library</div>
+      <button class="row" data-st-nav="models"><span class="ic"><svg class="i ft-ai"><use href="#i-spark"/></svg></span>AI &amp; models</button>
+      <button class="row" data-st-nav="library"><span class="ic"><svg class="i"><use href="#i-book"/></svg></span>Library</button>
       <div class="group">About</div>
-      <div class="row" data-st-nav="about"><span class="ic"><svg class="i"><use href="#i-gear"/></svg></span>Configuration</div>
+      <button class="row" data-st-nav="about"><span class="ic"><svg class="i"><use href="#i-gear"/></svg></span>Configuration</button>
     </div>
     <div class="st-main">
       <div data-st-panel="appearance">
       <div style="font:600 10.5px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px">Appearance</div>
       <div class="setting">
         <h4>Workspace theme</h4>
-        <p>A theme is a palette, not a skin — it sets sixteen tokens and touches no layout rule. Glass surfaces sample what is behind them, so the accent carries through the whole window.</p>
+        <p>Choose the colors used throughout Proton.</p>
         <div class="themes">
           <button class="theme-card on" data-theme-set="tokyo-night">
             <span class="sw"><i style="background:#16161e"></i><i style="background:#7aa2f7"></i><i style="background:#bb9af7"></i><i style="background:#9ece6a"></i><i style="background:#e0af68"></i></span>
@@ -1047,8 +1001,9 @@
       </div>
       <div class="setting">
         <h4>Window background</h4>
-        <p>Mica takes its colour from your wallpaper — the compositor samples it, so the whole window tints as you move it across the desktop. Acrylic blurs whatever is actually behind the window, live, and costs more. Content surfaces stay opaque either way: code is never at the mercy of a wallpaper.</p>
+        <p data-backdrop-description>Mica takes its colour from your wallpaper — the compositor samples it, so the whole window tints as you move it across the desktop. Acrylic blurs whatever is actually behind the window, live, and costs more. Content surfaces stay opaque either way: code is never at the mercy of a wallpaper.</p>
         <div class="seg" style="width:max-content" id="backdrop-picker">
+          <button data-backdrop-set="vibrancy" hidden>Vibrancy</button>
           <button class="on" data-backdrop-set="mica">Mica</button>
           <button data-backdrop-set="mica-alt">Mica Alt</button>
           <button data-backdrop-set="acrylic">Acrylic</button>
@@ -1058,7 +1013,7 @@
       </div>
       <div class="setting">
         <h4>Translucency</h4>
-        <p>How much of the backdrop comes through. The stage is always the most solid of the three surfaces because it is the one you read from; <b>Heavy</b> is where legibility starts to depend on your wallpaper, which is why it is a choice and not the default.</p>
+        <p>Choose how much of the window background shows through. Subtle gives text the strongest contrast.</p>
         <div class="seg" style="width:max-content" id="translucency-picker">
           <button data-translucency-set="subtle">Subtle</button>
           <button class="on" data-translucency-set="medium">Medium</button>
@@ -1066,29 +1021,32 @@
         </div>
       </div>
       <div class="setting">
+        <h4>Interface text</h4>
+        <p>Make labels, menus, and messages easier to read. Editor text has its own size below.</p>
+        <label class="setting-control">Text size <select data-display-setting="ui.textScale" aria-label="Interface text size"><option value="1">100%</option><option value="1.1">110%</option><option value="1.25">125%</option></select></label>
+      </div>
+      <div class="setting">
+        <h4>Density</h4>
+        <p>Choose more breathing room or fit more rows on screen.</p>
+        <label class="setting-control">Row spacing <select data-display-setting="ui.density" aria-label="Interface density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
+      </div>
+      <div class="setting">
         <h4>Surface blur</h4>
-        <p>How far floating layers blur the page beneath them. It cannot reach the desktop — only the compositor can do that, which is what Window background above is for. Drop it to zero on a remote session and every surface falls back to a flat fill without moving.</p>
-        <div class="field-ctl">46 px · saturate 200% <svg class="i caret"><use href="#i-chev"/></svg></div>
+        <p>Soften the content behind floating panels, including this window.</p>
+        <label class="setting-control">Blur <select data-display-setting="ui.blur" aria-label="Surface blur"><option value="46">Soft</option><option value="20">Light</option><option value="0">Off</option></select></label>
       </div>
       <div class="setting">
-        <h4>Modal editing</h4>
-        <p>Full vim semantics — operators, text objects, registers, marks, macros — dispatched to every mode, not just the editor. Off makes Proton a plain editor; the leader menu stays.</p>
-        <div style="display:flex;align-items:center;gap:10px"><span class="toggle on"></span><span style="color:var(--ink-3);font-size:12px">On · leader is <kbd>␣</kbd></span></div>
-      </div>
-      <div class="setting">
-        <h4>Editor font</h4>
-        <p>CaskaydiaMono Nerd Font — Cascadia with the Nerd Font glyph set, so devicons in the tree and the statusline resolve. Ligatures follow the family; inlay hints render at 84% of the body size.</p>
-        <div style="display:flex;gap:10px"><div class="field-ctl" style="width:240px">CaskaydiaMono Nerd Font <svg class="i caret"><use href="#i-chev"/></svg></div><div class="field-ctl" style="width:110px">13 px <svg class="i caret"><use href="#i-chev"/></svg></div></div>
-      </div>
-      <div class="setting" style="border-bottom:0">
-        <h4>Agent autonomy</h4>
-        <p>How far the agent goes before it stops for you. Every level still writes to a shadow worktree first — nothing touches your tree until you accept.</p>
-        <div class="field-ctl">Plan → propose diffs → wait <svg class="i caret"><use href="#i-chev"/></svg></div>
+        <h4>Editor text</h4>
+        <p>Uses CaskaydiaMono when installed, with your system monospace font as a fallback.</p>
+        <label class="setting-control">Font size <select data-display-setting="editor.fontSize" aria-label="Editor font size"><option value="12">12 px</option><option value="13" selected>13 px</option><option value="14">14 px</option><option value="16">16 px</option><option value="18">18 px</option></select></label>
       </div>
       </div><!-- /appearance -->
 
       <div data-st-panel="editing" hidden>
         <div class="st-head">Editing</div>
+        <div class="setting"><h4>Keyboard navigation</h4><p>In the file tabs, use <kbd>←</kbd> / <kbd>→</kbd> or <kbd>Home</kbd> / <kbd>End</kbd> to move focus, <kbd>Enter</kbd> to open, and <kbd>Delete</kbd> to close. Unsaved files stay open. Tab to a split divider and use arrow keys to resize, <kbd>Shift</kbd> for larger steps, or <kbd>Home</kbd> to make the two panes equal. <kbd>Esc</kbd> returns to the editor.</p></div>
+        <div class="setting"><h4>Modal editing</h4><p>Proton uses Vim-style editing in every mode. Press <kbd>i</kbd> to insert, <kbd>Esc</kbd> to return to Normal mode, and <kbd>Space</kbd> for the leader menu. A non-modal editing mode is not available yet.</p></div>
+        <div class="setting"><h4>Undo and redo</h4><p>In Codex, use the pane’s Undo and Redo buttons, or <kbd>⌘Z</kbd> and <kbd>⇧⌘Z</kbd> on Mac (<kbd>Ctrl+Z</kbd> and <kbd>Ctrl+Shift+Z</kbd> or <kbd>Ctrl+Y</kbd> on Windows/Linux). In Normal mode, <kbd>u</kbd> undoes and <kbd>Ctrl+R</kbd> redoes. Continuous typing is one undo step; moving the cursor or saving starts a new step.</p></div>
         <div class="setting">
           <h4>Format on save</h4>
           <p>`:w` writes the file and then asks the language server to format it, writing again if anything changed. Turn this off for a project whose formatter disagrees with its own history.</p>
@@ -1104,6 +1062,7 @@
           <div class="seg" data-set-choice="agent.provider">
             <button data-value="claude">Claude</button>
             <button data-value="gemini">Gemini</button>
+            <button data-value="codex">Codex</button>
           </div>
         </div>
         <div class="setting">
@@ -1116,6 +1075,7 @@
         <div class="setting">
           <h4>Credential</h4>
           <p data-agent-auth>Checking…</p>
+          <p>Codex uses your existing Codex sign-in. Sign in through the Codex app or run <code>codex login</code>, then send a message here. GPT-6 Astra is the default for Codex.</p>
         </div>
       </div>
 

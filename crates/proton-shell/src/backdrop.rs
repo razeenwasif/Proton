@@ -70,12 +70,15 @@ pub fn apply(window: &tauri::WebviewWindow, wanted: Backdrop) -> Backdrop {
 
     #[cfg(target_os = "macos")]
     let result = match wanted {
-        Backdrop::Solid => return Backdrop::Solid,
+        Backdrop::Solid => {
+            let _ = window_vibrancy::clear_vibrancy(window);
+            return Backdrop::Solid;
+        }
         _ => window_vibrancy::apply_vibrancy(
             window,
             window_vibrancy::NSVisualEffectMaterial::HudWindow,
             None,
-            None,
+            Some(13.0),
         ),
     };
 

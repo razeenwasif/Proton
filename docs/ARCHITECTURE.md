@@ -1,18 +1,32 @@
 # Proton — architecture
 
-The build document. **M0 through M7 are implemented**; Modeling, Game and
-Video are a plan. The design it serves is in [`../design/DESIGN.md`](../design/DESIGN.md), and the
-reasoning behind the tool choices is in [`STACK.md`](STACK.md). This file says
-**what we build and in what order**, and is the one to argue with before writing
-code.
+This document describes the implemented system and records its build history.
+All seven modes read real documents. Modeling includes a WebGL renderer;
+Game and Video edit scenes and timelines but still need engine playback and
+media decoding. The design reference is [`DESIGN.md`](../design/DESIGN.md),
+and the tool choices are in [`STACK.md`](STACK.md).
+
+The capability table below describes current behavior. Milestone sections later
+in this document retain historical decisions and measurements.
+
+| Mode | Implemented document and interaction | Remaining limitation |
+|---|---|---|
+| Chat | Saved conversations, provider-backed messages, staged edits, council debates | Requires a configured provider for model requests |
+| Codex | Text buffers, modal editing, search, splits, LSP/DAP, Git, terminal | Language servers, debuggers, and trace backends are external tools |
+| Design | CSS tokens and component markup, layers, source-linked artboard | Components requiring a build cannot be previewed directly |
+| Modeling | `.proton.json` scenes, OBJ geometry, transforms, modifiers, material graph, WebGL | Supported formats and viewport budget are bounded |
+| Game | Godot `.tscn` scene hierarchy and property editing | No engine playback process |
+| Video | CMX3600 `.edl` timeline and `.srt` captions | No decoded video/program monitor |
+| Data | `.ipynb` cells, kernel execution, outputs and dataframe views | Execution requires a configured Jupyter kernel |
 
 ```bash
-cargo test --workspace        # 609 tests, headless
+cargo test --workspace        # headless; some integrations require external tools
 cargo test --workspace -- --include-ignored --test-threads=1   # plus the live ones
                               # serial: the tracer, gdb and gcc all want the machine
 git submodule update --init   # the Code Visualizer checkout, for the Visualizer pane
 cargo run -p proton-shell     # the app
 node ui/serve.mjs             # the front end alone, in a browser
+npm ci && npm run check       # checked frontend modules and generated protocol
 ```
 
 ---
@@ -42,8 +56,8 @@ dependency, and the front end is replaceable.**
 
 Two rules keep that seam honest:
 
-1. **`proton-core` never names a widget.** It emits `Event::BufferChanged`, not
-   "repaint line 42". If a core crate would need to know pixels, the design is
+1. **`proton-core` never names a widget.** It emits viewport, cursor, and document state through `Event`, rather than
+   calling a renderer. If a core crate would need to know pixels, the design is
    wrong.
 2. **The vim engine lives in the core.** It resolves keys to *actions*
    (`Delete·Line`, count 2), which is exactly the boundary that lets a different
@@ -59,29 +73,26 @@ input-to-photon number justifies it. See STACK.md § "The actual decision".
 
 One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 
-| Crate | Owns | Key deps |
-|---|---|---|
-| `proton-text` | Rope, undo tree, multi-cursor selections, UTF‑8 ↔ UTF‑16 ↔ line/col | `ropey` |
-| `proton-vim` | Modal state machine, operators, motions, text objects, registers, marks, macros, which-key tree | — |
-| `proton-syntax` | Tree-sitter parsing, incremental re-parse, viewport-scoped highlight queries, companion and wasm grammars | `tree-sitter` |
-| `proton-lsp` | LSP client, server supervision, JSON-RPC framing, a non-blocking mailbox | `serde_json` |
-| `proton-vcs` | The gutter, what git considers changed, and the diff behind both | `gix` |
-| `proton-index` | The index behind every Telescope picker: file walking, fuzzy matching, grep | `ignore`, `nucleo-matcher` |
-| `proton-agent` | Messages API client, SSE streaming, request building, auth | `ureq` |
-| `proton-library` | The user's own documents: markdown cut into passages and PDFs into pages, BM25 with citations, and the walk that reads only the roots the settings name | `ignore`, `pdf-extract` |
-| `proton-trace` | Code Visualizer client: trace format, pointer resolution, sidecar | `ureq` |
-| `proton-dap` | Debug adapter client: launching one, and the conversation with it | `serde_json` |
-| `proton-term` | Pseudo-terminal, and the screen it paints | `portable-pty`, `vt100` |
-| `proton-plugin` | Wasmtime host, WIT interfaces, capability grants | `wasmtime`, `wit-bindgen` |
-| `proton-core` | Session and workspace state, mode registry, command/event bus, config | all of the above |
-| `proton-shell` | Window, webview, IPC bridge, system backdrop, packaging | `tauri` v2, `window-vibrancy` |
-| `proton-cli` | `proton trace`, `proton fmt`, headless smoke tests | `clap` |
+| Crate | Owns |
+|---|---|
+| `proton-core` | Sessions, workspaces, modal engine, command/event bus, orchestration |
+| `proton-text` | Rope buffers, undo, selections, motions, text objects |
+| `proton-index` | File walking, fuzzy matching, grep |
+| `proton-syntax` | Tree-sitter parsing and highlights |
+| `proton-lsp` / `proton-dap` | Language-server / debug-adapter protocols and supervision |
+| `proton-vcs` / `proton-term` | Git state / pseudo-terminal and terminal screen |
+| `proton-agent` / `proton-council` | Model conversations and tools / multi-model debates |
+| `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
+| `proton-data` | Notebook documents and kernel integration |
+| `proton-design` | Theme tokens and component markup |
+| `proton-scene` / `proton-mesh` | Scene documents and material graphs / geometry and modifiers |
+| `proton-game` / `proton-video` | Godot scenes / EDL timelines and captions |
+| `proton-plugin` | Wasmtime plugin host and capability grants |
+| `proton-trace` | Code Visualizer client and sidecar integration |
+| `proton-shell` | Tauri window, IPC, native backdrop, packaging |
 
-**Built so far: `proton-text`, `proton-index`, `proton-syntax`, `proton-lsp`,
-`proton-agent`, `proton-library`, `proton-trace`, `proton-vcs`, `proton-dap`,
-`proton-term`, `proton-plugin`, `proton-core`, `proton-shell`.** The rest of the table is the shape it grows
-into. `proton-vim` has not split out of `proton-core` yet — the modal engine is
-one file there and would gain nothing but a manifest from moving today.
+These are the 21 current workspace members. The modal engine remains in
+`proton-core/src/vim.rs`; there is no separate `proton-vim` or `proton-cli` crate.
 
 `proton-lsp` ended up with no async runtime and no protocol crate. Two threads
 and a channel do what `tokio` would, for a client that talks to two or three
@@ -103,34 +114,81 @@ becomes a constraint, `wry` is underneath it and the swap is contained to
 
 ### The bridge
 
-Rust owns the types; TypeScript is generated from them with `ts-rs`. Two enums,
-both `#[derive(Serialize, Deserialize, TS)]`:
+Rust owns `Command` and `Event` in `crates/proton-core/src/bus.rs`.
+`ts-rs` generates their discriminated unions in `ui/bindings/`. The Tauri
+bridge serializes commands such as `openBuffer`, `pickerQuery`, and `setMode`,
+then delivers returned events and asynchronous pushes to the frontend.
+Both native channels carry `{ sequence, events }`. `BridgeSession` assigns the
+sequence under the same mutex that applies commands and polls, and empty
+polls consume no sequence. `ui/transport.js` serializes commands and merges
+replies/pushes in that order. An initial sync establishes the baseline after
+events missed before listener setup. Duplicate batches are ignored. A missing
+batch blocking a reply for two seconds triggers a fresh sync, without replaying
+the uncertain user action. Dependent UI gestures reserve their commands together
+so focus and editing cannot be separated by another keystroke.
+`Viewport` carries a window of source lines; other events carry cursor,
+buffer-list, tree, settings, or mode-specific document state. Events are not
+uniformly deltas, and not all of them have version fields.
 
-```rust
-// shell → core
-enum Command {
-    Key { seq: KeySeq, mode: ModeId },
-    Action(Action),              // already-resolved, from a menu or a click
-    OpenBuffer { path: PathBuf },
-    SetMode(ModeId),
-    Agent(AgentCommand),
-    ...
-}
+`ui/protocol.ts` adapts generated `bigint` fields to JSON wire numbers.
+`npm run check` strictly checks the JavaScript modules listed in
+`ui/tsconfig.json`, including native bridge, transport, editor state, text rows,
+file tree, buffer tabs, resizing, feedback, display settings, history, and timing.
+Negative contract assertions reject invalid commands, pane updates, native binary
+read arguments, and JavaScript bigint in JSON commands. `native-api.d.ts` describes
+the narrow Tauri surface; command and event payloads use the generated protocol.
+`app.js` and the legacy demo implementation remain outside the complete check.
+The demo has an explicitly declared facade in `preview-bridge.d.ts`; this checks
+its consumers, not the fixture implementation itself.
 
-// core → shell
-enum Event {
-    BufferChanged { id: BufferId, edits: Vec<Edit>, version: u64 },
-    Diagnostics  { id: BufferId, items: Vec<Diagnostic> },
-    VimMode(VimMode),
-    AgentDelta(AgentDelta),      // streamed
-    TraceStep(TraceStep),
-    ...
-}
-```
+Frontend responsibilities now include:
 
-Events are **deltas with a version**, never whole-buffer snapshots — that is
-what keeps the webview affordable at scale, and it is the same discipline a GPU
-front end would need.
+- `app.js`: command routing and mode/document rendering.
+- `bridge.js`: strictly checked native API wiring, binary reads, and window controls.
+- `preview-bridge.js`: legacy standalone demo fixtures, dynamically imported only without Tauri.
+- `transport.js`: ordered command delivery, event batches, recovery, and typed key commands.
+- `editor-state.js`: typed pane state and one paint per affected pane per event batch.
+- `editor-row.js`: text rows, character selections, syntax/search spans, diagnostics, and gutters; pane and diagnostic state are explicit inputs.
+- `html.js`: shared HTML escaping and SVG icon markup.
+- `buffer-tabs.js`: semantic buffer tabs, manual keyboard activation, safe close, and stable focus.
+- `split-resize.js`: pointer and keyboard editor-divider resizing with accessible values.
+- `editor-feedback.js`: delayed file-loading status, empty-buffer guidance, and dismissible warnings/errors.
+- `performance.js`: opt-in, bounded command/render timing; no text or paths recorded.
+- `file-tree.js`: accessible tree rendering, keyboard focus, navigation.
+- `overlays.js`: modal visibility and focus containment.
+- `panels.js`: panel visibility, resizing, responsive layout, local preferences.
+- `display-settings.js`: project-scoped text size, density, and blur controls.
+- `viewport.js`, `meshbytes.js`, `document.js`: 3D and document views.
+
+The browser harness at `/tests/ui/index.html` loads production UI with an
+in-memory transport. `npm run test:unit` covers ordering and pure row rendering.
+`npm run test:browser` runs the harness and standalone preview in isolated
+Chromium contexts using Playwright, with a managed loopback server on port 5180.
+CI runs browser checks on Linux, macOS, and Windows and retains failure artifacts.
+These checks make no model calls or writes to a real workspace, and do not
+replace native webview testing. Native checks still require a rebuilt shell,
+because the frontend is embedded in that binary.
+
+Transport requests have a 15-second reply timeout. A failed request cancels
+input already queued against uncertain state; the next fresh interaction
+establishes a snapshot before proceeding. Passive viewport updates are skipped
+while document/project navigation is pending and measured again afterward, so
+one project's old scroll position cannot be sent to another project.
+
+For files at least 1 MB, syntax parsing has a cooperative 25 ms budget. Exceeding
+it clears the incomplete parse and pauses highlighting for that buffer, with a
+visible notice. Editing, scrolling, saving and undo continue using the rope.
+Reopening retries highlighting; reducing the buffer below 1 MB removes the
+limit. This bounds parser work, not file I/O, query compilation, language-server
+work, or total input-to-display latency.
+
+Session layouts distinguish scratch panes from file indices, clamp restored
+scroll positions, and read the live cursor of the focused pane. The native
+shell saves a final layout on normal exit. This restores positions and files;
+it does not persist unsaved buffer contents or provide crash recovery.
+`npm run test:transport` also runs the ordering/recovery tests in Node and CI.
+Editor batches apply state before painting, without waiting for an animation
+frame. Unchanged rows and buffer-tab markup keep their existing DOM nodes.
 
 ---
 
@@ -201,7 +259,11 @@ a row saying how many were left out — ten thousand generated files is ten
 thousand rows nobody reads, and the count is the useful part.
 
 `␣e` reveals the file you are in, opening every folder above it so the row
-exists to scroll to.
+exists to scroll to. The frontend exposes tree/treeitem roles, levels,
+expanded and selected state, and one Tab stop per tree. Up/Down, Home/End,
+Left/Right, and type-to-find move focus; Enter opens a file or toggles a folder.
+Escape returns focus to the editor. Core refreshes preserve focus or move it
+to the closest surviving ancestor when a folder closes.
 
 ### The terminal
 
@@ -467,6 +529,18 @@ Non-negotiable for this to feel real rather than emulated: operators compose
 with motions and text objects, counts multiply, registers and marks are global,
 macros record *actions* (so they replay across modes), `.` repeats, undo is a
 tree.
+
+In Codex, continuous typing shares one undo step, including newlines and
+backspaces. Cursor movement, explicit commands such as save or pane switching,
+and leaving Insert end the group; viewport updates and polling do not. Each
+dot or macro replay groups its edits into one step. Saving freezes that history
+revision so later typing becomes dirty and can be undone back to the saved
+state. Undo and redo end any open group before walking history.
+
+Pane buttons and platform shortcuts dispatch typed `Perform` actions through
+`ui/history-controls.js`. Native text fields retain their own history. Normal
+mode accepts `u` and Ctrl+R; macOS accepts Command+Z / Shift+Command+Z, and
+Windows/Linux accept Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y.
 
 **Search** is literal, with vim's smartcase: a pattern containing a capital is
 case-sensitive, one without is not. No regular expressions — `/` earns its keep
@@ -1190,6 +1264,22 @@ into a turn; `wire` gives both directions one set of types, because a response
 has to round-trip into the next request; `client` owns the connection and hands
 back a mailbox drained on the same 50 ms heartbeat the language servers use.
 
+The Codex provider uses `proton-agent/src/codex.rs` to launch a local Codex
+app-server over JSONL stdio. Codex manages its own login. Startup checks the
+account and exact selected model before sending a prompt; GPT-6 Astra is the
+provider default and model fallback is disabled. A current desktop runtime is
+preferred on macOS, with `PROTON_CODEX_BIN` and PATH alternatives. The dynamic
+tool protocol is experimental and was verified against Codex 0.153.4.
+
+Each question uses an ephemeral thread with Proton's serialized conversation.
+No Codex environment is attached, and workspace operations use the `proton`
+dynamic-tool namespace. Tool requests enter the existing workspace executor;
+results return to the same running turn, and completed exchanges are saved in
+Proton's history. Text and reasoning summaries stream through existing deltas.
+Cancellation kills and reaps the child process; startup and whole-turn timeouts
+prevent a stalled process from leaving the agent busy forever. Unexpected
+permission requests fail visibly. Claude and Gemini retain their HTTP paths.
+
 Two deltas cannot be used as they arrive, and both are quiet if you get them
 wrong. **`input_json_delta` carries fragments of a JSON string**, so a tool's
 arguments only exist once its block stops — anything reading them mid-stream is
@@ -1547,14 +1637,13 @@ into it, saves, and finds the artboard holding the new markup; and edits a
 layer from the design side and finds the file changed and otherwise untouched.
 Clicking the picture selects the layer, which the milestone did not ask for.
 
-**Later — Modeling, Game, Video.** Each needs a renderer and each is a real
-project. Do not start one until M0–M7 are shipped and stable.
+**Modeling, Game, Video — implemented documents; remaining runtime work.**
+These followed M0–M7. Game playback and Video decoding remain separate projects.
 
 *Where these stand.* All three now have their documents and the panels that
 read and write them: `scene.proton.json` with an outliner, viewport and shader
 graph; Godot's `.tscn` with a hierarchy and an inspector; a CMX3600 `.edl` and
-its `.srt` sidecar with a multitrack timeline and captions. The renderers are
-what is left, and the note above still holds for each: an engine process for
+its `.srt` sidecar with a multitrack timeline and captions. The remaining runtime integrations are an engine process for
 Game and an ffmpeg process for Video. Modeling has since grown a mesh loader —
 `proton-mesh` reads a Wavefront OBJ, which keeps the diffable-document rule
 true all the way down, since the geometry file is text as well — and the
@@ -1628,7 +1717,7 @@ node ui/serve.mjs             # or iterate in a browser, no rebuild at all
 ```
 
 The browser path is the faster loop for anything that is not shell behaviour.
-`bridge.js` falls back to a local stand-in when Tauri is absent, so the page
+`bridge.js` dynamically loads `preview-bridge.js` when Tauri is absent, so the page
 runs either way — but the stand-in is a demo, not a second implementation, and
 must never grow past keeping the design work honest. The real state machine
 lives in `crates/proton-core/src/vim.rs`.

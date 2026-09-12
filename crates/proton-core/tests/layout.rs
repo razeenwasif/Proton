@@ -23,6 +23,7 @@ fn project(name: &str) -> Project {
     ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
     for file in ["one.txt", "two.txt", "three.txt"] {
         std::fs::write(
             root.join(file),
@@ -183,4 +184,52 @@ fn a_layout_naming_a_project_that_is_gone_does_not_stop_the_rest() {
 
     let session = project.open();
     assert_eq!(session.active().root(), project.root);
+}
+
+#[test]
+fn a_scratch_pane_stays_scratch_after_restart() {
+    let project = project("scratch-pane");
+    {
+        let mut session = project.open();
+        session.apply(Command::OpenBuffer { path: "one.txt".into() });
+        session.apply(Command::Split { vertical: true });
+        session.apply(Command::FocusBuffer { index: 0 });
+    }
+    let session = project.open();
+    assert!(session.active().editor().buffer().path().is_none());
+    assert_eq!(panes_of(&session.active().shape()), 2);
+}
+
+#[test]
+fn restoring_a_shortened_file_clamps_the_scroll_position() {
+    let project = project("shortened");
+    std::fs::write(project.root.join("one.txt"), "line\n".repeat(1000)).unwrap();
+    {
+        let mut session = project.open();
+        session.apply(Command::OpenBuffer { path: "one.txt".into() });
+        session.apply(Command::Viewport { view: 0, first_line: 900, lines: 30 });
+        session.apply(Command::Split { vertical: true });
+    }
+    std::fs::write(project.root.join("one.txt"), "short\n").unwrap();
+    let mut session = project.open();
+    for event in session.apply(Command::Sync) {
+        if let proton_core::bus::Event::Viewport { first_line, total_lines, lines, .. } = event {
+            assert!(first_line < total_lines);
+            assert!(!lines.is_empty());
+        }
+    }
+}
+
+#[test]
+fn shutdown_snapshot_uses_the_live_focused_cursor() {
+    let project = project("live-cursor");
+    {
+        let mut session = project.open();
+        session.apply(Command::OpenBuffer { path: "one.txt".into() });
+        session.apply(Command::PlaceCursor { line: 2, column: 4 });
+        session.save();
+    }
+    let session = project.open();
+    let buffer = session.active().editor().buffer();
+    assert_eq!(buffer.position(buffer.cursor.offset), proton_text::Position { line: 2, column: 4 });
 }

@@ -17,9 +17,21 @@ pub struct Highlighters {
     /// `None` means "looked, and there is no grammar for this" — remembered so
     /// a plain-text file is not re-examined on every redraw.
     by_path: HashMap<PathBuf, Option<Syntax>>,
+    notices: Vec<String>,
 }
 
 impl Highlighters {
+    pub fn take_notices(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notices)
+    }
+    /// Versions restart at zero when a file is reopened. A parse tree from
+    /// the previous buffer must not be reused just because the path matches.
+    pub fn forget(&mut self, buffer: &Buffer) {
+        if let Some(path) = buffer.path() {
+            self.by_path.remove(path);
+        }
+    }
+
     /// Coloured runs for a window of the buffer.
     ///
     /// Empty when the file has no grammar, which the front end reads as "draw
@@ -47,7 +59,18 @@ impl Highlighters {
         });
 
         match syntax {
-            Some(syntax) => syntax.spans(buffer, first_line, count),
+            Some(syntax) => {
+                let was_limited = syntax.is_limited();
+                syntax.limit_parse_time(
+                    (buffer.text().len_bytes() >= 1_000_000)
+                        .then_some(std::time::Duration::from_millis(25)),
+                );
+                let spans = syntax.spans(buffer, first_line, count);
+                if !was_limited && syntax.is_limited() {
+                    self.notices.push(format!("Syntax highlighting paused for {} to keep this large file responsive. Reopen the file to retry.", buffer.name()));
+                }
+                spans
+            }
             None => Vec::new(),
         }
     }

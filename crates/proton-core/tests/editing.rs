@@ -422,3 +422,164 @@ fn a_drag_inside_a_line_selection_keeps_it_linewise() {
     ws.apply(Command::SelectTo { line: 1, column: 2 });
     assert_eq!(ws.vim_mode(), proton_core::VimMode::VisualLine);
 }
+
+/* Undo boundaries follow user edits, not individual IPC messages. */
+fn named(ws: &mut Workspace, name: &str) {
+    ws.apply(Command::Key { key: Key::named(name) });
+}
+
+fn redo(ws: &mut Workspace) {
+    ws.apply(Command::Perform {
+        action: proton_core::action::Action::new(
+            proton_core::action::Verb::Redo,
+            proton_core::action::Object::Here,
+            1,
+        ),
+    });
+}
+
+#[test]
+fn continuous_typing_with_newlines_and_backspace_is_one_undo() {
+    let mut ws = Workspace::new();
+    type_keys(&mut ws, "ihello 🚀<CR>world<BS>!<Esc>");
+    let after = text(&ws);
+    assert_eq!(after, "hello 🚀\nworl!");
+    type_keys(&mut ws, "u");
+    assert_eq!(text(&ws), "");
+    redo(&mut ws);
+    assert_eq!(text(&ws), after);
+}
+
+#[test]
+fn replace_mode_typing_undoes_as_a_single_run() {
+    let mut ws = open("original");
+    type_keys(&mut ws, "Rseveral characters<Esc>");
+    let after = text(&ws);
+    assert_ne!(after, "original");
+    type_keys(&mut ws, "u");
+    assert_eq!(text(&ws), "original");
+    redo(&mut ws);
+    assert_eq!(text(&ws), after);
+}
+
+#[test]
+fn separate_insert_sessions_are_separate_undo_steps() {
+    let mut ws = Workspace::new();
+    type_keys(&mut ws, "ifirst<Esc>A second<Esc>u");
+    assert_eq!(text(&ws), "first");
+    type_keys(&mut ws, "u");
+    assert_eq!(text(&ws), "");
+}
+
+#[test]
+fn cursor_keys_start_a_new_typing_run() {
+    let mut ws = Workspace::new();
+    type_keys(&mut ws, "iabc");
+    named(&mut ws, "ArrowLeft");
+    type_keys(&mut ws, "XY<Esc>u");
+    assert_eq!(text(&ws), "abc");
+    type_keys(&mut ws, "u");
+    assert_eq!(text(&ws), "");
+    redo(&mut ws);
+    redo(&mut ws);
+    assert_eq!(text(&ws), "abXYc");
+}
+
+#[test]
+fn clicking_elsewhere_starts_a_new_typing_run() {
+    let mut ws = Workspace::new();
+    type_keys(&mut ws, "iabc");
+    ws.apply(Command::PlaceCursor { line: 0, column: 0 });
+    type_keys(&mut ws, "XY<Esc>u");
+    assert_eq!(text(&ws), "abc");
+    type_keys(&mut ws, "u");
+    assert_eq!(text(&ws), "");
+}
+
+#[test]
+fn a_mode_round_trip_separates_typing_runs() {
+    let mut ws = Workspace::new();
+    type_keys(&mut ws, "iabc");
+    ws.apply(Command::SetMode { mode: proton_core::ModeId::Data });
+    ws.apply(Command::SetMode { mode: proton_core::ModeId::Codex });
+    type_keys(&mut ws, "def<Esc>u");
+    assert_eq!(text(&ws), "abc");
+}
+
+#[test]
+fn passive_viewport_and_poll_events_do_not_split_typing() {
+    let mut ws = Workspace::new();
+    type_keys(&mut ws, "iabc");
+    ws.apply(Command::Viewport { view: 0, first_line: 0, lines: 30 });
+    ws.apply(Command::Poll);
+    type_keys(&mut ws, "def<Esc>u");
+    assert_eq!(text(&ws), "");
+}
+
+#[test]
+fn dot_repeat_is_one_undo_step_including_its_deletion() {
+    let mut ws = open("one two three");
+    type_keys(&mut ws, "ciwlong<Esc>w");
+    let before = text(&ws);
+    type_keys(&mut ws, ".");
+    let after = text(&ws);
+    assert_eq!(after, "long long three");
+    type_keys(&mut ws, "u");
+    assert_eq!(text(&ws), before);
+    redo(&mut ws);
+    assert_eq!(text(&ws), after);
+}
+
+#[test]
+fn a_macro_invocation_is_one_undo_step() {
+    let mut ws = open("one\ntwo\nthree");
+    type_keys(&mut ws, "qaI- <Esc>jq");
+    let before = text(&ws);
+    type_keys(&mut ws, "@a");
+    let after = text(&ws);
+    assert_eq!(after, "- one\n- two\nthree");
+    type_keys(&mut ws, "u");
+    assert_eq!(text(&ws), before);
+    redo(&mut ws);
+    assert_eq!(text(&ws), after);
+}
+
+#[test]
+fn entering_insert_without_typing_does_not_add_an_undo_step() {
+    let mut ws = open("one two");
+    type_keys(&mut ws, "ciwchanged<Esc>i<Esc>u");
+    assert_eq!(text(&ws), "one two");
+}
+
+#[test]
+fn save_in_insert_mode_keeps_later_typing_dirty_and_separately_undoable() {
+    let root = std::env::temp_dir().join(format!("proton-undo-save-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("note.txt");
+    std::fs::write(&path, "base").unwrap();
+    let mut ws = Workspace::rooted(&root);
+    ws.apply(Command::OpenBuffer { path: "note.txt".into() });
+    type_keys(&mut ws, "A saved");
+    ws.apply(Command::Save);
+    assert!(!ws.editor().buffer().is_modified());
+    type_keys(&mut ws, " unsaved<Esc>");
+    assert!(ws.editor().buffer().is_modified());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "base saved");
+    type_keys(&mut ws, "u");
+    assert_eq!(text(&ws), "base saved");
+    assert!(!ws.editor().buffer().is_modified());
+    redo(&mut ws);
+    assert_eq!(text(&ws), "base saved unsaved");
+    assert!(ws.editor().buffer().is_modified());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn control_r_redoes_a_grouped_change() {
+    let mut ws = Workspace::new();
+    type_keys(&mut ws, "ityped together<Esc>u");
+    let mut key = Key::char('r');
+    key.ctrl = true;
+    ws.apply(Command::Key { key });
+    assert_eq!(text(&ws), "typed together");
+}

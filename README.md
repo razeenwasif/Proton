@@ -3,7 +3,7 @@
 # Proton
 
 A code editor that is also a chat client, a design tool, a 3D workspace, a game
-editor, a video editor and a data notebook — one window, seven modes, Neovim
+editor, a video editor and a data notebook — one window, seven modes, a shared Vim-style modal engine
 underneath all of them, and an agent that can act in any of them.
 
 **M0 through M7 are built**, and every mode in the window now reads and writes
@@ -15,13 +15,23 @@ still to come is the machinery underneath two of them — a game engine and
 ffmpeg — and each of those is a real project of its own.
 
 ```bash
+git submodule update --init    # the Code Visualizer, vendored underneath M4
 cargo run -p proton-shell      # the app
-cargo test --workspace         # 1333 tests, headless
+cargo test --workspace         # headless tests; some integrations need external tools
 cargo tauri build              # the installer
 node ui/serve.mjs              # the front end alone → http://localhost:5178
+npm ci && npm run check        # checked UI modules and generated command contract
+npm run test:unit              # transport and text-row regression tests
+npx playwright install chromium
+npm run test:browser           # isolated browser harness and preview smoke test
 ```
 
-Best at 1440px or wider. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
+`cmake` has to be on `PATH` first — tree-sitter builds its wasm runtime against
+wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
+on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
+already call it `cmake`.
+
+Panels can be collapsed from the rail; text size and density are in Settings. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
 `␣w` splits · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
@@ -58,6 +68,8 @@ collision is why the mode chord is `⌃`.
 | `assets/` | The reference designs the whole thing was drawn from |
 
 ## The seven modes
+
+See the [current capability matrix](docs/ARCHITECTURE.md) for implemented documents and runtime limitations.
 
 **Chat** · a full conversation with the model — threads on the left, a centred
 reading column, and **Send to Codex** when it is time to act on what you decided.
@@ -97,6 +109,22 @@ surfaced as a diff, hunk by hunk — nothing is written to disk until you accept
 it, so "I changed that file" is never something it can say truthfully before
 you have looked. It shows its tool calls with results and timings, and what it
 says about your notes carries a citation you can open.
+
+## Codex agent connection
+
+In **Settings → AI & models**, select **Codex** and **gpt-6-astra** (also the
+Codex default). Proton uses your existing Codex sign-in; credentials are managed
+by Codex and are never copied into project settings. On macOS it prefers the
+Codex runtime bundled with the desktop app. Other installations can supply a
+current `codex` executable on PATH or set `PROTON_CODEX_BIN` to its full path.
+
+The connection uses the [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server).
+Streaming replies and tool calls appear in Proton. Workspace tools retain
+Proton's file boundaries and patch review. Codex runs without an attached
+environment; unsupported permission requests fail visibly instead of being
+approved automatically. A recent runtime with experimental dynamic tools is
+required. Each question starts an ephemeral Codex thread with Proton's saved
+conversation; this adapter does not resume Codex desktop tasks.
 
 ## Your own library
 

@@ -13,13 +13,16 @@
 //! things mean at the bottom — but that is what tree-sitter is fast at.
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::ops::Range;
 use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use proton_text::Buffer;
 use serde::{Deserialize, Serialize};
 use tree_sitter::{
-    InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, TextProvider, Tree,
+    InputEdit, Node, ParseOptions, Parser, Point, Query, QueryCursor, StreamingIterator,
+    TextProvider, Tree,
 };
 use ts_rs::TS;
 
@@ -62,6 +65,8 @@ pub struct Syntax {
     /// covers move whenever a paragraph does, and a tree edited against the
     /// wrong ranges colours the file wrong rather than failing.
     inline: Option<Inline>,
+    parse_budget: Option<Duration>,
+    limited: bool,
 }
 
 struct Inline {
@@ -119,6 +124,8 @@ impl Syntax {
             tree: None,
             parsed: None,
             inline,
+            parse_budget: None,
+            limited: false,
         })
     }
 
@@ -150,11 +157,37 @@ impl Syntax {
             // plugin shipping a two-grammar language is a later problem, and
             // pretending to support it now would be a shape nobody has tried.
             inline: None,
+            parse_budget: None,
+            limited: false,
         })
     }
 
     pub fn language(&self) -> &str {
         &self.id
+    }
+
+    /// A cooperative parser limit for large files. Once exceeded, keep text
+    /// editing cheap until the limit is removed or this highlighter is rebuilt.
+    pub fn limit_parse_time(&mut self, budget: Option<Duration>) {
+        self.parse_budget = budget;
+        if budget.is_none() && self.limited {
+            self.limited = false;
+            self.parsed = None;
+        }
+    }
+
+    pub fn is_limited(&self) -> bool {
+        self.limited
+    }
+
+    fn pause(&mut self) {
+        self.limited = true;
+        self.parser.reset();
+        self.tree = None;
+        if let Some(inline) = &mut self.inline {
+            inline.parser.reset();
+            inline.tree = None;
+        }
     }
 
     /// Re-parse if the buffer has moved since the last time.
@@ -165,6 +198,9 @@ impl Syntax {
     /// bounded by the size of the change instead of the size of the file. The
     /// numbers are in `tests/latency.rs`.
     fn sync(&mut self, buffer: &Buffer) {
+        if self.limited {
+            return;
+        }
         if self.parsed == Some(buffer.version()) && self.tree.is_some() {
             return;
         }
@@ -186,6 +222,14 @@ impl Syntax {
             _ => None,
         };
 
+        let deadline = self.parse_budget.map(|budget| Instant::now() + budget);
+        let mut progress = |_: &tree_sitter::ParseState| {
+            if deadline.is_some_and(|end| Instant::now() >= end) {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
         let text = buffer.text();
         // Read straight out of the rope. `parse_with_options` asks for bytes
         // at an offset and gets whatever contiguous chunk lives there, which
@@ -200,11 +244,17 @@ impl Syntax {
                 &chunk.as_bytes()[offset - chunk_start..]
             },
             old.as_ref(),
-            None,
+            deadline.map(|_| ParseOptions::new().progress_callback(&mut progress)),
         );
+        if tree.is_none() && deadline.is_some() {
+            self.pause();
+            return;
+        }
         self.parsed = Some(buffer.version());
         self.tree = tree;
-        self.sync_inline(buffer);
+        if self.sync_inline(buffer, deadline) {
+            self.pause();
+        }
     }
 
     /// Parse the ranges the first grammar handed over.
@@ -219,15 +269,18 @@ impl Syntax {
     /// colours the file wrong rather than failing, which is the worse of the
     /// two. Markdown files are prose-sized and the second parse is over the
     /// prose only.
-    fn sync_inline(&mut self, buffer: &Buffer) {
+    fn sync_inline(&mut self, buffer: &Buffer, deadline: Option<Instant>) -> bool {
         let (Some(inline), Some(tree)) = (self.inline.as_mut(), self.tree.as_ref()) else {
-            return;
+            return false;
         };
 
         let mut ranges = Vec::new();
         let mut walk = tree.walk();
         let mut nodes = vec![tree.root_node()];
         while let Some(node) = nodes.pop() {
+            if deadline.is_some_and(|end| Instant::now() >= end) {
+                return true;
+            }
             if node.kind() == inline.inside {
                 ranges.push(tree_sitter::Range {
                     start_byte: node.start_byte(),
@@ -246,10 +299,17 @@ impl Syntax {
         ranges.sort_by_key(|r| r.start_byte);
         if ranges.is_empty() || inline.parser.set_included_ranges(&ranges).is_err() {
             inline.tree = None;
-            return;
+            return false;
         }
 
         let text = buffer.text();
+        let mut progress = |_: &tree_sitter::ParseState| {
+            if deadline.is_some_and(|end| Instant::now() >= end) {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
         inline.tree = inline.parser.parse_with_options(
             &mut |offset: usize, _| {
                 if offset >= text.len_bytes() {
@@ -259,16 +319,20 @@ impl Syntax {
                 &chunk.as_bytes()[offset - chunk_start..]
             },
             None,
-            None,
+            deadline.map(|_| ParseOptions::new().progress_callback(&mut progress)),
         );
+        inline.tree.is_none() && deadline.is_some()
     }
 
     /// The coloured runs for a window of lines, one list per line.
     ///
-    /// Always exactly `count` lists (or fewer at the end of the file), so the
-    /// front end can zip them against the lines it was given without checking.
+    /// One list per visible line, or empty when the parse budget was exceeded
+    /// and the caller should render plain text.
     pub fn spans(&mut self, buffer: &Buffer, first_line: usize, count: usize) -> Vec<Vec<Span>> {
         self.sync(buffer);
+        if self.limited {
+            return Vec::new();
+        }
 
         let text = buffer.text();
         let last_line = (first_line + count).min(text.len_lines());

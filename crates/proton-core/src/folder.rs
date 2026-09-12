@@ -259,12 +259,12 @@ mod tests {
         // Without it you are still naming a child of the parent; with it you
         // are inside. Getting this backwards makes the list flicker between
         // two directories as you type the last character of a name.
-        let (dir, prefix) = split(r"C:\Users\Raz");
-        assert_eq!(dir, PathBuf::from(r"C:\Users"));
+        let (dir, prefix) = split("projects/Raz");
+        assert_eq!(dir, PathBuf::from("projects"));
         assert_eq!(prefix, "Raz");
 
-        let (dir, prefix) = split(r"C:\Users\");
-        assert_eq!(dir, PathBuf::from(r"C:\Users\"));
+        let (dir, prefix) = split("projects/");
+        assert_eq!(dir, PathBuf::from("projects"));
         assert_eq!(prefix, "");
     }
 
@@ -296,6 +296,21 @@ mod tests {
         );
     }
 
+    // Windows path interpretation belongs on Windows; filesystem tests below
+    // use native separators and run on every platform.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_accept_both_separator_styles() {
+        for query in [r"C:\Users\Raz", "C:/Users/Raz"] {
+            let (dir, prefix) = split(query);
+            assert_eq!(dir, PathBuf::from(r"C:\Users"));
+            assert_eq!(prefix, "Raz");
+        }
+        let (dir, prefix) = split(r"C:\Users\Razeen\.");
+        assert_eq!(dir, PathBuf::from(r"C:\Users\Razeen"));
+        assert_eq!(prefix, ".");
+    }
+
     #[test]
     fn a_bare_drive_means_its_root() {
         // `Path` reads `C:` as "the current directory on C:", which is never
@@ -312,7 +327,7 @@ mod tests {
         std::fs::create_dir_all(root.join("beta")).unwrap();
         std::fs::write(root.join("gamma.txt"), "not a folder").unwrap();
 
-        let query = format!("{}\\", root.display());
+        let query = format!("{}{sep}", root.display(), sep = std::path::MAIN_SEPARATOR);
         let names: Vec<String> = complete(&query, LIMIT).iter().map(|p| name_of(p)).collect();
         assert_eq!(names, vec!["alpha", "beta"]);
 
@@ -326,7 +341,7 @@ mod tests {
         std::fs::create_dir_all(root.join("Pictures")).unwrap();
         std::fs::create_dir_all(root.join("Music")).unwrap();
 
-        let query = format!("{}\\proj", root.display());
+        let query = root.join("proj").display().to_string();
         let names: Vec<String> = complete(&query, LIMIT).iter().map(|p| name_of(p)).collect();
         assert_eq!(names, vec!["Projects"]);
 
@@ -340,11 +355,11 @@ mod tests {
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
 
-        let all = format!("{}\\", root.display());
+        let all = format!("{}{sep}", root.display(), sep = std::path::MAIN_SEPARATOR);
         let names: Vec<String> = complete(&all, LIMIT).iter().map(|p| name_of(p)).collect();
         assert_eq!(names, vec!["src"]);
 
-        let dotted = format!("{}\\.", root.display());
+        let dotted = format!("{}{sep}.", root.display(), sep = std::path::MAIN_SEPARATOR);
         let names: Vec<String> = complete(&dotted, LIMIT)
             .iter()
             .map(|p| name_of(p))
@@ -359,8 +374,8 @@ mod tests {
         // `Path::file_name` reads `src\.` as the name `src` in the parent
         // directory, so splitting with it would answer a request for a
         // folder's hidden entries with a list of its siblings.
-        let (dir, prefix) = split(r"C:\Users\Razeen\.");
-        assert_eq!(dir, PathBuf::from(r"C:\Users\Razeen"));
+        let (dir, prefix) = split("projects/Razeen/.");
+        assert_eq!(dir, PathBuf::from("projects/Razeen"));
         assert_eq!(prefix, ".");
     }
 
@@ -374,9 +389,9 @@ mod tests {
     #[test]
     fn names_gain_a_parent_only_when_they_collide() {
         let paths = vec![
-            PathBuf::from(r"C:\work\proton"),
-            PathBuf::from(r"C:\work\alpha\src"),
-            PathBuf::from(r"C:\work\beta\src"),
+            PathBuf::from("work").join("proton"),
+            PathBuf::from("work").join("alpha").join("src"),
+            PathBuf::from("work").join("beta").join("src"),
         ];
         assert_eq!(
             disambiguate(&paths),

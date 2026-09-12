@@ -216,7 +216,9 @@ impl Session {
                 .collect();
             if !alive.is_empty() {
                 session.workspaces = alive.iter().map(|path| session.build(path)).collect();
-                session.active = saved.active.min(session.workspaces.len() - 1);
+                session.active = saved.open.get(saved.active)
+                    .and_then(|root| alive.iter().position(|path| path == Path::new(root)))
+                    .unwrap_or_else(|| saved.active.min(session.workspaces.len() - 1));
 
                 // Matched by root rather than by position: the list above has
                 // already dropped whichever projects have gone, so the indices
@@ -306,6 +308,13 @@ impl Session {
             // While the workspace picker is open it owns the keyboard, exactly
             // as Telescope does inside a workspace — and for the same reason.
             Command::Key { key } if self.picker.is_some() => self.picker_key(&key),
+            Command::PickerQuery { text } if self.picker.is_some() => {
+                if let Some(picker) = &mut self.picker {
+                    picker.set_query(text);
+                }
+                self.requery();
+                vec![self.picker_event()]
+            }
             Command::SelectPick { index } if self.picker.is_some() => {
                 if let Some(picker) = &mut self.picker {
                     picker.select(index);
@@ -727,7 +736,7 @@ impl Session {
     /// Write the open set out. Best effort by design: a session that cannot be
     /// saved is a session you have to reopen by hand, not a reason to fail the
     /// command that triggered it.
-    fn save(&self) {
+    pub fn save(&self) {
         let Some(file) = &self.store else { return };
         let state = Stored {
             version: VERSION,

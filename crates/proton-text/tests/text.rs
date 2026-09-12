@@ -258,3 +258,45 @@ fn a_stale_position_is_clamped_rather_than_fatal() {
     assert_eq!(buffer.offset_at_utf16(0, 900), buffer.line_end());
     assert_eq!(buffer.offset_at_utf16(900, 0), buffer.len_chars());
 }
+
+#[test]
+fn undo_ends_an_open_group_before_a_new_history_branch() {
+    let mut b = Buffer::from_text("");
+    b.begin_group(false);
+    b.apply(vec![Edit::insert(0, "first")], Cursor::at(5));
+    b.end_group();
+    b.begin_group(false);
+    b.apply(vec![Edit::insert(5, " old")], Cursor::at(9));
+    assert!(b.undo());
+    // No end_group call from the consumer: undo itself is the boundary.
+    b.ensure_group();
+    b.apply(vec![Edit::insert(5, " new")], Cursor::at(9));
+    b.undo();
+    assert_eq!(b.contents(), "first");
+    assert_eq!(b.undo_branches(), 2);
+    b.undo();
+    assert_eq!(b.contents(), "");
+    b.redo();
+    b.redo();
+    assert_eq!(b.contents(), "first new");
+}
+
+#[test]
+fn saving_an_open_group_preserves_the_saved_revision() {
+    let path = std::env::temp_dir().join(format!("proton-text-save-group-{}.txt", std::process::id()));
+    std::fs::write(&path, "base").unwrap();
+    let mut b = Buffer::open(&path).unwrap();
+    b.begin_group(false);
+    b.apply(vec![Edit::insert(4, " saved")], Cursor::at(10));
+    b.save().unwrap();
+    b.ensure_group();
+    b.apply(vec![Edit::insert(10, " more")], Cursor::at(15));
+    assert!(b.is_modified());
+    b.undo();
+    assert_eq!(b.contents(), "base saved");
+    assert!(!b.is_modified());
+    b.redo();
+    assert_eq!(b.contents(), "base saved more");
+    assert!(b.is_modified());
+    std::fs::remove_file(path).unwrap();
+}

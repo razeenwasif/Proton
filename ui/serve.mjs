@@ -58,4 +58,4 @@ createServer((req, res) => {
     "Cache-Control": "no-cache",
   });
   createReadStream(file).pipe(res);
-}).listen(PORT, () => console.log(`Proton preview → http://localhost:${PORT}`));
+}).listen(PORT, '127.0.0.1', () => console.log(`Proton preview → http://localhost:${PORT}`));

@@ -71,9 +71,17 @@ impl Server {
 
         // The backends shell out to gcc and gdb, so they need the same
         // toolchain directory this Python came from.
+        //
+        // Built with `join_paths` rather than a hand-joined string: `;` only
+        // separates a `PATH` on Windows, and a literal `;` in front of a real
+        // Unix `PATH` makes the whole variable one unresolvable entry —
+        // `gcc`, `gdb` and even `python` itself would stop being found.
         if let Some(dir) = python.parent() {
-            let path = std::env::var("PATH").unwrap_or_default();
-            command.env("PATH", format!("{};{path}", dir.display()));
+            let existing = std::env::var_os("PATH").unwrap_or_default();
+            let dirs = std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&existing));
+            if let Ok(joined) = std::env::join_paths(dirs) {
+                command.env("PATH", joined);
+            }
         }
         #[cfg(windows)]
         {

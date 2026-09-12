@@ -17,6 +17,7 @@
 
 pub mod auth;
 pub mod client;
+pub mod codex;
 pub mod gemini;
 pub mod provider;
 pub mod request;

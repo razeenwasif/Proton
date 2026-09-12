@@ -1,0 +1,15 @@
+{
+  "name": "proton-ui-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc -p ui/tsconfig.json",
+    "test:transport": "node --test tests/ui/ordering.test.mjs",
+    "test:unit": "node --test tests/ui/ordering.test.mjs tests/ui/editor-row.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "typescript": "5.9.3"
+  }
+}

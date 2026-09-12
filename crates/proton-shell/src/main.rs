@@ -4,13 +4,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod backdrop;
+mod transport;
 mod window;
 
 use std::sync::Mutex;
 use std::time::Duration;
 
 use backdrop::Backdrop;
-use proton_core::{Command, Event, Session};
+use proton_core::{Command, Session};
+use transport::{BridgeSession, EventBatch};
 use tauri::{Emitter, Manager, State};
 
 /// The channel language servers arrive on. Distinct from the `dispatch` reply
@@ -39,7 +41,7 @@ type Surface = Mutex<Backdrop>;
 /// the right shape for both, which is the point of keeping it transport-
 /// agnostic.
 #[tauri::command]
-fn dispatch(command: Command, session: State<'_, Mutex<Session>>) -> Vec<Event> {
+fn dispatch(command: Command, session: State<'_, Mutex<BridgeSession>>) -> EventBatch {
     let events = match session.lock() {
         Ok(mut it) => it.apply(command.clone()),
         // A poisoned lock means a previous command panicked. Recover rather
@@ -55,7 +57,7 @@ fn dispatch(command: Command, session: State<'_, Mutex<Session>>) -> Vec<Event> 
     #[cfg(debug_assertions)]
     eprintln!(
         "[bridge] {command:?} -> {} event(s): {events:?}",
-        events.len()
+        events.events.len()
     );
 
     events
@@ -146,11 +148,11 @@ fn read_document(path: String) -> Result<tauri::ipc::Response, String> {
 #[tauri::command]
 fn read_geometry(
     key: String,
-    session: State<'_, Mutex<Session>>,
+    session: State<'_, Mutex<BridgeSession>>,
 ) -> Result<tauri::ipc::Response, String> {
     let bytes = match session.lock() {
-        Ok(mut it) => it.mesh_bytes(&key),
-        Err(poisoned) => poisoned.into_inner().mesh_bytes(&key),
+        Ok(mut it) => it.session.mesh_bytes(&key),
+        Err(poisoned) => poisoned.into_inner().session.mesh_bytes(&key),
     };
     bytes
         .map(tauri::ipc::Response::new)
@@ -170,7 +172,7 @@ fn spawn_poll(app: tauri::AppHandle) {
         .spawn(move || loop {
             std::thread::sleep(BEAT);
 
-            let Some(session) = app.try_state::<Mutex<Session>>() else {
+            let Some(session) = app.try_state::<Mutex<BridgeSession>>() else {
                 // The app is shutting down and the state is gone.
                 return;
             };
@@ -179,11 +181,11 @@ fn spawn_poll(app: tauri::AppHandle) {
                 Err(poisoned) => poisoned.into_inner().apply(Command::Poll),
             };
 
-            if events.is_empty() {
+            if events.events.is_empty() {
                 continue;
             }
             #[cfg(debug_assertions)]
-            eprintln!("[poll] {} event(s): {events:?}", events.len());
+            eprintln!("[poll] {} event(s): {events:?}", events.events.len());
             if app.emit(PUSHED, events).is_err() {
                 return;
             }
@@ -208,10 +210,10 @@ fn window_icon() -> Option<tauri::image::Image<'static>> {
 
 fn main() {
     tauri::Builder::default()
-        .manage(Mutex::new(Session::restore(
+        .manage(Mutex::new(BridgeSession::new(Session::restore(
             requested_folder(),
             working_folder(),
-        )))
+        ))))
         .invoke_handler(tauri::generate_handler![
             dispatch,
             backdrop,
@@ -247,6 +249,16 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("Proton failed to start");
+        .build(tauri::generate_context!())
+        .expect("Proton failed to start")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(state) = app.try_state::<Mutex<BridgeSession>>() {
+                    match state.lock() {
+                        Ok(session) => session.session.save(),
+                        Err(poisoned) => poisoned.into_inner().session.save(),
+                    }
+                }
+            }
+        });
 }

@@ -360,9 +360,8 @@ impl Workspace {
     ///
     /// Only files. A buffer with no path is something typed but never saved,
     /// and writing its *name* into the session would promise to reopen a
-    /// thing that does not exist. Panes pointing at one are folded onto the
-    /// first buffer rather than dropped, so the arrangement survives even
-    /// when one of its contents cannot.
+    /// thing that does not exist. Scratch panes remain scratch panes; their
+    /// unsaved contents are not part of the layout store.
     pub fn layout(&self) -> Layout {
         let mut files = Vec::new();
         // Where each editor buffer ended up in `files`, so views can be
@@ -384,10 +383,14 @@ impl Workspace {
                 .splits
                 .views()
                 .iter()
-                .map(|view| StoredView {
+                .enumerate()
+                .map(|(index, view)| StoredView {
                     file: moved.get(view.buffer).copied().flatten().unwrap_or(0),
+                    scratch: moved.get(view.buffer).copied().flatten().is_none(),
                     first_line: view.first_line,
-                    line: view.cursor.offset,
+                    line: if index == self.splits.focused() {
+                        self.editor.buffer().cursor.offset
+                    } else { view.cursor.offset },
                 })
                 .collect(),
             focused: self.splits.focused(),
@@ -407,18 +410,16 @@ impl Workspace {
         for file in &layout.files {
             opened.push(self.editor.open(file).ok());
         }
-        if opened.iter().all(Option::is_none) {
-            return;
-        }
-
         let views: Vec<View> = layout
             .views
             .iter()
             .map(|stored| {
-                let buffer = opened.get(stored.file).copied().flatten().unwrap_or(0);
+                let buffer = if stored.scratch { 0 } else {
+                    opened.get(stored.file).copied().flatten().unwrap_or(0)
+                };
                 let mut view = View {
                     buffer,
-                    first_line: stored.first_line,
+                    first_line: stored.first_line.min(self.editor.buffers()[buffer].len_lines().saturating_sub(1)),
                     ..View::default()
                 };
                 // Clamped against the file as it is *now*. An offset saved
@@ -437,8 +438,7 @@ impl Workspace {
             .restore(views, layout.focused, layout.vertical, count);
         // The focused pane's buffer is the one the editor is showing, and the
         // two disagreeing is what makes a restored window edit the wrong file.
-        let showing = self.splits.view().buffer;
-        self.editor.focus(showing);
+        self.restore_cursor();
     }
 
     /// Whether anything in this workspace has unsaved changes. The session
@@ -458,6 +458,21 @@ impl Workspace {
     }
 
     pub fn apply(&mut self, command: Command) -> Vec<Event> {
+        let mut events = self.dispatch(command);
+        events.extend(self.highlights.take_notices().into_iter().map(|text| notice(text, NoticeLevel::Warn)));
+        events
+    }
+
+    fn dispatch(&mut self, command: Command) -> Vec<Event> {
+        // Passive paints and heartbeats do not divide typing. An explicit
+        // command (click, save, mode/buffer/split switch, picker, etc.) does.
+        // Sync also marks re-entry into a workspace after a project switch.
+        if !matches!(
+            &command,
+            Command::Key { .. } | Command::Poll | Command::Viewport { .. }
+        ) {
+            self.editor.buffer_mut().end_group();
+        }
         match command {
             Command::Sync => {
                 // The front end connecting is the signal that the window is
@@ -1328,7 +1343,7 @@ impl Workspace {
 
             Command::Perform { action } => {
                 let mode = self.vim.mode();
-                let (mut events, changed) = self.act(&action, mode);
+                let (mut events, changed) = self.act(&action, mode, false);
                 events.extend(self.after_action(changed));
                 if changed {
                     self.resync();
@@ -1499,18 +1514,32 @@ impl Workspace {
                 {
                     match key.key.as_str() {
                         "Enter" => {
+                            self.editor.buffer_mut().ensure_group();
                             self.editor.insert_newline();
                             changed = true;
                         }
-                        "Backspace" => changed = self.editor.backspace(),
+                        "Backspace" => {
+                            self.editor.buffer_mut().ensure_group();
+                            changed = self.editor.backspace();
+                        }
                         _ => {}
                     }
                 }
 
-                for outcome in self.vim.keys(&key) {
-                    let (evts, did) = self.events_for(outcome, before);
+                let outcomes = self.vim.keys(&key);
+                // Only dot and macro replay fan out from one key. Keep that
+                // invocation together, including its initial change action.
+                let replay = outcomes.len() > 1 && self.mode == ModeId::Codex;
+                if replay {
+                    self.editor.buffer_mut().begin_group(false);
+                }
+                for outcome in outcomes {
+                    let (evts, did) = self.events_for(outcome, before, replay);
                     events.extend(evts);
                     changed |= did;
+                }
+                if replay {
+                    self.editor.buffer_mut().end_group();
                 }
 
                 // The mode transition is reported after whatever the key did,
@@ -1715,11 +1744,27 @@ impl Workspace {
 
         match accepted {
             Accepted::OpenPath { path, line, column } => {
-                let full = self.pickers.root().join(&path);
-                match self.editor.open(&full) {
-                    Ok(_) => {
-                        // A grep hit knows where it came from; jump there
-                        // rather than dropping the user at the top of the file.
+                // Mode-specific opening actions use the same picker, but their
+                // documents belong to their existing loaders, not a text buffer.
+                let extension = Path::new(&path).extension().and_then(|x| x.to_str());
+                let document = match (self.mode, extension) {
+                    (ModeId::Design, Some("css")) => Some(Command::OpenTheme { path: path.clone() }),
+                    (ModeId::Modeling, Some("json")) if path.ends_with(".proton.json") =>
+                        Some(Command::OpenScene { path: path.clone() }),
+                    (ModeId::Game, Some("tscn")) => Some(Command::OpenLevel { path: path.clone() }),
+                    (ModeId::Video, Some("edl")) => Some(Command::OpenTimeline { path: path.clone() }),
+                    _ => None,
+                };
+                // Grep and symbol results carry a location and must still
+                // reveal that exact line in the editor.
+                if let Some(command) = document.filter(|_| line.is_none()) {
+                    events.extend(self.apply(command));
+                } else {
+                    let opened = self.open_path(&path);
+                    let text_opened = opened.iter().any(|event| matches!(event, Event::Buffers { .. }));
+                    events.extend(opened);
+                    if text_opened {
+                        events.extend(self.set_mode(ModeId::Codex));
                         if let Some(line) = line {
                             let buf = self.editor.buffer_mut();
                             let at = buf.offset_of(proton_text::Position {
@@ -1728,10 +1773,8 @@ impl Workspace {
                             });
                             buf.cursor = buf.clamp(buf.cursor.moved_to(at));
                         }
-                        events.push(self.buffers_event());
                         events.extend(self.after_action(true));
                     }
-                    Err(err) => events.push(notice(format!("{path}: {err}"), NoticeLevel::Error)),
                 }
             }
             Accepted::OpenCitation { cite } => {
@@ -1743,7 +1786,8 @@ impl Workspace {
             }
             Accepted::FocusBuffer { index } => {
                 if self.editor.focus(index) {
-                    events.push(self.buffers_event());
+                    self.resync();
+                    events.extend(self.switched());
                     events.extend(self.after_action(true));
                 }
             }
@@ -2156,6 +2200,7 @@ impl Workspace {
         // editing any more, and diagnostics for it are still in the gutter's
         // reach.
         self.servers.closed(self.editor.buffer());
+        self.highlights.forget(self.editor.buffer());
         let closed = self.editor.active();
         self.editor.close(closed);
         // Every index above the closed one just shifted down, and a split
@@ -2391,6 +2436,7 @@ impl Workspace {
         self.lines_before = self.editor.buffer().len_lines();
         vec![
             self.buffers_event(),
+            self.splits_event(),
             self.viewport_event(),
             self.cursor_event(),
             self.diagnostics_event(),
@@ -3320,6 +3366,7 @@ impl Workspace {
             if self.editor.open(path).is_err() {
                 continue;
             }
+            self.editor.buffer_mut().end_group();
             if lsp::apply_edits(self.editor.buffer_mut(), edits) {
                 touched += 1;
             }
@@ -5121,7 +5168,7 @@ impl Workspace {
     ///
     /// Only Codex edits text today; the other modes accept the action and
     /// report it, and gain their own nouns with their document types.
-    fn act(&mut self, action: &Action, was: VimMode) -> (Vec<Event>, bool) {
+    fn act(&mut self, action: &Action, was: VimMode, replay: bool) -> (Vec<Event>, bool) {
         let description = action.describe();
         if !self.mode.supports(action) {
             return (
@@ -5166,6 +5213,13 @@ impl Workspace {
             return (events, false);
         }
 
+        if self.mode == ModeId::Codex
+            && !replay
+            && action.verb == Verb::Move
+            && matches!(was, VimMode::Insert | VimMode::Replace)
+        {
+            self.editor.buffer_mut().end_group();
+        }
         let changed = self.mode == ModeId::Codex && self.editor.execute(action, was);
 
         // An action that opens insert mode starts an undo group, so the typing
@@ -5176,6 +5230,7 @@ impl Workspace {
         // the time an action reaches here the engine has *already* switched to
         // insert — the operator sets the mode as it resolves.
         if self.mode == ModeId::Codex
+            && !replay
             && matches!(action.verb, Verb::Change | Verb::Insert)
             && self.vim.mode() == VimMode::Insert
         {
@@ -5196,11 +5251,12 @@ impl Workspace {
     /// in now. The two differ exactly when it matters: an operator in visual
     /// mode switches back to normal *as* it resolves, so asking the engine
     /// afterwards is asking too late to find out it was a block.
-    fn events_for(&mut self, outcome: Outcome, was: VimMode) -> (Vec<Event>, bool) {
+    fn events_for(&mut self, outcome: Outcome, was: VimMode, replay: bool) -> (Vec<Event>, bool) {
         match outcome {
-            Outcome::Action(action) => self.act(&action, was),
+            Outcome::Action(action) => self.act(&action, was, replay),
             Outcome::Input(c) => {
                 if self.mode == ModeId::Codex {
+                    self.editor.buffer_mut().ensure_group();
                     self.editor.insert_char(c);
                     (Vec::new(), true)
                 } else {
@@ -5910,6 +5966,9 @@ pub struct Layout {
 pub struct StoredView {
     /// Which of `files` it was showing.
     pub file: usize,
+    /// An unnamed pane, rather than the first file. Absent in older stores.
+    #[serde(default)]
+    pub scratch: bool,
     #[serde(default)]
     pub first_line: usize,
     /// The cursor, as a character offset into that file.

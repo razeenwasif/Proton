@@ -9,6 +9,7 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -25,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'"
     }
   },
   "bundle": {
@@ -42,8 +43,7 @@
     "resources": {
       "../../vendor/code-visualizer/server": "code-visualizer/server",
       "../../vendor/code-visualizer/backends": "code-visualizer/backends",
-      "../../vendor/code-visualizer/examples": "code-visualizer/examples",
-      "../../target/release/proton-mcp.exe": "proton-mcp.exe"
+      "../../vendor/code-visualizer/examples": "code-visualizer/examples"
     }
   }
 }

@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "allowJs": true,
+    "checkJs": true,
+    "strict": true,
+    "noEmit": true
+  },
+  "include": [
+    "protocol.ts",
+    "file-tree.js",
+    "display-settings.js",
+    "history-controls.js",
+    "transport.js",
+    "editor-state.js",
+    "performance.js",
+    "buffer-tabs.js",
+    "split-resize.js",
+    "editor-feedback.js",
+    "../tests/ui/protocol.test.ts",
+    "bridge.js",
+    "native-api.d.ts",
+    "editor-row.js",
+    "html.js"
+  ]
+}
