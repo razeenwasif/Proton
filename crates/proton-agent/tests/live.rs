@@ -56,6 +56,8 @@ fn ask_with(profile: Profile) -> Result<String, String> {
         messages: vec![Message::user(vec![Block::text(
             "What is the capital of France?",
         )])],
+        workspace: None,
+        allow_edits: false,
     };
 
     let mut turn = proton_agent::send(request)?;
@@ -170,6 +172,8 @@ fn ask_with_tools(provider: Provider) -> Result<String, String> {
             system: vec!["Answer with one word once you have the tool's result.".into()],
             tools: vec![tool.clone()],
             messages: messages.clone(),
+            workspace: None,
+            allow_edits: false,
         };
         let mut turn = proton_agent::send(request)?;
         let deadline = Instant::now() + Duration::from_secs(90);

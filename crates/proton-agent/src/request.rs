@@ -85,6 +85,12 @@ pub struct Request {
     pub system: Vec<String>,
     pub tools: Vec<Tool>,
     pub messages: Vec<Message>,
+    /// The project, for a provider that works in it directly — Antigravity
+    /// starts `agy` there. The HTTP providers and Codex reach files only
+    /// through `tools`, and ignore it.
+    pub workspace: Option<std::path::PathBuf>,
+    /// Whether such a provider may write files in it without asking.
+    pub allow_edits: bool,
 }
 
 #[derive(Serialize)]
@@ -189,6 +195,8 @@ mod tests {
             system: vec!["You are Proton.".into(), "# Repo map\n…".into()],
             tools: vec![tool("read_file"), tool("grep"), tool("apply_edit")],
             messages: vec![Message::user(vec![Block::text("fix the jank")])],
+            workspace: None,
+            allow_edits: false,
         }
     }
 

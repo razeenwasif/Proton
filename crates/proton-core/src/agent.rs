@@ -119,6 +119,10 @@ pub struct Agent {
     /// re-read when it changes rather than at startup only — switching
     /// provider should take effect on the next question, not the next launch.
     profile: Profile,
+    /// The project, for a provider that works in it directly.
+    root: Option<std::path::PathBuf>,
+    /// Whether that provider may change files there without asking.
+    allow_edits: bool,
 }
 
 impl std::fmt::Debug for Agent {
@@ -143,6 +147,8 @@ impl Default for Agent {
             activity: Activity::Idle,
             system: Vec::new(),
             profile: Profile::agent(),
+            root: None,
+            allow_edits: false,
         }
     }
 }
@@ -155,6 +161,7 @@ impl Agent {
                 // Second block, and last, so the cache breakpoint covers it.
                 format!("# Project\n\nThe workspace root is `{project}`."),
             ],
+            root: Some(project.into()),
             ..Agent::default()
         }
     }
@@ -432,6 +439,8 @@ impl Agent {
             system: self.system.clone(),
             tools: Agent::tools(),
             messages: self.conversation.clone(),
+            workspace: self.root.clone(),
+            allow_edits: self.allow_edits,
         };
         self.turn = Some(proton_agent::send(request)?);
         self.activity = Activity::Thinking;
@@ -495,6 +504,37 @@ impl Agent {
                         }
                     });
                     to_run.push(Pending { id, name, input });
+                }
+
+                // A tool the provider ran itself. One row, made on the first
+                // report and brought up to date by the next — and never handed
+                // to the workspace, because it has already happened.
+                Reply::Delta(Delta::Hosted {
+                    id,
+                    name,
+                    input,
+                    outcome,
+                }) => {
+                    let detail = summarise(&input);
+                    let (state, result) = match outcome {
+                        None => (CallState::Running, String::new()),
+                        Some(Ok(())) => (CallState::Done, String::new()),
+                        Some(Err(why)) => (CallState::Failed, short(&why)),
+                    };
+                    self.say(move |e| match e.calls.iter_mut().find(|c| c.id == id) {
+                        Some(call) => {
+                            call.detail = detail.clone();
+                            call.state = state;
+                            call.result = result.clone();
+                        }
+                        None => e.calls.push(ToolCall {
+                            id: id.clone(),
+                            name: name.clone(),
+                            detail: detail.clone(),
+                            result: result.clone(),
+                            state,
+                        }),
+                    });
                 }
 
                 Reply::Delta(Delta::Done { .. }) => {}
@@ -766,6 +806,12 @@ impl Agent {
         self.profile = Profile::for_provider(provider, model, false);
     }
 
+    /// Whether a provider that works in the project itself — Antigravity — may
+    /// change files there without asking. Off unless the settings say so.
+    pub fn allow_edits(&mut self, allow: bool) {
+        self.allow_edits = allow;
+    }
+
     /// Where a credential for the current provider would come from.
     ///
     /// Reported rather than tested: this reads the environment and the CLI's
@@ -782,6 +828,14 @@ impl Agent {
                 Err(why) => why,
             };
         }
+        if self.profile.provider == proton_agent::Provider::Antigravity {
+            return match proton_agent::antigravity::executable() {
+                Ok(_) => "Uses your Antigravity sign-in; connection is verified when you send a \
+                          message"
+                    .into(),
+                Err(why) => why,
+            };
+        }
         match proton_agent::auth::resolve_for(self.profile.provider) {
             Ok(found) => match found.source {
                 proton_agent::auth::Source::ApiKey => {
@@ -790,6 +844,9 @@ impl Agent {
                 proton_agent::auth::Source::AuthToken => "ANTHROPIC_AUTH_TOKEN is set".into(),
                 proton_agent::auth::Source::OauthProfile => "signed in with the Claude CLI".into(),
                 proton_agent::auth::Source::CodexLogin => "signed in with Codex".into(),
+                proton_agent::auth::Source::AntigravityLogin => {
+                    "signed in with Antigravity".into()
+                }
             },
             // The error already names what to set, which is the only thing
             // worth saying about a credential that is not there.

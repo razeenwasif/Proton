@@ -5264,6 +5264,19 @@ const TOOL_ICON = {
   open_buffer: "split-v",
   search_library: "book",
   diagnostics: "d-warning",
+  // Antigravity's own tools, which it runs in the project itself.
+  view_file: "file-code",
+  list_dir: "folder",
+  find_by_name: "files",
+  grep_search: "search",
+  write_to_file: "pen",
+  replace_file_content: "pen",
+  multi_replace_file_content: "pen",
+  sed_file: "pen",
+  run_command: "term",
+  command_status: "term",
+  search_web: "globe",
+  read_url_content: "globe",
 };
 
 const CALL_STATE = { starting: "", running: "spin", done: "", failed: "" };
@@ -5277,6 +5290,18 @@ const TOOL_LABEL = {
   open_buffer: "Open",
   search_library: "Search library",
   diagnostics: "Diagnostics",
+  view_file: "Read file",
+  list_dir: "List",
+  find_by_name: "Find files",
+  grep_search: "Search",
+  write_to_file: "Write file",
+  replace_file_content: "Edit",
+  multi_replace_file_content: "Edit",
+  sed_file: "Edit",
+  run_command: "Run",
+  command_status: "Command status",
+  search_web: "Search the web",
+  read_url_content: "Read page",
 };
 
 function toolHtml(call) {
@@ -5566,6 +5591,14 @@ const MODELS = {
     "gemini-3.1-pro-preview",
     "gemini-3.8-flash",
   ],
+  // `agy models` ids: the thinking level is part of the name.
+  antigravity: [
+    "gemini-3.8-flash-high",
+    "gemini-3.8-flash-medium",
+    "gemini-3.8-flash-low",
+    "gemini-3.1-pro-high",
+    "gemini-3.1-pro-low",
+  ],
 };
 
 // Choosing one writes the setting, which is the same thing the settings panel
@@ -5680,7 +5713,7 @@ function renderAgent(event) {
   // question, and a transcript you cannot attribute is one you cannot reason
   // about a week later.
   for (const who of $$("[data-agent-provider]")) {
-    who.textContent = {claude: "Claude", gemini: "Gemini", codex: "Codex"}[event.provider] ?? event.provider;
+    who.textContent = {claude: "Claude", gemini: "Gemini", codex: "Codex", antigravity: "Antigravity"}[event.provider] ?? event.provider;
     who.title = `${event.model} — change it in Settings > AI & models`;
     who.className = "chip" + (event.provider === "gemini" ? " ok" : " accent");
   }

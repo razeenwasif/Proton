@@ -74,6 +74,18 @@ impl Editor {
         &self.buffers
     }
 
+    /// Re-read every buffer whose file changed on disk and that has nothing
+    /// unsaved in it, and say which. A buffer with unsaved work is never
+    /// overwritten: it keeps its text, and its next `:w` is the one that
+    /// notices the disk moved.
+    pub fn reread_changed_on_disk(&mut self) -> Vec<String> {
+        self.buffers
+            .iter_mut()
+            .filter(|buffer| !buffer.is_modified() && buffer.changed_on_disk())
+            .filter_map(|buffer| buffer.reload().ok().map(|()| buffer.name()))
+            .collect()
+    }
+
     pub fn active(&self) -> usize {
         self.active
     }

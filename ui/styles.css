@@ -607,6 +607,11 @@ button.chip:hover { filter: brightness(1.25); }
 .row .ic { width: 14px; text-align: center; opacity: 0.8; flex: 0 0 14px; font-size: 11px; }
 .row .git { margin-left: auto; font-size: 10px; font-weight: 700; }
 .row .git.m { color: var(--warn); } .row .git.a { color: var(--ok); } .row .git.d { color: var(--err); }
+/* Every row as wide as the longest one, and never narrower than the panel:
+   a deep path or a long name scrolls sideways instead of being cut off, and
+   the highlight on a short row still reaches the panel's far edge, however
+   far it has been scrolled. */
+[data-tree] { display: grid; grid-template-columns: minmax(max-content, 1fr); align-content: start; }
 /* Still used by the sidebars that are static chrome. The file tree indents
    inline instead, because a class per level puts a ceiling on how deep a
    project may be nested. */
@@ -2532,7 +2537,6 @@ body { font-size: calc(13px * var(--ui-scale)); }
   height: var(--z-row); padding-top: 0; padding-bottom: 0; padding-right: 10px;
   gap: 8px; border-radius: 0; color: var(--muted);
 }
-.workspace[data-ws="codex"] .tree .row > span:last-child { overflow: hidden; text-overflow: clip; }
 .workspace[data-ws="codex"] .tree .row.dir { color: var(--muted); }
 .workspace[data-ws="codex"] .tree .row.dir .ic { display: none; }
 .workspace[data-ws="codex"] .tree .row .ic {

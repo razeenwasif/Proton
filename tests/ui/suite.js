@@ -671,6 +671,38 @@ await test('Codex provider selection clears the previous model and displays Astr
   assert($('[data-model-pick]').value === 'gpt-6-astra', 'Astra is not selected');
   key('Escape'); await settle();
 });
+await test('Antigravity is a provider, with its own models and its own tools named', async () => {
+  $('.rail [data-open="settings"]').click(); await settle();
+  $('[data-st-nav="models"]').click();
+  const before = win.commands.length;
+  $('[data-set-choice="agent.provider"] [data-value="antigravity"]').click(); await settle();
+  const writes = win.commands.slice(before).filter(c => c.type === 'setSetting');
+  assert(writes.some(c => c.key === 'agent.provider' && c.value === 'antigravity'), 'Antigravity was not selected');
+  assert($('[data-set-bool="agent.antigravityEdits"]') && !$('[data-set-bool="agent.antigravityEdits"]').checked, 'edits are not off by default');
+  key('Escape'); await settle();
+  await win.pushEvents([{type: 'agent', provider: 'antigravity', model: 'gemini-3.8-flash-high',
+    credential: 'Uses your Antigravity sign-in', activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0,
+    transcript: [{speaker: 'you', text: 'what does main do?', thinking: '', streaming: false, calls: []},
+      {speaker: 'proton', text: 'It parses arguments.', thinking: '', streaming: false,
+        calls: [{id: 'agy-2', name: 'view_file', detail: 'AbsolutePath=/fixture/main.c', result: '', state: 'done'}]}]}]);
+  assert($('[data-agent-provider]').textContent === 'Antigravity', 'provider is mislabeled');
+  const models = [...$('[data-model-pick]').options].map(o => o.value);
+  assert(models.includes('gemini-3.1-pro-high') && $('[data-model-pick]').value === 'gemini-3.8-flash-high', `wrong models: ${models}`);
+  assert([...doc.querySelectorAll('#codex-dock .tool b')].some(b => b.textContent === 'Read file'), 'its tool row is unnamed');
+});
+await test('A long name in the project panel scrolls sideways instead of being cut', async () => {
+  const tree = $('.workspace.on [data-tree]');
+  const space = tree.closest('.workspace');
+  const was = space.style.getPropertyValue('--col-l');
+  space.style.setProperty('--col-l', '90px'); await settle();
+  const rows = [...tree.querySelectorAll('.row')];
+  const name = (row) => row.querySelector('span:last-child');
+  assert(tree.scrollWidth > tree.clientWidth, 'nothing to scroll');
+  assert(rows.every(row => name(row).scrollWidth <= name(row).clientWidth + 1), 'a name is clipped');
+  assert(new Set(rows.map(row => Math.round(row.getBoundingClientRect().width))).size === 1, 'rows differ in width');
+  assert(rows[0].getBoundingClientRect().width >= tree.scrollWidth - 1, 'a highlight would stop short');
+  if (was) space.style.setProperty('--col-l', was); else space.style.removeProperty('--col-l');
+});
 await orderingChecks(test, assert);
 document.querySelector('#status').textContent = `${passed} passed · ${failed} failed`;
 document.title = `Proton UI tests: ${passed} passed, ${failed} failed`;

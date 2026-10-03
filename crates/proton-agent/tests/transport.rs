@@ -136,6 +136,8 @@ fn the_client_sends_a_real_request_and_reads_a_real_stream() {
     std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
 
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: Profile::agent(),
         system: vec!["You are Proton.".into()],
         tools: vec![Tool {
@@ -212,6 +214,8 @@ fn a_missing_credential_fails_before_anything_is_drawn_as_running() {
     std::env::set_var("USERPROFILE", "/nonexistent-proton-test");
 
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: Profile::quick(),
         system: vec!["hi".into()],
         tools: Vec::new(),

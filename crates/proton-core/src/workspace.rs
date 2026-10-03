@@ -3589,6 +3589,7 @@ impl Workspace {
             // memory.
             events.extend(self.save_chat());
             events.extend(self.task_finished());
+            events.extend(self.reread_after_hosted_turn());
         } else if was_busy {
             // Still going. The row says what it is doing, which is the whole
             // reason it is a queue and not a spinner.
@@ -3598,6 +3599,31 @@ impl Workspace {
             self.tasks.progress(&note, tools);
             events.push(self.tasks_event());
         }
+        events
+    }
+
+    /// Re-read the open files a provider changed on its own.
+    ///
+    /// Antigravity edits the project with its own tools rather than through
+    /// `edit_file`, so nothing here saw the change happen; without this the
+    /// buffer would go on showing the old text until `:e`. Only files you have
+    /// not touched since — a buffer with unsaved work is left alone, and the
+    /// `:w` guard will say the disk moved under it.
+    fn reread_after_hosted_turn(&mut self) -> Vec<Event> {
+        if self.agent.provider() != proton_agent::Provider::Antigravity {
+            return Vec::new();
+        }
+        let names = self.editor.reread_changed_on_disk();
+        if names.is_empty() {
+            return Vec::new();
+        }
+        self.resync();
+        let mut events = vec![
+            notice(format!("re-read {}", names.join(", ")), NoticeLevel::Info),
+            self.buffers_event(),
+        ];
+        events.extend(self.every_view());
+        events.push(self.diagnostics_event());
         events
     }
 
@@ -4505,6 +4531,8 @@ impl Workspace {
         let provider = proton_agent::Provider::parse(&self.settings.string("agent.provider", ""));
         let model = self.settings.string("agent.model", "");
         self.agent.use_provider(provider, &model);
+        self.agent
+            .allow_edits(self.settings.bool("agent.antigravityEdits", false));
     }
 
     /// Write the open conversation, naming its file if it has none yet.

@@ -37,6 +37,10 @@ pub enum Provider {
     Claude,
     Gemini,
     Codex,
+    /// Google's Antigravity CLI, `agy`, on the user's own sign-in — which is
+    /// how a Google AI subscription reaches the pane, since the plan does not
+    /// come with an API key. See [`crate::antigravity`].
+    Antigravity,
 }
 
 impl Provider {
@@ -49,6 +53,7 @@ impl Provider {
         match name.trim().to_ascii_lowercase().as_str() {
             "codex" | "openai" => Provider::Codex,
             "gemini" | "google" => Provider::Gemini,
+            "antigravity" | "agy" => Provider::Antigravity,
             _ => Provider::Claude,
         }
     }
@@ -58,6 +63,7 @@ impl Provider {
             Provider::Codex => "codex",
             Provider::Claude => "claude",
             Provider::Gemini => "gemini",
+            Provider::Antigravity => "antigravity",
         }
     }
 
@@ -67,6 +73,7 @@ impl Provider {
             Provider::Codex => "Codex",
             Provider::Claude => "Claude",
             Provider::Gemini => "Gemini",
+            Provider::Antigravity => "Antigravity",
         }
     }
 
@@ -98,13 +105,16 @@ impl Provider {
             (Provider::Claude, true) => "claude-haiku-4-5-20251001",
             (Provider::Gemini, false) => "gemini-pro-latest",
             (Provider::Gemini, true) => "gemini-flash-latest",
+            // `agy models` names, which carry the thinking level in the id.
+            (Provider::Antigravity, false) => "gemini-3.8-flash-high",
+            (Provider::Antigravity, true) => "gemini-3.8-flash-low",
         }
     }
 
     /// The environment variables that hold a key for it, in order.
     pub fn key_vars(self) -> &'static [&'static str] {
         match self {
-            Provider::Codex => &[],
+            Provider::Codex | Provider::Antigravity => &[],
             Provider::Claude => &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
             // `GEMINI_API_KEY` first: `GOOGLE_API_KEY` is used by half of
             // Google's other SDKs and is more likely to be set to something
@@ -119,7 +129,8 @@ impl Provider {
     /// needs to know which one — the only place a URL depends on it.
     pub fn url(self, model: &str) -> String {
         match self {
-            Provider::Codex => String::new(), // Local app-server, never HTTP here.
+            // Local processes, never HTTP from here.
+            Provider::Codex | Provider::Antigravity => String::new(),
             Provider::Claude => {
                 std::env::var("ANTHROPIC_BASE_URL")
                     .unwrap_or_else(|_| "https://api.anthropic.com".into())
@@ -155,6 +166,9 @@ mod tests {
         assert_eq!(Provider::parse("Gemini"), Provider::Gemini);
         assert_eq!(Provider::parse(" gemini "), Provider::Gemini);
         assert_eq!(Provider::parse("google"), Provider::Gemini);
+        assert_eq!(Provider::parse("Antigravity"), Provider::Antigravity);
+        assert_eq!(Provider::parse("agy"), Provider::Antigravity);
+        assert_eq!(Provider::Antigravity.id(), "antigravity");
     }
 
     #[test]

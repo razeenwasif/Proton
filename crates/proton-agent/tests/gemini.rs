@@ -58,6 +58,8 @@ fn a_thought_signature_survives_the_round_trip() {
     // And sent again, beside the call rather than inside it — which is where
     // it arrived, and where Gemini looks for it.
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -74,6 +76,8 @@ fn a_call_with_no_signature_sends_no_empty_field() {
     // or one carried over from Anthropic. Sending `thoughtSignature: null`
     // would be a new way to be rejected.
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -108,6 +112,8 @@ fn the_system_prompt_is_a_field_rather_than_a_message() {
     // Gemini has no system role. Sending one as a message would make it look
     // like something the user said.
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: vec!["You are Proton.".into(), "# Project".into()],
         tools: Vec::new(),
@@ -131,6 +137,8 @@ fn the_model_is_not_in_the_body() {
     // It goes in the URL. A model in both places is two things that can
     // disagree.
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -142,6 +150,8 @@ fn the_model_is_not_in_the_body() {
 #[test]
 fn tools_become_function_declarations() {
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: vec![Tool {
@@ -162,6 +172,8 @@ fn tools_become_function_declarations() {
 #[test]
 fn an_assistant_turn_is_the_model_role() {
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -182,6 +194,8 @@ fn a_tool_result_names_the_call_it_answers() {
     // id and matches on the name, so the name has to be carried across from
     // the `tool_use` that produced it.
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -217,6 +231,8 @@ fn a_tool_result_names_the_call_it_answers() {
 #[test]
 fn a_failed_tool_says_so_rather_than_reporting_its_error_as_output() {
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -256,6 +272,8 @@ fn consecutive_same_role_messages_are_merged() {
         }],
     };
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -289,6 +307,8 @@ fn anthropics_encrypted_reasoning_is_not_forwarded() {
     // It is opaque to us and meaningless to Gemini. Sending it would be
     // nonsense in a field Gemini would try to read as prose.
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -314,6 +334,8 @@ fn reasoning_is_not_echoed_back() {
     // *second* request of a turn, because the first has no reasoning to echo,
     // which makes it look like tool use broke rather than this.
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -342,6 +364,8 @@ fn reasoning_is_not_echoed_back() {
 #[test]
 fn thinking_is_asked_for_explicitly_when_the_profile_wants_it() {
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: profile(),
         system: Vec::new(),
         tools: Vec::new(),
@@ -358,6 +382,8 @@ fn thinking_is_asked_for_explicitly_when_the_profile_wants_it() {
     let mut quiet = profile();
     quiet.thinking = false;
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: quiet,
         system: Vec::new(),
         tools: Vec::new(),

@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 #[ignore = "uses the signed-in Codex account"]
 fn astra_calls_a_hosted_tool_and_streams_the_answer() {
     let request = Request {
+        workspace: None,
+        allow_edits: false,
         profile: Profile::for_provider(Provider::Codex, "gpt-6-astra", true),
         system: vec!["For this connection test call proton.connection_token once, then reply with its exact text. Do not use any other tools.".into()],
         tools: vec![Tool {name:"connection_token".into(),description:"Returns the connection verification text".into(),input_schema:json!({"type":"object","properties":{},"additionalProperties":false})}],

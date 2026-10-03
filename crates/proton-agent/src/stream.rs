@@ -34,6 +34,15 @@ pub enum Delta {
         name: String,
         input: Value,
     },
+    /// A tool the provider ran itself — Antigravity's own file and shell
+    /// tools. Shown in the pane and never run here. `outcome` is `None` while
+    /// it runs, then whether it worked and, if not, why.
+    Hosted {
+        id: String,
+        name: String,
+        input: Value,
+        outcome: Option<Result<(), String>>,
+    },
     /// The turn ended. Carries everything needed to continue the conversation.
     Done {
         stop: Option<StopReason>,

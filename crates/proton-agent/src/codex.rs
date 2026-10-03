@@ -334,6 +334,8 @@ mod tests {
             system: vec![],
             tools: vec![],
             messages: vec![Message::user(vec![Block::text("test")])],
+            workspace: None,
+            allow_edits: false,
         }
     }
     #[test]

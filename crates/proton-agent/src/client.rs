@@ -127,12 +127,16 @@ pub fn send(request: Request) -> Result<Turn, String> {
     if provider == Provider::Codex {
         return crate::codex::send(request);
     }
+    if provider == Provider::Antigravity {
+        return crate::antigravity::send(request);
+    }
     let found = auth::resolve_for(provider)?;
     let url = provider.url(&request.profile.model);
     let body = match provider {
         Provider::Claude => request.body(),
         Provider::Gemini => crate::gemini::body(&request),
         Provider::Codex => unreachable!("Codex uses the local app-server"),
+        Provider::Antigravity => unreachable!("Antigravity runs the agy CLI"),
     };
 
     let (tx, replies) = mpsc::channel();

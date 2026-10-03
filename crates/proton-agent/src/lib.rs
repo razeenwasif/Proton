@@ -15,6 +15,7 @@
 //! Nothing here blocks the caller, and nothing here knows what an editor
 //! looks like.
 
+pub mod antigravity;
 pub mod auth;
 pub mod client;
 pub mod codex;

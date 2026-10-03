@@ -126,6 +126,25 @@ approved automatically. A recent runtime with experimental dynamic tools is
 required. Each question starts an ephemeral Codex thread with Proton's saved
 conversation; this adapter does not resume Codex desktop tasks.
 
+## Antigravity agent connection
+
+A Google AI subscription has no API key, so the **Gemini** provider cannot use
+it. **Antigravity** can: in **Settings → AI & models**, select it, and Proton
+runs Antigravity's `agy` command on your own Google sign-in. Run `agy` once in a
+terminal to sign in. Proton finds it in `~/.local/bin`, where the Antigravity
+installer puts it, or on PATH, or at `PROTON_AGY_BIN`. Gemini 3.8 Flash (High)
+is the default, and `agy models` lists the rest.
+
+Unlike Codex, `agy` cannot be handed Proton's tools for a single run, so it
+works in the project with its own. Its steps appear in the agent pane as they
+happen. It may always read and search. It may not run commands. It may not
+write files either, until **Let Antigravity edit files** is turned on. That
+switch is the one exception to *the agent proposes, you apply*: with it on,
+edits go straight to disk, not through the diff review. Open files it changed
+are re-read when the turn ends, unless they have unsaved work in them.
+`agy` also reads your own global instructions, `~/.gemini/GEMINI.md`, as it does
+anywhere else.
+
 ## Your own library
 
 The one piece that is not an editor feature. Point Proton at directories of your
