@@ -16,6 +16,7 @@
   "include": [
     "protocol.ts",
     "file-tree.js",
+    "file-icons.js",
     "display-settings.js",
     "history-controls.js",
     "transport.js",

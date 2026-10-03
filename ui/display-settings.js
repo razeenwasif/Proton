@@ -6,9 +6,9 @@
  */
 export function createDisplaySettings(root, keep, changed) {
   /** @type {Record<string, string | number>} */
-  const defaults = { 'ui.textScale': 1, 'ui.density': 'comfortable', 'ui.blur': 46, 'editor.fontSize': 13 };
+  const defaults = { 'ui.textScale': 1, 'ui.density': 'comfortable', 'ui.blur': 46, 'editor.fontSize': 16, 'editor.tabs': 'hidden' };
   /** @type {Record<string, readonly (string | number)[]>} */
-  const choices = { 'ui.textScale': [1, 1.1, 1.25], 'ui.density': ['comfortable', 'compact'], 'ui.blur': [0, 20, 46], 'editor.fontSize': [12, 13, 14, 16, 18] };
+  const choices = { 'ui.textScale': [1, 1.1, 1.25], 'ui.density': ['comfortable', 'compact'], 'ui.blur': [0, 20, 46], 'editor.fontSize': [12, 13, 14, 15, 16, 18, 20], 'editor.tabs': ['hidden', 'shown'] };
   const inputs = [...root.querySelectorAll('[data-display-setting]')].filter((node) => node instanceof HTMLSelectElement);
   let current = { ...defaults };
   function paint() {
@@ -17,6 +17,7 @@ export function createDisplaySettings(root, keep, changed) {
     style.setProperty('--editor-font-size', `${current['editor.fontSize']}px`);
     style.setProperty('--glass-float', `saturate(200%) blur(${current['ui.blur']}px)`);
     root.documentElement.dataset.density = String(current['ui.density']);
+    root.documentElement.dataset.tabs = String(current['editor.tabs']);
     root.documentElement.dataset.surfaceBlur = String(current['ui.blur']);
     inputs.forEach((input) => { input.value = String(current[input.dataset.displaySetting ?? '']); });
     changed();

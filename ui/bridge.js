@@ -125,24 +125,29 @@ export function wireWindowChrome() {
   const win = tauri.window?.getCurrentWindow();
   if (!win) return;
 
-  const lights = document.querySelectorAll(".lights i");
+  // Two sets: the chrome rail's, and Codex's title bar's. Each is close,
+  // minimise, maximise in that order, whichever one is on screen.
   const actions = [() => win.close(), () => win.minimize(), () => win.toggleMaximize()];
-  lights.forEach((light, i) => {
-    if (!(light instanceof HTMLElement)) return;
-    light.style.cursor = "pointer";
-    light.addEventListener("click", () => actions[i]?.());
+  document.querySelectorAll(".lights").forEach((set) => {
+    set.querySelectorAll("i").forEach((light, i) => {
+      if (!(light instanceof HTMLElement)) return;
+      light.style.cursor = "pointer";
+      light.addEventListener("click", () => actions[i]?.());
+    });
   });
 
-  // With the titlebar gone, the chrome rail is the drag surface. Only its
-  // empty parts drag; every control on it keeps working.
-  const rail = document.querySelector(".chrome-rail");
-  if (!(rail instanceof HTMLElement)) return;
-  rail?.addEventListener("mousedown", (e) => {
-    if (!(e.target instanceof Element) || e.button !== 0 || e.target.closest("button, .lights, .avatars")) return;
-    win.startDragging();
-  });
-  rail?.addEventListener("dblclick", (e) => {
-    if (!(e.target instanceof Element) || e.target.closest("button, .lights, .avatars")) return;
-    win.toggleMaximize();
-  });
+  // With the titlebar gone, the chrome rail is the drag surface — and in
+  // Codex, the title bar is. Only their empty parts drag; every control on
+  // them keeps working.
+  for (const surface of document.querySelectorAll(".chrome-rail, .titlebar")) {
+    surface.addEventListener("mousedown", (e) => {
+      if (!(e instanceof MouseEvent) || !(e.target instanceof Element) || e.button !== 0 ||
+        e.target.closest("button, .lights, .avatars")) return;
+      win.startDragging();
+    });
+    surface.addEventListener("dblclick", (e) => {
+      if (!(e.target instanceof Element) || e.target.closest("button, .lights, .avatars")) return;
+      win.toggleMaximize();
+    });
+  }
 }

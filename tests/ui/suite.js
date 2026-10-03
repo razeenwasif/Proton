@@ -116,7 +116,9 @@ await test('Sidebar collapse gives the editor more room and restores across mode
   assert(!section.querySelector('aside').hidden, 'sidebar could not be restored');
 });
 await test('Narrow windows show the requested panel without squeezing out the editor', async () => {
-  frame.style.width = '900px'; await settle();
+  // Narrow enough that the two side panels cannot both sit beside a usable
+  // stage. Codex has no rails, so that is narrower than it is in other modes.
+  frame.style.width = '760px'; await settle();
   const section = $('.workspace.on');
   $('[data-panel-toggle="right"]').click(); await settle();
   assert(!$('#codex-dock').hidden, 'right panel did not open');
@@ -133,6 +135,38 @@ await test('Each mode keeps a usable stage and Chat disables the absent right pa
     assert(stage.getBoundingClientRect().right <= section.getBoundingClientRect().right + 1, `${mode} overflows`);
     assert($('[data-panel-toggle="right"]').disabled === (mode === 'chat'), `${mode} has the wrong panel controls`);
   }
+});
+const shown = (el) => Boolean(el) && win.getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0;
+await test('Codex trades the rails and statusline for a title bar, and only Codex does', async () => {
+  assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'Codex kept the old chrome');
+  const bar = $('.titlebar').getBoundingClientRect(), app = $('.app').getBoundingClientRect();
+  assert(Math.abs(bar.right - app.right) < 2 && bar.height > app.height - 4 && bar.width < 60,
+    'title bar is not a column down the right edge');
+  assert($('.workspace.on').getBoundingClientRect().top - app.top < 2, 'the code lost the top of the window');
+  const tab = [...doc.querySelectorAll('.titlebar [role="tab"]')].find((t) => t.textContent === 'Data');
+  assert(tab && tab.getAttribute('aria-selected') === 'false', 'title bar has no Data mode');
+  const before = win.commands.length;
+  tab.click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'setMode' && c.mode === 'data'), 'title bar did not switch modes');
+  assert(!shown($('.titlebar')) && shown($('.chrome-rail')) && shown($('.statusline')), 'Data lost its chrome');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  assert(shown($('.titlebar')), 'title bar did not come back');
+});
+await test('The terminal sits beside the code and toggles without editor commands', async () => {
+  const pane = $('[data-term-pane]'), toggle = $('.titlebar [data-term-toggle]');
+  const code = $('.workspace.on .stage-code');
+  const wasOpen = !pane.hidden;
+  if (!wasOpen) { toggle.click(); await settle(); }
+  const narrow = code.clientWidth, before = win.commands.length;
+  assert(!pane.hidden && pane.closest('main'), 'terminal is not in the stage');
+  toggle.click(); await settle();
+  assert(pane.hidden && code.clientWidth > narrow, 'closing the terminal gave the code no room');
+  toggle.click(); await settle();
+  assert(!pane.hidden && toggle.getAttribute('aria-pressed') === 'true', 'terminal did not reopen');
+  const sent = win.commands.slice(before);
+  assert(sent.some((c) => c.type === 'openTerminal'), 'opening the pane did not ask for a shell');
+  assert(!sent.some((c) => c.type === 'key'), 'toggling reached Vim');
+  if (!wasOpen) { toggle.click(); await settle(); }
 });
 await test('A dock shortcut reopens the hidden right panel', async () => {
   const toggle = $('[data-panel-toggle="right"]');
@@ -174,7 +208,7 @@ await test('Display settings persist typed values and change the rendered UI', a
 await test('Settings sync is read-only and workspace defaults reset display preferences', async () => {
   const before = win.commands.length;
   win.pushEvents([{type: 'settings', values: {}, path: '/other/.proton/settings.json'}]); await settle();
-  assert(parseFloat(win.getComputedStyle($('.workspace.on [data-editor]')).fontSize) === 13, 'old workspace font leaked');
+  assert(parseFloat(win.getComputedStyle($('.workspace.on [data-editor]')).fontSize) === 16, 'old workspace font leaked');
   assert(doc.documentElement.dataset.density === 'comfortable', 'old density leaked');
   assert(!win.commands.slice(before).some((c) => c.type === 'setSetting'), 'rendering settings wrote them back');
 });
@@ -302,6 +336,14 @@ await test('Viewport and cursor paint once per transaction and preserve unchange
   assert(result.paints === 1, `painted ${result.paints} times for one edit`);
   assert($('.workspace.on [data-editor] .win').children[1] === stable, 'unchanged row was rebuilt');
   assert($('.workspace.on [data-editor] .caret').textContent === 'c', 'caret painted before final cursor state');
+});
+await test('File tabs give way to the path until Settings turns them on', async () => {
+  const strip = $('.workspace.on [data-buffers]'), crumbs = $('.workspace.on [data-crumbs]');
+  assert(!shown(strip) && shown(crumbs), 'tabs are showing by default');
+  assert(crumbs.textContent === $('.workspace.on [data-buffers] .buf.on [role=tab]').title.split(' — ')[0], 'path is not the open file');
+  await choose('editor.tabs', 'shown');
+  assert(shown(strip) && !shown(crumbs), 'tabs did not come back');
+  assert(win.commands.some((c) => c.type === 'setSetting' && c.key === 'editor.tabs' && c.value === 'shown'), 'choice was not persisted');
 });
 await test('Unchanged buffer metadata preserves the tab DOM and keyboard focus', async () => {
   const tab = $('.workspace.on [data-buffers] .buf.on [role=tab]');

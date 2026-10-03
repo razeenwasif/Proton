@@ -29,7 +29,9 @@ export function createPanels(root, changed) {
     panes.forEach((pane, index) => {
       const willHide = !(index === 0 ? left : right);
       if (willHide && pane.contains(root.activeElement)) {
-        root.querySelector(`[data-panel-toggle="${index ? 'right' : 'left'}"]`)?.focus();
+        // The toggle that is on screen: Codex has its own, in the title bar.
+        const toggles = [...root.querySelectorAll(`[data-panel-toggle="${index ? 'right' : 'left'}"]`)];
+        /** @type {HTMLElement | undefined} */ (toggles.find((b) => b.getClientRects().length))?.focus();
       }
       pane.hidden = willHide;
       pane.inert = pane.hidden;
@@ -44,15 +46,18 @@ export function createPanels(root, changed) {
     section.dataset.rightOpen = String(right);
     if (section === active()) {
       for (const [side, visible] of [['left', left], ['right', right]]) {
-        const button = root.querySelector(`[data-panel-toggle="${side}"]`);
-        button.disabled = side === 'right' && !hasRight;
-        button.setAttribute('aria-expanded', String(visible));
-        button.classList.toggle('on', visible);
-        button.title = `${visible ? 'Hide' : 'Show'} ${side === 'left' ? 'sidebar' : 'right panel'}`;
-        button.setAttribute('aria-label', button.title);
-        const controlled = panes[side === 'left' ? 0 : 1];
-        if (controlled) button.setAttribute('aria-controls', controlled.id);
-        else button.removeAttribute('aria-controls');
+        // Every copy: the rail has one and Codex's title bar has another, and
+        // whichever is on screen has to tell the truth.
+        for (const button of root.querySelectorAll(`[data-panel-toggle="${side}"]`)) {
+          button.disabled = side === 'right' && !hasRight;
+          button.setAttribute('aria-expanded', String(visible));
+          button.classList.toggle('on', visible);
+          button.title = `${visible ? 'Hide' : 'Show'} ${side === 'left' ? 'sidebar' : 'right panel'}`;
+          button.setAttribute('aria-label', button.title);
+          const controlled = panes[side === 'left' ? 0 : 1];
+          if (controlled) button.setAttribute('aria-controls', controlled.id);
+          else button.removeAttribute('aria-controls');
+        }
       }
     }
   }

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap");
 
 /* ═══════════════════════════════════════════════════════════════════
    Proton — liquid glass, dark.
@@ -16,7 +16,77 @@
 
 /* ── palettes ─────────────────────────────────────────────────────── */
 
+/* Aura Dark, as one Zed setup wears it: Aura's ground, chrome and terminal,
+   Gruvbox's colours for the code. It is the default because Codex is drawn
+   after that setup — and unlike the other five it also sets the optional
+   tokens below the sixteen (syntax, ANSI, the editor's own surfaces), since
+   "Aura with Gruvbox syntax" is not something a derivation can arrive at. */
 :root,
+:root[data-theme="aura-dark"] {
+  --bg:        #15141b;
+  --bg-deep:   #110f18;
+  --raise:     255, 255, 255;
+  --text:      #edecee;
+  --text-hi:   #edecee;
+  --accent:    #a277ff;
+  --accent-2:  #f694ff;
+  --ok:        #61ffca;
+  --warn:      #ffca85;
+  --err:       #ff6767;
+  --info:      #82e2ff;
+  --tone:      #ffca85;
+  --wall-a:    #29263c;
+  --wall-b:    #a277ff;
+  --wall-c:    #61ffca;
+}
+
+/* Its optional tokens. A separate block, so that only Aura sets them: every
+   other palette gets the derivations in the block after the palettes, and
+   looks exactly as it did before these tokens existed. */
+:root[data-theme="aura-dark"] {
+  /* Zed's chrome, with this setup's overrides: panels the colour of the
+     editor, borders the colour of the ground, a lilac cursor. */
+  --muted:          #727176;
+  --faint:          #525156;
+  --head:           #100f18;
+  --line-number:    #312e46;
+  --cursor:         #bd9dff;
+  --selection:      #3d375e;
+  --row-on:         #29253d;
+  --row-on-edge:    #4e4a64;
+  --row-hover:      #1e1c27;
+  --placeholder:    #63548a;
+
+  --code:           #ebdbb2;
+  --syn-keyword:    #fb4833;
+  --syn-function:   #b8bb25;
+  --syn-string:     #b8bb25;
+  --syn-number:     #d3869b;
+  --syn-comment:    #a89984;
+  --syn-type:       #fabd2e;
+  --syn-operator:   #8ec07c;
+  --syn-punct:      #d5c4a1;
+  --syn-constant:   #fabd2e;
+  --syn-variable:   #ebdbb2;
+  --syn-property:   #ebdbb2;
+  --syn-attribute:  #83a598;
+  --syn-heading:    #b8bb25;
+  --syn-emphasis:   #83a598;
+  --syn-strong:     #83a598;
+  --syn-link:       #d3869b;
+
+  /* Aura's terminal palette, quirks included: its magenta is green and its
+     cyan purple, and a prompt drawn in them should look as it does in Zed. */
+  --ansi-0:  #15141b;  --ansi-8:  #2d2d2d;
+  --ansi-1:  #ff6767;  --ansi-9:  #ffca85;
+  --ansi-2:  #61ffca;  --ansi-10: #a277ff;
+  --ansi-3:  #ffca85;  --ansi-11: #ffca85;
+  --ansi-4:  #a277ff;  --ansi-12: #a277ff;
+  --ansi-5:  #61ffca;  --ansi-13: #61ffca;
+  --ansi-6:  #a277ff;  --ansi-14: #61ffca;
+  --ansi-7:  #cdccce;  --ansi-15: #edecee;
+}
+
 :root[data-theme="tokyo-night"] {
   --bg:        #16161e;
   --bg-deep:   #0f0f16;
@@ -146,6 +216,57 @@
           "CaskaydiaCove NF", "Cascadia Mono", "Cascadia Code", ui-monospace, monospace;
   --sans: Inter, -apple-system, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI",
           system-ui, sans-serif;
+  /* Codex's one face, for chrome and code alike — Zed's setup uses it for
+     both. The Nerd Font patch first, for its glyphs; plain JetBrains Mono
+     from Google Fonts where it is not installed. */
+  --zed: "JetBrainsMono Nerd Font", "JetBrainsMono NF", "JetBrains Mono", var(--mono);
+}
+
+/* ── optional tokens ──────────────────────────────────────────────────
+   A palette may set these; one that does not gets these derivations, which
+   reproduce what the rules below drew before the tokens existed. Aura sets
+   them all, because a ground from one theme and code from another is not
+   something a derivation can arrive at. */
+:root {
+  --muted:       color-mix(in srgb, var(--text) 48%, var(--bg));
+  --faint:       color-mix(in srgb, var(--text) 30%, var(--bg));
+  --head:        color-mix(in srgb, var(--bg-deep) 70%, var(--bg));
+  --line-number: color-mix(in srgb, var(--text) 22%, var(--bg));
+  --cursor:      var(--accent);
+  --selection:   color-mix(in srgb, var(--accent) 30%, var(--bg));
+  --row-on:      color-mix(in srgb, var(--accent) 15%, var(--bg));
+  --row-on-edge: color-mix(in srgb, var(--accent) 38%, var(--bg));
+  --row-hover:   color-mix(in srgb, var(--text) 6%, var(--bg));
+  --placeholder: color-mix(in srgb, var(--accent) 55%, var(--bg));
+
+  /* Syntax. `--syn-emphasis` is left unset on purpose: unset, emphasis keeps
+     the colour of the text it is in, which is what it has always done. */
+  --code:           var(--text);
+  --syn-keyword:    var(--accent-2);
+  --syn-function:   var(--accent);
+  --syn-string:     var(--ok);
+  --syn-number:     var(--tone);
+  --syn-comment:    var(--ink-2);
+  --syn-type:       var(--warn);
+  --syn-operator:   var(--info);
+  --syn-punct:      var(--ink-2);
+  --syn-constant:   var(--tone);
+  --syn-variable:   var(--ink-2);
+  --syn-property:   var(--info);
+  --syn-attribute:  var(--accent-2);
+  --syn-heading:    var(--accent);
+  --syn-strong:     var(--ink);
+  --syn-link:       var(--info);
+
+  /* The sixteen ANSI colours, mapped onto the theme. */
+  --ansi-0:  var(--ink-4);     --ansi-8:  var(--ink-3);
+  --ansi-1:  var(--err);       --ansi-9:  var(--err);
+  --ansi-2:  var(--ok);        --ansi-10: var(--ok);
+  --ansi-3:  var(--warn);      --ansi-11: var(--warn);
+  --ansi-4:  var(--info);      --ansi-12: var(--info);
+  --ansi-5:  var(--accent-2);  --ansi-13: var(--accent-2);
+  --ansi-6:  var(--tone);      --ansi-14: var(--tone);
+  --ansi-7:  var(--ink-2);     --ansi-15: var(--text-hi);
 }
 
 * { box-sizing: border-box; }
@@ -179,7 +300,10 @@ body {
   position: relative; z-index: 1;
   margin: 14px; height: calc(100vh - 28px);
   display: grid;
-  grid-template-rows: 1fr 26px;
+  /* Title bar, body, statusline. Placed by row rather than by order, because
+     Codex hides the statusline and the other modes hide the title bar, and
+     an auto-placed grid would slide the body into whichever row was left. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
   background: color-mix(in srgb, var(--bg) 74%, transparent);
   -webkit-backdrop-filter: var(--glass-chrome); backdrop-filter: var(--glass-chrome);
   border: 1px solid var(--edge-hi);
@@ -421,7 +545,11 @@ body {
 .btn.primary:hover { filter: brightness(1.08); }
 
 /* ── body ─────────────────────────────────────────────────────────── */
-.body { display: grid; grid-template-columns: 62px 48px 1fr; min-height: 0; }
+.body { grid-row: 2; display: grid; grid-template-columns: 62px 48px 1fr; min-height: 0; }
+
+/* Codex's title bar. Off everywhere else, where the chrome rail carries the
+   window controls instead; drawn in the Codex block at the end. */
+.titlebar { display: none; }
 
 .rail {
   display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 0;
@@ -487,7 +615,11 @@ button.chip:hover { filter: brightness(1.25); }
 /* ── the file tree ────────────────────────────────────────────────────
    A folder row reads as a container: the chevron points at what it will do
    rather than at what it is, which is the one thing everybody already knows
-   how to read without being told. */
+   how to read without being told.
+
+   A row carries its depth, not a width: how far a level steps in is said
+   here, once, so Codex can say it the way Zed does. */
+[data-tree] .row { padding-left: calc(var(--tree-pad, 8px) + var(--depth, 0) * var(--tree-indent, 13px)); }
 .row.dir { color: var(--ink); }
 .row .chev { transition: transform .13s ease; opacity: .55; }
 .row.dir.open .chev { transform: rotate(0deg); }
@@ -667,22 +799,22 @@ kbd {
    typing into it competes with the characters appearing next to it. */
 .code:not(.insert) .ln .caret { animation: blink 1.15s steps(1) infinite; }
 
-.k  { color: var(--accent-2); } .fn { color: var(--accent); }
-.str{ color: var(--ok); }       .num{ color: var(--tone); }
-.cm { color: var(--ink-2); font-style: italic; }
-.ty { color: var(--warn); }     .op { color: var(--info); }
-.pn { color: var(--ink-2); }
+.k  { color: var(--syn-keyword); } .fn { color: var(--syn-function); }
+.str{ color: var(--syn-string); }  .num{ color: var(--syn-number); }
+.cm { color: var(--syn-comment); font-style: italic; }
+.ty { color: var(--syn-type); }    .op { color: var(--syn-operator); }
+.pn { color: var(--syn-punct); }
 
 /* Prose. A markdown file is read rather than scanned, so these say what the
    marks around them mean — a heading looks like a heading, emphasis leans,
    strong is heavier — instead of adding four more colours to tell apart.
    The `*` and `` ` `` themselves stay punctuation-dim, which is what makes
    the text between them read as the text and not as the syntax. */
-.md-h  { color: var(--accent); font-weight: 700; }
-.md-em { font-style: italic; }
-.md-b  { font-weight: 700; color: var(--ink); }
-.md-a  { color: var(--info); text-decoration: underline; text-underline-offset: 2px;
-         text-decoration-color: color-mix(in srgb, var(--info) 45%, transparent); }
+.md-h  { color: var(--syn-heading); font-weight: 700; }
+.md-em { font-style: italic; color: var(--syn-emphasis, currentColor); }
+.md-b  { font-weight: 700; color: var(--syn-strong); }
+.md-a  { color: var(--syn-link); text-decoration: underline; text-underline-offset: 2px;
+         text-decoration-color: color-mix(in srgb, var(--syn-link) 45%, transparent); }
 
 .hl-add { background: color-mix(in srgb, var(--ok) 11%, transparent); box-shadow: inset 2px 0 0 var(--ok); }
 .hl-del { background: color-mix(in srgb, var(--err) 10%, transparent); box-shadow: inset 2px 0 0 var(--err); }
@@ -877,6 +1009,7 @@ button.find { border: 0; text-align: left; font: inherit; }
 
 /* ── statusline ───────────────────────────────────────────────────── */
 .statusline {
+  grid-row: 3; height: 26px;
   display: flex; align-items: center; font: 11px var(--mono);
   background: rgba(0, 0, 0, 0.16); border-top: 1px solid var(--edge);
 }
@@ -1510,8 +1643,8 @@ table.df tr:hover td { background: var(--e1); }
 /* The four scopes the mock markup never needed. Same idea as the eight above:
    the core names what a run is, and only this block decides what that looks
    like — which is why a fifth theme is a paste rather than a port. */
-.cn { color: var(--tone); }     .va { color: var(--ink-2); }
-.pr { color: var(--info); }     .at { color: var(--accent-2); }
+.cn { color: var(--syn-constant); } .va { color: var(--syn-variable); }
+.pr { color: var(--syn-property); } .at { color: var(--syn-attribute); }
 
 /* ── selection ────────────────────────────────────────────────────────
    Painted per character rather than as a box behind the line, because a
@@ -1571,6 +1704,17 @@ table.df tr:hover td { background: var(--e1); }
 /* A few icons are solid marks rather than outlines — a diagnostic sign
    has to read at 9px, where an outline is mush. */
 .i.solid { fill: currentColor; stroke: none; }
+
+/* File icons (file-icons.js). They bring their own fills and strokes, so the
+   box sets neither: anything the `.i` rule put here would be inherited by
+   every path that does not say otherwise. */
+.fi {
+  flex: none; width: 1em; height: 1em;
+  fill: none; stroke: none;
+  vertical-align: -0.14em;
+}
+.row .ic .fi, .row .fic .fi { width: 14px; height: 14px; }
+.fic { display: inline-flex; }
 
 /* ── icon variants ────────────────────────────────────────────────── */
 
@@ -1767,24 +1911,26 @@ table.df tr:hover td { background: var(--e1); }
 .tinv { background: var(--ink-2); color: var(--bg-deep); }
 
 /* The sixteen ANSI colours, mapped onto the theme rather than hard-coded, so
-   a terminal in Nord does not look like a terminal in Tokyo Night. */
-.tf0 { color: var(--ink-4); }   .tf8  { color: var(--ink-3); }
-.tf1 { color: var(--err); }     .tf9  { color: var(--err); }
-.tf2 { color: var(--ok); }      .tf10 { color: var(--ok); }
-.tf3 { color: var(--warn); }    .tf11 { color: var(--warn); }
-.tf4 { color: var(--info); }    .tf12 { color: var(--info); }
-.tf5 { color: var(--accent-2); }.tf13 { color: var(--accent-2); }
-.tf6 { color: var(--tone); }    .tf14 { color: var(--tone); }
-.tf7 { color: var(--ink-2); }   .tf15 { color: var(--text-hi); }
+   a terminal in Nord does not look like a terminal in Tokyo Night. The
+   mapping is the `--ansi-*` tokens; a palette with a terminal of its own
+   sets them. */
+.tf0 { color: var(--ansi-0); }  .tf8  { color: var(--ansi-8); }
+.tf1 { color: var(--ansi-1); }  .tf9  { color: var(--ansi-9); }
+.tf2 { color: var(--ansi-2); }  .tf10 { color: var(--ansi-10); }
+.tf3 { color: var(--ansi-3); }  .tf11 { color: var(--ansi-11); }
+.tf4 { color: var(--ansi-4); }  .tf12 { color: var(--ansi-12); }
+.tf5 { color: var(--ansi-5); }  .tf13 { color: var(--ansi-13); }
+.tf6 { color: var(--ansi-6); }  .tf14 { color: var(--ansi-14); }
+.tf7 { color: var(--ansi-7); }  .tf15 { color: var(--ansi-15); }
 
 .tb0 { background: var(--bg-deep); }  .tb8  { background: var(--e2); }
-.tb1 { background: var(--err); }      .tb9  { background: var(--err); }
-.tb2 { background: var(--ok); }       .tb10 { background: var(--ok); }
-.tb3 { background: var(--warn); }     .tb11 { background: var(--warn); }
-.tb4 { background: var(--info); }     .tb12 { background: var(--info); }
-.tb5 { background: var(--accent-2); } .tb13 { background: var(--accent-2); }
-.tb6 { background: var(--tone); }     .tb14 { background: var(--tone); }
-.tb7 { background: var(--ink-2); }    .tb15 { background: var(--text-hi); }
+.tb1 { background: var(--ansi-1); }   .tb9  { background: var(--ansi-9); }
+.tb2 { background: var(--ansi-2); }   .tb10 { background: var(--ansi-10); }
+.tb3 { background: var(--ansi-3); }   .tb11 { background: var(--ansi-11); }
+.tb4 { background: var(--ansi-4); }   .tb12 { background: var(--ansi-12); }
+.tb5 { background: var(--ansi-5); }   .tb13 { background: var(--ansi-13); }
+.tb6 { background: var(--ansi-6); }   .tb14 { background: var(--ansi-14); }
+.tb7 { background: var(--ansi-7); }   .tb15 { background: var(--ansi-15); }
 
 /* ── git panel ────────────────────────────────────────────────────── */
 /* One letter, in the colour the gutter already uses for that state — so a
@@ -2170,7 +2316,7 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
 .model-pick:hover { color: var(--ink); }
 
 /* Readability and panel controls. Sizes remain independent of editor text. */
-:root { --ui-scale: 1; --editor-font-size: 13px; --row-pad: 6px; }
+:root { --ui-scale: 1; --editor-font-size: 16px; --row-pad: 6px; }
 :root[data-density="compact"] { --row-pad: 3px; }
 .workspace > [hidden] { display: none !important; }
 .workspace > main { min-width: 0; }
@@ -2197,3 +2343,541 @@ body { font-size: calc(13px * var(--ui-scale)); }
   #settings .st-main { padding: 18px; }
   #telescope .cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
+
+.buf .fi { width: 13px; height: 13px; }
+.artifact .fi { width: 12px; height: 12px; }
+
+/* ── the stage, split ─────────────────────────────────────────────────
+   Codex's main column holds the code and, beside it, the terminal. The code
+   side is the positioning box for the document viewer, so a PDF covers the
+   code and leaves the shell alone. */
+.stage-row { display: flex; flex: 1; min-height: 0; }
+.stage-code {
+  position: relative; display: flex; flex-direction: column;
+  flex: 1 1 0; min-width: 0; min-height: 0;
+}
+/* The terminal is as wide as asked, never more than half the stage — so a
+   narrow window keeps the code readable without forgetting the width. */
+.term-pane {
+  position: relative; display: flex; flex-direction: column;
+  flex: 0 0 var(--term-w, 392px); max-width: 50%; min-width: 0; min-height: 0;
+}
+.term-gutter {
+  flex: 0 0 1px; position: relative; z-index: 5;
+  cursor: col-resize; touch-action: none; transition: background .12s;
+}
+/* The line is a pixel; the target is not. */
+.term-gutter::after { content: ""; position: absolute; inset: 0 -4px; }
+.term-gutter:hover, .term-gutter.dragging, .term-gutter:focus-visible {
+  background: var(--row-on-edge); outline: none;
+}
+.term-flags {
+  position: absolute; top: 6px; right: 10px; z-index: 2;
+  display: flex; align-items: center; gap: 6px;
+}
+.term-restart {
+  -webkit-appearance: none; appearance: none; border: 0; border-radius: 5px; padding: 4px 8px; cursor: pointer;
+  background: color-mix(in srgb, var(--err) 16%, var(--bg)); color: var(--err);
+  font: 12px/1.2 var(--zed);
+}
+.term-restart:hover { background: color-mix(in srgb, var(--err) 26%, var(--bg)); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Codex, drawn after Zed.
+
+   One Zed setup, reproduced: Aura Dark with Gruvbox syntax, JetBrains
+   Mono for chrome and code alike, and nothing that setup turns off — no
+   tabs, no statusline, no scrollbars, no git gutter, no current-line wash,
+   no borders. Every panel is the editor's colour, so the window reads as
+   one surface broken only by space and by the agent's darker header.
+
+   The numbers were measured off a screenshot of that setup at 1512pt:
+   16px code on 32px lines, 17.5px chrome, 32px tree rows stepping in 20px
+   a level. They scale with Interface text as Zed's do with its UI font
+   size. The one place Codex parts from that setup on purpose is the title
+   bar, which stands on its end down the right edge.
+
+   Scoped to Codex. The other six modes keep the glass until they are
+   drawn this way too, which is why everything here hangs off
+   `data-mode="codex"` or the Codex workspace rather than replacing a rule.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root[data-mode="codex"] {
+  --z-ui:  calc(17.5px * var(--ui-scale));  /* tree, breadcrumb, headers */
+  --z-sm:  calc(15px * var(--ui-scale));    /* the agent's prose */
+  --z-xs:  calc(14px * var(--ui-scale));    /* tool rows, composer controls */
+  --z-2xs: calc(12.5px * var(--ui-scale));  /* code and labels in the agent */
+  /* Density still means something: compact takes 6px off a row. */
+  --z-row: calc(32px * var(--ui-scale) - (6px - var(--row-pad)) * 2);
+}
+
+/* ── the window ───────────────────────────────────────────────────── */
+/* No rails and no statusline: the title bar takes the window controls and
+   the modes, and what the statusline said is said elsewhere or, as in that
+   setup, not at all. The vim mode is the caret's shape; a refused `:w` is
+   still the banner over the code.
+
+   The title bar is a column down the right edge rather than a row across
+   the top, so the code keeps every pixel of the window's height — the
+   dimension an editor is always short of. One row, two columns: the body,
+   then the bar. */
+:root[data-mode="codex"] .chrome-rail,
+:root[data-mode="codex"] .rail,
+:root[data-mode="codex"] .statusline,
+:root[data-mode="codex"] .hint { display: none; }
+:root[data-mode="codex"] .app {
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+:root[data-mode="codex"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
+
+/* Opaque, as Zed is. The window's own fill may be a veil over the desktop;
+   these two cover it, and the veils the backdrop puts on the panes are the
+   ground's colour over the ground's colour — the same colour. */
+:root[data-mode="codex"] .titlebar,
+.workspace[data-ws="codex"] { background: var(--bg); }
+
+:root[data-mode="codex"] .titlebar {
+  grid-row: 1; grid-column: 2;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  width: 40px; padding: 14px 0 8px;
+  font: var(--z-xs)/1 var(--zed); user-select: none;
+  -webkit-font-smoothing: auto;
+}
+/* The size macOS draws them, 12px and 20px apart, stacked as the chrome
+   rail stacks them; 14px in from the corner either way. */
+.titlebar .lights i { width: 12px; height: 12px; }
+.titlebar .tb-modes { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 10px; }
+/* Text buttons, like the items Zed keeps in its title bar, turned to read
+   down the bar as a side panel's labels do. Quiet until one is the mode you
+   are in. The words turn rather than the buttons, so the boxes stay boxes
+   to the layout and to the pointer.
+
+   `appearance: none` because WebKit — the native shell's engine — keeps a
+   text-only button's macOS bezel through a cleared border and background. */
+.titlebar .mode {
+  -webkit-appearance: none; appearance: none;
+  width: auto; display: block; padding: 8px 6px;
+  border: 0; border-radius: 5px; background: none; box-shadow: none;
+  color: var(--faint); font: inherit; letter-spacing: 0;
+}
+.titlebar .mode > span { display: block; writing-mode: vertical-rl; }
+.titlebar .mode:hover { color: var(--muted); background: var(--row-hover); }
+.titlebar .mode[aria-selected="true"] { color: var(--text); background: none; box-shadow: none; }
+.titlebar .tb-drag { flex: 1; align-self: stretch; }
+.titlebar .tb-actions { display: flex; flex-direction: column; gap: 2px; }
+.tb-btn {
+  -webkit-appearance: none; appearance: none;
+  width: 30px; height: 28px; display: grid; place-items: center; cursor: pointer;
+  border: 0; border-radius: 5px; background: none; color: var(--faint);
+}
+.tb-btn svg { width: 16px; height: 16px; }
+.tb-btn.on { color: var(--muted); }
+.tb-btn:hover { color: var(--text); background: var(--row-hover); }
+
+.workspace[data-ws="codex"] {
+  color: var(--text); font-family: var(--zed); letter-spacing: 0;
+  -webkit-font-smoothing: auto;
+}
+.workspace[data-ws="codex"] > .side { background: none; }
+
+/* The panes meet without a line. The divider is still there to drag and
+   says so when the pointer finds it. */
+.workspace[data-ws="codex"] > .gutter { background: transparent; }
+.workspace[data-ws="codex"] > .gutter:hover,
+.workspace[data-ws="codex"] > .gutter.dragging { background: var(--row-on-edge); }
+
+/* Never a scrollbar, in that setup or here. Scrolling is the wheel's. */
+.workspace[data-ws="codex"] .scroll { scrollbar-width: none; }
+.workspace[data-ws="codex"] .scroll::-webkit-scrollbar { display: none; }
+
+/* ── the project panel ────────────────────────────────────────────── */
+/* No header and no search box: `⌘K` and `␣ff` find files, `␣e` reveals the
+   one you are in. Rows are the whole panel wide, folders wear a folder
+   rather than a chevron, and only the open file is lit. */
+.workspace[data-ws="codex"] > aside.side > header,
+.workspace[data-ws="codex"] > aside.side > .find { display: none; }
+.workspace[data-ws="codex"] .tree {
+  --tree-pad: 6px; --tree-indent: 20px;
+  padding: 4px 0; font: var(--z-ui)/1 var(--zed);
+}
+.workspace[data-ws="codex"] .tree .row {
+  height: var(--z-row); padding-top: 0; padding-bottom: 0; padding-right: 10px;
+  gap: 8px; border-radius: 0; color: var(--muted);
+}
+.workspace[data-ws="codex"] .tree .row > span:last-child { overflow: hidden; text-overflow: clip; }
+.workspace[data-ws="codex"] .tree .row.dir { color: var(--muted); }
+.workspace[data-ws="codex"] .tree .row.dir .ic { display: none; }
+.workspace[data-ws="codex"] .tree .row .ic {
+  flex: 0 0 auto; width: auto; opacity: 1; font-size: inherit; display: inline-flex;
+}
+/* Icons a size up from the text, as Zed draws them: 20px beside 17.5px. */
+.workspace[data-ws="codex"] .tree .fi { width: calc(20px * var(--ui-scale)); height: calc(20px * var(--ui-scale)); }
+.workspace[data-ws="codex"] .tree .row:hover { background: var(--row-hover); color: var(--muted); }
+.workspace[data-ws="codex"] .tree .row.sel,
+.workspace[data-ws="codex"] .tree .row.sel:hover {
+  background: var(--row-on); color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--row-on-edge);
+}
+.workspace[data-ws="codex"] .tree [role="treeitem"]:focus-visible {
+  outline: 1px solid var(--row-on-edge); outline-offset: -1px;
+}
+.workspace[data-ws="codex"] .tree .row.more { font-size: var(--z-xs); color: var(--faint); }
+.workspace[data-ws="codex"] .empty { color: var(--muted); font: var(--z-xs)/1.6 var(--zed); }
+
+/* ── the editor ───────────────────────────────────────────────────── */
+/* The row above the code is the breadcrumb, as Zed draws it with its tab bar
+   turned off. The split buttons wait at its right end until the pointer or
+   the keyboard comes looking for them. */
+.crumbs { display: none; }
+.workspace[data-ws="codex"] .buffers {
+  height: calc(52px * var(--ui-scale)); padding: 0 8px 0 16px;
+  align-items: center; gap: 6px;
+}
+:root:not([data-tabs="shown"]) .workspace[data-ws="codex"] .crumbs {
+  display: block; flex: 1 1 auto; min-width: 0;
+  overflow: hidden; white-space: nowrap;
+  font: var(--z-ui)/1.4 var(--zed); color: var(--muted);
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+}
+:root:not([data-tabs="shown"]) .workspace[data-ws="codex"] [data-buffers] { display: none; }
+.workspace[data-ws="codex"] .split-actions { opacity: 0; transition: opacity .15s; }
+.workspace[data-ws="codex"] .buffers:hover .split-actions,
+.workspace[data-ws="codex"] .split-actions:focus-within { opacity: 1; }
+.workspace[data-ws="codex"] .split-actions button,
+.workspace[data-ws="codex"] .split-actions button[data-history] { color: var(--faint); }
+.workspace[data-ws="codex"] .split-actions button:hover { color: var(--text); background: var(--row-hover); }
+
+/* With tabs turned back on: names, not cards. */
+.workspace[data-ws="codex"] .buf {
+  font: var(--z-xs)/1 var(--zed); color: var(--muted); border-radius: 5px;
+}
+.workspace[data-ws="codex"] .buf:hover { color: var(--text); background: var(--row-hover); }
+.workspace[data-ws="codex"] .buf.on { color: var(--text); background: var(--row-hover); box-shadow: none; }
+
+/* 16px on 32px lines, in Gruvbox's ink. */
+.workspace[data-ws="codex"] .code {
+  font: var(--editor-font-size)/2 var(--zed);
+  color: var(--code); padding-top: 4px;
+}
+/* The gutter, left to right: the sign column, the number as wide as the
+   file's last one, then the text. No change bars — that setup hides git's
+   gutter — and no wash on the current line, only its number lit. */
+.workspace[data-ws="codex"] .ln { padding: 0 16px; }
+.workspace[data-ws="codex"] .ln.cur { background: none; }
+.workspace[data-ws="codex"] .ln .s { order: -1; }
+.workspace[data-ws="codex"] .ln .g { display: none; }
+.workspace[data-ws="codex"] .ln .n {
+  flex: 0 0 calc(var(--digits, 1) * 1ch + 14px); padding-right: 14px;
+  color: var(--line-number);
+}
+.workspace[data-ws="codex"] .ln.cur .n { color: var(--text); font-weight: 400; }
+
+/* A lilac block that blinks on and off, and a bar in insert. The block lets
+   the character through when it is off rather than taking it with it. */
+.workspace[data-ws="codex"] .code:not(.insert) .ln .caret {
+  background: var(--cursor); color: var(--bg); border-radius: 0; box-shadow: none;
+  animation: caret-blink 1s infinite;
+}
+.workspace[data-ws="codex"] .code.insert .ln .caret {
+  background: none; color: inherit; border-radius: 0;
+  box-shadow: inset 2px 0 0 var(--cursor);
+}
+@keyframes caret-blink {
+  0%, 49.9% { background: var(--cursor); color: var(--bg); }
+  50%, 100% { background: transparent; color: var(--code); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace[data-ws="codex"] .code:not(.insert) .ln .caret { animation: none; }
+}
+.workspace[data-ws="codex"] .sel,
+.workspace[data-ws="codex"] .ln.cur .sel,
+.workspace[data-ws="codex"] .ln.selected::after {
+  background: color-mix(in srgb, var(--selection) 50%, transparent);
+}
+.workspace[data-ws="codex"] .ln .hit { background: color-mix(in srgb, var(--warn) 22%, transparent); }
+/* As that setup draws Markdown: emphasis is a colour rather than a slope, and
+   a link is coloured, not underlined. */
+.workspace[data-ws="codex"] .md-em { font-style: normal; }
+.workspace[data-ws="codex"] .md-a { text-decoration: none; }
+.workspace[data-ws="codex"] .ln.cur .hit { background: color-mix(in srgb, var(--warn) 32%, transparent); }
+
+/* Splits: no line between them, and the one with the keyboard is the one
+   that is not dimmed. */
+.workspace[data-ws="codex"] .sp-gutter { background: transparent; }
+.workspace[data-ws="codex"] .sp-gutter:hover::after,
+.workspace[data-ws="codex"] .sp-gutter.dragging::after { background: var(--row-on-edge); }
+.workspace[data-ws="codex"] .splits > .split.on::before { height: 1px; background: var(--row-on-edge); }
+.workspace[data-ws="codex"] .splits.multi > .split:not(.on) { opacity: .7; }
+
+.workspace[data-ws="codex"] .editor-empty { color: var(--muted); font: var(--z-xs)/1.6 var(--zed); }
+.workspace[data-ws="codex"] .editor-loading {
+  padding: 0 16px 8px; background: none; color: var(--muted); font: var(--z-2xs) var(--zed);
+}
+.workspace[data-ws="codex"] .btn {
+  border-radius: 5px; box-shadow: none; background: var(--row-hover);
+  color: var(--text); font: var(--z-xs)/1.3 var(--zed);
+}
+.workspace[data-ws="codex"] .btn:hover { background: var(--row-on); box-shadow: none; }
+:root[data-mode="codex"] .editor-message {
+  border-radius: 6px; background: var(--bg-deep); font: var(--z-xs)/1.5 var(--zed);
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, .7);
+}
+:root[data-mode="codex"] .editor-message button {
+  border-radius: 5px; border-color: var(--row-on-edge); background: var(--row-hover);
+  color: var(--text); font: inherit;
+}
+.workspace[data-ws="codex"] #doc-viewer > header { font: var(--z-xs) var(--zed); color: var(--muted); }
+
+/* ── the terminal ─────────────────────────────────────────────────── */
+/* The editor's face and size, at the tighter line Zed gives a terminal.
+   The caret is a lilac block while the shell has the keyboard and an
+   outline of one when it does not. */
+.term-pane .term {
+  flex: 1; min-height: 0; padding: 6px 10px 6px 8px;
+  font: var(--editor-font-size)/1.3 var(--zed); color: var(--text);
+}
+.term-pane .trow { min-height: 1.3em; }
+.term-pane .term.on { outline: none; }
+.term-pane .trow.tcur::after {
+  background: transparent; opacity: 1; border-radius: 0;
+  box-shadow: inset 0 0 0 1px var(--cursor);
+}
+.term-pane .term.on .trow.tcur::after { background: var(--cursor); opacity: .75; box-shadow: none; }
+.term-pane .term-flags .chip { font: 12px/1 var(--zed); }
+
+/* ── the agent ────────────────────────────────────────────────────── */
+/* A darker strip with the thread's name, fading out where it runs long,
+   and three buttons. Everything below it is the editor's ground. */
+#codex-dock > .dock-head {
+  position: relative; display: flex; align-items: center; gap: 2px;
+  min-height: 0; height: calc(39px * var(--ui-scale)); padding: 0 8px 0 13px;
+  background: var(--head);
+  font: var(--z-sm)/1 var(--zed); letter-spacing: 0; text-transform: none; color: var(--code);
+}
+.dock-title {
+  flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; margin-right: 6px;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+#codex-dock > .dock-head .hbtn {
+  -webkit-appearance: none; appearance: none; position: relative; width: 28px; height: 26px; padding: 0;
+  border-radius: 5px; color: var(--text);
+}
+#codex-dock > .dock-head .hbtn svg { width: 15px; height: 15px; }
+#codex-dock > .dock-head .hbtn:hover,
+#codex-dock > .dock-head .hbtn[aria-expanded="true"] { background: var(--row-hover); }
+#codex-dock:not([data-showing="agent"]) [data-dock-only="agent"] { display: none; }
+/* Something is queued in Tasks, which now lives behind `⋯`. */
+.dock-head .dot {
+  position: absolute; top: 5px; right: 5px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--accent); box-shadow: none;
+}
+
+/* The panels, as a menu off `⋯`. */
+#codex-dock .dock-tabs {
+  position: absolute; top: calc(100% - 2px); right: 8px; z-index: 20;
+  display: flex; flex-direction: column; flex-wrap: nowrap; gap: 1px;
+  min-width: 170px; padding: 4px; overflow: visible;
+  background: var(--bg-deep); border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, var(--bg-deep));
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, .75);
+}
+#codex-dock .dock-tab {
+  -webkit-appearance: none; appearance: none; display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-radius: 4px; text-align: left;
+  color: var(--muted); font: var(--z-xs)/1 var(--zed);
+}
+#codex-dock .dock-tab:hover,
+#codex-dock .dock-tab:focus-visible { background: var(--row-hover); color: var(--text); outline: none; }
+#codex-dock .dock-tab.on { background: var(--row-on); color: var(--text); box-shadow: none; }
+#codex-dock .dock-tab .chip { margin-left: auto; }
+
+/* The transcript. No bylines and no rules between turns: what you wrote sits
+   in a box, what came back does not, and the tools it used are lines of
+   their own — an icon, what it did, and to what. */
+#codex-dock [data-agent-thread] { padding: 10px 0 14px; }
+#codex-dock .msg { padding: 6px 22px; }
+#codex-dock .msg + .msg { border-top: 0; }
+#codex-dock .msg .who { display: none; }
+#codex-dock .msg.you {
+  margin: 8px 16px; padding: 9px 12px; border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 5%, var(--bg));
+}
+#codex-dock .msg p { margin: 0 0 10px; font: var(--z-sm)/1.5 var(--zed); color: var(--text); }
+#codex-dock .msg p:last-child { margin-bottom: 0; }
+#codex-dock .msg code {
+  padding: 1px 4px; border-radius: 3px; font: .92em var(--zed); color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, var(--bg));
+}
+#codex-dock .tool {
+  display: flex; align-items: center; gap: 9px; margin: 0; padding: 7px 0;
+  background: none; box-shadow: none; border-radius: 0;
+  font: var(--z-xs)/1.2 var(--zed); color: var(--muted);
+}
+#codex-dock .tool > .i { width: 15px; height: 15px; opacity: 1; stroke-width: 1.8; }
+#codex-dock .tool b { flex: none; color: var(--muted); font-weight: 400; }
+#codex-dock .tool .d {
+  min-width: 0; overflow: hidden; white-space: nowrap;
+  padding: 2px 6px; border-radius: 4px; color: var(--muted);
+  background: color-mix(in srgb, var(--text) 5%, var(--bg));
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+}
+#codex-dock .tool .t { flex: none; margin-left: auto; font-size: var(--z-2xs); color: var(--faint); }
+#codex-dock .thought { margin: 0; padding: 0; border-left: 0; color: var(--muted); font: var(--z-xs)/1.5 var(--zed); }
+#codex-dock .thought > summary {
+  display: flex; align-items: center; gap: 9px; padding: 7px 0;
+  font: var(--z-xs)/1.2 var(--zed); letter-spacing: 0; text-transform: none; color: var(--muted);
+}
+#codex-dock .thought > summary::before { content: none; }
+#codex-dock .thought > summary .i { width: 15px; height: 15px; stroke-width: 1.8; }
+#codex-dock .thought > summary:hover,
+#codex-dock .thought[open] > summary { color: var(--text); }
+#codex-dock .thought p { margin: 2px 0 8px 24px; font: var(--z-xs)/1.55 var(--zed); color: var(--muted); }
+#codex-dock .cite { font: .92em var(--zed); }
+#codex-dock .msg .cursor {
+  width: .5em; height: 1.05em; background: var(--cursor); box-shadow: none;
+}
+
+/* What it proposed, waiting on you. Flat boxes; the buttons are words. */
+#codex-dock .staged { padding: 0 16px; }
+#codex-dock .staged .head {
+  font: var(--z-2xs)/1 var(--zed); letter-spacing: 0; text-transform: none; color: var(--muted);
+}
+#codex-dock .diff {
+  border-radius: 6px; box-shadow: none;
+  background: color-mix(in srgb, var(--text) 3%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg));
+}
+#codex-dock .diff header { font: var(--z-2xs) var(--zed); color: var(--muted); }
+#codex-dock .diff pre { font: var(--z-2xs)/1.55 var(--zed); }
+#codex-dock .diff header .acts button,
+#codex-dock .staged .head .acts button {
+  box-shadow: none; border-radius: 4px; background: var(--row-hover);
+  color: var(--muted); font: var(--z-2xs)/1 var(--zed); letter-spacing: 0;
+}
+#codex-dock .diff header .acts button.go,
+#codex-dock .staged .head .acts button.go {
+  background: color-mix(in srgb, var(--ok) 14%, var(--bg)); color: var(--ok);
+}
+
+/* The composer: no box. What you type is set like the code — 17px on a
+   double line — the placeholder in faded lilac, and the controls are words
+   in a row underneath, the send button the one thing with a fill. */
+#codex-dock .composer { padding: 6px 22px 12px; }
+#codex-dock .composer .box,
+#codex-dock .composer .box:hover,
+#codex-dock .composer .box.busy {
+  padding: 0; border-radius: 0; background: none; box-shadow: none;
+}
+#codex-dock .composer .txt {
+  min-height: calc(2em * 2); max-height: 40vh; overflow: auto;
+  font: calc(17px * var(--ui-scale))/2 var(--zed); color: var(--text);
+}
+#codex-dock .composer .txt:empty::before { color: var(--placeholder); }
+#codex-dock .composer .foot {
+  flex-wrap: wrap; gap: 2px; margin-top: 8px; font: var(--z-xs)/1 var(--zed);
+}
+#codex-dock .composer .foot .grow { flex: 1; }
+#codex-dock .select {
+  padding: 5px 6px; border-radius: 5px; background: none; box-shadow: none;
+  color: var(--muted); font: inherit;
+}
+#codex-dock .select:hover { background: var(--row-hover); color: var(--text); }
+#codex-dock .composer .select[data-mention].on { background: none; color: var(--accent); }
+#codex-dock .composer .chip[data-agent-provider] {
+  padding: 5px 4px; background: none; box-shadow: none; color: var(--faint); font: inherit;
+}
+#codex-dock .model-pick {
+  -webkit-appearance: none; appearance: none; max-width: 150px;
+  padding: 5px 18px 5px 6px; border: 0; border-radius: 5px;
+  color: var(--muted); font: inherit; cursor: pointer;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23727176' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 10l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 3px center / 12px 12px;
+}
+#codex-dock .model-pick:hover { background-color: var(--row-hover); color: var(--text); }
+#codex-dock .send {
+  width: 32px; height: 28px; margin-left: 4px; border-radius: 6px; box-shadow: none;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg)); color: var(--accent);
+}
+#codex-dock .send svg { width: 16px; height: 16px; }
+#codex-dock .send:hover { background: color-mix(in srgb, var(--accent) 24%, var(--bg)); }
+/* Nothing to send yet: the button is there, and quiet about it, as Zed's is. */
+#codex-dock .composer:has(.txt:empty) .send:not(.stop) {
+  background: var(--head); color: color-mix(in srgb, var(--accent) 35%, var(--bg));
+}
+#codex-dock .send.stop { background: color-mix(in srgb, var(--err) 16%, var(--bg)); color: var(--err); }
+
+/* The other panels behind `⋯`: the same quiet type, chips as plain words. */
+#codex-dock .dock-panel > header,
+#codex-dock .canvas-bar {
+  min-height: 0; padding: 8px 16px; border-bottom: 0;
+  font: var(--z-xs)/1 var(--zed); letter-spacing: 0; text-transform: none; color: var(--muted);
+}
+#codex-dock .chip {
+  padding: 2px 0; background: none; box-shadow: none;
+  font: var(--z-2xs)/1 var(--zed); color: var(--muted);
+}
+#codex-dock .chip.accent { color: var(--accent); }
+#codex-dock .chip.ok { color: var(--ok); }
+#codex-dock .chip.warn { color: var(--warn); }
+#codex-dock .dock-tab .chip { padding: 0; }
+#codex-dock .group {
+  padding: 14px 16px 6px; font: var(--z-2xs)/1 var(--zed);
+  letter-spacing: 0; text-transform: none; color: var(--faint);
+}
+#codex-dock .task { padding: 10px 16px; }
+#codex-dock .task + .task { border-top: 0; }
+#codex-dock .task .hd { font: var(--z-xs)/1.4 var(--zed); font-weight: 400; color: var(--text); }
+#codex-dock .task .sub { font: var(--z-2xs)/1.5 var(--zed); color: var(--muted); }
+#codex-dock .hbtn.wide { font: var(--z-2xs) var(--zed); color: var(--muted); }
+#codex-dock .seg { background: none; box-shadow: none; }
+#codex-dock .seg button { font: var(--z-2xs) var(--zed); color: var(--muted); }
+#codex-dock .seg button.on { background: var(--row-hover); box-shadow: none; color: var(--text); }
+#codex-dock .dbg-output { font: var(--z-2xs)/1.5 var(--zed); }
+
+/* ── what floats over Codex ───────────────────────────────────────── */
+/* Zed's popovers are flat: the deep ground, a hairline, a shadow, no blur
+   and no dimmed window behind. Settings keeps its glass — it is the whole
+   app's, not Codex's. */
+:root[data-mode="codex"] .scrim { background: rgba(0, 0, 0, .18); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-mode="codex"] .float:not(#settings) {
+  background: var(--bg-deep);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, var(--bg-deep));
+  border-radius: 8px; box-shadow: 0 24px 60px -18px rgba(0, 0, 0, .75);
+}
+:root[data-mode="codex"] #telescope { width: min(900px, 88vw); font-family: var(--zed); }
+:root[data-mode="codex"] #telescope .prompt {
+  padding: 12px 16px; font: var(--z-ui) var(--zed);
+  border-bottom-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep));
+}
+:root[data-mode="codex"] #telescope .prompt .caret { color: var(--muted); }
+:root[data-mode="codex"] #telescope .results { border-right-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); padding: 4px; }
+:root[data-mode="codex"] #telescope .res {
+  padding: 7px 10px; border-radius: 4px; font: var(--z-xs) var(--zed); color: var(--muted);
+}
+:root[data-mode="codex"] #telescope .res.on {
+  background: var(--row-on); color: var(--text); box-shadow: inset 0 0 0 1px var(--row-on-edge);
+}
+:root[data-mode="codex"] #telescope .res mark { color: var(--accent); }
+:root[data-mode="codex"] #telescope .preview { font: var(--z-2xs)/1.6 var(--zed); color: var(--code); }
+:root[data-mode="codex"] #telescope .chip { background: none; box-shadow: none; color: var(--faint); font: var(--z-2xs) var(--zed); }
+:root[data-mode="codex"] #whichkey .wk-head,
+:root[data-mode="codex"] #whichkey .wk-grid,
+:root[data-mode="codex"] #cmdline { font-family: var(--zed); }
+:root[data-mode="codex"] #whichkey .wk-head { border-bottom-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+:root[data-mode="codex"] #cmdline .chip { background: none; box-shadow: none; color: var(--faint); }
+:root[data-mode="codex"] .cmp,
+:root[data-mode="codex"] .hov-body { font: var(--z-xs) var(--zed); }
+:root[data-mode="codex"] .cmp-row.on { background: var(--row-on); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
+:root[data-mode="codex"] .cmp-foot { font-family: var(--zed); border-top-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+:root[data-mode="codex"] .hov { border-left: 0; }
+/* The search field's own clear button is the browser's, in the browser's
+   blue. Esc and ⌫ already clear it. */
+:root[data-mode="codex"] [data-picker-query]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+/* The code and the shell say they have the keyboard with their caret — a
+   solid block rather than an outline — so neither also wears a ring. */
+.workspace[data-ws="codex"] [data-editor]:focus-visible,
+.workspace[data-ws="codex"] [data-term-screen]:focus-visible { outline: none; }

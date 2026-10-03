@@ -122,14 +122,16 @@ content and therefore still the right tool.
 ### 4. Colour is a token set
 
 A theme sets sixteen custom properties on `<html>` and touches no layout rule.
-Four ship, switchable live in Settings → Appearance:
+Six ship, switchable live in Settings → Appearance:
 
 | Theme | Ground | Accent | |
 |---|---|---|---|
-| **Tokyo Night** (default) | `#16161e` | `#7aa2f7` | The nvim standard; its blue-violet ground is the best fit for glass |
+| **Aura Dark** (default) | `#15141b` | `#a277ff` | Aura's ground and terminal with Gruvbox's syntax — one Zed setup, which Codex is drawn after |
+| **Tokyo Night** | `#16161e` | `#7aa2f7` | The nvim standard; its blue-violet ground is the best fit for glass |
 | **One Dark** | `#282c34` | `#61afef` | The classic |
-| **Catppuccin Mocha** | `#1e1e2e` | `#89b4fa` | Softest contrast of the four |
+| **Catppuccin Mocha** | `#1e1e2e` | `#89b4fa` | Softest contrast of the lot |
 | **Nord** | `#2e3440` | `#88c0d0` | Coolest, lowest saturation |
+| **Gruvbox Dark** | `#282828` | `#83a598` | The one warm ground, which is what proves the rules are theme-blind |
 
 The tokens each theme defines:
 
@@ -143,9 +145,18 @@ The tokens each theme defines:
 
 Everything else is derived: `--ink-2/3/4` are `color-mix` steps off `--text`,
 elevation fills are `--raise` at fixed alphas, and every accent wash is a
-`color-mix` against `--accent`. That is why adding a fifth theme is a paste of
+`color-mix` against `--accent`. That is why adding a theme is a paste of
 one block, and why the accent carries through the entire window rather than
 being applied per-component.
+
+Beneath the sixteen sit **optional tokens** a palette may set and need not:
+the syntax colours (`--syn-keyword` … `--syn-link`, and `--code` for plain
+text), the terminal's sixteen ANSI colours (`--ansi-0` … `--ansi-15`), and the
+editor's own surfaces — `--muted`, `--line-number`, `--cursor`,
+`--selection`, `--row-on`, `--head` and the rest. Unset, each is derived from
+the sixteen exactly as the rules drew it before the token existed, so the
+older themes look as they always did. Aura sets them all, because "Aura's
+ground with Gruvbox's code" is a choice, not something a derivation can reach.
 
 ### Type
 
@@ -153,6 +164,7 @@ being applied per-component.
 |---|---|
 | UI | **Inter** — falls back to SF Pro, then Segoe UI Variable |
 | Code | **CaskaydiaMono Nerd Font** → CaskaydiaCove NF → Cascadia Mono |
+| Codex, chrome and code alike | **JetBrainsMono Nerd Font** → JetBrains Mono (Google Fonts) → the code stack above |
 
 The Nerd Font patch is worth having for the powerline separators and the git
 branch glyph in the statusline, but nothing structural depends on it. Icons are
@@ -190,6 +202,14 @@ Two places deliberately keep glyphs rather than icons. **Keycaps** — `⌘ ⌃ 
 ␣` — are typography: they are what is printed on the key, and drawing them
 would be redrawing a font badly. And **literal terminal output** in the mock
 panes keeps its `✓` and `❯`, because that is text a program actually wrote.
+
+**Files and folders are the exception to the sprite.** They wear Charmed
+Icons in its Warm palette — the set the Zed setup behind Codex uses — from
+`ui/file-icons.js`, a curated sixty-one of them under the set's MIT licence.
+They carry their own colours rather than taking the theme's, so they have
+their own class, `.fi`, with nothing for a path to inherit. The matching is
+the set's own and case-sensitive, as Zed's is: `README.md` gets the Markdown
+mark, because the set only names `readme.md`.
 
 ---
 
@@ -267,8 +287,76 @@ Five regions never move, in any mode:
 - **The dock** — the agent, plus whatever inspector that mode needs. Always
   where the AI lives, so there is one place to look for it.
 
-The statusline is the Neovim statusline, in every mode. In Video mode it still
-says `NORMAL`, and `d d` still deletes the selected clip.
+The statusline is the Neovim statusline, in every mode but Codex. In Video
+mode it still says `NORMAL`, and `d d` still deletes the selected clip.
+
+---
+
+## Codex, drawn after Zed
+
+Codex is the first mode drawn to a second language: one Zed setup, reproduced
+— Aura Dark with Gruvbox syntax, JetBrains Mono for everything, and nothing
+that setup turns off. The other six keep the glass until they are drawn this
+way too, so every rule for it hangs off `data-mode="codex"` on `<html>` or the
+Codex workspace (the block at the end of `ui/styles.css`), never replacing a
+rule the glass relies on.
+
+```
+╭──────────┬──────────────────────────────┬────────────────┬──────────┬───╮
+│ ▸ crates │ crates/proton-core/src/vim.rs│ ❯ cargo test   │ thread ⋯ │ ● │  ← darker
+│   src    │                              │                │          │ ● │
+│ ▣ vim.rs │  1  //! The modal input …    │                │ Thinking │ ● │
+│          │  2  //!                      │                │ Read file│ C │
+│          │                              │                │          │ o │
+│          │                              │                │          │ d │
+│ project  │  code                        │  terminal      │ agent    │ … │
+│          │                              │                │          │   │
+│          │                              │                │          │ ◫ │
+│          │                              │                │          │ ⚙ │
+╰──────────┴──────────────────────────────┴────────────────┴──────────┴───╯
+                                                                       40px
+```
+
+No line in that diagram is drawn on screen. Every panel is the editor's
+colour, so the window reads as one surface broken only by space and by the
+agent's darker header.
+
+**What the setup turns off stays off.** No rails, no file tabs, no statusline,
+no scrollbars, no git gutter, no current-line wash, no borders. What the rails
+held that Codex still needs moved to a title bar: the window controls, the
+modes as quiet words — mouse users need a way out of Codex, and ⌃1–7 is not
+discoverable — and the panel toggles a hidden statusline would otherwise have
+taken with it.
+
+**The title bar stands on its end down the right edge**, 40px wide, which is
+where Codex parts from the setup on purpose: the code keeps the window's full
+height, the dimension an editor is always short of, as the other modes' rail
+gives it theirs. The traffic lights stack at its top, the mode names read down
+it the way a side panel's labels do, the toggles sit at its foot, and the
+empty stretch between is the window's drag surface.
+The vim mode is the caret's shape, which is where the eye already is. A
+refused `:w` is still the banner over the code. File tabs come back from
+Settings → Appearance; until then the row above the code is the open file's
+path, as Zed's breadcrumb is with its tab bar off, and `␣fb` lists the buffers.
+
+**The terminal sits beside the code**, the way a Zed pane group splits one to
+the right of the editor, rather than in the dock — so the shell and the agent
+can be on screen together, which is the reason Zed users arrange it so. It is
+view state: open or shut and how wide are remembered in the window, never
+more than half the stage, and hiding it does not end the shell. `` ⌃` `` toggles it,
+and `␣tt` or `:terminal` opens it.
+
+**The agent's header is Zed's**: the thread's name, fading where it runs long,
+then new, expand and `⋯`. Expand is Chat mode — the same conversation given
+the window — and `⋯` holds the panels that used to be a row of tabs, since
+one is open at a time and it is usually the agent. Tool calls read as lines —
+an icon, what it did, and to what — and the composer has no box: what you
+type is set like code, on a double line, under a placeholder in faded lilac.
+
+The numbers were measured off a screenshot of the setup at 1512pt: 16px code
+on 32px lines, 17.5px chrome, 32px tree rows stepping in 20px a level, a 39px
+agent header, a 12px traffic light every 20px. They scale with Interface text,
+as Zed's scale with its UI font size, and the code with Editor text.
 
 ---
 
@@ -375,13 +463,14 @@ back two staged hunks.
 
 ### Codex
 
-The editor. Buffer tabs carry a role tag (`route`, `lib`, `native`) and a
-modified dot. Relative line numbers, inlay hints, a code lens above each symbol,
-current-line crimson wash. Splits are vim splits. Harpoon-style pinned buffers
-sit under the tree.
+The editor, drawn after Zed — see [Codex, drawn after Zed](#codex-drawn-after-zed).
+The path of the open file sits above the code, and buffer tabs with a modified
+dot come back from Settings. Splits are vim splits, and the terminal splits off
+to the right of them.
 
-The dock has five tabs — **Agent**, **Tasks**, **Visualizer**, **Device**,
-**Terminal** — which is where the mobile story lives. A project declares its
+The dock's panels — **Agent**, **Tasks**, **Debug**, **Visualizer**,
+**Device**, **Git** — sit behind the agent header's `⋯`, and the Device panel
+is where the mobile story lives. A project declares its
 targets in `proton.toml`; `android · pixel 8` turns the Device tab into the
 Android-Studio layout: a device frame, a layout inspector that outlines the
 selected view over the running app, and Logcat filtered to the package. The

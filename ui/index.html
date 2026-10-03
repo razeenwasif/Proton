@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="tokyo-night">
+<html lang="en" data-theme="aura-dark" data-mode="codex">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -67,6 +67,17 @@
     <symbol id="i-split-h" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
     <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></symbol>
+
+    <!-- ── Codex's title bar and agent panel ─────────────────────────
+         Drawn after Zed's own: a panel is a frame with a bar down one
+         side, and the agent's header carries the usual three — new,
+         expand, more. -->
+    <symbol id="i-panel-left" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M9 4.5v15"/></symbol>
+    <symbol id="i-panel-right" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M15 4.5v15"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><path d="M5.5 12h.01M12 12h.01M18.5 12h.01" stroke-width="2.6"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M4.5 4.5l16 7.5-16 7.5 2.5-7.5z"/><path d="M7 12h6"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 17.5h6M10 21h4"/><path d="M12 3a6 6 0 00-3.6 10.8c.6.5 1 1.2 1 2V17.5h5.2V15.8c0-.8.4-1.5 1-2A6 6 0 0012 3z"/></symbol>
 
     <!-- ── tree and files ──────────────────────────────────────────
          Drawn at 12–13px in the explorer, which is why these are the
@@ -279,7 +290,7 @@
     </section>
 
     <!-- ══ CODEX ═════════════════════════════════════════════════ -->
-    <section class="workspace on" data-ws="codex" style="--col-l:232px; --col-r:372px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+    <section class="workspace on" data-ws="codex" style="--col-l:200px; --col-r:330px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side">
         <header>Explorer <span class="grow"></span>
           <button class="hbtn" data-reveal title="Reveal the file you are in — ␣e"><svg class="i"><use href="#i-target"/></svg></button>
@@ -292,40 +303,80 @@
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
       <main class="pane">
-        <!-- Built from Event::Splits. The core owns how many there are, which
-             buffer each shows and which has the focus; this is where they go. -->
-        <div class="splits" id="codex-splits"></div>
+        <!-- The code and the shell, side by side, the way a Zed pane group
+             splits a terminal to the right of the editor. The terminal is
+             view state: open or shut, and how wide, live in this window and
+             nowhere in the core. -->
+        <div class="stage-row">
+          <div class="stage-code">
+            <!-- Built from Event::Splits. The core owns how many there are,
+                 which buffer each shows and which has the focus; this is
+                 where they go. -->
+            <div class="splits" id="codex-splits"></div>
 
-        <!-- A document is looked at, not edited, so it covers the panes rather
-             than becoming one of them: it has no cursor, no undo and no :w,
-             and a pane implies all three. Closing it puts the code back
-             exactly as it was, because the code never went anywhere. -->
-        <div id="doc-viewer" hidden>
-          <header>
-            <svg class="i" style="opacity:.6"><use href="#i-file-doc"/></svg>
-            <span data-doc-name>document</span>
-            <span class="chip" data-doc-pages></span>
-            <span class="grow"></span>
-            <button class="hbtn" data-doc-zoom="-1" title="Zoom out">−</button>
-            <span class="chip" data-doc-zoom-level>100%</span>
-            <button class="hbtn" data-doc-zoom="1" title="Zoom in">+</button>
-            <button class="hbtn" data-doc-close title="Close — back to the code"><svg class="i"><use href="#i-close"/></svg></button>
-          </header>
-          <div class="scroll" data-doc-pages-box></div>
+            <!-- A document is looked at, not edited, so it covers the panes
+                 rather than becoming one of them: it has no cursor, no undo
+                 and no :w, and a pane implies all three. Closing it puts the
+                 code back exactly as it was, because the code never went
+                 anywhere. It covers the code and not the shell beside it. -->
+            <div id="doc-viewer" hidden>
+              <header>
+                <svg class="i" style="opacity:.6"><use href="#i-file-doc"/></svg>
+                <span data-doc-name>document</span>
+                <span class="chip" data-doc-pages></span>
+                <span class="grow"></span>
+                <button class="hbtn" data-doc-zoom="-1" title="Zoom out">−</button>
+                <span class="chip" data-doc-zoom-level>100%</span>
+                <button class="hbtn" data-doc-zoom="1" title="Zoom in">+</button>
+                <button class="hbtn" data-doc-close title="Close — back to the code"><svg class="i"><use href="#i-close"/></svg></button>
+              </header>
+              <div class="scroll" data-doc-pages-box></div>
+            </div>
+          </div>
+
+          <div class="term-gutter" data-term-resize hidden></div>
+
+          <!-- Rendered from Event::Terminal. The core owns the pseudo-terminal
+               and the screen; this draws rows of runs and sends keys back. No
+               header, as in Zed: the two flags below only appear when there
+               is something to do — history to leave, or a shell to restart. -->
+          <section class="term-pane" data-term-pane aria-label="Terminal" hidden>
+            <div class="term-flags">
+              <!-- Only while looking at history. A terminal scrolled back
+                   looks exactly like one whose shell has stopped answering,
+                   so it has to say which it is — and offer the way out. -->
+              <button class="chip warn" data-term-back hidden title="Back to the live screen">↑ <span data-term-back-rows>0</span></button>
+              <!-- Only when the shell has gone. There is no button to start
+                   one: opening the pane does that, because that is what
+                   opening it means. -->
+              <button class="term-restart" data-term-restart hidden title="Start a new shell">Shell exited · restart</button>
+            </div>
+            <div class="scroll term" data-term-screen tabindex="0" aria-label="Terminal"></div>
+          </section>
         </div>
       </main>
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
-      <aside class="pane" id="codex-dock">
-        <div class="dock-tabs">
-          <button class="dock-tab on"  data-dockpanel="agent">Agent</button>
-          <button class="dock-tab"     data-dockpanel="tasks">Tasks <span class="chip accent" data-task-badge hidden></span></button>
-          <button class="dock-tab"     data-dockpanel="debug">Debug</button>
-          <button class="dock-tab"     data-dockpanel="visualizer">Visualizer</button>
-          <button class="dock-tab"     data-dockpanel="device">Device</button>
-          <button class="dock-tab"     data-dockpanel="git">Git</button>
-          <button class="dock-tab"     data-dockpanel="term">Terminal</button>
-        </div>
+      <aside class="pane" id="codex-dock" data-showing="agent">
+        <!-- Zed's agent header: what you are looking at on the left, the
+             three things you do to it on the right. The panels that used to
+             be a row of tabs are the third of those — a menu, because one of
+             them is open at a time and the agent is the one that usually is. -->
+        <header class="dock-head">
+          <span class="dock-title" data-dock-title>New Thread</span>
+          <button class="hbtn" data-chat-new data-dock-only="agent" title="New thread" aria-label="New thread"><svg class="i"><use href="#i-plus"/></svg></button>
+          <button class="hbtn" data-mode-go="chat" data-dock-only="agent" title="Open in Chat — the whole window" aria-label="Open in Chat"><svg class="i"><use href="#i-expand"/></svg></button>
+          <button class="hbtn" data-dock-menu title="Panels" aria-label="Panels" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-dots"/></svg><span class="dot" data-task-dot hidden></span></button>
+          <div class="dock-tabs" aria-label="Panels" hidden>
+            <button class="dock-tab on"  data-dockpanel="agent">Agent</button>
+            <button class="dock-tab"     data-dockpanel="tasks">Tasks <span class="chip accent" data-task-badge hidden></span></button>
+            <button class="dock-tab"     data-dockpanel="debug">Debug</button>
+            <button class="dock-tab"     data-dockpanel="visualizer">Visualizer</button>
+            <button class="dock-tab"     data-dockpanel="device">Device</button>
+            <button class="dock-tab"     data-dockpanel="git">Git</button>
+            <button class="dock-tab"     data-dockpanel="term">Terminal</button>
+          </div>
+        </header>
 
         <!-- Agent -->
         <div class="dock-panel on" data-panel="agent" style="display:flex;flex-direction:column;flex:1;min-height:0">
@@ -340,19 +391,17 @@
             <div class="box">
               <div class="txt" contenteditable="plaintext-only" role="textbox"
                    aria-label="Ask Proton" data-agent-input
-                   data-placeholder="Ask Proton about your workspace…"></div>
+                   data-placeholder="Message the Proton Agent, @selection to include context"></div>
               <div class="foot">
-                <select class="model-pick" data-model-pick title="Which model answers. Blank uses the provider's default."></select>
                 <span class="select" data-mention="@selection" title="Send the selected text with the question">@selection</span>
                 <span class="select" data-mention="@dataframe" title="Send the selected cell's table with the question">@dataframe</span>
                 <span class="select scope-chip" data-scope-chip hidden></span>
+                <span class="grow"></span>
                 <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
+                <select class="model-pick" data-model-pick title="Which model answers. Blank uses the provider's default."></select>
                 <span class="send" data-agent-send role="button" tabindex="0"
-                      aria-label="Send"><svg class="i" width="13" height="13"><use href="#i-arrow-up"/></svg></span>
+                      aria-label="Send"><svg class="i"><use href="#i-send"/></svg></span>
               </div>
-            </div>
-            <div class="suggest">
-              <span>Explain this buffer</span><span>Write the failing test</span><span>Trace it in Visualizer</span><span>Port to the Android target</span>
             </div>
           </div>
         </div>
@@ -464,9 +513,8 @@
           </div>
         </div>
 
-        <!-- Terminal -->
-        <!-- Rendered from Event::Terminal. The core owns the pseudo-terminal
-             and the screen; this draws rows of runs and sends keys back. -->
+        <!-- The terminal is not here any more. It sits beside the code in the
+             stage, where the agent no longer has to be hidden to see it. -->
         <!-- Git -->
         <!-- Rendered from Event::Repo. The core asks git each time rather than
              remembering: the answer moves for reasons that never pass through
@@ -479,22 +527,6 @@
             <span class="chip" data-git-count>0</span>
           </header>
           <div class="scroll tree" data-git-files></div>
-        </div>
-
-        <div class="dock-panel" data-panel="term" style="display:none;flex-direction:column;flex:1;min-height:0">
-          <header>
-            <span class="chip" data-term-state>closed</span>
-            <!-- Only while looking at history. A terminal scrolled back looks
-                 exactly like one whose shell has stopped answering, so it has
-                 to say which it is — and offer the way out. -->
-            <button class="chip warn" data-term-back hidden title="Back to the live screen">↑ <span data-term-back-rows>0</span></button>
-            <span class="grow"></span>
-            <!-- Only when the shell has gone. There is no button to start one:
-                 opening the panel does that, because that is what opening it
-                 means. -->
-            <button class="hbtn" data-term-restart hidden title="Start a new shell"><svg class="i"><use href="#i-play"/></svg></button>
-          </header>
-          <div class="scroll term" data-term-screen tabindex="0"></div>
         </div>
       </aside>
     </section>
@@ -871,6 +903,38 @@
     </section>
   </div>
 
+  <!-- ══ title bar — Codex only ═══════════════════════════════════
+       Codex is drawn after a Zed setup: no rails, no tabs, no statusline,
+       one ground from edge to edge. The title bar it does keep stands on its
+       end down the right edge, so the code has the window's full height. It
+       holds what the rails held that Codex still needs: the window controls,
+       the modes — so the window can be left by mouse as well as by ⌃1–7 —
+       and the panel toggles a hidden statusline would otherwise take with
+       it. The empty stretch between them is the window's drag surface.
+       After the body in the source because it is after it on screen, so Tab
+       reaches it last. -->
+  <header class="titlebar" aria-label="Window">
+    <div class="lights" aria-label="Window controls">
+      <i title="Close"></i><i title="Minimise"></i><i title="Maximise"></i>
+    </div>
+    <div class="tb-modes" role="tablist" aria-label="Mode" aria-orientation="vertical">
+      <button class="mode" role="tab" aria-selected="false" data-mode="chat" title="Chat  ⌃1"><span>Chat</span></button>
+      <button class="mode" role="tab" aria-selected="true"  data-mode="codex" title="Codex  ⌃2"><span>Codex</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="design" title="Design  ⌃3"><span>Design</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="modeling" title="Model  ⌃4"><span>Model</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="game" title="Game  ⌃5"><span>Game</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="video" title="Video  ⌃6"><span>Video</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="data" title="Data  ⌃7"><span>Data</span></button>
+    </div>
+    <span class="tb-drag" aria-hidden="true"></span>
+    <div class="tb-actions">
+      <button class="tb-btn" data-panel-toggle="left" title="Hide sidebar" aria-label="Hide sidebar" aria-expanded="true"><svg class="i"><use href="#i-panel-left"/></svg></button>
+      <button class="tb-btn" data-term-toggle title="Terminal  ⌃`" aria-label="Terminal" aria-pressed="false"><svg class="i"><use href="#i-term"/></svg></button>
+      <button class="tb-btn" data-panel-toggle="right" title="Hide right panel" aria-label="Hide right panel" aria-expanded="true"><svg class="i"><use href="#i-panel-right"/></svg></button>
+      <button class="tb-btn" data-open="settings" title="Settings  ⌘," aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></button>
+    </div>
+  </header>
+
   <!-- ══ statusline ══════════════════════════════════════════════ -->
   <footer class="statusline">
     <div class="sl sl-mode" id="sl-mode">NORMAL</div>
@@ -967,7 +1031,11 @@
         <h4>Workspace theme</h4>
         <p>Choose the colors used throughout Proton.</p>
         <div class="themes">
-          <button class="theme-card on" data-theme-set="tokyo-night">
+          <button class="theme-card on" data-theme-set="aura-dark">
+            <span class="sw"><i style="background:#15141b"></i><i style="background:#a277ff"></i><i style="background:#ebdbb2"></i><i style="background:#b8bb25"></i><i style="background:#fb4833"></i></span>
+            <span class="nm">Aura Dark</span>
+          </button>
+          <button class="theme-card" data-theme-set="tokyo-night">
             <span class="sw"><i style="background:#16161e"></i><i style="background:#7aa2f7"></i><i style="background:#bb9af7"></i><i style="background:#9ece6a"></i><i style="background:#e0af68"></i></span>
             <span class="nm">Tokyo Night</span>
           </button>
@@ -1037,8 +1105,13 @@
       </div>
       <div class="setting">
         <h4>Editor text</h4>
-        <p>Uses CaskaydiaMono when installed, with your system monospace font as a fallback.</p>
-        <label class="setting-control">Font size <select data-display-setting="editor.fontSize" aria-label="Editor font size"><option value="12">12 px</option><option value="13" selected>13 px</option><option value="14">14 px</option><option value="16">16 px</option><option value="18">18 px</option></select></label>
+        <p>Codex uses JetBrainsMono Nerd Font when it is installed, and the terminal follows the editor's size. The other modes use CaskaydiaMono, with your system monospace font as a fallback.</p>
+        <label class="setting-control">Font size <select data-display-setting="editor.fontSize" aria-label="Editor font size"><option value="12">12 px</option><option value="13">13 px</option><option value="14">14 px</option><option value="15">15 px</option><option value="16" selected>16 px</option><option value="18">18 px</option><option value="20">20 px</option></select></label>
+      </div>
+      <div class="setting">
+        <h4>File tabs</h4>
+        <p>Codex shows the open file's path above the code instead of a row of tabs. <kbd>␣</kbd><kbd>f</kbd><kbd>b</kbd> lists the open buffers either way.</p>
+        <label class="setting-control">Tabs <select data-display-setting="editor.tabs" aria-label="File tabs"><option value="hidden" selected>Hidden</option><option value="shown">Shown</option></select></label>
       </div>
       </div><!-- /appearance -->
 

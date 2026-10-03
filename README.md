@@ -31,9 +31,9 @@ wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
 on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
 already call it `cmake`.
 
-Panels can be collapsed from the rail; text size and density are in Settings. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
+Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
-`␣w` splits · `⌘,` settings. Bare digits are vim counts, not mode switches — that
+`␣w` splits · `` ⌃` `` terminal · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
 
 ---
@@ -60,7 +60,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-game/` | Godot `.tscn` scenes, for Game mode |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
-| `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, four live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
+| `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
 | `design/DESIGN.md` | The design system, the mode-by-mode spec, and which reference each idea came from |
 | `docs/ARCHITECTURE.md` | The build document — crate layout, the core/UI seam, the mode contract, milestones |
 | `docs/STACK.md` | Language, renderer, parser, plugin runtime — what is settled and what is still a real decision |

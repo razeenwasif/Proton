@@ -22,6 +22,7 @@ import { createOverlays } from "./overlays.js";
 import { createPanels } from "./panels.js";
 import { createDisplaySettings } from "./display-settings.js";
 import { createFileTree } from "./file-tree.js";
+import { fileIconHtml, folderIconHtml, installFileIcons } from "./file-icons.js";
 import { createBufferTabs } from "./buffer-tabs.js";
 import { createSplitResize } from "./split-resize.js";
 import { createEditorFeedback } from "./editor-feedback.js";
@@ -48,10 +49,12 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /* ── theme ────────────────────────────────────────────────────────────
-   A theme sets sixteen custom properties on <html> and nothing else. No
-   rule below the palette block knows which one is active, which is why
-   switching is instant and why adding a fifth is a paste, not a port. */
-const THEMES = ["tokyo-night", "one-dark", "catppuccin", "nord", "gruvbox-dark"];
+   A theme sets sixteen custom properties on <html> — and may set the
+   optional ones beneath them, as Aura does for its syntax and terminal —
+   and nothing else. No rule below the palette block knows which one is
+   active, which is why switching is instant and why adding another is a
+   paste, not a port. */
+const THEMES = ["aura-dark", "tokyo-night", "one-dark", "catppuccin", "nord", "gruvbox-dark"];
 
 /* Palettes a plugin brought, by id.
  *
@@ -432,6 +435,9 @@ let activeMode = "codex";
 
 function renderMode(mode) {
   activeMode = mode;
+  // Codex wears a different chrome from the other six — a title bar in place
+  // of the rails, no statusline — and the stylesheet keys all of it off this.
+  document.documentElement.dataset.mode = mode;
   $$(".mode").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
   $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === mode));
   closeAll();
@@ -451,9 +457,24 @@ $$("[data-mode-go]").forEach((el) =>
 );
 
 /* ── right dock ───────────────────────────────────────────────────────── */
+
+/** What the dock's header says while each panel is open. The agent's is the
+ *  conversation's own title, from `renderChats`. */
+const DOCK_TITLES = { tasks: "Tasks", debug: "Debug", visualizer: "Visualizer", device: "Device", git: "Git" };
+let dockPanel = "agent";
+
 function setDock(panel) {
   const dock = $("#codex-dock");
   if (!dock) return;
+  showDockMenu(false);
+  // The terminal left the dock for the stage, beside the code. Asking the
+  // dock for it still gets it — that is where it is now.
+  if (panel === "term") {
+    if (activeMode !== "codex") coreSetMode("codex");
+    showTerminal(true, { focus: true });
+    return;
+  }
+  dockPanel = panel;
   panels.show("right", dock.closest(".workspace"));
   $$(".dock-tab", dock).forEach((t) => t.classList.toggle("on", t.dataset.dockpanel === panel));
   $$(".dock-panel", dock).forEach((p) => {
@@ -461,26 +482,63 @@ function setDock(panel) {
     p.classList.toggle("on", on);
     p.style.display = on ? "flex" : "none";
   });
+  dock.dataset.showing = panel;
+  renderDockTitle();
   requestAnimationFrame(drawPointerEdges);
 
-  // A terminal panel with no terminal in it is a panel that does nothing until
-  // you find the button. Showing it is the request.
-  if (panel === "term") {
-    dispatch({ type: "openTerminal" });
-    requestAnimationFrame(() => {
-      reportTerminalSize();
-      focusTerminal(true);
-    });
-  }
   // Git's answer moves for reasons the core never sees — a commit in the
   // terminal panel, a branch switched outside — so opening the panel asks
   // again rather than showing whatever was true at the last sync.
   if (panel === "git") dispatch({ type: "refreshRepo" });
 }
 
+function renderDockTitle() {
+  const title = $("[data-dock-title]");
+  if (!title) return;
+  const open = lastChats.conversations.find((c) => c.path === lastChats.current);
+  title.textContent = dockPanel === "agent" ? open?.title || "New Thread" : DOCK_TITLES[dockPanel] ?? "";
+  title.title = title.textContent;
+}
+
+/** The panel list behind the header's `⋯`. A menu rather than a row of tabs:
+ *  one panel is open at a time, and it is usually the agent. */
+function showDockMenu(on) {
+  const menu = $("#codex-dock .dock-tabs");
+  const button = $("[data-dock-menu]");
+  if (!menu || !button) return;
+  menu.hidden = !on;
+  button.setAttribute("aria-expanded", String(on));
+  if (on) ($(".dock-tab.on", menu) ?? $(".dock-tab", menu))?.focus();
+}
+
 $$("#codex-dock .dock-tab").forEach((t) =>
   t.addEventListener("click", () => setDock(t.dataset.dockpanel)),
 );
+
+document.addEventListener("click", (e) => {
+  const menu = $("#codex-dock .dock-tabs");
+  if (!menu) return;
+  if (e.target.closest?.("[data-dock-menu]")) showDockMenu(menu.hidden);
+  else if (!menu.hidden && !e.target.closest?.("#codex-dock .dock-tabs")) showDockMenu(false);
+});
+
+// Arrows walk the menu and Escape puts it away, back on the button that
+// opened it — the keys every menu answers to.
+$("#codex-dock .dock-tabs")?.addEventListener("keydown", (e) => {
+  const items = $$("#codex-dock .dock-tab");
+  const at = items.indexOf(document.activeElement);
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    showDockMenu(false);
+    $("[data-dock-menu]")?.focus();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    e.stopPropagation();
+    const step = e.key === "ArrowDown" ? 1 : -1;
+    items[(at + step + items.length) % items.length]?.focus();
+  }
+});
 
 // Rail and tree shortcuts that jump straight to a dock panel.
 $$("[data-dock]").forEach((el) =>
@@ -592,6 +650,9 @@ function splitHtml(view, focused) {
   return (
     `<section class="split${on}" data-view="${view}">` +
     `<div class="buffers">` +
+    // Where the file is, in place of the tabs while they are hidden — what
+    // Zed's breadcrumb shows with its tab bar turned off.
+    `<span class="crumbs" data-crumbs></span>` +
     `<span data-buffers></span>` +
     actions +
     `</div>` +
@@ -824,35 +885,14 @@ const marks = { byLine: new Map(), errors: 0, warnings: 0 };
 let completionOpen = false;
 
 /* ── icons ────────────────────────────────────────────────────────────
-   The sprite lives in index.html; this is how the rendered parts of the
-   app reach it. `class="i"` is what makes a `<use>` draw at all — see the
-   comment on that rule in styles.css. */
-/* What each file gets in the buffer bar. A table rather than a switch
-   because it is read far more often than it is changed; the static
-   explorer markup in index.html mirrors it. */
-const FILE_ICONS = [
-  [/\.rs$/i, "file-code", "ft-rust"],
-  [/\.(tsx?|mts|cts)$/i, "file-code", "ft-ts"],
-  [/\.(jsx?|mjs|cjs)$/i, "file-code", "ft-js"],
-  [/\.(py|pyi)$/i, "file-code", "ft-py"],
-  [/\.go$/i, "file-code", "ft-go"],
-  [/\.(c|h|cpp|hpp|cc)$/i, "file-code", "ft-c"],
-  [/\.(gd|lua|rb|sh|ps1)$/i, "file-code", "ft-script"],
-  [/\.(css|scss)$/i, "file-code", "ft-css"],
-  [/\.(html?|svelte|vue)$/i, "file-code", "ft-html"],
-  [/\.(json|jsonc)$/i, "sliders", "ft-data"],
-  [/\.(toml|ya?ml|ini|cfg|conf)$/i, "sliders", "ft-config"],
-  [/\.lock$/i, "sliders", "ft-lock"],
-  [/\.(md|mdx|txt|rst)$/i, "file-doc", "ft-doc"],
-  [/\.(png|jpe?g|gif|webp|svg|ico|bmp)$/i, "image", "ft-image"],
-  [/\.(wav|mp3|ogg|flac|aac)$/i, "audio", "ft-audio"],
-  [/\.(mp4|mov|mkv|webm)$/i, "film", "ft-video"],
-];
+   Two sprites. The `.i` set lives in index.html and takes the theme's
+   colours; files and folders wear Charmed Icons, the set the Zed this
+   window is drawn after uses, which bring colours of their own — see
+   file-icons.js. Installed before anything renders a row. */
+installFileIcons(document);
 
-function fileIcon(name) {
-  const [, id, tint] = FILE_ICONS.find(([re]) => re.test(name)) ?? [0, "file", "ft-plain"];
-  return icon(id, tint);
-}
+/** What a file gets in the tree, the buffer bar and a task's artifacts. */
+const fileIcon = fileIconHtml;
 
 /* ── scrolling ────────────────────────────────────────────────────────
    The core sends one screen of lines, so the pane cannot simply scroll —
@@ -890,6 +930,13 @@ function paintEditor(index) {
   // no line rendered yet this falls back to the pane's computed line-height,
   // which is the same number.
   measureLineHeight();
+  // How many digits the last line number has. The gutter is as wide as the
+  // file needs and no wider, as Zed's is — a fixed width is too much for a
+  // ten-line file and too little for a hundred-thousand-line one.
+  const digits = String(Math.max(drawing.totalLines, 1)).length;
+  if (target.style.getPropertyValue("--digits") !== String(digits)) {
+    target.style.setProperty("--digits", String(digits));
+  }
 
   const cursorRow = drawing.cursor.line - drawing.firstLine;
   const rows = drawing.lines.map((text, i) =>
@@ -1095,6 +1142,25 @@ function renderBufferBars() {
     const index = viewOf(target);
     bufferTabs.render(target, bufferBar.names, bufferBar.panes[index] ?? bufferBar.active, index);
   });
+  $$("[data-crumbs]").forEach(target => {
+    const buffer = bufferBar.names[bufferBar.panes[viewOf(target)] ?? bufferBar.active];
+    const path = buffer ? projectRelative(buffer.path ?? buffer.name) : "";
+    if (target.textContent !== path) target.textContent = path;
+    target.title = buffer?.path ?? "";
+  });
+}
+
+/** The project the window is in, from Event::Workspaces, so a path can be
+ *  shown from its root the way the tree shows it. */
+let projectRoot = "";
+
+/** A buffer's path as the tree would spell it: from the project's root, with
+ *  forward slashes on every platform. A file outside the project keeps its
+ *  whole path, because that is the only honest thing to call it. */
+function projectRelative(path) {
+  const slashed = path.replaceAll("\\", "/");
+  const root = projectRoot.replaceAll("\\", "/").replace(/\/+$/, "");
+  return root && slashed.startsWith(`${root}/`) ? slashed.slice(root.length + 1) : slashed;
 }
 
 /* ── the file tree ────────────────────────────────────────────────────
@@ -1103,7 +1169,7 @@ function renderBufferBars() {
    it does not read a directory or decide what to hide, because then the
    tree and `␣ff` could disagree about what is in the project. */
 
-const fileTree = createFileTree(document, dispatch, fileIcon);
+const fileTree = createFileTree(document, dispatch, fileIcon, folderIconHtml);
 function renderTree(rows) { fileTree.render(rows); }
 
 /* ── the terminal ─────────────────────────────────────────────────────
@@ -3306,6 +3372,7 @@ function runHtml(run, row, column, cursor) {
 }
 
 function renderTerminal(event) {
+  terminalRunning = event.running;
   const state = $("[data-term-state]");
   if (state) {
     state.textContent = event.running ? "ready" : event.rows.length ? "exited" : "starting";
@@ -3651,6 +3718,112 @@ document.addEventListener("click", (e) => {
 const termScreen = $("[data-term-screen]");
 if (termScreen) new ResizeObserver(reportTerminalSize).observe(termScreen);
 
+/* ── the terminal pane ────────────────────────────────────────────────
+   Beside the code rather than in the dock, the way a Zed pane group splits
+   a terminal to the right of the editor — so the shell and the agent can be
+   on screen together. Open or shut, and how wide, are view state and live
+   here; the shell is the core's, and hiding the pane does not end it. */
+const termPane = $("[data-term-pane]");
+const termGutter = $("[data-term-resize]");
+/** Whether the core has a live shell, from the last Event::Terminal. */
+let terminalRunning = false;
+const TERM_WIDTH = 392;
+
+function showTerminal(on, { focus = false } = {}) {
+  if (!termPane || !termGutter) return;
+  termPane.hidden = !on;
+  termGutter.hidden = !on;
+  try {
+    localStorage.setItem("proton.terminal", on ? "open" : "closed");
+  } catch {
+    /* storage blocked — it just won't persist */
+  }
+  $$("[data-term-toggle]").forEach((b) => {
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
+  });
+  if (on) {
+    // Opening the pane is the request for a shell; there is no other button.
+    if (!terminalRunning) dispatch({ type: "openTerminal" });
+    requestAnimationFrame(() => {
+      reportTerminalSize();
+      if (focus) {
+        focusTerminal(true);
+        termScreen?.focus({ preventScroll: true });
+      }
+    });
+  } else if (terminalFocused || termPane.contains(document.activeElement)) {
+    // The keyboard was in the shell that just went away, so it goes back to
+    // the code rather than to nowhere.
+    focusTerminal(false);
+    $(".workspace.on .split.on [data-editor]")?.focus();
+  }
+}
+
+function toggleTerminal() {
+  if (activeMode !== "codex") coreSetMode("codex");
+  const on = Boolean(termPane?.hidden);
+  showTerminal(on, { focus: on });
+}
+
+$$("[data-term-toggle]").forEach((b) => b.addEventListener("click", toggleTerminal));
+
+/** How wide the terminal is, as asked for. The stylesheet caps it at half the
+ *  stage, so a narrow window keeps the code readable without forgetting the
+ *  width you chose. */
+function setTerminalWidth(px, keep = true) {
+  if (!termPane) return;
+  const width = Math.max(220, Math.min(1400, Math.round(px)));
+  termPane.style.setProperty("--term-w", `${width}px`);
+  termGutter?.setAttribute("aria-valuenow", String(width));
+  if (!keep) return;
+  try {
+    localStorage.setItem("proton.terminal.width", String(width));
+  } catch {
+    /* storage blocked — it just won't persist */
+  }
+}
+
+if (termGutter) {
+  termGutter.tabIndex = 0;
+  termGutter.setAttribute("role", "separator");
+  termGutter.setAttribute("aria-orientation", "vertical");
+  termGutter.setAttribute("aria-label", "Resize terminal");
+  termGutter.title = "Drag or use arrow keys to resize · double-click or Home to reset";
+  const width = () => termPane.getBoundingClientRect().width;
+  termGutter.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    termGutter.setPointerCapture(e.pointerId);
+    termGutter.classList.add("dragging");
+    document.documentElement.classList.add("resizing");
+  });
+  termGutter.addEventListener("pointermove", (e) => {
+    if (!termGutter.classList.contains("dragging")) return;
+    setTerminalWidth(termPane.parentElement.getBoundingClientRect().right - e.clientX);
+  });
+  const stop = () => {
+    termGutter.classList.remove("dragging");
+    document.documentElement.classList.remove("resizing");
+  };
+  termGutter.addEventListener("pointerup", stop);
+  termGutter.addEventListener("pointercancel", stop);
+  termGutter.addEventListener("dblclick", () => setTerminalWidth(TERM_WIDTH));
+  // The divider is on the terminal's left edge, so left widens it. Every
+  // other key stays with the divider rather than reaching the modal engine,
+  // as the split dividers do.
+  termGutter.addEventListener("keydown", (e) => {
+    if (e.key === "Tab" || e.metaKey || e.ctrlKey || e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const step = e.shiftKey ? 50 : 20;
+    if (e.key === "ArrowLeft") setTerminalWidth(width() + step);
+    else if (e.key === "ArrowRight") setTerminalWidth(width() - step);
+    else if (e.key === "Home") setTerminalWidth(TERM_WIDTH);
+    else if (e.key === "Escape") $(".workspace.on .split.on [data-editor]")?.focus();
+  });
+}
+
 /* ── the debugger ─────────────────────────────────────────────────────
    The core owns where it is, what the stack looks like and what is in
    scope. This draws it and sends the buttons back. */
@@ -3729,6 +3902,8 @@ function renderWorkspaces(items, active) {
   const current = items[active];
   $("#sl-project").textContent = current?.name ?? "No workspace";
   $("#sl-project").title = current?.path ?? "";
+  projectRoot = current?.path ?? "";
+  renderBufferBars();
   const rail = $("[data-workspaces]");
   if (!rail) return;
   rail.innerHTML = items
@@ -4189,6 +4364,14 @@ onEvents((events) => {
     }
     restorePaneFocus = false;
   }
+  // `␣tt` and `:terminal` answer with the screen in the same batch that puts
+  // the leader or the command line away; a shell printing never does. That
+  // is the one way to tell "show me the terminal" from "the terminal
+  // changed", and only the first should open a pane somebody shut.
+  if (termPane?.hidden && events.some((e) => e.type === "terminal" && e.running) &&
+      events.some((e) => (e.type === "leader" && e.prefix === null) || e.type === "vimMode")) {
+    showTerminal(true, { focus: true });
+  }
 });
 
 /** @param {import('./protocol').WireEvent} event */
@@ -4552,6 +4735,15 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
+  // ⌃` is Zed's terminal toggle. It means nothing to a Vim keymap, and it has
+  // to work from inside the shell too, or the pane could not be put away from
+  // where the keyboard usually is when you want to.
+  if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Backquote") {
+    e.preventDefault();
+    toggleTerminal();
+    return;
+  }
+
   if (e.metaKey && e.key.toLowerCase() === "k") {
     e.preventDefault();
     open("telescope");
@@ -4832,6 +5024,16 @@ applyBackdrop().then((applied) => {
 sync();
 drawPointerEdges();
 
+// The terminal pane as it was left: open unless somebody shut it, because a
+// fresh window is drawn with the shell beside the code.
+try {
+  const width = Number(localStorage.getItem("proton.terminal.width"));
+  if (width > 0) setTerminalWidth(width, false);
+  showTerminal(localStorage.getItem("proton.terminal") !== "closed");
+} catch {
+  showTerminal(true);
+}
+
 // The shell keeps its restored buffers. Only the browser preview opens a fixture.
 //
 // Not inside requestAnimationFrame: rAF does not fire while the window is
@@ -4850,7 +5052,7 @@ viewportObserver.observe(document.body);
 // Exposed for the browser preview's console and for driving screenshots.
 // Splitting is a command now, not a function here — `dispatch` covers it.
 Object.assign(window, {
-  setTheme, setTranslucency, setMode: coreSetMode, setDock, open, closeAll,
+  setTheme, setTranslucency, setMode: coreSetMode, setDock, toggleTerminal, open, closeAll,
   dispatch, drawPointerEdges, setHint, enterCell, protonPerformance: performanceReview,
 });
 
@@ -4946,6 +5148,17 @@ const TOOL_ICON = {
 
 const CALL_STATE = { starting: "", running: "spin", done: "", failed: "" };
 
+/** What each tool is called in a sentence. A tool this list does not know
+ *  keeps its own name, which is still the truth about what ran. */
+const TOOL_LABEL = {
+  read_file: "Read file",
+  grep: "Search",
+  find_files: "Find files",
+  open_buffer: "Open",
+  search_library: "Search library",
+  diagnostics: "Diagnostics",
+};
+
 function toolHtml(call) {
   const spin = CALL_STATE[call.state] === "spin" ? " spin" : "";
   const mark = TOOL_ICON[call.name] ?? "k-other";
@@ -4955,9 +5168,10 @@ function toolHtml(call) {
       : call.result
         ? `<span class="t">${escapeHtml(call.result)}</span>`
         : "";
+  const detail = call.detail ? ` <span class="d" title="${escapeHtml(call.detail)}">${escapeHtml(call.detail)}</span>` : "";
   return (
-    `<div class="tool"><svg class="i${spin}"><use href="#i-${mark}"/></svg> ` +
-    `<b>${escapeHtml(call.name)}</b> ${escapeHtml(call.detail)}${right}</div>`
+    `<div class="tool" title="${escapeHtml(call.name)}"><svg class="i${spin}"><use href="#i-${mark}"/></svg> ` +
+    `<b>${escapeHtml(TOOL_LABEL[call.name] ?? call.name)}</b>${detail}${right}</div>`
   );
 }
 
@@ -4999,7 +5213,7 @@ function entryHtml(entry) {
       }`;
 
   const thinking = entry.thinking
-    ? `<details class="thought"><summary>thought</summary>${proseHtml(entry.thinking)}</details>`
+    ? `<details class="thought"><summary><svg class="i"><use href="#i-bulb"/></svg>Thinking</summary>${proseHtml(entry.thinking)}</details>`
     : "";
   const calls = entry.calls.map(toolHtml).join("");
   // A caret while the text is still arriving, so an empty answer that is on
@@ -5007,7 +5221,7 @@ function entryHtml(entry) {
   const caret = entry.streaming ? `<span class="cursor"></span>` : "";
 
   return (
-    `<div class="msg"><div class="who">${who}</div>` +
+    `<div class="msg${you ? " you" : ""}"><div class="who">${who}</div>` +
     `${thinking}${calls}${proseHtml(entry.text)}${caret}</div>`
   );
 }
@@ -5089,6 +5303,10 @@ function renderTasks(event) {
   const badge = $("[data-task-badge]");
   badge.textContent = String(event.tasks.length);
   badge.hidden = !event.tasks.length;
+  // The Tasks entry is behind the agent header's `⋯` now, so the count needs
+  // a mark that can be seen with the menu shut.
+  const dot = $("[data-task-dot]");
+  if (dot) dot.hidden = !event.tasks.length;
   const box = $("[data-tasks]");
   if (!box) return;
 
@@ -5247,6 +5465,9 @@ let lastChats = { conversations: [], current: "" };
 
 function renderChats(event) {
   lastChats = event;
+  // The agent's header in Codex names the conversation, as Zed's names the
+  // thread.
+  renderDockTitle();
 
   const title = $("[data-chat-title]");
   if (title) {
@@ -5372,8 +5593,10 @@ function renderAgent(event) {
   for (const send of $$("[data-agent-send]")) {
     send.classList.toggle("stop", event.activity !== "idle");
     send.setAttribute("aria-label", event.activity === "idle" ? "Send" : "Stop");
+    // Codex's composer sends with Zed's paper plane; Chat keeps its arrow.
+    const idle = send.closest("#codex-dock") ? "send" : "arrow-up";
     send.innerHTML = `<svg class="i"><use href="#i-${
-      event.activity === "idle" ? "arrow-up" : "stop"
+      event.activity === "idle" ? idle : "stop"
     }"/></svg>`;
   }
 

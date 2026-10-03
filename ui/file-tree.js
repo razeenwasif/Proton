@@ -7,8 +7,9 @@
  * @param {Document} root
  * @param {Dispatch} dispatch
  * @param {(name: string) => string} icon Trusted, app-owned SVG markup.
+ * @param {(open: boolean) => string} folder The same, for a folder.
  */
-export function createFileTree(root, dispatch, icon) {
+export function createFileTree(root, dispatch, icon, folder) {
   const targets = [...root.querySelectorAll('[data-tree]')].filter((node) => node instanceof HTMLElement);
   /** @type {TreeRow[]} */
   let rows = [];
@@ -110,11 +111,13 @@ export function createFileTree(root, dispatch, icon) {
         siblings.push(row); groups.set(parent, siblings);
       }
       const html = rows.map((row) => {
-        const padding = `padding-left:${8 + row.depth * 13}px`;
+        // The depth, not a width: how far a level indents is the stylesheet's
+        // to say, and Codex says it differently from the other modes.
+        const padding = `--depth:${row.depth}`;
         if (row.truncated) return `<div class="row more" role="none" style="${padding}">${escape(row.name)}</div>`;
         const siblings = groups.get(row.path.slice(0, row.path.lastIndexOf('/') + 1)) ?? [];
         const image = row.dir
-          ? `<span class="ic"><svg class="i chev"><use href="#i-chev"/></svg></span><svg class="i ft-folder"><use href="#i-${row.expanded ? 'folder-open' : 'folder'}"/></svg>`
+          ? `<span class="ic"><svg class="i chev"><use href="#i-chev"/></svg></span><span class="fic">${folder(row.expanded)}</span>`
           : `<span class="ic">${icon(row.name)}</span>`;
         return `<div class="row${row.dir ? ' dir' : ''}${row.expanded ? ' open' : ''}${row.active ? ' sel' : ''}" role="treeitem" tabindex="-1"` +
           ` aria-label="${escape(row.name)}" aria-level="${row.depth + 1}" aria-posinset="${siblings.indexOf(row) + 1}" aria-setsize="${siblings.length}"` +
