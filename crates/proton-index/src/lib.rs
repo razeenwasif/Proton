@@ -15,5 +15,5 @@ pub mod grep;
 pub mod match_;
 
 pub use files::{children, Child, FileIndex};
-pub use grep::{grep, GrepHit};
+pub use grep::{grep, grep_until, GrepHit};
 pub use match_::{Match, Matcher};

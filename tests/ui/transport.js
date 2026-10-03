@@ -90,6 +90,10 @@ window.__TAURI__ = {
         return show();
       }
       case 'placeCursor': return [cursor(focused, command.column)];
+      // The real core answered every size with a screen; with `echoTerminalSize`
+      // this does too, which is what kept the panel measuring itself.
+      case 'terminalSize': return window.echoTerminalSize ? [{type: 'terminal', running: true, scrollback: 0,
+        cursor: [0, 0], cursorVisible: true, rows: Array.from({length: command.rows}, () => [{text: '%'}])}] : [];
       case 'setSetting': {
         const [group, key] = command.key.split('.');
         if (key) (settings[group] ??= {})[key] = command.value;

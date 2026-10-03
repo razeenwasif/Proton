@@ -1101,7 +1101,16 @@ impl Workspace {
             }
 
             Command::TerminalSize { rows, cols } => {
-                self.term_size = (rows.max(1), cols.max(1));
+                let size = (rows.max(1), cols.max(1));
+                // The size it already is answers nothing. Every answer is a
+                // whole screen, and the panel measures itself again after
+                // each screen it draws — so answering an unchanged size kept
+                // the two of them at it once a frame for as long as the panel
+                // was open, re-sending an idle shell sixty times a second.
+                if size == self.term_size {
+                    return Vec::new();
+                }
+                self.term_size = size;
                 match self.terminal.as_mut() {
                     Some(term) => {
                         term.resize(rows, cols);
@@ -1740,6 +1749,9 @@ impl Workspace {
     }
 
     fn accept_picker(&mut self) -> Vec<Event> {
+        // Live grep may still be searching for the query as typed; a hit from
+        // the keystroke before it is not the one being chosen.
+        self.pickers.settle();
         let accepted = self
             .pickers
             .open()
@@ -1830,6 +1842,7 @@ impl Workspace {
             // would be the wrong reassurance about the wrong thing.
             scanning: match picker.kind() {
                 PickerKind::Library => self.library.is_building(),
+                PickerKind::Grep => self.pickers.is_scanning() || self.pickers.is_searching(),
                 _ => self.pickers.is_scanning(),
             },
         }
@@ -2515,9 +2528,13 @@ impl Workspace {
         // The file walk lands here too. It is the same shape of problem — work
         // finished on a thread the core cannot see — so it uses the same
         // heartbeat rather than inventing a second one.
-        let labels = self.buffer_labels();
-        if self.pickers.poll(labels) {
-            events.push(self.picker_event());
+        // Only while a walk or a search is out: the labels are a list of every
+        // buffer, and building one on every beat to hand to nothing is waste.
+        if self.pickers.is_waiting() {
+            let labels = self.buffer_labels();
+            if self.pickers.poll(labels) {
+                events.push(self.picker_event());
+            }
         }
 
         events.extend(self.poll_council());

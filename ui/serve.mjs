@@ -19,6 +19,8 @@ const TYPES = {
   ".webp": "image/webp",
   ".ico": "image/x-icon",
   ".mp4": "video/mp4",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
 };
 
 /** The first candidate that is a real file, or null. */

@@ -6,16 +6,19 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ignore::WalkBuilder;
+use ignore::{DirEntry, ParallelVisitor, ParallelVisitorBuilder, WalkBuilder, WalkState};
 
 #[derive(Debug, Default)]
 pub struct FileIndex {
     root: PathBuf,
     /// Paths relative to the root, with forward slashes on every platform so a
-    /// query typed with `/` works the same on Windows.
-    paths: Vec<String>,
+    /// query typed with `/` works the same on Windows. Shared rather than
+    /// owned, so a search on another thread can read the list without a copy
+    /// of forty thousand strings being made for every keystroke.
+    paths: Arc<Vec<String>>,
     /// How long the last walk took, for the picker's footer.
     scan: Option<Duration>,
     /// A walk in flight. `None` means either "not started" or "already
@@ -37,6 +40,11 @@ impl FileIndex {
 
     pub fn paths(&self) -> &[String] {
         &self.paths
+    }
+
+    /// The same list, for a thread that outlives this borrow.
+    pub fn shared_paths(&self) -> Arc<Vec<String>> {
+        Arc::clone(&self.paths)
     }
 
     pub fn len(&self) -> usize {
@@ -102,7 +110,7 @@ impl FileIndex {
         };
         match waiting.try_recv() {
             Ok((paths, elapsed)) => {
-                self.paths = paths;
+                self.paths = Arc::new(paths);
                 self.scan = Some(elapsed);
                 self.walking = None;
                 true
@@ -122,7 +130,7 @@ impl FileIndex {
     /// nothing else to do — everything interactive should use `start`.
     pub fn scan(&mut self) -> usize {
         let started = Instant::now();
-        self.paths = walk(&self.root);
+        self.paths = Arc::new(walk(&self.root));
         self.scan = Some(started.elapsed());
         self.walking = None;
         self.paths.len()
@@ -209,10 +217,16 @@ fn ignore_rules(root: &Path) -> Option<ignore::gitignore::Gitignore> {
     builder.build().ok()
 }
 
+/// Every file under `root` that is not ignored, sorted.
+///
+/// On every core: directories are independent, and the walker hands them out
+/// to a thread per core, which made a 41,000-file folder several times faster
+/// to index. Each thread collects into its own list and hands it over once,
+/// at the end, rather than taking a lock per file; the sort puts the order
+/// back, so the answer is the one a single thread would give.
 fn walk(root: &Path) -> Vec<String> {
-    let mut paths = Vec::new();
-
-    let walker = WalkBuilder::new(root)
+    let all = Mutex::new(Vec::new());
+    WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
         .git_global(true)
@@ -220,18 +234,55 @@ fn walk(root: &Path) -> Vec<String> {
         // `.git` is not in `.gitignore`, and nobody wants to fuzzy-find their
         // way into an object file.
         .filter_entry(|e| e.file_name() != ".git")
-        .build();
+        .build_parallel()
+        .visit(&mut Collectors { root, all: &all });
 
-    for entry in walker.flatten() {
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
-        let Ok(relative) = entry.path().strip_prefix(root) else {
-            continue;
-        };
-        paths.push(relative.to_string_lossy().replace('\\', "/"));
-    }
-
+    let mut paths = all.into_inner().unwrap_or_default();
     paths.sort();
     paths
+}
+
+/// Makes a [`Collector`] for each walker thread.
+struct Collectors<'s> {
+    root: &'s Path,
+    all: &'s Mutex<Vec<String>>,
+}
+
+impl<'s> ParallelVisitorBuilder<'s> for Collectors<'s> {
+    fn build(&mut self) -> Box<dyn ParallelVisitor + 's> {
+        Box::new(Collector {
+            root: self.root,
+            found: Vec::new(),
+            all: self.all,
+        })
+    }
+}
+
+/// One walker thread's files, handed over when the thread is done with it.
+struct Collector<'s> {
+    root: &'s Path,
+    found: Vec<String>,
+    all: &'s Mutex<Vec<String>>,
+}
+
+impl ParallelVisitor for Collector<'_> {
+    fn visit(&mut self, entry: Result<DirEntry, ignore::Error>) -> WalkState {
+        let Ok(entry) = entry else {
+            return WalkState::Continue;
+        };
+        if entry.file_type().is_some_and(|t| t.is_file()) {
+            if let Ok(relative) = entry.path().strip_prefix(self.root) {
+                self.found.push(relative.to_string_lossy().replace('\\', "/"));
+            }
+        }
+        WalkState::Continue
+    }
+}
+
+impl Drop for Collector<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut all) = self.all.lock() {
+            all.append(&mut self.found);
+        }
+    }
 }

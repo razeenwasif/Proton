@@ -212,6 +212,20 @@ await test('Each project shows its own shell, and one without asks for one', asy
   assert(asked === 1, `asked for ${asked} shells, not one`);
   if (!wasOpen) { toggle.click(); await settle(); }
 });
+await test('An idle terminal is told its size once, not once a frame', async () => {
+  const pane = $('[data-term-pane]'), toggle = $('.titlebar [data-term-toggle]');
+  const wasOpen = !pane.hidden;
+  if (!wasOpen) { toggle.click(); await settle(); }
+  win.echoTerminalSize = true;
+  try {
+    const before = win.commands.length;
+    await win.pushEvents([shellScreen('idle %')]);
+    for (let i = 0; i < 5; i++) await settle();
+    const told = win.commands.slice(before).filter((c) => c.type === 'terminalSize').length;
+    assert(told === 1, `told its size ${told} times in half a second`);
+  } finally { win.echoTerminalSize = false; }
+  if (!wasOpen) { toggle.click(); await settle(); }
+});
 await test('Moving to a project does not open a terminal that was shut, and ␣tt still does', async () => {
   const pane = $('[data-term-pane]'), toggle = $('.titlebar [data-term-toggle]');
   const wasOpen = !pane.hidden;
@@ -349,6 +363,13 @@ await test('A press in the code takes the keyboard back from the shell, click or
   assert(!sent.some((c) => c.type === 'terminalInput'), 'i was typed into the shell');
   key('Escape'); await settle();
   if (!wasOpen) { toggle.click(); await settle(); }
+});
+await test('The caret blinks on a timer, not an animation restyled every frame', async () => {
+  const caret = $('.workspace.on .split.on [data-editor] .caret');
+  assert(caret, 'no caret to look at');
+  const running = caret.getAnimations().length + [...caret.querySelectorAll('*')].reduce((n, el) => n + el.getAnimations().length, 0);
+  assert(running === 0, `the caret has ${running} running animation(s)`);
+  assert(win.getComputedStyle(caret).animationName === 'none', 'a CSS animation is attached to the caret');
 });
 await test('A file clicked in the project panel takes the keyboard with it; a folder keeps it', async () => {
   const tree = $('.workspace.on [data-tree]');

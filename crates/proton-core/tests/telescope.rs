@@ -32,12 +32,12 @@ fn settle(ws: &mut Workspace) -> Vec<Event> {
         if !events.is_empty() {
             last = events;
         }
-        if !ws.pickers().is_scanning() {
+        if !ws.pickers().is_waiting() {
             return last;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "the file walk never finished"
+            "the file walk or the search never finished"
         );
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
@@ -208,7 +208,11 @@ fn the_selection_wraps() {
 fn live_grep_finds_a_line_and_jumps_to_it() {
     let mut ws = workspace();
     opened(&mut ws, " fg");
-    let events = keys(&mut ws, "pub struct Workspace {");
+    let typed = keys(&mut ws, "pub struct Workspace {");
+    // Searched on its own thread; over a large tree the answer can follow the
+    // keystroke rather than come with it.
+    let searched = settle(&mut ws);
+    let events = if searched.is_empty() { typed } else { searched };
     let (query, items, _) = picker(&events).expect("grep should be open");
     assert_eq!(query, "pub struct Workspace {");
     assert!(!items.is_empty(), "grep found nothing");
@@ -296,4 +300,26 @@ fn the_walk_happens_once_however_many_pickers_are_opened() {
     });
     assert!(!ws.pickers().is_scanning());
     assert_eq!(ws.pickers().file_count(), first);
+}
+
+#[test]
+fn a_later_keystroke_replaces_the_search_for_an_earlier_one() {
+    // A broad search and then a narrow one: whichever finishes first, what is
+    // left on screen answers the query as typed, never the broad one's hits
+    // arriving late over the top of it.
+    let mut ws = workspace();
+    opened(&mut ws, " fg");
+    keys(&mut ws, "fn ");
+    keys(&mut ws, "settle(");
+    settle(&mut ws);
+    let picker = ws.pickers().open().expect("grep should be open");
+    assert_eq!(picker.query(), "fn settle(");
+    assert!(!picker.items().is_empty(), "nothing found for the narrow query");
+    for item in picker.items() {
+        assert!(
+            item.label.to_lowercase().contains("fn settle("),
+            "a hit for an earlier keystroke survived: {}",
+            item.label
+        );
+    }
 }

@@ -50,6 +50,7 @@ pub use lsp::{Completion, Diagnostic, Servers, Severity};
 pub use mode::ModeId;
 pub use picker::{Picker, PickerItem, PickerKey, PickerKind};
 pub use proton_syntax::{Scope, Span};
+pub use proton_term::on_output as on_terminal_output;
 pub use proton_text::{Buffer, Cursor, Edit, Position, Range};
 pub use session::Session;
 pub use split::{Direction, Splits, View};

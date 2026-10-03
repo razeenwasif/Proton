@@ -222,6 +222,21 @@ pub fn remember(window: &WebviewWindow) {
         *LAST.lock().unwrap() = seeded;
     }
 
+    // Writes what the events below only note, once the window has held still
+    // long enough to answer honestly about being maximized. Asleep until the
+    // window moves: a window that is left where it is costs no wake-ups at all,
+    // where this used to look eight times a second for as long as it was open.
+    let ticking = window.clone();
+    let ticker = std::thread::spawn(move || loop {
+        let moved = *MOVED_AT.lock().unwrap();
+        match moved {
+            None => std::thread::park(),
+            Some(at) if at.elapsed() >= SETTLE => save(&ticking),
+            Some(_) => std::thread::sleep(TICK),
+        }
+    });
+    let ticker = ticker.thread().clone();
+
     let watched = window.clone();
     window.on_window_event(move |event| match event {
         // Noted, not saved. These arrive once a frame while a corner is
@@ -229,25 +244,12 @@ pub fn remember(window: &WebviewWindow) {
         // to be believed — see `SETTLE`.
         WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
             *MOVED_AT.lock().unwrap() = Some(Instant::now());
+            ticker.unpark();
         }
         // The last word. By the time a window is closing it has long since
         // settled, so this can ask directly.
         WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => save(&watched),
         _ => {}
-    });
-
-    // Writes what the events above only noted, once the window has held still
-    // long enough to answer honestly about being maximized.
-    let ticking = window.clone();
-    std::thread::spawn(move || loop {
-        std::thread::sleep(TICK);
-        let settled = MOVED_AT
-            .lock()
-            .unwrap()
-            .is_some_and(|at| at.elapsed() >= SETTLE);
-        if settled {
-            save(&ticking);
-        }
     });
 }
 

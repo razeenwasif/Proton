@@ -169,9 +169,18 @@ fn a_value_from_a_table_can_be_searched_for_across_the_project() {
     space.apply(Command::OpenPicker {
         kind: proton_core::picker::PickerKind::Grep,
     });
-    let events = space.apply(Command::PickerQuery {
+    let mut events = space.apply(Command::PickerQuery {
         text: "SAT_17".into(),
     });
+    // Live grep answers on its own thread when it cannot answer at once.
+    while space.pickers().is_searching() {
+        let polled = space.apply(Command::Poll);
+        if !polled.is_empty() {
+            events = polled;
+        }
+        assert!(std::time::Instant::now() < deadline, "the search never finished");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
 
     let picker = events.iter().find_map(|event| match event {
         Event::Picker { query, items, .. } => Some((query.clone(), items.len())),

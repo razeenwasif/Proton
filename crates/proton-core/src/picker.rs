@@ -11,8 +11,12 @@
 //! all of them are a source of candidates, and none needs new matching code.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use proton_index::{grep, FileIndex, Matcher};
+use proton_index::{grep, grep_until, FileIndex, GrepHit, Matcher};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -210,6 +214,46 @@ impl PickerKey {
 
 const LIMIT: usize = 200;
 
+/// How long a keystroke in live grep waits for its own search before leaving
+/// it to finish on its thread. Long enough that over an ordinary project the
+/// answer is simply there, as it always was; short enough that a search
+/// through a folder of datasets — a second, even on every core — never holds
+/// up the next keystroke, or anything else the editor is asked to do.
+const HEAD_START: Duration = Duration::from_millis(40);
+
+/// How long choosing a hit waits for the search it is choosing from: the
+/// query as typed, not the one a keystroke before it.
+const SETTLE: Duration = Duration::from_secs(5);
+
+/// A live grep running on its own thread. Dropping it stops the search, which
+/// is what the next keystroke does to the last one's.
+#[derive(Debug)]
+struct Search {
+    stop: Arc<AtomicBool>,
+    answer: Receiver<(Vec<GrepHit>, f64)>,
+}
+
+impl Drop for Search {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Grep hits as picker rows.
+fn grep_rows(hits: Vec<GrepHit>) -> Vec<PickerItem> {
+    hits.into_iter()
+        .map(|hit| PickerItem {
+            label: hit.text,
+            detail: format!("{}:{}", hit.path, hit.line + 1),
+            positions: Vec::new(),
+            path: Some(hit.path),
+            line: Some(hit.line),
+            column: Some(hit.column),
+            kind: None,
+        })
+        .collect()
+}
+
 #[derive(Debug)]
 pub struct Picker {
     kind: PickerKind,
@@ -347,6 +391,8 @@ pub struct Pickers {
     held: Vec<PickerItem>,
     matcher: Matcher,
     open: Option<Picker>,
+    /// Live grep's search, while it outlives the keystroke that started it.
+    search: Option<Search>,
 }
 
 impl Pickers {
@@ -357,6 +403,7 @@ impl Pickers {
             changes: Vec::new(),
             held: Vec::new(),
             open: None,
+            search: None,
         }
     }
 
@@ -369,6 +416,7 @@ impl Pickers {
     }
 
     pub fn close(&mut self) {
+        self.search = None;
         self.open = None;
     }
 
@@ -453,17 +501,106 @@ impl Pickers {
         self.index.is_scanning()
     }
 
+    /// Whether anything is out that a poll could bring back: a walk, or a
+    /// search.
+    pub fn is_waiting(&self) -> bool {
+        self.index.is_scanning() || self.search.is_some()
+    }
+
+    /// Whether live grep is still looking for the query as typed — so the
+    /// rows on screen are the last keystroke's, about to be replaced.
+    pub fn is_searching(&self) -> bool {
+        self.search.is_some()
+    }
+
+    /// Wait for the search the open picker is showing, so that choosing a
+    /// hit chooses one for the query as typed.
+    pub fn settle(&mut self) {
+        let Some(search) = self.search.take() else {
+            return;
+        };
+        if let Ok((hits, elapsed_ms)) = search.answer.recv_timeout(SETTLE) {
+            if let Some(picker) = self.open.as_mut() {
+                picker.fill(grep_rows(hits), elapsed_ms);
+            }
+        }
+    }
+
+    /// Take a search that finished on its thread. `true` if the list changed.
+    fn poll_search(&mut self) -> bool {
+        let Some(search) = &self.search else {
+            return false;
+        };
+        match search.answer.try_recv() {
+            Ok((hits, elapsed_ms)) => {
+                self.search = None;
+                match self.open.as_mut().filter(|p| p.kind == PickerKind::Grep) {
+                    Some(picker) => {
+                        picker.fill(grep_rows(hits), elapsed_ms);
+                        true
+                    }
+                    None => false,
+                }
+            }
+            Err(TryRecvError::Empty) => false,
+            // Gone without an answer: stop saying it is coming.
+            Err(TryRecvError::Disconnected) => {
+                self.search = None;
+                true
+            }
+        }
+    }
+
+    /// Start live grep on its own thread, and give it a head start.
+    fn search_for(&mut self, query: String) {
+        // Whatever the last keystroke was looking for is not the question now.
+        self.search = None;
+        let Some(picker) = &mut self.open else { return };
+        if query.is_empty() {
+            picker.fill(Vec::new(), 0.0);
+            return;
+        }
+        let (answer, waiting) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let halt = Arc::clone(&stop);
+        let (root, paths) = (self.index.root().to_path_buf(), self.index.shared_paths());
+        let spawned = std::thread::Builder::new()
+            .name("proton-grep".into())
+            .spawn(move || {
+                let started = Instant::now();
+                let hits = grep_until(&root, &paths, &query, LIMIT, &halt);
+                if !halt.load(Ordering::Relaxed) {
+                    let _ = answer.send((hits, started.elapsed().as_secs_f64() * 1000.0));
+                }
+            });
+        if spawned.is_err() {
+            // No thread to be had: search here, as it always used to.
+            let started = Instant::now();
+            let query = picker.query.clone();
+            let hits = grep(self.index.root(), self.index.paths(), &query, LIMIT);
+            picker.fill(grep_rows(hits), started.elapsed().as_secs_f64() * 1000.0);
+            return;
+        }
+        match waiting.recv_timeout(HEAD_START) {
+            Ok((hits, elapsed_ms)) => picker.fill(grep_rows(hits), elapsed_ms),
+            // Still reading. The rows stay as they were until it answers, and
+            // the picker says it is still searching.
+            Err(_) => self.search = Some(Search { stop, answer: waiting }),
+        }
+    }
+
     /// Take a finished walk and re-run the query against it. `true` if the
     /// visible list changed.
     pub fn poll(&mut self, buffers: Vec<(String, Option<String>)>) -> bool {
+        let searched = self.poll_search();
         if !self.index.poll() {
-            return false;
+            return searched;
         }
         if self.open.is_some() {
             self.requery(buffers);
             return true;
         }
-        false
+        searched
     }
 
     /// Open a picker. The walk happens on a worker, so this returns at once
@@ -532,6 +669,11 @@ impl Pickers {
 
     fn requery(&mut self, buffers: Vec<(String, Option<String>)>) {
         let Some(picker) = &mut self.open else { return };
+        if picker.kind == PickerKind::Grep {
+            let query = picker.query.clone();
+            self.search_for(query);
+            return;
+        }
         let started = std::time::Instant::now();
         let query = picker.query.clone();
 
@@ -559,18 +701,8 @@ impl Pickers {
                     .collect()
             }
 
-            PickerKind::Grep => grep(self.index.root(), self.index.paths(), &query, LIMIT)
-                .into_iter()
-                .map(|hit| PickerItem {
-                    label: hit.text,
-                    detail: format!("{}:{}", hit.path, hit.line + 1),
-                    positions: Vec::new(),
-                    path: Some(hit.path),
-                    line: Some(hit.line),
-                    column: Some(hit.column),
-                    kind: None,
-                })
-                .collect(),
+            // Searched on its own thread, by `search_for`, above.
+            PickerKind::Grep => Vec::new(),
 
             PickerKind::Buffers => {
                 let labels: Vec<&str> = buffers.iter().map(|(name, _)| name.as_str()).collect();

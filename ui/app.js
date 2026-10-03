@@ -122,6 +122,9 @@ function renderSettings(event) {
     }
 
     displaySettings.apply(lastSettings);
+    // A new font size is a new cell size: the panel is the same size and
+    // holds a different number of rows, which no resize would announce.
+    requestAnimationFrame(() => reportTerminalSize());
 
     // The controls show what is set, and a control with nothing set shows the
     // default — which is why each one carries its own.
@@ -3507,7 +3510,15 @@ function cellSize(screen) {
 }
 
 /** How many cells fit, so the shell can be told. */
-function reportTerminalSize() {
+/** The size last sent to the shell. Every size sent is answered with a
+ *  screen, and every screen used to send the size again — once a frame, for as
+ *  long as the panel was open. Only a size that changed goes now. */
+let termSize = { rows: 0, cols: 0 };
+
+/** Tell the shell how big the panel is, if that is news. `force` sends it
+ *  regardless, for a shell that may never have been told: one just started,
+ *  or another project's. */
+function reportTerminalSize(force = false) {
   const screen = $("[data-term-screen]");
   if (!screen || !screen.offsetParent) return;
   const cell = cellSize(screen);
@@ -3521,6 +3532,8 @@ function reportTerminalSize() {
 
   const rows = Math.max(1, Math.floor(height / cell.height));
   const cols = Math.max(20, Math.floor(width / cell.width));
+  if (force !== true && rows === termSize.rows && cols === termSize.cols) return;
+  termSize = { rows, cols };
   dispatch({ type: "terminalSize", rows, cols });
 }
 
@@ -3730,7 +3743,7 @@ document.addEventListener("click", (e) => {
 // that have nothing to do with the shell: the window, the dock, a split. An
 // observer is the only thing that hears all of them.
 const termScreen = $("[data-term-screen]");
-if (termScreen) new ResizeObserver(reportTerminalSize).observe(termScreen);
+if (termScreen) new ResizeObserver(() => reportTerminalSize()).observe(termScreen);
 
 /* ── the terminal pane ────────────────────────────────────────────────
    Beside the code rather than in the dock, the way a Zed pane group splits
@@ -4669,12 +4682,20 @@ function renderEvent(event) {
     case "terminal":
       renderTerminal(event);
       // The shell has to be told how big the panel is, and only the panel
-      // knows once it has a row to measure.
-      requestAnimationFrame(reportTerminalSize);
+      // knows once it has a row to measure — but only when it is not that
+      // size already. A screen with a different number of rows is a shell
+      // that was never told: just started, or another project's.
+      if (event.rows.length && event.rows.length !== termSize.rows) {
+        requestAnimationFrame(() => reportTerminalSize(true));
+      }
       break;
 
     case "workspaces":
       renderWorkspaces(event.items, event.active);
+      // Every project has its own shell, and a size told to one was not told
+      // to the others.
+      termSize = { rows: 0, cols: 0 };
+      requestAnimationFrame(() => reportTerminalSize());
       break;
 
     case "picker":
@@ -4744,6 +4765,42 @@ function renderPosition() {
   const total = focusedPane().totalLines;
   $("#sl-progress").textContent = total ? `${Math.min(100, Math.round((at.line + 1) / total * 100))}%` : "";
 }
+
+/* ── the caret's blink ────────────────────────────────────────────────
+   On a timer, as Zed's is, rather than as a CSS animation. Animating a colour
+   means styling the page again on every frame the animation runs — sixty
+   times a second, for as long as an editor was open, which made an idle
+   window the busiest thing on the machine's main thread. This changes it
+   twice a second, holds it solid while you type, and stops altogether while
+   the window is in the background or motion is turned down. */
+const BLINK_MS = 530;
+const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+let blinkTimer = 0;
+let blinkOff = false;
+
+function showBlink(off) {
+  blinkOff = off;
+  for (const caret of document.querySelectorAll("[data-editor] .caret")) {
+    caret.classList.toggle("off", off);
+  }
+}
+
+/** Solid now, and blinking again from here — the moment anything happens. */
+function restartBlink() {
+  clearInterval(blinkTimer);
+  blinkTimer = 0;
+  if (blinkOff) showBlink(false);
+  if (document.hidden || !document.hasFocus() || reducedMotion?.matches) return;
+  blinkTimer = setInterval(() => showBlink(!blinkOff), BLINK_MS);
+}
+
+document.addEventListener("keydown", restartBlink, true);
+document.addEventListener("mousedown", restartBlink, true);
+document.addEventListener("visibilitychange", restartBlink);
+window.addEventListener("focus", restartBlink);
+window.addEventListener("blur", restartBlink);
+reducedMotion?.addEventListener?.("change", restartBlink);
+restartBlink();
 
 /* ── who has the keyboard ─────────────────────────────────────────────
    The code, unless something else has asked for it: the project panel, the

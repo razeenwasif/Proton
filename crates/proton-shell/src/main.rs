@@ -7,8 +7,8 @@ mod backdrop;
 mod transport;
 mod window;
 
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use backdrop::Backdrop;
 use proton_core::{Command, Session};
@@ -20,14 +20,74 @@ use tauri::{Emitter, Manager, State};
 /// server finished thinking, not because the user pressed a key.
 const PUSHED: &str = "proton://events";
 
-/// How often to ask the core whether a server has said anything.
+/// How often to ask the core whether anything has happened on a thread it
+/// cannot see — a server, a shell, the agent.
 ///
 /// The core has no clock and no threads — that is what makes it testable — so
-/// something has to ask on its behalf, and this is that something. Fast enough
-/// that a completion list feels like it arrived with the keystroke, slow
-/// enough to be free: an idle poll is a `try_recv` on a handful of channels
-/// and returns no events, so it never redraws anything.
+/// something has to ask on its behalf, and this is that something. It used to
+/// ask twenty times a second whatever was going on, which is twenty wake-ups a
+/// second for a window nobody is using and a twentieth of a second added to
+/// every echoed keystroke in the terminal. Now it keeps time with the work:
+/// once a frame while things are happening, slower as they stop, and rarely
+/// once they have — and it is woken the moment a command arrives or a shell
+/// writes, so being asleep never makes anything late.
+const FAST: Duration = Duration::from_millis(16);
+/// For a few seconds after things go quiet: a language server answering a
+/// save, an agent thinking before its first word.
 const BEAT: Duration = Duration::from_millis(50);
+/// Once nothing has happened for a while.
+const IDLE: Duration = Duration::from_millis(250);
+
+/// The heartbeat's alarm clock: sleep until the next beat, or until woken.
+struct Heartbeat {
+    woken: Mutex<bool>,
+    bell: Condvar,
+}
+
+impl Heartbeat {
+    const fn new() -> Heartbeat {
+        Heartbeat {
+            woken: Mutex::new(false),
+            bell: Condvar::new(),
+        }
+    }
+
+    /// Something happened: poll now rather than at the next beat.
+    fn wake(&self) {
+        if let Ok(mut woken) = self.woken.lock() {
+            *woken = true;
+            self.bell.notify_one();
+        }
+    }
+
+    /// Sleep for `wait`, or less if woken. `true` if it was woken.
+    fn sleep(&self, wait: Duration) -> bool {
+        let Ok(mut woken) = self.woken.lock() else {
+            std::thread::sleep(wait);
+            return false;
+        };
+        if !*woken {
+            woken = match self.bell.wait_timeout(woken, wait) {
+                Ok((guard, _)) => guard,
+                Err(poisoned) => poisoned.into_inner().0,
+            };
+        }
+        std::mem::replace(&mut *woken, false)
+    }
+}
+
+static HEARTBEAT: Heartbeat = Heartbeat::new();
+
+/// How long to sleep, given how long it has been since anything happened.
+fn cadence(quiet: Duration) -> Duration {
+    if quiet < Duration::from_secs(1) {
+        FAST
+    } else if quiet < Duration::from_secs(5) {
+        BEAT
+    } else {
+        IDLE
+    }
+}
 
 /// What the compositor actually gave us. The front end needs this to decide
 /// whether to paint its own ground, so it reads it on boot and after any change.
@@ -35,12 +95,17 @@ type Surface = Mutex<Backdrop>;
 
 /// The whole bridge. One command in, the events it produced out.
 ///
-/// M0 answers synchronously because every command it handles is synchronous.
-/// Streaming work — agent deltas, trace steps, LSP diagnostics — arrives in M3
-/// and will push through `AppHandle::emit` instead; the `Event` type is already
-/// the right shape for both, which is the point of keeping it transport-
+/// Work that finishes later — agent deltas, trace steps, LSP diagnostics — is
+/// pushed by the heartbeat through `AppHandle::emit` instead; the `Event` type
+/// is the same shape for both, which is the point of keeping it transport-
 /// agnostic.
-#[tauri::command]
+///
+/// Off the main thread. A command Tauri is not told is `async` runs on the
+/// thread that runs the window, so every keystroke's work — and every wait for
+/// the session's lock while the heartbeat held it — was time the window could
+/// not be moved, resized or redrawn in. The page sends one command at a time
+/// and waits for each reply, so running them elsewhere cannot reorder them.
+#[tauri::command(async)]
 fn dispatch(command: Command, session: State<'_, Mutex<BridgeSession>>) -> EventBatch {
     let events = match session.lock() {
         Ok(mut it) => it.apply(command.clone()),
@@ -49,6 +114,9 @@ fn dispatch(command: Command, session: State<'_, Mutex<BridgeSession>>) -> Event
         // has already been reported on stderr.
         Err(poisoned) => poisoned.into_inner().apply(command.clone()),
     };
+    // Whatever was just asked for may answer on another thread — a shell
+    // echoing the key, a server replying — so the heartbeat looks sooner.
+    HEARTBEAT.wake();
 
     // A dropped keystroke is the worst failure mode a modal editor has, and it
     // is invisible from the page. Tracing the seam in debug builds makes it
@@ -167,31 +235,54 @@ fn read_geometry(
 /// Nothing is emitted when nothing happened, which is the common case by
 /// several orders of magnitude.
 fn spawn_poll(app: tauri::AppHandle) {
+    // A shell writing is the one thing worth waking for that no command asked
+    // for just before: a build's output, a prompt coming back.
+    proton_core::on_terminal_output(|| HEARTBEAT.wake());
     std::thread::Builder::new()
         .name("proton-poll".into())
-        .spawn(move || loop {
-            std::thread::sleep(BEAT);
-
-            let Some(session) = app.try_state::<Mutex<BridgeSession>>() else {
-                // The app is shutting down and the state is gone.
-                return;
-            };
-            let events = match session.lock() {
-                Ok(mut it) => it.apply(Command::Poll),
-                Err(poisoned) => poisoned.into_inner().apply(Command::Poll),
-            };
-
-            if events.events.is_empty() {
-                continue;
-            }
-            #[cfg(debug_assertions)]
-            eprintln!("[poll] {} event(s): {events:?}", events.events.len());
-            if app.emit(PUSHED, events).is_err() {
-                return;
+        .spawn(move || {
+            let mut stirred = Instant::now();
+            let mut last = Instant::now();
+            loop {
+                if HEARTBEAT.sleep(cadence(stirred.elapsed())) {
+                    stirred = Instant::now();
+                }
+                // Never more than once a frame, however often it is woken: a
+                // shell printing a log writes thousands of times a second.
+                let since = last.elapsed();
+                if since < FAST {
+                    std::thread::sleep(FAST - since);
+                }
+                last = Instant::now();
+                if let Some(events) = poll_once(&app) {
+                    if events.events.is_empty() {
+                        continue;
+                    }
+                    stirred = Instant::now();
+                    #[cfg(debug_assertions)]
+                    eprintln!("[poll] {} event(s): {events:?}", events.events.len());
+                    if app.emit(PUSHED, events).is_err() {
+                        return;
+                    }
+                } else {
+                    // The app is shutting down and the state is gone.
+                    return;
+                }
             }
         })
         .expect("the poll thread is not optional: without it no server is ever heard from");
 }
+
+/// One poll of the core, or `None` once the app is going away.
+fn poll_once(app: &tauri::AppHandle) -> Option<EventBatch> {
+    let session = app.try_state::<Mutex<BridgeSession>>()?;
+    let events = match session.lock() {
+        Ok(mut it) => it.apply(Command::Poll),
+        Err(poisoned) => poisoned.into_inner().apply(Command::Poll),
+    };
+    Some(events)
+}
+
 
 /// The window and taskbar icon.
 ///
@@ -261,4 +352,32 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_heartbeat_slows_as_things_go_quiet() {
+        assert_eq!(cadence(Duration::ZERO), FAST);
+        assert_eq!(cadence(Duration::from_secs(2)), BEAT);
+        assert_eq!(cadence(Duration::from_secs(60)), IDLE);
+    }
+
+    #[test]
+    fn a_wake_ends_the_sleep_at_once_and_is_used_up() {
+        let beat = std::sync::Arc::new(Heartbeat::new());
+        let waker = std::sync::Arc::clone(&beat);
+        let started = Instant::now();
+        let ringer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            waker.wake();
+        });
+        assert!(beat.sleep(Duration::from_secs(10)), "slept through the wake");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        ringer.join().unwrap();
+        // Woken once, so the next sleep is a whole one.
+        assert!(!beat.sleep(Duration::from_millis(30)));
+    }
 }

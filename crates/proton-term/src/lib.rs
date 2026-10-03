@@ -83,6 +83,19 @@ impl Drop for Terminal {
     }
 }
 
+/// Who to tell that a shell has written something, if anyone asked.
+static ON_OUTPUT: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+/// Be told, from the reader thread, whenever any shell writes.
+///
+/// For whatever drains terminals on a clock: it can sleep for as long as it
+/// likes and still show output — an echoed keystroke, above all — the moment
+/// it arrives, rather than whenever the clock next comes round. Set once; a
+/// second call is ignored.
+pub fn on_output(wake: impl Fn() + Send + Sync + 'static) {
+    let _ = ON_OUTPUT.set(Box::new(wake));
+}
+
 /// The shell to run, and what to tell programs about the terminal.
 fn shell() -> CommandBuilder {
     #[cfg(windows)]
@@ -154,6 +167,9 @@ impl Terminal {
                         Ok(n) => {
                             if found.send(buf[..n].to_vec()).is_err() {
                                 return;
+                            }
+                            if let Some(wake) = ON_OUTPUT.get() {
+                                wake();
                             }
                         }
                     }
