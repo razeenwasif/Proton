@@ -1071,6 +1071,14 @@ document.addEventListener("mousedown", (e) => {
 
   // Stops the browser painting a second, different selection over ours.
   e.preventDefault();
+  // ...which stops it moving the focus too, so that is done here. A click in
+  // the text is a request to type in it; left where it was — in the project
+  // panel, usually — the keyboard sent `i` to find a file instead. The shell
+  // lets go here too rather than on `click`: placing the cursor redraws the
+  // line under the pointer, and a press whose element is gone by the release
+  // may never become a click at all.
+  e.target.closest?.("[data-editor]")?.focus({ preventScroll: true });
+  focusTerminal(false);
   dragging = true;
 
   // The core clamps: a click past the end of a short line is the ordinary
@@ -3355,6 +3363,7 @@ let terminalPainted = [];
 function focusTerminal(on) {
   terminalFocused = on;
   $("[data-term-screen]")?.classList.toggle("on", on);
+  renderKeyboardOwner();
 }
 
 function runHtml(run, row, column, cursor) {
@@ -3373,6 +3382,11 @@ function runHtml(run, row, column, cursor) {
 
 function renderTerminal(event) {
   terminalRunning = event.running;
+  // No shell at all — not one that exited, which keeps its last screen. Every
+  // project has its own, so this is what switching to one that has never had
+  // one looks like; with the pane open, that is the request for one, exactly
+  // as opening the pane is.
+  if (!event.running && !event.rows.length && termPane && !termPane.hidden) askForTerminal();
   const state = $("[data-term-state]");
   if (state) {
     state.textContent = event.running ? "ready" : event.rows.length ? "exited" : "starting";
@@ -3729,6 +3743,16 @@ const termGutter = $("[data-term-resize]");
 let terminalRunning = false;
 const TERM_WIDTH = 392;
 
+/** Ask the core for a shell in the active project — once at a time, because
+ *  the pane opening and the project's first empty screen both ask, and they
+ *  usually arrive together. */
+let terminalAsked = false;
+function askForTerminal() {
+  if (terminalAsked) return;
+  terminalAsked = true;
+  dispatch({ type: "openTerminal" }).finally(() => { terminalAsked = false; });
+}
+
 function showTerminal(on, { focus = false } = {}) {
   if (!termPane || !termGutter) return;
   termPane.hidden = !on;
@@ -3744,7 +3768,7 @@ function showTerminal(on, { focus = false } = {}) {
   });
   if (on) {
     // Opening the pane is the request for a shell; there is no other button.
-    if (!terminalRunning) dispatch({ type: "openTerminal" });
+    if (!terminalRunning) askForTerminal();
     requestAnimationFrame(() => {
       reportTerminalSize();
       if (focus) {
@@ -4430,8 +4454,11 @@ onEvents((events) => {
   // `␣tt` and `:terminal` answer with the screen in the same batch that puts
   // the leader or the command line away; a shell printing never does. That
   // is the one way to tell "show me the terminal" from "the terminal
-  // changed", and only the first should open a pane somebody shut.
+  // changed", and only the first should open a pane somebody shut. Moving to
+  // another project — `␣pn`, `:cd` — sends that project's screen the same
+  // way, and says so with the project list, which a terminal key never does.
   if (termPane?.hidden && events.some((e) => e.type === "terminal" && e.running) &&
+      !events.some((e) => e.type === "workspaces") &&
       events.some((e) => (e.type === "leader" && e.prefix === null) || e.type === "vimMode")) {
     showTerminal(true, { focus: true });
   }
@@ -4717,6 +4744,24 @@ function renderPosition() {
   const total = focusedPane().totalLines;
   $("#sl-progress").textContent = total ? `${Math.min(100, Math.round((at.line + 1) / total * 100))}%` : "";
 }
+
+/* ── who has the keyboard ─────────────────────────────────────────────
+   The code, unless something else has asked for it: the project panel, the
+   shell, a field being typed in. The caret says which — solid while keys go
+   to the code, hollow and still while they go elsewhere, as Zed draws an
+   editor without the focus — because a key that lands somewhere unseen reads
+   as a key that did nothing. */
+function renderKeyboardOwner() {
+  const elsewhere = terminalFocused || Boolean(document.activeElement?.closest?.(
+    "[data-tree], input, textarea, select, [contenteditable]:not([contenteditable=false])",
+  ));
+  document.documentElement.dataset.keys = elsewhere ? "elsewhere" : "code";
+}
+
+// Out of one element and into the next is two events, and between them the
+// focus is on the page itself — which is "the code" — so both are heard.
+document.addEventListener("focusin", renderKeyboardOwner);
+document.addEventListener("focusout", renderKeyboardOwner);
 
 /* ── keys ─────────────────────────────────────────────────────────────
    Two layers, and the split matters. Shell chords (⌘K, ⌘,, ⌃1-7) are the

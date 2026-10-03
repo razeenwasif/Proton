@@ -48,3 +48,17 @@ fn a_closed_terminal_reports_itself_at_the_bottom() {
     });
     assert_eq!(found, Some((0, false)));
 }
+
+#[test]
+fn a_sync_reports_the_terminal_even_when_there_is_none() {
+    // A window reconnecting syncs, and so does a session moving to this
+    // project. The panel has to hear whose shell it is showing — including
+    // that there is none — or it goes on drawing whichever it drew last.
+    let mut space = workspace();
+    let events = space.apply(Command::Sync);
+    let found = events.iter().find_map(|event| match event {
+        Event::Terminal { rows, running, .. } => Some((rows.len(), *running)),
+        _ => None,
+    });
+    assert_eq!(found, Some((0, false)));
+}

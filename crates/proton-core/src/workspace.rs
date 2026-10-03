@@ -502,6 +502,12 @@ impl Workspace {
                     self.trace_event(),
                     self.tree_event(),
                     self.repo_event(),
+                    // This project's shell, or the empty screen that says it
+                    // has none. A session switching projects syncs the one it
+                    // switches to, and without this the panel went on showing
+                    // the last project's shell while keystrokes went to this
+                    // one — where, with no shell to take them, they vanished.
+                    self.terminal_event(),
                     // A window that has just connected to a session with a
                     // notebook open would otherwise show an empty stage until
                     // something happened to change a cell.

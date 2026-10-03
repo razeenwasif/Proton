@@ -334,7 +334,10 @@ height, the dimension an editor is always short of, as the other modes' rail
 gives it theirs. The traffic lights stack at its top, the mode names read down
 it the way a side panel's labels do, the toggles sit at its foot, and the
 empty stretch between is the window's drag surface.
-The vim mode is the caret's shape, which is where the eye already is. A
+The vim mode is the caret's shape, which is where the eye already is — and so
+is where the keys are going: hollow and still while the project panel, the
+shell or a field has them, as Zed draws an editor without the focus. A click
+in the code takes them back, and so does a file clicked in the tree. A
 refused `:w` is still the banner over the code. File tabs come back from
 Settings → Appearance; until then the row above the code is the open file's
 path, as Zed's breadcrumb is with its tab bar off, and `␣fb` lists the buffers.
@@ -344,7 +347,10 @@ the right of the editor, rather than in the dock — so the shell and the agent
 can be on screen together, which is the reason Zed users arrange it so. It is
 view state: open or shut and how wide are remembered in the window, never
 more than half the stage, and hiding it does not end the shell. `` ⌃` `` toggles it,
-and `␣tt` or `:terminal` opens it.
+and `␣tt` or `:terminal` opens it. Each project has its own shell, started in
+its root — as a login shell on macOS, as Terminal starts one, so Homebrew's
+PATH is there — and the pane shows the project you are in, starting one there
+if it has none.
 
 **The agent's header is Zed's**: the thread's name, fading where it runs long,
 then new, expand and `⋯`. Expand is Chat mode — the same conversation given

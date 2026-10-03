@@ -90,11 +90,34 @@ fn shell() -> CommandBuilder {
     #[cfg(not(windows))]
     let program = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
 
-    let mut cmd = CommandBuilder::new(program);
+    let mut cmd = CommandBuilder::new(&program);
+    // A login shell on macOS, as Terminal, iTerm and Ghostty start theirs. An
+    // app opened from the Dock inherits launchd's bare PATH, and it is the
+    // login profile — path_helper in /etc/zprofile, Homebrew's shellenv in
+    // ~/.zprofile — that adds the rest. Without it, `brew` and everything it
+    // installed was "command not found" in this terminal and nowhere else.
+    #[cfg(target_os = "macos")]
+    if takes_login_flag(&program) {
+        cmd.arg("-l");
+    }
     // Programs ask `TERM` what they may draw with. Claiming colour we do
     // render, and nothing we do not.
     cmd.env("TERM", "xterm-256color");
     cmd
+}
+
+/// Whether a shell is one known to take `-l` for "login". Anything else is
+/// started as it always was, rather than handed a flag it may refuse.
+#[cfg(any(target_os = "macos", test))]
+fn takes_login_flag(program: &str) -> bool {
+    let name = std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    matches!(
+        name,
+        "sh" | "bash" | "zsh" | "fish" | "ksh" | "mksh" | "dash" | "tcsh" | "csh" | "nu"
+    )
 }
 
 impl Terminal {
@@ -541,6 +564,17 @@ mod tests {
             oldest.contains(&"line1".to_string()),
             "the very top of the history: {oldest:?}"
         );
+    }
+
+    #[test]
+    fn only_shells_known_to_take_it_are_started_as_login_shells() {
+        // `-l` is what lets a terminal opened from the Dock find Homebrew, and
+        // it is a flag some shells would refuse rather than ignore.
+        assert!(takes_login_flag("/bin/zsh"));
+        assert!(takes_login_flag("/opt/homebrew/bin/fish"));
+        assert!(takes_login_flag("bash"));
+        assert!(!takes_login_flag("/usr/local/bin/elvish"));
+        assert!(!takes_login_flag(""));
     }
 
     #[test]

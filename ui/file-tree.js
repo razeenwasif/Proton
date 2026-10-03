@@ -35,6 +35,15 @@ export function createFileTree(root, dispatch, icon, folder) {
     if (row.dir) dispatch({ type: 'toggleTreeNode', path: row.path });
     else dispatch({ type: 'openBuffer', path: row.path });
   }
+  /** Hand the keyboard to the code beside this tree: the focused split's.
+   * @param {HTMLElement} target */
+  function toEditor(target) {
+    const space = target.closest('.workspace');
+    const editor = space?.querySelector('.split.on [data-editor]') ?? space?.querySelector('[data-editor]');
+    if (!(editor instanceof HTMLElement)) return;
+    if (!editor.hasAttribute('tabindex')) editor.tabIndex = -1;
+    editor.focus({ preventScroll: true });
+  }
   for (const target of targets) {
     target.setAttribute('role', 'tree');
     target.setAttribute('aria-label', 'Project files');
@@ -44,7 +53,13 @@ export function createFileTree(root, dispatch, icon, folder) {
       if (!(item instanceof HTMLElement)) return;
       const row = rows.find((row) => row.path === item.dataset.treePath && !row.truncated);
       if (!row) return;
-      focus(target, row.path);
+      // A folder clicked is a folder being browsed, and the keyboard stays to
+      // walk it. A file clicked is one you mean to work in, and the keyboard
+      // goes with it — what Zed does with preview tabs off, and Proton has no
+      // preview tabs. Enter keeps it here instead, for opening one file after
+      // another; the row is remembered either way, for Tab to come back to.
+      focus(target, row.path, row.dir);
+      if (!row.dir) toEditor(target);
       activate(row);
     });
     target.addEventListener('focusin', (event) => {
@@ -79,11 +94,9 @@ export function createFileTree(root, dispatch, icon, folder) {
           }
           break;
         case 'Enter': case ' ': activate(row); break;
-        case 'Escape': {
-          const editor = target.closest('.workspace')?.querySelector('[data-editor]');
-          if (editor instanceof HTMLElement) { if (!editor.hasAttribute('tabindex')) editor.tabIndex = -1; editor.focus(); }
+        case 'Escape':
+          toEditor(target);
           return;
-        }
         default:
           if (event.key.length !== 1 || event.isComposing) return;
           prefix = Date.now() - typedAt > 700 ? event.key.toLowerCase() : prefix + event.key.toLowerCase();

@@ -196,6 +196,36 @@ await test('The terminal sits beside the code and toggles without editor command
   assert(!sent.some((c) => c.type === 'key'), 'toggling reached Vim');
   if (!wasOpen) { toggle.click(); await settle(); }
 });
+const shellScreen = (text, running = true) => ({type: 'terminal', rows: text ? [[{text}]] : [], cursor: [0, 0],
+  cursorVisible: running, running, scrollback: 0});
+const fixtureProjects = {type: 'workspaces', items: [{name: 'Fixture', path: '/fixture', modified: false}], active: 0};
+await test('Each project shows its own shell, and one without asks for one', async () => {
+  const pane = $('[data-term-pane]'), screen = $('[data-term-screen]'), toggle = $('.titlebar [data-term-toggle]');
+  const wasOpen = !pane.hidden;
+  if (!wasOpen) { toggle.click(); await settle(); }
+  await win.pushEvents([shellScreen('alpha %')]);
+  assert(screen.textContent.includes('alpha %'), 'the shell was not drawn');
+  const before = win.commands.length;
+  await win.pushEvents([fixtureProjects, shellScreen('', false)]); await settle();
+  assert(!screen.textContent.includes('alpha %'), "the last project's shell stayed on screen");
+  const asked = win.commands.slice(before).filter((c) => c.type === 'openTerminal').length;
+  assert(asked === 1, `asked for ${asked} shells, not one`);
+  if (!wasOpen) { toggle.click(); await settle(); }
+});
+await test('Moving to a project does not open a terminal that was shut, and ␣tt still does', async () => {
+  const pane = $('[data-term-pane]'), toggle = $('.titlebar [data-term-toggle]');
+  const wasOpen = !pane.hidden;
+  if (wasOpen) { toggle.click(); await settle(); }
+  await win.pushEvents([{type: 'leader', prefix: null}, fixtureProjects, shellScreen('beta %')]); await settle();
+  assert(pane.hidden, 'switching projects opened the terminal');
+  await win.pushEvents([{type: 'leader', prefix: null}, shellScreen('beta %')]); await settle();
+  assert(!pane.hidden, '␣tt no longer opens the terminal');
+  // Back to the code, and to the pane as it was.
+  $('.workspace.on [data-editor]').click();
+  if (!wasOpen) { toggle.click(); await settle(); }
+  $('.workspace.on [data-editor]').focus();
+  assert(doc.documentElement.dataset.keys === 'code', 'the keyboard stayed with the shell');
+});
 await test('A dock shortcut reopens the hidden right panel', async () => {
   const toggle = $('[data-panel-toggle="right"]');
   if (toggle.getAttribute('aria-expanded') === 'true') toggle.click();
@@ -277,6 +307,63 @@ await test('Type-to-find moves focus and Enter opens exactly the chosen file', a
   assert(doc.activeElement.dataset.treePath === 'README.md', 'opening lost keyboard focus');
   key('Escape'); await settle();
   assert(doc.activeElement.matches('[data-editor]'), 'Escape did not return to the editor');
+});
+await test('A click in the code takes the keyboard back from the project panel', async () => {
+  $('.workspace.on [data-tree] [data-tree-path="README.md"]').focus();
+  assert(doc.documentElement.dataset.keys === 'elsewhere', 'the caret does not say the keys are elsewhere');
+  const caret = $('.workspace.on .split.on [data-editor] .caret');
+  assert(!caret || win.getComputedStyle(caret).animationName === 'none', 'the caret blinks for keys that are not coming');
+  const number = $('.workspace.on .split.on [data-editor] .ln .n');
+  const box = number.getBoundingClientRect();
+  const at = {clientX: box.left + box.width / 2, clientY: box.top + box.height / 2};
+  assert(doc.elementFromPoint(at.clientX, at.clientY)?.closest('.ln'), 'the line is not on screen to click');
+  number.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, cancelable: true, button: 0, ...at}));
+  number.dispatchEvent(new win.MouseEvent('mouseup', {bubbles: true, ...at}));
+  await settle();
+  assert(doc.activeElement.matches('[data-editor]'), 'the keyboard stayed in the project panel');
+  assert(doc.documentElement.dataset.keys === 'code', 'the caret still says the keys are elsewhere');
+  const before = win.commands.length;
+  key('i'); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'key' && c.key.key === 'i'), 'i did not reach Vim');
+  key('Escape'); await settle();
+});
+await test('A press in the code takes the keyboard back from the shell, click or no click', async () => {
+  const pane = $('[data-term-pane]'), toggle = $('.titlebar [data-term-toggle]');
+  const wasOpen = !pane.hidden;
+  if (!wasOpen) { toggle.click(); await settle(); }
+  $('[data-term-screen]').click(); await settle();
+  assert(doc.documentElement.dataset.keys === 'elsewhere', 'the shell does not have the keyboard');
+  // A press and a release, and no click: what a cursor move that redraws the
+  // line under the pointer leaves behind.
+  const number = $('.workspace.on .split.on [data-editor] .ln .n');
+  const box = number.getBoundingClientRect();
+  const at = {clientX: box.left + box.width / 2, clientY: box.top + box.height / 2};
+  number.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, cancelable: true, button: 0, ...at}));
+  number.dispatchEvent(new win.MouseEvent('mouseup', {bubbles: true, ...at}));
+  await settle();
+  assert(doc.documentElement.dataset.keys === 'code', 'the shell kept the keyboard');
+  const before = win.commands.length;
+  key('i'); await settle();
+  const sent = win.commands.slice(before);
+  assert(sent.some((c) => c.type === 'key' && c.key.key === 'i'), 'i did not reach Vim');
+  assert(!sent.some((c) => c.type === 'terminalInput'), 'i was typed into the shell');
+  key('Escape'); await settle();
+  if (!wasOpen) { toggle.click(); await settle(); }
+});
+await test('A file clicked in the project panel takes the keyboard with it; a folder keeps it', async () => {
+  const tree = $('.workspace.on [data-tree]');
+  tree.querySelector('[data-tree-path="README.md"]').click(); await settle();
+  assert(doc.activeElement.matches('[data-editor]'), 'the keyboard stayed in the project panel');
+  const before = win.commands.length;
+  key('i'); await settle();
+  const sent = win.commands.slice(before);
+  assert(sent.some((c) => c.type === 'key' && c.key.key === 'i'), 'i did not reach Vim');
+  assert(!sent.some((c) => c.type === 'openBuffer'), 'i found a file instead');
+  key('Escape'); await settle();
+  tree.querySelector('[data-tree-path="src"]').click(); await settle();
+  assert(doc.activeElement.dataset.treePath === 'src', 'a folder took the keyboard out of the panel');
+  tree.querySelector('[data-tree-path="src"]').click(); await settle();
+  $('.workspace.on [data-editor]').focus();
 });
 const primaryModifier = /Mac/.test(win.navigator.platform) ? {metaKey: true} : {ctrlKey: true};
 await test('Editor shortcuts dispatch one Undo or Redo without Vim keystrokes', async () => {

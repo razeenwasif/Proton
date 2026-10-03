@@ -228,6 +228,23 @@ fn switching_redraws_everything_because_everything_changed() {
 }
 
 #[test]
+fn a_project_without_a_shell_says_so_when_you_move_to_it() {
+    // Every project has its own terminal. Without being told this one has
+    // none, the panel went on showing the last project's shell while what was
+    // typed into it went here — to nothing.
+    let scratch = Scratch::new("shell");
+    let mut session = Session::new(scratch.at("alpha"));
+    let events = session.apply(Command::OpenWorkspace {
+        path: scratch.at("beta"),
+    });
+    let screen = events.iter().find_map(|event| match event {
+        Event::Terminal { rows, running, .. } => Some((rows.len(), *running)),
+        _ => None,
+    });
+    assert_eq!(screen, Some((0, false)), "{events:?}");
+}
+
+#[test]
 fn the_window_height_follows_you_into_a_new_workspace() {
     // The height belongs to the window and the scroll belongs to the project.
     // A workspace created after the front end reported its size has never been
