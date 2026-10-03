@@ -152,6 +152,34 @@ await test('Codex trades the rails and statusline for a title bar, and only Code
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   assert(shown($('.titlebar')), 'title bar did not come back');
 });
+await test('Codex can switch and open projects without the rails', async () => {
+  const tiles = doc.querySelectorAll('.titlebar [data-workspace]');
+  assert(tiles.length === 1 && shown(tiles[0]) && tiles[0].getAttribute('aria-selected') === 'true', 'no project tiles in the title bar');
+  let before = win.commands.length;
+  $('.titlebar [data-open-workspace]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'openWorkspacePicker'), 'the + did not ask for a folder');
+  $('.workspace.on [data-editor]').focus();
+  before = win.commands.length;
+  key('o', {metaKey: true}); await settle();
+  const sent = win.commands.slice(before);
+  assert(sent.some((c) => c.type === 'openWorkspacePicker'), '⌘O did not ask for a folder');
+  assert(!sent.some((c) => c.type === 'key'), '⌘O reached Vim');
+});
+await test('which-key lists what is bound under the pending prefix', async () => {
+  await win.pushEvents([{type: 'leader', prefix: 'f'}]);
+  assert($('#whichkey').classList.contains('on'), 'which-key did not open');
+  assert($('[data-wk-grid]').textContent.includes('projects') && $('[data-wk-head]').textContent.includes('find'), 'the f family is not listed');
+  await win.pushEvents([{type: 'leader', prefix: ''}]);
+  assert($('[data-wk-grid]').textContent.includes('+project'), 'the top level lost the project family');
+  await win.pushEvents([{type: 'leader', prefix: null}]);
+  assert(!$('#whichkey').classList.contains('on'), 'which-key stayed open');
+});
+await test('Codex says in passing what a statusline would have said', async () => {
+  await win.pushEvents([{type: 'notice', level: 'info', text: '/fixture'}]);
+  const line = $('.msgline');
+  assert(shown(line) && line.textContent === '/fixture', 'the message did not appear');
+  assert(line.closest('.stage-code'), 'the message is not at the foot of the code');
+});
 await test('The terminal sits beside the code and toggles without editor commands', async () => {
   const pane = $('[data-term-pane]'), toggle = $('.titlebar [data-term-toggle]');
   const code = $('.workspace.on .stage-code');

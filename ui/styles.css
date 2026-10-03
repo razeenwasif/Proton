@@ -2464,8 +2464,35 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .titlebar .mode > span { display: block; writing-mode: vertical-rl; }
 .titlebar .mode:hover { color: var(--muted); background: var(--row-hover); }
 .titlebar .mode[aria-selected="true"] { color: var(--text); background: none; box-shadow: none; }
-.titlebar .tb-drag { flex: 1; align-self: stretch; }
+.titlebar .tb-drag { flex: 1; align-self: stretch; min-height: 8px; }
 .titlebar .tb-actions { display: flex; flex-direction: column; gap: 2px; }
+
+/* The open projects, as small tiles of initials — the chrome rail's, in this
+   bar's quieter clothes: the one you are in is lit the way the tree lights
+   the open file. Capped and scrolled rather than allowed to push the modes
+   and the toggles off the end of a short window. */
+.titlebar .tb-projects {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  max-height: 30vh; overflow-y: auto; scrollbar-width: none; margin-top: 4px;
+}
+.titlebar .tb-projects::-webkit-scrollbar { display: none; }
+.titlebar .ws {
+  -webkit-appearance: none; appearance: none;
+  width: 28px; height: 28px; border-radius: 5px;
+  background: none; color: var(--faint); box-shadow: none;
+  font: 500 11px/1 var(--zed); letter-spacing: 0;
+}
+.titlebar .ws:hover { background: var(--row-hover); color: var(--muted); }
+.titlebar .ws[aria-selected="true"] {
+  background: var(--row-on); color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--row-on-edge);
+}
+.titlebar .ws .mod { top: 3px; right: 3px; width: 5px; height: 5px; box-shadow: none; }
+.titlebar .ws .x {
+  top: -3px; right: -3px; width: 14px; height: 14px;
+  background: var(--row-on-edge); color: var(--text); box-shadow: none;
+}
+.titlebar .ws .x:hover { background: var(--err); color: var(--bg); }
 .tb-btn {
   -webkit-appearance: none; appearance: none;
   width: 30px; height: 28px; display: grid; place-items: center; cursor: pointer;
@@ -2881,3 +2908,14 @@ body { font-size: calc(13px * var(--ui-scale)); }
    solid block rather than an outline — so neither also wears a ring. */
 .workspace[data-ws="codex"] [data-editor]:focus-visible,
 .workspace[data-ws="codex"] [data-term-screen]:focus-visible { outline: none; }
+
+/* The message line: what a statusline would have said in passing, said for a
+   moment at the foot of the code. Quiet, because it is never something you
+   have to act on — those get the banner. */
+.msgline {
+  position: absolute; left: 16px; bottom: 10px; z-index: 6; max-width: calc(100% - 32px);
+  padding: 4px 8px; border-radius: 5px; background: var(--bg);
+  color: var(--muted); font: var(--z-xs, 13px)/1.4 var(--zed);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.msgline[data-level="warn"] { color: var(--warn); }

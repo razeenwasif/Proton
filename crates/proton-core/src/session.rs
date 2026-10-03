@@ -59,6 +59,52 @@ impl Claim {
     }
 }
 
+/// What a `:` line means to the session: the handful that are about which
+/// project you are in, rather than anything inside one.
+///
+/// They arrive the way an unresolved leader sequence does. The workspace runs
+/// every `:` command it knows and hands the rest back out as `CmdlineRun`, and
+/// the session reads those before they reach the front end — so a project can
+/// go on owning `:w` and `:e` without knowing that other projects exist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExClaim {
+    /// `:cd {folder}` — open it, or go to it if it is already open. A bare
+    /// `:cd` asks where, with the picker `␣fp` opens.
+    Cd(Option<String>),
+    /// `:pwd` — say which project this is.
+    Pwd,
+    /// `:projects` — the picker, by name.
+    Projects,
+    /// `:pnext` and `:pprevious` — `␣pn` and `␣pp`, as `:bn` and `:bp` are to
+    /// buffers.
+    Cycle(i64),
+    /// `:pclose` — close the project you are in.
+    Close,
+}
+
+impl ExClaim {
+    fn of(line: &str) -> Option<ExClaim> {
+        let ex = crate::ex::Ex::parse(line)?;
+        // Vim's minimum abbreviations where vim has the command; for the ones
+        // it does not, the shortest spelling that cannot be mistaken for one.
+        Some(if ex.is("cd", 2) || ex.is("chdir", 3) {
+            ExClaim::Cd(ex.arg)
+        } else if ex.is("pwd", 2) {
+            ExClaim::Pwd
+        } else if ex.is("projects", 4) {
+            ExClaim::Projects
+        } else if ex.is("pnext", 2) {
+            ExClaim::Cycle(1)
+        } else if ex.is("pprevious", 2) || ex.is("pNext", 2) {
+            ExClaim::Cycle(-1)
+        } else if ex.is("pclose", 2) {
+            ExClaim::Close
+        } else {
+            return None;
+        })
+    }
+}
+
 /// How many projects to remember having opened. Long enough that a project you
 /// touched last month is still one keystroke away, short enough that the list
 /// stays a list.
@@ -364,6 +410,21 @@ impl Session {
     /// for more. That is exactly the moment for the layer above to say it was
     /// theirs all along.
     fn claim(&mut self, events: Vec<Event>) -> Vec<Event> {
+        // A `:` line the workspace did not know, which may be one of ours.
+        // Anything else it did not know goes on to the front end untouched,
+        // which is what says "not a command yet".
+        if let Some(ex) = events.iter().find_map(|event| match event {
+            Event::CmdlineRun { text } => ExClaim::of(text),
+            _ => None,
+        }) {
+            let mut out: Vec<Event> = events
+                .into_iter()
+                .filter(|event| !matches!(event, Event::CmdlineRun { .. }))
+                .collect();
+            out.extend(self.ex(ex));
+            return out;
+        }
+
         let Some(claim) = events.iter().find_map(|event| match event {
             Event::Leader { prefix: Some(p) } => Claim::of(p),
             _ => None,
@@ -387,6 +448,67 @@ impl Session {
             }
         }
         out
+    }
+
+    /// Run a `:` command that was the session's.
+    fn ex(&mut self, ex: ExClaim) -> Vec<Event> {
+        match ex {
+            ExClaim::Cd(None) | ExClaim::Projects => self.open_picker(),
+            // `cd -`, as a shell has it: back to wherever you were before.
+            // The recents are most recent first, so that is the first one that
+            // is not this — or, when the project the window started in was
+            // never recorded as visited, the first other one that is open.
+            ExClaim::Cd(Some(to)) if to == "-" => {
+                // Compared canonically, for the reason `index_of` gives.
+                let here = folder::normalise(self.active().root());
+                let previous = self
+                    .recents
+                    .iter()
+                    .map(|path| folder::normalise(path))
+                    .find(|path| *path != here)
+                    .or_else(|| {
+                        self.workspaces
+                            .iter()
+                            .map(|workspace| folder::normalise(workspace.root()))
+                            .find(|path| *path != here)
+                    });
+                match previous {
+                    Some(previous) => self.open(&previous.display().to_string()),
+                    None => vec![notice(
+                        "no previous project to go back to".into(),
+                        NoticeLevel::Warn,
+                    )],
+                }
+            }
+            ExClaim::Cd(Some(to)) => {
+                // Relative to the project you are in, because that is the only
+                // directory this window has. The process's own working
+                // directory is wherever the app happened to be launched from.
+                let path = folder::expand(&to);
+                let path = match path.is_relative() {
+                    true => self.active().root().join(path),
+                    false => path,
+                };
+                self.open(&path.display().to_string())
+            }
+            ExClaim::Pwd => vec![notice(
+                self.active().root().display().to_string(),
+                NoticeLevel::Info,
+            )],
+            ExClaim::Cycle(by) => match self.workspaces.len() {
+                // Saying so beats doing nothing: `:pn` with one project open
+                // is usually someone who meant to open a second.
+                1 => vec![notice(
+                    "one project open — :cd opens another".into(),
+                    NoticeLevel::Info,
+                )],
+                _ => self.cycle(by),
+            },
+            ExClaim::Close => {
+                let index = self.active;
+                self.close(index)
+            }
+        }
     }
 
     /// Drain every workspace, show only the active one.
@@ -521,8 +643,15 @@ impl Session {
         events
     }
 
+    /// Which open workspace is this folder, if any. `root` is normalised by the
+    /// caller; each workspace's is normalised here, because the one a session
+    /// starts with is rooted wherever it was named — `proton .`, or a path
+    /// through a symlink — and comparing that spelling with a canonical one
+    /// would open the same folder twice.
     fn index_of(&self, root: &Path) -> Option<usize> {
-        self.workspaces.iter().position(|w| w.root() == root)
+        self.workspaces
+            .iter()
+            .position(|w| w.root() == root || folder::normalise(w.root()) == root)
     }
 
     /* ── the workspace picker ─────────────────────────────────────── */

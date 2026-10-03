@@ -3904,9 +3904,8 @@ function renderWorkspaces(items, active) {
   $("#sl-project").title = current?.path ?? "";
   projectRoot = current?.path ?? "";
   renderBufferBars();
-  const rail = $("[data-workspaces]");
-  if (!rail) return;
-  rail.innerHTML = items
+  // Every rail that lists them: the chrome rail's, and Codex's title bar.
+  const html = items
     .map(
       (ws, i) =>
         `<button class="ws" role="tab" aria-selected="${i === active}"` +
@@ -3917,6 +3916,7 @@ function renderWorkspaces(items, active) {
         `<svg class="i"><use href="#i-close"/></svg></span></button>`,
     )
     .join("");
+  for (const rail of $$("[data-workspaces]")) rail.innerHTML = html;
 }
 
 /**
@@ -4322,6 +4322,69 @@ function closeHover() {
   if (panel) panel.hidden = true;
 }
 
+/* ── which-key ────────────────────────────────────────────────────────
+   What each leader key does, as the core resolves it: the pickers in
+   picker.rs, the debug, lsp, window and terminal families in workspace.rs,
+   and the project keys session.rs claims. Mirrored here only to be shown —
+   a key pressed still goes to the core, which is the authority on what it
+   means, so a row here that drifted would be a wrong label rather than a
+   wrong action. Every row is a binding that does something. */
+const LEADER = {
+  "": [
+    ["f", "+find"], ["p", "+project · plugins"], ["g", "+git"], ["l", "+lsp"],
+    ["d", "+debug"], ["w", "+window"], ["c", "+code"], ["t", "+terminal"],
+    ["e", "reveal this file in the tree"],
+  ],
+  f: [["f", "files"], ["g", "live grep"], ["b", "open buffers"], ["p", "projects — open a folder"], ["l", "your library"]],
+  p: [["n", "next project"], ["p", "previous project"], ["c", "plugin commands"]],
+  g: [["g", "changed files"]],
+  l: [["s", "symbols"], ["r", "rename"], ["a", "code actions"], ["f", "format"]],
+  d: [["b", "toggle breakpoint"], ["r", "run"], ["c", "continue"], ["n", "step over"], ["i", "step into"], ["o", "step out"], ["q", "stop"]],
+  w: [["v", "split right"], ["s", "split down"], ["h j k l", "go to a split"], ["w", "next split"], ["o", "only this split"], ["q", "close this split"]],
+  c: [["t", "trace in the Code Visualizer"]],
+  t: [["t", "open the terminal"]],
+};
+
+function renderWhichKey(prefix) {
+  const head = $("[data-wk-head]");
+  const grid = $("[data-wk-grid]");
+  if (!head || !grid) return;
+  const rows = LEADER[prefix];
+  const keys = ["␣", ...prefix].map((k) => escapeHtml(k)).join(" ");
+  const name = prefix ? LEADER[""].find(([k]) => k === prefix)?.[1] ?? "" : "— leader";
+  head.innerHTML =
+    `<span style="color:var(--accent)">${keys}</span> <span style="color:var(--ink-4)">${escapeHtml(name)}</span>`;
+  grid.innerHTML = rows
+    ? rows
+        .map(([key, label]) =>
+          `<div class="wk"><b>${escapeHtml(key)}</b><span class="arrow">→</span>` +
+          `<span${label.startsWith("+") ? ' class="grp"' : ""}>${escapeHtml(label)}</span></div>`)
+        .join("")
+    : `<div class="wk"><span>nothing is bound under ${escapeHtml(keys)} — ⎋ to cancel</span></div>`;
+}
+
+/* ── the message line ─────────────────────────────────────────────────
+   Codex has no statusline, so what one would have said in passing — `:pwd`,
+   a write, a command nobody knows — appears for a moment at the foot of the
+   code instead, where vim says it. Refusals and errors are not routed here:
+   they have the banner, which stays until it is dismissed. */
+const messageLine = document.createElement("div");
+messageLine.className = "msgline";
+messageLine.setAttribute("role", "status");
+messageLine.setAttribute("aria-live", "polite");
+messageLine.hidden = true;
+$(".stage-code")?.append(messageLine);
+let messageTimer;
+
+function flashMessage(text, level = "info") {
+  if (activeMode !== "codex" || !text) return;
+  messageLine.textContent = text;
+  messageLine.dataset.level = level;
+  messageLine.hidden = false;
+  clearTimeout(messageTimer);
+  messageTimer = setTimeout(() => { messageLine.hidden = true; }, 4000);
+}
+
 /* ── rendering core events ────────────────────────────────────────────── */
 
 function renderVim(label) {
@@ -4404,6 +4467,7 @@ function renderEvent(event) {
       if (event.prefix === null) {
         closeAll();
       } else {
+        renderWhichKey(event.prefix);
         show("whichkey");
         // ␣ff is the one leader sequence M0 resolves, so Telescope is reachable
         // the way it will be in M2.
@@ -4432,6 +4496,7 @@ function renderEvent(event) {
       // and saying so beats swallowing a typo.
       if (event.text.trim()) {
         renderStatus(`:${event.text.trim()} — not a command yet`, "warn");
+        flashMessage(`:${event.text.trim()} — not a command`, "warn");
       }
       break;
     }
@@ -4640,6 +4705,7 @@ function renderEvent(event) {
     case "notice":
       editorFeedback.notice(event);
       renderStatus(event.text, event.level);
+      if (event.level === "info") flashMessage(event.text);
       break;
   }
 }
@@ -4747,6 +4813,15 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey && e.key.toLowerCase() === "k") {
     e.preventDefault();
     open("telescope");
+    return;
+  }
+
+  // ⌘O opens a folder, as it does in Zed — the same picker as ␣fp and a bare
+  // :cd, which takes a project's name or a path, with Tab to complete it.
+  if (e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "o") {
+    e.preventDefault();
+    closeAll();
+    dispatch({ type: "openWorkspacePicker" });
     return;
   }
 

@@ -917,6 +917,10 @@
     <div class="lights" aria-label="Window controls">
       <i title="Close"></i><i title="Minimise"></i><i title="Maximise"></i>
     </div>
+    <!-- The projects that are open, as the chrome rail draws them, and the
+         way to open another: the same picker as ⌘O, ␣fp and :cd. -->
+    <div class="tb-projects" role="tablist" aria-label="Project" aria-orientation="vertical" data-workspaces></div>
+    <button class="tb-btn" data-open-workspace title="Open a folder  ⌘O · ␣fp · :cd" aria-label="Open a folder"><svg class="i"><use href="#i-plus"/></svg></button>
     <div class="tb-modes" role="tablist" aria-label="Mode" aria-orientation="vertical">
       <button class="mode" role="tab" aria-selected="false" data-mode="chat" title="Chat  ⌃1"><span>Chat</span></button>
       <button class="mode" role="tab" aria-selected="true"  data-mode="codex" title="Codex  ⌃2"><span>Codex</span></button>
@@ -975,30 +979,18 @@
   </div>
 </div>
 
+<!-- which-key. Drawn for whichever prefix is pending, from the keymap the
+     core resolves (see `LEADER` in app.js): every row is a key that does
+     something. The list that used to be here offered ␣a, ␣b, ␣m, ␣/, ␣? and
+     ␣␣, none of which were bound to anything. -->
 <div class="overlay float" id="whichkey">
-  <div class="wk-head"><span style="color:var(--accent)">␣</span> <span style="color:var(--ink-4)">— leader</span></div>
-  <div class="wk-grid">
-    <div class="wk"><b>f</b><span class="arrow">→</span><span class="grp">+find</span></div>
-    <div class="wk"><b>g</b><span class="arrow">→</span><span class="grp">+git</span></div>
-    <div class="wk"><b>l</b><span class="arrow">→</span><span class="grp">+lsp · r a s f</span></div>
-    <div class="wk"><b>d</b><span class="arrow">→</span><span class="grp">+debug / data</span></div>
-    <div class="wk"><b>c</b><span class="arrow">→</span><span class="grp">+code · cv trace</span></div>
-    <div class="wk"><b>a</b><span class="arrow">→</span><span class="grp">+ai agent</span></div>
-    <div class="wk"><b>w</b><span class="arrow">→</span><span class="grp">+window</span></div>
-    <div class="wk"><b>b</b><span class="arrow">→</span><span class="grp">+buffer</span></div>
-    <div class="wk"><b>t</b><span class="arrow">→</span><span class="grp">+terminal / test</span></div>
-    <div class="wk"><b>m</b><span class="arrow">→</span><span>mode switcher</span></div>
-    <div class="wk"><b>p</b><span class="arrow">→</span><span class="grp">+plugins</span></div>
-    <div class="wk"><b>e</b><span class="arrow">→</span><span>explorer</span></div>
-    <div class="wk"><b>/</b><span class="arrow">→</span><span>live grep</span></div>
-    <div class="wk"><b>?</b><span class="arrow">→</span><span>keymap cheatsheet</span></div>
-    <div class="wk"><b>␣</b><span class="arrow">→</span><span>last buffer</span></div>
-  </div>
+  <div class="wk-head" data-wk-head><span style="color:var(--accent)">␣</span> <span style="color:var(--ink-4)">— leader</span></div>
+  <div class="wk-grid" data-wk-grid></div>
 </div>
 
 <div class="overlay float" id="cmdline">
-  <span class="caret" id="cmdline-prompt">:</span><span id="cmdline-text">ProtonTrace native/trajectory.c</span><span class="cursor"></span>
-  <span class="chip" style="margin-left:auto">↹ ProtonTrace · ProtonMode · ProtonAgent</span>
+  <span class="caret" id="cmdline-prompt">:</span><span id="cmdline-text"></span><span class="cursor"></span>
+  <span class="chip" style="margin-left:auto">:w · :e · :cd · :vs · :q</span>
 </div>
 
 <div class="overlay float" id="settings" role="dialog" aria-modal="true" aria-label="Settings" tabindex="-1">

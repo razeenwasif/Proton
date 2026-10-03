@@ -756,3 +756,125 @@ fn kind_of(event: &Event) -> String {
         .unwrap_or_default()
         .to_string()
 }
+
+/* ── the same, as `:` commands ────────────────────────────────────── */
+
+/// Type a `:` line and run it, the way the window sends one.
+fn ex(session: &mut Session, line: &str) -> Vec<Event> {
+    keys(session, line);
+    key(session, "Enter")
+}
+
+#[test]
+fn cd_opens_a_folder_relative_to_the_project_you_are_in() {
+    // The project is the only working directory the window has, so `..` is
+    // the folder above it rather than wherever the app was launched from.
+    let scratch = Scratch::new("cd");
+    let mut session = Session::new(scratch.at("alpha"));
+
+    let events = ex(&mut session, ":cd ../beta");
+    let (names, active) = tabs(&events).expect("the switcher is told");
+    assert_eq!(active, 1);
+    assert!(names[1].ends_with("beta"), "{names:?}");
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::CmdlineRun { .. })),
+        "the front end was told it was not a command: {events:?}"
+    );
+}
+
+#[test]
+fn cd_to_an_open_project_goes_to_it_and_cd_dash_goes_back() {
+    let scratch = Scratch::new("cddash");
+    let mut session = Session::new(scratch.at("alpha"));
+    ex(&mut session, &format!(":cd {}", scratch.at("beta")));
+    assert_eq!(session.active_index(), 1);
+
+    ex(&mut session, ":cd -");
+    assert_eq!(session.active_index(), 0, "back to alpha");
+    ex(&mut session, ":cd -");
+    assert_eq!(session.active_index(), 1, "and forth to beta");
+
+    ex(&mut session, &format!(":cd {}", scratch.at("alpha")));
+    assert_eq!(session.active_index(), 0, "an open folder is gone to, not opened twice");
+    let (names, _) = tabs(&session.apply(Command::Sync)).expect("switcher");
+    assert_eq!(names.len(), 2, "{names:?}");
+}
+
+#[test]
+fn cd_to_something_that_is_not_a_folder_says_so() {
+    let scratch = Scratch::new("cdmissing");
+    let mut session = Session::new(scratch.at("alpha"));
+    let events = ex(&mut session, ":cd nowhere");
+    assert!(
+        notices(&events).iter().any(|n| n.contains("not a folder")),
+        "{events:?}"
+    );
+    assert_eq!(session.active_index(), 0);
+}
+
+#[test]
+fn a_bare_cd_and_projects_ask_where_with_the_picker() {
+    let scratch = Scratch::new("cdbare");
+    let mut session = Session::new(&scratch.root);
+    for line in [":cd", ":projects", ":proj"] {
+        let events = ex(&mut session, line);
+        let (kind, _, _) =
+            picker(&events).unwrap_or_else(|| panic!("{line} opened no picker: {events:?}"));
+        assert_eq!(kind, PickerKind::Workspaces, "{line}");
+        key(&mut session, "Escape");
+    }
+}
+
+#[test]
+fn pwd_names_the_project_you_are_in() {
+    let scratch = Scratch::new("pwd");
+    let mut session = Session::new(scratch.at("alpha"));
+    let events = ex(&mut session, ":pwd");
+    assert!(
+        notices(&events).iter().any(|n| n.ends_with("alpha")),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn the_project_keys_are_commands_too() {
+    // `:pn`, `:pp` and `:pclose` are `␣pn`, `␣pp` and the tile's ×, for
+    // somebody who would rather type a word than learn a chord.
+    let scratch = Scratch::new("pncmd");
+    let mut session = Session::new(scratch.at("alpha"));
+    let events = ex(&mut session, ":pn");
+    assert!(
+        notices(&events).iter().any(|n| n.contains("one project open")),
+        "{events:?}"
+    );
+
+    ex(&mut session, &format!(":cd {}", scratch.at("beta")));
+    ex(&mut session, ":pnext");
+    assert_eq!(session.active_index(), 0, "off the end and round");
+    ex(&mut session, ":pp");
+    assert_eq!(session.active_index(), 1, "and back");
+
+    ex(&mut session, ":pclose");
+    let (names, _) = tabs(&session.apply(Command::Sync)).expect("switcher");
+    assert_eq!(names.len(), 1, "{names:?}");
+    let events = ex(&mut session, ":pclose");
+    assert!(
+        notices(&events).iter().any(|n| n.contains("last workspace")),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn a_command_nobody_knows_still_reaches_the_front_end() {
+    // Claiming a few `:` lines must not swallow the rest — the front end is
+    // what says "not a command yet", and it can only say it if it hears.
+    let scratch = Scratch::new("unknownex");
+    let mut session = Session::new(&scratch.root);
+    let events = ex(&mut session, ":frobnicate");
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::CmdlineRun { text } if text.contains("frobnicate"))),
+        "{events:?}"
+    );
+}
