@@ -13,7 +13,18 @@ fn keys_of(s: &str) -> Vec<Key> {
     let mut out = Vec::new();
     let mut rest = s;
     while !rest.is_empty() {
-        let named = [("<Esc>", "Escape"), ("<CR>", "Enter"), ("<BS>", "Backspace"), ("<Tab>", "Tab")];
+        let named = [
+            ("<Esc>", "Escape"),
+            ("<CR>", "Enter"),
+            ("<BS>", "Backspace"),
+            ("<Tab>", "Tab"),
+            ("<Up>", "ArrowUp"),
+            ("<Down>", "ArrowDown"),
+            ("<Left>", "ArrowLeft"),
+            ("<Right>", "ArrowRight"),
+            ("<Home>", "Home"),
+            ("<End>", "End"),
+        ];
         if let Some((tok, name)) = named.iter().find(|(t, _)| rest.starts_with(t)) {
             out.push(Key::named(name));
             rest = &rest[tok.len()..];
@@ -124,6 +135,13 @@ fn common_commands_do_what_vim_does() {
         ("x at end", "abc\n", "$x", "ab\n", (0, 1)),
         (">j", t, ">j", "    one two three\n    four five six\nseven eight\n", (0, 4)),
         ("3>>", t, "3>>", "    one two three\n    four five six\n    seven eight\n", (99, 99)),
+        // The arrows are hjkl outside insert mode too.
+        ("<Down> <Right>", t, "<Down><Right>", "", (1, 1)),
+        ("<End>", t, "<End>", "", (0, 12)),
+        ("V<Down>d", t, "V<Down>d", "seven eight\n", (99, 99)),
+        ("V<Down><Down>y P", t, "V<Down><Down>yGP", "one two three\nfour five six\nseven eight\none two three\nfour five six\nseven eight\n", (99, 99)),
+        ("v<Right>d", t, "v<Right>d", "e two three\nfour five six\nseven eight\n", (99, 99)),
+        ("d<Down>", t, "d<Down>", "seven eight\n", (99, 99)),
         ("u", t, "ddu", t, (99, 99)),
         ("<C-r>", t, "ddu<C-r>", "four five six\nseven eight\n", (99, 99)),
         (".", t, "dd.", "seven eight\n", (99, 99)),

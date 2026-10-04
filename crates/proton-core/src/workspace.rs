@@ -5377,6 +5377,18 @@ impl Workspace {
     fn events_for(&mut self, outcome: Outcome, was: VimMode, replay: bool) -> (Vec<Event>, bool) {
         match outcome {
             Outcome::Action(action) => self.act(&action, was, replay),
+            Outcome::Page { down, half, count } => {
+                // Half the view for `⌃d` and `⌃u`; the view less two lines of
+                // overlap for `⌃f`, `⌃b` and the page keys — vim's arithmetic.
+                // In visual mode it extends the selection, like any motion.
+                let lines = self.splits.view().lines.max(1);
+                let step = match half {
+                    true => (lines / 2).max(1),
+                    false => lines.saturating_sub(2).max(1),
+                } * count.max(1) as usize;
+                let object = if down { Object::LineDown } else { Object::LineUp };
+                self.act(&Action::new(Verb::Move, object, step as u32), was, replay)
+            }
             Outcome::Reselect => {
                 let Some((buffer, anchor, offset, kind)) = self.last_visual else {
                     return (Vec::new(), false);

@@ -82,6 +82,11 @@ pub enum Outcome {
     /// `gv`: the last selection again. The workspace kept it, and says which
     /// kind it was with [`Vim::reselect`].
     Reselect,
+    /// A screen's worth of lines down or up — `⌃d` and `⌃u` half of one,
+    /// `⌃f`, `⌃b` and the page keys all of it. How many lines that is only
+    /// the workspace knows, because only it has been told how tall the view
+    /// is.
+    Page { down: bool, half: bool, count: u32 },
     /// Nothing happened. Deliberately distinct from an action with no effect.
     Ignored,
 }
@@ -642,8 +647,27 @@ impl Vim {
     }
 
     fn key_normal(&mut self, k: &Key) -> Outcome {
-        let Some(c) = k.as_char().filter(|_| k.is_bare_char()) else {
-            return Outcome::Ignored;
+        // The arrows, Home and End are `hjkl`, `0` and `$` here as they are in
+        // insert mode: the way to grow a selection without leaving them, and
+        // what `d↓` means. Not while a key is being taken literally — `f→` is
+        // not a search for `l`.
+        let literal = self.leader.is_some()
+            || self.pending.awaiting_mark.is_some()
+            || self.pending.awaiting_find.is_some()
+            || self.pending.awaiting_replace
+            || self.pending.awaiting_register;
+        let arrow = match k.key.as_str() {
+            "ArrowLeft" => Some('h'),
+            "ArrowRight" => Some('l'),
+            "ArrowUp" => Some('k'),
+            "ArrowDown" => Some('j'),
+            "Home" => Some('0'),
+            "End" => Some('$'),
+            _ => None,
+        }
+        .filter(|_| !literal && !k.ctrl && !k.alt && !k.meta);
+        let Some(c) = arrow.or_else(|| k.as_char().filter(|_| k.is_bare_char())) else {
+            return self.key_page(k);
         };
 
         // Leader sequence in progress: collect until a mode or plugin claims it.
@@ -807,6 +831,28 @@ impl Vim {
         }
 
         self.normal_command(c)
+    }
+
+    /// The page keys, and vim's chords for them.
+    fn key_page(&mut self, k: &Key) -> Outcome {
+        let chord = |c: &str| k.ctrl && !k.alt && !k.meta && k.key.eq_ignore_ascii_case(c);
+        let page = match k.key.as_str() {
+            "PageDown" if !k.ctrl && !k.meta => Some((true, false)),
+            "PageUp" if !k.ctrl && !k.meta => Some((false, false)),
+            _ if chord("f") => Some((true, false)),
+            _ if chord("b") => Some((false, false)),
+            _ if chord("d") => Some((true, true)),
+            _ if chord("u") => Some((false, true)),
+            _ => None,
+        };
+        match page {
+            Some((down, half)) if self.pending.operator.is_none() => {
+                let count = self.pending.total_count();
+                self.pending.clear();
+                Outcome::Page { down, half, count }
+            }
+            _ => Outcome::Ignored,
+        }
     }
 
     fn normal_command(&mut self, c: char) -> Outcome {

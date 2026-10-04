@@ -632,3 +632,35 @@ fn shift_v_selects_the_line_before_anything_moves() {
     });
     assert_eq!(selection, Some(false), "Escape kept the selection: {events:?}");
 }
+
+#[test]
+fn the_page_keys_move_by_the_view_and_grow_a_selection() {
+    // Twenty lines on screen: half of that for ⌃d and ⌃u, all of it less two
+    // lines of overlap for the page keys — and in visual-line mode they
+    // extend the selection, so ⌃d after `V` selects eleven lines.
+    let mut ws = open(&"x\n".repeat(60));
+    ws.apply(Command::Viewport {
+        view: 0,
+        first_line: 0,
+        lines: 20,
+    });
+    ws.apply(Command::Key { key: Key::ctrl('d') });
+    assert_eq!(cursor_line(&ws), 10);
+    ws.apply(Command::Key {
+        key: Key::named("PageDown"),
+    });
+    assert_eq!(cursor_line(&ws), 28);
+    ws.apply(Command::Key { key: Key::ctrl('u') });
+    assert_eq!(cursor_line(&ws), 18);
+
+    type_keys(&mut ws, "gg");
+    ws.apply(Command::Key {
+        key: Key {
+            shift: true,
+            ..Key::char('V')
+        },
+    });
+    ws.apply(Command::Key { key: Key::ctrl('d') });
+    type_keys(&mut ws, "d");
+    assert_eq!(text(&ws), "x\n".repeat(49));
+}
