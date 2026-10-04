@@ -6269,3 +6269,199 @@ fn indents_with_tabs(buffer: &proton_text::Buffer) -> bool {
     }
     tabs > spaces
 }
+
+#[cfg(test)]
+mod tests {
+    //! The agent's staged changes, in a workspace whose root is not spelled
+    //! the way the editor spells the files it opens.
+    //!
+    //! The editor canonicalises a file when it opens it, and a workspace joins
+    //! every path the agent or the review panel names to its root as it was
+    //! given. The session roots a project by its real path, but a workspace
+    //! does not insist on one: through a link — on a Mac, anything under
+    //! `/tmp` or `/var` — the two spellings disagree, and `folder::Root` is
+    //! what reconciles them. These check that end to end, and live here
+    //! because CI runs the library's tests and not `tests/staging.rs`.
+    //!
+    //! A `..` in the root disagrees in the same way on every platform, and is
+    //! what most of these use: it needs neither the working directory changed
+    //! under the other tests nor, on Windows, the privilege a link does.
+
+    use super::*;
+
+    const SOURCE: &str = "fn one() {\n    1\n}\n\nfn two() {\n    2\n}\n";
+
+    /// A folder for one test, and everything that names it, removed together.
+    struct Project {
+        base: PathBuf,
+    }
+
+    impl Project {
+        fn new(tag: &str) -> Project {
+            let base = std::env::temp_dir().join(format!(
+                "proton-spelling-{tag}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(base.join("project").join("sub")).unwrap();
+            Project { base }
+        }
+
+        /// The project, named the way it was made.
+        fn folder(&self) -> PathBuf {
+            self.base.join("project")
+        }
+
+        /// The same folder, named the long way round.
+        fn around(&self) -> PathBuf {
+            self.folder().join("sub").join("..")
+        }
+
+        /// The same folder again, through a link beside it.
+        #[cfg(unix)]
+        fn linked(&self) -> PathBuf {
+            let link = self.base.join("link");
+            std::os::unix::fs::symlink(self.folder(), &link).unwrap();
+            link
+        }
+    }
+
+    impl Drop for Project {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    /// Call `edit_file` the way the agent's tool runner does.
+    fn edit(ws: &mut Workspace, path: &str, old: &str, new: &str) -> Result<String, String> {
+        ws.run_tool(
+            "edit_file",
+            &serde_json::json!({ "path": path, "old_text": old, "new_text": new }),
+        )
+    }
+
+    /// Press each of these keys, then Escape.
+    fn typed(ws: &mut Workspace, keys: &str) {
+        for c in keys.chars() {
+            ws.apply(Command::Key { key: Key::char(c) });
+        }
+        ws.apply(Command::Key {
+            key: Key::named("Escape"),
+        });
+    }
+
+    /// Every buffer with a file behind it. A lookup that compares spellings
+    /// ends up with one file open in two of them.
+    fn files(ws: &Workspace) -> Vec<PathBuf> {
+        ws.editor()
+            .buffers()
+            .iter()
+            .filter_map(|b| b.path())
+            .map(Path::to_path_buf)
+            .collect()
+    }
+
+    /// Stage two hunks against a buffer with unsaved work in it, then refuse
+    /// one and take the other, in a workspace rooted at `root`.
+    fn review_the_buffer(root: &Path) {
+        let mut ws = Workspace::rooted(root);
+        ws.apply(Command::OpenBuffer {
+            path: "a.rs".into(),
+        });
+        // A line only the buffer has. Matching against it proves which one
+        // was read: a lookup that missed the buffer reads the disk, and is
+        // told the line is not in the file.
+        typed(&mut ws, "Otyped");
+
+        edit(&mut ws, "a.rs", "typed\n", "TYPED\n").unwrap();
+        edit(&mut ws, "a.rs", "    2\n", "    22\n").unwrap();
+        let staged = ws.staged();
+        assert_eq!(staged.len(), 1, "one file: {staged:?}");
+        assert_eq!(staged[0].path, "a.rs", "named relative to the project");
+        assert_eq!(staged[0].hunks.len(), 2, "{:?}", staged[0].hunks);
+
+        // The panel answers with the path it showed.
+        ws.apply(Command::RejectHunk {
+            path: "a.rs".into(),
+            hunk: 1,
+        });
+        ws.apply(Command::ApplyHunk {
+            path: "a.rs".into(),
+            hunk: 0,
+        });
+
+        // Into the buffer that was typed in, rather than a second copy of the
+        // file read from the disk.
+        assert_eq!(files(&ws).len(), 1, "{:?}", files(&ws));
+        assert_eq!(ws.editor().buffer().contents(), format!("TYPED\n{SOURCE}"));
+        assert!(ws.staged().is_empty(), "{:?}", ws.staged());
+    }
+
+    #[test]
+    fn a_review_is_of_the_buffer_however_the_project_was_named() {
+        let project = Project::new("named");
+        std::fs::write(project.folder().join("a.rs"), SOURCE).unwrap();
+        review_the_buffer(&project.around());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_review_is_of_the_buffer_in_a_project_reached_through_a_link() {
+        // How this was found: on a Mac the temporary folder is under `/var`,
+        // which is a link into `/private`. Given a link of its own here, so it
+        // is tested where `/tmp` is a real folder too.
+        let project = Project::new("linked");
+        std::fs::write(project.folder().join("a.rs"), SOURCE).unwrap();
+        review_the_buffer(&project.linked());
+    }
+
+    #[test]
+    fn the_agent_and_the_panel_can_name_one_file_two_ways() {
+        // The agent can be handed a buffer's own path, which is canonical,
+        // and the panel answers with the one it showed, which is joined to the
+        // root as it was given. They are one change: the second edit stacks on
+        // the first, in one row named relative to the project.
+        let project = Project::new("twice");
+        std::fs::write(project.folder().join("a.rs"), SOURCE).unwrap();
+        let mut ws = Workspace::rooted(project.around());
+        let canonical = crate::folder::normalise(&project.folder().join("a.rs"));
+        let canonical = canonical.display().to_string();
+
+        edit(&mut ws, &canonical, "    1\n", "    11\n").unwrap();
+        edit(&mut ws, "a.rs", "    2\n", "    22\n").unwrap();
+        let staged = ws.staged();
+        assert_eq!(staged.len(), 1, "{staged:?}");
+        assert_eq!(staged[0].path, "a.rs");
+        assert_eq!(staged[0].hunks.len(), 2, "{:?}", staged[0].hunks);
+
+        ws.apply(Command::ApplyStaged {
+            path: Some("a.rs".into()),
+        });
+        assert_eq!(
+            ws.editor().buffer().contents(),
+            "fn one() {\n    11\n}\n\nfn two() {\n    22\n}\n"
+        );
+        assert!(ws.staged().is_empty(), "{:?}", ws.staged());
+    }
+
+    #[test]
+    fn a_file_the_agent_created_is_one_buffer_once_it_is_written() {
+        // A buffer made for a file that is not there yet keeps the path it was
+        // resolved to, and once the file exists the editor opens it by its
+        // canonical path. Compared as text, the next edit opened the file a
+        // second time, and accepting it landed in a copy nobody was looking at.
+        let project = Project::new("created");
+        let mut ws = Workspace::rooted(project.around());
+        edit(&mut ws, "new.rs", "", "fn fresh() {}").unwrap();
+        ws.apply(Command::ApplyStaged { path: None });
+        ws.apply(Command::Save);
+        assert!(project.folder().join("new.rs").exists(), "`:w` wrote it");
+
+        edit(&mut ws, "new.rs", "fresh", "fresher").unwrap();
+        ws.apply(Command::ApplyStaged { path: None });
+        assert_eq!(files(&ws).len(), 1, "{:?}", files(&ws));
+        assert_eq!(ws.editor().buffer().contents(), "fn fresher() {}");
+        assert!(ws.staged().is_empty(), "{:?}", ws.staged());
+    }
+}
