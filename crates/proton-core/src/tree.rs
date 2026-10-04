@@ -49,6 +49,18 @@ pub struct TreeRow {
 
 #[derive(Debug, Default)]
 pub struct Tree {
+    /// Canonical, and without the `\\?\` canonicalising adds on Windows — the
+    /// spelling the editor gives every file it opens. The root as handed over
+    /// need not be: the project a session starts with is rooted wherever it
+    /// was named, `.` for `proton .`, and one reached through a link is named
+    /// by the link, which on a Mac is anything under `/tmp` or `/var`. Against
+    /// that spelling the file you are in would be outside the project —
+    /// unmarked, and not revealed by `␣e`.
+    ///
+    /// Only the tree's copy is canonical. The workspace keeps the name it was
+    /// given, because that is where the terminal starts and what the project
+    /// is called; the rows are relative, so nothing drawn here shows which
+    /// spelling the tree used.
     root: PathBuf,
     /// The folders the user has opened. Everything else is closed, which is
     /// the whole of the tree's state.
@@ -61,7 +73,7 @@ pub struct Tree {
 impl Tree {
     pub fn new(root: impl AsRef<Path>) -> Tree {
         Tree {
-            root: root.as_ref().to_path_buf(),
+            root: crate::folder::normalise(root.as_ref()),
             expanded: BTreeSet::new(),
         }
     }
@@ -82,6 +94,9 @@ impl Tree {
     /// Open every folder on the way to a file, so revealing it can scroll to
     /// a row that exists.
     pub fn reveal(&mut self, path: &Path) {
+        // Spelled the way the root is, or a file in the project can look like
+        // one outside it.
+        let path = crate::folder::normalise(path);
         let Ok(relative) = path.strip_prefix(&self.root) else {
             // A file outside the project has no row to reveal, and forcing one
             // would mean a tree that is not a tree of this project.
@@ -107,8 +122,12 @@ impl Tree {
     /// tree is also the answer to "where am I", and a tree that cannot say is
     /// half a tree.
     pub fn rows(&self, active: Option<&Path>) -> Vec<TreeRow> {
+        // Usually canonical already, since the editor canonicalises what it
+        // opens — but not a name given to `:saveas`, which is joined to the
+        // workspace's root and kept as it comes out.
+        let active = active.map(crate::folder::normalise);
         let mut rows = Vec::new();
-        self.walk(&self.root.clone(), 0, active, &mut rows);
+        self.walk(&self.root.clone(), 0, active.as_deref(), &mut rows);
         rows
     }
 
@@ -190,6 +209,13 @@ mod tests {
     fn names(rows: &[TreeRow]) -> Vec<String> {
         rows.iter()
             .map(|r| format!("{}{}", "  ".repeat(r.depth), r.name))
+            .collect()
+    }
+
+    fn marked(rows: &[TreeRow]) -> Vec<&str> {
+        rows.iter()
+            .filter(|r| r.active)
+            .map(|r| r.name.as_str())
             .collect()
     }
 
@@ -289,6 +315,57 @@ mod tests {
             .map(|r| r.name.as_str())
             .collect();
         assert_eq!(active, vec!["main.rs"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn the_file_you_are_in_is_found_however_the_project_was_named() {
+        // The editor canonicalises what it opens, and the root a tree is given
+        // need not be canonical. Compared as given, the open file was outside
+        // the project: never marked, and `␣e` revealed nothing. A `..` stands
+        // in for `proton .` and for a link, because it needs neither the
+        // working directory changed under the other tests nor, on Windows, the
+        // privilege a link does.
+        let root = scratch("named");
+        let named = root.join("src/..");
+        let mut editor = crate::editor::Editor::new();
+        editor.open(named.join("src/deep/inner.rs")).unwrap();
+        let opened = editor.buffer().path().unwrap();
+
+        let mut tree = Tree::new(&named);
+        tree.reveal(opened);
+        let rows = tree.rows(Some(opened));
+        assert_eq!(
+            names(&rows),
+            vec!["src", "  deep", "    inner.rs", "  main.rs", "Cargo.toml"]
+        );
+        assert_eq!(marked(&rows), vec!["inner.rs"]);
+
+        // And spelled the root's way, which is what a name given to `:saveas`
+        // keeps.
+        let rows = tree.rows(Some(&named.join("src/main.rs")));
+        assert_eq!(marked(&rows), vec!["main.rs"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_reached_through_a_link_still_knows_where_you_are() {
+        // How this was found: on a Mac the temporary folder is under `/var`,
+        // which is a link into `/private`. Given a link of its own here, so it
+        // is tested where `/tmp` is a real folder too.
+        let root = scratch("linked");
+        let link = PathBuf::from(format!("{}-link", root.display()));
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&root, &link).unwrap();
+        let mut editor = crate::editor::Editor::new();
+        editor.open(link.join("src/main.rs")).unwrap();
+        let opened = editor.buffer().path().unwrap();
+
+        let mut tree = Tree::new(&link);
+        tree.reveal(opened);
+        assert_eq!(marked(&tree.rows(Some(opened))), vec!["main.rs"]);
+        std::fs::remove_file(&link).ok();
         std::fs::remove_dir_all(&root).ok();
     }
 
