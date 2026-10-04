@@ -87,3 +87,4 @@ jobs:
       # plan, a make and a removal (those need a POSIX shell, so not Windows).
       - run: cargo test --locked -p proton-lab
       - run: git diff --exit-code -- ui/bindings
+      - run: cargo test --locked -p proton-council --lib
