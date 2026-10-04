@@ -30,6 +30,8 @@
     "native-api.d.ts",
     "editor-row.js",
     "html.js",
-    "term-gl.js"
+    "term-gl.js",
+    "markdown.js",
+    "claude.js"
   ]
 }

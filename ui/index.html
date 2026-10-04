@@ -231,62 +231,111 @@
     </nav>
 
     <!-- ══ CHAT ══════════════════════════════════════════════════ -->
-    <section class="workspace" data-ws="chat" style="--col-l:260px; grid-template-columns: var(--col-l) 1px minmax(0,1fr);">
-      <aside class="pane side">
-        <header>Conversations <span class="grow"></span>
-          <button class="hbtn" data-chat-new title="Start a new conversation"><svg class="i"><use href="#i-plus"/></svg></button>
-        </header>
-        <!-- From Event::Chats. Files in `.proton/chats`, most recently changed
-             first. What used to be here was a list of conversations nobody had
-             ever had. -->
-        <div class="scroll tree" data-chats></div>
+    <!-- Claude Code, as its own app draws it: sessions down the left, the
+         conversation in a column, and what it publishes in a pane on the
+         right. The engine is the real `claude` (proton-claude); this is the
+         window onto it. The artifacts pane starts closed and opens on the
+         first thing published. -->
+    <section class="workspace cc" data-ws="chat" data-right-start="hidden"
+             style="--col-l:264px; --col-r:480px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side cc-side">
+        <div class="cc-side-head">
+          <button class="cc-new" data-claude-new title="New session"><svg class="i"><use href="#i-plus"/></svg>New session</button>
+        </div>
+        <!-- From Event::ClaudeSessions: the sessions Claude Code keeps for
+             this folder — started here, in a terminal or in its own app —
+             newest first. -->
+        <div class="scroll cc-sessions" data-claude-sessions></div>
 
-        <!-- The council. A debate is a question put to every model that has a
-             subscription, and what comes back is a document rather than a
-             conversation — so it lists beside the conversations and opens
-             into the same stage. -->
-        <header style="border-top:1px solid var(--edge)">Council <span class="grow"></span>
-          <button class="hbtn" data-council-new title="Put the question in the composer to the council"><svg class="i"><use href="#i-users"/></svg></button>
-        </header>
-        <div class="scroll tree" data-council-list style="flex:0 1 auto; max-height:38%"></div>
+        <!-- The council: one question put to every model with a
+             subscription, answered as a brief. `/council` in the composer
+             convenes it. -->
+        <div class="cc-council">
+          <header>Council <span class="grow"></span>
+            <button class="hbtn" data-council-new title="Put the question in the composer to the council"><svg class="i"><use href="#i-users"/></svg></button>
+          </header>
+          <div class="scroll tree" data-council-list></div>
+        </div>
+        <div class="cc-account-box" data-claude-account></div>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
 
-      <!-- Chat's stage is the agent itself: Slot::Agent, per the mode
-           contract. It is the same conversation Codex shows in its dock — one
-           agent, seen from two places — rather than a second one that would
-           have to be kept in step. -->
-      <main class="pane">
-        <div class="canvas-bar">
-          <span class="chip accent" data-chat-title>New conversation</span>
+      <main class="pane cc-main">
+        <header class="cc-head">
+          <div class="cc-title" data-claude-title>New session</div>
           <span class="grow"></span>
-          <button class="btn" data-chat-rename title="Give this conversation a name">Rename</button>
-          <button class="btn" data-chat-delete title="Delete this conversation">Delete</button>
-        </div>
+          <button class="hbtn cc-art-toggle" data-artifacts-toggle title="Artifacts"><svg class="i"><use href="#i-layers"/></svg><span class="cc-count" data-artifacts-count hidden></span></button>
+        </header>
 
-        <div class="scroll" data-agent-thread></div>
-
-        <!-- Shown instead of the conversation while a debate is on screen.
-             Same stage, because a brief is the thing you came to read. -->
-        <div class="scroll" data-council-view hidden></div>
-
-        <div class="composer">
-          <div class="box">
-            <div class="txt" contenteditable="plaintext-only" role="textbox"
-                 aria-label="Ask Proton" data-agent-input
-                 data-placeholder="Ask Proton…"></div>
-            <div class="foot">
-              <select class="model-pick" data-model-pick title="Which model answers. Blank uses the provider's default."></select>
-              <span class="grow"></span>
-              <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
-              <button class="btn" data-council-ask title="Put this question to every model you have a subscription to. Two minutes, three of them.">Convene</button>
-              <span class="send" data-agent-send role="button" tabindex="0"
-                    aria-label="Send"><svg class="i" width="13" height="13"><use href="#i-arrow-up"/></svg></span>
+        <div class="scroll cc-thread" data-claude-thread>
+          <div class="cc-col">
+            <div class="cc-welcome" data-claude-welcome>
+              <div class="cc-welcome-star">✻</div>
+              <h2 data-claude-welcome-title>What should Claude work on?</h2>
+              <p data-claude-welcome-text>Claude Code, in this project. It reads, edits and runs things here, asks before anything you have not allowed, and what it publishes opens beside the chat.</p>
             </div>
+            <div class="cc-earlier" data-claude-earlier hidden>Earlier messages in this session are not shown.</div>
+            <div class="cc-items" data-claude-items></div>
+            <div class="cc-working" data-claude-working hidden></div>
           </div>
         </div>
+
+        <!-- Shown instead of the conversation while a debate is on screen. -->
+        <div class="scroll cc-council-view" data-council-view hidden></div>
+
+        <div class="cc-dock">
+          <div class="cc-tasks" data-claude-tasks hidden></div>
+          <div class="cc-composer">
+            <div class="cc-menu" data-claude-menu hidden></div>
+            <div class="cc-attachments" data-claude-attachments hidden></div>
+            <textarea class="cc-input" data-claude-input rows="1" spellcheck="true" aria-label="Message Claude"
+                      placeholder="Ask Claude to build, fix or explain something…"></textarea>
+            <div class="cc-foot">
+              <button class="cc-pill icon" data-claude-attach title="Attach an image"><svg class="i"><use href="#i-plus"/></svg></button>
+              <button class="cc-pill" data-claude-engine data-pop="engine" title="Which agent answers"></button>
+              <button class="cc-pill" data-claude-mode data-pop="mode" title="Permissions  ⇧⇥"></button>
+              <span class="grow"></span>
+              <span class="cc-meter" data-claude-meter></span>
+              <button class="cc-pill" data-claude-model data-pop="model" title="Model and effort"></button>
+              <button class="cc-send" data-claude-send title="Send  ⏎" aria-label="Send" disabled><svg class="i"><use href="#i-arrow-up"/></svg></button>
+            </div>
+            <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden data-claude-file>
+          </div>
+        </div>
+        <div class="cc-pop" data-claude-pop hidden></div>
       </main>
+
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+
+      <!-- What Claude publishes with its Artifact tool, kept here a version at
+           a time and served from artifact://, a scheme of its own: the page
+           runs in a sandbox with an origin that is not the editor's, under a
+           policy that lets it load what claude.ai lets it load and reach
+           nothing of Proton's. -->
+      <aside class="pane cc-artifacts" data-claude-artifacts>
+        <header class="cc-art-head">
+          <span class="cc-art-icon" data-artifact-icon><svg class="i"><use href="#i-layers"/></svg></span>
+          <div class="cc-art-title" data-artifact-title>Artifacts</div>
+          <select class="cc-art-version" data-artifact-version hidden aria-label="Version"></select>
+          <span class="grow"></span>
+          <button class="hbtn" data-artifact-reload title="Reload"><svg class="i"><use href="#i-redo"/></svg></button>
+          <button class="hbtn" data-artifact-open title="Open on claude.ai"><svg class="i"><use href="#i-ext"/></svg></button>
+          <button class="hbtn" data-artifact-gallery title="All artifacts"><svg class="i"><use href="#i-grid"/></svg></button>
+          <button class="hbtn" data-artifact-close title="Close"><svg class="i"><use href="#i-close"/></svg></button>
+        </header>
+        <div class="cc-art-body">
+          <iframe class="cc-art-frame" data-artifact-frame hidden title="Artifact"
+                  sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"
+                  referrerpolicy="no-referrer"></iframe>
+          <div class="scroll cc-art-doc" data-artifact-doc hidden></div>
+          <div class="cc-art-empty" data-artifact-empty>
+            <p>Nothing is open. Artifacts Claude publishes open here, and every one it has published is in the list.</p>
+            <button class="cc-secondary" data-artifact-gallery>Show artifacts</button>
+          </div>
+          <div class="scroll cc-gallery" data-artifact-gallery-list hidden></div>
+        </div>
+      </aside>
     </section>
 
     <!-- ══ CODEX ═════════════════════════════════════════════════ -->
@@ -371,7 +420,7 @@
         <header class="dock-head">
           <span class="dock-title" data-dock-title>New Thread</span>
           <button class="hbtn" data-chat-new data-dock-only="agent" title="New thread" aria-label="New thread"><svg class="i"><use href="#i-plus"/></svg></button>
-          <button class="hbtn" data-mode-go="chat" data-dock-only="agent" title="Open in Chat — the whole window" aria-label="Open in Chat"><svg class="i"><use href="#i-expand"/></svg></button>
+          <button class="hbtn" data-mode-go="chat" data-dock-only="agent" title="Claude Code, in the Chat tab" aria-label="Open in Chat"><svg class="i"><use href="#i-expand"/></svg></button>
           <button class="hbtn" data-dock-menu title="Panels" aria-label="Panels" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-dots"/></svg><span class="dot" data-task-dot hidden></span></button>
           <div class="dock-tabs" aria-label="Panels" hidden>
             <button class="dock-tab on"  data-dockpanel="agent">Agent</button>

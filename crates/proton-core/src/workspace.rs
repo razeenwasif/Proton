@@ -104,6 +104,9 @@ pub struct Workspace {
     /// three subscriptions, so the rounds are shown as they land rather than
     /// all at the end.
     council: Option<proton_council::Running>,
+    /// The Chat tab: Claude Code's sessions for this project, and the ones
+    /// running here.
+    claude: crate::claude::Claude,
     council_progress: Vec<String>,
     council_round: usize,
     /// The brief on screen, and which past debate it came from.
@@ -253,6 +256,7 @@ impl Workspace {
             pickers: Pickers::new(root),
             servers: Servers::new(root),
             agent: Agent::new(&root.display().to_string()),
+            claude: crate::claude::Claude::new(root),
             visualizer: Visualizer::new(root),
             tree: Tree::new(root),
             git: Git::discover(root),
@@ -265,6 +269,7 @@ impl Workspace {
         // they say, or the first question of every session goes to whatever
         // the default provider is regardless of what was chosen.
         space.follow_agent_settings();
+        space.follow_claude_settings();
         // And the library, which starts its walk here rather than on the first
         // question: a vault takes the better part of a second to read, and the
         // moment somebody asks about their notes is the worst one to spend it.
@@ -528,6 +533,7 @@ impl Workspace {
                         layout: self.mode.layout(),
                     },
                 ]);
+                events.extend(self.claude.sync());
                 events
             }
 
@@ -904,6 +910,9 @@ impl Workspace {
                 Ok(true) => {
                     if key.starts_with("agent.") {
                         self.follow_agent_settings();
+                    }
+                    if key.starts_with("claude.") || key.starts_with("chat.") {
+                        self.follow_claude_settings();
                     }
                     let mut events = vec![self.settings_event()];
                     // A root added here starts a walk here. The panel says
@@ -1314,6 +1323,50 @@ impl Workspace {
                 self.tasks.clear_finished();
                 vec![self.tasks_event()]
             }
+
+            /* ── Claude Code ───────────────────────────────── */
+            Command::ClaudeNew { engine } => self.claude.start(engine),
+            Command::ClaudeEngine { engine } => {
+                let events = self.claude.set_engine(engine);
+                let _ = self.settings.set("chat.engine", serde_json::Value::String(engine.key().into()));
+                events
+            }
+            Command::ClaudeOpen { session } => self.claude.open(&session),
+            Command::ClaudeSend { text, images } => self.claude.send(&text, &images),
+            Command::ClaudeStop => self.claude.interrupt(),
+            Command::ClaudeAnswer { request, answer } => self.claude.answer(&request, answer),
+            // The choice is the session's, and the default for the next one —
+            // which is a project setting, so it is there when Proton is next
+            // opened on this folder.
+            Command::ClaudeMode { mode } => {
+                let events = self.claude.set_mode(&mode);
+                let _ = self.settings.set("claude.mode", serde_json::Value::String(mode));
+                events
+            }
+            Command::ClaudeModel { model } => {
+                let key = chat_setting(self.claude.active_engine(), "model");
+                let events = self.claude.set_model(&model);
+                let saved = match model.as_str() {
+                    "" | "default" => serde_json::Value::Null,
+                    _ => serde_json::Value::String(model),
+                };
+                let _ = self.settings.set(&key, saved);
+                events
+            }
+            Command::ClaudeEffort { effort } => {
+                let key = chat_setting(self.claude.active_engine(), "effort");
+                let events = self.claude.set_effort(effort.as_deref());
+                let saved = effort.filter(|e| !e.is_empty()).map(serde_json::Value::String).unwrap_or(serde_json::Value::Null);
+                let _ = self.settings.set(&key, saved);
+                events
+            }
+            Command::ClaudeSessions => self.claude.refresh(),
+            Command::ForgetArtifact { id } => self.claude.forget_artifact(&id),
+            Command::ImportArtifacts => self.claude.import_artifacts(),
+            Command::OpenLink { url } => match open_link(&url) {
+                Ok(()) => Vec::new(),
+                Err(why) => vec![notice(why, NoticeLevel::Warn)],
+            },
 
             Command::CancelTurn => {
                 self.agent.cancel();
@@ -2571,6 +2624,10 @@ impl Workspace {
         }
 
         events.extend(self.poll_council());
+
+        // Claude Code's conversations: every one that is running, whether
+        // or not it is on screen.
+        events.extend(self.claude.poll());
 
         // And the library's walk, which is the same shape again: a second of
         // reading somebody's vault, on a thread with nothing to call back to.
@@ -4607,6 +4664,23 @@ impl Workspace {
             .join("\n\n---\n\n"))
     }
 
+    /// What a new conversation in the Chat tab starts with: the engine, the
+    /// permission mode, and each engine's model and effort.
+    fn follow_claude_settings(&mut self) {
+        let chosen = |text: String| (!text.is_empty()).then_some(text);
+        let mut models = std::collections::HashMap::new();
+        for engine in proton_claude::Engine::ALL {
+            let model = chosen(self.settings.string(&chat_setting(engine, "model"), ""));
+            let effort = chosen(self.settings.string(&chat_setting(engine, "effort"), ""));
+            models.insert(engine, (model, effort));
+        }
+        self.claude.configure(crate::claude::Defaults {
+            engine: proton_claude::Engine::parse(&self.settings.string("chat.engine", "claude")).unwrap_or_default(),
+            mode: self.settings.string("claude.mode", "default"),
+            models,
+        });
+    }
+
     /// Point the agent at whatever the settings name.
     ///
     /// Called on startup and after any `agent.*` change, so switching provider
@@ -5786,6 +5860,15 @@ impl Workspace {
     }
 }
 
+/// Where an engine's model or effort is saved: Claude Code's where they
+/// always were, the others' beside the engine chosen for new conversations.
+fn chat_setting(engine: proton_claude::Engine, what: &str) -> String {
+    match engine {
+        proton_claude::Engine::Claude => format!("claude.{what}"),
+        other => format!("chat.{}.{what}", other.key()),
+    }
+}
+
 pub(crate) fn notice(text: String, level: NoticeLevel) -> Event {
     Event::Notice { text, level }
 }
@@ -5866,6 +5949,28 @@ fn slugged(question: &str) -> String {
         true => "debate".into(),
         false => short.join("-"),
     }
+}
+
+/// Open a web address in the browser — the only kind of link Proton follows
+/// out of a conversation.
+fn open_link(url: &str) -> Result<(), String> {
+    // A web address and nothing else: a link in a reply is the model's
+    // writing, and `file:` or a custom scheme from it is not something to
+    // hand to the desktop.
+    let lower = url.trim().to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://")) || url.chars().any(char::is_whitespace) {
+        return Err(format!("not a web address: {url}"));
+    }
+    let program = match () {
+        _ if cfg!(windows) => "explorer",
+        _ if cfg!(target_os = "macos") => "open",
+        _ => "xdg-open",
+    };
+    std::process::Command::new(program)
+        .arg(url.trim())
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("could not open {url}: {err}"))
 }
 
 /// Hand a file to whatever the desktop opens it with.

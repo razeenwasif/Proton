@@ -31,17 +31,20 @@ fn exported() -> HashMap<String, Vec<String>> {
             continue;
         };
         let mut exporting = false;
+        // A `rename` in the attribute is the name the file is written under.
+        let mut renamed: Option<String> = None;
         for line in text.lines() {
             let line = line.trim();
             if line.starts_with("#[ts(") && line.contains("export") {
                 exporting = true;
+                renamed = rename(line);
                 continue;
             }
             if !exporting || line.starts_with('#') || line.starts_with("///") {
                 continue;
             }
             // The declaration the attribute was attached to.
-            if let Some(name) = declared(line) {
+            if let Some(name) = renamed.take().or_else(|| declared(line)) {
                 found
                     .entry(name)
                     .or_default()
@@ -51,6 +54,17 @@ fn exported() -> HashMap<String, Vec<String>> {
         }
     }
     found
+}
+
+/// The name out of a `rename = "Foo"` in a `#[ts(...)]` attribute.
+fn rename(attribute: &str) -> Option<String> {
+    // Every `rename`, skipping a `rename_all` that may come first.
+    attribute.match_indices("rename").find_map(|(at, word)| {
+        let rest = attribute[at + word.len()..].trim_start().strip_prefix('=')?;
+        let rest = rest.trim_start().strip_prefix('"')?;
+        let name: String = rest.chars().take_while(|c| *c != '"').collect();
+        (!name.is_empty()).then_some(name)
+    })
 }
 
 /// The type name out of a `pub struct Foo {` or `pub enum Foo {`.

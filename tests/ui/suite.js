@@ -127,17 +127,30 @@ await test('Narrow windows show the requested panel without squeezing out the ed
   frame.style.width = '1400px'; await settle();
   assert(!section.querySelector('aside').hidden, 'wide layout did not restore sidebar');
 });
-await test('Each mode keeps a usable stage and Chat disables the absent right panel', async () => {
+await test('Each mode keeps a usable stage, and every one has a right panel to toggle', async () => {
   for (const mode of ['chat', 'design', 'modeling', 'game', 'video', 'data', 'codex']) {
     await win.dispatch({type: 'setMode', mode}); await settle();
     const section = $('.workspace.on'), stage = section.querySelector('main');
     assert(stage.clientWidth >= 320, `${mode} lost its stage`);
     assert(stage.getBoundingClientRect().right <= section.getBoundingClientRect().right + 1, `${mode} overflows`);
-    assert($('[data-panel-toggle="right"]').disabled === (mode === 'chat'), `${mode} has the wrong panel controls`);
+    // Chat's is its artifacts pane.
+    const toggle = [...doc.querySelectorAll('[data-panel-toggle="right"]')].find((b) => b.getClientRects().length);
+    assert(toggle && !toggle.disabled, `${mode} has the wrong panel controls`);
   }
 });
 const shown = (el) => Boolean(el) && win.getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0;
-await test('Codex trades the rails and statusline for a title bar, and only Codex does', async () => {
+await test('Chat wears Codex\'s chrome: a title bar for the rails, no statusline, no terminal toggle', async () => {
+  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
+  assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.rail')) && !shown($('.statusline')), 'Chat kept the old chrome');
+  assert(!shown($('.titlebar [data-term-toggle]')), 'Chat offers a terminal it cannot show');
+  const ground = win.getComputedStyle($('.workspace[data-ws="chat"] .cc-main')).backgroundColor;
+  const bg = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim();
+  const probe = doc.createElement('i'); probe.style.color = bg; doc.body.append(probe);
+  const expected = win.getComputedStyle(probe).color; probe.remove();
+  assert(ground === expected, `Chat is not on the theme's ground: ${ground} vs ${expected}`);
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+await test('Codex trades the rails and statusline for a title bar, Data does too, and Design does not', async () => {
   assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'Codex kept the old chrome');
   const bar = $('.titlebar').getBoundingClientRect(), app = $('.app').getBoundingClientRect();
   assert(Math.abs(bar.right - app.right) < 2 && bar.height > app.height - 4 && bar.width < 60,
@@ -148,7 +161,12 @@ await test('Codex trades the rails and statusline for a title bar, and only Code
   const before = win.commands.length;
   tab.click(); await settle();
   assert(win.commands.slice(before).some((c) => c.type === 'setMode' && c.mode === 'data'), 'title bar did not switch modes');
-  assert(!shown($('.titlebar')) && shown($('.chrome-rail')) && shown($('.statusline')), 'Data lost its chrome');
+  assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'Data kept the old chrome');
+  const data = $('.workspace[data-ws="data"]');
+  assert(win.getComputedStyle(data).fontFamily.includes('JetBrains'), 'Data is not set in Codex\'s type');
+  assert(!shown(data.querySelector('aside.side > header')) && !shown(data.querySelector('aside.side > .find')), 'Data\'s project panel kept its header');
+  await win.dispatch({type: 'setMode', mode: 'design'}); await settle();
+  assert(!shown($('.titlebar')) && shown($('.chrome-rail')) && shown($('.statusline')), 'Design lost its chrome');
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   assert(shown($('.titlebar')), 'title bar did not come back');
 });
@@ -810,20 +828,262 @@ await test('Rapid project clicks preserve the final project and its scroll posit
     assert($('.workspace.on [role=tab][data-buffer]').title.includes('/Beta/same.txt'), 'tab path belongs to a different project');
   } finally { win.replyDelay = 0; }
 });
+/* ── Chat: Claude Code ─────────────────────────────────────────────── */
+const ccRun = (text, extra = {}) => ({kind: 'text', id: `t-${text}`, text, done: true, parent: null, ...extra});
+const ccTool = (id, name, input, extra = {}) => ({kind: 'tool', id, name, input, state: 'done', streamed: 0, result: null,
+  detail: null, parent: null, ask: null, artifact: null, ...extra});
+const ccStatus = (extra = {}) => ({session: 's1', title: 'Fix the build', activity: 'idle', doing: '', model: 'claude-opus-5-5',
+  mode: 'default', effort: null, since: null, cost: 0, context: 1200, output: 0, tasks: [], limit: null, error: null, version: '2', ...extra});
+const ccCaps = {models: [{value: 'default', resolved: 'claude-opus-5-5', name: 'Default (recommended)', description: 'Opus', efforts: ['low', 'high']},
+  {value: 'opus', resolved: 'claude-opus-5-5', name: 'Opus 5.5', description: 'Best', efforts: ['low', 'high']},
+  {value: 'haiku', resolved: 'claude-haiku-4-5', name: 'Haiku 4.5', description: 'Fast', efforts: []}],
+  commands: [{name: 'compact', description: 'Summarise the conversation', hint: ''}, {name: 'init', description: 'Write a CLAUDE.md', hint: ''}],
+  plan: 'Claude Max', email: 'someone@example.com'};
+const ccItems = (items, reset = false) => ({type: 'claudeItems', session: 's1', items, reset, earlier: false});
+const ccPush = async (...events) => { await win.pushEvents(events); await settle(); };
+const sentSince = (before, type) => win.commands.slice(before).filter((c) => c.type === type);
+await test('Chat draws Claude Code\'s sessions, prose, tools and status from the core', async () => {
+  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
+  // Paths are shown from the project they are in.
+  await ccPush(fixtureProjects);
+  await ccPush(
+    {type: 'claudeSessions', active: 's1', busy: ['s2'], waiting: [], sessions: [
+      {id: 's1', title: 'Fix the build', updated: Date.now()}, {id: 's2', title: 'Port the parser', updated: Date.now() - 1000}]},
+    {type: 'claudeCapabilities', capabilities: ccCaps},
+    ccItems([
+      {kind: 'user', id: 'u1', text: 'Why does it fail?', images: 0},
+      {kind: 'thinking', id: 'th1', text: '', tokens: 320, done: true, parent: null},
+      ccRun('It fails because **the lockfile** is stale.'),
+      ccTool('e1', 'Edit', {file_path: '/fixture/src/fixture.c', old_string: 'a', new_string: 'b'}, {detail: {structuredPatch: [
+        {oldStart: 3, oldLines: 1, newStart: 3, newLines: 1, lines: ['-int a;', '+int b;']}]}}),
+      ccTool('q1', 'TaskCreate', {subject: 'quiet'}),
+      {kind: 'turn', id: 'turn1', ms: 4200, turns: 2, cost: 0.02, error: null},
+    ], true),
+    {type: 'claudeStatus', status: ccStatus()});
+  const ws = $('.workspace[data-ws="chat"]');
+  const rows = [...ws.querySelectorAll('.cc-session')];
+  assert(rows.length === 2 && rows[0].classList.contains('on') && rows[1].querySelector('.cc-spin'), 'the session list is wrong');
+  assert(ws.querySelector('.cc-bubble')?.textContent.includes('Why does it fail?'), 'your message is not a bubble');
+  assert(ws.querySelector('.cc-prose strong')?.textContent === 'the lockfile', 'the reply was not drawn as markdown');
+  const edit = ws.querySelector('[data-item="e1"]');
+  assert(edit.querySelector('.cc-verb').textContent === 'Update' && edit.querySelector('.cc-target').textContent === 'src/fixture.c', 'the edit row does not say what it did');
+  assert(edit.querySelector('.cc-note-inline').textContent === '+1 −1', 'the edit row does not count its lines');
+  assert(win.getComputedStyle(ws.querySelector('[data-item="q1"]')).display === 'none', 'a task tool has a row of its own');
+  assert(ws.querySelector('[data-claude-title]').textContent === 'Fix the build', 'the header does not name the session');
+  assert(ws.querySelector('[data-claude-model]').textContent.includes('Opus 5.5'), 'the model pill does not name the model');
+  assert(ws.querySelector('[data-claude-mode]').textContent.includes('Ask permissions'), 'the mode pill does not name the mode');
+  assert(ws.querySelector('[data-claude-account]').textContent.includes('Claude Max'), 'the account is not shown');
+  edit.querySelector('[data-toggle]').click(); await settle();
+  assert(edit.querySelector('.cc-diff tr.del') && edit.querySelector('.cc-diff tr.add'), 'the edit did not open into its diff');
+});
+await test('Chat redraws only the rows that changed, and keeps an open diff open', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  const bubble = ws.querySelector('[data-item="u1"]');
+  await ccPush(ccItems([ccRun('Streaming', {id: 't-live', done: false})]));
+  await ccPush(ccItems([ccRun('Streaming more', {id: 't-live', done: false})]));
+  assert(ws.querySelector('[data-item="u1"]') === bubble, 'an unchanged row was rebuilt');
+  assert(ws.querySelector('[data-item="t-live"] .cc-caret'), 'a streaming reply has no caret');
+  assert(ws.querySelector('[data-item="e1"] .cc-diff'), 'the open diff closed under a streaming reply');
+  const items = ws.querySelectorAll('[data-claude-items] > .cc-item');
+  assert(items[items.length - 1].dataset.item === 't-live', 'a new row was not added at the end');
+});
+await test('A permission card answers the request it was asked with, as allow, always or deny', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  const ask = {request: 'req-7', kind: 'permission', description: 'touch x', blocked: null,
+    suggestions: [{type: 'addRules', rules: [{toolName: 'Bash', ruleContent: 'touch:*'}], behavior: 'allow', destination: 'session'}]};
+  await ccPush(ccItems([ccTool('b1', 'Bash', {command: 'touch x', description: 'Make x'}, {state: 'waiting', ask})]),
+    {type: 'claudeStatus', status: ccStatus({activity: 'waiting'})});
+  const card = ws.querySelector('[data-item="b1"] .cc-ask');
+  assert(card && card.textContent.includes('run this command') && card.querySelector('code')?.textContent.includes('touch x'), 'the card does not show the command');
+  let before = win.commands.length;
+  card.querySelector('[data-claude-allow]:not([data-remember])').click(); await settle();
+  let answer = sentSince(before, 'claudeAnswer')[0];
+  assert(answer?.request === 'req-7' && answer.answer.kind === 'allow' && answer.answer.remember === false, `Yes sent ${JSON.stringify(answer)}`);
+  before = win.commands.length;
+  card.querySelector('[data-remember="1"]').click(); await settle();
+  answer = sentSince(before, 'claudeAnswer')[0];
+  assert(answer?.answer.remember === true && card.querySelector('[data-remember="1"]').textContent.includes('Bash(touch:*)'), 'Always did not offer or send the rule');
+  before = win.commands.length;
+  card.querySelector('[data-claude-why]').value = 'Use mktemp instead';
+  card.querySelector('[data-claude-deny]').click(); await settle();
+  answer = sentSince(before, 'claudeAnswer')[0];
+  assert(answer?.answer.kind === 'deny' && answer.answer.message === 'Use mktemp instead', `No sent ${JSON.stringify(answer)}`);
+});
+await test('A question card sends the options chosen, by question', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  const questions = [{question: 'Which database?', header: 'Storage', multiSelect: false,
+    options: [{label: 'SQLite', description: 'One file'}, {label: 'Postgres', description: 'A server'}]}];
+  await ccPush(ccItems([ccTool('a1', 'AskUserQuestion', {questions}, {state: 'waiting', ask: {request: 'req-q', kind: 'question', description: '', suggestions: [], blocked: null}})]));
+  const form = ws.querySelector('[data-item="a1"] form[data-claude-question]');
+  assert(form && form.querySelectorAll('.cc-option').length === 3, 'the options (and something else) are not offered');
+  form.querySelector('input[value="Postgres"]').click();
+  const before = win.commands.length;
+  form.requestSubmit(); await settle();
+  const answer = sentSince(before, 'claudeAnswer')[0];
+  assert(answer?.request === 'req-q' && answer.answer.kind === 'questions' && answer.answer.answers['Which database?'] === 'Postgres', `sent ${JSON.stringify(answer)}`);
+});
+await test('The composer sends, stops, steps the mode, and offers Claude Code\'s commands', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  const input = ws.querySelector('[data-claude-input]');
+  input.focus();
+  input.value = '/co'; input.dispatchEvent(new win.Event('input', {bubbles: true})); await settle();
+  const offered = [...ws.querySelectorAll('[data-claude-command]')].map((r) => r.dataset.claudeCommand);
+  assert(offered.includes('compact') && offered.includes('council'), `slash menu offered ${offered}`);
+  input.value = 'Run the tests'; input.dispatchEvent(new win.Event('input', {bubbles: true}));
+  let before = win.commands.length;
+  input.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); await settle();
+  const sent = sentSince(before, 'claudeSend')[0];
+  assert(sent?.text === 'Run the tests' && Array.isArray(sent.images) && input.value === '', `Enter sent ${JSON.stringify(sent)}`);
+  assert(!sentSince(before, 'key').length, 'typing in the composer reached Vim');
+  await ccPush({type: 'claudeStatus', status: ccStatus({activity: 'working', since: Date.now()})});
+  assert(!ws.querySelector('[data-claude-working]').hidden, 'nothing says Claude is working');
+  before = win.commands.length;
+  ws.querySelector('[data-claude-send]').click(); await settle();
+  assert(sentSince(before, 'claudeStop').length === 1, 'the empty send button did not stop the turn');
+  before = win.commands.length;
+  input.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Tab', shiftKey: true, bubbles: true, cancelable: true})); await settle();
+  assert(sentSince(before, 'claudeMode')[0]?.mode === 'acceptEdits', 'Shift+Tab did not step to the next mode');
+  await ccPush({type: 'claudeStatus', status: ccStatus()});
+});
+await test('An artifact published while you watch opens beside the chat, sandboxed, from artifact://', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  const artifact = {id: '4a1f9d2e-77b3-4c41-9e0a-5c2d8f1b6a30', seq: 2, title: 'Frame times', url: 'https://claude.ai/artifact/abc', icon: 'chart', file: 'index.html'};
+  await ccPush({type: 'artifacts', artifacts: [{id: artifact.id, url: artifact.url, title: 'Frame times', icon: 'chart', description: '',
+    project: '/fixture', session: 's1', versions: [{seq: 1, file: 'index.html', at: 1}, {seq: 2, file: 'index.html', at: 2}]}]});
+  await ccPush(ccItems([ccTool('art1', 'Artifact', {file_path: '/fixture/index.html'}, {artifact})]));
+  assert(ws.dataset.rightOpen === 'true', 'the artifacts pane did not open');
+  const frame = ws.querySelector('[data-artifact-frame]');
+  assert(frame.getAttribute('src') === `artifact://localhost/${artifact.id}/2/index.html`, `framed ${frame.getAttribute('src')}`);
+  const sandbox = frame.getAttribute('sandbox') ?? '';
+  assert(sandbox.includes('allow-scripts') && !sandbox.includes('allow-same-origin'), 'the artifact can reach the editor');
+  assert(ws.querySelector('[data-item="art1"] .cc-artifact b')?.textContent === 'Frame times', 'the transcript has no card for it');
+  assert(ws.querySelector('[data-artifact-version]').options.length === 2, 'its versions are not offered');
+  let before = win.commands.length;
+  ws.querySelector('[data-artifact-open]').click(); await settle();
+  assert(sentSince(before, 'openLink')[0]?.url === artifact.url, 'Open on claude.ai did not ask for the link');
+  ws.querySelector('[data-artifact-close]').click(); await settle();
+  assert(ws.dataset.rightOpen === 'false', 'the pane did not close');
+});
+await test('Artifacts published before Proton kept them import with one click, and a pageless one opens on claude.ai', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  ws.querySelector('[data-artifact-gallery]').click(); await settle();
+  let before = win.commands.length;
+  ws.querySelector('[data-artifact-import]').click(); await settle();
+  assert(sentSince(before, 'importArtifacts').length === 1, 'the button did not ask for an import');
+  assert(ws.querySelector('.cc-importing')?.textContent.includes('Reading your sessions'), 'nothing says the import is running');
+  await ccPush({type: 'artifacts', importing: false, artifacts: [
+    {id: 'Gone1', url: 'https://claude.ai/artifact/Gone1', title: 'Old chart', icon: 'chart', description: '', project: '/fixture', session: 's0',
+      versions: [{seq: 1, file: '', at: 5}]}]});
+  assert(ws.querySelector('[data-artifact-import]') && ws.querySelectorAll('.cc-gallery-row').length === 1, 'the imported artifact is not listed');
+  ws.querySelector('.cc-gallery-open').click(); await settle();
+  const empty = ws.querySelector('[data-artifact-empty]');
+  assert(!empty.hidden && empty.textContent.includes('no longer on this machine'), 'a pageless artifact did not say where it is');
+  assert(ws.querySelector('[data-artifact-frame]').hidden, 'a pageless artifact framed nothing');
+  before = win.commands.length;
+  empty.querySelector('[data-artifact-open]').click(); await settle();
+  assert(sentSince(before, 'openLink')[0]?.url === 'https://claude.ai/artifact/Gone1', 'it did not open on claude.ai');
+  ws.querySelector('[data-artifact-close]').click(); await settle();
+});
+await test('Replies are markdown that never becomes HTML, and their links open in the browser', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  await ccPush(ccItems([ccRun('<img src=x onerror="window.pwned=1"><script>window.pwned=1</script> see [docs](https://example.com/a?b=1&c=2)', {id: 'evil'})]));
+  const prose = ws.querySelector('[data-item="evil"]');
+  assert(!prose.querySelector('img, script') && prose.textContent.includes('<script>'), 'HTML in a reply was drawn as HTML');
+  assert(!win.pwned, 'a reply ran script');
+  const link = prose.querySelector('a[data-link]');
+  const before = win.commands.length;
+  const click = new win.MouseEvent('click', {bubbles: true, cancelable: true});
+  link.dispatchEvent(click); await settle();
+  assert(click.defaultPrevented && sentSince(before, 'openLink')[0]?.url === 'https://example.com/a?b=1&c=2', 'the link was followed in the window');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+await test('The desktop app\'s sessions from other folders are listed apart, by folder, and one open elsewhere says so', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  await ccPush({type: 'claudeSessions', active: 's1', busy: [], waiting: [], engine: 'claude', sessions: [
+    {id: 's1', title: 'Fix the build', updated: Date.now(), folder: '', elsewhere: false, engine: 'claude'},
+    {id: 'x1', title: 'Make the poll configurable', updated: Date.now() - 1000, folder: '', elsewhere: false, engine: 'codex'},
+    {id: 'd1', title: 'Batting averages', updated: Date.now() - 5000, folder: '/Users/you/Github/Cricket-Analysis', elsewhere: true, engine: 'claude'},
+    {id: 'd2', title: 'Quantisation and SNR', updated: Date.now() - 9000, folder: '/Users/you/Research/TinyML', elsewhere: false, engine: 'claude'}]});
+  const groups = [...ws.querySelectorAll('.cc-group')].map((g) => g.textContent);
+  assert(groups[groups.length - 1] === 'Claude desktop', `groups are ${groups}`);
+  const row = (id) => ws.querySelector(`[data-claude-session="${id}"]`);
+  assert(row('d1').querySelector('.cc-session-where')?.textContent === 'Cricket-Analysis', 'a desktop session does not name its folder');
+  assert(row('d1').querySelector('.cc-elsewhere') && !row('d2').querySelector('.cc-elsewhere'), 'a session open in another Claude Code is not marked');
+  assert(row('x1').querySelector('.cc-session-where[data-engine="codex"]')?.textContent === 'Codex', 'a Codex conversation does not say so');
+  assert(!row('s1').querySelector('.cc-session-where'), 'a Claude Code session here is tagged');
+  const before = win.commands.length;
+  row('d1').click(); await settle();
+  assert(sentSince(before, 'claudeOpen')[0]?.session === 'd1', 'opening a desktop session did not ask for it');
+});
+await test('The engine picker starts a conversation with Codex, and the composer speaks its language', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  const codexModes = [{value: 'default', name: 'Ask permissions', note: 'Ask before commands and edits', icon: 'eye'},
+    {value: 'acceptEdits', name: 'Auto', note: 'Work in the project; ask to go beyond it', icon: 'pen'},
+    {value: 'plan', name: 'Read only', note: 'Change nothing', icon: 'bulb'}];
+  await ccPush(
+    {type: 'claudeCapabilities', capabilities: {engine: 'codex', plan: 'ChatGPT Plus', email: 'someone@example.com', missing: null, commands: [], modes: codexModes,
+      models: [{value: 'gpt-6.1-sol', resolved: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', description: 'Workhorse', efforts: ['low', 'high']}]}},
+    {type: 'claudeCapabilities', capabilities: {engine: 'gemini', plan: '', email: '', missing: 'The Gemini CLI is not installed.', commands: [], modes: [], models: []}});
+  ws.querySelector('[data-claude-engine]').click(); await settle();
+  const pop = ws.querySelector('[data-claude-pop]');
+  const rows = [...pop.querySelectorAll('[data-claude-set-engine]')];
+  assert(rows.map((r) => r.dataset.claudeSetEngine).join() === 'claude,codex,gemini,antigravity', 'the picker does not offer the four engines');
+  const gemini = pop.querySelector('[data-claude-set-engine="gemini"]');
+  assert(gemini.classList.contains('off') && gemini.textContent.includes('Not installed'), 'an engine that is not installed is not said to be');
+  let before = win.commands.length;
+  pop.querySelector('[data-claude-set-engine="codex"]').click(); await settle();
+  assert(sentSince(before, 'claudeEngine')[0]?.engine === 'codex', 'choosing Codex did not ask for it');
+  await ccPush(ccItems([], true), {type: 'claudeStatus', status: ccStatus({engine: 'codex', model: 'gpt-6.1-sol', title: '', context: 0})});
+  const input = ws.querySelector('[data-claude-input]');
+  assert(ws.querySelector('[data-claude-engine]').textContent.includes('Codex'), 'the engine pill does not name Codex');
+  assert(input.placeholder.startsWith('Ask Codex'), `the placeholder is ${input.placeholder}`);
+  assert(ws.querySelector('[data-claude-welcome-title]').textContent === 'What should Codex work on?', 'the welcome is still Claude\'s');
+  assert(ws.querySelector('[data-claude-model]').textContent.includes('GPT-6.1-Sol'), 'the model pill does not name Codex\'s model');
+  assert(ws.querySelector('[data-claude-account]').textContent.includes('ChatGPT Plus'), 'the account is not Codex\'s');
+  input.focus();
+  before = win.commands.length;
+  input.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Tab', shiftKey: true, bubbles: true, cancelable: true})); await settle();
+  assert(sentSince(before, 'claudeMode')[0]?.mode === 'acceptEdits', 'Shift+Tab did not step through Codex\'s modes');
+  await ccPush({type: 'claudeStatus', status: ccStatus({engine: 'codex', model: 'gpt-6.1-sol', mode: 'acceptEdits', title: ''})});
+  assert(ws.querySelector('[data-claude-mode]').textContent.includes('Auto'), 'the mode pill does not use Codex\'s name for the mode');
+});
+await test('A Codex patch reads as an edit of its file, and its approval asks in Codex\'s name', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  const files = [{path: '/fixture/src/poll.ts', kind: 'update', movePath: null,
+    structuredPatch: [{oldStart: 3, oldLines: 1, newStart: 3, newLines: 1, lines: ['-export const POLL_MS = 1000;', '+export const POLL_MS = 2000;']}]}];
+  const ask = {request: 'codex-3', kind: 'permission', description: '', suggestions: [{type: 'session'}], blocked: null};
+  await ccPush(ccItems([ccTool('p1', 'Patch', {files: [{path: files[0].path, kind: 'update'}]}, {state: 'waiting', ask, detail: {files}})]),
+    {type: 'claudeStatus', status: ccStatus({engine: 'codex', model: 'gpt-6.1-sol', activity: 'waiting'})});
+  const row = ws.querySelector('[data-item="p1"]');
+  assert(row.querySelector('.cc-verb').textContent === 'Update' && row.querySelector('.cc-target').textContent === 'src/poll.ts', 'the patch row does not say what it changes');
+  const card = row.querySelector('.cc-ask');
+  assert(card?.textContent.includes('Allow Codex to edit') && card.querySelector('.cc-diff tr.add'), 'the approval is not Codex\'s, or shows no diff');
+  const before = win.commands.length;
+  card.querySelector('[data-remember="1"]').click(); await settle();
+  const answer = sentSince(before, 'claudeAnswer')[0];
+  assert(answer?.request === 'codex-3' && answer.answer.remember === true, `"for this session" sent ${JSON.stringify(answer)}`);
+  await ccPush({type: 'claudeStatus', status: ccStatus()}, {type: 'claudeCapabilities', capabilities: ccCaps});
+});
 await test('No browser runtime errors', () => {
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
 });
-await test('Codex asks for an opaque window in its own ground, and the glass modes give it back', async () => {
+await test('Codex and Data ask for an opaque window in their ground, and the glass modes give it back', async () => {
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
-  const before = asked().length;
-  $('.titlebar [data-mode="data"]').click(); await settle();
+  const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
+  let before = asked().length;
+  await win.pushEvents([{type: 'modeChanged', mode: 'design'}]);
+  assert(asked().slice(before).includes(null), `leaving Codex for Design kept the window opaque: ${JSON.stringify(asked().slice(before))}`);
+  before = asked().length;
+  $('.rail [data-mode="data"]')?.click(); await settle();
   await win.pushEvents([{type: 'modeChanged', mode: 'data'}]);
+  assert(asked().slice(before).at(-1) === ground, `Data did not ask for the ground: ${JSON.stringify(asked().slice(before))}`);
+  before = asked().length;
+  await win.pushEvents([{type: 'modeChanged', mode: 'design'}]);
   await win.pushEvents([{type: 'modeChanged', mode: 'codex'}]);
   const now = asked().slice(before);
-  assert(now.includes(null), `leaving Codex kept the window opaque: ${JSON.stringify(now)}`);
+  assert(now.includes(null), `Design kept the window opaque: ${JSON.stringify(now)}`);
   const last = now.at(-1);
   assert(/^#[0-9a-f]{6}$/.test(last ?? ''), `Codex did not ask for its ground: ${JSON.stringify(now)}`);
-  const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
   assert(last === ground, `asked for ${last}, the theme's ground is ${ground}`);
 });
 await test('Codex provider selection clears the previous model and displays Astra', async () => {

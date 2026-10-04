@@ -2,10 +2,12 @@
  * Its public boundary is described in preview-bridge.d.ts; the fixture
  * implementation remains outside the incremental strict-check boundary. */
 import {encodeMesh} from './meshbytes.js';
+import {createClaudePreview} from './preview-claude.js';
 
 export function createPreview(deliver, mockLatency) {
   let mockMesh = () => null;
   let send;
+  const claude = createClaudePreview(deliver);
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
@@ -868,7 +870,11 @@ FCM: NON-DROP FRAME
         cutEvent(),
         settingsEvent(),
         chatsEvent(),
+        ...claude.sync(),
       ];
+    }
+    if (command.type.startsWith("claude") || command.type === "forgetArtifact" || command.type === "openLink") {
+      return claude.command(command);
     }
     if (command.type === "runCell") {
       // The shape of a real run: the cell goes busy, and the answer arrives

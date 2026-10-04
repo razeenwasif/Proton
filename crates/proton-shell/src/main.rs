@@ -248,6 +248,9 @@ fn spawn_poll(app: tauri::AppHandle) {
     // A shell writing is the one thing worth waking for that no command asked
     // for just before: a build's output, a prompt coming back.
     proton_core::on_terminal_output(|| HEARTBEAT.wake());
+    // Claude Code streaming a reply is the same shape: a thread the core
+    // cannot see, writing a line at a time.
+    proton_core::on_claude_output(|| HEARTBEAT.wake());
     std::thread::Builder::new()
         .name("proton-poll".into())
         .spawn(move || {
@@ -309,8 +312,42 @@ fn window_icon() -> Option<tauri::image::Image<'static>> {
     }
 }
 
+/// An artifact page, from the copies Proton keeps of what Claude Code
+/// published.
+///
+/// `artifact://localhost/<id>/<version>/<file>` and nothing else: the path is
+/// resolved by `proton_claude::artifacts::resolve`, which answers only with a
+/// file inside the artifact folder. Every page is served under the policy
+/// artifacts are written for — inline script, the CDNs claude.ai allows — and
+/// that policy names neither `ipc:` nor the editor's own origin, so a page
+/// can draw itself and reach nothing of Proton's. The pane frames it
+/// sandboxed besides, with an origin of its own.
+fn artifact_page(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
+    use proton_claude::artifacts;
+    let root = artifacts::root();
+    let found = artifacts::resolve(&root, request.uri().path()).and_then(|file| {
+        let bytes = std::fs::read(&file).ok()?;
+        Some((artifacts::content_type(&file), bytes))
+    });
+    let builder = tauri::http::Response::builder()
+        .header("Content-Security-Policy", artifacts::CSP)
+        .header("X-Content-Type-Options", "nosniff")
+        // A sandboxed frame's origin is opaque, so a page fetching its own
+        // data file is a cross-origin request to itself.
+        .header("Access-Control-Allow-Origin", "*");
+    let response = match found {
+        Some((kind, bytes)) => builder.status(200).header("Content-Type", kind).body(bytes),
+        None => builder
+            .status(404)
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .body(b"This artifact is not kept here.".to_vec()),
+    };
+    response.unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
 fn main() {
     tauri::Builder::default()
+        .register_uri_scheme_protocol("artifact", |_, request| artifact_page(&request))
         .manage(Mutex::new(BridgeSession::new(Session::restore(
             requested_folder(),
             working_folder(),

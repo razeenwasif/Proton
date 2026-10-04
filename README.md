@@ -71,8 +71,10 @@ collision is why the mode chord is `⌃`.
 
 See the [current capability matrix](docs/ARCHITECTURE.md) for implemented documents and runtime limitations.
 
-**Chat** · a full conversation with the model — threads on the left, a centred
-reading column, and **Send to Codex** when it is time to act on what you decided.
+**Chat** · Claude Code itself — your `claude`, its tools, permissions,
+sessions and Artifact tool — drawn as Claude Code's app draws it, with what it
+publishes in a pane beside the conversation. Codex, Gemini and Antigravity
+answer in the same tab.
 **Codex** · the editor — buffers, LSP, splits, the agent dock, and the mobile
 target's device / layout-inspector / Logcat panel.
 **Design** · a web builder with a layer tree and an artboard, two-way bound to
@@ -90,7 +92,7 @@ captions from the `.srt` beside it. Both files are spliced, never re-printed.
 There is no program monitor: a frame of the programme is a decoded frame of
 video, and decoding needs ffmpeg.
 **Data** · notebook + SQL + dataframe grid + charts, with real cell lineage back
-into the codebase.
+into the codebase, drawn as Codex is.
 
 ## The three things that hold it together
 
@@ -125,6 +127,52 @@ environment; unsupported permission requests fail visibly instead of being
 approved automatically. A recent runtime with experimental dynamic tools is
 required. Each question starts an ephemeral Codex thread with Proton's saved
 conversation; this adapter does not resume Codex desktop tasks.
+
+## Claude Code, in the Chat tab
+
+The Chat tab runs the real Claude Code. Proton starts your own `claude`
+command in the project, in the stream-json mode Claude Code's SDKs use, so it
+is your account, your settings and CLAUDE.md, your skills and connectors, and
+every tool Claude Code has. Run `claude` once in a terminal to sign in. Proton
+finds it in `~/.local/bin`, where Claude Code's installer puts it, on your login
+shell's PATH, or at `PROTON_CLAUDE_BIN`.
+
+What Claude Code would ask in a terminal — may it run this command, edit this
+file, go ahead with this plan, which of these did you mean — is asked as a card
+in the conversation. The permission mode and the model are pills on the
+composer; ⇧⇥ steps the mode. The sessions on the left are every session Claude
+Code keeps for the folder, including ones started in a terminal or in the
+desktop app, and any of them can be picked up again. Under them, **Claude
+desktop** lists the desktop app's sessions from its other folders; one opens in
+its own folder, and one the desktop app has open right now (marked with a ring)
+carries on as a copy, so two programs never write to one session.
+
+**Codex, Gemini and Antigravity.** The pill at the left of the composer picks
+who answers a new conversation. Each is the real CLI on its own sign-in,
+driven over the protocol it offers hosts, and drawn with the same rows, cards
+and pills:
+
+| Agent | Runs | Sign in with | Asks before acting | Picks a conversation up again |
+| --- | --- | --- | --- | --- |
+| Codex | `codex app-server` | `codex login` (ChatGPT plan) | yes, as cards | yes, its own thread |
+| Gemini | `gemini --experimental-acp` | `gemini` (Google) | yes, as cards | told what was said, as the CLI cannot load a session |
+| Antigravity | `agy`, stream-json print mode | `agy` | no: its mode decides, and refusals are listed when it finishes | yes, its own conversation |
+
+Their conversations are kept in Proton's data folder (`dev.razeen.proton/chats`,
+or `PROTON_CHATS`) and listed with the project's sessions. `PROTON_CODEX_BIN`,
+`PROTON_GEMINI_BIN` and `PROTON_AGY_BIN` point at the commands if they are
+somewhere unusual.
+
+**Artifacts.** When Claude publishes one with its Artifact tool, it opens in the
+pane on the right. Proton keeps a copy of every version it publishes in
+`~/Library/Application Support/dev.razeen.proton/artifacts` (`PROTON_ARTIFACTS`
+moves it) and serves them from `artifact://`, sandboxed: a page can load what a
+claude.ai artifact can and reach nothing of the editor's. **Open on claude.ai**
+goes to the published page. **Import from Claude**, in the artifacts list,
+brings in what Claude Code published from this machine before Proton was
+keeping it — found in the desktop app's session records and in every session's
+own file, with the files each page brought along. One whose page has since
+been deleted comes in as its address, and opens on claude.ai.
 
 ## Antigravity agent connection
 

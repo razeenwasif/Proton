@@ -4321,10 +4321,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-claude"
+version = "0.0.1"
+dependencies = [
+ "dirs",
+ "getrandom 0.3.4",
+ "gix-imara-diff",
+ "libc",
+ "memchr",
+ "serde",
+ "serde_json",
+ "ts-rs",
+]
+
+[[package]]
 name = "proton-core"
 version = "0.0.1"
 dependencies = [
  "proton-agent",
+ "proton-claude",
  "proton-council",
  "proton-dap",
  "proton-data",
@@ -4465,6 +4480,7 @@ name = "proton-shell"
 version = "0.0.1"
 dependencies = [
  "objc2",
+ "proton-claude",
  "proton-core",
  "serde",
  "serde_json",

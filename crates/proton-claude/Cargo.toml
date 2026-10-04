@@ -1,0 +1,26 @@
+[package]
+name = "proton-claude"
+description = "The Chat tab's engines: the real `claude`, `codex`, `gemini` and `agy`, each driven over the protocol it offers a host, their sessions, and what they publish."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+ts-rs = { workspace = true }
+# A session's id is a UUID Proton chooses, so it is known before the process
+# has said a word; the random half of a v4 UUID is all this needs.
+getrandom = "0.3"
+# Where per-user data goes on each platform: the artifacts Proton keeps.
+dirs = "6"
+# Finding the few lines about artifacts in a gigabyte of session files.
+memchr = "2"
+# The hunks of an edit an engine describes only as before and after.
+gix-imara-diff = { workspace = true }
+
+# Whether the process a session registered is still alive.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

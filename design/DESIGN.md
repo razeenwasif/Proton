@@ -296,10 +296,10 @@ mode it still says `NORMAL`, and `d d` still deletes the selected clip.
 
 Codex is the first mode drawn to a second language: one Zed setup, reproduced
 — Aura Dark with Gruvbox syntax, JetBrains Mono for everything, and nothing
-that setup turns off. The other six keep the glass until they are drawn this
-way too, so every rule for it hangs off `data-mode="codex"` on `<html>` or the
-Codex workspace (the block at the end of `ui/styles.css`), never replacing a
-rule the glass relies on.
+that setup turns off. Chat and Data are drawn this way too; the other four
+keep the glass until they are, so every rule for it hangs off `data-mode` on
+`<html>` or the workspace it is for (the blocks near the end of
+`ui/styles.css`), never replacing a rule the glass relies on.
 
 ```
 ╭──────────┬──────────────────────────────┬────────────────┬──────────┬───╮
@@ -364,8 +364,8 @@ process and 0.6 ms of WebKit's GPU process a frame against 4.7 ms and 3.5 ms
 for text, with memory the same; `tests/ui/terminal-bench.html` measures it.
 
 **The agent's header is Zed's**: the thread's name, fading where it runs long,
-then new, expand and `⋯`. Expand is Chat mode — the same conversation given
-the window — and `⋯` holds the panels that used to be a row of tabs, since
+then new, expand and `⋯`. Expand goes to the Chat tab, which is Claude Code,
+and `⋯` holds the panels that used to be a row of tabs, since
 one is open at a time and it is usually the agent. Tool calls read as lines —
 an icon, what it did, and to what — and the composer has no box: what you
 type is set like code, on a double line, under a placeholder in faded lilac.
@@ -391,9 +391,9 @@ application, and each mode binds the same verbs to its own nouns.
 | `u` | undo | undo | undo | undo | undo | undo |
 | visual | text object | multi-select | box-select | box-select | range select | cell range |
 
-Chat is the one mode where the verbs mostly go quiet — `j` `k` walk threads,
-`/` searches the transcript, and everything else defers to the composer, because
-the noun there is prose.
+Chat is the one mode where the verbs go quiet: the keyboard is the
+composer's, because the noun there is a conversation with Claude Code, and its
+own keys — ⇧⇥, `/`, Escape — are the ones that mean something.
 
 Leader is `␣`, and which-key shows the tree after ~200ms:
 
@@ -458,25 +458,63 @@ completion. `⇥` accepts, `⌥⇥` cycles.
 
 ### Chat
 
-A full conversation with the model, given the whole window rather than a 370px
-sidebar. Threads on the left — pinned, today, yesterday — and the conversation
-in a centred 780px column, because a reading measure is a reading measure
-whether or not the app around it is an IDE.
+**Claude Code itself, in a tab.** Not a harness written to resemble it: the
+`claude` command, driven over the stream-json protocol Claude Code's own SDKs
+use (`proton-claude`). Every tool, permission rule, CLAUDE.md, skill, subagent,
+compaction and claude.ai connector is the one Claude Code has — and so is its
+Artifact tool. Proton is the host: it draws the session, asks the questions
+Claude Code would ask in a terminal, and keeps a copy of everything published.
 
-It is not a separate product bolted on. The distinction from the Codex dock is
-where the work lands:
+The layout is Claude Code's app. Sessions run down the left — every session
+Claude Code keeps for the folder, whether it was started here, in a terminal
+or in the desktop app, each resumable — and under them the desktop app's
+sessions from its other folders, each named by its folder. One the desktop
+app has open right now wears a ring, and what is sent to it continues a fork,
+because two programs writing one session would interleave. The conversation is a centred column,
+your messages as bubbles and Claude's as prose. Each tool is one line — a dot
+for its state, a verb, what it acted on, a count — that opens into its diff,
+its output or the lines it read. The questions it stops for are cards answered
+in place: yes, yes and remember the rule it suggests, or no with what to do
+instead; a plan is a card to approve, and AskUserQuestion is a form. Its task
+list sits over the composer, whose pills are the permission mode and the model
+and effort; ⇧⇥ steps the mode, `/` offers Claude Code's commands, Escape stops
+the turn, and an image pastes in. A session left running carries on while
+another is looked at.
 
-|  | Chat mode | Codex dock |
-|---|---|---|
-| For | Thinking, explaining, deciding | Acting on the buffer in front of you |
-| Output | Prose, tables, charts, artifact chips | Diffs, applied in place |
-| Scope | The whole workspace | Usually one file or selection |
+It is worn as Codex is worn: the theme's ground and accent, JetBrains Mono at
+Zed's sizes, the darker strip for a header, rows lit as the tree lights them,
+and Codex's title bar down the right instead of the rails.
 
-The same agent and the same tools underneath, so a chat can end with **Send to
-Codex** and the diffs it staged are already there. The conversation in the
-prototype does exactly that: it profiles the web target, reads Logcat from the
-Android target, concludes both symptoms have one cause in `orbit.ts`, and hands
-back two staged hunks.
+**Artifacts open in the right pane the moment they are published.** The page
+is copied, a version at a time, into Proton's data folder
+(`dev.razeen.proton/artifacts`), so the version published is the one shown,
+offline. It is served from `artifact://` — a scheme the shell answers only from
+that folder, under the policy artifacts are written for (inline script, the
+CDNs claude.ai allows) and with nothing of the editor's in it — and framed
+sandboxed, with an origin of its own, so a page can draw itself and reach
+nothing of Proton's. The pane lists every artifact kept, every version of each,
+and opens the published page on claude.ai. What was published before Proton
+kept it is imported from what this machine remembers — the desktop app's
+records and the sessions' own files — page and files as they are now, or the
+address alone when the page has gone.
+
+**Codex, Gemini and Antigravity answer here too.** The first pill on the
+composer says who is answering; a new conversation can be with any of them.
+Each is its own CLI on its own sign-in — `codex app-server` over JSON-RPC, the
+Gemini CLI over the Agent Client Protocol, `agy` over its stream-json print
+mode — and each is folded into the rows Claude Code's are: a command is a Bash
+row, a patch an edit with its hunks, a refused tool a refused row. The pills
+are the engine's own — its models, its efforts, its permission modes under
+their own names (Codex's Auto and Read only, Antigravity's Review) — and so is
+the account box. What differs is said where it differs: Antigravity cannot stop
+to ask, so what its mode refused is listed when it finishes, with the mode that
+would allow it; the Gemini CLI cannot load a session, so a conversation picked
+up again is told what was said. Their conversations are kept by Proton, as the
+rows it drew, and listed with the project's sessions, tagged with who had them.
+
+The Codex dock keeps Proton's own agent: the one that stages edits for review
+and also speaks to Codex, Gemini and Antigravity. The council lists under the
+sessions, and `/council <question>` convenes it.
 
 ### Codex
 
@@ -538,6 +576,12 @@ listed as the operations it actually ran — `scene.detect`, `transcribe`,
 sidecar `.srt` rather than a flattened render.
 
 ### Data
+
+Drawn as Codex is: the title bar down the right, the project panel as
+Codex's, one ground from edge to edge. The notebook is a column of cells on
+it, each a little raised from the ground as Zed raises a tool call in its
+agent, the one the keys are on outlined; the frame beside it is a table in the
+same type, its numbers in the syntax's colour for numbers.
 
 Notebook, SQL, grid and charts over the same kernel. Cells record their inputs,
 so lineage is real: the analyst cell can say "open sat 17 in Codex" and land on

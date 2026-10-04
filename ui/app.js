@@ -29,6 +29,7 @@ import { createEditorFeedback } from "./editor-feedback.js";
 import { createEditorState, createEditorPaints } from "./editor-state.js";
 import { performanceReview, editorPainted } from "./performance.js";
 import { createTerminalGL, xtermHex } from "./term-gl.js";
+import { createClaude } from "./claude.js";
 import { keyCommand, changesContext } from "./transport.js";
 import { historyCommand, historyShortcut } from "./history-controls.js";
 import {
@@ -461,7 +462,9 @@ function hexOf(css) {
 
 function renderWindowGround(again = false) {
   if (!HAS_SHELL) return;
-  const want = activeMode === "codex" ? hexOf(token("--bg")) : null;
+  // Chat and Data are drawn as Codex is — every pixel the theme's ground —
+  // so they get the same opaque window.
+  const want = ["codex", "chat", "data"].includes(activeMode) ? hexOf(token("--bg")) : null;
   if (!again && want === groundAsked) return;
   groundAsked = want;
   setOpaque(want);
@@ -814,6 +817,16 @@ const displaySettings = createDisplaySettings(document, keep, () => {
     if (activeMode === "codex") $$(".workspace.on [data-editor]").forEach((pane) => renderEditor(Number(pane.dataset.view)));
     panels.refresh();
   });
+});
+
+/* Chat: Claude Code. The module draws what the core sends; the council it
+   hands back here, because the council is Proton's, not Claude Code's. */
+const claude = createClaude({
+  root: document,
+  dispatch,
+  panels,
+  shell: HAS_SHELL,
+  convene: (question) => dispatch({ type: "convene", question }),
 });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
@@ -4093,6 +4106,7 @@ function renderWorkspaces(items, active) {
   $("#sl-project").textContent = current?.name ?? "No workspace";
   $("#sl-project").title = current?.path ?? "";
   projectRoot = current?.path ?? "";
+  claude?.setRoot(projectRoot);
   renderBufferBars();
   // Every rail that lists them: the chrome rail's, and Codex's title bar.
   const html = items
@@ -4750,6 +4764,26 @@ function renderEvent(event) {
       if (activeMode === "data" && event.action.verb === "Insert") {
         requestAnimationFrame(() => enterCell(event.action.object));
       }
+      break;
+
+    case "claudeSessions":
+      claude?.sessions(event);
+      break;
+
+    case "claudeItems":
+      claude?.items(event);
+      break;
+
+    case "claudeStatus":
+      claude?.status(event.status);
+      break;
+
+    case "claudeCapabilities":
+      claude?.capabilities(event.capabilities);
+      break;
+
+    case "artifacts":
+      claude?.artifacts(event);
       break;
 
     case "chats":
@@ -5445,7 +5479,7 @@ function renderCouncil(event) {
   // The stage shows a debate when there is one to show, and the conversation
   // otherwise — one place to look rather than two panes competing.
   const view = $("[data-council-view]");
-  const thread = $("[data-agent-thread]");
+  const thread = $("[data-claude-thread]");
   if (!view || !thread) return;
   const showing = Boolean(event.running || event.brief || event.problem);
   view.hidden = !showing;
@@ -5475,12 +5509,15 @@ function renderCouncil(event) {
 /* Convene, from the button or the side pane's +. The question is whatever is
    in the composer, because that is where a question already is. */
 document.addEventListener("click", (e) => {
-  if (e.target.closest?.("[data-council-ask]") || e.target.closest?.("[data-council-new]")) {
-    const box = $("[data-agent-input]");
-    const question = (box?.textContent ?? "").trim();
-    if (!question) return;
+  if (e.target.closest?.("[data-council-new]")) {
+    const question = (claude?.question() ?? "").replace(/^\/council\s+/, "").trim();
+    if (!question) {
+      flashMessage?.("Type the question in the composer, then press the council button.");
+      claude?.focus();
+      return;
+    }
     dispatch({ type: "convene", question });
-    if (box) box.textContent = "";
+    claude?.clearQuestion();
     return;
   }
   const row = e.target.closest?.("[data-debate]");

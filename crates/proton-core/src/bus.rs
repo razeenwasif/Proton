@@ -5,6 +5,9 @@
 //! design would be wrong and the GPU front end in `docs/ARCHITECTURE.md` would
 //! be unreachable.
 
+use std::collections::BTreeMap;
+
+use proton_claude::{Artifact, Capabilities as ClaudeCapabilities, Engine as ChatEngine, Item as ClaudeItem, SessionSummary as ClaudeSession, Status as ClaudeStatus};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -232,6 +235,60 @@ pub enum Command {
     },
     /// Clear everything that has finished, leaving what is still to come.
     ClearTasks,
+
+    /* ── Claude Code, in the Chat tab ──────────────────────────────── */
+    /// A new conversation on screen, with the engine named or the one new
+    /// conversations start with. Nothing starts until something is said.
+    ClaudeNew {
+        #[serde(default)]
+        #[ts(optional)]
+        engine: Option<ChatEngine>,
+    },
+    /// The engine new conversations start with — Claude Code, Codex, Gemini
+    /// or Antigravity — and a new conversation with it on screen.
+    ClaudeEngine {
+        engine: ChatEngine,
+    },
+    /// Show one of the project's sessions, reading it back if it is not open.
+    ClaudeOpen {
+        session: String,
+    },
+    /// Say something in the conversation on screen.
+    ClaudeSend {
+        text: String,
+        images: Vec<ClaudeImage>,
+    },
+    /// Stop the turn in progress, as Escape does in a terminal.
+    ClaudeStop,
+    /// Answer what a conversation is waiting on.
+    ClaudeAnswer {
+        request: String,
+        answer: ClaudeAnswer,
+    },
+    /// The permission mode — `default`, `acceptEdits`, `plan`, `auto` — for
+    /// the conversation on screen and those started after it.
+    ClaudeMode {
+        mode: String,
+    },
+    ClaudeModel {
+        model: String,
+    },
+    ClaudeEffort {
+        effort: Option<String>,
+    },
+    /// Read the project's sessions again.
+    ClaudeSessions,
+    /// Forget an artifact, and the copies of it kept here.
+    ForgetArtifact {
+        id: String,
+    },
+    /// Bring in the artifacts published from this machine before Proton was
+    /// keeping them: from the desktop app's records and the sessions' files.
+    ImportArtifacts,
+    /// Open a web address in the browser.
+    OpenLink {
+        url: String,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -879,6 +936,40 @@ pub enum Event {
         /// Why there is no kernel, when there is a reason worth showing.
         problem: String,
     },
+    /// The project's conversations, newest first — Claude Code's sessions
+    /// and the other engines' — then the desktop app's from other folders;
+    /// which one is on screen; which are working or waiting on you; and the
+    /// engine a new one starts with.
+    ClaudeSessions {
+        sessions: Vec<ClaudeSession>,
+        active: String,
+        busy: Vec<String>,
+        waiting: Vec<String>,
+        engine: ChatEngine,
+    },
+    /// Rows of the conversation on screen: the ones that changed, or with
+    /// `reset`, all of them. `earlier` says a long session's start was left
+    /// out.
+    ClaudeItems {
+        session: String,
+        items: Vec<ClaudeItem>,
+        reset: bool,
+        earlier: bool,
+    },
+    ClaudeStatus {
+        status: ClaudeStatus,
+    },
+    /// What one engine offers — its models, modes and commands, whose
+    /// account it is, or why it cannot be used here. One for each engine.
+    ClaudeCapabilities {
+        capabilities: ClaudeCapabilities,
+    },
+    /// Every artifact kept here, newest first, and whether an import is
+    /// reading the sessions for more.
+    Artifacts {
+        artifacts: Vec<Artifact>,
+        importing: bool,
+    },
     /// The saved conversations, most recently changed first.
     #[serde(rename_all = "camelCase")]
     Chats {
@@ -1386,4 +1477,27 @@ pub struct ServerState {
     pub language: String,
     pub status: ServerStatus,
     pub note: Option<String>,
+}
+
+/// A picture to go with a prompt.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+pub struct ClaudeImage {
+    /// `image/png`, `image/jpeg`…
+    pub media: String,
+    /// The bytes, in base64.
+    pub data: String,
+}
+
+/// Your answer to what Claude Code asked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ClaudeAnswer {
+    /// Yes — and with `remember`, the rule it suggested, for the session.
+    Allow { remember: bool },
+    /// No, and what to tell it instead.
+    Deny { message: String },
+    /// An AskUserQuestion's answers, by question.
+    Questions { answers: BTreeMap<String, String> },
 }

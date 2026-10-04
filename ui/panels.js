@@ -77,7 +77,9 @@ export function createPanels(root, changed) {
     const defaults = {
       '--col-l': parseFloat(section.style.getPropertyValue('--col-l')) || 232,
       '--col-r': parseFloat(section.style.getPropertyValue('--col-r')) || 280,
-      leftHidden: false, rightHidden: false, preferred: 'left',
+      // A pane can start closed: Chat's artifacts pane opens on the first
+      // thing published rather than standing empty beside every session.
+      leftHidden: false, rightHidden: section.dataset.rightStart === 'hidden', preferred: 'left',
     };
     let saved;
     try { saved = JSON.parse(localStorage.getItem(key(section))); } catch { /* defaults */ }
@@ -142,5 +144,10 @@ export function createPanels(root, changed) {
   };
   for (const event of ['pointerup', 'pointercancel', 'blur']) window.addEventListener(event, finish);
   new ResizeObserver(refresh).observe(root.querySelector('.body'));
-  return { refresh, show };
+  function hide(side, section = active()) {
+    if (!section) return;
+    states.get(section)[`${side}Hidden`] = true;
+    save(section); refresh();
+  }
+  return { refresh, show, hide };
 }
