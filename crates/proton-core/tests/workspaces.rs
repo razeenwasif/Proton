@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use proton_core::bus::Event;
+use proton_core::folder;
 use proton_core::picker::PickerKind;
 use proton_core::{Command, Key, Session};
 
@@ -708,7 +709,15 @@ fn a_first_run_records_what_it_opened() {
     ));
 
     let written = std::fs::read_to_string(&store).expect("the first run wrote a session");
-    assert!(written.contains("alpha"), "{written}");
+    // Once, and by its real path. On macOS the scratch folder is under `/var`,
+    // a link into `/private`, so the path given above is not that.
+    let stored: serde_json::Value = serde_json::from_str(&written).unwrap();
+    let alpha = folder::normalise(&scratch.root.join("alpha"));
+    assert_eq!(
+        stored["open"],
+        serde_json::json!([alpha.display().to_string()]),
+        "{written}"
+    );
 }
 
 #[test]
@@ -744,6 +753,51 @@ fn the_working_directory_is_a_fallback_and_not_a_request() {
 }
 
 #[test]
+fn a_folder_named_through_a_symlink_is_opened_once() {
+    // A link and the folder it leads to are one project, and the one named on
+    // the command line is no exception. On macOS that covers every folder
+    // under `/var` or `/tmp`, which are links into `/private`.
+    //
+    // `proton .` is the same mistake by another name, and has a test binary
+    // of its own because it moves the working directory.
+    let scratch = Scratch::new("symlink");
+    let link = scratch.root.join("link");
+    link_folder(&scratch.root.join("alpha"), &link);
+
+    let session = Session::restore_from(None, Some(link), None);
+    assert_eq!(
+        roots(&session),
+        [folder::normalise(&scratch.root.join("alpha"))],
+        "one workspace, rooted where the link leads"
+    );
+}
+
+#[test]
+fn a_relative_path_in_the_stored_session_is_not_reopened() {
+    // Written by a build that saved `proton .` as typed. Read against this
+    // launch's working directory it is some other folder — from the Dock that
+    // is `/`, and the whole disk becomes a project.
+    let scratch = Scratch::new("relative");
+    let store = scratch.root.join("session.json");
+    let alpha = folder::normalise(&scratch.root.join("alpha"));
+    let old = serde_json::json!({
+        "version": 1,
+        "open": [".", alpha.display().to_string()],
+        "active": 0,
+        "recents": [".", alpha.display().to_string()],
+    });
+    std::fs::write(&store, old.to_string()).unwrap();
+
+    let session = Session::restore_from(Some(store), None, None);
+    assert_eq!(roots(&session), [alpha.clone()]);
+    assert_eq!(
+        session.recents(),
+        [alpha],
+        "nor offered again by the picker"
+    );
+}
+
+#[test]
 fn recents_outlive_the_projects_being_closed() {
     // Closing a project is not forgetting it — reopening is one keystroke and
     // a name, which is the point of the list.
@@ -763,6 +817,37 @@ fn recents_outlive_the_projects_being_closed() {
 
 fn dir_name(path: &Path) -> String {
     path.file_name().unwrap().to_string_lossy().into_owned()
+}
+
+fn roots(session: &Session) -> Vec<PathBuf> {
+    session
+        .workspaces()
+        .iter()
+        .map(|w| w.root().to_path_buf())
+        .collect()
+}
+
+/// Make `link` another name for the folder `target`.
+#[cfg(unix)]
+fn link_folder(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+/// Make `link` another name for the folder `target`: a symlink where one is
+/// allowed, and otherwise a junction. A symlink takes an administrator or
+/// Developer Mode; a junction takes neither, and resolves the same way.
+#[cfg(windows)]
+fn link_folder(target: &Path, link: &Path) {
+    if std::os::windows::fs::symlink_dir(target, link).is_ok() {
+        return;
+    }
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .expect("cmd runs");
+    assert!(made.status.success(), "mklink /J: {made:?}");
 }
 
 /// The event's tag, which is what the front end switches on.

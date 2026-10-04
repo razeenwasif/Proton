@@ -146,6 +146,9 @@ pub struct Session {
 
 impl Session {
     /// One workspace, no persistence, no language servers. What tests want.
+    ///
+    /// The root is used as given, as `Workspace::rooted` uses it. A folder
+    /// somebody typed is normalised on the way in, by `restore_from` or `open`.
     pub fn new(root: impl AsRef<Path>) -> Session {
         Session {
             workspaces: vec![Workspace::rooted(root)],
@@ -243,22 +246,37 @@ impl Session {
             .or_else(|| fallback.filter(|path| path.is_dir()))
             .or_else(folder::home)
             .unwrap_or_else(|| PathBuf::from("."));
-        let mut session = Session::new(&start);
+        // Rooted the way `open` roots a folder rather than as it was typed.
+        // Typed, `proton .` is a project called `.`, saved as `.`, and reopened
+        // next time against wherever the app was launched from — which from
+        // the Dock is `/`.
+        let mut session = Session::new(folder::normalise(&start));
         session.store = store;
         session.recents = saved
             .as_ref()
-            .map(|s| s.recents.iter().map(PathBuf::from).collect())
+            .map(|s| {
+                s.recents
+                    .iter()
+                    .map(PathBuf::from)
+                    .filter(|path| path.is_absolute())
+                    .collect()
+            })
             .unwrap_or_default();
 
         if let Some(saved) = saved {
             // A project can be deleted, renamed, or on a drive that is not
             // plugged in. Skipping it silently is right: refusing to start
             // because a folder from last week is gone would be absurd.
+            //
+            // A relative path is skipped too. Only a build that saved `proton .`
+            // as typed wrote one, and the folder it meant — wherever that
+            // terminal was — is recorded nowhere, so reading it against this
+            // launch's working directory would open some other folder.
             let alive: Vec<PathBuf> = saved
                 .open
                 .iter()
                 .map(PathBuf::from)
-                .filter(|path| path.is_dir())
+                .filter(|path| path.is_absolute() && path.is_dir())
                 .collect();
             if !alive.is_empty() {
                 session.workspaces = alive.iter().map(|path| session.build(path)).collect();
@@ -644,10 +662,11 @@ impl Session {
     }
 
     /// Which open workspace is this folder, if any. `root` is normalised by the
-    /// caller; each workspace's is normalised here, because the one a session
-    /// starts with is rooted wherever it was named — `proton .`, or a path
-    /// through a symlink — and comparing that spelling with a canonical one
-    /// would open the same folder twice.
+    /// caller; each workspace's is normalised here, because not every root
+    /// was — `Session::new` takes its root as given, and a session file written
+    /// before `restore_from` normalised can name a folder through a symlink —
+    /// and comparing that spelling with a canonical one would open the same
+    /// folder twice.
     fn index_of(&self, root: &Path) -> Option<usize> {
         self.workspaces
             .iter()
