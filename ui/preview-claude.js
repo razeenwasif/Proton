@@ -8,6 +8,8 @@
 const ARTIFACT = "4a1f9d2e-77b3-4c41-9e0a-5c2d8f1b6a30";
 const SESSION = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const CODEX_SESSION = "7d3e2f10-5b6a-4c8d-9e0f-1a2b3c4d5e6f";
+const GLOSSARY = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
+const GLOSSARY_ARTIFACT = "9c3b7e21-4d8a-4f6b-a1e2-7b5c0d9e8f14";
 const ROOT = "/Users/you/Projects/Proton";
 
 const now = Date.now();
@@ -162,25 +164,38 @@ export function createClaudePreview(deliver) {
   let engine = "claude";
   let active = SESSION;
   const row = (/** @type {string} */ id, /** @type {string} */ title, /** @type {number} */ updated, extra = {}) =>
-    ({ id, title, updated, folder: "", elsewhere: false, engine: "claude", ...extra });
-  const sessions = () => ({
-    type: "claudeSessions", active, engine, busy: current.activity === "working" ? [active] : [],
-    waiting: current.activity === "waiting" ? [active] : [],
-    sessions: [
+    ({ id, title, updated, cwd: "", elsewhere: false, engine: "claude", ...extra });
+  /** Your folders, as the core keeps them. @type {{id: string, name: string, collapsed: boolean, members: string[]}[]} */
+  let folders = [{ id: "folder-fleet", name: "Fleet", collapsed: false, members: [GLOSSARY, CODEX_SESSION] }];
+  const sessions = () => {
+    const rows = everyRow();
+    const inFolders = new Set(folders.flatMap((f) => f.members));
+    return {
+      type: "claudeSessions", active, engine, busy: current.activity === "working" ? [active] : [],
+      waiting: current.activity === "waiting" ? [active] : [],
+      folders: folders.map((f) => ({ id: f.id, name: f.name, collapsed: f.collapsed,
+        sessions: f.members.map((id) => rows.find((r) => r.id === id)).filter(Boolean) })),
+      sessions: rows.filter((r) => !inFolders.has(r.id)),
+    };
+  };
+  const everyRow = () => [
       row(SESSION, "Why the fleet grid janks", now - 60_000),
       row(CODEX_SESSION, "Make the telemetry poll configurable", now - 2 * 3600_000, { engine: "codex" }),
-      row("1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "Fleet telemetry glossary", now - 3 * 3600_000),
+      row(GLOSSARY, "Fleet telemetry glossary", now - 3 * 3600_000),
       row("6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b", "Port trajectory.c to Android", now - 26 * 3600_000),
       row("9b2c1e44-0d5f-4c2e-8a1b-3f6d7e8c9a0b", "Set up the Parquet ingest", now - 9 * 86400_000),
       // The desktop app's, from its other folders.
-      row("c2a7f9e0-3b1d-4e5f-8a6b-7c9d0e1f2a3b", "Batting averages by venue", now - 5 * 3600_000, { folder: "/Users/you/Github/Cricket-Analysis", elsewhere: true }),
-      row("e4b8a1c2-5d6f-4a7b-9c8d-0e1f2a3b4c5d", "Quantisation and SNR", now - 4 * 86400_000, { folder: "/Users/you/Research/TinyML" }),
-    ],
-  });
+      row("c2a7f9e0-3b1d-4e5f-8a6b-7c9d0e1f2a3b", "Batting averages by venue", now - 5 * 3600_000, { cwd: "/Users/you/Github/Cricket-Analysis", elsewhere: true }),
+      row("e4b8a1c2-5d6f-4a7b-9c8d-0e1f2a3b4c5d", "Quantisation and SNR", now - 4 * 86400_000, { cwd: "/Users/you/Research/TinyML" }),
+    ];
   const artifacts = (importing = false) => ({
     type: "artifacts", importing,
-    artifacts: [{ id: ARTIFACT, url: "https://claude.ai/artifact/preview", title: "Fleet grid frame times", icon: "chart",
-      description: "Frame times before and after the fix", project: ROOT, session: SESSION, versions: [{ seq: 1, file: "index.html", at: now - 60_000 }] }],
+    artifacts: [
+      { id: ARTIFACT, url: "https://claude.ai/artifact/preview", title: "Fleet grid frame times", icon: "chart",
+        description: "Frame times before and after the fix", project: ROOT, session: SESSION, versions: [{ seq: 1, file: "index.html", at: now - 60_000 }] },
+      { id: GLOSSARY_ARTIFACT, url: "https://claude.ai/artifact/glossary", title: "Telemetry glossary", icon: "book",
+        description: "The fields the fleet grid draws", project: ROOT, session: GLOSSARY, versions: [{ seq: 1, file: "index.html", at: now - 3 * 3600_000 }] },
+    ],
   });
 
   const all = () => ({ type: "claudeItems", session: active, items, reset: true, earlier: false });
@@ -274,6 +289,22 @@ export function createClaudePreview(deliver) {
             tasks: [], cost: 0, context: 18812, limit: { window: "seven_day", used: 0.02, resets: Math.round(now / 1000) + 400000, status: "allowed" } });
           return [sessions(), all(), { type: "claudeStatus", status: current }];
         }
+        if (command.session !== SESSION) {
+          // Every other conversation, briefly — its own id, so it has its
+          // own pane; the glossary one published an artifact.
+          const title = everyRow().find((r) => r.id === command.session)?.title ?? "A conversation";
+          active = command.session;
+          items = [
+            { kind: "user", id: "you-1", text: `Pick up “${title}”.`, images: 0 },
+            { kind: "text", id: "m1:0", text: `Here is where **${title}** stands.`, done: true, parent: null },
+            ...(command.session === GLOSSARY ? [{ kind: "tool", id: "g1", name: "Artifact", input: { title: "Telemetry glossary", icon: "book" }, state: "done", streamed: 0,
+              result: "Published", detail: { artifact_id: GLOSSARY_ARTIFACT, seq: 1 }, parent: null, ask: null,
+              artifact: { id: GLOSSARY_ARTIFACT, seq: 1, title: "Telemetry glossary", url: "https://claude.ai/artifact/glossary", icon: "book", file: "index.html" } }] : []),
+            { kind: "turn", id: "turn-1", ms: 12000, turns: 1, cost: 0.01, error: null },
+          ];
+          current = status({ session: active, title, activity: "idle", tasks: [], limit: null });
+          return [sessions(), all(), { type: "claudeStatus", status: current }];
+        }
         active = SESSION;
         items = transcript();
         current = status();
@@ -290,6 +321,34 @@ export function createClaudePreview(deliver) {
       case "claudeEffort":
         current = { ...current, effort: command.effort };
         return [{ type: "claudeStatus", status: current }];
+      case "chatFolderNew": {
+        const taken = new Set(folders.map((f) => f.name));
+        let name = String(command.name ?? "").trim();
+        if (!name) {
+          name = "New folder";
+          for (let n = 2; taken.has(name); n++) name = `New folder ${n}`;
+        }
+        for (const f of folders) f.members = f.members.filter((id) => !command.sessions.includes(id));
+        folders.push({ id: `folder-${++counter}`, name, collapsed: false, members: [...command.sessions] });
+        return [sessions()];
+      }
+      case "chatFolderRename": {
+        const f = folders.find((x) => x.id === command.folder);
+        if (f && String(command.name).trim()) f.name = String(command.name).trim();
+        return [sessions()];
+      }
+      case "chatFolderDelete":
+        folders = folders.filter((f) => f.id !== command.folder);
+        return [sessions()];
+      case "chatFolderCollapse": {
+        const f = folders.find((x) => x.id === command.folder);
+        if (f) f.collapsed = command.collapsed;
+        return [sessions()];
+      }
+      case "chatFolderMove":
+        for (const f of folders) f.members = f.members.filter((id) => id !== command.session);
+        if (command.folder) folders.find((f) => f.id === command.folder)?.members.push(command.session);
+        return [sessions()];
       case "importArtifacts":
         setTimeout(() => {
           deliver(artifacts(false));

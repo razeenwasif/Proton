@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use proton_claude::folders::FolderView as ChatFolder;
 use proton_claude::{Artifact, Capabilities as ClaudeCapabilities, Engine as ChatEngine, Item as ClaudeItem, SessionSummary as ClaudeSession, Status as ClaudeStatus};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -278,6 +279,30 @@ pub enum Command {
     },
     /// Read the project's sessions again.
     ClaudeSessions,
+    /// A new folder for conversations — named, or "New folder" until it is —
+    /// with these put in it.
+    ChatFolderNew {
+        name: String,
+        sessions: Vec<String>,
+    },
+    ChatFolderRename {
+        folder: String,
+        name: String,
+    },
+    /// Delete a folder. Its conversations go back to the list.
+    ChatFolderDelete {
+        folder: String,
+    },
+    ChatFolderCollapse {
+        folder: String,
+        collapsed: bool,
+    },
+    /// Put a conversation in a folder, taking it out of any other — or, with
+    /// no folder, take it out of the one it is in.
+    ChatFolderMove {
+        session: String,
+        folder: Option<String>,
+    },
     /// Forget an artifact, and the copies of it kept here.
     ForgetArtifact {
         id: String,
@@ -942,6 +967,9 @@ pub enum Event {
     /// engine a new one starts with.
     ClaudeSessions {
         sessions: Vec<ClaudeSession>,
+        /// The folders conversations are grouped into, each with what it
+        /// holds; what is in a folder is not in `sessions` as well.
+        folders: Vec<ChatFolder>,
         active: String,
         busy: Vec<String>,
         waiting: Vec<String>,

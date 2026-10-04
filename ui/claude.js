@@ -22,6 +22,7 @@ import { markdown } from "./markdown.js";
 /** @typedef {import("./bindings/ClaudeSession").ClaudeSession} Session */
 /** @typedef {import("./bindings/Artifact").Artifact} Artifact */
 /** @typedef {import("./bindings/ChatEngine").ChatEngine} Engine */
+/** @typedef {import("./bindings/ChatFolder").ChatFolder} Folder */
 
 /** Claude Code's permission modes, in the order Shift+Tab steps through
  *  them — until an engine has said what its own are. */
@@ -81,6 +82,35 @@ function language(path) {
   return names[ext] ?? ext;
 }
 
+/** What a conversation's artifacts pane was showing: whether it was open, the
+ *  artifact and version in it, and whether the list was over it.
+ *  @typedef {{open: boolean, shown: {id: string, seq: number} | null, gallery: boolean}} Pane */
+
+/** Where each conversation's pane is remembered between runs, in this
+ *  window's own storage: it is how the window was left, not the project. */
+const PANES = "proton.chat.panes";
+/** How many conversations' panes are remembered, the latest kept. */
+const PANES_KEPT = 300;
+
+/** @returns {Map<string, Pane>} */
+function loadPanes() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PANES) ?? "[]");
+    return new Map(Array.isArray(saved) ? saved : []);
+  } catch {
+    return new Map();
+  }
+}
+
+/** @param {Map<string, Pane>} panes */
+function savePanes(panes) {
+  try {
+    localStorage.setItem(PANES, JSON.stringify([...panes].slice(-PANES_KEPT)));
+  } catch {
+    // A window that cannot keep it forgets which artifact was open; nothing more.
+  }
+}
+
 /**
  * @param {{
  *   root: Document,
@@ -131,14 +161,18 @@ export function createClaude(host) {
 
   /** @type {{session: string, items: Map<string, Item>, order: string[], status: Status | null,
    *   engines: Map<string, Capabilities>, newEngine: Engine, sessions: Session[], active: string, busy: Set<string>, waiting: Set<string>,
+   *   folders: Folder[], renaming: string, draft: string, fresh: boolean, expectFolder: boolean, knownFolders: Set<string>,
    *   artifacts: Artifact[], open: Set<string>, shown: {id: string, seq: number} | null, root: string,
+   *   panes: Map<string, Pane>, latest: Map<string, number> | null,
    *   attachments: {media: string, data: string, name: string}[], live: boolean, menuIndex: number,
    *   limit: any, verb: string, importing: boolean}} */
   const state = {
     session: "", items: new Map(), order: [], status: null,
     engines: new Map(), newEngine: "claude",
     sessions: [], active: "", busy: new Set(), waiting: new Set(),
+    folders: [], renaming: "", draft: "", fresh: false, expectFolder: false, knownFolders: new Set(),
     artifacts: [], open: new Set(), shown: null, root: "",
+    panes: loadPanes(), latest: null,
     attachments: [], live: false, menuIndex: 0, limit: null, verb: VERBS[0], importing: false,
   };
 
@@ -169,33 +203,62 @@ export function createClaude(host) {
     return days <= 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? "This week" : days < 31 ? "This month" : "Earlier";
   }
 
-  /** One row of the list. @param {Session} s */
+  /** One row of the list, which can be dragged into a folder or moved with
+   *  its menu. @param {Session} s */
   function sessionRow(s) {
     const busy = state.busy.has(s.id), waiting = state.waiting.has(s.id);
     const when = s.updated >= Number.MAX_SAFE_INTEGER ? "now" : new Date(s.updated).toLocaleString();
-    const where = s.folder ? s.folder.split("/").filter(Boolean).pop() ?? s.folder
+    const where = s.cwd ? s.cwd.split("/").filter(Boolean).pop() ?? s.cwd
       : s.engine && s.engine !== "claude" ? ENGINES[s.engine]?.short ?? "" : "";
-    const tip = [s.title, s.engine && s.engine !== "claude" ? ENGINES[s.engine]?.name : "", s.folder ? rel(s.folder) : "", when,
+    const tip = [s.title, s.engine && s.engine !== "claude" ? ENGINES[s.engine]?.name : "", s.cwd ? rel(s.cwd) : "", when,
       s.elsewhere ? "open in another Claude Code" : ""].filter(Boolean).join(" · ");
     return (
-      `<button class="cc-session${s.id === state.active ? " on" : ""}" data-claude-session="${esc(s.id)}" title="${esc(tip)}">` +
+      `<div class="cc-session-wrap">` +
+      `<button class="cc-session${s.id === state.active ? " on" : ""}" data-claude-session="${esc(s.id)}" draggable="true" title="${esc(tip)}">` +
       `<span class="cc-session-name">${esc(s.title || "Untitled")}</span>` +
-      (where ? `<span class="cc-session-where"${s.folder ? "" : ` data-engine="${esc(s.engine)}"`}>${esc(where)}</span>` : "") +
+      (where ? `<span class="cc-session-where"${s.cwd ? "" : ` data-engine="${esc(s.engine)}"`}>${esc(where)}</span>` : "") +
       (busy ? `<span class="cc-spin" aria-label="Working"></span>`
         : waiting ? `<span class="cc-wait" aria-label="Waiting for you"></span>`
         : s.elsewhere ? `<span class="cc-elsewhere" aria-label="Open in another Claude Code"></span>` : "") +
-      `</button>`
+      `</button>` +
+      `<button class="cc-session-more" data-session-menu="${esc(s.id)}" title="Move to a folder" aria-label="Move ${esc(s.title || "this chat")} to a folder">${icon("dots")}</button>` +
+      `</div>`
     );
+  }
+
+  /** A folder: its head, and what it holds unless it is folded. @param {Folder} f */
+  function folderBlock(f) {
+    const renaming = state.renaming === f.id;
+    // Folded, it still says when something in it is working or waiting.
+    const marker = !f.collapsed ? ""
+      : f.sessions.some((s) => state.busy.has(s.id)) ? `<span class="cc-spin" aria-label="Working"></span>`
+      : f.sessions.some((s) => state.waiting.has(s.id)) ? `<span class="cc-wait" aria-label="Waiting for you"></span>` : "";
+    const holdsActive = f.collapsed && f.sessions.some((s) => s.id === state.active);
+    return `<div class="cc-folder${f.collapsed ? " folded" : ""}${holdsActive ? " has-on" : ""}${renaming ? " renaming" : ""}" data-folder="${esc(f.id)}">` +
+      `<div class="cc-folder-head">` +
+      `<button class="cc-folder-toggle" data-folder-toggle="${esc(f.id)}" aria-expanded="${String(!f.collapsed)}" title="${esc(f.name)}">` +
+      `${icon("chev")}${icon(f.collapsed ? "folder" : "folder-open")}` +
+      (renaming ? "" : `<span class="cc-folder-name" data-folder-name="${esc(f.id)}">${esc(f.name)}</span><span class="cc-folder-count">${f.sessions.length || ""}</span>${marker}`) +
+      `</button>` +
+      (renaming ? `<input class="cc-folder-input" data-folder-input="${esc(f.id)}" value="${esc(state.draft)}" aria-label="Folder name" spellcheck="false" autocomplete="off">` : "") +
+      `<button class="cc-folder-more" data-folder-menu="${esc(f.id)}" title="Rename or delete" aria-label="Rename or delete ${esc(f.name)}">${icon("dots")}</button>` +
+      `</div>` +
+      (f.collapsed ? "" : `<div class="cc-folder-body">${f.sessions.length
+        ? f.sessions.map(sessionRow).join("")
+        : `<div class="cc-folder-empty">Drag chats here, or move one with its ⋯ menu</div>`}</div>`) +
+      `</div>`;
   }
 
   function renderSessions() {
     if (!els.sessions) return;
-    // This project's sessions by day, then the desktop app's from its other
-    // folders, newest first.
-    const here = state.sessions.filter((s) => !s.folder);
-    const away = state.sessions.filter((s) => s.folder);
-    let html = "";
-    if (!here.length) html += `<div class="cc-none">No sessions in this project yet.</div>`;
+    // Your folders first; then this project's sessions by day, then the
+    // desktop app's from its other folders, newest first.
+    const here = state.sessions.filter((s) => !s.cwd);
+    const away = state.sessions.filter((s) => s.cwd);
+    let html = `<div class="cc-folders">`;
+    if (state.folders.length) html += `<div class="cc-group">Folders</div>${state.folders.map(folderBlock).join("")}`;
+    html += `</div><div class="cc-loose" data-loose>`;
+    if (!here.length && !state.folders.length) html += `<div class="cc-none">No sessions in this project yet.</div>`;
     let group = "";
     for (const s of here) {
       const label = day(s.updated);
@@ -209,7 +272,91 @@ export function createClaude(host) {
       html += `<div class="cc-group">Claude desktop</div>`;
       for (const s of away) html += sessionRow(s);
     }
+    html += `</div>`;
+    // A name being typed survives the list being redrawn under it.
+    const typing = /** @type {HTMLInputElement | null} */ (els.sessions.querySelector("[data-folder-input]"));
+    const caret = typing && doc.activeElement === typing ? [typing.selectionStart, typing.selectionEnd] : null;
     els.sessions.innerHTML = html;
+    const input = /** @type {HTMLInputElement | null} */ (els.sessions.querySelector("[data-folder-input]"));
+    if (input) {
+      input.focus();
+      if (state.fresh) {
+        input.select();
+        state.fresh = false;
+      } else if (caret) {
+        input.setSelectionRange(caret[0], caret[1]);
+      }
+    }
+  }
+
+  /** Name a folder in place. @param {string} id */
+  function startRename(id) {
+    const folder = state.folders.find((f) => f.id === id);
+    if (!folder) return;
+    state.renaming = id;
+    state.draft = folder.name;
+    state.fresh = true;
+    renderSessions();
+  }
+
+  /** Keep the name typed, or with `cancel`, the one it had. @param {boolean} [cancel] */
+  function finishRename(cancel = false) {
+    const id = state.renaming;
+    if (!id) return;
+    state.renaming = "";
+    const folder = state.folders.find((f) => f.id === id);
+    const name = state.draft.trim();
+    if (!cancel && folder && name && name !== folder.name) {
+      folder.name = name;
+      host.dispatch({ type: "chatFolderRename", folder: id, name });
+    }
+    renderSessions();
+  }
+
+  /* ── the list's menus ─────────────────────────────────────────── */
+
+  const sideMenu = doc.createElement("div");
+  sideMenu.className = "cc-pop cc-side-menu";
+  sideMenu.setAttribute("role", "menu");
+  sideMenu.hidden = true;
+  ws.append(sideMenu);
+
+  /** Open a menu by a point on screen. @param {string} html @param {number} x @param {number} y */
+  function openSideMenu(html, x, y) {
+    sideMenu.innerHTML = html;
+    sideMenu.hidden = false;
+    const width = sideMenu.offsetWidth, height = sideMenu.offsetHeight;
+    sideMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - width - 8))}px`;
+    sideMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - height - 8))}px`;
+    /** @type {HTMLElement | null} */ (sideMenu.querySelector("button"))?.focus();
+  }
+
+  const closeSideMenu = () => { sideMenu.hidden = true; };
+
+  /** Which folder a conversation is in. @param {string} id */
+  const folderOf = (id) => state.folders.find((f) => f.sessions.some((s) => s.id === id));
+
+  /** Where a conversation can go. @param {string} id */
+  function sessionMenu(id) {
+    const now = folderOf(id);
+    return `<div class="cc-pop-head">Move to folder</div>` +
+      state.folders.map((f) =>
+        `<button class="cc-pop-row${f.id === now?.id ? " on" : ""}" role="menuitem" data-move-to="${esc(f.id)}" data-session="${esc(id)}">` +
+        `${icon("folder")}<b>${esc(f.name)}</b>${f.id === now?.id ? icon("check") : ""}</button>`).join("") +
+      `<button class="cc-pop-row" role="menuitem" data-new-folder-with="${esc(id)}">${icon("plus")}<b>New folder…</b></button>` +
+      (now ? `<button class="cc-pop-row" role="menuitem" data-move-out="${esc(id)}">${icon("close")}<b>Remove from ${esc(now.name)}</b></button>` : "");
+  }
+
+  /** @param {string} id */
+  function folderMenu(id) {
+    return `<button class="cc-pop-row" role="menuitem" data-folder-rename="${esc(id)}">${icon("pen")}<b>Rename</b></button>` +
+      `<button class="cc-pop-row" role="menuitem" data-folder-delete="${esc(id)}">${icon("close")}<b>Delete folder</b><span>Its chats go back to the list</span></button>`;
+  }
+
+  /** A new folder, named in place once it exists. @param {string[]} sessions */
+  function newFolder(sessions) {
+    state.expectFolder = true;
+    host.dispatch({ type: "chatFolderNew", name: "", sessions });
   }
 
   function renderAccount() {
@@ -607,7 +754,11 @@ export function createClaude(host) {
   function items(event) {
     const stick = nearBottom();
     if (event.reset || event.session !== state.session) {
+      const switched = event.session !== state.session;
       state.session = event.session;
+      // Each conversation has its own pane: what it had open comes back with
+      // it, and one that never opened anything has it closed.
+      if (switched) restorePane();
       state.items.clear();
       state.order = [];
       els.items.innerHTML = "";
@@ -745,8 +896,20 @@ export function createClaude(host) {
     renderComposerState();
   }
 
-  /** @param {{sessions: Session[], active: string, busy: string[], waiting: string[], engine?: Engine}} event */
+  /** @param {{sessions: Session[], folders?: Folder[], active: string, busy: string[], waiting: string[], engine?: Engine}} event */
   function sessions(event) {
+    state.folders = event.folders ?? [];
+    // A folder just asked for is named in place as soon as it exists.
+    const made = state.expectFolder ? state.folders.find((f) => !state.knownFolders.has(f.id)) : undefined;
+    state.knownFolders = new Set(state.folders.map((f) => f.id));
+    if (made) {
+      state.expectFolder = false;
+      state.renaming = made.id;
+      state.draft = made.name;
+      state.fresh = true;
+    } else if (state.renaming && !state.knownFolders.has(state.renaming)) {
+      state.renaming = "";
+    }
     if (event.engine && event.engine !== state.newEngine) {
       state.newEngine = event.engine;
       if (!state.status) {
@@ -781,12 +944,26 @@ export function createClaude(host) {
   /** @param {{artifacts: Artifact[], importing: boolean}} event */
   function artifacts(event) {
     const list = event.artifacts;
+    const wasImporting = state.importing;
     state.artifacts = list;
     state.importing = Boolean(event.importing);
-    if (els.artCount) {
-      els.artCount.textContent = list.length ? String(list.length) : "";
-      els.artCount.hidden = !list.length;
+    // What a conversation off screen publishes is waiting open in its pane
+    // when it is next looked at. An import brings in the past, and opens
+    // nothing.
+    const latest = new Map(list.map((a) => [a.id, a.versions[a.versions.length - 1]?.seq ?? 0]));
+    if (state.latest && !wasImporting && !state.importing) {
+      for (const a of list) {
+        const seq = latest.get(a.id) ?? 0;
+        if (a.session && a.session !== state.session && seq > (state.latest.get(a.id) ?? 0)) {
+          recordPane({ open: true, shown: { id: a.id, seq }, gallery: false }, a.session);
+        }
+      }
     }
+    state.latest = latest;
+    renderCount();
+    // A pane put back before the list arrived — on connect, the conversation
+    // comes first — is drawn again now its artifact is known.
+    if (state.shown && unknown && list.some((a) => a.id === state.shown?.id)) present(state.shown.id, state.shown.seq);
     if (state.shown) {
       const a = list.find((x) => x.id === state.shown?.id);
       if (a) renderVersions(a);
@@ -802,6 +979,78 @@ export function createClaude(host) {
     els.artVersion.hidden = a.versions.length < 2;
   }
 
+  /** This conversation's artifacts, on the pane's toggle. */
+  function renderCount() {
+    if (!els.artCount) return;
+    const mine = state.artifacts.filter((a) => a.session && a.session === state.session).length;
+    els.artCount.textContent = mine ? String(mine) : "";
+    els.artCount.hidden = !mine;
+  }
+
+  /** Remember what a conversation's pane shows. @param {Partial<Pane>} patch @param {string} [session] */
+  function recordPane(patch, session = state.session) {
+    if (!session) return;
+    const was = state.panes.get(session) ?? { open: false, shown: null, gallery: false };
+    state.panes.delete(session);
+    state.panes.set(session, { ...was, ...patch });
+    savePanes(state.panes);
+  }
+
+  const emptyHtml = els.artEmpty?.innerHTML ?? "";
+
+  /** The pane with nothing in it. */
+  function clearPane() {
+    state.shown = null;
+    delete ws.dataset.artifact;
+    if (els.artTitle) els.artTitle.textContent = "Artifacts";
+    if (els.artIcon) els.artIcon.innerHTML = icon("layers");
+    if (els.artVersion) els.artVersion.hidden = true;
+    if (els.artFrame) {
+      els.artFrame.hidden = true;
+      if (els.artFrame.getAttribute("src")) els.artFrame.setAttribute("src", "about:blank");
+    }
+    if (els.artDoc) els.artDoc.hidden = true;
+    if (els.artEmpty) {
+      els.artEmpty.hidden = false;
+      els.artEmpty.innerHTML = emptyHtml;
+    }
+    if (els.gallery) els.gallery.hidden = true;
+  }
+
+  /** Put the pane back as the conversation now on screen left it. */
+  function restorePane() {
+    const pane = state.panes.get(state.session);
+    clearPane();
+    if (pane?.shown) present(pane.shown.id, pane.shown.seq);
+    if (pane?.gallery && els.gallery) els.gallery.hidden = false;
+    renderGallery();
+    renderCount();
+    restoring = true;
+    if (pane?.open) host.panels.show("right", ws);
+    else host.panels.hide?.("right", ws);
+    restoring = false;
+  }
+
+  /** Whether the pane is being put back rather than opened or closed by hand. */
+  let restoring = false;
+
+  // However the pane is opened or closed — its own buttons, the title bar,
+  // a shortcut — this conversation remembers it so.
+  new MutationObserver(() => {
+    if (!restoring) recordPane({ open: ws.dataset.rightOpen === "true" });
+  }).observe(ws, { attributes: true, attributeFilter: ["data-right-open"] });
+
+  /** @param {Artifact} a */
+  function galleryRow(a) {
+    const latest = a.versions[a.versions.length - 1];
+    const when = latest ? new Date(latest.at).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
+    return `<div class="cc-gallery-row${a.id === state.shown?.id ? " on" : ""}">` +
+      `<button class="cc-gallery-open" data-claude-artifact="${esc(a.id)}" data-seq="${latest?.seq ?? 1}">` +
+      `<span class="cc-artifact-icon">${icon(artifactIcon(a))}</span>` +
+      `<span class="cc-artifact-text"><b>${esc(a.title)}</b><small>${esc(a.description || `${a.versions.length} version${a.versions.length === 1 ? "" : "s"}`)} · ${esc(when)}</small></span></button>` +
+      `<button class="hbtn" data-artifact-forget="${esc(a.id)}" title="Forget this artifact here (it stays on claude.ai)">${icon("close")}</button></div>`;
+  }
+
   function renderGallery() {
     if (!els.gallery) return;
     const list = state.artifacts;
@@ -812,22 +1061,33 @@ export function createClaude(host) {
         ? `<span class="cc-importing"><span class="cc-spin"></span>Reading your sessions…</span>`
         : `<button class="cc-secondary" data-artifact-import title="Bring in what Claude Code published from this machine before Proton kept it">Import from Claude</button>`) +
       `</div>`;
+    // This conversation's first, then everything else kept here.
+    const mine = list.filter((a) => a.session && a.session === state.session);
+    const rest = list.filter((a) => !mine.includes(a));
     els.gallery.innerHTML = head + (list.length
-      ? list.map((a) => {
-        const latest = a.versions[a.versions.length - 1];
-        const when = latest ? new Date(latest.at).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
-        return `<div class="cc-gallery-row${a.id === state.shown?.id ? " on" : ""}">` +
-          `<button class="cc-gallery-open" data-claude-artifact="${esc(a.id)}" data-seq="${latest?.seq ?? 1}">` +
-          `<span class="cc-artifact-icon">${icon(artifactIcon(a))}</span>` +
-          `<span class="cc-artifact-text"><b>${esc(a.title)}</b><small>${esc(a.description || `${a.versions.length} version${a.versions.length === 1 ? "" : "s"}`)} · ${esc(when)}</small></span></button>` +
-          `<button class="hbtn" data-artifact-forget="${esc(a.id)}" title="Forget this artifact here (it stays on claude.ai)">${icon("close")}</button></div>`;
-      }).join("")
+      ? (mine.length
+        ? `<div class="cc-gallery-group">In this chat</div>${mine.map(galleryRow).join("")}` +
+          (rest.length ? `<div class="cc-gallery-group">Other chats</div>${rest.map(galleryRow).join("")}` : "")
+        : rest.map(galleryRow).join(""))
       : `<div class="cc-none">Nothing published yet. Ask Claude to make something — a page, a chart, a small app — and it opens here, or import what you have already published.</div>`);
   }
 
-  /** Show an artifact in the pane. @param {string} id @param {number} seq @param {any} [ref] */
+  /** Show an artifact in the pane, and open the pane on it. @param {string} id @param {number} seq @param {any} [ref] */
   function openArtifact(id, seq, ref) {
+    present(id, seq, ref);
+    if (els.gallery) els.gallery.hidden = true;
+    renderGallery();
+    host.panels.show("right", ws);
+    recordPane({ open: true, shown: state.shown, gallery: false });
+  }
+
+  /** Whether the artifact in the pane was not yet in the list when it was put there. */
+  let unknown = false;
+
+  /** Load an artifact into the pane, open or not. @param {string} id @param {number} seq @param {any} [ref] */
+  function present(id, seq, ref) {
     const a = state.artifacts.find((x) => x.id === id);
+    unknown = !a && !ref;
     const version = a?.versions.find((v) => v.seq === seq) ?? a?.versions[a.versions.length - 1];
     const file = version?.file ?? ref?.file ?? "";
     const title = a?.title ?? ref?.title ?? "Artifact";
@@ -839,7 +1099,6 @@ export function createClaude(host) {
     ws.querySelector("[data-artifact-open]")?.setAttribute("data-url", url);
     if (a) renderVersions(a);
     else if (els.artVersion) els.artVersion.hidden = true;
-    if (els.gallery) els.gallery.hidden = true;
     const src = file ? `${base()}${encodeURIComponent(id)}/${state.shown.seq}/${file.split("/").map(encodeURIComponent).join("/")}` : "";
     const isMarkdown = /\.(md|markdown)$/i.test(file);
     if (els.artEmpty) {
@@ -863,8 +1122,6 @@ export function createClaude(host) {
           .catch(() => { els.artDoc.innerHTML = `<div class="cc-none">Could not read this document.</div>`; });
       }
     }
-    renderGallery();
-    host.panels.show("right", ws);
   }
 
   function showGallery() {
@@ -872,6 +1129,7 @@ export function createClaude(host) {
     els.gallery.hidden = !els.gallery.hidden;
     renderGallery();
     if (!els.gallery.hidden) host.panels.show("right", ws);
+    recordPane({ gallery: !els.gallery.hidden, ...(els.gallery.hidden ? {} : { open: true }) });
   }
 
   /* ── the composer ─────────────────────────────────────────────── */
@@ -1042,6 +1300,77 @@ export function createClaude(host) {
     const pop = els.pop;
     if (pop && !pop.hidden && !target.closest("[data-claude-pop]") && !target.closest("[data-pop]")) pop.hidden = true;
 
+    if (!sideMenu.hidden && !target.closest(".cc-side-menu") && !target.closest("[data-session-menu]") && !target.closest("[data-folder-menu]")) closeSideMenu();
+    const more = target.closest("[data-session-menu]") ?? target.closest("[data-folder-menu]");
+    if (more) {
+      const el = /** @type {HTMLElement} */ (more);
+      const box = el.getBoundingClientRect();
+      const html = el.dataset.sessionMenu ? sessionMenu(el.dataset.sessionMenu) : folderMenu(el.dataset.folderMenu ?? "");
+      if (!sideMenu.hidden && sideMenu.dataset.for === (el.dataset.sessionMenu ?? el.dataset.folderMenu)) closeSideMenu();
+      else {
+        openSideMenu(html, box.left, box.bottom + 4);
+        sideMenu.dataset.for = el.dataset.sessionMenu ?? el.dataset.folderMenu ?? "";
+      }
+      return;
+    }
+    const moveTo = target.closest("[data-move-to]");
+    if (moveTo) {
+      const el = /** @type {HTMLElement} */ (moveTo);
+      closeSideMenu();
+      if (folderOf(el.dataset.session ?? "")?.id !== el.dataset.moveTo) {
+        host.dispatch({ type: "chatFolderMove", session: el.dataset.session, folder: el.dataset.moveTo });
+      }
+      return;
+    }
+    const moveOut = target.closest("[data-move-out]");
+    if (moveOut) {
+      closeSideMenu();
+      host.dispatch({ type: "chatFolderMove", session: /** @type {HTMLElement} */ (moveOut).dataset.moveOut, folder: null });
+      return;
+    }
+    const withSession = target.closest("[data-new-folder-with]");
+    if (withSession) {
+      closeSideMenu();
+      newFolder([/** @type {HTMLElement} */ (withSession).dataset.newFolderWith ?? ""]);
+      return;
+    }
+    if (target.closest("[data-claude-new-folder]")) {
+      newFolder([]);
+      return;
+    }
+    const rename = target.closest("[data-folder-rename]");
+    if (rename) {
+      closeSideMenu();
+      startRename(/** @type {HTMLElement} */ (rename).dataset.folderRename ?? "");
+      return;
+    }
+    const drop = target.closest("[data-folder-delete]");
+    if (drop) {
+      closeSideMenu();
+      host.dispatch({ type: "chatFolderDelete", folder: /** @type {HTMLElement} */ (drop).dataset.folderDelete });
+      return;
+    }
+    const toggleFolder = target.closest("[data-folder-toggle]");
+    if (toggleFolder) {
+      const id = /** @type {HTMLElement} */ (toggleFolder).dataset.folderToggle ?? "";
+      const folder = state.folders.find((f) => f.id === id);
+      // A double click names it: the first click of the two folded it, so it
+      // is unfolded again rather than left the other way.
+      if (folder && e.detail >= 2) {
+        folder.collapsed = !folder.collapsed;
+        host.dispatch({ type: "chatFolderCollapse", folder: id, collapsed: folder.collapsed });
+        startRename(id);
+        return;
+      }
+      if (folder) {
+        // Folded at once; the core keeps it so for every project.
+        folder.collapsed = !folder.collapsed;
+        renderSessions();
+        host.dispatch({ type: "chatFolderCollapse", folder: id, collapsed: folder.collapsed });
+      }
+      return;
+    }
+
     const link = target.closest("a[data-link]");
     if (link) {
       e.preventDefault();
@@ -1189,6 +1518,99 @@ export function createClaude(host) {
       host.dispatch({ type: "claudeMode", mode: /** @type {HTMLElement} */ (setMode).dataset.claudeSetMode });
       if (els.pop) els.pop.hidden = true;
     }
+  });
+
+  // A right click on a chat or a folder offers what its ⋯ does.
+  ws.addEventListener("contextmenu", (e) => {
+    const target = /** @type {HTMLElement} */ (e.target);
+    const row = /** @type {HTMLElement | null} */ (target.closest?.("[data-claude-session]"));
+    const folder = /** @type {HTMLElement | null} */ (target.closest?.("[data-folder-toggle]"));
+    if (!row && !folder) return;
+    e.preventDefault();
+    const id = row ? row.dataset.claudeSession ?? "" : folder?.dataset.folderToggle ?? "";
+    openSideMenu(row ? sessionMenu(id) : folderMenu(id), e.clientX, e.clientY);
+    sideMenu.dataset.for = id;
+  });
+
+  // Naming a folder in place: Enter keeps it, Escape does not, and leaving
+  // the field keeps it too. Its keys are its own, not the chat's or Vim's.
+  els.sessions?.addEventListener("input", (e) => {
+    const field = /** @type {HTMLInputElement} */ (e.target);
+    if (field.matches?.("[data-folder-input]")) state.draft = field.value;
+  });
+  els.sessions?.addEventListener("keydown", (e) => {
+    const field = /** @type {HTMLElement} */ (e.target);
+    if (field.matches?.("[data-folder-toggle]") && e.key === "F2") {
+      e.preventDefault();
+      startRename(field.dataset.folderToggle ?? "");
+      return;
+    }
+    if (!field.matches?.("[data-folder-input]")) return;
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finishRename();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      finishRename(true);
+    }
+  });
+  els.sessions?.addEventListener("focusout", (e) => {
+    if (!/** @type {HTMLElement} */ (e.target).matches?.("[data-folder-input]")) return;
+    // A redraw puts the focus in a new field; only leaving it for good keeps
+    // the name.
+    setTimeout(() => {
+      if (state.renaming && !doc.activeElement?.matches?.("[data-folder-input]")) finishRename();
+    }, 0);
+  });
+  sideMenu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeSideMenu();
+    }
+  });
+
+  // Dragging a chat onto a folder puts it there; onto the list, takes it out.
+  const DRAGGED = "application/x-proton-chat";
+  /** @param {Element | null} on */
+  const markDrop = (on) => {
+    els.sessions?.querySelectorAll(".drop").forEach((el) => { if (el !== on) el.classList.remove("drop"); });
+    on?.classList.add("drop");
+  };
+  els.sessions?.addEventListener("dragstart", (e) => {
+    const row = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest?.("[data-claude-session]"));
+    if (!row || !e.dataTransfer) return;
+    e.dataTransfer.setData(DRAGGED, row.dataset.claudeSession ?? "");
+    e.dataTransfer.effectAllowed = "move";
+    row.classList.add("dragging");
+    closeSideMenu();
+  });
+  els.sessions?.addEventListener("dragend", () => {
+    els.sessions?.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
+    markDrop(null);
+  });
+  els.sessions?.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer?.types.includes(DRAGGED)) return;
+    const target = /** @type {HTMLElement} */ (e.target);
+    const on = target.closest?.("[data-folder]") ?? target.closest?.("[data-loose]");
+    if (!on) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    markDrop(on);
+  });
+  els.sessions?.addEventListener("dragleave", (e) => {
+    if (!els.sessions?.contains(/** @type {Node | null} */ (e.relatedTarget))) markDrop(null);
+  });
+  els.sessions?.addEventListener("drop", (e) => {
+    const id = e.dataTransfer?.getData(DRAGGED);
+    if (!id) return;
+    e.preventDefault();
+    markDrop(null);
+    const target = /** @type {HTMLElement} */ (e.target);
+    const folder = /** @type {HTMLElement | null} */ (target.closest?.("[data-folder]"))?.dataset.folder ?? null;
+    if (!folder && !target.closest?.("[data-loose]")) return;
+    // Dropped where it already is, nothing moves.
+    if ((folderOf(id)?.id ?? null) !== folder) host.dispatch({ type: "chatFolderMove", session: id, folder });
   });
 
   // A question card: the answers, by question.

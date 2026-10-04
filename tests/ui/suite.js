@@ -1,7 +1,9 @@
 import {orderingChecks} from './ordering.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
-const layoutKeys = ['chat', 'codex', 'design', 'modeling', 'game', 'video', 'data'].map((mode) => `proton.panes.${mode}`);
+const layoutKeys = [...['chat', 'codex', 'design', 'modeling', 'game', 'video', 'data'].map((mode) => `proton.panes.${mode}`),
+  // Which artifact each conversation had open.
+  'proton.chat.panes'];
 const savedLayouts = layoutKeys.map((key) => [key, localStorage.getItem(key)]);
 layoutKeys.forEach((key) => localStorage.removeItem(key));
 const restoreLayouts = () => savedLayouts.forEach(([key, value]) => {
@@ -1000,10 +1002,10 @@ await test('Replies are markdown that never becomes HTML, and their links open i
 await test('The desktop app\'s sessions from other folders are listed apart, by folder, and one open elsewhere says so', async () => {
   const ws = $('.workspace[data-ws="chat"]');
   await ccPush({type: 'claudeSessions', active: 's1', busy: [], waiting: [], engine: 'claude', sessions: [
-    {id: 's1', title: 'Fix the build', updated: Date.now(), folder: '', elsewhere: false, engine: 'claude'},
-    {id: 'x1', title: 'Make the poll configurable', updated: Date.now() - 1000, folder: '', elsewhere: false, engine: 'codex'},
-    {id: 'd1', title: 'Batting averages', updated: Date.now() - 5000, folder: '/Users/you/Github/Cricket-Analysis', elsewhere: true, engine: 'claude'},
-    {id: 'd2', title: 'Quantisation and SNR', updated: Date.now() - 9000, folder: '/Users/you/Research/TinyML', elsewhere: false, engine: 'claude'}]});
+    {id: 's1', title: 'Fix the build', updated: Date.now(), cwd: '', elsewhere: false, engine: 'claude'},
+    {id: 'x1', title: 'Make the poll configurable', updated: Date.now() - 1000, cwd: '', elsewhere: false, engine: 'codex'},
+    {id: 'd1', title: 'Batting averages', updated: Date.now() - 5000, cwd: '/Users/you/Github/Cricket-Analysis', elsewhere: true, engine: 'claude'},
+    {id: 'd2', title: 'Quantisation and SNR', updated: Date.now() - 9000, cwd: '/Users/you/Research/TinyML', elsewhere: false, engine: 'claude'}]});
   const groups = [...ws.querySelectorAll('.cc-group')].map((g) => g.textContent);
   assert(groups[groups.length - 1] === 'Claude desktop', `groups are ${groups}`);
   const row = (id) => ws.querySelector(`[data-claude-session="${id}"]`);
@@ -1063,6 +1065,122 @@ await test('A Codex patch reads as an edit of its file, and its approval asks in
   const answer = sentSince(before, 'claudeAnswer')[0];
   assert(answer?.request === 'codex-3' && answer.answer.remember === true, `"for this session" sent ${JSON.stringify(answer)}`);
   await ccPush({type: 'claudeStatus', status: ccStatus()}, {type: 'claudeCapabilities', capabilities: ccCaps});
+});
+const folderEvent = (folders, sessions = []) => ({type: 'claudeSessions', active: 's1', busy: [], waiting: ['f2'], engine: 'claude', folders, sessions});
+const chatRow = (id, title, extra = {}) => ({id, title, updated: Date.now(), cwd: '', elsewhere: false, engine: 'claude', ...extra});
+await test('Chats sit in folders: a folder folds, says what is waiting in it, and its menu renames or deletes it', async () => {
+  // Focus and the pane need the tab on screen.
+  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
+  const ws = $('.workspace[data-ws="chat"]');
+  await ccPush(folderEvent([
+    {id: 'F1', name: 'Research', collapsed: false, sessions: [chatRow('f1', 'Linear Programming'), chatRow('f2', 'Convex Optimization', {cwd: '/Users/you/Github'})]},
+    {id: 'F2', name: 'Empty', collapsed: false, sessions: []},
+  ], [chatRow('s1', 'Fix the build')]));
+  const research = ws.querySelector('[data-folder="F1"]');
+  assert(research.querySelector('.cc-folder-name').textContent === 'Research' && research.querySelector('.cc-folder-count').textContent === '2', 'the folder does not name itself and count its chats');
+  assert(research.querySelectorAll('.cc-session').length === 2 && !ws.querySelector('.cc-loose [data-claude-session="f1"]'), 'a chat in a folder is not drawn there, or is drawn twice');
+  assert(research.querySelector('[data-claude-session="f2"] .cc-session-where')?.textContent === 'Github', 'a chat from another folder does not say which');
+  assert(ws.querySelector('[data-folder="F2"] .cc-folder-empty'), 'an empty folder does not say how to fill it');
+  let before = win.commands.length;
+  research.querySelector('[data-folder-toggle]').click(); await settle();
+  assert(sentSince(before, 'chatFolderCollapse')[0]?.collapsed === true, 'folding was not kept');
+  const folded = ws.querySelector('[data-folder="F1"]');
+  assert(!folded.querySelector('.cc-session') && folded.querySelector('.cc-folder-head .cc-wait'), 'a folded folder shows its chats, or hides that one is waiting');
+  ws.querySelector('[data-folder-menu="F2"]').click(); await settle();
+  const menu = ws.querySelector('.cc-side-menu');
+  assert(!menu.hidden && menu.textContent.includes('Rename') && menu.textContent.includes('Delete folder'), 'the folder menu is wrong');
+  before = win.commands.length;
+  menu.querySelector('[data-folder-delete="F2"]').click(); await settle();
+  assert(sentSince(before, 'chatFolderDelete')[0]?.folder === 'F2' && menu.hidden, 'deleting did not ask the core');
+  ws.querySelector('[data-folder-menu="F1"]').click(); await settle();
+  ws.querySelector('.cc-side-menu [data-folder-rename="F1"]').click(); await settle();
+  const field = ws.querySelector('[data-folder-input="F1"]');
+  assert(field && doc.activeElement === field && field.selectionEnd - field.selectionStart === 'Research'.length, 'renaming does not put the name in a field, selected');
+  before = win.commands.length;
+  field.value = 'Optimisation'; field.dispatchEvent(new win.Event('input', {bubbles: true}));
+  field.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); await settle();
+  const renamed = sentSince(before, 'chatFolderRename')[0];
+  assert(renamed?.folder === 'F1' && renamed.name === 'Optimisation', `renaming sent ${JSON.stringify(renamed)}`);
+  assert(!sentSince(before, 'key').length && !sentSince(before, 'claudeStop').length, 'the name reached Vim or stopped the turn');
+});
+await test('A chat moves into a folder by its menu or by being dragged there, and a new folder is named in place', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  await ccPush(folderEvent([{id: 'F1', name: 'Research', collapsed: false, sessions: [chatRow('f1', 'Linear Programming')]}],
+    [chatRow('s1', 'Fix the build'), chatRow('s3', 'Port the parser')]));
+  ws.querySelector('[data-session-menu="s3"]').click(); await settle();
+  const menu = ws.querySelector('.cc-side-menu');
+  assert([...menu.querySelectorAll('[data-move-to]')].map((b) => b.textContent).join() === 'Research' && menu.querySelector('[data-new-folder-with="s3"]'), 'the chat menu does not offer the folders and a new one');
+  let before = win.commands.length;
+  menu.querySelector('[data-move-to="F1"]').click(); await settle();
+  let moved = sentSince(before, 'chatFolderMove')[0];
+  assert(moved?.session === 's3' && moved.folder === 'F1', `the menu moved ${JSON.stringify(moved)}`);
+  // Dragged onto the folder, and a folder's chat dragged back to the list.
+  const drag = async (row, onto) => {
+    const data = new win.DataTransfer();
+    row.dispatchEvent(new win.DragEvent('dragstart', {bubbles: true, cancelable: true, dataTransfer: data}));
+    const over = new win.DragEvent('dragover', {bubbles: true, cancelable: true, dataTransfer: data});
+    onto.dispatchEvent(over);
+    onto.dispatchEvent(new win.DragEvent('drop', {bubbles: true, cancelable: true, dataTransfer: data}));
+    row.dispatchEvent(new win.DragEvent('dragend', {bubbles: true, dataTransfer: data}));
+    await settle();
+    return over.defaultPrevented;
+  };
+  before = win.commands.length;
+  assert(await drag(ws.querySelector('[data-claude-session="s1"]'), ws.querySelector('[data-folder="F1"] .cc-folder-toggle')), 'a folder does not take a dragged chat');
+  moved = sentSince(before, 'chatFolderMove')[0];
+  assert(moved?.session === 's1' && moved.folder === 'F1', `dragging in moved ${JSON.stringify(moved)}`);
+  before = win.commands.length;
+  await drag(ws.querySelector('[data-claude-session="f1"]'), ws.querySelector('.cc-loose'));
+  moved = sentSince(before, 'chatFolderMove')[0];
+  assert(moved?.session === 'f1' && moved.folder === null, `dragging out moved ${JSON.stringify(moved)}`);
+  before = win.commands.length;
+  ws.querySelector('[data-claude-new-folder]').click(); await settle();
+  const asked = sentSince(before, 'chatFolderNew')[0];
+  assert(asked && asked.name === '' && asked.sessions.length === 0, `the new folder button sent ${JSON.stringify(asked)}`);
+  await ccPush(folderEvent([{id: 'F1', name: 'Research', collapsed: false, sessions: []}, {id: 'F9', name: 'New folder', collapsed: false, sessions: []}]));
+  const field = ws.querySelector('[data-folder-input="F9"]');
+  assert(field && doc.activeElement === field && field.value === 'New folder', 'a new folder is not waiting to be named');
+  field.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+  assert(!ws.querySelector('[data-folder-input]'), 'Escape did not leave the name as it was');
+  await ccPush(folderEvent([], [chatRow('s1', 'Fix the build')]));
+});
+await test('Each chat keeps its own artifacts pane, and one published while you were elsewhere is waiting', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  const artifact = (id, session, seq = 1) => ({id, url: `https://claude.ai/artifact/${id}`, title: `Artifact ${id}`, icon: 'chart', description: '',
+    project: '/fixture', session, versions: Array.from({length: seq}, (_, i) => ({seq: i + 1, file: 'index.html', at: Date.now()}))});
+  const open = () => ws.dataset.rightOpen === 'true';
+  const shown = () => ws.dataset.artifact ?? null;
+  const visit = (session) => ccPush({type: 'claudeItems', session, items: [{kind: 'user', id: `u-${session}`, text: session, images: 0}], reset: true, earlier: false});
+  // Brought in as an import is, so neither counts as published while away.
+  await ccPush({type: 'artifacts', importing: true, artifacts: [artifact('A1', 'milp'), artifact('B1', 'cvx')]},
+    {type: 'artifacts', importing: false, artifacts: [artifact('A1', 'milp'), artifact('B1', 'cvx')]});
+  await visit('milp');
+  assert(!open(), 'a chat that never opened an artifact has its pane open');
+  await ccPush({type: 'claudeItems', session: 'milp', reset: false, earlier: false, items: [ccTool('pub', 'Artifact', {title: 'A'}, {
+    artifact: {id: 'A1', seq: 1, title: 'Artifact A1', url: 'https://claude.ai/artifact/A1', icon: 'chart', file: 'index.html'}})]});
+  assert(open() && shown() === 'A1', 'the MILP chat did not open its artifact');
+  await visit('cvx');
+  assert(!open() && shown() === null, 'the CVX chat inherited the MILP chat\'s pane');
+  ws.querySelector('[data-artifacts-toggle]').click(); await settle();
+  const gallery = ws.querySelector('[data-artifact-gallery-list]');
+  assert(gallery.querySelector('.cc-gallery-group')?.textContent === 'In this chat' && gallery.querySelector('.cc-gallery-row [data-claude-artifact="B1"]'), 'the list does not put this chat\'s artifacts first');
+  gallery.querySelector('[data-claude-artifact="B1"]').click(); await settle();
+  assert(open() && shown() === 'B1', 'the CVX chat did not open its own artifact');
+  await visit('milp');
+  assert(open() && shown() === 'A1', 'going back to the MILP chat did not bring back its artifact');
+  ws.querySelector('[data-artifact-close]').click(); await settle();
+  await visit('cvx');
+  assert(open() && shown() === 'B1', 'closing the MILP chat\'s pane closed the CVX chat\'s');
+  await visit('milp');
+  assert(!open(), 'the MILP chat forgot it had closed its pane');
+  // The MILP chat publishes a second version while the CVX chat is on screen.
+  await visit('cvx');
+  await ccPush({type: 'artifacts', importing: false, artifacts: [artifact('A1', 'milp', 2), artifact('B1', 'cvx')]});
+  assert(shown() === 'B1', 'another chat publishing changed this chat\'s pane');
+  await visit('milp');
+  assert(open() && shown() === 'A1' && ws.querySelector('[data-artifact-frame]').getAttribute('src').includes('/A1/2/'), 'what the MILP chat published while away was not waiting open');
+  await ccPush(ccItems([], true), {type: 'claudeStatus', status: ccStatus()});
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
 await test('No browser runtime errors', () => {
   assert(win.testErrors.length === 0, win.testErrors.join('; '));

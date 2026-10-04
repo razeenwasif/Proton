@@ -3125,14 +3125,79 @@ body { font-size: calc(13px * var(--ui-scale)); }
 
 /* ── sessions ─────────────────────────────────────────────────────── */
 .cc-side { display: flex; flex-direction: column; min-height: 0; }
-.cc-side-head { padding: 12px 10px 6px; }
+.cc-side-head { display: flex; gap: 6px; padding: 12px 10px 6px; }
 .cc-new {
-  display: flex; align-items: center; gap: 8px; width: 100%;
+  display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0;
   padding: 8px 10px; border: 1px solid var(--cc-line); border-radius: 6px;
   background: transparent; color: var(--cc-muted); font: var(--z-xs)/1 var(--cc-font); cursor: pointer;
 }
 .cc-new:hover { background: var(--row-hover); color: var(--cc-text); }
 .cc-new .i { width: 14px; height: 14px; color: var(--cc-accent); }
+.cc-new-folder {
+  flex: 0 0 auto; display: grid; place-items: center; width: 34px; padding: 0;
+  border: 1px solid var(--cc-line); border-radius: 6px; background: transparent; color: var(--cc-muted); cursor: pointer;
+}
+.cc-new-folder:hover { background: var(--row-hover); color: var(--cc-text); }
+.cc-new-folder .i { width: 15px; height: 15px; }
+
+/* A row and its ⋯, which waits at the row's end until the pointer or the
+   keyboard comes looking. */
+.cc-session-wrap { position: relative; }
+.cc-session-more {
+  position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+  display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: 5px; background: var(--cc-bg); color: var(--cc-faint); cursor: pointer;
+  opacity: 0; pointer-events: none;
+}
+.cc-session-wrap:hover .cc-session-more,
+.cc-session-more:focus-visible,
+.cc-session-more[aria-expanded="true"] { opacity: 1; pointer-events: auto; }
+.cc-session-wrap:hover .cc-session.on + .cc-session-more { background: var(--row-on); }
+.cc-session-more:hover { color: var(--cc-text); background: var(--row-hover); }
+.cc-session-more .i { width: 14px; height: 14px; }
+.cc-session.dragging { opacity: .45; }
+
+/* Folders: a head that folds and unfolds, a ⋯ for renaming and deleting,
+   and what it holds indented under it. */
+.cc-folder { margin: 0 6px; border-radius: 6px; }
+.cc-folder-head { display: flex; align-items: center; position: relative; }
+.cc-folder-toggle {
+  display: flex; align-items: center; gap: 7px; flex: 1 1 auto; min-width: 0;
+  height: var(--z-row); padding: 0 34px 0 8px; border: 0; border-radius: 5px; background: transparent;
+  color: var(--cc-muted); font: var(--z-xs)/1 var(--cc-font); text-align: left; cursor: pointer;
+}
+.cc-folder-toggle:hover { background: var(--row-hover); color: var(--cc-text); }
+.cc-folder-toggle .i { flex: 0 0 auto; width: 14px; height: 14px; }
+.cc-folder-toggle .i:first-child { width: 11px; height: 11px; opacity: .7; transition: transform .12s; }
+.cc-folder.folded .cc-folder-toggle .i:first-child { transform: rotate(-90deg); }
+.cc-folder-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-folder-count { flex: 0 0 auto; color: var(--cc-faint); font-size: var(--z-2xs); }
+.cc-folder.has-on > .cc-folder-head .cc-folder-toggle { color: var(--cc-text); box-shadow: inset 2px 0 0 var(--cc-accent); }
+.cc-folder-more {
+  position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+  display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: 5px; background: transparent; color: var(--cc-faint); cursor: pointer;
+  opacity: 0; pointer-events: none;
+}
+.cc-folder-head:hover .cc-folder-more, .cc-folder-more:focus-visible { opacity: 1; pointer-events: auto; }
+.cc-folder-more:hover { color: var(--cc-text); background: var(--row-hover); }
+.cc-folder-more .i { width: 14px; height: 14px; }
+.cc-folder.renaming .cc-folder-toggle { flex: 0 0 auto; padding-right: 2px; }
+.cc-folder-input {
+  flex: 1 1 auto; min-width: 0; height: calc(var(--z-row) - 8px); margin-right: 32px; padding: 0 8px;
+  border: 1px solid var(--row-on-edge); border-radius: 5px; outline: none;
+  background: var(--cc-bg); color: var(--cc-text); font: var(--z-xs)/1 var(--cc-font);
+}
+.cc-folder-body .cc-session { padding-left: 34px; }
+.cc-folder-body { margin: 0 -6px; }
+.cc-folder-empty { padding: 6px 16px 10px 34px; color: var(--cc-faint); font-size: var(--z-2xs); line-height: 1.5; }
+/* Where a dragged chat would land. */
+.cc-folder.drop { box-shadow: inset 0 0 0 1px var(--cc-accent); background: color-mix(in srgb, var(--cc-accent) 8%, transparent); }
+.cc-loose.drop { box-shadow: inset 0 0 0 1px var(--row-on-edge); border-radius: 6px; }
+.cc-loose { min-height: 40px; }
+
+/* The list's menus float where they were asked for. */
+.cc-pop.cc-side-menu { position: fixed; width: 260px; max-height: 60vh; overflow: auto; }
 .cc-sessions { flex: 1 1 auto; min-height: 0; padding: 2px 0 10px; }
 .cc-group { margin: 14px 16px 6px; font: var(--z-2xs)/1 var(--cc-font); color: var(--cc-faint); }
 .cc-session {
@@ -3480,4 +3545,5 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .workspace.cc .pane > header.cc-head { padding: 0 8px 0 18px; }
 .workspace.cc .pane > header.cc-art-head { padding: 0 8px 0 12px; }
 .cc-gallery-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 12px 10px; font-size: var(--z-2xs); color: var(--cc-faint); }
+.cc-gallery-group { margin: 12px 14px 6px; font: var(--z-2xs)/1 var(--cc-font); color: var(--cc-faint); }
 .cc-importing { display: inline-flex; align-items: center; gap: 8px; color: var(--cc-muted); }

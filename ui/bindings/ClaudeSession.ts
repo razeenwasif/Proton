@@ -13,7 +13,7 @@ updated: number,
  * The folder it runs in, when that is not the project's: a session
  * from the desktop app, started somewhere else.
  */
-folder: string, 
+cwd: string, 
 /**
  * Open in another Claude Code right now — the desktop app, a terminal —
  * so what is sent here continues a copy of it rather than it.

@@ -21,6 +21,7 @@ use std::sync::mpsc::Receiver;
 use proton_claude::agy::Antigravity;
 use proton_claude::chat::{self, Answer, Chat, Image, Settings};
 use proton_claude::codex::Codex;
+use proton_claude::folders::{FolderView, Folders, Member};
 use proton_claude::gemini::Gemini;
 use proton_claude::history::{self, Titles};
 use proton_claude::{engine, saved, Activity, Capabilities, Conversation, Engine, SessionSummary, Store};
@@ -62,6 +63,11 @@ pub struct Claude {
     desktop: Vec<history::DesktopSession>,
     /// Sessions another Claude Code has open right now.
     elsewhere: HashSet<String>,
+    /// The folders conversations are grouped into, shared by every project.
+    folders: Folders,
+    /// What could be read of the conversations in folders that this
+    /// project's list does not have — another project's, say.
+    away: HashMap<String, SessionSummary>,
     /// Which conversations were working and which were waiting on you, as
     /// the list last said.
     busy: Vec<String>,
@@ -144,6 +150,8 @@ impl Claude {
             kept: Vec::new(),
             desktop: Vec::new(),
             elsewhere: HashSet::new(),
+            folders: Folders::open(),
+            away: HashMap::new(),
             busy: Vec::new(),
             waiting: Vec::new(),
             shortened: Vec::new(),
@@ -155,6 +163,13 @@ impl Claude {
             importing: None,
             defaults: Defaults { mode: "default".into(), ..Defaults::default() },
         }
+    }
+
+    /// Keep folders somewhere else than everyone's — for a test.
+    #[cfg(test)]
+    fn with_folders(mut self, folders: Folders) -> Claude {
+        self.folders = folders;
+        self
     }
 
     /// What new conversations start with, from the project's settings.
@@ -212,7 +227,7 @@ impl Claude {
 
     /* ── what the window is told ─────────────────────────────── */
 
-    fn sessions_event(&self) -> Event {
+    fn sessions_event(&mut self) -> Event {
         let listed = |id: &str| {
             self.listed.iter().any(|s| s.id == id) || self.kept.iter().any(|s| s.id == id) || self.desktop.iter().any(|d| d.id == id)
         };
@@ -231,7 +246,7 @@ impl Claude {
                 id: chat.id().to_string(),
                 title: if title.is_empty() { "New session".into() } else { title },
                 updated: u64::MAX,
-                folder: if chat.cwd() == self.root.as_path() { String::new() } else { chat.cwd().display().to_string() },
+                cwd: if chat.cwd() == self.root.as_path() { String::new() } else { chat.cwd().display().to_string() },
                 elsewhere: false,
                 engine: chat.engine(),
             });
@@ -256,17 +271,52 @@ impl Claude {
             id: d.id.clone(),
             title: d.title.clone(),
             updated: d.updated,
-            folder: d.cwd.display().to_string(),
+            cwd: d.cwd.display().to_string(),
             elsewhere: self.elsewhere.contains(&d.id),
             engine: Engine::Claude,
         }));
+        // What is in a folder is drawn there, from whichever project it is,
+        // and not in the list as well.
+        let mut folders = Vec::new();
+        let mut foldered = HashSet::new();
+        for folder in self.folders.list().to_vec() {
+            let mut inside: Vec<SessionSummary> = folder
+                .members
+                .iter()
+                .map(|member| {
+                    foldered.insert(member.id.clone());
+                    sessions.iter().find(|s| s.id == member.id).cloned().unwrap_or_else(|| self.member_summary(member))
+                })
+                .collect();
+            inside.sort_by_key(|s| std::cmp::Reverse(s.updated));
+            folders.push(FolderView { id: folder.id, name: folder.name, collapsed: folder.collapsed, sessions: inside });
+        }
+        sessions.retain(|s| !foldered.contains(&s.id));
         Event::ClaudeSessions {
             sessions,
+            folders,
             active: self.active.clone().unwrap_or_default(),
             busy: self.busy.clone(),
             waiting: self.waiting.clone(),
             engine: self.defaults.engine,
         }
+    }
+
+    /// A conversation in a folder that this project's list does not have,
+    /// as well as it can be read.
+    fn member_summary(&self, member: &Member) -> SessionSummary {
+        let mut summary = self.away.get(&member.id).cloned().unwrap_or_else(|| SessionSummary {
+            id: member.id.clone(),
+            title: if member.title.is_empty() { "Untitled".into() } else { member.title.clone() },
+            updated: member.updated,
+            cwd: String::new(),
+            elsewhere: false,
+            engine: member.engine,
+        });
+        summary.cwd = if same_folder(&member.cwd, &self.root) { String::new() } else { member.cwd.display().to_string() };
+        summary.elsewhere = self.elsewhere.contains(&member.id);
+        summary.engine = member.engine;
+        summary
     }
 
     /// The conversation on screen, whole.
@@ -356,6 +406,38 @@ impl Claude {
             .filter(|d| !d.archived && !listed.contains(d.id.as_str()))
             .filter(|d| d.cwd.canonicalize().unwrap_or_else(|_| d.cwd.clone()) != here)
             .collect();
+        self.refresh_folders();
+    }
+
+    /// Read again what the folders hold: from this project's lists where they
+    /// have it, from the conversation's own file where they do not. What is
+    /// read is kept with the folder, for the next project to show.
+    fn refresh_folders(&mut self) {
+        self.away.clear();
+        let members: Vec<Member> = self.folders.list().iter().flat_map(|f| f.members.clone()).collect();
+        for member in members {
+            let known = self
+                .listed
+                .iter()
+                .chain(self.kept.iter())
+                .find(|s| s.id == member.id)
+                .map(|s| (s.title.clone(), s.updated))
+                .or_else(|| self.desktop.iter().find(|d| d.id == member.id).map(|d| (d.title.clone(), d.updated)));
+            let (title, updated) = match known {
+                Some(known) => known,
+                None => {
+                    let read = match member.engine {
+                        Engine::Claude => history::summary(&member.cwd, &member.id, &mut self.titles),
+                        _ => saved::summary(&member.id),
+                    };
+                    let Some(read) = read else { continue };
+                    let known = (read.title.clone(), read.updated);
+                    self.away.insert(member.id.clone(), read);
+                    known
+                }
+            };
+            self.folders.remember(&member.id, &title, updated);
+        }
     }
 
     /// Everything, for a window that has just connected.
@@ -452,8 +534,15 @@ impl Claude {
 
     /// A Claude Code session, read back from the file it keeps.
     fn claude_session(&mut self, id: &str, events: &mut Vec<Event>) -> Option<Chat> {
-        // A desktop session runs in its own folder, not this project's.
-        let cwd = self.desktop.iter().find(|d| d.id == id).map(|d| d.cwd.clone()).unwrap_or_else(|| self.root.clone());
+        // A desktop session runs in its own folder, not this project's, and so
+        // does one in a folder that another project's list has.
+        let cwd = self
+            .desktop
+            .iter()
+            .find(|d| d.id == id)
+            .map(|d| d.cwd.clone())
+            .or_else(|| self.folders.find(id).map(|(_, m)| m.cwd.clone()).filter(|cwd| !cwd.as_os_str().is_empty()))
+            .unwrap_or_else(|| self.root.clone());
         let Some(file) = history::file(&cwd, id) else {
             events.push(crate::workspace::notice("That session is not in this project any more.".into(), crate::bus::NoticeLevel::Warn));
             return None;
@@ -568,6 +657,80 @@ impl Claude {
     pub fn forget_artifact(&mut self, id: &str) -> Vec<Event> {
         self.store().remove(id);
         vec![self.artifacts_event()]
+    }
+
+    /* ── folders ─────────────────────────────────────────────── */
+
+    /// A new folder, named or not, with conversations put in it.
+    pub fn folder_new(&mut self, name: &str, sessions: &[String]) -> Vec<Event> {
+        let folder = self.folders.create(name);
+        for session in sessions {
+            if let Some(member) = self.member_for(session) {
+                self.folders.put(&folder, member);
+            }
+        }
+        self.refresh_folders();
+        vec![self.sessions_event()]
+    }
+
+    pub fn folder_rename(&mut self, folder: &str, name: &str) -> Vec<Event> {
+        self.folders.rename(folder, name);
+        vec![self.sessions_event()]
+    }
+
+    /// Delete a folder. Its conversations go back to the list.
+    pub fn folder_delete(&mut self, folder: &str) -> Vec<Event> {
+        self.folders.delete(folder);
+        vec![self.sessions_event()]
+    }
+
+    pub fn folder_collapse(&mut self, folder: &str, collapsed: bool) -> Vec<Event> {
+        self.folders.collapse(folder, collapsed);
+        vec![self.sessions_event()]
+    }
+
+    /// Put a conversation in a folder — or, with none, take it out of the
+    /// one it is in.
+    pub fn folder_move(&mut self, session: &str, folder: Option<&str>) -> Vec<Event> {
+        match folder {
+            Some(folder) => {
+                if let Some(member) = self.member_for(session) {
+                    self.folders.put(folder, member);
+                }
+            }
+            None => {
+                self.folders.take_out(session);
+            }
+        }
+        self.refresh_folders();
+        vec![self.sessions_event()]
+    }
+
+    /// Enough of a conversation to keep it in a folder: which engine, which
+    /// folder it runs in, and what it is called.
+    fn member_for(&mut self, session: &str) -> Option<Member> {
+        let member = |engine: Engine, cwd: PathBuf, title: &str, updated: u64| Member {
+            id: session.to_string(),
+            engine,
+            cwd,
+            title: title.to_string(),
+            updated,
+        };
+        if let Some(chat) = self.chats.iter().find(|c| c.id() == session) {
+            let title = chat.fold().status().title.clone();
+            let listed = self.listed.iter().chain(self.kept.iter()).find(|s| s.id == session).map(|s| s.updated);
+            return Some(member(chat.engine(), chat.cwd().to_path_buf(), &title, listed.unwrap_or_else(now)));
+        }
+        if let Some(s) = self.listed.iter().find(|s| s.id == session) {
+            return Some(member(Engine::Claude, self.root.clone(), &s.title, s.updated));
+        }
+        if let Some(s) = self.kept.iter().find(|s| s.id == session) {
+            return Some(member(s.engine, self.root.clone(), &s.title, s.updated));
+        }
+        if let Some(d) = self.desktop.iter().find(|d| d.id == session) {
+            return Some(member(Engine::Claude, d.cwd.clone(), &d.title, d.updated));
+        }
+        self.folders.find(session).map(|(_, m)| m.clone())
     }
 
     /// The defaults, as they are to be saved.
@@ -739,6 +902,8 @@ impl Claude {
         for index in 0..self.chats.len() {
             if let Some(old) = self.chats[index].take_renamed() {
                 renamed = true;
+                let new = self.chats[index].id().to_string();
+                self.folders.follow(&old, &new);
                 if self.active.as_deref() == Some(old.as_str()) {
                     self.active = Some(self.chats[index].id().to_string());
                     events.extend(self.snapshot());
@@ -788,5 +953,57 @@ impl Claude {
             || self.probing_others.is_some()
             || self.importing.is_some()
             || self.chats.iter().any(|chat| chat.running())
+    }
+}
+
+/// Whether two paths are one folder, however each was spelled.
+fn same_folder(a: &Path, b: &Path) -> bool {
+    a == b || a.canonicalize().ok().zip(b.canonicalize().ok()).is_some_and(|(a, b)| a == b)
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn listed(event: &Event) -> (Vec<String>, Vec<(String, Vec<String>)>) {
+        let Event::ClaudeSessions { sessions, folders, .. } = event else { panic!("{event:?}") };
+        let ids = sessions.iter().map(|s| s.id.clone()).collect();
+        let folders = folders.iter().map(|f| (f.name.clone(), f.sessions.iter().map(|s| s.id.clone()).collect())).collect();
+        (ids, folders)
+    }
+
+    #[test]
+    fn a_conversation_put_in_a_folder_is_listed_there_and_not_twice() {
+        let dir = std::env::temp_dir().join(format!("proton-core-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let root = dir.join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut claude = Claude::new(&root).with_folders(Folders::at(&dir));
+        claude.start(Some(Engine::Codex));
+        let chat = claude.active.clone().unwrap();
+
+        let events = claude.folder_new("", std::slice::from_ref(&chat));
+        let (top, folders) = listed(events.last().unwrap());
+        assert_eq!(folders, [("New folder".to_string(), vec![chat.clone()])]);
+        assert!(!top.contains(&chat), "listed in its folder and out of it");
+
+        let Event::ClaudeSessions { folders: views, .. } = events.last().unwrap() else { unreachable!() };
+        assert_eq!(views[0].sessions[0].engine, Engine::Codex, "a folder keeps which engine a conversation is with");
+
+        let folder = views[0].id.clone();
+        claude.folder_rename(&folder, "Optimisation");
+        let (top, folders) = listed(&claude.folder_move(&chat, None)[0]);
+        assert_eq!(folders, [("Optimisation".to_string(), Vec::<String>::new())]);
+        assert!(top.contains(&chat), "taken out, it is back in the list");
+        let (_, folders) = listed(&claude.folder_delete(&folder)[0]);
+        assert!(folders.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

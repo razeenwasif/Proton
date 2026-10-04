@@ -128,11 +128,23 @@ pub fn list_in(dir: &Path, cwd: &Path) -> Vec<SessionSummary> {
             id: e.id,
             title: e.title,
             updated: e.updated,
-            folder: String::new(),
+            cwd: String::new(),
             elsewhere: false,
             engine: e.engine,
         })
         .collect()
+}
+
+/// A kept conversation as the list shows it, whichever project it is in.
+pub fn summary(id: &str) -> Option<SessionSummary> {
+    index(&dir()).into_iter().find(|e| e.id == id).map(|e| SessionSummary {
+        id: e.id,
+        title: e.title,
+        updated: e.updated,
+        cwd: String::new(),
+        elsewhere: false,
+        engine: e.engine,
+    })
 }
 
 /// Which engine a kept conversation is with, if it is one.

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Telemetry glossary</title>
+<style>
+  :root { --bg: #ffffff; --ink: #1d1b26; --muted: #6b6878; --line: #e7e5ee; --accent: #6d4fd8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #15141b; --ink: #edecee; --muted: #9a97a6; --line: #2a2833; --accent: #a277ff; } }
+  body { margin: 0; padding: 20px 16px; background: var(--bg); color: var(--ink); font: 14px/1.55 system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 18px; }
+  p { margin: 0 0 16px; color: var(--muted); }
+  dl { margin: 0; display: grid; grid-template-columns: minmax(90px, max-content) 1fr; gap: 10px 16px; }
+  dt { font-weight: 600; color: var(--accent); font-family: ui-monospace, monospace; }
+  dd { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+  <h1>Telemetry glossary</h1>
+  <p>The fields the fleet grid draws, and what each one means.</p>
+  <dl>
+    <dt>sat_id</dt><dd>The satellite's catalogue number within the fleet.</dd>
+    <dt>battery_v</dt><dd>Bus voltage, sampled once a second and averaged over the downlink window.</dd>
+    <dt>SAFE_HOLD</dt><dd>The mode a satellite enters when its scheduler sees a fault it cannot clear on its own.</dd>
+    <dt>pass</dt><dd>One contact with a ground station, from acquisition of signal to loss of signal.</dd>
+  </dl>
+</body>
+</html>

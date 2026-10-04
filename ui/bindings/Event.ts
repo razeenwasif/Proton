@@ -7,6 +7,7 @@ import type { Caption } from "./Caption";
 import type { CellView } from "./CellView";
 import type { ChangeView } from "./ChangeView";
 import type { ChatEngine } from "./ChatEngine";
+import type { ChatFolder } from "./ChatFolder";
 import type { ClaudeCapabilities } from "./ClaudeCapabilities";
 import type { ClaudeItem } from "./ClaudeItem";
 import type { ClaudeSession } from "./ClaudeSession";
@@ -148,7 +149,12 @@ path: string, cells: Array<CellView>,
 /**
  * Why there is no kernel, when there is a reason worth showing.
  */
-problem: string, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, active: string, busy: Array<string>, waiting: Array<string>, engine: ChatEngine, } | { "type": "claudeItems", session: string, items: Array<ClaudeItem>, reset: boolean, earlier: boolean, } | { "type": "claudeStatus", status: ClaudeStatus, } | { "type": "claudeCapabilities", capabilities: ClaudeCapabilities, } | { "type": "artifacts", artifacts: Array<Artifact>, importing: boolean, } | { "type": "chats", conversations: Array<Summary>, 
+problem: string, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
+/**
+ * The folders conversations are grouped into, each with what it
+ * holds; what is in a folder is not in `sessions` as well.
+ */
+folders: Array<ChatFolder>, active: string, busy: Array<string>, waiting: Array<string>, engine: ChatEngine, } | { "type": "claudeItems", session: string, items: Array<ClaudeItem>, reset: boolean, earlier: boolean, } | { "type": "claudeStatus", status: ClaudeStatus, } | { "type": "claudeCapabilities", capabilities: ClaudeCapabilities, } | { "type": "artifacts", artifacts: Array<Artifact>, importing: boolean, } | { "type": "chats", conversations: Array<Summary>, 
 /**
  * Which one is open, as a project-relative path. Empty for a
  * conversation that has not been saved yet — one with no question in

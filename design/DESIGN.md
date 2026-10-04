@@ -470,7 +470,15 @@ Claude Code keeps for the folder, whether it was started here, in a terminal
 or in the desktop app, each resumable — and under them the desktop app's
 sessions from its other folders, each named by its folder. One the desktop
 app has open right now wears a ring, and what is sent to it continues a fork,
-because two programs writing one session would interleave. The conversation is a centred column,
+because two programs writing one session would interleave.
+Above them all are your folders, as Claude's own apps have them: a head that
+folds — still showing a spinner or a dot when something inside is working or
+waiting — a **⋯** to rename or delete it, and the chats it holds indented
+under it. A chat goes into one by being dragged there or from its own **⋯**
+(or a right click), and a new folder is named in place the moment it exists.
+Folders belong to you rather than to a project: one file in Proton's data
+folder, read again whenever another project's tab has changed it, holding
+chats from every project and engine, each opened in its own folder. The conversation is a centred column,
 your messages as bubbles and Claude's as prose. Each tool is one line — a dot
 for its state, a verb, what it acted on, a count — that opens into its diff,
 its output or the lines it read. The questions it stops for are cards answered
@@ -484,6 +492,13 @@ another is looked at.
 It is worn as Codex is worn: the theme's ground and accent, JetBrains Mono at
 Zed's sizes, the darker strip for a header, rows lit as the tree lights them,
 and Codex's title bar down the right instead of the rails.
+
+**Each chat has its own artifacts pane, as in Cowork.** Switching chats puts
+back what the chat on screen had open — an artifact at its version, the list,
+or a closed pane — and one published while another chat was on screen is
+waiting open when its own comes back. The list puts the chat's own artifacts
+first. What each pane holds is the window's to remember, so it lives in the
+window's storage, not the project's.
 
 **Artifacts open in the right pane the moment they are published.** The page
 is copied, a version at a time, into Proton's data folder

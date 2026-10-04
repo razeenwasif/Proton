@@ -241,10 +241,11 @@
       <aside class="pane side cc-side">
         <div class="cc-side-head">
           <button class="cc-new" data-claude-new title="New session"><svg class="i"><use href="#i-plus"/></svg>New session</button>
+          <button class="cc-new-folder" data-claude-new-folder title="New folder" aria-label="New folder"><svg class="i"><use href="#i-folder"/></svg></button>
         </div>
-        <!-- From Event::ClaudeSessions: the sessions Claude Code keeps for
-             this folder — started here, in a terminal or in its own app —
-             newest first. -->
+        <!-- From Event::ClaudeSessions: your folders, then the sessions Claude
+             Code keeps for this folder — started here, in a terminal or in its
+             own app — and the other engines' conversations, newest first. -->
         <div class="scroll cc-sessions" data-claude-sessions></div>
 
         <!-- The council: one question put to every model with a

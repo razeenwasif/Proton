@@ -36,6 +36,8 @@
 //! - [`patch`] turns what each says about an edit into the hunks Claude
 //!   Code's edits are drawn with, and [`saved`] keeps the conversations
 //!   whose own files Proton does not read.
+//! - [`folders`] keeps the folders conversations are grouped into, across
+//!   every project and engine.
 //!
 //! Nothing here blocks the caller, and nothing here knows what Proton looks
 //! like.
@@ -46,6 +48,7 @@ pub mod chat;
 pub mod codex;
 pub mod engine;
 pub mod fold;
+pub mod folders;
 pub mod gemini;
 pub mod history;
 pub mod import;

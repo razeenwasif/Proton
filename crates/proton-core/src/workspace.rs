@@ -1369,6 +1369,11 @@ impl Workspace {
                 events
             }
             Command::ClaudeSessions => self.claude.refresh(),
+            Command::ChatFolderNew { name, sessions } => self.claude.folder_new(&name, &sessions),
+            Command::ChatFolderRename { folder, name } => self.claude.folder_rename(&folder, &name),
+            Command::ChatFolderDelete { folder } => self.claude.folder_delete(&folder),
+            Command::ChatFolderCollapse { folder, collapsed } => self.claude.folder_collapse(&folder, collapsed),
+            Command::ChatFolderMove { session, folder } => self.claude.folder_move(&session, folder.as_deref()),
             Command::ForgetArtifact { id } => self.claude.forget_artifact(&id),
             Command::ImportArtifacts => self.claude.import_artifacts(),
             Command::OpenLink { url } => match open_link(&url) {

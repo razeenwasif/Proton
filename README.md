@@ -147,6 +147,15 @@ desktop** lists the desktop app's sessions from its other folders; one opens in
 its own folder, and one the desktop app has open right now (marked with a ring)
 carries on as a copy, so two programs never write to one session.
 
+**Folders.** Group chats into folders, as in Claude's own apps: the folder
+button beside **New session** makes one and puts its name up for editing,
+and a chat moves into a folder by dragging it there or from its **⋯** menu
+(right-click works too). A folder folds, and still shows a spinner or a dot
+when something in it is working or waiting on you. Folders are shared by
+every project, and hold chats from any of them — Claude Code's, the other
+engines', the desktop app's. Deleting a folder puts its chats back in the
+list; it never deletes them.
+
 **Codex, Gemini and Antigravity.** The pill at the left of the composer picks
 who answers a new conversation. Each is the real CLI on its own sign-in,
 driven over the protocol it offers hosts, and drawn with the same rows, cards
@@ -164,7 +173,10 @@ or `PROTON_CHATS`) and listed with the project's sessions. `PROTON_CODEX_BIN`,
 somewhere unusual.
 
 **Artifacts.** When Claude publishes one with its Artifact tool, it opens in the
-pane on the right. Proton keeps a copy of every version it publishes in
+pane on the right. Each chat has its own pane: switch chats and the pane
+shows what that chat had open — or nothing — and switch back to find yours
+as you left it. One a chat publishes while you are in another is waiting open
+when you go back to it, and the list puts the chat's own artifacts first. Proton keeps a copy of every version it publishes in
 `~/Library/Application Support/dev.razeen.proton/artifacts` (`PROTON_ARTIFACTS`
 moves it) and serves them from `artifact://`, sandboxed: a page can load what a
 claude.ai artifact can and reach nothing of the editor's. **Open on claude.ai**

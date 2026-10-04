@@ -37,7 +37,7 @@ pub struct SessionSummary {
     /// The folder it runs in, when that is not the project's: a session
     /// from the desktop app, started somewhere else.
     #[serde(default)]
-    pub folder: String,
+    pub cwd: String,
     /// Open in another Claude Code right now — the desktop app, a terminal —
     /// so what is sent here continues a copy of it rather than it.
     #[serde(default)]
@@ -111,7 +111,7 @@ pub fn sessions(root: &Path, titles: &mut Titles) -> Vec<SessionSummary> {
             if found.iter().any(|(s, _)| s.id == id) {
                 continue;
             }
-            found.push((SessionSummary { id, title: String::new(), updated, folder: String::new(), elsewhere: false, engine: crate::engine::Engine::Claude }, path));
+            found.push((SessionSummary { id, title: String::new(), updated, cwd: String::new(), elsewhere: false, engine: crate::engine::Engine::Claude }, path));
         }
     }
     found.sort_by(|a, b| b.0.updated.cmp(&a.0.updated));
@@ -131,6 +131,29 @@ pub fn sessions(root: &Path, titles: &mut Titles) -> Vec<SessionSummary> {
             Some(summary)
         })
         .collect()
+}
+
+/// One session as the list would show it, wherever it is — for a folder,
+/// which holds conversations from every project. `None` if its file is gone
+/// or has nothing said in it.
+pub fn summary(cwd: &Path, id: &str, titles: &mut Titles) -> Option<SessionSummary> {
+    let path = file(cwd, id)?;
+    let updated = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default();
+    let known = titles.get(id).filter(|(at, _)| *at == updated).map(|(_, t)| t.clone());
+    let title = match known {
+        Some(title) => title,
+        None => {
+            let found = title(&path);
+            titles.insert(id.to_string(), (updated, found.clone()));
+            found
+        }
+    }?;
+    Some(SessionSummary { id: id.to_string(), title, updated, cwd: String::new(), elsewhere: false, engine: crate::engine::Engine::Claude })
 }
 
 /// The file a session is in.

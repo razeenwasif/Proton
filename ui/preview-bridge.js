@@ -873,7 +873,7 @@ FCM: NON-DROP FRAME
         ...claude.sync(),
       ];
     }
-    if (command.type.startsWith("claude") || command.type === "forgetArtifact" || command.type === "openLink") {
+    if (command.type.startsWith("claude") || command.type.startsWith("chatFolder") || command.type === "forgetArtifact" || command.type === "openLink") {
       return claude.command(command);
     }
     if (command.type === "runCell") {
