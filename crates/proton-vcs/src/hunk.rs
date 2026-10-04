@@ -52,6 +52,19 @@ pub fn lines(text: &str) -> Vec<&str> {
     text.lines().collect()
 }
 
+/// The same lines, each still ending the way it does in `text`.
+///
+/// `split_inclusive` cuts after every `\n`, which is also how the diff
+/// divides a text, so an index in a [`Hunk`] names the same line here as in
+/// [`lines`]. What differs is what the line brings with it. Text taken from
+/// here can be put somewhere else exactly as it was, `\r\n` and all. Text
+/// rebuilt from [`lines`] has to guess its endings back, and the guess goes
+/// wrong on the last line of a file, because the diff counts the file's final
+/// newline, or the lack of one, as part of that line.
+pub fn lines_with_endings(text: &str) -> Vec<&str> {
+    text.split_inclusive('\n').collect()
+}
+
 /// Rebuild a text from lines, ending it the way the original ended.
 ///
 /// A file that ended with a newline has to keep ending with one: dropping it
@@ -131,5 +144,18 @@ mod tests {
         assert_eq!(join(&["a", "b"], true), "a\nb\n");
         assert_eq!(join(&["a", "b"], false), "a\nb");
         assert_eq!(join(&[], true), "", "no lines is no file, not a newline");
+    }
+
+    #[test]
+    fn lines_with_endings_are_the_same_lines_with_nothing_dropped() {
+        assert_eq!(lines_with_endings("a\nb\n"), vec!["a\n", "b\n"]);
+        assert_eq!(lines_with_endings("a\r\nb"), vec!["a\r\n", "b"]);
+        // The same count as `lines` for every way a text can end, or a hunk's
+        // indices would name different lines in the two lists.
+        for text in ["", "\n", "a", "a\n", "a\n\n", "a\r\nb\r\n"] {
+            let ended = lines_with_endings(text);
+            assert_eq!(ended.len(), lines(text).len(), "{text:?}");
+            assert_eq!(ended.concat(), text, "{text:?}");
+        }
     }
 }

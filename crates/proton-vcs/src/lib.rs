@@ -27,7 +27,7 @@ pub mod gutter;
 pub mod hunk;
 
 pub use gutter::{diff, Mark, Marked};
-pub use hunk::{ends_with_newline, hunks, join, lines, Hunk};
+pub use hunk::{ends_with_newline, hunks, join, lines, lines_with_endings, Hunk};
 
 /// What git says about a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

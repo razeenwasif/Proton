@@ -3283,7 +3283,7 @@ impl Workspace {
                 NoticeLevel::Warn,
             )];
         };
-        let Some((lines, replacement)) = self.review.accept(&path, index, &current) else {
+        let Some((lines, text)) = self.review.accept(&path, index, &current) else {
             // The file moved under the review. Not an error: the panel is
             // about to be redrawn without that hunk in it.
             return vec![self.review_event()];
@@ -3302,9 +3302,12 @@ impl Workspace {
             line: lines.start,
             column: 0,
         });
-        // The end of the last line it replaces, newline included — except at
-        // the end of the file, where there is no newline to include and
-        // reaching for one lands past the rope.
+        // Up to the start of the line after the hunk, so the newline ending
+        // its last line is replaced too, and `text` brings the target's own
+        // endings in its place, the file's final newline included. A file
+        // without a final newline has no line after its last, and asking for
+        // one would land at the start of that last line, so the stretch runs
+        // to the end of the file instead.
         let end = match lines.end < buffer.len_lines() {
             true => buffer.offset_of(proton_text::Position {
                 line: lines.end,
@@ -3312,10 +3315,6 @@ impl Workspace {
             }),
             false => buffer.len_chars(),
         };
-        let mut text = replacement.join("\n");
-        if !text.is_empty() && end < buffer.len_chars() {
-            text.push('\n');
-        }
         let landing = start + text.chars().count();
         buffer.apply(
             vec![proton_text::Edit { start, end, text }],
@@ -6286,6 +6285,9 @@ mod tests {
     //! A `..` in the root disagrees in the same way on every platform, and is
     //! what most of these use: it needs neither the working directory changed
     //! under the other tests nor, on Windows, the privilege a link does.
+    //!
+    //! The last section is about where a file ends rather than how its
+    //! project is named, and lives here for the same reason.
 
     use super::*;
 
@@ -6324,6 +6326,12 @@ mod tests {
             let link = self.base.join("link");
             std::os::unix::fs::symlink(self.folder(), &link).unwrap();
             link
+        }
+
+        /// The same folder by its real path, the spelling the editor gives
+        /// the files it opens, for a test that is about something else.
+        fn real(&self) -> PathBuf {
+            crate::folder::normalise(&self.folder())
         }
     }
 
@@ -6463,5 +6471,41 @@ mod tests {
         assert_eq!(files(&ws).len(), 1, "{:?}", files(&ws));
         assert_eq!(ws.editor().buffer().contents(), "fn fresher() {}");
         assert!(ws.staged().is_empty(), "{:?}", ws.staged());
+    }
+
+    /* ── where a file ends ────────────────────────────────────────── */
+
+    // The diff counts a newline as part of the line it ends, so a hunk on a
+    // file's last line covers the file's final newline as well. Accepting it
+    // has to leave the file ending the way the target does. When it did not,
+    // the newline was gone and the diff still had one hunk to offer, and
+    // accepting that hunk changed nothing, so it could never be cleared.
+
+    #[test]
+    fn accepting_a_change_to_the_last_line_keeps_the_newline_after_it() {
+        let project = Project::new("last-line");
+        std::fs::write(project.folder().join("a.rs"), "one\ntwo\n").unwrap();
+        let mut ws = Workspace::rooted(project.real());
+        edit(&mut ws, "a.rs", "two", "TWO").unwrap();
+
+        ws.apply(Command::ApplyStaged { path: None });
+        assert_eq!(ws.editor().buffer().contents(), "one\nTWO\n");
+        assert!(ws.staged().is_empty(), "{:?}", ws.staged());
+        // Forgotten, rather than kept with nothing left to show.
+        assert!(ws.review.is_empty(), "{:?}", ws.review);
+    }
+
+    #[test]
+    fn accepting_a_file_the_agent_created_keeps_its_final_newline() {
+        // The buffer starts empty, so the one hunk replaces nothing at the
+        // very end of the file, and everything it brings is the last line.
+        let project = Project::new("new-file");
+        let mut ws = Workspace::rooted(project.real());
+        edit(&mut ws, "new.rs", "", "fn fresh() {}\n").unwrap();
+
+        ws.apply(Command::ApplyStaged { path: None });
+        assert_eq!(ws.editor().buffer().contents(), "fn fresh() {}\n");
+        assert!(ws.staged().is_empty(), "{:?}", ws.staged());
+        assert!(ws.review.is_empty(), "{:?}", ws.review);
     }
 }

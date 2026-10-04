@@ -152,7 +152,14 @@ impl Review {
     }
 
     /// What to put in the buffer to accept one hunk: the lines it covers, and
-    /// what goes there instead.
+    /// the text that goes there instead, line endings included.
+    ///
+    /// That text is copied from the target, not rebuilt from its lines. The
+    /// diff counts a newline as part of the line it ends, so a hunk on a
+    /// file's last line also covers the file's final newline, or the lack of
+    /// one. Rebuilt text had to guess that ending, and when the guess dropped
+    /// a newline the target has, the file lost it and the hunk stayed on
+    /// offer, with nothing that could clear it.
     ///
     /// `None` when the hunk is not there any more — the file moved on while
     /// the review was on screen, and an index into a list that has changed is
@@ -162,17 +169,11 @@ impl Review {
         path: &Path,
         index: usize,
         current: &str,
-    ) -> Option<(std::ops::Range<usize>, Vec<String>)> {
+    ) -> Option<(std::ops::Range<usize>, String)> {
         let change = self.get(path)?;
         let hunk = self.hunks(path, current).into_iter().nth(index)?;
-        let target = proton_vcs::lines(&change.target);
-        Some((
-            hunk.before.clone(),
-            target[hunk.after]
-                .iter()
-                .map(|l| (*l).to_string())
-                .collect(),
-        ))
+        let target = proton_vcs::lines_with_endings(&change.target);
+        Some((hunk.before, target[hunk.after].concat()))
     }
 
     /// Fold a rejection into the target, so the hunk stops being proposed.
@@ -317,9 +318,33 @@ mod tests {
     #[test]
     fn accepting_a_hunk_names_the_lines_it_replaces() {
         let (review, path) = review("one\nTWO\nthree\n");
-        let (range, lines) = review.accept(&path, 0, "one\ntwo\nthree\n").unwrap();
+        let (range, text) = review.accept(&path, 0, "one\ntwo\nthree\n").unwrap();
         assert_eq!(range, 1..2);
-        assert_eq!(lines, vec!["TWO"]);
+        assert_eq!(text, "TWO\n");
+    }
+
+    #[test]
+    fn an_accepted_hunk_ends_its_lines_the_way_the_target_does() {
+        // The cases where rebuilding the lines would guess wrong: the end of
+        // the file, which the last line's hunk covers, a line ending in
+        // `\r\n`, and a single blank line, which joins to nothing at all.
+        let cases = [
+            // (the file now, the target, lines replaced, what goes there)
+            ("one\ntwo\n", "one\nTWO\n", 1..2, "TWO\n"),
+            ("", "fn fresh() {}\n", 0..0, "fn fresh() {}\n"),
+            ("one\ntwo", "one\ntwo\n", 1..2, "two\n"),
+            ("one\ntwo\n", "one\ntwo", 1..2, "two"),
+            ("a\r\nb\r\n", "a\r\nB\r\n", 1..2, "B\r\n"),
+            ("a\nb\n", "a\n\nb\n", 1..1, "\n"),
+        ];
+        for (now, target, lines, text) in cases {
+            let (review, path) = review(target);
+            assert_eq!(
+                review.accept(&path, 0, now),
+                Some((lines, text.to_string())),
+                "{now:?} towards {target:?}"
+            );
+        }
     }
 
     #[test]
