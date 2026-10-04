@@ -76,6 +76,12 @@ pub enum Outcome {
     SearchWord { forward: bool },
     /// A literal character typed in insert mode.
     Input(char),
+    /// Tab in insert mode: one level of indentation, whatever that is in the
+    /// file being edited — which the workspace knows and the engine does not.
+    Indent,
+    /// `gv`: the last selection again. The workspace kept it, and says which
+    /// kind it was with [`Vim::reselect`].
+    Reselect,
     /// Nothing happened. Deliberately distinct from an action with no effect.
     Ignored,
 }
@@ -98,6 +104,11 @@ struct Pending {
     /// key is taken literally whatever else is pending, which is what lets
     /// `d'a` work.
     awaiting_mark: Option<MarkUse>,
+    /// Set after `f`, `F`, `t` or `T`: which way, and whether to stop short.
+    /// The next key is the character to find, taken literally.
+    awaiting_find: Option<(bool, bool)>,
+    /// Set after `r`, while waiting for the character to write.
+    awaiting_replace: bool,
 }
 
 impl Pending {
@@ -110,6 +121,8 @@ impl Pending {
             && self.text_object.is_none()
             && !self.awaiting_g
             && self.awaiting_mark.is_none()
+            && self.awaiting_find.is_none()
+            && !self.awaiting_replace
     }
 
     /// vim multiplies the two counts: `2d3w` deletes six words.
@@ -136,11 +149,16 @@ impl Pending {
             s.push_str(&c.to_string());
         }
         if let Some(op) = self.operator {
-            s.push(match op {
-                Verb::Delete => 'd',
-                Verb::Yank => 'y',
-                Verb::Change => 'c',
-                _ => '?',
+            s.push_str(match op {
+                Verb::Delete => "d",
+                Verb::Yank => "y",
+                Verb::Change => "c",
+                Verb::Indent => ">",
+                Verb::Outdent => "<",
+                Verb::Lowercase => "gu",
+                Verb::Uppercase => "gU",
+                Verb::ToggleCase => "g~",
+                _ => "?",
             });
         }
         if let Some(c) = self.operator_count {
@@ -158,6 +176,17 @@ impl Pending {
                 MarkUse::Exact => '`',
                 MarkUse::Line => '\x27',
             });
+        }
+        if let Some((forward, till)) = self.awaiting_find {
+            s.push(match (forward, till) {
+                (true, false) => 'f',
+                (false, false) => 'F',
+                (true, true) => 't',
+                (false, true) => 'T',
+            });
+        }
+        if self.awaiting_replace {
+            s.push('r');
         }
         s
     }
@@ -208,6 +237,8 @@ pub struct Vim {
     macros: std::collections::HashMap<char, Vec<Step>>,
     /// Set after `q` or `@` while waiting for the register name.
     awaiting_macro: Option<MacroWait>,
+    /// The last `f`, `t`, `F` or `T`, for `;` and `,` to repeat.
+    last_find: Option<(char, bool, bool)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,6 +284,17 @@ impl Vim {
             ':'
         } else {
             self.prompt
+        }
+    }
+
+    /// Back into the visual mode a selection was made in, for `gv`.
+    pub fn reselect(&mut self, mode: VimMode) {
+        if matches!(
+            mode,
+            VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+        ) {
+            self.pending.clear();
+            self.mode = mode;
         }
     }
 
@@ -442,7 +484,12 @@ impl Vim {
             self.awaiting_window = false;
             return Outcome::Leader(format!("w{}", k.key));
         }
-        if k.ctrl && k.key.eq_ignore_ascii_case("w") && !matches!(self.mode, VimMode::Command) {
+        // Not in insert mode, where `⌃w` deletes the word before the cursor —
+        // as it does in vim, and in every terminal.
+        if k.ctrl
+            && k.key.eq_ignore_ascii_case("w")
+            && !matches!(self.mode, VimMode::Command | VimMode::Insert | VimMode::Replace)
+        {
             self.awaiting_window = true;
             return Outcome::Pending("^w".into());
         }
@@ -450,7 +497,10 @@ impl Vim {
         // `⌃v` is the one modal command that is a chord rather than a letter,
         // so it is matched here — before the branch that only looks at bare
         // characters and would drop it.
-        if k.ctrl && k.key.eq_ignore_ascii_case("v") && !matches!(self.mode, VimMode::Command) {
+        if k.ctrl
+            && k.key.eq_ignore_ascii_case("v")
+            && !matches!(self.mode, VimMode::Command | VimMode::Insert | VimMode::Replace)
+        {
             self.pending.clear();
             self.mode = if self.mode == VimMode::VisualBlock {
                 VimMode::Normal
@@ -534,6 +584,22 @@ impl Vim {
                 register: None,
             });
         }
+        if k.key == "Tab" && !k.ctrl && !k.alt && !k.meta && !k.shift {
+            return Outcome::Indent;
+        }
+        // The line-editing keys every terminal has: `⌃w` takes back the word
+        // before the cursor, `⌃u` the line before it, `⌃h` one character.
+        if k.ctrl && !k.alt && !k.meta {
+            let object = match k.key.as_str() {
+                "w" => Some(Object::WordBackward),
+                "u" => Some(Object::LineStart),
+                "h" => Some(Object::CharLeft),
+                _ => None,
+            };
+            if let Some(object) = object {
+                return Outcome::Action(Action::new(Verb::Delete, object, 1));
+            }
+        }
 
         match k.as_char() {
             Some(c) if k.is_bare_char() => Outcome::Input(c),
@@ -592,6 +658,22 @@ impl Vim {
         if let Some(use_of) = self.pending.awaiting_mark.take() {
             return self.mark_named(use_of, c);
         }
+        // The character after `f`, `t`, `F` or `T` is the one to look for,
+        // taken literally like a mark's name.
+        if let Some((forward, till)) = self.pending.awaiting_find.take() {
+            self.last_find = Some((c, forward, till));
+            return self.motion_outcome(Object::FindChar { ch: c, forward, till });
+        }
+        // And the one after `r` is what to write.
+        if self.pending.awaiting_replace {
+            let count = self.pending.total_count();
+            let register = self.pending.register.clone();
+            self.pending.clear();
+            self.mode = VimMode::Normal;
+            let mut action = Action::new(Verb::Replace, Object::Char { ch: c }, count);
+            action.register = register;
+            return Outcome::Action(action);
+        }
 
         // `"a` selects a register for the next operator.
         if self.pending.awaiting_register {
@@ -599,7 +681,8 @@ impl Vim {
             self.pending.register = Some(c.to_string());
             return Outcome::Pending(self.pending.showcmd());
         }
-        if c == '"' {
+        // Not after `i` or `a`, where `"` is the quote text object — `di"`.
+        if c == '"' && self.pending.text_object.is_none() {
             self.pending.awaiting_register = true;
             return Outcome::Pending(self.pending.showcmd());
         }
@@ -623,8 +706,41 @@ impl Vim {
         // three claim the next key, in normal mode and operator-pending
         // alike — which is what makes `d'a` mean "delete to that mark's line".
         // `m` is normal-mode only, because `dm` is not a command.
-        if let Some(use_of) = MarkUse::prefix(c, self.pending.operator.is_some()) {
+        // Again not after `i` or `a`: `ci'` and ``da` `` are quotes.
+        if let Some(use_of) = MarkUse::prefix(c, self.pending.operator.is_some())
+            .filter(|_| self.pending.text_object.is_none())
+        {
             self.pending.awaiting_mark = Some(use_of);
+            return Outcome::Pending(self.pending.showcmd());
+        }
+
+        // `f`, `t`, `F` and `T` wait for a character, in normal mode, visual
+        // mode and after an operator alike — `dt)` is as common as `t)`. Not
+        // inside a text object, where `t` would be a tag.
+        let find = match c {
+            'f' => Some((true, false)),
+            'F' => Some((false, false)),
+            't' => Some((true, true)),
+            'T' => Some((false, true)),
+            _ => None,
+        };
+        if let Some(find) = find.filter(|_| self.pending.text_object.is_none() && !self.pending.awaiting_g) {
+            self.pending.awaiting_find = Some(find);
+            return Outcome::Pending(self.pending.showcmd());
+        }
+        // `;` repeats the last of them, and `,` repeats it the other way.
+        if (c == ';' || c == ',') && self.pending.text_object.is_none() && !self.pending.awaiting_g {
+            if let Some((ch, forward, till)) = self.last_find {
+                let forward = if c == ',' { !forward } else { forward };
+                return self.motion_outcome(Object::FindChar { ch, forward, till });
+            }
+            self.pending.clear();
+            return Outcome::Ignored;
+        }
+        // `r` waits for the character to write — and `r` on a selection
+        // writes it over every character of it.
+        if c == 'r' && self.pending.operator.is_none() && !self.pending.awaiting_g {
+            self.pending.awaiting_replace = true;
             return Outcome::Pending(self.pending.showcmd());
         }
 
@@ -648,7 +764,7 @@ impl Vim {
             if Self::doubles(op, c) {
                 return Outcome::Action(self.finish_operator(op, Object::Line));
             }
-            if let Some(object) = Self::motion(c) {
+            if let Some(object) = self.motion_counted(c) {
                 return Outcome::Action(self.finish_operator(op, object));
             }
             // Not a motion — cancel, as vim does.
@@ -665,7 +781,17 @@ impl Vim {
             // `x` is `d` on a selection. In normal mode it is a character
             // delete, which is why it is folded in here rather than added to
             // the operator table.
-            if let Some(verb) = Self::operator(c).or((c == 'x').then_some(Verb::Delete)) {
+            // So are the case keys and `J`, which on a selection need no
+            // motion — `U` uppercases it, `J` joins its lines.
+            let on_selection = match c {
+                'x' => Some(Verb::Delete),
+                'u' => Some(Verb::Lowercase),
+                'U' => Some(Verb::Uppercase),
+                '~' => Some(Verb::ToggleCase),
+                'J' => Some(Verb::Join),
+                _ => None,
+            };
+            if let Some(verb) = Self::operator(c).or(on_selection) {
                 let count = self.pending.total_count();
                 let register = self.pending.register.clone();
                 self.pending.clear();
@@ -689,11 +815,39 @@ impl Vim {
         // `g` is a prefix, not a command. `gg`, `gd` and `gr` are bound; the
         // rest of the family (`gU`, `gq`) hangs off the same branch.
         if self.pending.awaiting_g {
+            let counted = self.pending.count;
+            let visual = matches!(
+                self.mode,
+                VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+            );
+            // `gu`, `gU` and `g~` are operators: on a selection they act at
+            // once, and otherwise they wait for a motion, as `d` does.
+            let case = match c {
+                'u' => Some(Verb::Lowercase),
+                'U' => Some(Verb::Uppercase),
+                '~' => Some(Verb::ToggleCase),
+                _ => None,
+            };
+            if let Some(verb) = case {
+                self.pending.awaiting_g = false;
+                if visual {
+                    self.pending.clear();
+                    self.mode = VimMode::Normal;
+                    return Outcome::Action(Action::new(verb, Object::Selection, count));
+                }
+                self.pending.operator = Some(verb);
+                return Outcome::Pending(self.pending.showcmd());
+            }
             self.pending.clear();
             return match c {
-                'g' => Outcome::Action(Action::new(Verb::Move, Object::FileStart, count)),
+                // `5gg` is line five, as `5G` is.
+                'g' => match counted {
+                    Some(line) => self.motion_outcome(Object::LineNumber { line }),
+                    None => Outcome::Action(Action::new(Verb::Move, Object::FileStart, count)),
+                },
                 'd' => Outcome::Action(Action::new(Verb::Goto, Object::Definition, 1)),
                 'r' => Outcome::Action(Action::new(Verb::Goto, Object::References, 1)),
+                'v' => Outcome::Reselect,
                 _ => Outcome::Ignored,
             };
         }
@@ -784,8 +938,15 @@ impl Vim {
             'p' => Some(Action::new(Verb::Paste, Object::After, count)),
             'P' => Some(Action::new(Verb::Paste, Object::Here, count)),
             'x' => Some(Action::new(Verb::Delete, Object::CharRight, count)),
+            'X' => Some(Action::new(Verb::Delete, Object::CharLeft, count)),
             'D' => Some(Action::new(Verb::Delete, Object::LineEnd, count)),
             'C' => Some(Action::new(Verb::Change, Object::LineEnd, count)),
+            'Y' => Some(Action::new(Verb::Yank, Object::Line, count)),
+            // `s` is `cl` and `S` is `cc`, as vim defines them.
+            's' => Some(Action::new(Verb::Change, Object::CharRight, count)),
+            'S' => Some(Action::new(Verb::Change, Object::Line, count)),
+            '~' => Some(Action::new(Verb::ToggleCase, Object::CharRight, count)),
+            'J' => Some(Action::new(Verb::Join, Object::Line, count)),
             // `K` is vim's "look this up". Count is meaningless — there is
             // one thing under the cursor — so it is not carried.
             'K' => Some(Action::new(Verb::Explain, Object::Here, 1)),
@@ -801,7 +962,7 @@ impl Vim {
         }
 
         // Bare motions.
-        if let Some(object) = Self::motion(c) {
+        if let Some(object) = self.motion_counted(c) {
             self.pending.clear();
             return Outcome::Action(Action::new(Verb::Move, object, count));
         }
@@ -873,6 +1034,8 @@ impl Vim {
             'd' => Some(Verb::Delete),
             'y' => Some(Verb::Yank),
             'c' => Some(Verb::Change),
+            '>' => Some(Verb::Indent),
+            '<' => Some(Verb::Outdent),
             _ => None,
         }
     }
@@ -881,7 +1044,14 @@ impl Vim {
     fn doubles(op: Verb, c: char) -> bool {
         matches!(
             (op, c),
-            (Verb::Delete, 'd') | (Verb::Yank, 'y') | (Verb::Change, 'c')
+            (Verb::Delete, 'd')
+                | (Verb::Yank, 'y')
+                | (Verb::Change, 'c')
+                | (Verb::Indent, '>')
+                | (Verb::Outdent, '<')
+                | (Verb::Lowercase, 'u')
+                | (Verb::Uppercase, 'U')
+                | (Verb::ToggleCase, '~')
         )
     }
 
@@ -901,8 +1071,40 @@ impl Vim {
             '0' => Object::LineStart,
             '$' => Object::LineEnd,
             'G' => Object::FileEnd,
+            '%' => Object::MatchPair,
+            '}' => Object::ParagraphForward,
+            '{' => Object::ParagraphBackward,
             _ => return None,
         })
+    }
+
+    /// A motion, with `G` going to the counted line when there is a count —
+    /// `5G` — rather than to the end.
+    fn motion_counted(&self, c: char) -> Option<Object> {
+        let counted = self.pending.count.or(self.pending.operator_count);
+        match (c, counted) {
+            ('G', Some(_)) => Some(Object::LineNumber {
+                line: self.pending.total_count(),
+            }),
+            _ => Self::motion(c),
+        }
+    }
+
+    /// A motion's object, as an operator's target if one is waiting and as a
+    /// move otherwise.
+    fn motion_outcome(&mut self, object: Object) -> Outcome {
+        match self.pending.operator {
+            Some(op) => Outcome::Action(self.finish_operator(op, object)),
+            None => {
+                let count = self.pending.total_count();
+                self.pending.clear();
+                let count = match object {
+                    Object::LineNumber { .. } => 1,
+                    _ => count,
+                };
+                Outcome::Action(Action::new(Verb::Move, object, count))
+            }
+        }
     }
 }
 

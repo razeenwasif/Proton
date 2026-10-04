@@ -3362,12 +3362,46 @@ function renderRepo(event) {
 /** The rows drawn last time, so only the ones that moved are redrawn. */
 let terminalPainted = [];
 
-/** Give the terminal the keyboard, or take it back. */
+/** Give the terminal the keyboard, or take it back.
+ *
+ *  The focus goes to the hidden field the terminal types through, because a
+ *  paste only lands in something that takes text — unless a mouse has just
+ *  selected some of the screen, which moving the focus would throw away. */
 function focusTerminal(on) {
   terminalFocused = on;
   $("[data-term-screen]")?.classList.toggle("on", on);
+  if (on && window.getSelection()?.isCollapsed !== false) {
+    $("[data-term-input]")?.focus({ preventScroll: true });
+  }
   renderKeyboardOwner();
 }
+
+// A paste while the shell has the keyboard is the shell's: the core sends it
+// as a terminal pastes — Return for line breaks, and bracketed when the shell
+// asked, so a pasted command waits for Enter rather than running.
+document.addEventListener("paste", (e) => {
+  if (!terminalFocused) return;
+  const text = e.clipboardData?.getData("text/plain") ?? "";
+  e.preventDefault();
+  if (text) dispatch({ type: "terminalPaste", text });
+});
+
+// What an input method composes — an accent, a character from another
+// script — arrives as text in the field rather than as a key, and is the
+// shell's too. The field is emptied every time, so nothing builds up in it.
+$("[data-term-input]")?.addEventListener("input", (e) => {
+  const field = /** @type {HTMLTextAreaElement} */ (e.target);
+  if (/** @type {InputEvent} */ (e).isComposing) return;
+  const text = field.value;
+  field.value = "";
+  if (text && terminalFocused) dispatch({ type: "terminalInput", text });
+});
+$("[data-term-input]")?.addEventListener("compositionend", (e) => {
+  const field = /** @type {HTMLTextAreaElement} */ (e.target);
+  const text = field.value;
+  field.value = "";
+  if (text && terminalFocused) dispatch({ type: "terminalInput", text });
+});
 
 function runHtml(run, row, column, cursor) {
   const classes = [];
@@ -3784,10 +3818,7 @@ function showTerminal(on, { focus = false } = {}) {
     if (!terminalRunning) askForTerminal();
     requestAnimationFrame(() => {
       reportTerminalSize();
-      if (focus) {
-        focusTerminal(true);
-        termScreen?.focus({ preventScroll: true });
-      }
+      if (focus) focusTerminal(true);
     });
   } else if (terminalFocused || termPane.contains(document.activeElement)) {
     // The keyboard was in the shell that just went away, so it goes back to
@@ -4820,6 +4851,16 @@ function renderKeyboardOwner() {
 document.addEventListener("focusin", renderKeyboardOwner);
 document.addEventListener("focusout", renderKeyboardOwner);
 
+// The shell lets go of the keyboard when the focus goes anywhere outside its
+// pane — not only when something else is clicked. A file chosen from ⌘K puts
+// the focus back in the code without a click, and the keys went on to the
+// shell, Tab and all.
+document.addEventListener("focusin", (e) => {
+  if (terminalFocused && !(e.target instanceof Element && e.target.closest("[data-term-pane]"))) {
+    focusTerminal(false);
+  }
+});
+
 /* ── keys ─────────────────────────────────────────────────────────────
    Two layers, and the split matters. Shell chords (⌘K, ⌘,, ⌃1-7) are the
    window's own bindings and never reach the core. Everything else is a
@@ -4874,6 +4915,17 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (terminalFocused) {
+    // An input method is composing in the hidden field; what it makes
+    // arrives there as text, not as these keys.
+    if (e.isComposing || e.key === "Dead" || e.key === "Process") return;
+    // ⌘V (⌃⇧V elsewhere) pastes, and the paste lands in whatever has the
+    // focus — so the hidden field takes it first, in case a mouse selection
+    // on the screen had kept it there. The paste handler does the rest.
+    const mac = /Mac/.test(navigator.platform);
+    if (e.key.toLowerCase() === "v" && (mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && e.shiftKey)) {
+      $("[data-term-input]")?.focus({ preventScroll: true });
+      return;
+    }
     // Shift+PageUp/PageDown look through the history, which is the pairing
     // every terminal uses — the unshifted keys belong to whatever is running
     // in the shell, and taking those would break a pager.
@@ -4987,7 +5039,11 @@ document.addEventListener("keydown", (e) => {
   // nothing, so the core would never hear that it should go away.
   if (e.key === "Escape" && hoverOpen) dispatch({ type: "closeHover" });
 
-  if (e.key === "Tab") return;
+  // Tab is the code's, as it is in every editor: an indent in insert mode,
+  // and nothing the browser does with it. Left to the browser it moved the
+  // focus to the next control, so a Tab typed into a function walked off
+  // into the panes. A control that has the focus — a button, a field —
+  // keeps its own Tab above; so does the terminal, which completes with it.
 
   // Nothing that moves the cursor may also move the page.
   //

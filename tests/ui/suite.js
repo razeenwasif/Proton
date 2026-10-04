@@ -226,6 +226,63 @@ await test('An idle terminal is told its size once, not once a frame', async () 
   } finally { win.echoTerminalSize = false; }
   if (!wasOpen) { toggle.click(); await settle(); }
 });
+await test('Tab in the code goes to the editor and does not walk off to the next control', async () => {
+  const editor = $('.workspace.on .split.on [data-editor]');
+  editor.focus();
+  const before = win.commands.length;
+  const tab = new win.KeyboardEvent('keydown', {key: 'Tab', bubbles: true, cancelable: true});
+  editor.dispatchEvent(tab);
+  await settle();
+  assert(tab.defaultPrevented, 'the browser was left to move the focus');
+  assert(win.commands.slice(before).some((c) => c.type === 'key' && c.key.key === 'Tab'), 'Tab never reached the editor');
+  assert(doc.activeElement === editor, 'the focus left the editor');
+});
+await test('A paste while the shell has the keyboard goes to the shell, as a paste', async () => {
+  const pane = $('[data-term-pane]'), toggle = $('.titlebar [data-term-toggle]');
+  const wasOpen = !pane.hidden;
+  if (!wasOpen) { toggle.click(); await settle(); }
+  win.getSelection()?.removeAllRanges();
+  $('[data-term-screen]').click(); await settle();
+  const field = $('[data-term-input]');
+  assert(doc.activeElement === field, 'the terminal did not take the keyboard through its input');
+  // ⌘V with the screen focused hands the focus to the field first.
+  $('[data-term-screen]').focus();
+  const mac = /Mac/.test(win.navigator.platform);
+  key('v', mac ? {metaKey: true} : {ctrlKey: true, shiftKey: true});
+  assert(doc.activeElement === field, '⌘V did not move the focus to where a paste can land');
+  const before = win.commands.length;
+  const data = new win.DataTransfer();
+  data.setData('text/plain', 'echo hi\n');
+  const paste = new win.ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true});
+  field.dispatchEvent(paste);
+  await settle();
+  const sent = win.commands.slice(before);
+  assert(sent.some((c) => c.type === 'terminalPaste' && c.text === 'echo hi\n'), `no paste reached the shell: ${JSON.stringify(sent)}`);
+  assert(paste.defaultPrevented && field.value === '', 'the paste also landed in the hidden field');
+  // An input method's text goes to the shell too, and leaves nothing behind.
+  field.value = 'é';
+  field.dispatchEvent(new win.InputEvent('input', {bubbles: true, data: 'é', inputType: 'insertText'}));
+  await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'terminalInput' && c.text === 'é'), 'composed text was lost');
+  assert(field.value === '', 'the field kept what was typed into it');
+  $('.workspace.on [data-editor]').click();
+  if (!wasOpen) { toggle.click(); await settle(); }
+  $('.workspace.on [data-editor]').focus();
+});
+await test('Visual-line mode lights the whole line before the cursor moves', async () => {
+  await win.pushEvents([
+    {type: 'vimMode', mode: 'VisualLine', label: 'V-LINE'},
+    {type: 'viewport', view: 0, firstLine: 0, lines: ['alpha beta', 'gamma'], totalLines: 2, version: 0,
+      highlights: [], matches: [], git: [], stops: []},
+    {type: 'cursor', view: 0, line: 0, column: 3, offset: 3, selection: {line: 0, column: 3, offset: 3}},
+  ]);
+  const editor = $('.workspace.on [data-editor]');
+  const selected = [...editor.querySelectorAll('.sel')].map((n) => n.textContent).join('');
+  assert(selected.replace(/\s+$/, '') === 'alpha beta'.replace('a', '') || selected.includes('beta'), `line not selected: ${JSON.stringify(selected)}`);
+  await win.pushEvents([{type: 'vimMode', mode: 'Normal', label: 'NORMAL'},
+    {type: 'cursor', view: 0, line: 0, column: 3, offset: 3, selection: null}]);
+  assert(!editor.querySelector('.sel'), 'the selection stayed after leaving visual mode');
+});
 await test('Moving to a project does not open a terminal that was shut, and ␣tt still does', async () => {
   const pane = $('[data-term-pane]'), toggle = $('.titlebar [data-term-toggle]');
   const wasOpen = !pane.hidden;

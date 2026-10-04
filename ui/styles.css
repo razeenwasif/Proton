@@ -2368,6 +2368,11 @@ body { font-size: calc(13px * var(--ui-scale)); }
   position: relative; display: flex; flex-direction: column;
   flex: 0 0 var(--term-w, 392px); max-width: 50%; min-width: 0; min-height: 0;
 }
+.term-input {
+  position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+  opacity: 0; border: 0; padding: 0; resize: none; overflow: hidden;
+  pointer-events: none; caret-color: transparent;
+}
 .term-gutter {
   flex: 0 0 1px; position: relative; z-index: 5;
   cursor: col-resize; touch-action: none; transition: background .12s;

@@ -18,6 +18,9 @@ fn type_keys(ws: &mut Workspace, keys: &str) {
         } else if let Some(tail) = rest.strip_prefix("<BS>") {
             rest = tail;
             Key::named("Backspace")
+        } else if let Some(tail) = rest.strip_prefix("<Tab>") {
+            rest = tail;
+            Key::named("Tab")
         } else {
             let c = rest.chars().next().unwrap();
             rest = &rest[c.len_utf8()..];
@@ -582,4 +585,50 @@ fn control_r_redoes_a_grouped_change() {
     key.ctrl = true;
     ws.apply(Command::Key { key });
     assert_eq!(text(&ws), "typed together");
+}
+
+#[test]
+fn tab_in_insert_mode_indents_to_the_next_stop() {
+    // Spaces, four to a stop: a Tab at the start of a line is a whole indent,
+    // and one after a character goes only as far as the next stop, so what
+    // follows lines up with the lines around it.
+    let mut ws = open("ab");
+    type_keys(&mut ws, "I<Tab><Esc>");
+    assert_eq!(text(&ws), "    ab");
+    type_keys(&mut ws, "Ax<Tab>y<Esc>");
+    assert_eq!(text(&ws), "    abx y");
+}
+
+#[test]
+fn tab_in_a_file_indented_with_tabs_is_a_tab() {
+    let mut ws = open("\tone\n\ttwo\nthree");
+    type_keys(&mut ws, "GI<Tab><Esc>");
+    assert_eq!(text(&ws), "\tone\n\ttwo\n\tthree");
+}
+
+#[test]
+fn shift_v_selects_the_line_before_anything_moves() {
+    // The selection is on screen the moment visual-line mode starts, as it
+    // is in vim — not only once the cursor has moved off the anchor.
+    let mut ws = open("one\ntwo\nthree");
+    type_keys(&mut ws, "j");
+    let events = ws.apply(Command::Key {
+        key: Key {
+            shift: true,
+            ..Key::char('V')
+        },
+    });
+    let selection = events.iter().find_map(|event| match event {
+        Event::Cursor { selection, .. } => Some(selection.as_ref().map(|s| s.line)),
+        _ => None,
+    });
+    assert_eq!(selection, Some(Some(1)), "{events:?}");
+    let events = ws.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+    let selection = events.iter().find_map(|event| match event {
+        Event::Cursor { selection, .. } => Some(selection.is_some()),
+        _ => None,
+    });
+    assert_eq!(selection, Some(false), "Escape kept the selection: {events:?}");
 }

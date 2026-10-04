@@ -561,6 +561,12 @@ pub enum Command {
     TerminalInput {
         text: String,
     },
+    /// Paste into it — not the same as typing it: line breaks are sent as
+    /// Return, and a shell that asked for bracketed paste gets the text
+    /// bracketed, so a pasted command waits for Enter rather than running.
+    TerminalPaste {
+        text: String,
+    },
     /// How big the panel is, in cells. Programs redraw from this.
     #[serde(rename_all = "camelCase")]
     TerminalSize {

@@ -3,4 +3,4 @@
 /**
  * What to do.
  */
-export type Verb = "Move" | "Delete" | "Yank" | "Change" | "Insert" | "Paste" | "Undo" | "Redo" | "Goto" | "Explain" | "Repeat" | "SetMark";
+export type Verb = "Move" | "Delete" | "Yank" | "Change" | "Insert" | "Paste" | "Undo" | "Redo" | "Goto" | "Explain" | "Repeat" | "SetMark" | "Indent" | "Outdent" | "Lowercase" | "Uppercase" | "ToggleCase" | "Join" | "Replace";

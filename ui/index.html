@@ -352,6 +352,12 @@
               <button class="term-restart" data-term-restart hidden title="Start a new shell">Shell exited · restart</button>
             </div>
             <div class="scroll term" data-term-screen tabindex="0" aria-label="Terminal"></div>
+            <!-- What the keyboard types through while the shell has it. A
+                 paste only lands in something that takes text, and the screen
+                 is drawn, not edited — so this holds the focus instead, and
+                 hands what arrives in it to the shell. -->
+            <textarea class="term-input" data-term-input tabindex="-1" aria-label="Terminal input"
+                      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
           </section>
         </div>
       </main>

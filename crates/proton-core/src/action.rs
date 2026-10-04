@@ -34,6 +34,20 @@ pub enum Verb {
     Repeat,
     /// Name the cursor's position, for `m`.
     SetMark,
+    /// `>` — shift lines right by one indent.
+    Indent,
+    /// `<` — shift lines left by one indent.
+    Outdent,
+    /// `gu`, and `u` on a selection.
+    Lowercase,
+    /// `gU`, and `U` on a selection.
+    Uppercase,
+    /// `g~` and `~`.
+    ToggleCase,
+    /// `J` — the lines into one, a space between.
+    Join,
+    /// `r` — overwrite characters with the one in [`Object::Char`].
+    Replace,
 }
 
 /// What to do it to. A mode maps these onto its own nouns: `Line` is a line of
@@ -99,6 +113,28 @@ pub enum Object {
     /// The block's right edge, padding short lines out to reach it.
     BlockEnd,
 
+    /* ── motions that carry their argument ───────────────────────── */
+    /// `f`, `t`, `F` and `T`: the `count`th `ch` on the line, ahead or behind,
+    /// or the character just short of it.
+    FindChar {
+        ch: char,
+        forward: bool,
+        till: bool,
+    },
+    /// `%` — the bracket that matches the one under or after the cursor.
+    MatchPair,
+    /// `}` and `{` — the next and previous blank line.
+    ParagraphForward,
+    ParagraphBackward,
+    /// `5G` and `5gg` — a line by number, counting from one as vim does.
+    LineNumber {
+        line: u32,
+    },
+    /// What `r` writes.
+    Char {
+        ch: char,
+    },
+
     /* ── text objects ─────────────────────────────────────────────
     These are the reason the engine resolves to objects rather than
     to offsets: `ciw` means the same thing in every mode that has a
@@ -132,7 +168,18 @@ impl Verb {
     pub fn modifies(self) -> bool {
         matches!(
             self,
-            Verb::Delete | Verb::Change | Verb::Insert | Verb::Paste | Verb::Repeat
+            Verb::Delete
+                | Verb::Change
+                | Verb::Insert
+                | Verb::Paste
+                | Verb::Repeat
+                | Verb::Indent
+                | Verb::Outdent
+                | Verb::Lowercase
+                | Verb::Uppercase
+                | Verb::ToggleCase
+                | Verb::Join
+                | Verb::Replace
         )
     }
 }

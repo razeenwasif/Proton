@@ -52,6 +52,9 @@ pub struct Workspace {
     mode: ModeId,
     vim: Vim,
     editor: Editor,
+    /// The last selection, for `gv`: which buffer, its two ends, and whether
+    /// it was charwise, linewise or a block.
+    last_visual: Option<(usize, usize, usize, VimMode)>,
     /// The views onto the buffers. Always at least one; what used to be a
     /// single viewport is the focused one of these.
     splits: Splits,
@@ -1091,6 +1094,13 @@ impl Workspace {
                 vec![self.terminal_event()]
             }
 
+            Command::TerminalPaste { text } => {
+                if let Some(term) = self.terminal.as_mut() {
+                    term.paste(&text);
+                }
+                Vec::new()
+            }
+
             Command::TerminalInput { text } => {
                 if let Some(term) = self.terminal.as_mut() {
                     term.write(&text);
@@ -1518,6 +1528,12 @@ impl Workspace {
                 }
 
                 let before = self.vim.mode();
+                // The selection as it stands, in case this key ends it.
+                let held = matches!(
+                    before,
+                    VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+                )
+                .then(|| (self.editor.active(), self.editor.buffer().cursor));
                 let typed = key.as_char().filter(|_| key.is_bare_char());
                 let mut events = Vec::new();
                 let mut changed = false;
@@ -1560,6 +1576,23 @@ impl Workspace {
                 // The mode transition is reported after whatever the key did,
                 // so a statusline applying events in order ends up correct.
                 if self.vim.mode() != before {
+                    // Leaving visual mode lets go of the selection — kept for
+                    // `gv`, and gone from the screen, where it used to stay lit
+                    // after Escape until the cursor next moved.
+                    let visual = |mode: VimMode| {
+                        matches!(
+                            mode,
+                            VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+                        )
+                    };
+                    if visual(before) && !visual(self.vim.mode()) && self.mode == ModeId::Codex {
+                        if let Some((buffer, cursor)) = held {
+                            self.last_visual = Some((buffer, cursor.anchor, cursor.offset, before));
+                        }
+                        let buf = self.editor.buffer_mut();
+                        let at = buf.cursor.offset;
+                        buf.cursor = buf.cursor.moved_to(at);
+                    }
                     // Leaving insert mode steps the cursor back one, as vim
                     // does: in insert you sit *between* characters, in normal
                     // you sit *on* one, and the character you land on is the
@@ -3619,6 +3652,40 @@ impl Workspace {
         events
     }
 
+    /// What Tab inserts at the cursor: a tab where the file is indented with
+    /// tabs, and otherwise spaces to the next tab stop — so a Tab after two
+    /// characters of a four-wide indent adds two, and the code lines up.
+    fn indent_here(&self) -> String {
+        let buffer = self.editor.buffer();
+        if indents_with_tabs(buffer) {
+            return "\t".into();
+        }
+        let width = self.tab_size();
+        let at = buffer.position(buffer.cursor.offset);
+        let column = buffer
+            .line(at.line)
+            .chars()
+            .take(at.column)
+            .fold(0, |col, c| match c {
+                '\t' => (col / width + 1) * width,
+                _ => col + 1,
+            });
+        " ".repeat(width - column % width)
+    }
+
+    /// How wide a tab stop is: `editor.tabSize`, four unless it says.
+    fn tab_size(&self) -> usize {
+        self.settings.number("editor.tabSize", 4).clamp(1, 16) as usize
+    }
+
+    /// One level of indentation in the buffer being edited.
+    fn indent_unit(&self) -> String {
+        match indents_with_tabs(self.editor.buffer()) {
+            true => "\t".into(),
+            false => " ".repeat(self.tab_size()),
+        }
+    }
+
     /// Re-read the open files a provider changed on its own.
     ///
     /// Antigravity edits the project with its own tools rather than through
@@ -5271,6 +5338,11 @@ impl Workspace {
         {
             self.editor.buffer_mut().end_group();
         }
+        // `>` and `<` shift by the file's own indent — the same one Tab types.
+        if matches!(action.verb, Verb::Indent | Verb::Outdent) {
+            let unit = self.indent_unit();
+            self.editor.set_indent(&unit);
+        }
         let changed = self.mode == ModeId::Codex && self.editor.execute(action, was);
 
         // An action that opens insert mode starts an undo group, so the typing
@@ -5305,6 +5377,34 @@ impl Workspace {
     fn events_for(&mut self, outcome: Outcome, was: VimMode, replay: bool) -> (Vec<Event>, bool) {
         match outcome {
             Outcome::Action(action) => self.act(&action, was, replay),
+            Outcome::Reselect => {
+                let Some((buffer, anchor, offset, kind)) = self.last_visual else {
+                    return (Vec::new(), false);
+                };
+                if buffer != self.editor.active() || self.mode != ModeId::Codex {
+                    return (Vec::new(), false);
+                }
+                let buf = self.editor.buffer_mut();
+                let len = buf.len_chars();
+                buf.cursor = buf.clamp(proton_text::Cursor {
+                    offset: offset.min(len),
+                    anchor: anchor.min(len),
+                    goal_column: None,
+                });
+                self.vim.reselect(kind);
+                (Vec::new(), false)
+            }
+            Outcome::Indent => {
+                if self.mode != ModeId::Codex {
+                    return (Vec::new(), false);
+                }
+                let indent = self.indent_here();
+                self.editor.buffer_mut().ensure_group();
+                for c in indent.chars() {
+                    self.editor.insert_char(c);
+                }
+                (Vec::new(), true)
+            }
             Outcome::Input(c) => {
                 if self.mode == ModeId::Codex {
                     self.editor.buffer_mut().ensure_group();
@@ -5616,7 +5716,14 @@ impl Workspace {
         let buf = &self.editor.buffers()[buffer];
         let cursor = if focused { buf.cursor } else { pane.cursor };
         let at = buf.position(cursor.offset);
-        let selection = cursor.has_selection().then(|| {
+        // Visual mode selects from the moment it starts — `V` lights the whole
+        // line and `v` the character under the cursor before anything has
+        // moved, as vim's do — and that is exactly when the anchor and the
+        // head are still in one place, so a selection judged by the distance
+        // between them was no selection at all, and `V` looked like it had
+        // done nothing.
+        let selecting = focused && self.vim.is_selecting();
+        let selection = (selecting || cursor.has_selection()).then(|| {
             let anchor = buf.position(cursor.anchor);
             Selection {
                 line: anchor.line,
@@ -6025,4 +6132,23 @@ pub struct StoredView {
     /// The cursor, as a character offset into that file.
     #[serde(default)]
     pub line: usize,
+}
+
+/// Whether a buffer is indented with tabs: a Makefile, which must be, or a
+/// file where more of the indented lines begin with a tab than with spaces.
+/// An empty or unindented file says nothing, and gets spaces.
+fn indents_with_tabs(buffer: &proton_text::Buffer) -> bool {
+    let name = buffer.name();
+    if name == "Makefile" || name == "makefile" || name == "GNUmakefile" || name.ends_with(".mk") {
+        return true;
+    }
+    let (mut tabs, mut spaces) = (0, 0);
+    for line in 0..buffer.len_lines().min(1000) {
+        match buffer.line(line).chars().next() {
+            Some('\t') => tabs += 1,
+            Some(' ') => spaces += 1,
+            _ => {}
+        }
+    }
+    tabs > spaces
 }

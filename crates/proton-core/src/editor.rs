@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use proton_text::edit::Range;
-use proton_text::{motion, Buffer, Cursor, Edit};
+use proton_text::{motion, Buffer, Cursor, Edit, Position};
 
 use crate::action::{Action, Object, Verb};
 use crate::block::{Block, PendingInsert};
@@ -33,6 +33,10 @@ pub struct Editor {
     registers: HashMap<String, Register>,
     /// A block insert waiting for insert mode to end. See `block.rs`.
     block_insert: Option<PendingInsert>,
+    /// One level of indentation, for `>` and `<`: a tab, or a run of spaces —
+    /// whichever the file being edited uses. The workspace sets it, because
+    /// the settings and the file are both its to read.
+    indent: String,
 }
 
 /// What shape the text in a register is, which decides how it comes back.
@@ -59,7 +63,13 @@ impl Editor {
             active: 0,
             registers: HashMap::new(),
             block_insert: None,
+            indent: "    ".into(),
         }
+    }
+
+    /// What `>` adds and `<` takes away.
+    pub fn set_indent(&mut self, unit: &str) {
+        self.indent = unit.to_string();
     }
 
     pub fn buffer(&self) -> &Buffer {
@@ -209,10 +219,18 @@ impl Editor {
                 } else {
                     buf.cursor.moved_to(target)
                 };
-                buf.cursor = buf.clamp(Cursor {
+                let cursor = buf.clamp(Cursor {
                     goal_column: goal,
                     ..cursor
                 });
+                // Normal mode never rests on the line break: `$` lands on the
+                // last character, `l` stops at it, and `j` onto a shorter line
+                // comes to rest on its end rather than past it — as in vim.
+                // Insert mode can, which is where `A` types.
+                buf.cursor = match mode {
+                    VimMode::Normal => on_a_character(buf, cursor),
+                    _ => cursor,
+                };
                 false
             }
 
@@ -225,7 +243,7 @@ impl Editor {
             }
 
             Verb::Delete | Verb::Change | Verb::Yank => {
-                let Some((range, linewise)) = self.span_for(action, count, visual) else {
+                let Some((range, linewise)) = self.span_for(action, count, mode) else {
                     return false;
                 };
                 if range.is_empty() {
@@ -248,8 +266,119 @@ impl Editor {
                     return false;
                 }
 
+                // `cc`, `S` and `c` on a line-wise selection empty the lines
+                // into one rather than removing them: what is typed replaces
+                // them, on a line of its own, at the indentation they had.
+                if action.verb == Verb::Change && linewise {
+                    let buf = self.buffer_mut();
+                    let first = buf.position(range.start).line;
+                    let indent: String = buf
+                        .line(first)
+                        .chars()
+                        .take_while(|c| *c == ' ' || *c == '\t')
+                        .collect();
+                    let end = match buf.slice(range).ends_with('\n') {
+                        true => range.end - 1,
+                        false => range.end,
+                    };
+                    let at = range.start + indent.chars().count();
+                    buf.apply(
+                        vec![Edit::replace(Range::new(range.start, end), indent)],
+                        Cursor::at(at),
+                    );
+                    return true;
+                }
+
                 let buf = self.buffer_mut();
                 buf.apply(vec![Edit::delete(range)], Cursor::at(range.start));
+                // Not in insert mode, where `⌃w` deletes too and the cursor
+                // belongs exactly where the deleted text began.
+                if action.verb == Verb::Delete && !matches!(mode, VimMode::Insert | VimMode::Replace) {
+                    // Whole lines gone: on to the first non-blank of the line
+                    // that took their place. Otherwise on a character, as
+                    // everywhere in normal mode — `x` on a line's last one
+                    // steps back rather than onto the break.
+                    let cursor = match linewise {
+                        true => Cursor::at(buf.first_non_blank()),
+                        false => buf.cursor,
+                    };
+                    buf.cursor = on_a_character(buf, cursor);
+                }
+                true
+            }
+
+            Verb::Indent | Verb::Outdent => self.shift(action, count, mode),
+
+            Verb::Lowercase | Verb::Uppercase | Verb::ToggleCase => {
+                let Some((range, _)) = self.span_for(action, count, mode) else {
+                    return false;
+                };
+                let buf = self.buffer_mut();
+                let before = buf.slice(range);
+                let after: String = before
+                    .chars()
+                    .flat_map(|c| -> Vec<char> {
+                        match action.verb {
+                            Verb::Lowercase => c.to_lowercase().collect(),
+                            Verb::Uppercase => c.to_uppercase().collect(),
+                            _ if c.is_lowercase() => c.to_uppercase().collect(),
+                            _ if c.is_uppercase() => c.to_lowercase().collect(),
+                            _ => vec![c],
+                        }
+                    })
+                    .collect();
+                // `~` walks on past what it changed; an operator stays at the
+                // start of it, as vim's do.
+                let at = match action.object {
+                    Object::CharRight => range.start + after.chars().count(),
+                    _ => range.start,
+                };
+                let changed = before != after;
+                if changed {
+                    buf.apply(vec![Edit::replace(range, after)], Cursor::at(at));
+                } else {
+                    buf.cursor = Cursor::at(at);
+                }
+                buf.cursor = on_a_character(buf, buf.cursor);
+                changed
+            }
+
+            Verb::Join => self.join(action, count, mode),
+
+            Verb::Replace => {
+                let Object::Char { ch } = action.object else {
+                    return false;
+                };
+                if visual {
+                    // The object is the character to write, so the range is
+                    // asked for as the selection's.
+                    let selection = Action::new(Verb::Replace, Object::Selection, 1);
+                    let Some((range, _)) = self.span_for(&selection, 1, mode) else {
+                        return false;
+                    };
+                    let buf = self.buffer_mut();
+                    let text: String = buf
+                        .slice(range)
+                        .chars()
+                        .map(|c| if c == '\n' { c } else { ch })
+                        .collect();
+                    buf.apply(vec![Edit::replace(range, text)], Cursor::at(range.start));
+                    return true;
+                }
+                let buf = self.buffer_mut();
+                let at = buf.cursor.offset;
+                // As in vim, `5rx` with fewer than five characters left on the
+                // line does nothing rather than reaching into the next one.
+                if at + count > buf.line_end() {
+                    return false;
+                }
+                buf.apply(
+                    vec![Edit::replace(
+                        Range::new(at, at + count),
+                        ch.to_string().repeat(count),
+                    )],
+                    Cursor::at(at + count - 1),
+                );
                 true
             }
 
@@ -383,17 +512,40 @@ impl Editor {
     /* ── helpers ──────────────────────────────────────────────────── */
 
     /// The range an operator applies to, and whether it is linewise.
-    fn span_for(&mut self, action: &Action, count: usize, visual: bool) -> Option<(Range, bool)> {
+    fn span_for(&mut self, action: &Action, count: usize, mode: VimMode) -> Option<(Range, bool)> {
+        let visual = matches!(
+            mode,
+            VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+        );
         let buf = self.buffer_mut();
         if visual && action.object == Object::Selection {
             let sel = buf.cursor.selection();
+            // `V` selects whole lines whatever columns the ends are in: `Vd`
+            // takes the lines, and `Vy` yanks them as lines, so `p` puts them
+            // back as lines rather than splicing them into one.
+            if mode == VimMode::VisualLine {
+                let first = buf.position(sel.start).line;
+                let last = buf.position(sel.end).line;
+                return Some((buf.line_span(first, last - first + 1), true));
+            }
             // Visual selections are inclusive of the character under the cursor.
             return Some((
                 Range::new(sel.start, (sel.end + 1).min(buf.len_chars())),
                 false,
             ));
         }
-        match resolve(buf, action.object, count)? {
+        // `cw` on a word changes the word and not the space after it — vim's
+        // own exception, because that is what anybody typing it means.
+        let on_word = buf
+            .text()
+            .get_char(buf.cursor.offset)
+            .is_some_and(|c| !c.is_whitespace());
+        let object = match (action.verb, action.object) {
+            (Verb::Change, Object::WordForward) if on_word => Object::WordEnd,
+            (Verb::Change, Object::BigWordForward) if on_word => Object::BigWordEnd,
+            (_, object) => object,
+        };
+        match resolve(buf, object, count)? {
             Resolved::Linewise(r) => Some((r, true)),
             Resolved::Span(r) => Some((r, false)),
             // Some motions are linewise even though they resolve to a point:
@@ -401,15 +553,140 @@ impl Editor {
             // `d'a` takes every line between here and the mark. Expanding the
             // span here rather than at each object keeps `resolve` answering
             // one question — where — and this one answering the other.
-            Resolved::Motion(at) if linewise(action.object) => {
+            Resolved::Motion(at) if linewise(object) => {
                 let from = buf.cursor.offset.min(at);
                 let to = buf.cursor.offset.max(at);
                 let lines = buf.position(to).line - buf.position(from).line + 1;
                 let start = buf.position(from).line;
                 Some((buf.line_span(start, lines), true))
             }
+            // An inclusive motion takes the character it lands on: `de`
+            // deletes to the end of the word, `df)` the bracket as well.
+            Resolved::Motion(at) if inclusive(object) && at >= buf.cursor.offset => Some((
+                Range::new(buf.cursor.offset, (at + 1).min(buf.len_chars())),
+                false,
+            )),
             Resolved::Motion(at) => Some((Range::new(buf.cursor.offset, at), false)),
         }
+    }
+
+    /// The first and last line an action covers: a selection's, a count of
+    /// lines from the cursor's, or every line a motion crosses.
+    fn lines_for(&self, action: &Action, count: usize, mode: VimMode) -> Option<(usize, usize)> {
+        let buf = self.buffer();
+        let here = buf.position(buf.cursor.offset).line;
+        let visual = matches!(
+            mode,
+            VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+        );
+        if visual && action.object == Object::Selection {
+            let sel = buf.cursor.selection();
+            return Some((buf.position(sel.start).line, buf.position(sel.end).line));
+        }
+        if action.object == Object::Line {
+            return Some((here, (here + count - 1).min(last_line(buf))));
+        }
+        let target = match resolve(buf, action.object, count)? {
+            Resolved::Motion(at) => at,
+            Resolved::Span(r) | Resolved::Linewise(r) => r.end.saturating_sub(1).max(r.start),
+        };
+        let there = buf.position(target).line;
+        Some((here.min(there), here.max(there)))
+    }
+
+    /// `>` and `<`: every line covered gains or loses one level. Blank lines
+    /// are left alone, as vim leaves them, rather than given trailing spaces.
+    fn shift(&mut self, action: &Action, count: usize, mode: VimMode) -> bool {
+        let Some((first, last)) = self.lines_for(action, count, mode) else {
+            return false;
+        };
+        let unit = match self.indent.is_empty() {
+            true => "    ".to_string(),
+            false => self.indent.clone(),
+        };
+        let width = match unit.as_str() {
+            "\t" => 4,
+            spaces => spaces.chars().count(),
+        };
+        let buf = self.buffer_mut();
+        let mut edits = Vec::new();
+        for line in first..=last {
+            let text = buf.line(line);
+            if text.trim().is_empty() {
+                continue;
+            }
+            let at = buf.offset_of(Position { line, column: 0 });
+            if action.verb == Verb::Indent {
+                edits.push(Edit::insert(at, unit.clone()));
+                continue;
+            }
+            let take = match text.chars().next() {
+                Some('\t') => 1,
+                _ => text.chars().take(width).take_while(|c| *c == ' ').count(),
+            };
+            if take > 0 {
+                edits.push(Edit::delete(Range::new(at, at + take)));
+            }
+        }
+        if edits.is_empty() {
+            return false;
+        }
+        // On the first non-blank of the first line, once it has moved.
+        let start = buf.offset_of(Position {
+            line: first,
+            column: 0,
+        });
+        let blank = buf
+            .line(first)
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .count();
+        let shifted = match edits.first() {
+            Some(edit) if edit.start == start && action.verb == Verb::Indent => blank + unit.chars().count(),
+            Some(edit) if edit.start == start => blank - (edit.end - edit.start),
+            _ => blank,
+        };
+        buf.apply(edits, Cursor::at(start + shifted));
+        true
+    }
+
+    /// `J`: the lines become one, the break and the next line's indentation
+    /// replaced by a single space — none before a closing bracket, or where
+    /// the next line is blank.
+    fn join(&mut self, action: &Action, count: usize, mode: VimMode) -> bool {
+        let visual = matches!(
+            mode,
+            VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
+        );
+        let buf = self.buffer();
+        let here = buf.position(buf.cursor.offset).line;
+        let (first, last) = match visual {
+            true => self.lines_for(action, count, mode).unwrap_or((here, here)),
+            // `J` joins two lines; `3J` joins three.
+            false => (here, here + count.max(2) - 1),
+        };
+        let last = last.max(first + 1).min(last_line(buf));
+        if first >= last {
+            return false;
+        }
+        let mut edits = Vec::new();
+        let mut joined_at = None;
+        for line in first..last {
+            let end = buf.offset_of(Position { line, column: 0 }) + buf.line(line).chars().count();
+            let next = buf.line(line + 1);
+            let lead = next.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+            let rest = &next[next.char_indices().nth(lead).map_or(next.len(), |(i, _)| i)..];
+            let space = match (buf.line(line).ends_with(' '), rest.is_empty(), rest.starts_with(')')) {
+                (false, false, false) => " ",
+                _ => "",
+            };
+            joined_at.get_or_insert(end);
+            edits.push(Edit::replace(Range::new(end, end + 1 + lead), space.to_string()));
+        }
+        let at = joined_at.unwrap_or(0);
+        let buf = self.buffer_mut();
+        buf.apply(edits, Cursor::at(at));
+        true
     }
 
     fn write_register(&mut self, name: Option<&str>, text: String, shape: Shape) {
@@ -454,6 +731,15 @@ fn resolve(buf: &Buffer, object: Object, count: usize) -> Option<Resolved> {
         AroundWord => Resolved::Span(buf.a_word(false)),
         InnerBigWord => Resolved::Span(buf.inner_word(true)),
         AroundBigWord => Resolved::Span(buf.a_word(true)),
+        FindChar { ch, forward, till } => Resolved::Motion(find_in_line(buf, ch, forward, till, count)?),
+        MatchPair => Resolved::Motion(match_pair(buf)?),
+        ParagraphForward => Resolved::Motion(paragraph(buf, true, count)),
+        ParagraphBackward => Resolved::Motion(paragraph(buf, false, count)),
+        LineNumber { line } => {
+            let line = (line as usize).saturating_sub(1).min(last_line(buf));
+            let start = buf.offset_of(Position { line, column: 0 });
+            Resolved::Motion(motion::first_non_blank(buf.text().slice(..), start))
+        }
         InnerPair { open } => Resolved::Span(buf.inside_pair(open, closing(open), false)?),
         AroundPair { open } => Resolved::Span(buf.inside_pair(open, closing(open), true)?),
         MarkExact { name } => Resolved::Motion(buf.mark(name)?),
@@ -473,6 +759,7 @@ fn resolve(buf: &Buffer, object: Object, count: usize) -> Option<Resolved> {
         // answered in the workspace where one lives.
         BlockStart
         | BlockEnd
+        | Char { .. }
         | Mark { .. }
         | Definition
         | References
@@ -502,8 +789,159 @@ fn closing(open: char) -> char {
 fn linewise(object: Object) -> bool {
     matches!(
         object,
-        Object::LineDown | Object::LineUp | Object::MarkLine { .. }
+        Object::LineDown
+            | Object::LineUp
+            | Object::MarkLine { .. }
+            // `dG`, `dgg` and `d5G` take whole lines, as in vim.
+            | Object::FileEnd
+            | Object::FileStart
+            | Object::LineNumber { .. }
     )
+}
+
+/// Whether a motion includes the character it lands on, when an operator is
+/// waiting on it. `e`, `f` and `t` do and `w` does not — `dw` stops before the
+/// next word, `de` takes the end of this one.
+fn inclusive(object: Object) -> bool {
+    matches!(
+        object,
+        Object::WordEnd
+            | Object::BigWordEnd
+            | Object::MatchPair
+            | Object::FindChar { forward: true, .. }
+    )
+}
+
+/// The last line with anything on it. A file ending in a line break has an
+/// empty line after it as far as the rope is concerned, and nothing should
+/// land on or join with that.
+fn last_line(buf: &Buffer) -> usize {
+    let lines = buf.len_lines().max(1);
+    match buf.text().len_chars() > 0 && buf.text().char(buf.text().len_chars() - 1) == '\n' {
+        true => lines.saturating_sub(2),
+        false => lines - 1,
+    }
+}
+
+/// The cursor, moved back off a line break onto the line's last character —
+/// where normal mode keeps it. An empty line has only the break to sit on.
+fn on_a_character(buf: &Buffer, cursor: Cursor) -> Cursor {
+    let text = buf.text().slice(..);
+    let start = motion::line_start(text, cursor.offset);
+    let end = motion::line_end(text, cursor.offset);
+    if cursor.offset >= end && end > start {
+        Cursor {
+            offset: end - 1,
+            anchor: end - 1,
+            goal_column: cursor.goal_column,
+        }
+    } else {
+        cursor
+    }
+}
+
+/// `f`, `t`, `F`, `T`: the `count`th `ch` along the cursor's line.
+fn find_in_line(buf: &Buffer, ch: char, forward: bool, till: bool, count: usize) -> Option<usize> {
+    let text = buf.text();
+    let (at, start, end) = (buf.cursor.offset, buf.line_start(), buf.line_end());
+    let mut found = 0;
+    if forward {
+        for i in at + 1..end {
+            if text.char(i) == ch {
+                found += 1;
+                if found == count {
+                    return Some(if till { i - 1 } else { i });
+                }
+            }
+        }
+    } else {
+        for i in (start..at).rev() {
+            if text.char(i) == ch {
+                found += 1;
+                if found == count {
+                    return Some(if till { i + 1 } else { i });
+                }
+            }
+        }
+    }
+    None
+}
+
+/// `%`: the bracket matching the one under the cursor, or the first one after
+/// it on the line, counting nested pairs on the way.
+fn match_pair(buf: &Buffer) -> Option<usize> {
+    let text = buf.text();
+    let (at, end) = (buf.cursor.offset, buf.line_end());
+    let (pos, c) = (at..end)
+        .map(|i| (i, text.char(i)))
+        .find(|(_, c)| "(){}[]".contains(*c))?;
+    let (open, close, forward) = match c {
+        '(' => ('(', ')', true),
+        ')' => ('(', ')', false),
+        '{' => ('{', '}', true),
+        '}' => ('{', '}', false),
+        '[' => ('[', ']', true),
+        _ => ('[', ']', false),
+    };
+    let mut depth = 0usize;
+    if forward {
+        for (i, ch) in text.chars_at(pos).enumerate() {
+            if ch == open {
+                depth += 1;
+            } else if ch == close {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(pos + i);
+                }
+            }
+        }
+    } else {
+        let mut chars = text.chars_at(pos + 1);
+        let mut i = pos + 1;
+        while let Some(ch) = chars.prev() {
+            i -= 1;
+            if ch == close {
+                depth += 1;
+            } else if ch == open {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// `}` and `{`: past the paragraph the cursor is in to the blank line beyond
+/// it, `count` times; the end or start of the file when there is none.
+fn paragraph(buf: &Buffer, forward: bool, count: usize) -> usize {
+    let last = last_line(buf);
+    let blank = |line: usize| buf.line(line).trim().is_empty();
+    let mut line = buf.position(buf.cursor.offset).line;
+    for _ in 0..count {
+        if forward {
+            while line < last && blank(line) {
+                line += 1;
+            }
+            while line < last && !blank(line) {
+                line += 1;
+            }
+        } else {
+            while line > 0 && blank(line) {
+                line -= 1;
+            }
+            while line > 0 && !blank(line) {
+                line -= 1;
+            }
+        }
+    }
+    let start = buf.offset_of(Position { line, column: 0 });
+    match forward && line == last && !blank(line) {
+        // No blank line ahead: the end of the last line.
+        true => start + buf.line(line).chars().count().saturating_sub(1),
+        false => start,
+    }
 }
 
 /* ── visual block ─────────────────────────────────────────────────── */

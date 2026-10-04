@@ -20,4 +20,4 @@ line: number | null, } | { "type": "refreshRepo" } | { "type": "runCell", index:
 /**
  * Zero-based, as every line number crossing this bus is.
  */
-line: number, column: number, } | { "type": "openTerminal" } | { "type": "terminalInput", text: string, } | { "type": "terminalSize", rows: number, cols: number, } | { "type": "terminalScroll", lines: number, } | { "type": "terminalToBottom" } | { "type": "closeTerminal" } | { "type": "debugStart" } | { "type": "debugStop" } | { "type": "debugResume" } | { "type": "debugStepOver" } | { "type": "debugStepInto" } | { "type": "debugStepOut" } | { "type": "sync" };
+line: number, column: number, } | { "type": "openTerminal" } | { "type": "terminalInput", text: string, } | { "type": "terminalPaste", text: string, } | { "type": "terminalSize", rows: number, cols: number, } | { "type": "terminalScroll", lines: number, } | { "type": "terminalToBottom" } | { "type": "closeTerminal" } | { "type": "debugStart" } | { "type": "debugStop" } | { "type": "debugResume" } | { "type": "debugStepOver" } | { "type": "debugStepInto" } | { "type": "debugStepOut" } | { "type": "sync" };

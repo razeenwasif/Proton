@@ -119,6 +119,20 @@ fn shell() -> CommandBuilder {
     cmd
 }
 
+/// What a paste sends. Escapes are dropped from bracketed text: a clipboard
+/// holding the closing bracket would otherwise end the paste early, and run
+/// whatever came after it as if typed.
+fn pasted(text: &str, bracketed: bool) -> String {
+    let text = text.replace("\r\n", "\r").replace('\n', "\r");
+    match bracketed {
+        true => {
+            let clean: String = text.chars().filter(|&c| c != '\x1b').collect();
+            format!("\x1b[200~{clean}\x1b[201~")
+        }
+        false => text,
+    }
+}
+
 /// Whether a shell is one known to take `-l` for "login". Anything else is
 /// started as it always was, rather than handed a flag it may refuse.
 #[cfg(any(target_os = "macos", test))]
@@ -209,6 +223,17 @@ impl Terminal {
         self.parser.screen_mut().set_scrollback(0);
         let _ = self.writer.write_all(text.as_bytes());
         let _ = self.writer.flush();
+    }
+
+    /// Paste, the way a terminal pastes.
+    ///
+    /// Line breaks go as Return, which is what the keyboard would have sent.
+    /// And when the program asked for bracketed paste — zsh, bash and vim all
+    /// do — the text is bracketed, so a pasted line is text at the prompt to
+    /// look at rather than a command that has already run.
+    pub fn paste(&mut self, text: &str) {
+        let bytes = pasted(text, self.parser.screen().bracketed_paste());
+        self.write(&bytes);
     }
 
     /// How far back through the history the view is, in rows. `0` is live.
@@ -580,6 +605,15 @@ mod tests {
             oldest.contains(&"line1".to_string()),
             "the very top of the history: {oldest:?}"
         );
+    }
+
+    #[test]
+    fn a_paste_sends_return_for_line_breaks_and_brackets_when_asked() {
+        assert_eq!(pasted("ls\ncd /\r\n", false), "ls\rcd /\r");
+        assert_eq!(pasted("echo hi\n", true), "\x1b[200~echo hi\r\x1b[201~");
+        // A clipboard trying to close the bracket early, and run `rm`.
+        let sneaky = "x\x1b[201~rm -rf ~\n";
+        assert_eq!(pasted(sneaky, true), "\x1b[200~x[201~rm -rf ~\r\x1b[201~");
     }
 
     #[test]
