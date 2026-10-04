@@ -1111,6 +1111,11 @@
         <p>Codex shows the open file's path above the code instead of a row of tabs. <kbd>␣</kbd><kbd>f</kbd><kbd>b</kbd> lists the open buffers either way.</p>
         <label class="setting-control">Tabs <select data-display-setting="editor.tabs" aria-label="File tabs"><option value="hidden" selected>Hidden</option><option value="shown">Shown</option></select></label>
       </div>
+      <div class="setting">
+        <h4>Terminal</h4>
+        <p>The GPU draws the terminal the way Zed does: each character is drawn once, and a busy screen is redrawn without laying out any text. It is new, so text stays the default. Selecting and copying work the same with either.</p>
+        <label class="setting-control">Drawn with <select data-display-setting="terminal.renderer" aria-label="Terminal renderer"><option value="text" selected>Text</option><option value="gpu">GPU</option></select></label>
+      </div>
       </div><!-- /appearance -->
 
       <div data-st-panel="editing" hidden>

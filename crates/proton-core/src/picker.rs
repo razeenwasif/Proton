@@ -596,6 +596,8 @@ impl Pickers {
         if !self.index.poll() {
             return searched;
         }
+        // A new list: what the last query matched was out of the old one.
+        self.matcher.forget();
         if self.open.is_some() {
             self.requery(buffers);
             return true;

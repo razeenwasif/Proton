@@ -117,3 +117,13 @@ Also check Settings → Appearance at 125% interface text and 16 px editor text,
 collapse a panel, and restart to verify those choices survive. These display
 settings are saved in the disposable project's `.proton/settings.json`; panel
 widths and visibility are local preferences per mode.
+
+`tests/ui/terminal-bench.html` streams a coloured build log through the
+terminal a line a frame — every row changing every time — once drawn as text
+and once by the GPU, and reports the main thread's time per frame and the
+frames that came late. Drivers can call `window.bench` themselves: Chrome's
+profiler and a WKWebView with the web and GPU processes' CPU time both agree
+with what the page reports. Nothing in it is asserted; the suite's GPU check
+is that the canvas draws the right colours where it should, that the rows
+under it catch up once the screen is still, and that switching back leaves
+nothing behind.

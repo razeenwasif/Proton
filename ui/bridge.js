@@ -102,6 +102,19 @@ export async function applyBackdrop() {
   return material;
 }
 
+/** Make the window opaque in `color` (`#rrggbb`), or give it back its
+ *  see-through material with `null`. Codex paints every pixel itself, and a
+ *  see-through window under it is compositor work nobody sees. */
+/** @param {string | null} color */
+export async function setOpaque(color) {
+  if (!tauri) return;
+  try {
+    await tauri.core.invoke("set_opaque", { color });
+  } catch (err) {
+    console.error("proton: could not change the window's ground", err);
+  }
+}
+
 /** Ask for a material. Returns what was actually applied, which may differ. */
 /** @param {string} material */
 export async function setBackdrop(material) {

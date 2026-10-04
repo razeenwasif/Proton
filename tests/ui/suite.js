@@ -269,6 +269,85 @@ await test('A paste while the shell has the keyboard goes to the shell, as a pas
   if (!wasOpen) { toggle.click(); await settle(); }
   $('.workspace.on [data-editor]').focus();
 });
+/** One line of coloured text per row: a red number, then a word on blue. */
+const colourScreen = (first, rows = 1) => ({type: 'terminal', running: true, scrollback: 0, cursor: [0, 0], cursorVisible: true,
+  rows: Array.from({length: rows}, (_, i) => [{text: `${first + i} `, fg: 1}, {text: 'drawn', bg: 4}])});
+/** The canvas's pixels, top-down — read before the frame is shown, which is
+ *  the only time a canvas that does not keep its picture still has it. */
+const canvasPixels = (canvas, x, y, w, h) => {
+  const gl = canvas.getContext('webgl2'), out = new Uint8Array(w * h * 4);
+  gl.readPixels(x, canvas.height - y - h, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out);
+  return out;
+};
+/** A theme token as the page paints it, `[r, g, b]`. */
+const tokenRgb = (name) => {
+  const probe = doc.createElement('i'); probe.style.color = `var(${name})`; doc.body.append(probe);
+  const rgb = win.getComputedStyle(probe).color.match(/\d+/g).slice(0, 3).map(Number); probe.remove();
+  return rgb;
+};
+const near = (pixels, offset, rgb, slack) => rgb.every((v, i) => Math.abs(pixels[offset + i] - v) <= slack);
+await test('The GPU draws the terminal, and the rows under it catch up once it is still', async () => {
+  const pane = $('[data-term-pane]'), screen = $('[data-term-screen]'), toggle = $('.titlebar [data-term-toggle]');
+  const wasOpen = !pane.hidden;
+  if (!wasOpen) { toggle.click(); await settle(); }
+  await win.pushEvents([colourScreen(1)]); await settle();
+  await win.dispatch({type: 'setSetting', key: 'terminal.renderer', value: 'gpu'}); await settle();
+  try {
+    const canvas = pane.querySelector('canvas.term-gl');
+    assert(canvas && screen.classList.contains('gpu'), 'Settings asked for the GPU and the text renderer stayed');
+    // The cell, as the panel measures it.
+    const probe = doc.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;padding:0';
+    probe.textContent = '0'.repeat(100); screen.append(probe);
+    const style = win.getComputedStyle(screen), dpr = canvas.width / parseFloat(canvas.style.width);
+    const cell = {w: probe.getBoundingClientRect().width / 100 * dpr, h: parseFloat(style.lineHeight) * dpr};
+    probe.remove();
+    const left = parseFloat(style.paddingLeft) * dpr, top = parseFloat(style.paddingTop) * dpr;
+
+    await win.pushEvents([colourScreen(2)]);
+    // The GPU draws at the next frame. Read it in that frame, after the draw
+    // and before it is shown.
+    await new Promise((done) => win.requestAnimationFrame(done));
+    // The word's background, along the top of its fourth cell where no letter reaches.
+    const ground = canvasPixels(canvas, Math.round(left + 4.5 * cell.w), Math.round(top + 2), 1, 1);
+    assert(near(ground, 0, tokenRgb('--ansi-4'), 3), `the background was not drawn: ${[...ground]}`);
+    // The digit, somewhere in the first cell, in the theme's red.
+    const digit = canvasPixels(canvas, Math.round(left), Math.round(top), Math.floor(cell.w), Math.floor(cell.h));
+    const red = tokenRgb('--ansi-1');
+    let inked = false;
+    for (let i = 0; i < digit.length && !inked; i += 4) inked = near(digit, i, red, 10);
+    assert(inked, 'the digit was not drawn in its colour');
+    // The rows underneath have not been touched for that screen yet...
+    assert(screen.textContent.includes('1 drawn') && !screen.textContent.includes('2 drawn'), 'the rows were rewritten for a moving screen');
+    // ...and catch up once it has been still for a moment.
+    await settle(); await settle();
+    assert(screen.textContent.includes('2 drawn'), 'the rows never caught up with a still screen');
+    // A press brings them up to date at once, so a selection starts on what is shown.
+    await win.pushEvents([colourScreen(3)]);
+    screen.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, cancelable: true}));
+    assert(screen.textContent.includes('3 drawn'), 'a press started a selection on rows the screen no longer shows');
+    // The rows are there for the mouse and the clipboard, and must not show.
+    const row = screen.querySelector('.trow span');
+    assert(win.getComputedStyle(row).color === 'rgba(0, 0, 0, 0)', 'the rows under the picture were visible');
+    // Back to text: the canvas goes, and the rows are the screen again.
+    await win.pushEvents([colourScreen(4)]);
+    await win.dispatch({type: 'setSetting', key: 'terminal.renderer', value: 'text'}); await settle();
+    assert(!pane.querySelector('canvas.term-gl') && !screen.classList.contains('gpu'), 'the GPU renderer outlived its setting');
+    assert(screen.textContent.includes('4 drawn'), 'the text renderer came back to a stale screen');
+  } finally {
+    await win.dispatch({type: 'setSetting', key: 'terminal.renderer', value: 'text'}); await settle();
+    if (!wasOpen) { toggle.click(); await settle(); }
+  }
+});
+await test('The text terminal colours all 256 of xterm\'s colours, not only the theme\'s sixteen', async () => {
+  const screen = $('[data-term-screen]');
+  await win.pushEvents([{type: 'terminal', running: true, scrollback: 0, cursor: [0, 0], cursorVisible: false,
+    rows: [[{text: 'cube', fg: 196, bg: 21}, {text: 'grey', fg: 244}]]}]);
+  const [cube, grey] = screen.querySelectorAll('.trow span');
+  assert(cube && win.getComputedStyle(cube).color === 'rgb(255, 0, 0)', `colour 196 was ${cube && win.getComputedStyle(cube).color}`);
+  assert(win.getComputedStyle(cube).backgroundColor === 'rgb(0, 0, 255)', 'background 21 was not drawn');
+  assert(grey && win.getComputedStyle(grey).color === 'rgb(128, 128, 128)', `grey 244 was ${grey && win.getComputedStyle(grey).color}`);
+});
 await test('Visual-line mode lights the whole line before the cursor moves', async () => {
   await win.pushEvents([
     {type: 'vimMode', mode: 'VisualLine', label: 'V-LINE'},
@@ -733,6 +812,19 @@ await test('Rapid project clicks preserve the final project and its scroll posit
 });
 await test('No browser runtime errors', () => {
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
+});
+await test('Codex asks for an opaque window in its own ground, and the glass modes give it back', async () => {
+  const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
+  const before = asked().length;
+  $('.titlebar [data-mode="data"]').click(); await settle();
+  await win.pushEvents([{type: 'modeChanged', mode: 'data'}]);
+  await win.pushEvents([{type: 'modeChanged', mode: 'codex'}]);
+  const now = asked().slice(before);
+  assert(now.includes(null), `leaving Codex kept the window opaque: ${JSON.stringify(now)}`);
+  const last = now.at(-1);
+  assert(/^#[0-9a-f]{6}$/.test(last ?? ''), `Codex did not ask for its ground: ${JSON.stringify(now)}`);
+  const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
+  assert(last === ground, `asked for ${last}, the theme's ground is ${ground}`);
 });
 await test('Codex provider selection clears the previous model and displays Astra', async () => {
   await win.dispatch({type: 'setSetting', key: 'agent.model', value: 'claude-opus-5'});

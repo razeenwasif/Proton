@@ -29,6 +29,7 @@
     "bridge.js",
     "native-api.d.ts",
     "editor-row.js",
-    "html.js"
+    "html.js",
+    "term-gl.js"
   ]
 }

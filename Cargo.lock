@@ -4464,6 +4464,7 @@ dependencies = [
 name = "proton-shell"
 version = "0.0.1"
 dependencies = [
+ "objc2",
  "proton-core",
  "serde",
  "serde_json",

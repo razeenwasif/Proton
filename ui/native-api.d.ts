@@ -8,6 +8,7 @@ export interface NativeApi {
     invoke(name: 'read_geometry', args: {key: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'backdrop'): Promise<string>;
     invoke(name: 'set_backdrop', args: {material: string}): Promise<string>;
+    invoke(name: 'set_opaque', args: {color: string | null}): Promise<void>;
   };
   event?: {
     listen(name: 'proton://events', listener: (event: {payload: EventBatch}) => unknown): Promise<() => void>;

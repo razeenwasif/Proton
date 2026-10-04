@@ -14,7 +14,7 @@
 
 import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
-import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, readGeometry, sendKey, setBackdrop,
+import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, readGeometry, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
 import { closeDocument, documentIsOpen, openDocument, zoomDocument } from "./document.js";
 import { decodeMesh } from "./meshbytes.js";
@@ -28,6 +28,7 @@ import { createSplitResize } from "./split-resize.js";
 import { createEditorFeedback } from "./editor-feedback.js";
 import { createEditorState, createEditorPaints } from "./editor-state.js";
 import { performanceReview, editorPainted } from "./performance.js";
+import { createTerminalGL, xtermHex } from "./term-gl.js";
 import { keyCommand, changesContext } from "./transport.js";
 import { historyCommand, historyShortcut } from "./history-controls.js";
 import {
@@ -398,6 +399,10 @@ function setTheme(name) {
   }
 
   $$("[data-theme-set]").forEach((c) => c.classList.toggle("on", c.dataset.themeSet === name));
+  // A new theme is a new ground for Codex's opaque window, and new colours
+  // for a terminal the GPU draws.
+  renderWindowGround();
+  termGL?.restyle();
   keep("theme", name);
   requestAnimationFrame(drawPointerEdges); // edges are painted, not tokenised
 }
@@ -436,11 +441,41 @@ const MODES = ["chat", "codex", "design", "modeling", "game", "video", "data"];
  *  of places that have to behave differently in one of them. */
 let activeMode = "codex";
 
+/* ── the window's ground ───────────────────────────────────────────────
+   Codex paints every pixel of its own, so the window under it need not be
+   see-through: an opaque one spares the compositor a blur of the desktop that
+   Codex's ground hides completely. The modes drawn as glass get their
+   material back. Asked for only when the answer changes. */
+let groundAsked;
+
+/** A CSS colour as `#rrggbb`, whatever form the theme wrote it in. */
+function hexOf(css) {
+  const probe = document.createElement("i");
+  probe.style.color = css;
+  document.body.append(probe);
+  const channels = getComputedStyle(probe).color.match(/\d+(\.\d+)?/g);
+  probe.remove();
+  if (!channels) return null;
+  return "#" + channels.slice(0, 3).map((v) => Math.round(Number(v)).toString(16).padStart(2, "0")).join("");
+}
+
+function renderWindowGround(again = false) {
+  if (!HAS_SHELL) return;
+  const want = activeMode === "codex" ? hexOf(token("--bg")) : null;
+  if (!again && want === groundAsked) return;
+  groundAsked = want;
+  setOpaque(want);
+}
+
 function renderMode(mode) {
   activeMode = mode;
   // Codex wears a different chrome from the other six — a title bar in place
   // of the rails, no statusline — and the stylesheet keys all of it off this.
   document.documentElement.dataset.mode = mode;
+  // After the mode is set, not before: Codex has a ground of its own, and
+  // reading the token any earlier gets the mode being left.
+  renderWindowGround();
+  termGL?.restyle();
   $$(".mode").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
   $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === mode));
   closeAll();
@@ -771,6 +806,9 @@ const panels = createPanels(document, () => {
   });
 });
 const displaySettings = createDisplaySettings(document, keep, () => {
+  // Not in the frame below: nothing here waits on layout, and a renderer
+  // switched on should not wait for the next frame to exist.
+  renderTerminalRenderer();
   requestAnimationFrame(() => {
     measureLineHeight();
     if (activeMode === "codex") $$(".workspace.on [data-editor]").forEach((pane) => renderEditor(Number(pane.dataset.view)));
@@ -3361,6 +3399,14 @@ function renderRepo(event) {
 
 /** The rows drawn last time, so only the ones that moved are redrawn. */
 let terminalPainted = [];
+/** The last screen the core sent, to draw again without being sent it. */
+let lastTerminal = null;
+/** The GPU renderer, while Settings asks for one and there is a GPU to ask. */
+let termGL = null;
+/** A catch-up of the rows under the GPU's picture, waiting for a still screen. */
+let termRowsLater = 0;
+/** How long the screen has to be still before those rows catch up, in ms. */
+const TERM_ROWS_SETTLE = 150;
 
 /** Give the terminal the keyboard, or take it back.
  *
@@ -3368,8 +3414,12 @@ let terminalPainted = [];
  *  paste only lands in something that takes text — unless a mouse has just
  *  selected some of the screen, which moving the focus would throw away. */
 function focusTerminal(on) {
+  const was = terminalFocused;
   terminalFocused = on;
   $("[data-term-screen]")?.classList.toggle("on", on);
+  // The caret is drawn solid or hollow by who has the keyboard, and the GPU
+  // draws only when asked.
+  if (termGL && was !== on) termGL.redraw(on);
   if (on && window.getSelection()?.isCollapsed !== false) {
     $("[data-term-input]")?.focus({ preventScroll: true });
   }
@@ -3403,16 +3453,25 @@ $("[data-term-input]")?.addEventListener("compositionend", (e) => {
   if (text && terminalFocused) dispatch({ type: "terminalInput", text });
 });
 
-function runHtml(run, row, column, cursor) {
+function runHtml(run) {
   const classes = [];
-  if (run.fg != null) classes.push(`tf${run.fg}`);
-  if (run.bg != null) classes.push(`tb${run.bg}`);
+  // The theme names sixteen colours; the other 240 are xterm's, and go inline.
+  const inline = [];
+  if (run.fg != null) {
+    if (run.fg < 16) classes.push(`tf${run.fg}`);
+    else inline.push(`color:${xtermHex(run.fg)}`);
+  }
+  if (run.bg != null) {
+    if (run.bg < 16) classes.push(`tb${run.bg}`);
+    else inline.push(`background:${xtermHex(run.bg)}`);
+  }
   if (run.bold) classes.push("tbold");
   if (run.italic) classes.push("titalic");
   if (run.underline) classes.push("tunder");
   if (run.inverse) classes.push("tinv");
-  // A true colour has no palette name, so it goes inline. Nothing else does.
-  const style = run.rgb ? ` style="color:${run.rgb}"` : "";
+  // A true colour has no palette name either.
+  if (run.rgb) inline.push(`color:${run.rgb}`);
+  const style = inline.length ? ` style="${inline.join(";")}"` : "";
   const attrs = `${classes.length ? ` class="${classes.join(" ")}"` : ""}${style}`;
   return attrs ? `<span${attrs}>${escapeHtml(run.text)}</span>` : escapeHtml(run.text);
 }
@@ -3424,9 +3483,12 @@ function renderTerminal(event) {
   // one looks like; with the pane open, that is the request for one, exactly
   // as opening the pane is.
   if (!event.running && !event.rows.length && termPane && !termPane.hidden) askForTerminal();
+  // Written only when they change: a busy shell sends twenty screens a
+  // second, and the same words written again are still a change to lay out.
   const state = $("[data-term-state]");
   if (state) {
-    state.textContent = event.running ? "ready" : event.rows.length ? "exited" : "starting";
+    const text = event.running ? "ready" : event.rows.length ? "exited" : "starting";
+    if (state.textContent !== text) state.textContent = text;
     state.className = "chip" + (event.running ? " accent" : "");
   }
   // A shell you exited out of is the one case where there is something to
@@ -3437,11 +3499,70 @@ function renderTerminal(event) {
   const back = $("[data-term-back]");
   if (back) {
     back.hidden = !event.scrollback;
-    if (event.scrollback) $("[data-term-back-rows]").textContent = String(event.scrollback);
+    const behind = $("[data-term-back-rows]");
+    if (event.scrollback && behind.textContent !== String(event.scrollback)) behind.textContent = String(event.scrollback);
   }
 
+  lastTerminal = event;
+  if (termGL) {
+    termGL.draw(event, terminalFocused);
+    // The rows are still written underneath, unseen: the mouse selects them,
+    // the clipboard copies them and a screen reader reads them. None of those
+    // needs every frame of a build streaming past, which is the work the GPU
+    // is here to save — so they catch up once the screen is still.
+    clearTimeout(termRowsLater);
+    termRowsLater = setTimeout(() => {
+      termRowsLater = 0;
+      paintTerminalRows();
+    }, TERM_ROWS_SETTLE);
+    return;
+  }
+  paintTerminalRows();
+}
+
+/** Bring the rows under the GPU's picture up to date now, rather than when
+ *  the screen is next still: a selection starts on what is shown. */
+function settleTerminalRows() {
+  if (!termRowsLater) return;
+  clearTimeout(termRowsLater);
+  termRowsLater = 0;
+  paintTerminalRows();
+}
+
+/** Draw the terminal with the GPU or as text, as Settings → Appearance says. */
+function renderTerminalRenderer() {
   const screen = $("[data-term-screen]");
   if (!screen) return;
+  const want = document.documentElement.dataset.termRenderer === "gpu";
+  if (want && !termGL) {
+    termGL = createTerminalGL(screen, {
+      // A driver reset or a long sleep can take the GPU's context away. The
+      // text renderer is always there to fall back on.
+      onLost: () => {
+        termGL?.destroy();
+        termGL = null;
+        screen.classList.remove("gpu");
+        settleTerminalRows();
+      },
+    });
+    if (termGL && lastTerminal) termGL.draw(lastTerminal, terminalFocused);
+  } else if (!want && termGL) {
+    termGL.destroy();
+    termGL = null;
+    settleTerminalRows();
+  } else {
+    // A new font size is a new cell.
+    termGL?.restyle();
+  }
+  screen.classList.toggle("gpu", Boolean(termGL));
+}
+
+/** Write the last screen out as rows of text: the picture itself for the
+ *  text renderer, and what lies under the GPU's for the mouse and clipboard. */
+function paintTerminalRows() {
+  const event = lastTerminal;
+  const screen = $("[data-term-screen]");
+  if (!screen || !event) return;
   const [cursorRow, cursorCol] = event.cursor;
 
   const rows = event.rows.map((row, i) => {
@@ -3517,7 +3638,7 @@ function terminalBytes(e) {
 
 /** How many rows the panel is showing, for a page-sized scroll. */
 function terminalRows() {
-  return $("[data-term-screen]")?.querySelectorAll(".trow").length || 24;
+  return lastTerminal?.rows.length || $("[data-term-screen]")?.querySelectorAll(".trow").length || 24;
 }
 
 /** The size of one character cell, measured rather than assumed.
@@ -3778,6 +3899,7 @@ document.addEventListener("click", (e) => {
 // observer is the only thing that hears all of them.
 const termScreen = $("[data-term-screen]");
 if (termScreen) new ResizeObserver(() => reportTerminalSize()).observe(termScreen);
+termScreen?.addEventListener("mousedown", settleTerminalRows);
 
 /* ── the terminal pane ────────────────────────────────────────────────
    Beside the code rather than in the dock, the way a Zed pane group splits
@@ -5246,6 +5368,8 @@ $$("[data-backdrop-set]").forEach((b) =>
   b.addEventListener("click", async () => {
     const wanted = b.dataset.backdropSet;
     renderBackdrop(await setBackdrop(wanted), wanted);
+    // Applying a material puts it back behind Codex's opaque window.
+    renderWindowGround(true);
     requestAnimationFrame(drawPointerEdges);
   }),
 );

@@ -155,6 +155,16 @@ fn set_backdrop(
     applied.to_string()
 }
 
+/// Make the window opaque in the given `#rrggbb`, or see-through again with
+/// the chosen material behind it — Codex asks for the first, the modes drawn
+/// as glass for the second. Not `async`: AppKit wants the main thread.
+#[tauri::command]
+fn set_opaque(color: Option<String>, window: tauri::WebviewWindow, surface: State<'_, Surface>) {
+    let material = surface.lock().map(|current| *current).unwrap_or_default();
+    let color = color.as_deref().map(|hex| backdrop::rgb(hex).unwrap_or((0.0, 0.0, 0.0)));
+    backdrop::set_opaque(&window, color, material);
+}
+
 /// A project the user actually named: `proton .` or `proton C:\src\thing`, the
 /// way every editor takes it.
 ///
@@ -309,6 +319,7 @@ fn main() {
             dispatch,
             backdrop,
             set_backdrop,
+            set_opaque,
             read_document,
             read_geometry
         ])

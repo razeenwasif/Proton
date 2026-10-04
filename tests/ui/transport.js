@@ -57,7 +57,9 @@ const pick = () => ({type: 'picker', kind: 'files', title: 'Find files', query,
 window.__TAURI__ = {
   event: {listen: async (_, callback) => { window.pushBatch = payload => callback({payload}); window.pushEvents = events => callback({payload: window.makeBatch(events)}); return () => {}; }},
   window: {getCurrentWindow: () => ({close() {}, minimize() {}, toggleMaximize() {}, startDragging() {}})},
-  core: {invoke: async (name, {command} = {}) => {
+  core: {invoke: async (name, args = {}) => {
+    const {command} = args;
+    if (name !== 'dispatch') (window.invokes ??= []).push({name, args});
     if (name === 'backdrop') return 'vibrancy';
     if (name !== 'dispatch') return [];
     window.commands.push(command);

@@ -352,6 +352,17 @@ its root — as a login shell on macOS, as Terminal starts one, so Homebrew's
 PATH is there — and the pane shows the project you are in, starting one there
 if it has none.
 
+**Settings → Appearance → Terminal draws it with the GPU**, as Zed does: each
+glyph is rasterised once into a sheet on the GPU, and a screen is two
+instanced draws, the cells' colours and then their glyphs, with nothing laid
+out. Text stays the default while it is new. The rows are still written
+underneath, invisibly, once the screen has been still for 150 ms — so the
+mouse selects, the clipboard copies and a screen reader reads exactly as it
+did — and a press brings them up to date at once. On a 52 × 100 screen
+scrolling a coloured build log a line a frame, it cost 1.8 ms of the web
+process and 0.6 ms of WebKit's GPU process a frame against 4.7 ms and 3.5 ms
+for text, with memory the same; `tests/ui/terminal-bench.html` measures it.
+
 **The agent's header is Zed's**: the thread's name, fading where it runs long,
 then new, expand and `⋯`. Expand is Chat mode — the same conversation given
 the window — and `⋯` holds the panels that used to be a row of tabs, since

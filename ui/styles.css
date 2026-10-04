@@ -2686,6 +2686,16 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .term-pane .term.on .trow.tcur::after { background: var(--cursor); opacity: .75; box-shadow: none; }
 .term-pane .term-flags .chip { font: 12px/1 var(--zed); }
 
+/* Drawn by the GPU (Settings → Appearance → Terminal). The canvas sits over
+   the screen and lets the mouse through to the rows, which are still there,
+   unseen, so selecting, copying and a screen reader work as they always did. */
+.term-gl { position: absolute; z-index: 1; pointer-events: none; }
+.term.gpu .trow, .term.gpu .trow * {
+  color: transparent !important; background: transparent !important; text-decoration: none !important;
+}
+.term.gpu .trow.tcur::after { display: none; }
+.term.gpu .trow::selection, .term.gpu .trow *::selection { color: transparent; background: var(--selection); }
+
 /* ── the agent ────────────────────────────────────────────────────── */
 /* A darker strip with the thread's name, fading out where it runs long,
    and three buttons. Everything below it is the editor's ground. */
