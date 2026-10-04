@@ -5,26 +5,38 @@
 //! a hunk types it into that buffer and stops. `:w` is still the only thing
 //! that writes, which is the same deal as for anything else you typed.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use proton_core::bus::Event;
 use proton_core::review::DiffMark;
 use proton_core::{Command, Key, Workspace};
 
 struct Scratch {
+    /// Everything the test made — the project and anything beside it — so
+    /// that one `remove_dir_all` takes all of it.
+    base: PathBuf,
     root: PathBuf,
 }
 
 impl Scratch {
     fn new(tag: &str) -> Scratch {
-        let root = std::env::temp_dir().join(format!(
+        let base = std::env::temp_dir().join(format!(
             "proton-stage-{tag}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("project");
         std::fs::create_dir_all(&root).unwrap();
-        Scratch { root }
+        Scratch { base, root }
+    }
+
+    /// A second name for the project: a symlink beside it, which is what
+    /// opening a linked folder hands the workspace.
+    fn link(&self) -> PathBuf {
+        let link = self.base.join("link");
+        make_link(&self.root, &link).expect("a symlink to the scratch project");
+        link
     }
 
     fn file(&self, name: &str, text: &str) -> PathBuf {
@@ -40,7 +52,33 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
+        // Takes the link away rather than following it.
+        let _ = std::fs::remove_dir_all(&self.base);
+    }
+}
+
+#[cfg(unix)]
+fn make_link(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(windows)]
+fn make_link(target: &Path, link: &Path) -> std::io::Result<()> {
+    // A symlink takes an administrator or developer mode on Windows. A
+    // junction takes neither, and `canonicalize` sees through it the same way.
+    if std::os::windows::fs::symlink_dir(target, link).is_ok() {
+        return Ok(());
+    }
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .args([link, target])
+        .output()?;
+    if made.status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(
+            String::from_utf8_lossy(&made.stderr).into_owned(),
+        ))
     }
 }
 
@@ -309,4 +347,100 @@ fn discarding_leaves_the_buffer_alone() {
     assert!(review(&ws).is_empty());
     assert_eq!(ws.editor().buffer().contents(), SOURCE);
     assert!(!ws.is_modified());
+}
+
+/* ── a project opened through a symlink ───────────────────────────── */
+
+fn type_keys(ws: &mut Workspace, keys: &str) {
+    for c in keys.chars() {
+        ws.apply(Command::Key { key: Key::char(c) });
+    }
+}
+
+/// How many buffers hold a file of this name — one, or the same file has
+/// become two buffers that can disagree about it.
+fn buffers_named(ws: &Workspace, name: &str) -> usize {
+    ws.editor()
+        .buffers()
+        .iter()
+        .filter(|b| b.name() == name)
+        .count()
+}
+
+#[test]
+fn a_project_opened_through_a_symlink_stages_against_the_buffer() {
+    // The workspace knows the project by the link's name, while the editor
+    // resolves every file it opens to the folder behind it. On macOS that is
+    // every project under `/tmp` or `/var`, which point into `/private`; this
+    // makes the same case on every platform rather than only on the one whose
+    // temp folder is a link.
+    let scratch = Scratch::new("linked");
+    scratch.file("a.rs", "keep\nold\n");
+    let mut ws = Workspace::rooted(scratch.link());
+    ws.apply(Command::OpenBuffer {
+        path: "a.rs".into(),
+    });
+    type_keys(&mut ws, "Otyped");
+    ws.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+
+    // A line only the buffer has, so reading the disk instead cannot pass.
+    let said = edit(&mut ws, "a.rs", "typed\n", "TYPED\n").unwrap();
+    assert!(said.contains("staged 1 hunk"), "{said}");
+
+    // Shown relative to the project, rather than as either absolute name.
+    let files = review(&ws);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, "a.rs");
+    assert_eq!(files[0].hunks.len(), 1, "{:?}", files[0].hunks);
+
+    ws.apply(Command::ApplyHunk {
+        path: "a.rs".into(),
+        hunk: 0,
+    });
+    assert_eq!(ws.editor().buffer().contents(), "TYPED\nkeep\nold\n");
+    assert_eq!(scratch.read("a.rs"), "keep\nold\n", "still nothing on disk");
+    assert!(review(&ws).is_empty(), "{:?}", review(&ws));
+    assert_eq!(buffers_named(&ws, "a.rs"), 1);
+}
+
+#[test]
+fn a_file_is_one_change_and_one_buffer_under_either_name() {
+    // `:saveas` names its buffer through the link, and then the agent names
+    // the same file by its real path, the way a compiler's error would. Under
+    // both names it is one file: one change in the review, shown relative to
+    // the project, one buffer, and an edit made against what that buffer
+    // says, unsaved line and all.
+    let scratch = Scratch::new("bothnames");
+    scratch.file("a.rs", "keep\nold\n");
+    let mut ws = Workspace::rooted(scratch.link());
+    ws.apply(Command::OpenBuffer {
+        path: "a.rs".into(),
+    });
+    type_keys(&mut ws, ":saveas b.rs");
+    ws.apply(Command::Key {
+        key: Key::named("Enter"),
+    });
+    type_keys(&mut ws, "Otyped");
+    ws.apply(Command::Key {
+        key: Key::named("Escape"),
+    });
+
+    let real = proton_core::folder::normalise(&scratch.root).join("b.rs");
+    edit(&mut ws, &real.to_string_lossy(), "typed\n", "TYPED\n").unwrap();
+    let files = review(&ws);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, "b.rs", "relative, whichever name it came by");
+
+    // Accepted by the name the panel shows, which is not the one it was
+    // staged under.
+    ws.apply(Command::ApplyHunk {
+        path: "b.rs".into(),
+        hunk: 0,
+    });
+    assert!(review(&ws).is_empty(), "{:?}", review(&ws));
+    assert_eq!(buffers_named(&ws, "b.rs"), 1);
+    assert_eq!(ws.editor().buffer().contents(), "TYPED\nkeep\nold\n");
+    assert_eq!(scratch.read("b.rs"), "keep\nold\n", "still nothing on disk");
 }

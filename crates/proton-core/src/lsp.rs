@@ -669,7 +669,10 @@ pub fn symbol_kind(code: Option<u8>) -> CompletionKind {
 /// nothing about which of the eleven uses this is. Files are read once each
 /// rather than once per hit, because references cluster: forty uses of a
 /// symbol are usually in three or four files.
-pub fn reference_rows(places: &[proton_lsp::Jump], root: &Path) -> Vec<crate::picker::PickerItem> {
+pub fn reference_rows(
+    places: &[proton_lsp::Jump],
+    root: &crate::folder::Root,
+) -> Vec<crate::picker::PickerItem> {
     let mut files: HashMap<PathBuf, Option<Vec<String>>> = HashMap::new();
     let mut rows = Vec::new();
 
@@ -685,15 +688,11 @@ pub fn reference_rows(places: &[proton_lsp::Jump], root: &Path) -> Vec<crate::pi
             char_column(text, place.character as usize)
         });
 
-        // The path relative to the project, when it is inside it. An absolute
-        // path is not wrong, it is just most of a row spent on the part every
-        // row shares.
-        let shown = place
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&place.path)
-            .to_string_lossy()
-            .replace('\\', "/");
+        // The path relative to the project, when it is inside it under either
+        // of its names — the server spells it however it resolved the file.
+        // An absolute path is not wrong, it is just most of a row spent on the
+        // part every row shares.
+        let shown = root.shown(&place.path);
 
         rows.push(crate::picker::PickerItem {
             label: line.map(|t| t.trim().to_string()).unwrap_or_default(),

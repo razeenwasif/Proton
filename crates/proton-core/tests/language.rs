@@ -448,8 +448,16 @@ fn a_reference_row_carries_the_line_it_is_on() {
             line: 0,
             character: 0,
         },
+        // The same file spelled through the real folder, the way a server
+        // that resolved it reports it. On macOS the temp folder is a link, so
+        // this is the project's other name.
+        proton_lsp::Jump {
+            path: proton_core::folder::normalise(&root).join("a.rs"),
+            line: 0,
+            character: 3,
+        },
     ];
-    let rows = lsp::reference_rows(&places, &root);
+    let rows = lsp::reference_rows(&places, &proton_core::folder::Root::new(&root));
 
     assert_eq!(rows[0].label, "let x = one();", "trimmed of its indent");
     assert_eq!(rows[0].detail, "a.rs:2", "relative, and one-based");
@@ -457,8 +465,9 @@ fn a_reference_row_carries_the_line_it_is_on() {
     assert_eq!(rows[0].column, Some(12));
     // The missing file still gets a row: dropping it silently would make the
     // count disagree with what the server said.
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 3);
     assert_eq!(rows[1].label, "");
+    assert_eq!(rows[2].detail, "a.rs:1", "relative under either name");
 
     let _ = std::fs::remove_dir_all(&root);
 }

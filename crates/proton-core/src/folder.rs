@@ -229,6 +229,64 @@ pub fn normalise(path: &Path) -> PathBuf {
     }
 }
 
+/// A project's folder under both of its names.
+///
+/// One is the name it was opened by: `proton .`, a path through a symlink, or
+/// on macOS anything under `/tmp` and `/var`, which point into `/private`. The
+/// other is the real folder behind it. The editor resolves every file it
+/// opens, so those buffers are spelled through the real folder, while
+/// `:w {file}`, `:saveas`, a file staged before it exists and anything
+/// resolved against the root are spelled through the name it was opened by.
+/// They are files in the same folder, and matching only one spelling loses
+/// the other: a review that reads the disk instead of the buffer with your
+/// unsaved work in it, or one file open as two buffers.
+#[derive(Debug, Clone, Default)]
+pub struct Root {
+    path: PathBuf,
+    /// `path` with its symlinks resolved, worked out once.
+    real: PathBuf,
+}
+
+impl Root {
+    pub fn new(path: impl AsRef<Path>) -> Root {
+        let path = path.as_ref().to_path_buf();
+        Root {
+            real: normalise(&path),
+            path,
+        }
+    }
+
+    /// Where a file is in this folder, under either name, or `None` if it is
+    /// not in it.
+    pub fn inside<'a>(&self, path: &'a Path) -> Option<&'a Path> {
+        path.strip_prefix(&self.path)
+            .or_else(|_| path.strip_prefix(&self.real))
+            .ok()
+    }
+
+    /// Whether two paths are one file: spelled alike, or the same place in
+    /// this folder reached through its two names.
+    pub fn same(&self, a: &Path, b: &Path) -> bool {
+        a == b
+            || matches!(
+                (self.inside(a), self.inside(b)),
+                (Some(here), Some(there)) if here == there
+            )
+    }
+
+    /// A path as a row shows it: relative to this folder when it is in it,
+    /// whole when it is not, and with `/` between the parts on every platform.
+    ///
+    /// Relative because the folder is the part every row shares, and an
+    /// absolute path spends most of a row on it.
+    pub fn shown(&self, path: &Path) -> String {
+        self.inside(path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,6 +474,39 @@ mod tests {
         assert!(!direct.to_string_lossy().starts_with(r"\\?\"), "{direct:?}");
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_file_is_in_the_folder_under_either_of_its_names() {
+        // `proton .` names the project by a dot, and the editor names each
+        // file it opens by its real path. A symlink to the project is the same
+        // case with a link where the dot is; `tests/staging.rs` makes one.
+        let root = Root::new(".");
+        let dotted = Path::new(".").join("src").join("lib.rs");
+        let real = normalise(Path::new(".")).join("src").join("lib.rs");
+
+        assert_eq!(root.inside(&dotted), Some(Path::new("src/lib.rs")));
+        assert_eq!(root.inside(&real), Some(Path::new("src/lib.rs")));
+        assert!(root.same(&dotted, &real));
+        assert!(!root.same(&dotted, &real.with_file_name("folder.rs")));
+        assert_eq!(root.shown(&real), "src/lib.rs");
+    }
+
+    #[test]
+    fn a_file_outside_the_folder_is_only_itself() {
+        let root = Root::new(".");
+        let elsewhere = normalise(Path::new("..")).join("elsewhere.rs");
+        assert_eq!(root.inside(&elsewhere), None);
+        assert!(!root.same(&elsewhere, &normalise(Path::new(".")).join("elsewhere.rs")));
+        assert_eq!(
+            root.shown(&elsewhere),
+            elsewhere.to_string_lossy().replace('\\', "/")
+        );
+
+        // And with no folder at all, a path is the same file only as itself.
+        let none = Root::default();
+        assert!(none.same(&elsewhere, &elsewhere));
+        assert!(!none.same(Path::new("/a/x.rs"), Path::new("/b/x.rs")));
     }
 
     fn temp(tag: &str) -> PathBuf {

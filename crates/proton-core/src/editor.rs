@@ -13,6 +13,7 @@ use proton_text::{motion, Buffer, Cursor, Edit, Position};
 
 use crate::action::{Action, Object, Verb};
 use crate::block::{Block, PendingInsert};
+use crate::folder::Root;
 use crate::vim::VimMode;
 
 /// How an object resolves against a buffer.
@@ -37,6 +38,10 @@ pub struct Editor {
     /// whichever the file being edited uses. The workspace sets it, because
     /// the settings and the file are both its to read.
     indent: String,
+    /// The project these files are in, under both of its names, so that a
+    /// file is one buffer whichever name its path came through. Without one,
+    /// paths match only as they are spelled.
+    root: Root,
 }
 
 /// What shape the text in a register is, which decides how it comes back.
@@ -64,6 +69,16 @@ impl Editor {
             registers: HashMap::new(),
             block_insert: None,
             indent: "    ".into(),
+            root: Root::default(),
+        }
+    }
+
+    /// An editor for the files of one project. See `root` for why it needs to
+    /// know which.
+    pub fn rooted(root: Root) -> Self {
+        Self {
+            root,
+            ..Self::new()
         }
     }
 
@@ -112,21 +127,8 @@ impl Editor {
     /// must not become two buffers with diverging histories.
     pub fn open(&mut self, path: impl AsRef<Path>) -> std::io::Result<usize> {
         let path = path.as_ref();
-        // Canonicalised so that two spellings of one file cannot become two
-        // buffers, then un-prefixed, because on Windows canonicalising hands
-        // back `\\?\C:\...` — which is the same file, but is neither what a
-        // statusline should show nor a spelling any language server accepts.
-        // The display path and the LSP path want the same normalisation, so
-        // they get it in the same place.
-        let canonical = path
-            .canonicalize()
-            .map(proton_lsp::uri::plain)
-            .unwrap_or_else(|_| PathBuf::from(path));
-        if let Some(i) = self
-            .buffers
-            .iter()
-            .position(|b| b.path().map(|p| p == canonical.as_path()).unwrap_or(false))
-        {
+        let canonical = canonical(path);
+        if let Some(i) = self.holding(path, &canonical) {
             self.active = i;
             return Ok(i);
         }
@@ -134,6 +136,29 @@ impl Editor {
         self.buffers.push(buffer);
         self.active = self.buffers.len() - 1;
         Ok(self.active)
+    }
+
+    /// The buffer holding a file, if one is open: the one `open` would focus
+    /// rather than read the file again.
+    ///
+    /// For anything that has to see what the user is looking at. Missing the
+    /// buffer means reading the disk, which quietly drops every unsaved edit.
+    pub fn find(&self, path: &Path) -> Option<usize> {
+        self.holding(path, &canonical(path))
+    }
+
+    /// Matched through both names of the project, and against both spellings
+    /// of the path: as it was asked for, and canonical.
+    ///
+    /// A buffer `open` made is spelled canonically, but one named by
+    /// `:w {file}`, `:saveas` or `open_or_create` keeps the spelling it was
+    /// given — through the name the project was opened by, or through a link
+    /// further in. Matching one way only is how one file becomes two buffers.
+    fn holding(&self, path: &Path, canonical: &Path) -> Option<usize> {
+        self.buffers.iter().position(|b| {
+            b.path()
+                .is_some_and(|p| self.root.same(p, path) || self.root.same(p, canonical))
+        })
     }
 
     /// Open a file, or make a buffer for one that is not there yet.
@@ -704,6 +729,18 @@ impl Editor {
             .cloned()
             .unwrap_or_default()
     }
+}
+
+/// How `open` names a file: canonicalised so that two spellings of one file
+/// cannot become two buffers, then un-prefixed, because on Windows
+/// canonicalising hands back `\\?\C:\...` — which is the same file, but is
+/// neither what a statusline should show nor a spelling any language server
+/// accepts. The display path and the LSP path want the same normalisation, so
+/// they get it in the same place. As given for a file that is not there yet.
+fn canonical(path: &Path) -> PathBuf {
+    path.canonicalize()
+        .map(proton_lsp::uri::plain)
+        .unwrap_or_else(|_| PathBuf::from(path))
 }
 
 /// Turn an object into something a verb can act on.

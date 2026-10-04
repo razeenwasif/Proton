@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::folder::Root;
+
 /// A file the agent wants to change, and what it wants it to say.
 #[derive(Debug, Clone)]
 pub struct Change {
@@ -35,6 +37,10 @@ pub struct Change {
 #[derive(Debug, Default)]
 pub struct Review {
     changes: Vec<Change>,
+    /// The project, under both of its names. A change staged through one is
+    /// the same change when it is accepted through the other, and is shown
+    /// relative to the project whichever it came by.
+    root: Root,
 }
 
 /* ── what the front end draws ─────────────────────────────────────── */
@@ -85,6 +91,13 @@ const CONTEXT: usize = 3;
 /* ── staging ──────────────────────────────────────────────────────── */
 
 impl Review {
+    pub fn new(root: Root) -> Review {
+        Review {
+            changes: Vec::new(),
+            root,
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.changes.is_empty()
     }
@@ -104,20 +117,26 @@ impl Review {
             target,
             creates,
         };
-        match self.changes.iter_mut().find(|c| c.path == path) {
+        match self.get_mut(path) {
             Some(existing) => *existing = change,
             None => self.changes.push(change),
         }
     }
 
     pub fn get(&self, path: &Path) -> Option<&Change> {
-        self.changes.iter().find(|c| c.path == path)
+        self.changes.iter().find(|c| self.root.same(&c.path, path))
+    }
+
+    fn get_mut(&mut self, path: &Path) -> Option<&mut Change> {
+        self.changes
+            .iter_mut()
+            .find(|c| self.root.same(&c.path, path))
     }
 
     /// Drop a change — because every hunk of it has been dealt with, or
     /// because the whole thing was refused.
     pub fn forget(&mut self, path: &Path) {
-        self.changes.retain(|c| c.path != path);
+        self.changes.retain(|c| !self.root.same(&c.path, path));
     }
 
     pub fn clear(&mut self) {
@@ -166,7 +185,7 @@ impl Review {
         let Some(hunk) = self.hunks(path, current).into_iter().nth(index) else {
             return false;
         };
-        let Some(change) = self.changes.iter_mut().find(|c| c.path == path) else {
+        let Some(change) = self.get_mut(path) else {
             return false;
         };
 
@@ -189,7 +208,7 @@ impl Review {
     ///
     /// `contents` supplies each file's text as it is right now — the caller
     /// holds the buffers, and this module deliberately does not.
-    pub fn view(&self, root: &Path, contents: impl Fn(&Path) -> Option<String>) -> Vec<ChangeView> {
+    pub fn view(&self, contents: impl Fn(&Path) -> Option<String>) -> Vec<ChangeView> {
         self.changes
             .iter()
             .filter_map(|change| {
@@ -199,12 +218,7 @@ impl Review {
                     return None;
                 }
                 Some(ChangeView {
-                    path: change
-                        .path
-                        .strip_prefix(root)
-                        .unwrap_or(&change.path)
-                        .to_string_lossy()
-                        .replace('\\', "/"),
+                    path: self.root.shown(&change.path),
                     creates: change.creates,
                     hunks: hunks
                         .iter()
@@ -280,7 +294,7 @@ mod tests {
 
     fn review(target: &str) -> (Review, PathBuf) {
         let path = PathBuf::from("/p/a.rs");
-        let mut review = Review::default();
+        let mut review = Review::new(Root::new("/p"));
         review.stage(&path, target.into(), false);
         (review, path)
     }
@@ -355,7 +369,7 @@ mod tests {
     #[test]
     fn a_hunk_is_drawn_with_context_either_side() {
         let (review, _) = review("a\nb\nc\nD\ne\nf\ng\n");
-        let view = review.view(Path::new("/p"), |_| Some("a\nb\nc\nd\ne\nf\ng\n".into()));
+        let view = review.view(|_| Some("a\nb\nc\nd\ne\nf\ng\n".into()));
 
         assert_eq!(view[0].path, "a.rs");
         let hunk = &view[0].hunks[0];
@@ -385,7 +399,7 @@ mod tests {
         // The agent proposing what is already there is a no-op, not an empty
         // box with a file name on it.
         let (review, _) = review("same\n");
-        let view = review.view(Path::new("/p"), |_| Some("same\n".into()));
+        let view = review.view(|_| Some("same\n".into()));
         assert!(view.is_empty(), "{view:?}");
     }
 }

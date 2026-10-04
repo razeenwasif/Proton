@@ -59,6 +59,9 @@ pub struct Workspace {
     /// single viewport is the focused one of these.
     splits: Splits,
     pickers: Pickers,
+    /// The project folder under both of its names, for showing a path that
+    /// arrived through either one relative to it. See [`crate::folder::Root`].
+    root: crate::folder::Root,
     servers: Servers,
     highlights: Highlighters,
     popup: Popup,
@@ -251,8 +254,13 @@ impl Workspace {
     /// can point at a fixture instead of the process's working directory.
     pub fn rooted(root: impl AsRef<Path>) -> Self {
         let root = root.as_ref();
+        // Resolved once and shared, so that the buffers, the review and what
+        // is shown all agree on what the project's other name is.
+        let folder = crate::folder::Root::new(root);
         let mut space = Self {
-            editor: Editor::new(),
+            editor: Editor::rooted(folder.clone()),
+            review: review::Review::new(folder.clone()),
+            root: folder,
             pickers: Pickers::new(root),
             servers: Servers::new(root),
             agent: Agent::new(&root.display().to_string()),
@@ -2691,7 +2699,7 @@ impl Workspace {
                 }
                 Incoming::References { id, places } => {
                     if self.servers.wanted(lsp::Ask::References, id) {
-                        let rows = lsp::reference_rows(&places, self.pickers.root());
+                        let rows = lsp::reference_rows(&places, &self.root);
                         events.extend(self.fill_picker(rows));
                     }
                 }
@@ -3225,15 +3233,18 @@ impl Workspace {
 
     /* ── the agent's staged changes ───────────────────────────────── */
 
-    /// What one staged file says right now — from the buffer if it is open,
-    /// which it always is, because staging opens it.
-    fn staged_text(&self, path: &Path) -> Option<String> {
-        self.editor
-            .buffers()
-            .iter()
-            .find(|b| b.path() == Some(path))
-            .map(|b| b.contents())
-            .or_else(|| std::fs::read_to_string(path).ok())
+    /// What a file says right now: the buffer holding it when there is one,
+    /// which for a staged file there always is, because staging opens it —
+    /// and the disk otherwise.
+    ///
+    /// Found the way the editor finds what to focus, so it is the same buffer
+    /// that accepting a hunk then types into, whichever name of the project
+    /// either path was spelled through.
+    fn file_now(&self, path: &Path) -> Option<String> {
+        match self.editor.find(path) {
+            Some(index) => Some(self.editor.buffers()[index].contents()),
+            None => std::fs::read_to_string(path).ok(),
+        }
     }
 
     /// One mesh as bytes — what `Event::Geometry` described, in the layout
@@ -3249,8 +3260,7 @@ impl Workspace {
     /// are the diff between each buffer and what was proposed, so there is
     /// nothing stored that this could return a stale copy of.
     pub fn staged(&self) -> Vec<review::ChangeView> {
-        self.review
-            .view(self.pickers.root(), |path| self.staged_text(path))
+        self.review.view(|path| self.file_now(path))
     }
 
     fn review_event(&self) -> Event {
@@ -3267,7 +3277,7 @@ impl Workspace {
     /// undo in git.
     fn apply_hunk(&mut self, path: &str, index: usize) -> Vec<Event> {
         let path = self.pickers.resolve(path);
-        let Some(current) = self.staged_text(&path) else {
+        let Some(current) = self.file_now(&path) else {
             return vec![notice(
                 format!("{}: not open any more", path.display()),
                 NoticeLevel::Warn,
@@ -3331,7 +3341,7 @@ impl Workspace {
     /// still being proposed.
     fn reject_hunk(&mut self, path: &str, index: usize) -> Vec<Event> {
         let path = self.pickers.resolve(path);
-        let Some(current) = self.staged_text(&path) else {
+        let Some(current) = self.file_now(&path) else {
             return vec![self.review_event()];
         };
         self.review.reject(&path, index, &current);
@@ -3352,7 +3362,7 @@ impl Workspace {
 
         let mut applied = 0;
         for path in &paths {
-            let Some(current) = self.staged_text(path) else {
+            let Some(current) = self.file_now(path) else {
                 continue;
             };
             let count = self.review.hunks(path, &current).len();
@@ -4191,13 +4201,7 @@ impl Workspace {
                 // an agent editing what is on disk while the user has unsaved
                 // changes in front of them would propose a diff against a
                 // file neither of them is looking at.
-                let existing = self
-                    .editor
-                    .buffers()
-                    .iter()
-                    .find(|b| b.path() == Some(path.as_path()))
-                    .map(|b| b.contents())
-                    .or_else(|| std::fs::read_to_string(&path).ok());
+                let existing = self.file_now(&path);
 
                 let (current, creates) = match (existing, old.is_empty()) {
                     (Some(text), _) => (text, false),
@@ -5163,7 +5167,6 @@ impl Workspace {
     /* ── debugging ────────────────────────────────────────────────── */
 
     fn debug_event(&self) -> Event {
-        let root = self.pickers.root();
         Event::Debug {
             phase: match self.debugger.phase() {
                 debug::Phase::Idle => DebugPhase::Idle,
@@ -5179,12 +5182,9 @@ impl Workspace {
                     // Relative to the project when it is inside it: an
                     // absolute path in a stack is unreadable at a glance and
                     // the project is what the reader is holding in their head.
-                    path: frame.path.as_ref().map(|path| {
-                        path.strip_prefix(root)
-                            .unwrap_or(path)
-                            .to_string_lossy()
-                            .replace('\\', "/")
-                    }),
+                    // Under either of its names, because an adapter reports
+                    // where the program really ran.
+                    path: frame.path.as_ref().map(|path| self.root.shown(path)),
                     line: frame.line,
                 })
                 .collect(),
