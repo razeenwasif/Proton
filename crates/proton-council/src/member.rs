@@ -415,13 +415,26 @@ mod tests {
 
     /// A member that is a shell command rather than a model, so the plumbing
     /// can be tested without spending anybody's subscription.
+    ///
+    /// `args` is the command, and the prompt `run` appends is its argument.
+    /// `cmd /C` gets that for free by running the rest of its line as typed.
+    /// `sh -c` does not: the first word after the script becomes `$0` rather
+    /// than `$1`, so `sh -c echo hello` named the shell "hello" and echoed a
+    /// blank line — which passed on Windows and failed everywhere else as
+    /// "answered with nothing, twice". Hence the `"$@"`, which hands the
+    /// prompt on, and the `sh` after the script, which is only there to be
+    /// `$0`.
     fn echoing(args: &[&str]) -> Member {
         Member {
             name: "echo".into(),
             program: if cfg!(windows) { "cmd" } else { "sh" }.into(),
             args: match cfg!(windows) {
                 true => ["/C"].iter().chain(args).map(|a| a.to_string()).collect(),
-                false => ["-c"].iter().chain(args).map(|a| a.to_string()).collect(),
+                false => vec![
+                    "-c".into(),
+                    format!(r#"{} "$@""#, args.join(" ")),
+                    "sh".into(),
+                ],
             },
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
