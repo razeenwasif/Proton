@@ -478,7 +478,11 @@ under it. A chat goes into one by being dragged there or from its own **⋯**
 (or a right click), and a new folder is named in place the moment it exists.
 Folders belong to you rather than to a project: one file in Proton's data
 folder, read again whenever another project's tab has changed it, holding
-chats from every project and engine, each opened in its own folder. The conversation is a centred column,
+chats from every project and engine, each opened in its own folder. A chat's
+**⋯** also deletes it, after asking: the transcript goes to the Trash rather
+than away, because a session is history someone may want back, and one
+another Claude Code has open is refused, because that program would only
+write it back. The conversation is a centred column,
 your messages as bubbles and Claude's as prose. Each tool is one line — a dot
 for its state, a verb, what it acted on, a count — that opens into its diff,
 its output or the lines it read. The questions it stops for are cards answered

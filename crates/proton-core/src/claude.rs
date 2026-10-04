@@ -659,6 +659,65 @@ impl Claude {
         vec![self.artifacts_event()]
     }
 
+    /// Delete a conversation: its process stopped, and its transcript moved
+    /// to the Trash, from where it can be put back. One another Claude Code
+    /// has open is left alone — it would only write itself back.
+    pub fn delete(&mut self, id: &str) -> Vec<Event> {
+        if self.elsewhere.contains(id) {
+            return vec![crate::workspace::notice(
+                "This chat is open in another Claude Code. Close it there, then delete it here.".into(),
+                crate::bus::NoticeLevel::Warn,
+            )];
+        }
+        let title = self
+            .listed
+            .iter()
+            .chain(self.kept.iter())
+            .find(|s| s.id == id)
+            .map(|s| s.title.clone())
+            .or_else(|| self.desktop.iter().find(|d| d.id == id).map(|d| d.title.clone()))
+            .or_else(|| self.chats.iter().find(|c| c.id() == id).map(|c| c.fold().status().title.clone()))
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "The chat".into());
+        // Where it lives decides how it goes.
+        let open = self.index(id).map(|index| self.chats.remove(index));
+        let engine = open.as_ref().map(|c| c.engine()).or_else(|| self.kept.iter().find(|s| s.id == id).map(|s| s.engine));
+        let cwd = open
+            .as_ref()
+            .map(|c| c.cwd().to_path_buf())
+            .or_else(|| self.desktop.iter().find(|d| d.id == id).map(|d| d.cwd.clone()))
+            .or_else(|| self.folders.find(id).map(|(_, m)| m.cwd.clone()).filter(|c| !c.as_os_str().is_empty()))
+            .unwrap_or_else(|| self.root.clone());
+        drop(open);
+        let gone = match engine {
+            Some(Engine::Claude) | None => history::trash(&cwd, id),
+            Some(_) => saved::trash(id),
+        };
+        let mut events = Vec::new();
+        match gone {
+            // One that was never spoken in had nothing on disk to move.
+            Ok(false) => {}
+            Ok(true) => events.push(crate::workspace::notice(
+                format!("Moved “{title}” to the Trash."),
+                crate::bus::NoticeLevel::Info,
+            )),
+            Err(why) => events.push(crate::workspace::notice(why, crate::bus::NoticeLevel::Error)),
+        }
+        self.folders.take_out(id);
+        self.shortened.retain(|s| s != id);
+        self.titles.remove(id);
+        let was_active = self.active.as_deref() == Some(id);
+        if was_active {
+            self.active = None;
+        }
+        self.rescan();
+        events.push(self.sessions_event());
+        if was_active {
+            events.extend(self.snapshot());
+        }
+        events
+    }
+
     /* ── folders ─────────────────────────────────────────────── */
 
     /// A new folder, named or not, with conversations put in it.
@@ -1004,6 +1063,30 @@ mod tests {
         assert!(top.contains(&chat), "taken out, it is back in the list");
         let (_, folders) = listed(&claude.folder_delete(&folder)[0]);
         assert!(folders.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_deleted_conversation_leaves_the_list_its_folder_and_the_screen() {
+        let dir = std::env::temp_dir().join(format!("proton-core-delete-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let root = dir.join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut claude = Claude::new(&root).with_folders(Folders::at(&dir));
+        claude.start(Some(Engine::Claude));
+        let chat = claude.active.clone().unwrap();
+        claude.folder_new("Kept", std::slice::from_ref(&chat));
+        // Nothing was said in it, so there is no file: only the conversation goes.
+        let events = claude.delete(&chat);
+        assert!(claude.active.is_none() && claude.index(&chat).is_none());
+        let sessions = events.iter().find_map(|e| match e {
+            Event::ClaudeSessions { sessions, folders, .. } => Some((sessions.clone(), folders.clone())),
+            _ => None,
+        });
+        let (sessions, folders) = sessions.expect("the list is redrawn");
+        assert!(!sessions.iter().any(|s| s.id == chat));
+        assert!(folders[0].sessions.is_empty(), "it is out of its folder too");
+        assert!(events.iter().any(|e| matches!(e, Event::ClaudeItems { session, reset: true, .. } if session.is_empty())), "the screen is cleared");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

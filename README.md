@@ -156,6 +156,12 @@ every project, and hold chats from any of them — Claude Code's, the other
 engines', the desktop app's. Deleting a folder puts its chats back in the
 list; it never deletes them.
 
+**Deleting a chat.** **Delete chat…** in a chat's **⋯** menu asks first, then
+stops it if it is running and moves its transcript to the Trash — with the
+folder beside it where Claude Code keeps its subagents' logs — so it can be
+put back. A chat open in another Claude Code can't be deleted here until it is
+closed there, since that program would only write it back.
+
 **Codex, Gemini and Antigravity.** The pill at the left of the composer picks
 who answers a new conversation. Each is the real CLI on its own sign-in,
 driven over the protocol it offers hosts, and drawn with the same rows, cards

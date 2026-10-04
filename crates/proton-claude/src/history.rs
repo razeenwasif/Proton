@@ -156,6 +156,39 @@ pub fn summary(cwd: &Path, id: &str, titles: &mut Titles) -> Option<SessionSumma
     Some(SessionSummary { id: id.to_string(), title, updated, cwd: String::new(), elsewhere: false, engine: crate::engine::Engine::Claude })
 }
 
+/// What a session is on disk: its transcript, and the folder beside it
+/// where Claude Code keeps what its subagents and its longest tool results
+/// wrote. Never anything else of the project's — not its memory.
+pub fn session_files(cwd: &Path, id: &str) -> Vec<PathBuf> {
+    files_in(&project_dirs(cwd), id)
+}
+
+/// A session's files, among some of Claude Code's project folders.
+fn files_in(dirs: &[PathBuf], id: &str) -> Vec<PathBuf> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Vec::new();
+    }
+    let Some(transcript) = dirs.iter().map(|dir| dir.join(format!("{id}.jsonl"))).find(|path| path.is_file()) else {
+        return Vec::new();
+    };
+    let beside = transcript.with_extension("");
+    let mut files = vec![transcript];
+    if beside.is_dir() && beside.file_name().and_then(|n| n.to_str()) == Some(id) {
+        files.push(beside);
+    }
+    files
+}
+
+/// Move a session to the Trash. `false` if there was nothing to move.
+pub fn trash(cwd: &Path, id: &str) -> Result<bool, String> {
+    let files = session_files(cwd, id);
+    if files.is_empty() {
+        return Ok(false);
+    }
+    trash::delete_all(&files).map_err(|e| format!("Could not move the conversation to the Trash: {e}"))?;
+    Ok(true)
+}
+
 /// The file a session is in.
 pub fn file(root: &Path, id: &str) -> Option<PathBuf> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
@@ -427,6 +460,24 @@ mod tests {
         let result = serde_json::json!({ "type": "user", "message": { "content": [{ "type": "tool_result", "content": "ok" }] } });
         assert_eq!(prompt(&typed).as_deref(), Some("Fix the build"));
         assert!(prompt(&meta).is_none() && prompt(&command).is_none() && prompt(&result).is_none());
+    }
+
+    #[test]
+    fn a_session_is_its_transcript_and_the_folder_beside_it_and_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("proton-history-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        std::fs::create_dir_all(dir.join(id).join("subagents")).unwrap();
+        std::fs::create_dir_all(dir.join("memory")).unwrap();
+        std::fs::write(dir.join(format!("{id}.jsonl")), "{}\n").unwrap();
+        std::fs::write(dir.join("other.jsonl"), "{}\n").unwrap();
+        let dirs = vec![dir.join("elsewhere"), dir.clone()];
+        assert_eq!(files_in(&dirs, id), [dir.join(format!("{id}.jsonl")), dir.join(id)]);
+        assert!(files_in(&dirs, "memory").is_empty(), "the project's memory is not a session");
+        assert!(files_in(&dirs, "../other").is_empty());
+        std::fs::remove_file(dir.join(format!("{id}.jsonl"))).unwrap();
+        assert!(files_in(&dirs, id).is_empty(), "a folder with no transcript is not a session");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

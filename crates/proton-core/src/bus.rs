@@ -279,6 +279,10 @@ pub enum Command {
     },
     /// Read the project's sessions again.
     ClaudeSessions,
+    /// Delete a conversation: its transcript goes to the Trash.
+    ClaudeDelete {
+        session: String,
+    },
     /// A new folder for conversations — named, or "New folder" until it is —
     /// with these put in it.
     ChatFolderNew {

@@ -1369,6 +1369,7 @@ impl Workspace {
                 events
             }
             Command::ClaudeSessions => self.claude.refresh(),
+            Command::ClaudeDelete { session } => self.claude.delete(&session),
             Command::ChatFolderNew { name, sessions } => self.claude.folder_new(&name, &sessions),
             Command::ChatFolderRename { folder, name } => self.claude.folder_rename(&folder, &name),
             Command::ChatFolderDelete { folder } => self.claude.folder_delete(&folder),

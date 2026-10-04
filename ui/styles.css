@@ -3196,6 +3196,17 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cc-loose.drop { box-shadow: inset 0 0 0 1px var(--row-on-edge); border-radius: 6px; }
 .cc-loose { min-height: 40px; }
 
+.cc-pop-sep { height: 1px; margin: 4px 6px; background: var(--cc-line); }
+.cc-pop-row.danger b { color: var(--err); }
+.cc-pop-row.danger > .i:first-child { color: var(--err); }
+.cc-pop-ask { padding: 8px 10px 4px; color: var(--cc-text); font: 600 var(--z-xs)/1.35 var(--cc-font); overflow-wrap: anywhere; }
+.cc-pop-note { margin: 0; padding: 2px 10px 10px; font-size: var(--z-2xs); line-height: 1.5; color: var(--cc-muted); }
+.cc-pop-acts { display: flex; justify-content: flex-end; gap: 6px; padding: 0 6px 6px; }
+.cc-danger {
+  padding: 6px 12px; border: 1px solid color-mix(in srgb, var(--err) 55%, transparent); border-radius: 5px;
+  background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err); font: 600 var(--z-2xs)/1.2 var(--cc-font); cursor: pointer;
+}
+.cc-danger:hover { background: color-mix(in srgb, var(--err) 24%, transparent); }
 /* The list's menus float where they were asked for. */
 .cc-pop.cc-side-menu { position: fixed; width: 260px; max-height: 60vh; overflow: auto; }
 .cc-sessions { flex: 1 1 auto; min-height: 0; padding: 2px 0 10px; }

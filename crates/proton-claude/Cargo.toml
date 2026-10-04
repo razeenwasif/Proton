@@ -20,6 +20,8 @@ dirs = "6"
 memchr = "2"
 # The hunks of an edit an engine describes only as before and after.
 gix-imara-diff = { workspace = true }
+# A deleted conversation goes to the Trash, from where it can be put back.
+trash = "5"
 
 # Whether the process a session registered is still alive.
 [target.'cfg(unix)'.dependencies]

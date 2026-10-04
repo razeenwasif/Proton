@@ -152,6 +152,27 @@ pub fn engine_of(id: &str) -> Option<Engine> {
     index(&dir()).into_iter().find(|e| e.id == id).map(|e| e.engine)
 }
 
+/// Move a kept conversation to the Trash and take it off the list. `false`
+/// if it had never been kept.
+pub fn trash(id: &str) -> Result<bool, String> {
+    let dir = dir();
+    let moved = match file(&dir, id).filter(|p| p.is_file()) {
+        Some(path) => {
+            trash::delete(&path).map_err(|e| format!("Could not move the conversation to the Trash: {e}"))?;
+            true
+        }
+        None => false,
+    };
+    let mut entries = index(&dir);
+    let before = entries.len();
+    entries.retain(|e| e.id != id);
+    if entries.len() != before {
+        let text = serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())?;
+        write(&dir.join("index.json"), &text)?;
+    }
+    Ok(moved)
+}
+
 pub fn remove(id: &str) {
     let dir = dir();
     if let Some(path) = file(&dir, id) {

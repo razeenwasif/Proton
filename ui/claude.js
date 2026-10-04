@@ -335,6 +335,8 @@ export function createClaude(host) {
 
   /** Which folder a conversation is in. @param {string} id */
   const folderOf = (id) => state.folders.find((f) => f.sessions.some((s) => s.id === id));
+  /** A conversation as the list has it, wherever it is drawn. @param {string} id */
+  const sessionById = (id) => state.sessions.find((s) => s.id === id) ?? state.folders.flatMap((f) => f.sessions).find((s) => s.id === id);
 
   /** Where a conversation can go. @param {string} id */
   function sessionMenu(id) {
@@ -344,7 +346,24 @@ export function createClaude(host) {
         `<button class="cc-pop-row${f.id === now?.id ? " on" : ""}" role="menuitem" data-move-to="${esc(f.id)}" data-session="${esc(id)}">` +
         `${icon("folder")}<b>${esc(f.name)}</b>${f.id === now?.id ? icon("check") : ""}</button>`).join("") +
       `<button class="cc-pop-row" role="menuitem" data-new-folder-with="${esc(id)}">${icon("plus")}<b>New folder…</b></button>` +
-      (now ? `<button class="cc-pop-row" role="menuitem" data-move-out="${esc(id)}">${icon("close")}<b>Remove from ${esc(now.name)}</b></button>` : "");
+      (now ? `<button class="cc-pop-row" role="menuitem" data-move-out="${esc(id)}">${icon("close")}<b>Remove from ${esc(now.name)}</b></button>` : "") +
+      `<div class="cc-pop-sep"></div>` +
+      // One open in another Claude Code would only write itself back.
+      (sessionById(id)?.elsewhere
+        ? `<button class="cc-pop-row off" role="menuitem" disabled>${icon("close")}<b>Delete chat</b><span>Close it in the other Claude Code first</span></button>`
+        : `<button class="cc-pop-row danger" role="menuitem" data-delete-ask="${esc(id)}">${icon("close")}<b>Delete chat…</b></button>`);
+  }
+
+  /** Ask before a chat goes. @param {string} id */
+  function deleteConfirm(id) {
+    const s = sessionById(id);
+    const note = s?.cwd
+      ? "Its transcript goes to the Trash, where you can restore it. Claude's desktop app may still list it."
+      : "Its transcript goes to the Trash, where you can restore it.";
+    return `<div class="cc-pop-ask">Delete “${esc(s?.title || "this chat")}”?</div>` +
+      `<p class="cc-pop-note">${esc(note)}</p>` +
+      `<div class="cc-pop-acts"><button class="cc-quiet" data-delete-cancel>Cancel</button>` +
+      `<button class="cc-danger" data-delete-chat="${esc(id)}">Delete</button></div>`;
   }
 
   /** @param {string} id */
@@ -1326,6 +1345,28 @@ export function createClaude(host) {
     if (moveOut) {
       closeSideMenu();
       host.dispatch({ type: "chatFolderMove", session: /** @type {HTMLElement} */ (moveOut).dataset.moveOut, folder: null });
+      return;
+    }
+    const ask = target.closest("[data-delete-ask]");
+    if (ask) {
+      // The same menu turns into the question, where it was.
+      sideMenu.innerHTML = deleteConfirm(/** @type {HTMLElement} */ (ask).dataset.deleteAsk ?? "");
+      const box = sideMenu.getBoundingClientRect();
+      openSideMenu(sideMenu.innerHTML, box.left, box.top);
+      /** @type {HTMLElement | null} */ (sideMenu.querySelector("[data-delete-cancel]"))?.focus();
+      return;
+    }
+    if (target.closest("[data-delete-cancel]")) {
+      closeSideMenu();
+      return;
+    }
+    const doomed = target.closest("[data-delete-chat]");
+    if (doomed) {
+      const id = /** @type {HTMLElement} */ (doomed).dataset.deleteChat ?? "";
+      closeSideMenu();
+      state.panes.delete(id);
+      savePanes(state.panes);
+      host.dispatch({ type: "claudeDelete", session: id });
       return;
     }
     const withSession = target.closest("[data-new-folder-with]");

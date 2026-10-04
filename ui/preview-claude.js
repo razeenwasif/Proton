@@ -167,8 +167,10 @@ export function createClaudePreview(deliver) {
     ({ id, title, updated, cwd: "", elsewhere: false, engine: "claude", ...extra });
   /** Your folders, as the core keeps them. @type {{id: string, name: string, collapsed: boolean, members: string[]}[]} */
   let folders = [{ id: "folder-fleet", name: "Fleet", collapsed: false, members: [GLOSSARY, CODEX_SESSION] }];
+  /** Chats deleted in this preview. */
+  const deleted = new Set();
   const sessions = () => {
-    const rows = everyRow();
+    const rows = everyRow().filter((r) => !deleted.has(r.id));
     const inFolders = new Set(folders.flatMap((f) => f.members));
     return {
       type: "claudeSessions", active, engine, busy: current.activity === "working" ? [active] : [],
@@ -344,6 +346,17 @@ export function createClaudePreview(deliver) {
         const f = folders.find((x) => x.id === command.folder);
         if (f) f.collapsed = command.collapsed;
         return [sessions()];
+      }
+      case "claudeDelete": {
+        deleted.add(command.session);
+        for (const f of folders) f.members = f.members.filter((id) => id !== command.session);
+        if (command.session === active) {
+          active = "";
+          items = [];
+          current = status({ session: "", activity: "idle", title: "", tasks: [], cost: 0, context: 0, limit: null });
+          return [sessions(), all(), { type: "notice", level: "info", text: "Moved the chat to the Trash." }];
+        }
+        return [sessions(), { type: "notice", level: "info", text: "Moved the chat to the Trash." }];
       }
       case "chatFolderMove":
         for (const f of folders) f.members = f.members.filter((id) => id !== command.session);

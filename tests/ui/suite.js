@@ -1144,6 +1144,29 @@ await test('A chat moves into a folder by its menu or by being dragged there, an
   assert(!ws.querySelector('[data-folder-input]'), 'Escape did not leave the name as it was');
   await ccPush(folderEvent([], [chatRow('s1', 'Fix the build')]));
 });
+await test('A chat is deleted from its menu once you confirm, and one open in another Claude Code cannot be', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  await ccPush(folderEvent([], [chatRow('s1', 'Fix the build'), chatRow('old', 'Old experiment'), chatRow('live', 'Open elsewhere', {cwd: '/Users/you/Github', elsewhere: true})]));
+  ws.querySelector('[data-session-menu="old"]').click(); await settle();
+  const menu = ws.querySelector('.cc-side-menu');
+  let before = win.commands.length;
+  menu.querySelector('[data-delete-ask="old"]').click(); await settle();
+  assert(!sentSince(before, 'claudeDelete').length, 'it was deleted without asking');
+  assert(menu.textContent.includes('Delete “Old experiment”?') && menu.textContent.includes('Trash'), 'the question does not name the chat or say where it goes');
+  assert(doc.activeElement === menu.querySelector('[data-delete-cancel]'), 'Enter would delete rather than cancel');
+  menu.querySelector('[data-delete-cancel]').click(); await settle();
+  assert(menu.hidden && !sentSince(before, 'claudeDelete').length, 'cancelling deleted it');
+  ws.querySelector('[data-session-menu="old"]').click(); await settle();
+  ws.querySelector('.cc-side-menu [data-delete-ask="old"]').click(); await settle();
+  before = win.commands.length;
+  ws.querySelector('.cc-side-menu [data-delete-chat="old"]').click(); await settle();
+  assert(sentSince(before, 'claudeDelete')[0]?.session === 'old', 'confirming did not ask the core to delete it');
+  ws.querySelector('[data-session-menu="live"]').click(); await settle();
+  const offered = ws.querySelector('.cc-side-menu');
+  assert(!offered.querySelector('[data-delete-ask]') && offered.textContent.includes('Close it in the other Claude Code first'), 'a chat open elsewhere could be deleted');
+  offered.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+  assert(offered.hidden, 'Escape did not close the menu');
+});
 await test('Each chat keeps its own artifacts pane, and one published while you were elsewhere is waiting', async () => {
   const ws = $('.workspace[data-ws="chat"]');
   const artifact = (id, session, seq = 1) => ({id, url: `https://claude.ai/artifact/${id}`, title: `Artifact ${id}`, icon: 'chart', description: '',
