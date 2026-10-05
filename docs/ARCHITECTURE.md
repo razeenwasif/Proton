@@ -799,7 +799,10 @@ the venv empty and asks its pip, brought up to 22.2 if it is older, for
 `install --dry-run --report`, with each package's size from PyPI; making it
 installs exactly that list, pinned and `--no-deps`, and `pip freeze` is its
 lock. A venv planned and not wanted is removed, so nothing is left behind but
-what the scientist made. A run is `research/<slug>/runs/R005/`: the approved
+what the scientist made. What makes it — conda, or a Python — is looked for
+the first time a window draws the Lab, on a thread, because asking a Python
+its version means starting it; a Proton that never shows the Lab never asks.
+A run is `research/<slug>/runs/R005/`: the approved
 code as `main.py`, a helper it can import, and `run.json` — the code and the
 environment's lock by SHA-256, the Python, the sandbox, the limits, who
 approved it and when, and how it ended. Its output goes to files, not pipes;

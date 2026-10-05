@@ -14,6 +14,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver, TryRecvError};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -104,6 +105,13 @@ enum Step {
 pub struct Lab {
     home: PathBuf,
     maker: Option<Maker>,
+    /// How the maker is found, until it has been looked for: the first
+    /// time the Lab is checked, not when it is made, so a Proton that never
+    /// shows the Lab never asks after conda or a Python.
+    finder: Option<Box<dyn FnOnce() -> Option<Maker> + Send>>,
+    /// The maker, while it is looked for: on a thread, since finding a
+    /// Python means starting each one to ask its version.
+    looking: Option<Receiver<Option<Maker>>>,
     specs: Vec<String>,
     state: EnvState,
     /// Bumped on every change, so a window can tell it has seen this one.
@@ -136,17 +144,23 @@ fn quiet() -> Vec<(String, String)> {
         .collect()
 }
 
+/// What the Lab's Python is made of, by what makes it.
+fn specs(maker: &Option<Maker>) -> Vec<String> {
+    match maker {
+        Some(Maker::Pip { version, .. }) => std::iter::once(format!("python={version}")).chain(pip::SPECS.iter().map(|s| s.to_string())).collect(),
+        _ => SPECS.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
 impl Lab {
     /// The Lab under `home` — `~/.proton/lab` — made with `maker`, if there is one.
     pub fn new(home: &Path, maker: Option<Maker>) -> Lab {
-        let specs = match &maker {
-            Some(Maker::Pip { version, .. }) => std::iter::once(format!("python={version}")).chain(pip::SPECS.iter().map(|s| s.to_string())).collect(),
-            _ => SPECS.iter().map(|s| s.to_string()).collect(),
-        };
         Lab {
             home: home.to_path_buf(),
+            specs: specs(&maker),
             maker,
-            specs,
+            finder: None,
+            looking: None,
             state: EnvState::Unknown,
             version: 0,
             step: None,
@@ -170,12 +184,21 @@ impl Lab {
         env
     }
 
+    /// The Lab under `home`, made with what `find` finds, which is asked —
+    /// on a thread — the first time the Lab is checked.
+    pub fn finding(home: &Path, find: impl FnOnce() -> Option<Maker> + Send + 'static) -> Lab {
+        let mut lab = Lab::new(home, None);
+        lab.finder = Some(Box::new(find));
+        lab
+    }
+
     /// `~/.proton/lab`, made with the conda people install — or, with none,
     /// a Python already here.
     pub fn at_home() -> Lab {
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-        let maker = conda::find().map(Maker::Conda).or_else(|| pip::find().map(|(python, version)| Maker::Pip { python, version }));
-        Lab::new(&home.join(".proton").join("lab"), maker)
+        Lab::finding(&home.join(".proton").join("lab"), || {
+            conda::find().map(Maker::Conda).or_else(|| pip::find().map(|(python, version)| Maker::Pip { python, version }))
+        })
     }
 
     pub fn state(&self) -> &EnvState {
@@ -214,15 +237,24 @@ impl Lab {
         self.version += 1;
     }
 
-    /// Whether a step is running.
+    /// Whether a step is running, or the maker is being looked for.
     pub fn busy(&self) -> bool {
-        self.step.is_some()
+        self.step.is_some() || self.looking.is_some()
     }
 
     /// Look at what there is: a ready environment is read; otherwise what
-    /// making one would take.
+    /// making one would take. The first time, what would make it is looked
+    /// for first.
     pub fn check(&mut self) {
-        if self.step.is_some() {
+        if self.busy() {
+            return;
+        }
+        if let Some(find) = self.finder.take() {
+            let (tx, rx) = channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(find());
+            });
+            self.looking = Some(rx);
             return;
         }
         if self.python_path().is_file() {
@@ -283,7 +315,7 @@ impl Lab {
 
     /// The first say-so: ask what the environment would be.
     pub fn plan(&mut self) -> Result<(), String> {
-        if self.step.is_some() {
+        if self.busy() {
             return Err("The Lab is busy.".into());
         }
         if matches!(self.state, EnvState::Ready { .. }) {
@@ -325,7 +357,7 @@ impl Lab {
 
     /// Take the Lab's Python away. Runs keep what they wrote.
     pub fn remove(&mut self) -> Result<(), String> {
-        if self.step.is_some() {
+        if self.busy() {
             return Err("The Lab is busy.".into());
         }
         match self.maker()? {
@@ -366,6 +398,18 @@ impl Lab {
 
     /// Drain what the running step said; `true` if anything changed.
     pub fn poll(&mut self) -> bool {
+        if let Some(looking) = &self.looking {
+            let maker = match looking.try_recv() {
+                Ok(maker) => maker,
+                Err(TryRecvError::Empty) => return false,
+                Err(TryRecvError::Disconnected) => None,
+            };
+            self.looking = None;
+            self.specs = specs(&maker);
+            self.maker = maker;
+            self.check();
+            return true;
+        }
         let Some(step) = &mut self.step else { return false };
         let job = match step {
             Step::Venv(job) | Step::Plan(job) | Step::Create(job) | Step::Lock(job) | Step::Inspect(job) | Step::Remove(job) => job,
@@ -659,6 +703,36 @@ esac
         lab.check();
         assert_eq!(lab.state(), &EnvState::NoPython);
         assert!(lab.plan().is_err());
+    }
+
+    #[test]
+    fn what_makes_the_lab_is_looked_for_off_the_thread_and_only_once_it_is_checked() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+        let asked = Arc::new(AtomicU32::new(0));
+        let counted = asked.clone();
+        let mut lab = Lab::finding(&std::env::temp_dir().join("proton-lab-finding"), move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(50));
+            Some(Maker::Pip { python: PathBuf::from("/opt/python3"), version: "3.12.4".into() })
+        });
+        lab.poll();
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(asked.load(Ordering::SeqCst), 0, "it was looked for before anyone looked at the Lab");
+        lab.check();
+        assert!(lab.busy() && lab.state() == &EnvState::Unknown, "checking waited for the answer");
+        assert!(lab.plan().is_err(), "a plan was started with no maker yet");
+        settle(&mut lab, |s| matches!(s, EnvState::Missing { .. }));
+        let EnvState::Missing { maker, specs, .. } = lab.state().clone() else { unreachable!() };
+        assert_eq!(maker, MakerView::Pip { python: "/opt/python3".into(), version: "3.12.4".into() });
+        assert_eq!(specs.first().map(String::as_str), Some("python=3.12.4"), "its specs are pip's");
+        lab.check();
+        settle(&mut lab, |s| matches!(s, EnvState::Missing { .. }));
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "it was looked for again");
+
+        let mut lab = Lab::finding(&std::env::temp_dir().join("proton-lab-finding-none"), || None);
+        lab.check();
+        settle(&mut lab, |s| s == &EnvState::NoPython);
     }
 
     /// A Python that makes virtual environments of itself, and answers in

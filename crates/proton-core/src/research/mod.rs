@@ -201,9 +201,10 @@ impl Research {
     /// has changed since this window last drew it, or `always`.
     fn lab_event(&mut self, always: bool) -> Vec<Event> {
         let mut lab = self.lab.lock().unwrap_or_else(|e| e.into_inner());
-        // Looked at again whenever a window draws it and there is none: one
-        // made outside Proton, or since, is found.
-        let stale = matches!(lab.state(), EnvState::Unknown) || always && matches!(lab.state(), EnvState::Missing { .. } | EnvState::NoPython);
+        // Looked at only when a window draws it, never by a poll alone, and
+        // again whenever one does and there is none: one made outside Proton,
+        // or since, is found.
+        let stale = always && matches!(lab.state(), EnvState::Unknown | EnvState::Missing { .. } | EnvState::NoPython);
         if stale && !lab.busy() {
             lab.check();
         }
