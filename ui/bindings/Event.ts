@@ -34,11 +34,15 @@ import type { LabSandbox } from "./LabSandbox";
 import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
 import type { LibrarySource } from "./LibrarySource";
+import type { LiteratureSourceRow } from "./LiteratureSourceRow";
 import type { Material } from "./Material";
 import type { MediaItem } from "./MediaItem";
 import type { ModeId } from "./ModeId";
 import type { Node } from "./Node";
 import type { NoticeLevel } from "./NoticeLevel";
+import type { PaperDetail } from "./PaperDetail";
+import type { PaperResult } from "./PaperResult";
+import type { PaperRow } from "./PaperRow";
 import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
 import type { PluginView } from "./PluginView";
@@ -191,7 +195,11 @@ feedback: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypot
 /**
  * Whether what the agents propose runs, in the sandbox, without asking.
  */
-autoRun: boolean, } | { "type": "researchRun", slug: string, detail: LabRunDetail | null, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+autoRun: boolean, } | { "type": "researchRun", slug: string, detail: LabRunDetail | null, } | { "type": "researchLiterature", slug: string, enabled: boolean, 
+/**
+ * Whether this Proton asks anybody at all.
+ */
+live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
 /**
  * Another Proton is running its rounds, in words: read only here.
  */

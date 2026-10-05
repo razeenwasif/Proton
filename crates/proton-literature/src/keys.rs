@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 use proton_research::LiteratureSource;
 
+pub use proton_research::view::KeyState;
+
 /// The environment variables they are read from.
 pub const NAMES: [&str; 3] = ["SEMANTIC_SCHOLAR_API_KEY", "OPENALEX_API_KEY", "CROSSREF_MAILTO"];
 
@@ -17,15 +19,6 @@ pub struct Keys {
     pub mailto: Option<String>,
 }
 
-/// Whether a key was found — what may be said about one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyState {
-    Found,
-    Missing,
-    /// Not looked for yet: nothing has been searched.
-    NotLooked,
-}
-
 impl Keys {
     /// From variables as an environment has them; an empty one is none.
     pub fn from_vars(vars: &BTreeMap<String, String>) -> Keys {
@@ -33,10 +26,10 @@ impl Keys {
         Keys { semantic_scholar: get(NAMES[0]), openalex: get(NAMES[1]), mailto: get(NAMES[2]) }
     }
 
-    /// Whether `source` has its key. arXiv needs none.
+    /// Whether `source` has its key. arXiv takes none.
     pub fn state(&self, source: LiteratureSource) -> KeyState {
         let found = match source {
-            LiteratureSource::Arxiv => true,
+            LiteratureSource::Arxiv => return KeyState::NotNeeded,
             LiteratureSource::SemanticScholar => self.semantic_scholar.is_some(),
             LiteratureSource::OpenAlex => self.openalex.is_some(),
         };
@@ -72,7 +65,7 @@ mod tests {
         assert_eq!(keys.semantic_scholar.as_deref(), Some("s2-secret"));
         assert_eq!(keys.openalex, None, "an empty one is none");
         assert_eq!(keys.state(LiteratureSource::OpenAlex), KeyState::Missing);
-        assert_eq!(keys.state(LiteratureSource::Arxiv), KeyState::Found, "arXiv needs none");
+        assert_eq!(keys.state(LiteratureSource::Arxiv), KeyState::NotNeeded);
         assert!(!format!("{keys:?}").contains("s2-secret"));
     }
 }

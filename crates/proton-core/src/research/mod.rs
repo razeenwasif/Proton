@@ -14,18 +14,22 @@
 
 pub mod driver;
 pub mod factory;
+pub mod literature;
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use proton_lab::run::{self as lab_run, Spec};
 use proton_lab::{EnvState, Lab, Run, RunState, Sandbox};
 
-use proton_research::model::{Author, Experiment, ExperimentStatus, Hypothesis, HypothesisStatus, Seat};
+use proton_literature::fetch::{Fetch, Job, Reply};
+use proton_research::cite::{self, Ident};
+use proton_research::literature::{known, Candidate};
+use proton_research::model::{AddedBy, Author, Experiment, ExperimentStatus, Hypothesis, HypothesisStatus, LiteratureSource, Record, Seat};
 use proton_research::store::{Folder, Store};
 use proton_research::supervisor::{RoundStatus, RunSummary};
-use proton_research::view::{self, Board};
+use proton_research::view::{self, Board, LiteratureSourceRow, PaperResult};
 use proton_research::Discipline;
 
 use crate::bus::{Event, NoticeLevel};
@@ -59,6 +63,44 @@ pub struct Research {
     showing_run: Option<String>,
     /// The sandbox runs are in, as the Lab found it; asked once.
     sandbox: Option<Sandbox>,
+    /// What asks the literature.
+    literature: Box<dyn literature::Source>,
+    /// The scientist's last search.
+    search: Option<Search>,
+    /// Papers being looked up by name, to be added.
+    lookups: Vec<Lookup>,
+    /// Open PDFs being downloaded.
+    downloads: Vec<Downloading>,
+    /// The paper shown whole.
+    showing_paper: Option<String>,
+    /// Sources left alone until then, having said they were out of calls.
+    resting: BTreeMap<LiteratureSource, u64>,
+}
+
+/// A search the scientist asked for: of which investigation, what, and
+/// what it found — the fetch let go of once it has answered.
+struct Search {
+    slug: String,
+    query: String,
+    fetch: Option<Fetch>,
+    found: Vec<Candidate>,
+    failures: Vec<String>,
+}
+
+/// A paper named by a DOI or an arXiv id, being looked up.
+struct Lookup {
+    slug: String,
+    /// The name as it is said.
+    asked: String,
+    key: String,
+    fetch: Fetch,
+}
+
+/// PDFs being kept, and the papers still waiting for theirs.
+struct Downloading {
+    slug: String,
+    waiting: Vec<String>,
+    fetch: Fetch,
 }
 
 /// A run going in the Lab.
@@ -153,6 +195,7 @@ impl Research {
     pub fn new(root: &Path) -> Research {
         let mut research = Research::with_factory(root, Box::new(Engines::default()), instance());
         research.lab = shared_lab();
+        research.literature = Box::new(literature::Live::new());
         research
     }
 
@@ -161,6 +204,7 @@ impl Research {
     pub fn kept_in(folder: &Path) -> Research {
         let mut research = Research::kept_with(folder, Box::new(Engines::default()), instance());
         research.lab = shared_lab();
+        research.literature = Box::new(literature::Live::new());
         research
     }
 
@@ -174,7 +218,8 @@ impl Research {
     }
 
     /// Over another factory — scripted engines, in tests — as another
-    /// instance, and with a Lab of its own that has no conda to call.
+    /// instance, with a Lab of its own that has no conda to call, and asking
+    /// nobody for the literature.
     pub fn with_factory(root: &Path, factory: Box<dyn AgentFactory>, instance: &str) -> Research {
         Research {
             lab: Arc::new(Mutex::new(Lab::new(&root.join(".proton-lab"), None))),
@@ -190,7 +235,19 @@ impl Research {
             drivers: BTreeMap::new(),
             factory,
             instance: instance.to_string(),
+            literature: Box::new(literature::Offline),
+            search: None,
+            lookups: Vec::new(),
+            downloads: Vec::new(),
+            showing_paper: None,
+            resting: BTreeMap::new(),
         }
+    }
+
+    /// Asking `source` for the literature: a script, in tests.
+    pub fn with_literature(mut self, source: Box<dyn literature::Source>) -> Research {
+        self.literature = source;
+        self
     }
 
     /// Everything the Research tab draws.
@@ -209,6 +266,7 @@ impl Research {
         }
         let mut events = vec![self.list_event(&folders)];
         events.extend(self.board());
+        events.extend(self.results_event());
         events.extend(self.round_event(now));
         events.extend(self.lab_event(true));
         self.reap();
@@ -399,6 +457,10 @@ impl Research {
         for driver in self.drivers.values_mut() {
             driver.shutdown();
         }
+        // Let go of, each fetch is cancelled; a PDF half-downloaded is removed.
+        self.search = None;
+        self.lookups.clear();
+        self.downloads.clear();
     }
 
     /// A run that ended without being watched to its end: its experiment
@@ -579,13 +641,14 @@ impl Research {
     }
 
 
-    /// The open investigation's board, and the hypothesis shown whole.
+    /// The open investigation's board, the hypothesis shown whole, and its
+    /// literature — whose papers count the reviews that cite them.
     fn board(&self) -> Vec<Event> {
         let Some(slug) = &self.open else { return Vec::new() };
         let Ok(folder) = self.store.open(slug) else { return Vec::new() };
         let board = Board::read(&folder);
         let i = folder.investigation();
-        vec![
+        let mut events = vec![
             Event::ResearchBoard {
                 slug: slug.clone(),
                 title: i.title.clone(),
@@ -599,7 +662,9 @@ impl Research {
                 hypotheses: board.rows(),
             },
             Event::ResearchHypothesis { slug: slug.clone(), detail: self.showing.as_deref().and_then(|id| board.detail(id)) },
-        ]
+        ];
+        events.extend(self.literature_events(&folder, &board));
+        events
     }
 
     /// The round of an investigation, picked up from its folder the first
@@ -632,11 +697,20 @@ impl Research {
         }]
     }
 
-    pub fn create(&mut self, title: &str, goal: &str, discipline: Discipline) -> Vec<Event> {
+    /// A new investigation, searching the literature or not.
+    pub fn create(&mut self, title: &str, goal: &str, discipline: Discipline, literature: bool) -> Vec<Event> {
         match self.store.create(title, goal, discipline, now()) {
-            Ok(folder) => {
+            Ok(mut folder) => {
+                if !literature {
+                    let mut investigation = folder.investigation().clone();
+                    investigation.literature.enabled = false;
+                    if let Err(why) = folder.save(investigation) {
+                        return vec![notice(why, NoticeLevel::Error)];
+                    }
+                }
                 self.open = Some(folder.slug().to_string());
                 self.showing = None;
+                self.showing_paper = None;
                 self.sync()
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
@@ -650,6 +724,7 @@ impl Research {
                 self.showing = None;
                 self.watching = None;
                 self.showing_run = None;
+                self.showing_paper = None;
                 self.sync()
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
@@ -695,6 +770,395 @@ impl Research {
         }
         if open && self.watching.as_ref().is_some_and(|task| moved.talked.contains(task)) {
             events.extend(self.transcript_event());
+        }
+        events
+    }
+
+    /* ── the literature ────────────────────────────────────────────── */
+
+    /// The open investigation's literature and the paper shown whole, from
+    /// the board already read.
+    fn literature_events(&self, folder: &Folder, board: &Board) -> Vec<Event> {
+        let slug = folder.slug().to_string();
+        let policy = &folder.investigation().literature;
+        let now = now();
+        let sources = LiteratureSource::ALL
+            .iter()
+            .map(|&source| LiteratureSourceRow {
+                source,
+                name: source.name().into(),
+                chosen: policy.sources.contains(&source),
+                key: self.literature.key(source),
+                resting: self.resting.get(&source).copied().filter(|until| *until > now),
+            })
+            .collect();
+        vec![
+            Event::ResearchLiterature {
+                slug: slug.clone(),
+                enabled: policy.enabled,
+                live: self.literature.live(),
+                sources,
+                papers: board.paper_rows(),
+                fetching: self.downloads.iter().filter(|d| d.slug == slug).flat_map(|d| d.waiting.iter().cloned()).collect(),
+                adding: self.lookups.iter().filter(|l| l.slug == slug).map(|l| l.asked.clone()).collect(),
+            },
+            Event::ResearchPaper { slug, detail: self.showing_paper.as_deref().and_then(|id| board.paper(id)) },
+        ]
+    }
+
+    /// The open investigation's literature, read again.
+    fn literature(&self) -> Vec<Event> {
+        let Some(slug) = &self.open else { return Vec::new() };
+        let Ok(folder) = self.store.open(slug) else { return Vec::new() };
+        self.literature_events(&folder, &Board::read(&folder))
+    }
+
+    /// The scientist's last search, when it was of the open investigation.
+    fn results_event(&self) -> Vec<Event> {
+        let (Some(open), Some(search)) = (&self.open, &self.search) else { return Vec::new() };
+        if &search.slug != open {
+            return Vec::new();
+        }
+        let papers = self.store.open(open).map(|f| f.papers()).unwrap_or_default();
+        vec![Event::ResearchResults {
+            slug: open.clone(),
+            query: search.query.clone(),
+            searching: search.fetch.is_some(),
+            results: search.found.iter().map(|c| PaperResult::of(c, &papers)).collect(),
+            failures: search.failures.clone(),
+        }]
+    }
+
+    /// The open investigation, if it uses the literature; why not, if not.
+    fn literature_folder(&self) -> Result<Folder, String> {
+        let folder = self.folder()?;
+        if !folder.investigation().literature.enabled {
+            return Err("This investigation does not use the literature. Turn it on in the Literature tab first: what it searches for is sent to the sources it asks.".into());
+        }
+        Ok(folder)
+    }
+
+    /// Another Proton running the investigation's rounds, in words: papers
+    /// are added there, so two never number one P007 between them.
+    fn held(&mut self, slug: &str) -> Option<String> {
+        let now = now();
+        self.driver(slug).and_then(|d| d.held(now))
+    }
+
+    /// The sources of `chosen` not left alone just now.
+    fn awake(&self, chosen: &[LiteratureSource], now: u64) -> Vec<LiteratureSource> {
+        chosen.iter().copied().filter(|s| self.resting.get(s).is_none_or(|until| *until <= now)).collect()
+    }
+
+    /// Whether the open investigation searches the literature, and in which
+    /// sources. Turned off, whatever it is asking is let go.
+    pub fn set_literature(&mut self, enabled: Option<bool>, sources: Option<Vec<LiteratureSource>>) -> Vec<Event> {
+        let mut folder = match self.folder() {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let mut investigation = folder.investigation().clone();
+        if let Some(enabled) = enabled {
+            investigation.literature.enabled = enabled;
+        }
+        if let Some(sources) = sources {
+            investigation.literature.sources = LiteratureSource::ALL.into_iter().filter(|s| sources.contains(s)).collect();
+        }
+        let on = investigation.literature.enabled;
+        if let Err(why) = folder.save(investigation) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        let slug = folder.slug().to_string();
+        if on {
+            let _ = folder.ensure_ignored(literature::PDFS_IGNORED);
+        } else {
+            self.search.take_if(|s| s.slug == slug);
+            self.lookups.retain(|l| l.slug != slug);
+            self.downloads.retain(|d| d.slug != slug);
+        }
+        if let Some(driver) = self.drivers.get_mut(&slug) {
+            driver.invalidate();
+        }
+        let mut events = self.literature();
+        events.extend(self.results_event());
+        events
+    }
+
+    /// Search the open investigation's sources for `query`.
+    pub fn search(&mut self, query: &str) -> Vec<Event> {
+        let query = query.split_whitespace().collect::<Vec<_>>().join(" ");
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let folder = match self.literature_folder() {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let policy = folder.investigation().literature.clone();
+        if policy.sources.is_empty() {
+            return vec![notice("Choose a source to search first.".into(), NoticeLevel::Warn)];
+        }
+        let sources = self.awake(&policy.sources, now());
+        if sources.is_empty() {
+            return vec![notice("Every source this investigation asks said it was out of calls, and is left alone for now.".into(), NoticeLevel::Warn)];
+        }
+        let fetch = self.literature.fetch(Job::Search { queries: vec![query.clone()], sources, per_query: policy.per_query.clamp(1, 50) });
+        self.search = Some(Search { slug: folder.slug().to_string(), query, fetch: Some(fetch), found: Vec::new(), failures: Vec::new() });
+        self.results_event()
+    }
+
+    /// Add a paper to the open investigation: one the last search found, by
+    /// its key, or one named — a DOI, an arXiv id, a link to either — which
+    /// is looked up first.
+    pub fn add_paper(&mut self, text: &str) -> Vec<Event> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Vec::new();
+        }
+        let folder = match self.literature_folder() {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let slug = folder.slug().to_string();
+        if let Some(why) = self.held(&slug) {
+            return vec![notice(format!("{why} Add papers there."), NoticeLevel::Warn)];
+        }
+        let papers = folder.papers();
+        let found = self
+            .search
+            .as_ref()
+            .filter(|s| s.slug == slug)
+            .and_then(|s| s.found.iter().find(|c| proton_research::literature::keys(&c.record).first().map(String::as_str) == Some(text)))
+            .cloned();
+        let record = match &found {
+            Some(candidate) => candidate.record.clone(),
+            None => match Ident::parse(text).or_else(|| cite::extract(text).into_iter().map(|(_, ident)| ident).next()) {
+                Some(Ident::Paper(id)) => return vec![notice(format!("{id} is one of this investigation's papers already."), NoticeLevel::Info)],
+                Some(Ident::Doi(doi)) => Record { doi: Some(doi), ..Record::default() },
+                Some(Ident::Arxiv(id)) => Record { arxiv: Some(id), ..Record::default() },
+                None => return vec![notice("Give a DOI or an arXiv id, or a link to either, to add a paper by.".into(), NoticeLevel::Warn)],
+            },
+        };
+        if let Some(have) = known(&papers, &record) {
+            self.showing_paper = Some(have.id.clone());
+            let mut events = vec![notice(format!("That is {} already.", have.id), NoticeLevel::Info)];
+            events.extend(self.literature());
+            return events;
+        }
+        if let Some(candidate) = found {
+            let added = self.add_records(&slug, vec![(candidate.record, candidate.queries)], AddedBy::Scientist, None, now());
+            return self.said_added(added);
+        }
+        let ident = match (record.doi, record.arxiv) {
+            (Some(doi), _) => Ident::Doi(doi),
+            (None, Some(id)) => Ident::Arxiv(id),
+            (None, None) => return Vec::new(),
+        };
+        if self.lookups.iter().any(|l| l.slug == slug && l.key == ident.key()) {
+            return Vec::new();
+        }
+        let sources = self.awake(&folder.investigation().literature.sources, now());
+        let fetch = self.literature.fetch(Job::Lookup { idents: vec![ident.clone()], sources });
+        self.lookups.push(Lookup { slug, asked: ident.text(), key: ident.key(), fetch });
+        self.literature()
+    }
+
+    /// Papers written into an investigation from what the sources said —
+    /// none it has by another name — and their open PDFs sent for: each
+    /// added, by its id and title.
+    fn add_records(&mut self, slug: &str, records: Vec<(Record, Vec<String>)>, by: AddedBy, round: Option<u32>, now: u64) -> Result<Vec<(String, String)>, String> {
+        let folder = self.store.open(slug)?;
+        let mut papers = folder.papers();
+        let mut added = Vec::new();
+        for (mut record, queries) in records {
+            if known(&papers, &record).is_some() {
+                continue;
+            }
+            if record.title.trim().is_empty() {
+                record.title = record.doi.clone().or_else(|| record.arxiv.as_ref().map(|id| format!("arXiv:{id}"))).unwrap_or_else(|| "Untitled".into());
+            }
+            let paper = literature::paper(folder.next_paper(), record, by, round, queries, now);
+            folder.write_paper(&paper)?;
+            papers.push(paper.clone());
+            added.push(paper);
+        }
+        if let Some((fetch, waiting)) = literature::start_downloads(self.literature.as_mut(), &folder, &added) {
+            self.downloads.push(Downloading { slug: slug.to_string(), waiting, fetch });
+        }
+        if let Some(driver) = self.drivers.get_mut(slug) {
+            driver.invalidate();
+        }
+        Ok(added.into_iter().map(|p| (p.id, p.record.title)).collect())
+    }
+
+    /// What adding papers came to, said; the first shown whole.
+    fn said_added(&mut self, added: Result<Vec<(String, String)>, String>) -> Vec<Event> {
+        let mut events = Vec::new();
+        match added {
+            Ok(added) => {
+                if let Some((id, _)) = added.first() {
+                    self.showing_paper = Some(id.clone());
+                }
+                for (id, title) in added {
+                    events.push(notice(format!("{id} is added: {title}"), NoticeLevel::Info));
+                }
+            }
+            Err(why) => events.push(notice(why, NoticeLevel::Error)),
+        }
+        events.extend(self.literature());
+        events.extend(self.results_event());
+        events
+    }
+
+    /// Show one of the open investigation's papers whole, or none.
+    pub fn show_paper(&mut self, paper: Option<String>) -> Vec<Event> {
+        self.showing_paper = paper;
+        self.literature()
+    }
+
+    /// Where a paper of the open investigation has its PDF.
+    pub fn paper_pdf(&self, paper: &str) -> Result<PathBuf, String> {
+        let path = self.folder()?.paper_pdf(paper)?;
+        if path.is_file() {
+            Ok(path)
+        } else {
+            Err(format!("{paper} has no PDF beside it."))
+        }
+    }
+
+    /// Try again to keep a paper's open PDF.
+    pub fn fetch_pdf(&mut self, paper: &str) -> Vec<Event> {
+        let folder = match self.literature_folder() {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let slug = folder.slug().to_string();
+        if self.downloads.iter().any(|d| d.slug == slug && d.waiting.iter().any(|id| id == paper)) {
+            return Vec::new();
+        }
+        let Some(found) = folder.papers().into_iter().find(|p| p.id == paper) else {
+            return vec![notice(format!("There is no paper {paper}."), NoticeLevel::Warn)];
+        };
+        if found.has_pdf {
+            return vec![notice(format!("{paper} has its PDF already."), NoticeLevel::Info)];
+        }
+        match literature::start_downloads(self.literature.as_mut(), &folder, std::slice::from_ref(&found)) {
+            Some((fetch, waiting)) => {
+                self.downloads.push(Downloading { slug, waiting, fetch });
+                self.literature()
+            }
+            None => vec![notice(format!("No open copy of {paper} is known. A copy you put at literature/{paper}.pdf is read like any other."), NoticeLevel::Info)],
+        }
+    }
+
+    /// What the literature's fetches have found since last looked: the
+    /// search's results, papers looked up and added, PDFs kept.
+    fn poll_literature(&mut self, now: u64) -> Vec<Event> {
+        let mut events = Vec::new();
+        let mut changed: BTreeSet<String> = BTreeSet::new();
+
+        let mut tired = Vec::new();
+        let mut searched = false;
+        if let Some(search) = self.search.as_mut() {
+            if let Some(fetch) = search.fetch.as_mut() {
+                for reply in fetch.poll() {
+                    match reply {
+                        Reply::Searched { candidates, failures } => {
+                            search.found = candidates;
+                            for failure in failures {
+                                search.failures.push(format!("{}: {}", failure.source.name(), failure.why));
+                                if failure.exhausted {
+                                    tired.push(failure.source);
+                                }
+                            }
+                        }
+                        Reply::Failed { why } => search.failures.push(why),
+                        _ => {}
+                    }
+                }
+                if fetch.is_done() {
+                    search.fetch = None;
+                    searched = true;
+                }
+            }
+        }
+        for source in tired {
+            let until = literature::rest_until(source, self.literature.key(source), now);
+            self.resting.insert(source, until);
+        }
+        if searched {
+            events.extend(self.results_event());
+            changed.extend(self.open.clone());
+        }
+
+        let mut i = 0;
+        while i < self.lookups.len() {
+            let replies = self.lookups[i].fetch.poll();
+            let done = self.lookups[i].fetch.is_done();
+            let (slug, asked) = (self.lookups[i].slug.clone(), self.lookups[i].asked.clone());
+            for reply in replies {
+                match reply {
+                    Reply::Resolved { found, missing, failures } => {
+                        if !found.is_empty() {
+                            let records = found.into_iter().map(|(_, record)| (record, Vec::new())).collect();
+                            let added = self.add_records(&slug, records, AddedBy::Scientist, None, now);
+                            if self.open.as_deref() == Some(slug.as_str()) {
+                                events.extend(self.said_added(added).into_iter().filter(|e| matches!(e, Event::Notice { .. })));
+                            }
+                        }
+                        for ident in missing {
+                            events.push(notice(format!("Nobody has {}: is it right?", ident.text()), NoticeLevel::Warn));
+                        }
+                        for (ident, why) in failures {
+                            events.push(notice(format!("{} could not be looked up: {why}", ident.text()), NoticeLevel::Warn));
+                        }
+                    }
+                    Reply::Failed { why } => events.push(notice(format!("{asked} could not be looked up: {why}"), NoticeLevel::Warn)),
+                    _ => {}
+                }
+            }
+            if done {
+                self.lookups.remove(i);
+                changed.insert(slug);
+            } else {
+                i += 1;
+            }
+        }
+
+        let mut i = 0;
+        while i < self.downloads.len() {
+            let replies = self.downloads[i].fetch.poll();
+            let done = self.downloads[i].fetch.is_done();
+            let slug = self.downloads[i].slug.clone();
+            if let Ok(folder) = self.store.open(&slug) {
+                for reply in &replies {
+                    match reply {
+                        Reply::Saved { key, .. } | Reply::Unsaved { key, .. } => {
+                            literature::settle_download(&folder, reply);
+                            self.downloads[i].waiting.retain(|id| id != key);
+                        }
+                        // The worker gave up: every paper still waiting says why.
+                        Reply::Failed { why } => {
+                            for key in std::mem::take(&mut self.downloads[i].waiting) {
+                                literature::settle_download(&folder, &Reply::Unsaved { key, why: why.clone() });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if !replies.is_empty() {
+                changed.insert(slug);
+            }
+            if done {
+                self.downloads.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+
+        if self.open.as_ref().is_some_and(|open| changed.contains(open)) {
+            events.extend(self.literature());
         }
         events
     }
@@ -926,6 +1390,7 @@ impl Research {
         self.lab.lock().unwrap_or_else(|e| e.into_inner()).poll();
         let mut lab = self.lab_event(false);
         lab.extend(self.poll_runs(now));
+        lab.extend(self.poll_literature(now));
         let mut all = Vec::new();
         for (slug, driver) in self.drivers.iter_mut() {
             if driver.busy() {
@@ -950,7 +1415,11 @@ impl Research {
     /// investigations elsewhere would leave behind. The Lab's Python is the
     /// machine's, and goes with them.
     pub fn has_work(&self) -> bool {
-        self.drivers.values().any(Driver::busy) || !self.runs.is_empty()
+        self.drivers.values().any(Driver::busy)
+            || !self.runs.is_empty()
+            || self.search.as_ref().is_some_and(|s| s.fetch.is_some())
+            || !self.lookups.is_empty()
+            || !self.downloads.is_empty()
     }
 }
 
@@ -978,7 +1447,7 @@ mod tests {
         // Somebody's own work, beside the investigations.
         std::fs::create_dir_all(kept.join("Cricket-Analysis")).unwrap();
         let mut research = Research::kept_with(&kept, Box::new(Engines::default()), "test");
-        let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics);
+        let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics, false);
         let Some(Event::ResearchList { investigations, folder, .. }) = events.first() else { panic!("{events:?}") };
         assert_eq!(investigations.iter().map(|i| i.slug.as_str()).collect::<Vec<_>>(), ["why-is-the-sky-blue"], "a folder that is no investigation was listed");
         assert_eq!(folder, &format!("{}{}", crate::folder::tilde(&kept), std::path::MAIN_SEPARATOR));
@@ -997,7 +1466,7 @@ mod tests {
         // A Lab of its own, with no conda to call: the machine's is not touched.
         assert!(matches!(events.last(), Some(Event::LabEnv { env: EnvState::NoPython })), "{events:?}");
 
-        let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics);
+        let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics, false);
         let Some(Event::ResearchList { investigations, open, .. }) = events.first() else { panic!("{events:?}") };
         assert_eq!((investigations.len(), open.as_deref()), (1, Some("why-is-the-sky-blue")));
         let board = events.iter().find_map(|e| match e {
@@ -1031,7 +1500,166 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, Event::ResearchHypothesis { detail: Some(d), .. } if d.statement.contains("lambda"))));
 
         assert!(matches!(research.open("nope").as_slice(), [Event::Notice { .. }]));
-        assert!(matches!(research.create("  ", "", Discipline::Physics).as_slice(), [Event::Notice { .. }]));
+        assert!(matches!(research.create("  ", "", Discipline::Physics, false).as_slice(), [Event::Notice { .. }]));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Poll until nothing is out, as a host would.
+    fn settle(research: &mut Research) -> Vec<Event> {
+        let mut events = Vec::new();
+        for _ in 0..20 {
+            events.extend(research.poll_at(now()));
+            if !research.has_work() {
+                break;
+            }
+        }
+        assert!(!research.has_work(), "the literature never settled");
+        events
+    }
+
+    fn notices(events: &[Event]) -> Vec<String> {
+        events.iter().filter_map(|e| if let Event::Notice { text, .. } = e { Some(text.clone()) } else { None }).collect()
+    }
+
+    fn results(events: &[Event]) -> Option<(bool, Vec<PaperResult>, Vec<String>)> {
+        events.iter().rev().find_map(|e| match e {
+            Event::ResearchResults { searching, results, failures, .. } => Some((*searching, results.clone(), failures.clone())),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn the_scientists_literature_is_searched_added_and_its_pdfs_kept_out_of_git() {
+        use literature::Scripted;
+        use proton_literature::fetch::{Job, Reply};
+        use proton_literature::keys::Keys;
+        use proton_research::model::Access;
+        use proton_research::view::KeyState;
+
+        let dir = root("literature");
+        let found = vec![
+            Candidate {
+                record: Record {
+                    title: "Rayleigh scattering of sunlight".into(),
+                    arxiv: Some("2101.00001".into()),
+                    abstract_: "Why short wavelengths win.".into(),
+                    access: Access::Open,
+                    pdf_url: Some("https://arxiv.org/pdf/2101.00001".into()),
+                    sources: vec![LiteratureSource::Arxiv],
+                    ..Record::default()
+                },
+                queries: vec!["rayleigh sky".into()],
+                rank: 0,
+            },
+            Candidate {
+                record: Record {
+                    title: "Skylight in Granada".into(),
+                    doi: Some("10.1364/josaa.18.000412".into()),
+                    abstract_: "Measured spectra of clear skylight.".into(),
+                    access: Access::Closed,
+                    sources: vec![LiteratureSource::OpenAlex],
+                    ..Record::default()
+                },
+                queries: vec!["rayleigh sky".into()],
+                rank: 1,
+            },
+        ];
+        let answers = found.clone();
+        let source = Scripted::new(move |job| match job {
+            Job::Search { .. } => vec![Reply::Searched { candidates: answers.clone(), failures: Vec::new() }],
+            // As the worker does: each PDF written where it goes.
+            Job::Download { items, .. } => {
+                let mut replies: Vec<Reply> = items
+                    .iter()
+                    .map(|item| {
+                        std::fs::write(&item.dest, b"%PDF-1.7 a paper").unwrap();
+                        Reply::Saved { key: item.key.clone(), bytes: 16, sha256: "ab".repeat(32), url: item.urls[0].clone() }
+                    })
+                    .collect();
+                replies.push(Reply::Finished);
+                replies
+            }
+            Job::Lookup { idents, .. } => vec![Reply::Resolved {
+                found: idents.iter().map(|i| (i.clone(), Record { title: "Looked up".into(), doi: Some("10.1000/xyz".into()), ..Record::default() })).collect(),
+                missing: Vec::new(),
+                failures: Vec::new(),
+            }],
+        })
+        .keyed(Keys { semantic_scholar: Some("s2-secret".into()), ..Keys::default() });
+        let asked = source.asked.clone();
+        let mut research = Research::with_factory(&dir, Box::new(Engines::default()), "test").with_literature(Box::new(source));
+
+        research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics, true);
+        let events = research.set_literature(None, Some(vec![LiteratureSource::OpenAlex, LiteratureSource::Arxiv]));
+        let rows = events.iter().find_map(|e| if let Event::ResearchLiterature { sources, .. } = e { Some(sources.clone()) } else { None }).unwrap();
+        assert_eq!(rows.iter().map(|r| (r.chosen, r.key)).collect::<Vec<_>>(), [
+            (true, KeyState::NotNeeded),
+            (false, KeyState::Found),
+            (true, KeyState::Missing),
+        ]);
+
+        // Searched: in the chosen sources only.
+        assert_eq!(results(&research.search("  rayleigh   sky ")).map(|r| r.0), Some(true));
+        let (searching, shown, failures) = results(&settle(&mut research)).expect("the results are drawn");
+        assert!(!searching && failures.is_empty() && shown.len() == 2);
+        assert!(matches!(&asked.lock().unwrap()[0], Job::Search { queries, sources, .. }
+            if queries == &["rayleigh sky"] && sources == &[LiteratureSource::Arxiv, LiteratureSource::OpenAlex]));
+
+        // Added: the open one with its PDF, kept out of Git; the paywalled one with its abstract.
+        let events = research.add_paper(&shown[0].key);
+        assert_eq!(notices(&events), ["P001 is added: Rayleigh scattering of sunlight"]);
+        research.add_paper(&shown[1].key);
+        settle(&mut research);
+        let folder = research.folder().unwrap();
+        let papers = folder.papers();
+        assert_eq!(papers.iter().map(|p| (p.id.as_str(), p.has_pdf, p.by)).collect::<Vec<_>>(), [
+            ("P001", true, AddedBy::Scientist),
+            ("P002", false, AddedBy::Scientist),
+        ]);
+        assert_eq!(papers[0].pdf_from.as_deref(), Some("https://arxiv.org/pdf/2101.00001"));
+        assert_eq!(papers[1].record.abstract_, "Measured spectra of clear skylight.");
+        assert!(papers[1].pdf_note.as_deref().is_some_and(|n| n.contains("paywall")), "{:?}", papers[1].pdf_note);
+        assert!(std::fs::read_to_string(folder.dir().join(".gitignore")).unwrap().lines().any(|l| l == "literature/*.pdf"));
+        let downloads = asked.lock().unwrap().iter().filter(|j| matches!(j, Job::Download { .. })).count();
+        assert_eq!(downloads, 1, "the paywalled one is not sent for");
+        assert_eq!(results(&research.sync()).unwrap().1.iter().map(|r| r.have.clone()).collect::<Vec<_>>(), [Some("P001".into()), Some("P002".into())]);
+
+        // Named: looked up and added, unless it is one already.
+        assert_eq!(notices(&research.add_paper("doi:10.1364/JOSAA.18.000412")), ["That is P002 already."]);
+        research.add_paper("https://doi.org/10.1000/xyz");
+        assert_eq!(notices(&settle(&mut research)), ["P003 is added: Looked up"]);
+        assert!(notices(&research.add_paper("sky colour")).iter().any(|n| n.contains("DOI")));
+
+        // Only a paper's own PDF is opened.
+        assert!(research.paper_pdf("P001").is_ok());
+        assert!(research.paper_pdf("P002").is_err() && research.paper_pdf("../x").is_err() && research.paper_pdf("P001/../../x").is_err());
+
+        // What the page is told says whether a key was found, never what it is.
+        let told = serde_json::to_string(&research.sync()).unwrap();
+        assert!(!told.contains("s2-secret") && told.contains("found"));
+
+        // Off: nothing is asked of anybody, and the scientist is told why.
+        research.set_literature(Some(false), None);
+        let before = asked.lock().unwrap().len();
+        assert!(notices(&research.search("ozone")).iter().any(|n| n.contains("Turn it on")));
+        assert!(notices(&research.add_paper("arXiv:2101.00002")).iter().any(|n| n.contains("Turn it on")));
+        assert_eq!(asked.lock().unwrap().len(), before);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_research_that_is_not_the_apps_asks_nobody_and_an_old_investigation_is_off() {
+        let dir = root("offline");
+        let mut research = Research::with_factory(&dir, Box::new(Engines::default()), "test");
+        let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics, true);
+        assert!(events.iter().any(|e| matches!(e, Event::ResearchLiterature { enabled: true, live: false, .. })), "{events:?}");
+        research.search("rayleigh");
+        let (_, shown, failures) = results(&settle(&mut research)).unwrap();
+        assert!(shown.is_empty() && failures == [literature::OFFLINE], "{failures:?}");
+
+        let events = research.create("Why are sunsets red?", "", Discipline::Physics, false);
+        assert!(events.iter().any(|e| matches!(e, Event::ResearchLiterature { enabled: false, .. })));
+        assert!(!research.folder().unwrap().investigation().literature.enabled);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

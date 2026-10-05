@@ -210,6 +210,90 @@ pub struct PaperDetail {
     pub extra: Vec<(String, String)>,
 }
 
+/// Whether a source's key was found: all that is ever said of one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub enum KeyState {
+    Found,
+    Missing,
+    /// Not looked for yet: nothing has been asked.
+    NotLooked,
+    /// It takes none.
+    NotNeeded,
+}
+
+/// A source, as the Literature tab says it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LiteratureSourceRow {
+    pub source: LiteratureSource,
+    pub name: String,
+    /// Asked for this investigation.
+    pub chosen: bool,
+    pub key: KeyState,
+    /// Left alone until then, in seconds since the epoch, having said it was
+    /// out of calls.
+    #[ts(type = "number | null")]
+    pub resting: Option<u64>,
+}
+
+/// A paper a search found, before it is added.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct PaperResult {
+    /// What it is added by: the first of the names it goes by.
+    pub key: String,
+    pub title: String,
+    pub authors: String,
+    pub year: Option<u32>,
+    pub venue: Option<String>,
+    pub doi: Option<String>,
+    pub arxiv: Option<String>,
+    /// Its abstract, cut short for a list.
+    #[serde(rename = "abstract")]
+    pub abstract_: String,
+    pub citations: Option<u32>,
+    pub access: Access,
+    /// Whether somewhere an open PDF of it is known.
+    pub pdf: bool,
+    pub sources: Vec<LiteratureSource>,
+    pub queries: Vec<String>,
+    /// The paper the investigation has it as already.
+    pub have: Option<String>,
+}
+
+/// The most of an abstract a result shows.
+const RESULT_ABSTRACT: usize = 420;
+
+impl PaperResult {
+    pub fn of(found: &literature::Candidate, papers: &[Paper]) -> PaperResult {
+        let r = &found.record;
+        let mut abstract_: String = r.abstract_.chars().take(RESULT_ABSTRACT).collect();
+        if r.abstract_.chars().count() > RESULT_ABSTRACT {
+            abstract_ = format!("{}…", abstract_.trim_end());
+        }
+        PaperResult {
+            key: literature::keys(r).into_iter().next().unwrap_or_default(),
+            title: r.title.clone(),
+            authors: named(&r.authors, r.authors_more),
+            year: r.year,
+            venue: r.venue.clone(),
+            doi: r.doi.clone(),
+            arxiv: r.arxiv.clone(),
+            abstract_,
+            citations: r.citations,
+            access: r.access,
+            pdf: r.pdf_url.is_some() || r.arxiv.is_some(),
+            sources: r.sources.clone(),
+            queries: found.queries.clone(),
+            have: literature::known(papers, r).map(|p| p.id.clone()),
+        }
+    }
+}
+
 /// A paper's authors as a reference names them, by their last names.
 fn named(authors: &[String], more: u32) -> String {
     let last = |name: &String| name.split_whitespace().last().unwrap_or(name).to_string();
@@ -510,6 +594,18 @@ mod tests {
         assert!(board.paper("P009").is_none());
         assert_eq!(named(&["Lee".to_string()], 0), "Lee");
         assert_eq!(named(&["A B".to_string()], 4), "B et al.", "one named and four counted");
+
+        // A search's find, said as a result: the paper it is already, if it is one.
+        let found = |doi: &str, abstract_: &str| literature::Candidate {
+            record: Record { title: "Found".into(), doi: Some(doi.into()), abstract_: abstract_.into(), ..Record::default() },
+            queries: vec!["sky".into()],
+            rank: 0,
+        };
+        let have = PaperResult::of(&found("10.1364/josaa.18.000412", "Short."), &board.papers);
+        assert_eq!((have.key.as_str(), have.have.as_deref(), have.pdf), ("doi:10.1364/josaa.18.000412", Some("P001"), false));
+        let long = PaperResult::of(&found("10.1/new", &"word ".repeat(200)), &board.papers);
+        assert_eq!((long.have, long.abstract_.chars().count()), (None, 420), "cut short, and marked so");
+        assert!(long.abstract_.ends_with("word…"));
     }
 
     #[test]

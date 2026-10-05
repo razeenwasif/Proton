@@ -866,6 +866,49 @@ next. An investigation can let what its agents propose run without asking;
 only ever in a sandbox, two at a time, and the record says the policy
 approved it.
 
+### The literature
+
+An investigation keeps its papers in `literature/`: `P003.md` says what the
+sources said about one — its names (DOI, arXiv id, Semantic Scholar's and
+OpenAlex's ids), its abstract, how often it is cited, who added it and which
+queries found it — and `P003.pdf` beside it is its open copy, kept out of Git
+by the investigation's `.gitignore` (megabytes each, and other people's
+copyright). `proton-research::cite` is the one definition of a paper's
+identity, so a paper is never added twice under two of its names.
+
+`proton-literature` does the asking: arXiv's Atom API, Semantic Scholar,
+OpenAlex, Crossref for what a DOI names, and the DOI system itself for one
+Crossref never heard of — a dataset's DOI is real too. Each host is asked no
+oftener than it asks to be, by gates the whole process shares (arXiv once every
+three seconds, its PDFs and its API one arXiv; Semantic Scholar once a second
+with a key, gentler without); a busy answer is asked again after its
+Retry-After, three times at most. Every job — a search, a lookup, a set of
+downloads — runs on a worker the core polls, each source on a thread of its
+own; dropped, it is cancelled.
+
+The keys some sources give more to (`SEMANTIC_SCHOLAR_API_KEY`,
+`OPENALEX_API_KEY`, and `CROSSREF_MAILTO` for Crossref's polite pool) are the
+person's own environment's: Proton's, then the login shell's, which an app
+opened from the Dock does not inherit — asked the first time a worker needs
+them, looked for again a minute later if one was missing, held in memory only.
+The page is only ever told whether each was found. A source that says it is
+out of calls is left alone — OpenAlex without a key until midnight UTC, which
+is when its hundred a day come back — and the tab says so.
+
+A PDF is kept only when it is one: the size it states, then the bytes it sends,
+within the investigation's limit (40 MB); `%PDF-` at its start (a publisher's
+sign-in page is not a paper, and arXiv's copy is tried next); written to a
+`.partial` and renamed whole, never over a copy already there — one the
+scientist put there is theirs — and never into a folder that has gone. A
+paywalled paper keeps its abstract, and says where a copy would go.
+
+An investigation made before there was a literature has it off, so none starts
+telling third parties its topic on its own; a new one has it on unless the
+scientist says otherwise. Off, nothing is asked of anybody: the scientist's
+searches and lookups are refused with the reason, and whatever was being asked
+is let go. Research outside the app (tests) asks nobody: its source is
+`Offline`, or a script.
+
 ### Trace
 
 Code Visualizer, sidecar first and native second — [`CODE-VISUALIZER.md`](CODE-VISUALIZER.md)

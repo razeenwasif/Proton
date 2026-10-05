@@ -11,6 +11,7 @@ repository.workspace = true
 proton-agent = { workspace = true }
 proton-claude = { workspace = true }
 proton-research = { workspace = true }
+proton-literature = { workspace = true }
 proton-lab = { workspace = true }
 proton-council = { workspace = true }
 proton-data = { workspace = true }

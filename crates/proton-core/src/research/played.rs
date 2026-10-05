@@ -364,7 +364,7 @@ const SLUG: &str = "why-is-the-sky-blue";
 
 fn begin(dir: &Path, factory: Factory) -> Research {
     let mut research = Research::with_factory(dir, Box::new(factory), "this-proton");
-    research.create("Why is the sky blue?", "Explain the colour of the daytime sky.", Discipline::Physics);
+    research.create("Why is the sky blue?", "Explain the colour of the daytime sky.", Discipline::Physics, false);
     research
 }
 
@@ -694,7 +694,7 @@ fn one_round_runs_at_a_time_in_a_project() {
     let (factory, _) = Factory::new();
     let mut research = begin(&dir, factory);
     research.start_at(T0);
-    research.create("Sums of three cubes", "Find the missing ones.", Discipline::Mathematics);
+    research.create("Sums of three cubes", "Find the missing ones.", Discipline::Mathematics, false);
     let events = research.start_at(T0 + 1);
     assert!(notices(&events).iter().any(|n| n.contains("one round at a time")), "{:?}", notices(&events));
     let _ = std::fs::remove_dir_all(dir);

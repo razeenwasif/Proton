@@ -1249,6 +1249,7 @@ fn investigations_kept_in_a_folder_of_their_own_are_every_projects() {
         title: "Why is the sky blue?".into(),
         goal: "Explain the colour.".into(),
         discipline: proton_research::Discipline::Physics,
+        literature: false,
     });
     assert!(kept.join("why-is-the-sky-blue").join("investigation.json").is_file(), "{events:?}");
     for project in ["alpha", "beta"] {
@@ -1303,6 +1304,7 @@ fn where_investigations_are_kept_is_moved_from_the_window_and_saved() {
         title: "Why is the sky blue?".into(),
         goal: "Explain the colour.".into(),
         discipline: proton_research::Discipline::Physics,
+        literature: false,
     });
     assert!(kept.join("why-is-the-sky-blue").join("investigation.json").is_file());
 

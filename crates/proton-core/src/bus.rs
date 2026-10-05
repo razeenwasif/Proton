@@ -10,8 +10,10 @@ use std::collections::BTreeMap;
 use proton_claude::folders::FolderView as ChatFolder;
 use proton_claude::{Artifact, Capabilities as ClaudeCapabilities, Engine as ChatEngine, Item as ClaudeItem, SessionSummary as ClaudeSession, Status as ClaudeStatus};
 use proton_research::supervisor::{RoundStatus, TaskRow as ResearchTask};
-use proton_research::view::{HypothesisDetail, HypothesisRow, SeatRow as ResearchSeatRow, Summary as ResearchSummary};
-use proton_research::model::{HypothesisStatus, Seat as ResearchSeat};
+use proton_research::view::{
+    HypothesisDetail, HypothesisRow, LiteratureSourceRow, PaperDetail, PaperResult, PaperRow, SeatRow as ResearchSeatRow, Summary as ResearchSummary,
+};
+use proton_research::model::{HypothesisStatus, LiteratureSource, Seat as ResearchSeat};
 use proton_research::Discipline as ResearchDiscipline;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -330,11 +332,13 @@ pub enum Command {
         folder: String,
     },
     /// Start an investigation, in a folder of its own where investigations
-    /// are kept.
+    /// are kept: searching the literature with the team's queries, or not.
     ResearchNew {
         title: String,
         goal: String,
         discipline: ResearchDiscipline,
+        #[serde(default)]
+        literature: bool,
     },
     /// Show one of the project's investigations.
     ResearchOpen {
@@ -402,6 +406,38 @@ pub enum Command {
     /// Show one of the open investigation's runs whole; `None` for none.
     ResearchShowRun {
         run: Option<String>,
+    },
+    /// Whether the open investigation searches the literature — each round
+    /// with the team's queries, and when the scientist asks — and in which
+    /// sources. What is not given stays as it is.
+    ResearchSetLiterature {
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[serde(default)]
+        sources: Option<Vec<LiteratureSource>>,
+    },
+    /// Search the literature for the open investigation, in its sources.
+    ResearchSearch {
+        query: String,
+    },
+    /// Add a paper to the open investigation: one the last search found, by
+    /// its key, or one named by a DOI, an arXiv id or a link to either.
+    ResearchAddPaper {
+        paper: String,
+    },
+    /// Show one of the open investigation's papers whole; `None` for none.
+    ResearchShowPaper {
+        paper: Option<String>,
+    },
+    /// Open a paper's PDF in the document viewer, at a page if one is given.
+    ResearchOpenPaper {
+        paper: String,
+        #[serde(default)]
+        page: Option<u32>,
+    },
+    /// Try again to keep a paper's open PDF.
+    ResearchFetchPdf {
+        paper: String,
     },
     /// The scientist's first say-so for the Lab's Python: conda works out
     /// what it would be, fetching conda-forge's index if its copy is old.
@@ -1154,6 +1190,37 @@ pub enum Event {
     ResearchRun {
         slug: String,
         detail: Option<proton_lab::run::Detail>,
+    },
+    /// The open investigation's literature: whether it is searched, the
+    /// sources and whether their keys were found — never a key — and its
+    /// papers, with those whose PDFs are downloading and the names being
+    /// looked up to add.
+    #[serde(rename_all = "camelCase")]
+    ResearchLiterature {
+        slug: String,
+        enabled: bool,
+        /// Whether this Proton asks anybody at all.
+        live: bool,
+        sources: Vec<LiteratureSourceRow>,
+        papers: Vec<PaperRow>,
+        fetching: Vec<String>,
+        adding: Vec<String>,
+    },
+    /// One paper of the open investigation, whole; `None` for none.
+    #[serde(rename_all = "camelCase")]
+    ResearchPaper {
+        slug: String,
+        detail: Option<PaperDetail>,
+    },
+    /// The scientist's last search of the open investigation: what it asked,
+    /// whether it is still asking, what it found, and which sources failed.
+    #[serde(rename_all = "camelCase")]
+    ResearchResults {
+        slug: String,
+        query: String,
+        searching: bool,
+        results: Vec<PaperResult>,
+        failures: Vec<String>,
     },
     /// Where the Lab's Python stands: one for the machine, whichever
     /// project is open.

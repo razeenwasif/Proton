@@ -56,6 +56,12 @@ pub fn keys(record: &Record) -> Vec<String> {
     out
 }
 
+/// The paper an investigation has that goes by any of `record`'s names.
+pub fn known<'a>(papers: &'a [Paper], record: &Record) -> Option<&'a Paper> {
+    let names = keys(record);
+    papers.iter().find(|p| keys(&p.record).iter().any(|k| names.contains(k)))
+}
+
 /// Which of `found` the investigation keeps: none it has by any name, and of
 /// the rest the best each query found in turn — by rank, then by how many
 /// sources found it, then by how often it is cited — until `max`.

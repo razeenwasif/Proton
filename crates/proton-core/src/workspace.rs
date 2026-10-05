@@ -1386,7 +1386,7 @@ impl Workspace {
             Command::ResearchFolder { .. } => {
                 vec![notice("Where investigations are kept is set for the whole window.".into(), NoticeLevel::Warn)]
             }
-            Command::ResearchNew { title, goal, discipline } => self.research().create(&title, &goal, discipline),
+            Command::ResearchNew { title, goal, discipline, literature } => self.research().create(&title, &goal, discipline, literature),
             Command::ResearchOpen { slug } => self.research().open(&slug),
             Command::ResearchShow { hypothesis } => self.research().show(hypothesis),
             Command::ResearchStart => self.research().start(),
@@ -1403,6 +1403,18 @@ impl Workspace {
             Command::ResearchAutoRun { enabled } => self.research().set_auto_run(enabled),
             Command::ResearchStopRun { run } => self.research().stop_run(&run),
             Command::ResearchShowRun { run } => self.research().show_run(run),
+            Command::ResearchSetLiterature { enabled, sources } => self.research().set_literature(enabled, sources),
+            Command::ResearchSearch { query } => self.research().search(&query),
+            Command::ResearchAddPaper { paper } => self.research().add_paper(&paper),
+            Command::ResearchShowPaper { paper } => self.research().show_paper(paper),
+            Command::ResearchOpenPaper { paper, page } => {
+                let found = self.research().paper_pdf(&paper);
+                match found {
+                    Ok(path) => vec![self.document_event(&path, ViewerKind::Pdf, page)],
+                    Err(why) => vec![notice(why, NoticeLevel::Warn)],
+                }
+            }
+            Command::ResearchFetchPdf { paper } => self.research().fetch_pdf(&paper),
             Command::LabPlan => self.research().lab_do(|lab| lab.plan()),
             Command::LabCreate => self.research().lab_do(|lab| lab.create()),
             Command::LabCancel => self.research().lab_do(|lab| {
