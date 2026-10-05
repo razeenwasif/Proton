@@ -1048,6 +1048,9 @@ pub enum Event {
         /// What to put on the tab.
         name: String,
         kind: ViewerKind,
+        /// The page to show first, counting from one: a citation's. `None`
+        /// for the first page.
+        page: Option<u32>,
     },
     /// The notebook that is open, and what its cells have produced.
     ///

@@ -1439,6 +1439,33 @@ await test('In a notebook, i puts the caret in the selected cell', async () => {
   src.blur(); await settle();
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('A PDF opens over the mode on screen, draws its pages as they come near, and keeps the keyboard', async () => {
+  await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
+  const before = win.commands.length;
+  // Cited by its second page, in Data rather than Codex.
+  await win.pushEvents([{type: 'document', path: '/tests/ui/fixtures/three-pages.pdf', name: 'three-pages.pdf', kind: 'pdf', page: 2}]);
+  const viewer = $('#doc-viewer');
+  const wait = async (ready) => { for (let i = 0; i < 40 && !ready(); i++) await settle(); };
+  await wait(() => viewer.querySelectorAll('.doc-page').length === 3 && viewer.querySelector('.textLayer span'));
+  assert(!viewer.hidden && viewer.closest('.workspace.on')?.dataset.ws === 'data', 'the PDF did not open over the mode on screen');
+  assert(viewer.querySelectorAll('.doc-page').length === 3, 'not a place a page');
+  assert(viewer.querySelector('.doc-page canvas'), 'no page was drawn');
+  assert([...viewer.querySelectorAll('.textLayer span')].some((s) => s.textContent.includes('Proton reads this sentence')), 'the page\'s text is not there to select');
+  assert($('[data-doc-at]').textContent === 'page 2 of 3', `it did not open at the page cited: ${$('[data-doc-at]').textContent}`);
+  // Its keys move it, and nothing reaches the notebook underneath.
+  const box = viewer.querySelector('[data-doc-pages-box]');
+  const top = box.scrollTop;
+  key('j'); key('j'); await settle();
+  assert(box.scrollTop > top, 'j did not scroll the document');
+  key('d'); key('d'); key('x'); await settle();
+  assert(!win.commands.slice(before).some((c) => c.type === 'key'), 'a key reached the core from over a PDF');
+  const width = viewer.querySelector('.doc-page').offsetWidth;
+  key('-'); await settle();
+  assert(viewer.querySelector('.doc-page').offsetWidth < width, '- did not zoom out');
+  key('Escape'); await settle();
+  assert(viewer.hidden && !viewer.querySelector('.doc-page'), 'Escape did not put it away');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('A notebook draws an SVG figure as a picture, whose scripts and styles stay its own', async () => {
   await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
   win.svgRan = false;

@@ -61,6 +61,12 @@ window.__TAURI__ = {
     const {command} = args;
     if (name !== 'dispatch') (window.invokes ??= []).push({name, args});
     if (name === 'backdrop') return 'vibrancy';
+    // A document's bytes, as the shell reads one: the fixture's, from the server.
+    if (name === 'read_document') {
+      const response = await fetch(args.path);
+      if (!response.ok) throw new Error(`${args.path}: not a document Proton opened`);
+      return await response.arrayBuffer();
+    }
     // A Lab run's files, as a test puts them.
     if (name === 'read_lab') {
       const bytes = window.labFiles?.[args.key];

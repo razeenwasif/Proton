@@ -219,13 +219,24 @@ fn could_be_a_project(cwd: &std::path::Path, exe_folder: Option<&std::path::Path
 /// asset protocol would mean enabling a second scheme and choosing a path
 /// scope for it.
 ///
-/// This grants the page no reach it did not already have. It runs only
-/// first-party code — the CSP forbids remote scripts — and it can already ask
-/// the core to open any file by name and read the text back out of the
-/// viewport events. What is new here is the encoding, not the access.
-#[tauri::command]
-fn read_document(path: String) -> Result<tauri::ipc::Response, String> {
-    let bytes = std::fs::read(&path).map_err(|err| format!("{path}: {err}"))?;
+/// Only a file the core has shown as a document is read — asked under the
+/// session's lock, and read after letting go of it — and never one larger
+/// than a document could reasonably be. Off the main thread, which a 40 MB
+/// read would otherwise hold, and the window with it.
+#[tauri::command(async)]
+fn read_document(path: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
+    /// The largest file read for the page: the library reads none larger.
+    const LARGEST: u64 = 128 * 1024 * 1024;
+    let file = match session.lock() {
+        Ok(it) => it.session.document_file(&path),
+        Err(poisoned) => poisoned.into_inner().session.document_file(&path),
+    };
+    let file = file.ok_or_else(|| format!("{path}: not a document Proton opened"))?;
+    let size = std::fs::metadata(&file).map_err(|err| format!("{path}: {err}"))?.len();
+    if size > LARGEST {
+        return Err(format!("{path}: {} MB is more than a document is read at", size / (1024 * 1024)));
+    }
+    let bytes = std::fs::read(&file).map_err(|err| format!("{path}: {err}"))?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -259,7 +270,7 @@ fn read_geometry(
 /// Where it is is asked of the core under the session's lock, which only
 /// gives a file inside that run's folder of a kind the Lab shows; it is read
 /// after the lock is let go, so a large picture never holds the core.
-#[tauri::command]
+#[tauri::command(async)]
 fn read_lab(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
     let path = match session.lock() {
         Ok(it) => it.session.lab_file(&key),

@@ -16,7 +16,7 @@ import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
 import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, readGeometry, readLab, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
-import { closeDocument, documentIsOpen, openDocument, zoomDocument } from "./document.js";
+import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, zoomDocument } from "./document.js";
 import { decodeMesh } from "./meshbytes.js";
 import { createOverlays } from "./overlays.js";
 import { createPanels } from "./panels.js";
@@ -3905,6 +3905,10 @@ document.addEventListener("click", (e) => {
     closeDocument();
     return;
   }
+  if (e.target.closest("[data-doc-fit]")) {
+    fitDocument();
+    return;
+  }
   const zoom = e.target.closest("[data-doc-zoom]");
   if (zoom) {
     zoomDocument(Number(zoom.dataset.docZoom));
@@ -5128,15 +5132,6 @@ document.addEventListener("keydown", (e) => {
   // The terminal takes the whole keyboard while it has the focus, exactly as
   // the picker does — `d` types a `d` at the shell rather than starting an
   // operator, and `⌃c` interrupts a program rather than doing nothing.
-  // A document is over the code, so Escape closes it rather than reaching the
-  // modal engine underneath — which is what Escape means over anything else
-  // that covers the stage.
-  if (documentIsOpen() && e.key === "Escape") {
-    e.preventDefault();
-    closeDocument();
-    return;
-  }
-
   if (terminalFocused) {
     // An input method is composing in the hidden field; what it makes
     // arrives there as text, not as these keys.
@@ -5205,6 +5200,17 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey && e.key === ",") {
     e.preventDefault();
     open("settings");
+    return;
+  }
+
+  // A document on screen takes the keyboard, as the picker does: its own keys
+  // scroll, page and zoom it and Escape or q puts it away, and nothing else
+  // reaches the buffer or the cell underneath — `dd` over a PDF must not
+  // delete a line nobody can see. ⌘ chords, ⌃1–8 and a focused shell are
+  // answered above, and the text it lays over each page can still be copied.
+  if (documentShown() && !terminalFocused && !e.metaKey) {
+    e.preventDefault();
+    documentKey(e);
     return;
   }
 

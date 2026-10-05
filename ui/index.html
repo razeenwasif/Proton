@@ -360,7 +360,7 @@
              view state: open or shut, and how wide, live in this window and
              nowhere in the core. -->
         <div class="stage-row">
-          <div class="stage-code">
+          <div class="stage-code" data-doc-host>
             <!-- Built from Event::Splits. The core owns how many there are,
                  which buffer each shows and which has the focus; this is
                  where they go. -->
@@ -370,17 +370,19 @@
                  rather than becoming one of them: it has no cursor, no undo
                  and no :w, and a pane implies all three. Closing it puts the
                  code back exactly as it was, because the code never went
-                 anywhere. It covers the code and not the shell beside it. -->
+                 anywhere. Here it covers the code and not the shell beside it;
+                 opened in another mode it moves over that mode's stage. -->
             <div id="doc-viewer" hidden>
               <header>
                 <svg class="i" style="opacity:.6"><use href="#i-file-doc"/></svg>
                 <span data-doc-name>document</span>
-                <span class="chip" data-doc-pages></span>
+                <span class="chip" data-doc-at></span>
                 <span class="grow"></span>
-                <button class="hbtn" data-doc-zoom="-1" title="Zoom out">−</button>
+                <button class="hbtn" data-doc-zoom="-1" title="Zoom out  −">−</button>
                 <span class="chip" data-doc-zoom-level>100%</span>
-                <button class="hbtn" data-doc-zoom="1" title="Zoom in">+</button>
-                <button class="hbtn" data-doc-close title="Close — back to the code"><svg class="i"><use href="#i-close"/></svg></button>
+                <button class="hbtn" data-doc-zoom="1" title="Zoom in  +">+</button>
+                <button class="hbtn" data-doc-fit title="Fit the page's width  0">Fit</button>
+                <button class="hbtn" data-doc-close title="Close  Esc · q"><svg class="i"><use href="#i-close"/></svg></button>
               </header>
               <div class="scroll" data-doc-pages-box></div>
             </div>
@@ -1322,7 +1324,7 @@
         </div>
         <div class="setting">
           <h4>PDFs</h4>
-          <p>Papers, slide decks and textbooks, read a page at a time and cited by page — clicking one opens it in whatever you already read PDFs with. Getting the text out is slow: 240 documents took three and a half minutes the first time. It is kept afterwards, so only a new or edited document costs anything. A scan with no text layer is skipped rather than indexed as noise.</p>
+          <p>Papers, slide decks and textbooks, read a page at a time and cited by page — clicking one opens it in Proton's viewer at that page. Getting the text out is slow: 240 documents took three and a half minutes the first time. It is kept afterwards, so only a new or edited document costs anything. A scan with no text layer is skipped rather than indexed as noise.</p>
           <label class="st-toggle"><input type="checkbox" data-set-bool="library.pdfs" checked> Read PDFs as well as notes</label>
         </div>
         <div class="setting">

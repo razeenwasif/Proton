@@ -119,6 +119,9 @@ pub struct Workspace {
     /// round said could be drained by a project in the background and
     /// dropped with the rest of that project's events.
     research_shared: bool,
+    /// The files opened in the document viewer: the only ones the shell's
+    /// `read_document` will read for the page.
+    documents: std::collections::BTreeSet<PathBuf>,
     council_progress: Vec<String>,
     council_round: usize,
     /// The brief on screen, and which past debate it came from.
@@ -280,6 +283,7 @@ impl Workspace {
             claude: crate::claude::Claude::new(root),
             research: Arc::new(Mutex::new(crate::research::Research::new(root))),
             research_shared: false,
+            documents: std::collections::BTreeSet::new(),
             visualizer: Visualizer::new(root),
             tree: Tree::new(root),
             git: Git::discover(root),
@@ -1102,11 +1106,14 @@ impl Workspace {
                         NoticeLevel::Error,
                     )];
                 };
-                // A page is not something this editor can show. Opening a PDF
-                // as text would put a screenful of binary in a buffer, which
-                // is worse than not following the citation at all — so it goes
-                // to whatever the user already reads PDFs with.
+                // A page: the viewer shows a PDF at it. Anything else with
+                // pages goes to whatever the person reads it with, since as
+                // text it would be a screenful of binary in a buffer.
                 if cited.place == proton_library::chunk::Place::Pages {
+                    if let Some(kind) = ViewerKind::of(&path) {
+                        let page = u32::try_from(cited.from).ok();
+                        return vec![self.document_event(&path, kind, page)];
+                    }
                     return match open_outside(&path) {
                         Ok(()) => vec![notice(
                             format!("{} — page {}", cited.path, cited.from),
@@ -2629,11 +2636,7 @@ impl Workspace {
         // Until this, opening one failed — `read_to_string` refuses invalid
         // UTF-8 — so the whole of the old behaviour was an error notice.
         if let Some(kind) = ViewerKind::of(&resolved) {
-            return vec![Event::Document {
-                path: resolved.display().to_string(),
-                name: crate::folder::name_of(&resolved),
-                kind,
-            }];
+            return vec![self.document_event(&resolved, kind, None)];
         }
 
         match self.editor.open(resolved) {
@@ -3385,6 +3388,18 @@ impl Workspace {
     /// Where a file a Lab run left is: see `Research::lab_file`.
     pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
         self.research().lab_file(key)
+    }
+
+    /// A file to show in the document viewer, remembered so the shell will
+    /// read it for the page: it reads only what was opened here this way.
+    fn document_event(&mut self, path: &Path, kind: ViewerKind, page: Option<u32>) -> Event {
+        self.documents.insert(path.to_path_buf());
+        Event::Document { path: path.display().to_string(), name: crate::folder::name_of(path), kind, page }
+    }
+
+    /// The file at `path`, if it was opened in the document viewer here.
+    pub fn document_file(&self, path: &Path) -> Option<PathBuf> {
+        self.documents.contains(path).then(|| path.to_path_buf())
     }
 
     /// The investigations this workspace shows.
@@ -6194,8 +6209,8 @@ fn open_link(url: &str) -> Result<(), String> {
 /// Hand a file to whatever the desktop opens it with.
 ///
 /// The only place Proton starts something that is not Proton, and it exists
-/// for one case: a citation into a PDF. There is no PDF viewer here and
-/// opening one as text would fill a buffer with binary, so following that
+/// for one case: a citation by page into a file the document viewer cannot
+/// show. Opened as text it would fill a buffer with binary, so following that
 /// citation means handing the file to the reader the user already has.
 ///
 /// No shell is involved. The path goes to the program as one argument rather

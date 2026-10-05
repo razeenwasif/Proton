@@ -32,12 +32,13 @@ fn a_pdf_is_a_document_rather_than_a_buffer() {
     });
 
     let found = events.iter().find_map(|event| match event {
-        Event::Document { name, kind, path } => Some((name.clone(), *kind, path.clone())),
+        Event::Document { name, kind, path, page } => Some((name.clone(), *kind, path.clone(), *page)),
         _ => None,
     });
-    let (name, kind, path) = found.expect("a pdf should open as a document");
+    let (name, kind, path, page) = found.expect("a pdf should open as a document");
     assert_eq!(kind, ViewerKind::Pdf);
     assert_eq!(name, "paper.pdf");
+    assert_eq!(page, None, "opened, rather than cited, it starts at the first page");
     assert!(path.ends_with("paper.pdf"), "{path}");
     assert!(
         std::path::Path::new(&path).is_absolute(),
@@ -49,6 +50,11 @@ fn a_pdf_is_a_document_rather_than_a_buffer() {
         before,
         "no buffer should have been made for it"
     );
+
+    // What the shell will read for the page: this, and nothing it was not shown.
+    assert_eq!(space.document_file(std::path::Path::new(&path)).as_deref(), Some(std::path::Path::new(&path)));
+    assert_eq!(space.document_file(&root.join("other.pdf")), None);
+    assert_eq!(space.document_file(std::path::Path::new("/etc/passwd")), None);
 }
 
 #[test]

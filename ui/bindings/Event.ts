@@ -159,7 +159,12 @@ path: string,
 /**
  * What to put on the tab.
  */
-name: string, kind: ViewerKind, } | { "type": "notebook", 
+name: string, kind: ViewerKind, 
+/**
+ * The page to show first, counting from one: a citation's. `None`
+ * for the first page.
+ */
+page: number | null, } | { "type": "notebook", 
 /**
  * Empty when no notebook is open, which is how the panel knows to
  * say so rather than showing the last one.

@@ -544,3 +544,29 @@ fn a_note_written_after_the_walk_is_found_once_it_is_refreshed() {
         "a refresh did not pick up a new note"
     );
 }
+
+#[test]
+fn a_citation_into_a_pdf_opens_it_in_the_viewer_at_its_page() {
+    // Once handed to the desktop's own reader; now the viewer shows it, at the
+    // page cited, and it is a file the shell will read for the page.
+    let (mut space, _project, vault) = open("pdf-page");
+    std::fs::write(vault.join("paper.pdf"), b"%PDF-1.4\n%%EOF\n").unwrap();
+    point_at(&mut space, &[&vault]);
+
+    let events = space.apply(Command::OpenCitation {
+        cite: "[[paper.pdf p. 7]]".into(),
+    });
+    let (path, page) = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Document { path, page, .. } => Some((path.clone(), *page)),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the viewer was not asked to show it: {events:#?}"));
+    assert_eq!(page, Some(7), "not at the page cited");
+    assert!(path.ends_with("paper.pdf"), "{path}");
+    assert!(
+        space.document_file(Path::new(&path)).is_some(),
+        "the shell would not read it for the page"
+    );
+}

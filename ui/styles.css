@@ -1977,15 +1977,53 @@ table.df tr:hover td { background: var(--e1); }
 #doc-viewer > .scroll {
   flex: 1; min-height: 0; overflow: auto;
   padding: 16px; display: flex; flex-direction: column;
-  align-items: center; gap: 16px;
+  /* Centred while it fits; zoomed wider than the window, it scrolls from its
+     left edge rather than losing it off the side. */
+  align-items: safe center; gap: 16px;
 }
 /* A page is paper: it keeps its own ground whatever the theme is, because a
-   PDF's colours are part of the document rather than part of the editor. */
+   PDF's colours are part of the document rather than part of the editor. Its
+   slot is its size before it is drawn, so the scrollbar is the document's. */
 .doc-page {
+  position: relative; flex: none;
   background: #fff; border-radius: 2px;
   box-shadow: 0 2px 14px rgba(0, 0, 0, .45);
-  max-width: 100%; height: auto;
+  /* What pdf.js sizes the text over a page with: the scale is set per page
+     as it is drawn; whole pixels, rounded down. */
+  --scale-round-x: 1px; --scale-round-y: 1px;
 }
+.doc-page > canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; }
+
+/* The page's text, laid over its picture by pdf.js where the words are, so it
+   can be selected and copied: invisible itself, its selection showing. The
+   rules are pdf.js's own text layer's, which its viewer's stylesheet carries
+   and which is not vendored. */
+.doc-page .textLayer {
+  position: absolute; text-align: initial; inset: 0; overflow: clip; opacity: 1; line-height: 1;
+  -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none;
+  transform-origin: 0 0; caret-color: CanvasText; z-index: 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.doc-page .textLayer :is(span, br) {
+  color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%;
+}
+.doc-page .textLayer > :not(.markedContent),
+.doc-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.doc-page .textLayer .markedContent { display: contents; }
+.doc-page .textLayer span[role="img"] { user-select: none; cursor: default; }
+.doc-page .textLayer ::selection { background: rgba(0, 0, 255, .25); }
+.doc-page .textLayer br::selection { background: transparent; }
+.doc-page .textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }
+.doc-page .textLayer.selecting .endOfContent { top: 0; }
 .doc-note { color: var(--ink-4); font-size: 12px; padding: 30px; text-align: center; }
 
 /* ── notebook cells, live ─────────────────────────────────────────── */

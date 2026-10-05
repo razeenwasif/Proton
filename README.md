@@ -281,8 +281,11 @@ passages, ranks them with BM25, and answers with a citation you can click:
 ```
 
 Notes are cited by line and PDFs by page, because a page is the only place in a
-PDF a reader can be sent. `␣fl` searches it, the agent searches it, and it is
-checked for changes while the editor runs.
+PDF a reader can be sent — and a citation opens Proton's own viewer at it.
+`␣fl` searches it, the agent searches it, and it is checked for changes while
+the editor runs. Any PDF opens in the viewer, from the tree or `␣ff` in any
+mode: its pages drawn as you reach them, its text selectable, `j`/`k` and
+Space to read, `+`/`−` and `0` to zoom and fit, Escape to put it away.
 
 Nothing is read until you list it in `.proton/settings.json`, and nothing outside
 a listed directory is ever read — no symlink is followed out of one. A library

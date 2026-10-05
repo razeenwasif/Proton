@@ -1374,6 +1374,11 @@ FCM: NON-DROP FRAME
       return [everyViewport()[command.view]].filter(Boolean);
     }
     if (command.type === "openBuffer") {
+      // A PDF is looked at, not edited: the core answers with a document,
+      // which the viewer reads back from the server.
+      if (/\.pdf$/i.test(command.path)) {
+        return [{ type: "document", path: "/" + command.path, name: command.path.split("/").pop(), kind: "pdf", page: null }];
+      }
       try {
         const res = await fetch("/" + command.path);
         if (!res.ok) throw new Error(res.status);

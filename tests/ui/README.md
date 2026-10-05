@@ -128,6 +128,13 @@ is that the canvas draws the right colours where it should, that the rows
 under it catch up once the screen is still, and that switching back leaves
 nothing behind.
 
+The document checks open `fixtures/three-pages.pdf` — three pages, the middle
+one landscape, written by hand to be small — over Data rather than Codex, at
+the page a citation names, and check that its pages are drawn with their text
+over them, that its keys scroll and zoom it and reach nothing underneath, and
+that Escape puts it away. A notebook's SVG figure is checked to be drawn as a
+picture whose script does not run and whose style does not reach the window.
+
 The Research checks push the core's research events into the page and read
 what it asks back: making an investigation (a refusal keeps what was typed,
 a redraw keeps the caret), the board and a hypothesis drawn whole, a round

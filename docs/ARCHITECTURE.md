@@ -345,13 +345,20 @@ answering.
 **A PDF never becomes a buffer.** A buffer has an undo history, a cursor and a
 `:w`; offering any of those for a file that cannot be edited would be a promise
 the editor cannot keep. So `openBuffer` on a `.pdf` answers with
-`Event::Document` instead, and the viewer covers the panes rather than becoming
-one — closing it puts the code back because the code never went anywhere.
+`Event::Document` instead, and the viewer covers the stage of whatever mode is
+on screen rather than becoming a pane — Codex's code but not its shell, Data's
+notebook, anything else's whole — and closing it puts back what was there
+because nothing moved. A library citation by page opens the viewer at that
+page (`Event::Document`'s `page`) rather than handing the file to the
+desktop's reader. While it is up it takes the keyboard as the picker does:
+`j`/`k`, Space, `⌃d`/`⌃u`, `gg`/`G`, `+`/`−`, `0` to fit, Escape or `q` to
+close — and nothing reaches the buffer or cell underneath, where `dd` would
+delete a line nobody can see.
 
 Before this, opening one failed outright: `read_to_string` refuses invalid
 UTF-8, so the whole of the old behaviour was an error notice.
 
-`DocumentKind` is a small closed set rather than "anything that is not text".
+`ViewerKind` is a small closed set rather than "anything that is not text".
 A format belongs in it only once something can actually draw it — treating
 every binary as a document would replace one honest error with a viewer that
 has nothing to show.
@@ -361,14 +368,23 @@ path; the shell answers a separate `read_document` with `ipc::Response`, which
 hands the webview an ArrayBuffer directly. Base64 through the JSON channel
 would inflate a PDF by a third and make every other event queue behind it, and
 Tauri's asset protocol would mean enabling a second scheme and choosing a path
-scope for it. This grants the page no reach it did not have: it runs only
-first-party code under a CSP that forbids remote scripts, and it could already
-ask the core to open any file and read the text back out of the viewport.
+scope for it. It reads only a file the core has shown as a document — asked
+under the session's lock, read after letting go of it — no larger than 128 MB,
+and off the main thread, which a large read would otherwise hold.
 
 `pdf.js` is vendored, because `script-src 'self'` means nothing loads from a
 CDN at run time — an editor that needs the network to open a file is one that
 stops working on a train. It is imported on first use rather than at boot: it
-is 1.7MB, and a session that never opens a PDF should never pay for it.
+is 1.7MB, and a session that never opens a PDF should never pay for it. Pages
+are drawn as they come within a screen or so of the window and let go of as
+they leave it: drawn all at once, each is a canvas of eight megabytes on a
+high-DPI screen, and a seven-hundred-page textbook would ask for more memory
+than the window has. Each drawn page carries pdf.js's text layer over it, so
+its words can be selected and copied; the layer's rules are written into
+`styles.css`, since pdf.js's viewer stylesheet is not vendored. The vendored
+build has no `cmaps/`, `standard_fonts/` or `wasm/`: a PDF whose text needs a
+predefined CJK CMap draws its glyphs without their text, an unembedded standard
+font is drawn in the nearest system one, and a JPEG 2000 picture is missing.
 
 ### Git
 
