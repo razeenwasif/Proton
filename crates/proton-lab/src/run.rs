@@ -661,4 +661,46 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("stdout.txt")).unwrap().trim(), "orbit.scene.json");
         let _ = std::fs::remove_dir_all(base);
     }
+
+    /// The calls the agents are told to make (`prompts.rs`'s LAB), as written there.
+    #[test]
+    fn the_helper_takes_the_calls_its_prompt_describes() {
+        let Some(python) = ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"].iter().map(PathBuf::from).find(|p| p.is_file()) else { return };
+        let base = std::env::temp_dir().join(format!("proton-run-prompted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let env = python.parent().unwrap().parent().unwrap().to_path_buf();
+        // A figure stands in for matplotlib's, which this Python may not have.
+        let code = "import proton_lab as lab\n\
+                    class Fig:\n    def savefig(self, path, **kw): open(path, 'w').write('png')\n\
+                    lab.figure(Fig(), 'spectrum')\nlab.figure('again', Fig())\n\
+                    scene = lab.Scene('orbit')\n\
+                    scene.points([[0, 0, 0], [1, 1, 1]])\n\
+                    scene.line([[0, 0, 0], [1, 1, 0]])\n\
+                    scene.spheres([[0, 0, 0], [1, 0, 0]], [0.1, 0.2], color=['gold', 'blue'],\n\
+                                  frames=[[[0, 0, 0], [1, 0, 0]], [[0, 0, 0], [0, 1, 0]], [[0, 0, 0], [-1, 0, 0]]])\n\
+                    scene.bonds([([0, 0, 0], [1, 0, 0])], frames=[[([0, 0, 0], [1, 0, 0])], [([0, 0, 0], [0, 1, 0])]])\n\
+                    scene.mesh([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[0, 1, 2]])\n\
+                    scene.arrows([[0, 0, 0]], [[0, 1, 0]])\n\
+                    print(scene.save('planet').name)\n";
+        let mut spec = spec(&base, &python, code, 60, Kind::None);
+        spec.env = env;
+        let mut run = Run::start(&spec).unwrap();
+        wait(&mut run);
+        let dir = base.join("runs/R001");
+        let err = std::fs::read_to_string(dir.join("stderr.txt")).unwrap_or_default();
+        assert_eq!(run.state(), State::Done, "{err}");
+        assert!(dir.join("figures/spectrum.png").is_file() && dir.join("figures/again.png").is_file(), "a figure and its name, in either order");
+        assert_eq!(std::fs::read_to_string(dir.join("stdout.txt")).unwrap().trim(), "planet.scene.json", "save names the file");
+        let scene: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("planet.scene.json")).unwrap()).unwrap();
+        let frames = scene["frames"].as_array().unwrap();
+        assert_eq!(frames.len(), 3, "one frame for each moment of what moves");
+        let kinds = |f: &Value| f.as_array().unwrap().iter().map(|i| i["kind"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        for frame in frames {
+            assert_eq!(kinds(frame), ["points", "line", "mesh", "arrow", "sphere", "sphere", "bond"], "what does not move is in every frame");
+        }
+        let last = frames[2].as_array().unwrap();
+        assert_eq!((last[5]["center"].clone(), last[5]["radius"].as_f64(), last[5]["color"].as_str()), (json!([-1.0, 0.0, 0.0]), Some(0.2), Some("blue")));
+        assert_eq!(last[6]["b"], json!([0.0, 1.0, 0.0]), "a moving thing shorter than the rest stays at its last place");
+        let _ = std::fs::remove_dir_all(base);
+    }
 }
