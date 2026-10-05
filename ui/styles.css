@@ -3915,3 +3915,30 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .rs-composer { max-width: 780px; margin: 0 auto; }
 .rs-composer .cc-input { min-height: calc(var(--z-sm) * 1.6); }
 .rs-hint { color: var(--cc-faint); font: var(--z-2xs)/1.3 var(--cc-font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── the Lab's Python ── */
+.lab-env { display: grid; gap: 10px; padding: 12px 16px 16px; border-bottom: 1px solid var(--cc-line); font: var(--z-2xs)/1.6 var(--cc-font); color: var(--cc-soft); }
+.lab-env:empty { display: none; }
+.lab-env > header { color: var(--cc-faint); text-transform: none; letter-spacing: 0; }
+.lab-env p { margin: 0; }
+.lab-env code { font: var(--z-2xs) var(--zed); color: var(--cc-soft); overflow-wrap: anywhere; }
+.lab-step { padding: 10px 12px; border: 1px solid var(--cc-line); border-radius: 8px; background: var(--cc-raise); }
+.lab-step b { color: var(--cc-text); }
+.lab-acts { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.lab-acts .cc-primary, .lab-acts .cc-quiet, .lab-acts .cc-danger { padding: 5px 12px; }
+.lab-faint { color: var(--cc-faint); }
+.lab-err { color: var(--cc-err); overflow-wrap: anywhere; }
+.lab-ok { width: 13px; height: 13px; color: var(--cc-ok); vertical-align: -2px; }
+.lab-packs { color: var(--cc-text); }
+.lab-busy { display: flex; align-items: center; gap: 8px; }
+.lab-spin { flex: 0 0 auto; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--cc-raise-2); border-top-color: var(--cc-accent); animation: lab-turn .9s linear infinite; }
+@keyframes lab-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lab-spin { animation: none; } }
+.lab-bar { height: 4px; border-radius: 2px; background: var(--cc-raise-2); overflow: hidden; }
+.lab-bar > i { display: block; height: 100%; background: var(--cc-accent); transition: width .3s; }
+.lab-log { margin: 0; max-height: 132px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: var(--cc-code); color: var(--cc-muted); font: 11px/1.5 var(--zed); white-space: pre-wrap; }
+.lab-packages > summary { cursor: pointer; color: var(--cc-muted); }
+.lab-packages table { width: 100%; margin-top: 6px; border-collapse: collapse; font: var(--z-2xs)/1.5 var(--zed); }
+.lab-packages td { padding: 1px 6px 1px 0; color: var(--cc-soft); }
+.lab-packages td:last-child { text-align: right; color: var(--cc-muted); white-space: nowrap; }
+.lab-confirm { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--err) 40%, transparent); border-radius: 8px; }

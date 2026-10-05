@@ -15,7 +15,9 @@ pub mod factory;
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use proton_lab::{EnvState, Lab};
 
 use proton_research::model::{Author, Hypothesis, HypothesisStatus, Seat};
 use proton_research::store::{Folder, Store};
@@ -41,6 +43,16 @@ pub struct Research {
     factory: Box<dyn AgentFactory>,
     /// Who this Proton is, to the investigations' locks.
     instance: String,
+    /// The Lab's Python: one for the machine, shared by every project.
+    lab: Arc<Mutex<Lab>>,
+    /// The Lab as this window last drew it.
+    lab_seen: u64,
+}
+
+/// The machine's Lab, made the first time it is asked for.
+fn shared_lab() -> Arc<Mutex<Lab>> {
+    static LAB: OnceLock<Arc<Mutex<Lab>>> = OnceLock::new();
+    LAB.get_or_init(|| Arc::new(Mutex::new(Lab::at_home()))).clone()
 }
 
 impl std::fmt::Debug for Research {
@@ -72,13 +84,17 @@ fn instance() -> &'static str {
 
 impl Research {
     pub fn new(root: &Path) -> Research {
-        Research::with_factory(root, Box::new(Engines), instance())
+        let mut research = Research::with_factory(root, Box::new(Engines), instance());
+        research.lab = shared_lab();
+        research
     }
 
-    /// Over another factory — scripted engines, in tests — and as another
-    /// instance.
+    /// Over another factory — scripted engines, in tests — as another
+    /// instance, and with a Lab of its own that has no conda to call.
     pub fn with_factory(root: &Path, factory: Box<dyn AgentFactory>, instance: &str) -> Research {
         Research {
+            lab: Arc::new(Mutex::new(Lab::new(&root.join(".proton-lab"), None))),
+            lab_seen: 0,
             store: Store::new(root.join("research")),
             open: None,
             showing: None,
@@ -109,7 +125,39 @@ impl Research {
         }];
         events.extend(self.board());
         events.extend(self.round_event(now));
+        events.extend(self.lab_event(true));
         events
+    }
+
+    /* ── the Lab ───────────────────────────────────────────────────── */
+
+    /// The Lab, looked at the first time a window shows it; drawn when it
+    /// has changed since this window last drew it, or `always`.
+    fn lab_event(&mut self, always: bool) -> Vec<Event> {
+        let mut lab = self.lab.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(lab.state(), EnvState::Unknown) && !lab.busy() {
+            lab.check();
+        }
+        if !always && lab.version() == self.lab_seen {
+            return Vec::new();
+        }
+        self.lab_seen = lab.version();
+        vec![Event::LabEnv { env: lab.state().clone() }]
+    }
+
+    /// Do something to the Lab, and draw it.
+    pub fn lab_do(&mut self, act: impl FnOnce(&mut Lab) -> Result<(), String>) -> Vec<Event> {
+        let done = act(&mut self.lab.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut events = self.lab_event(true);
+        if let Err(why) = done {
+            events.push(notice(why, NoticeLevel::Warn));
+        }
+        events
+    }
+
+    /// The Lab's Python, when it is ready: what runs are made with.
+    pub fn lab_python(&self) -> Option<std::path::PathBuf> {
+        self.lab.lock().unwrap_or_else(|e| e.into_inner()).python()
     }
 
     /// The open investigation's board, and the hypothesis shown whole.
@@ -444,6 +492,10 @@ impl Research {
     }
 
     pub fn poll_at(&mut self, now: u64) -> Vec<Event> {
+        // The Lab first: whichever window looks first drains what conda
+        // said, and each draws it when it has changed.
+        self.lab.lock().unwrap_or_else(|e| e.into_inner()).poll();
+        let mut lab = self.lab_event(false);
         let mut all = Vec::new();
         for (slug, driver) in self.drivers.iter_mut() {
             if driver.busy() {
@@ -454,12 +506,14 @@ impl Research {
         for (slug, moved) in all {
             events.extend(self.moved(&slug, moved, now));
         }
+        events.append(&mut lab);
         events
     }
 
-    /// Whether a round has calls out, for a host deciding how often to look.
+    /// Whether a round has calls out, or the Lab is working, for a host
+    /// deciding how often to look.
     pub fn is_busy(&self) -> bool {
-        self.drivers.values().any(Driver::busy)
+        self.drivers.values().any(Driver::busy) || self.lab.lock().map(|lab| lab.busy()).unwrap_or(false)
     }
 }
 
@@ -481,8 +535,11 @@ mod tests {
     #[test]
     fn a_new_investigation_is_listed_opened_and_drawn() {
         let dir = root("new");
-        let mut research = Research::new(&dir);
-        assert!(matches!(research.sync().as_slice(), [Event::ResearchList { investigations, open: None }] if investigations.is_empty()));
+        let mut research = Research::with_factory(&dir, Box::new(Engines), "test");
+        let events = research.sync();
+        assert!(matches!(events.first(), Some(Event::ResearchList { investigations, open: None }) if investigations.is_empty()));
+        // A Lab of its own, with no conda to call: the machine's is not touched.
+        assert!(matches!(events.last(), Some(Event::LabEnv { env: EnvState::NoConda })), "{events:?}");
 
         let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics);
         let Some(Event::ResearchList { investigations, open }) = events.first() else { panic!("{events:?}") };

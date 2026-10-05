@@ -31,6 +31,7 @@ import { performanceReview, editorPainted } from "./performance.js";
 import { createTerminalGL, xtermHex } from "./term-gl.js";
 import { createClaude } from "./claude.js";
 import { createResearch } from "./research.js";
+import { createLab } from "./lab.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -857,6 +858,8 @@ const claude = createClaude({
 /* Research: the project's investigations. Drawn from what the core reads
    out of research/; nothing is kept here that the files do not say. */
 const research = createResearch({ root: document, dispatch });
+/* The Lab: the Python an investigation's code runs in, made with your say-so. */
+const lab = createLab({ root: document, dispatch });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -4816,6 +4819,10 @@ function renderEvent(event) {
 
     case "researchTranscript":
       research?.transcript(event);
+      break;
+
+    case "labEnv":
+      lab?.env(event);
       break;
 
     case "chats":

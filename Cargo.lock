@@ -4348,6 +4348,7 @@ dependencies = [
  "proton-design",
  "proton-game",
  "proton-index",
+ "proton-lab",
  "proton-library",
  "proton-lsp",
  "proton-mesh",
@@ -4417,6 +4418,15 @@ dependencies = [
  "ignore",
  "nucleo-matcher",
  "serde",
+ "ts-rs",
+]
+
+[[package]]
+name = "proton-lab"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
  "ts-rs",
 ]
 

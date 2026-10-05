@@ -1634,6 +1634,50 @@ await test('The table says who cannot sit, and a hypothesis is pinned or retired
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('The Lab\'s Python is planned, then made, each on its own say-so', async () => {
+  await win.dispatch({type: 'setMode', mode: 'research'}); await settle();
+  const box = $('[data-lab-env]');
+  const text = () => box.textContent.replace(/\s+/g, ' ');
+  const prefix = '/Users/you/.proton/lab/envs/lab';
+  assert(!win.commands.some((c) => c.type.startsWith('lab')), 'the Lab was asked before it was told to');
+  await win.pushEvents([{type: 'labEnv', env: {state: 'missing', conda: '/Users/you/miniconda3/bin/conda', index: null, specs: ['python=3.12', 'numpy', 'scipy'], prefix}}]);
+  assert(text().includes('Python 3.12 with numpy and scipy') && text().includes('~/.proton/lab/envs/lab'), `the Lab does not say what it would be: ${text()}`);
+  assert(text().includes('conda has no copy of it yet') && text().includes('Nothing is installed yet'), 'the first say-so does not say what it costs');
+  let before = win.commands.length;
+  box.querySelector('[data-lab="plan"]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'labPlan'), 'planning was not asked for');
+  await win.pushEvents([{type: 'labEnv', env: {state: 'planning', log: ['Collecting package metadata (repodata.json): done']}}]);
+  assert(box.querySelector('.lab-log')?.textContent.includes('Collecting package metadata'), 'what conda says is not shown');
+  await win.pushEvents([{type: 'labEnv', env: {state: 'planned', plan: {packages: [
+    {name: 'numpy', version: '2.1.3', build: 'h0', size: 5301200}, {name: 'python', version: '3.12.7', build: 'h1', size: 13412345},
+    {name: 'tzdata', version: '2024b', build: 'h2', size: null}], download: 18713545, cached: 1, prefix}}}]);
+  assert(text().includes('17.8 MB') && text().includes('1 already in conda') && box.querySelectorAll('.lab-packages tr').length === 3,
+    `the second say-so does not show every package and the download: ${text()}`);
+  before = win.commands.length;
+  box.querySelector('[data-lab="create"]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'labCreate'), 'making it was not asked for');
+  await win.pushEvents([{type: 'labEnv', env: {state: 'creating', fetched: 1, total: 2, log: []}}]);
+  assert(box.querySelector('.lab-bar > i').style.width === '50%' && text().includes('1 of 2 downloaded'), 'making it shows no progress');
+  await win.pushEvents([{type: 'labEnv', env: {state: 'ready', python: '3.12.7', prefix, packages: [{name: 'numpy', version: '2.1.3', build: '', size: null}]}}]);
+  assert(text().includes('Python 3.12.7') && text().includes('numpy 2.1.3'), 'a ready Lab does not say what it has');
+  before = win.commands.length;
+  box.querySelector('[data-lab="confirm"]').click(); await settle();
+  box.querySelector('[data-lab="keep"]').click(); await settle();
+  box.querySelector('[data-lab="confirm"]').click(); await settle();
+  assert(box.querySelector('.lab-confirm')?.textContent.includes('Runs keep what they wrote'), 'removing does not ask first');
+  box.querySelector('[data-lab="remove"]').click(); await settle();
+  const sent = win.commands.slice(before).map((c) => c.type).filter((t) => t.startsWith('lab'));
+  assert(sent.join() === 'labRemove', `wrong commands: ${sent}`);
+  await win.pushEvents([{type: 'labEnv', env: {state: 'failed', step: 'plan', why: 'PackagesNotFoundError: nosuchpackage', log: ['x']}}]);
+  assert(text().includes('Planning failed: PackagesNotFoundError'), 'a failure does not say what failed');
+  before = win.commands.length;
+  box.querySelector('[data-lab="cancel"]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'labCancel'), 'Start over did not ask');
+  await win.pushEvents([{type: 'labEnv', env: {state: 'noConda'}}]);
+  assert(text().includes('there is no conda here') && !box.querySelector('button'), 'without conda the Lab offers what it cannot do');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('A long name in the project panel scrolls sideways instead of being cut', async () => {
   const tree = $('.workspace.on [data-tree]');
   const space = tree.closest('.workspace');

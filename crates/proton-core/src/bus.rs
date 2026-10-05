@@ -372,6 +372,15 @@ pub enum Command {
     ResearchTask {
         task: Option<String>,
     },
+    /// The scientist's first say-so for the Lab's Python: conda works out
+    /// what it would be, fetching conda-forge's index if its copy is old.
+    LabPlan,
+    /// The second: make exactly what was planned.
+    LabCreate,
+    /// Stop what the Lab is doing, or put a plan aside.
+    LabCancel,
+    /// Take the Lab's Python away.
+    LabRemove,
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1086,6 +1095,11 @@ pub enum Event {
     ResearchHypothesis {
         slug: String,
         detail: Option<HypothesisDetail>,
+    },
+    /// Where the Lab's Python stands: one for the machine, whichever
+    /// project is open.
+    LabEnv {
+        env: proton_lab::EnvState,
     },
     /// What one task said, drawn as Chat draws a conversation: live while
     /// it runs.

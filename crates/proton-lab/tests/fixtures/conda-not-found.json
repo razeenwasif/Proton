@@ -1,0 +1,10 @@
+{
+  "caused_by": "None",
+  "error": "PackagesNotFoundError: The following packages are not available from current channels:\n\n  - nosuchpackage\n\nCurrent channels:\n\n  - https://conda.anaconda.org/conda-forge\n",
+  "exception_name": "PackagesNotFoundError",
+  "exception_type": "<class 'conda.exceptions.PackagesNotFoundError'>",
+  "message": "The following packages are not available from current channels:\n\n  - nosuchpackage\n\nCurrent channels:\n\n  - https://conda.anaconda.org/conda-forge\n",
+  "packages": [
+    "nosuchpackage"
+  ]
+}

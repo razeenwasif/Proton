@@ -26,6 +26,7 @@ import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
 import type { HypothesisDetail } from "./HypothesisDetail";
 import type { HypothesisRow } from "./HypothesisRow";
+import type { LabEnv } from "./LabEnv";
 import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
 import type { LibrarySource } from "./LibrarySource";
@@ -170,7 +171,7 @@ folders: Array<ChatFolder>, active: string, busy: Array<string>, waiting: Array<
 /**
  * What the scientist has told the team.
  */
-feedback: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+feedback: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
 /**
  * Another Proton is running its rounds, in words: read only here.
  */

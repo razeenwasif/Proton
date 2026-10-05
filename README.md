@@ -52,6 +52,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-mcp/` | The library, served over MCP to any client you already pay for |
 | `crates/proton-data/` | Notebooks and the Jupyter kernel behind Data mode |
 | `crates/proton-research/` | Research's investigations — the files each is, and the co-scientist round that grows it |
+| `crates/proton-lab/` | Research's Lab — the Python its code runs in, made with your say-so |
 | `crates/proton-vcs/` | The gutter, and what git considers changed |
 | `crates/proton-dap/` | The debug-adapter client |
 | `crates/proton-term/` | The pseudo-terminal, and the screen it paints |
@@ -120,7 +121,11 @@ in Git and can be edited by hand. Research works in the project Data has open.
 Run round starts one — about fourteen agent calls, never more than twenty — and
 the Activity tab follows it call by call, each one opening into what it said;
 what you type goes to the team, and `/h Title: statement` adds a hypothesis of
-your own. The Lab, which runs an investigation's code in a sandbox, comes next.
+your own. The Lab's Python — Python 3.12 with numpy, scipy, sympy, mpmath,
+matplotlib, networkx and pandas, from conda-forge, apart from your own
+environments — is made with your say-so twice: once for conda to plan it,
+and once to make exactly that plan, every package and its download in front
+of you. Running an investigation's code in it, sandboxed, comes next.
 
 ## The three things that hold it together
 

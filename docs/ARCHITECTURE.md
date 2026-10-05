@@ -18,7 +18,7 @@ in this document retain historical decisions and measurements.
 | Game | Godot `.tscn` scene hierarchy and property editing | No engine playback process |
 | Video | CMX3600 `.edl` timeline and `.srt` captions | No decoded video/program monitor |
 | Data | `.ipynb` cells, kernel execution, outputs and dataframe views | Execution requires a configured Jupyter kernel |
-| Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | No Lab yet: proposed experiments are written down, not run |
+| Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | The Lab's Python is made on two say-sos; proposed experiments are written down, not yet run |
 
 ```bash
 cargo test --workspace        # headless; some integrations require external tools
@@ -85,6 +85,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-agent` / `proton-council` | Model conversations and tools / multi-model debates |
 | `proton-claude` | Claude Code, Codex and Antigravity as engines: interactive, and unattended with structured answers |
 | `proton-research` | Investigations as files, and the co-scientist round as a pure state machine |
+| `proton-lab` | The Lab's conda environment — planned, made and removed on the scientist's say-so — and the jobs that run for it |
 | `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
 | `proton-data` | Notebook documents and kernel integration |
 | `proton-design` | Theme tokens and component markup |
@@ -94,7 +95,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-trace` | Code Visualizer client and sidecar integration |
 | `proton-shell` | Tauri window, IPC, native backdrop, packaging |
 
-These are the 23 current workspace members. The modal engine remains in
+These are the 24 current workspace members. The modal engine remains in
 `proton-core/src/vim.rs`; there is no separate `proton-vim` or `proton-cli` crate.
 
 `proton-lsp` ended up with no async runtime and no protocol crate. Two threads

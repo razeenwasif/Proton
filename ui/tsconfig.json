@@ -34,6 +34,7 @@
     "markdown.js",
     "highlight.js",
     "claude.js",
-    "research.js"
+    "research.js",
+    "lab.js"
   ]
 }

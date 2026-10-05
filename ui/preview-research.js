@@ -123,6 +123,22 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
   let timer = null;
   let nextTask = 1;
 
+  /* The Lab's Python: missing until planned and made, each on a timer. */
+  const PREFIX = "/Users/you/.proton/lab/envs/lab";
+  const SPECS = ["python=3.12", "numpy", "scipy", "sympy", "mpmath", "matplotlib-base", "networkx", "pandas"];
+  /** @type {any} */
+  let env = { state: "missing", conda: "/Users/you/miniconda3/bin/conda", index: now - 86400 * 9, specs: SPECS, prefix: PREFIX };
+  /** @type {any} */
+  let labTimer = null;
+  const labEvent = () => ({ type: "labEnv", env });
+  const plan = () => {
+    const pkgs = [["python", "3.12.7", 13_412_345], ["numpy", "2.1.3", 5_301_200], ["scipy", "1.14.1", 14_900_000], ["sympy", "1.13.3", 4_620_000],
+      ["mpmath", "1.3.0", null], ["matplotlib-base", "3.9.2", 7_830_000], ["networkx", "3.4.2", 1_210_000], ["pandas", "2.2.3", 11_400_000],
+      ["libopenblas", "0.3.28", 4_210_000], ["openssl", "3.3.2", null], ["tk", "8.6.13", 3_120_000], ["ca-certificates", "2024.8.30", null]];
+    const packages = pkgs.map(([name, version, size]) => ({ name, version, build: "h0", size })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return { packages, download: packages.reduce((n, p) => n + Number(p.size ?? 0), 0), cached: packages.filter((p) => p.size == null).length, prefix: PREFIX };
+  };
+
   const summary = (i) => ({ slug: i.slug, title: i.title, discipline: i.discipline, created: i.created, hypotheses: i.hypotheses.length, rounds: i.rounds });
   const find = (slug) => investigations.find((i) => i.slug === slug);
 
@@ -310,7 +326,7 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
   }
 
   function sync() {
-    return [{ type: "researchList", investigations: investigations.map(summary), open }, ...board(), ...roundEvent()];
+    return [{ type: "researchList", investigations: investigations.map(summary), open }, ...board(), ...roundEvent(), labEvent()];
   }
 
   /** @param {any} command */
@@ -401,6 +417,40 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
         if (h) h.status = command.status;
         return board();
       }
+      case "labPlan":
+        clearInterval(labTimer);
+        env = { state: "planning", log: ["Collecting package metadata (repodata.json): ...working..."] };
+        labTimer = setTimeout(() => { env = { state: "planned", plan: plan() }; deliver(labEvent()); }, 1500);
+        return [labEvent()];
+      case "labCreate": {
+        if (env.state !== "planned") return [];
+        const total = env.plan.packages.filter((/** @type {any} */ p) => p.size != null).length;
+        env = { state: "creating", fetched: 0, total, log: [] };
+        clearInterval(labTimer);
+        labTimer = setInterval(() => {
+          if (env.state !== "creating") return clearInterval(labTimer);
+          env = { ...env, fetched: env.fetched + 1 };
+          if (env.fetched >= env.total) {
+            clearInterval(labTimer);
+            env = { state: "ready", python: "3.12.7", prefix: PREFIX, packages: [["numpy", "2.1.3"], ["scipy", "1.14.1"], ["sympy", "1.13.3"], ["mpmath", "1.3.0"],
+              ["matplotlib", "3.9.2"], ["networkx", "3.4.2"], ["pandas", "2.2.3"]].map(([name, version]) => ({ name, version, build: "", size: null })) };
+          }
+          deliver(labEvent());
+        }, 350);
+        return [labEvent()];
+      }
+      case "labCancel":
+        clearInterval(labTimer);
+        clearTimeout(labTimer);
+        env = { state: "missing", conda: "/Users/you/miniconda3/bin/conda", index: now - 86400 * 9, specs: SPECS, prefix: PREFIX };
+        return [labEvent()];
+      case "labRemove":
+        env = { state: "removing" };
+        setTimeout(() => {
+          env = { state: "missing", conda: "/Users/you/miniconda3/bin/conda", index: now - 86400 * 9, specs: SPECS, prefix: PREFIX };
+          deliver(labEvent());
+        }, 800);
+        return [labEvent()];
       case "researchSeat": {
         const r = roundOf(open);
         if (command.enabled) r.off.delete(command.seat);

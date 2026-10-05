@@ -686,6 +686,16 @@ what is typed goes to the team, into `feedback.md`, which every later task is
 shown; `/h Title: statement` is a hypothesis of their own, reviewed and played
 with the agents'. A hypothesis's page can pin it, retire it or bring it back.
 
+**The Lab's Python is the scientist's to make.** At the top of the Lab
+pane, a card in two steps. First, what the Lab would be — Python 3.12 with
+the scientific stack, in a folder of Proton's own — and what planning it
+costs: conda asks conda-forge, which needs its package index, and the card
+says whether conda has a copy and how old. Then, once planned, every
+package, what downloading them costs and what is cached already, with Make
+it and Not now. Making it shows what has downloaded; a made one says what it
+has, and asks before it is removed. Nothing is fetched or installed on a
+step the scientist did not take.
+
 **The Lab** is the pane on the right: what an investigation proposes to run
 is shown there before it runs, and runs with no network, nothing of your
 home folder to read and nowhere to write but its own folder. Its figures and

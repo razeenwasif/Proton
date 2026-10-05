@@ -2,6 +2,7 @@
 import {test} from 'node:test';
 import {deepEqual, equal} from 'node:assert/strict';
 import {ownHypothesis} from '../../ui/research.js';
+import {bytes} from '../../ui/lab.js';
 
 test('/h Title: statement is a hypothesis, and anything else is feedback', () => {
   deepEqual(ownHypothesis('/h Sieve by 7: A sieve modulo 7 rules out a sixth of the triples.'),
@@ -22,4 +23,11 @@ test('without a title, the first line is one, cut to fit', () => {
   // A colon far into the text is part of the statement, not a title.
   const late = ownHypothesis(`/h ${'x'.repeat(130)}: y`);
   equal(late?.statement, `${'x'.repeat(130)}: y`);
+});
+
+test('a download is said in the unit people read it in', () => {
+  equal(bytes(512), '512 B');
+  equal(bytes(5 * 1024), '5 KB');
+  equal(bytes(18713545), '17.8 MB');
+  equal(bytes(3 * 1024 ** 3), '3.00 GB');
 });
