@@ -127,13 +127,7 @@ impl Settings {
     /// `research.folder`. A leading `~/` is the home folder, and so is what a
     /// relative path is taken from, there being no project to take it from.
     pub fn research_folder(&self) -> Option<PathBuf> {
-        let text = self.get("research.folder")?.as_str()?.trim();
-        let home = crate::folder::home()?;
-        match text {
-            "" => None,
-            "~" => Some(home),
-            text => Some(expand(text, &home)),
-        }
+        research_path(self.get("research.folder")?.as_str()?)
     }
 
     /// Everything set, as one object — what the front end draws the panels
@@ -234,6 +228,17 @@ impl Settings {
 }
 
 /// A path as a person writes one: `~/OnyxVault`, `../notes`, or absolute.
+/// A research folder as somebody typed it: `~/` is the home folder, and a
+/// relative path is taken from there too. Nothing for nothing.
+pub fn research_path(text: &str) -> Option<PathBuf> {
+    let home = crate::folder::home()?;
+    match text.trim() {
+        "" => None,
+        "~" => Some(home),
+        text => Some(expand(text, &home)),
+    }
+}
+
 fn expand(text: &str, project: &Path) -> PathBuf {
     let text = text.trim();
     if let Some(rest) = text.strip_prefix("~/").or_else(|| text.strip_prefix("~\\")) {

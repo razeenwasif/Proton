@@ -168,6 +168,8 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
           environment: { lock: { sha256: "4b1d3c2a9e8f7d6c" } }, approved: undefined, about: { approved: { by: "scientist", at: now - 3600 } }, limits: { seconds: 600 } } },
     ],
   };
+  /** Where the investigations are kept, as the window says it. */
+  let kept = "research/";
   /** @type {string | null} */
   let showingRun = null;
   /** Investigations that run proposals unasked. @type {Set<string>} */
@@ -363,7 +365,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
       i.rounds = r.n;
     }
     if (i.slug === open) {
-      for (const event of [...roundEvent(), ...board(), ...transcriptEvent(), { type: "researchList", investigations: investigations.map(summary), open, folder: "research/" }]) deliver(event);
+      for (const event of [...roundEvent(), ...board(), ...transcriptEvent(), { type: "researchList", investigations: investigations.map(summary), open, folder: kept }]) deliver(event);
     }
   }
 
@@ -421,12 +423,18 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
   }
 
   function sync() {
-    return [{ type: "researchList", investigations: investigations.map(summary), open, folder: "research/" }, ...board(), ...roundEvent(), labEvent(), ...labRunsEvent()];
+    return [{ type: "researchList", investigations: investigations.map(summary), open, folder: kept }, ...board(), ...roundEvent(), labEvent(), ...labRunsEvent()];
   }
 
   /** @param {any} command */
   function command(command) {
     switch (command.type) {
+      case "researchFolder": {
+        // Where they are kept, as the window would say it; nothing moves in a preview.
+        const typed = String(command.folder ?? "").trim().replace(/[\\/]+$/, "");
+        kept = typed ? `${typed}/` : "research/";
+        return sync();
+      }
       case "researchNew": {
         const title = String(command.title ?? "").trim();
         if (!title) return [{ type: "notice", level: "error", text: "An investigation needs a title." }];
@@ -506,7 +514,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         const id = `H${String(i.hypotheses.length + 1).padStart(3, "0")}`;
         i.hypotheses.push({ id, title: command.title, author: { seat: "scientist", model: "" }, round: r.status === "idle" ? r.n + 1 : r.n,
           status: "active", parents: [], statement: command.statement, rationale: "", predictions: [], assumptions: [] });
-        return [{ type: "researchList", investigations: investigations.map(summary), open, folder: "research/" }, ...board(),
+        return [{ type: "researchList", investigations: investigations.map(summary), open, folder: kept }, ...board(),
           { type: "notice", level: "info", text: `${id} is yours: it is reviewed and played with the others.` }];
       }
       case "researchSetStatus": {

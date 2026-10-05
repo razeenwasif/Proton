@@ -131,6 +131,7 @@ export function createResearch(host) {
   const els = {
     list: q("[data-research-list]"),
     seatsBox: q("[data-research-seats-box]"),
+    where: q("[data-research-where]"),
     seats: q("[data-research-seats]"),
     title: q("[data-research-title]"),
     discipline: q("[data-research-discipline]"),
@@ -150,12 +151,14 @@ export function createResearch(host) {
     send: /** @type {HTMLButtonElement} */ (q("[data-research-send]")),
   };
 
-  /** @type {{list: Summary[], open: string | null, folder: string, board: BoardEvent | null, detail: Detail | null,
+  /** @type {{list: Summary[], open: string | null, folder: string, moving: string | null, moved: boolean, board: BoardEvent | null, detail: Detail | null,
    *   round: RoundEvent | null, task: string | null, transcript: TranscriptEvent | null,
    *   tab: Tab, creating: boolean, made: number, draft: {title: string, goal: string, discipline: Discipline}}} */
   const state = {
-    // Where the investigations are kept, as the core says it.
-    list: [], open: null, folder: "research/", board: null, detail: null, round: null, task: null, transcript: null, tab: "overview",
+    // Where the investigations are kept, as the core says it; and the folder
+    // being typed to keep them in instead, once asked for, until it is.
+    list: [], open: null, folder: "research/", moving: /** @type {string | null} */ (null), moved: false,
+    board: null, detail: null, round: null, task: null, transcript: null, tab: "overview",
     // The form is up, and how many there were when it was sent: it goes when
     // the list grows, and stays with what was typed when the core refuses.
     creating: false, made: -1,
@@ -471,7 +474,7 @@ export function createResearch(host) {
   function renderForm() {
     const d = state.draft;
     els.board.innerHTML = `<form class="rs-col rs-new" data-research-form novalidate>
-      <p class="rs-faint">A folder under <code>research/</code> in this project, with your brief as its README. Nothing runs until you start a round.</p>
+      <p class="rs-faint">A folder ${state.folder === "research/" ? "under <code>research/</code> in this project" : `in <code>${esc(state.folder)}</code>`}, with your brief as its README. Nothing runs until you start a round.</p>
       <label class="rs-field"><span>Title</span>
         <input name="title" maxlength="120" autocomplete="off" spellcheck="true" required
                placeholder="e.g. Why is the daytime sky blue rather than violet?" value="${esc(d.title)}"></label>
@@ -487,6 +490,30 @@ export function createResearch(host) {
       </div>
     </form>`;
     /** @type {HTMLInputElement | null} */ (els.board.querySelector('[name="title"]'))?.focus({ preventScroll: true });
+  }
+
+  /** Where the investigations are kept, and a way to keep them elsewhere. */
+  function renderWhere() {
+    if (state.moving !== null) {
+      // Drawn once while open, so a redraw neither takes the caret nor loses what was typed.
+      if (els.where.querySelector("[data-research-where-form]")) return;
+      els.where.innerHTML = `<form class="rs-where-form" data-research-where-form novalidate>
+          <label class="rs-field"><span>Keep every project's investigations in</span>
+            <input name="folder" value="${esc(state.moving)}" placeholder="each project's own research/" spellcheck="false" autocomplete="off"></label>
+          <div class="rs-actions">
+            <button type="button" class="cc-quiet" data-research-where-cancel>Cancel</button>
+            <button type="submit" class="cc-primary">Keep them here</button>
+          </div>
+        </form>`;
+      const input = /** @type {HTMLInputElement | null} */ (els.where.querySelector("input"));
+      input?.focus({ preventScroll: true });
+      input?.select();
+      return;
+    }
+    const own = state.folder === "research/";
+    els.where.innerHTML = `<span>Kept in ${own ? "each project's " : ""}<code>${esc(state.folder)}</code></span>` +
+      `<button class="rs-where-change" data-research-where-change title="${own
+        ? "Keep every project's investigations in one folder" : "Keep them somewhere else, or in each project again"}">Change</button>`;
   }
 
   function newInvestigation() {
@@ -560,6 +587,14 @@ export function createResearch(host) {
   ws.addEventListener("click", (e) => {
     const target = /** @type {HTMLElement} */ (e.target);
     if (target.closest("[data-research-new]")) return newInvestigation();
+    if (target.closest("[data-research-where-change]")) {
+      state.moving = state.folder === "research/" ? "" : state.folder.replace(/[\\/]$/, "");
+      return renderWhere();
+    }
+    if (target.closest("[data-research-where-cancel]")) {
+      state.moving = null;
+      return renderWhere();
+    }
     if (target.closest("[data-research-cancel]")) {
       state.creating = false;
       renderList();
@@ -633,6 +668,13 @@ export function createResearch(host) {
   });
 
   ws.addEventListener("submit", (e) => {
+    if (/** @type {HTMLElement} */ (e.target).closest("[data-research-where-form]")) {
+      e.preventDefault();
+      // Put away when the core says where they are kept now; a refusal keeps it.
+      state.moved = true;
+      host.dispatch({ type: "researchFolder", folder: (state.moving ?? "").trim() });
+      return;
+    }
     const form = /** @type {HTMLElement} */ (e.target).closest("[data-research-form]");
     if (!form) return;
     e.preventDefault();
@@ -643,6 +685,10 @@ export function createResearch(host) {
   // investigation and back — does not lose it.
   ws.addEventListener("input", (e) => {
     const field = /** @type {HTMLInputElement} */ (e.target);
+    if (field.closest?.("[data-research-where-form]")) {
+      state.moving = field.value;
+      return;
+    }
     if (!field.closest?.("[data-research-form]")) return;
     if (field.name === "title" || field.name === "goal") state.draft[field.name] = field.value;
     if (field.name === "discipline") state.draft.discipline = /** @type {Discipline} */ (field.value);
@@ -650,6 +696,12 @@ export function createResearch(host) {
 
   // ⌘⏎ creates, from anywhere in the form; Escape puts it away.
   ws.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && /** @type {HTMLElement} */ (e.target).closest?.("[data-research-where-form]")) {
+      e.preventDefault();
+      e.stopPropagation();
+      state.moving = null;
+      return renderWhere();
+    }
     const form = /** @type {HTMLElement} */ (e.target).closest?.("[data-research-form]");
     if (!form) return;
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -670,6 +722,11 @@ export function createResearch(host) {
   function list_(event) {
     state.list = event.investigations ?? [];
     state.folder = event.folder || "research/";
+    if (state.moved) {
+      state.moving = null;
+      state.moved = false;
+    }
+    renderWhere();
     if (state.creating && state.made >= 0 && state.list.length > state.made) {
       state.creating = false;
       state.made = -1;

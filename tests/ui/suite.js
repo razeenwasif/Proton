@@ -1522,6 +1522,28 @@ await test('Research ranks the hypotheses, opens one whole, and lets another inv
   await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?'), researchSummary('cubes', 'Sums of three cubes', 0)], open: 'sky'},
     researchBoard()]);
   assert(board.querySelector('.rs-file[title="research/sky/RESEARCH_PLAN.md"]'), 'a list that does not say where is not the project\'s research/');
+  // Where they are kept is changed from under the list, and a refusal keeps what was typed.
+  const where = ws.querySelector('[data-research-where]');
+  assert(where.textContent.includes("Kept in each project's research/"), `the list does not say where they are kept: ${where.textContent}`);
+  where.querySelector('[data-research-where-change]').click(); await settle();
+  let field = where.querySelector('[data-research-where-form] input');
+  assert(field && doc.activeElement === field && field.value === '', 'the folder form did not open on an empty field');
+  field.value = '~/Github/Research'; field.dispatchEvent(new win.Event('input', {bubbles: true}));
+  const asked = win.commands.length;
+  where.querySelector('[type="submit"]').click(); await settle();
+  assert(win.commands.slice(asked).find((c) => c.type === 'researchFolder')?.folder === '~/Github/Research', 'the folder was not asked for');
+  await win.pushEvents([{type: 'notice', level: 'error', text: '~/Github: no such folder'}]);
+  assert(where.querySelector('[data-research-where-form] input')?.value === '~/Github/Research', 'a refusal lost what was typed');
+  await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?'), researchSummary('cubes', 'Sums of three cubes', 0)], open: 'sky',
+    folder: '~/Github/Research/'}, researchBoard()]);
+  assert(!where.querySelector('form') && where.textContent.includes('Kept in ~/Github/Research/'), `the folder line did not follow: ${where.textContent}`);
+  where.querySelector('[data-research-where-change]').click(); await settle();
+  field = where.querySelector('[data-research-where-form] input');
+  assert(field?.value === '~/Github/Research', 'the form does not start from where they are');
+  field.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+  assert(!where.querySelector('form'), 'Escape did not put the folder form away');
+  await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?'), researchSummary('cubes', 'Sums of three cubes', 0)], open: 'sky'},
+    researchBoard()]);
   for (let i = 0; i < 30 && board.querySelector('.md-math[data-tex]'); i++) await settle();
   assert(board.querySelector('.md-math .katex'), 'the plan\'s TeX is not drawn');
   ws.querySelector('[data-research-tab="hypotheses"]').click(); await settle();
@@ -1753,6 +1775,24 @@ await test('An experiment is read, then run in the sandbox or turned down, and i
   await win.pushEvents([lab({sandbox: 'none'})]);
   const bare = work.querySelector('[data-lab-approve="E002"]');
   assert(bare.dataset.unsandboxed === '1' && bare.textContent === 'Run without a sandbox' && text().includes('can do anything you can'), 'an unsandboxed run is not said to be one');
+  // A round's proposals: one card a hypothesis, in the core's order, the
+  // earlier ones folded under it and the hypotheses past the fifth folded too.
+  const of = (id, hypothesis) => ({...proposal, id, hypothesis, code: 'x = 1'});
+  const many = [of('E009', 'H004'), of('E002', 'H004'), of('E008', 'H001'), of('E007', 'H002'), of('E006', 'H003'), of('E005', 'H005'),
+    of('E004', 'H006'), of('E003', 'H007')];
+  await win.pushEvents([lab({experiments: many})]);
+  const cards = () => [...work.querySelectorAll(':scope > .lab-proposal')].map((c) => c.dataset.experiment);
+  assert(cards().join() === 'E009,E008,E007,E006,E005', `not one card a hypothesis, the first five open: ${cards().join()}`);
+  assert(text().includes('Waiting for you 8 for 7 hypotheses'), `the count does not say how many hypotheses: ${text()}`);
+  const earlier = work.querySelector('[data-lab-fold="earlier:H004"]');
+  assert(earlier && !earlier.open && earlier.querySelector('[data-experiment="E002"]') && earlier.textContent.includes('1 earlier proposal for H004'),
+    'the earlier proposal is not folded under its hypothesis');
+  const more = work.querySelector('[data-lab-fold="more"]');
+  assert(more && !more.open && more.textContent.includes('2 more, for hypotheses ranked lower') && more.querySelector('[data-experiment="E003"]'),
+    'the hypotheses ranked lower are not folded');
+  more.open = true; await settle();
+  await win.pushEvents([lab({experiments: many})]);
+  assert(work.querySelector('[data-lab-fold="more"]')?.open, 'an opened fold closed when it was drawn again');
   // Runs, and one whole.
   const row = {id: 'R001', experiment: 'E001', hypothesis: 'H001', state: 'done', exit: 0, seconds: 2.4, started: 0, sandbox: 'seatbelt'};
   await win.pushEvents([lab({experiments: [], runs: [row, {...row, id: 'R002', state: 'failed', exit: 1}]})]);
@@ -1785,7 +1825,8 @@ await test('A run\'s pictures are drawn, and its 3D scene opens from it', async 
       figures: ['figures/spectrum.png'], scenes: ['broken.scene.json', 'orbit.scene.json'], record: {}}}]);
   for (let i = 0; i < 20 && !work.querySelector('img[data-lab-figure]')?.src; i++) await settle();
   const img = work.querySelector('img[data-lab-figure]');
-  assert(img?.src.startsWith('blob:'), 'the picture was not read from the run');
+  // As a data: URL: the app's img-src allows those and refuses blob: ones.
+  assert(img?.src.startsWith('data:image/png;base64,'), 'the picture was not read from the run, or not as the app\'s policy lets it load');
   work.querySelector('[data-lab-scene-open="broken.scene.json"]').click();
   for (let i = 0; i < 20 && !work.querySelector('.lab-scene .lab-err'); i++) await settle();
   assert(work.querySelector('.lab-scene .lab-err')?.textContent.includes('not a scene the Lab can draw'), 'a file that is not a scene was drawn');

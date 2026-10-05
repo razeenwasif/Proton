@@ -120,10 +120,11 @@ ranks them by Elo, the best are evolved, and an overview rewrites the plan.
 An investigation is a folder, `research/<slug>/`: the brief, the plan, each
 hypothesis and review, the tournament one match to a line — files that diff
 in Git and can be edited by hand. Research works in the project Data has open,
-or, to keep every investigation in one place whichever project is open, in the
-folder `research.folder` names in your own settings,
-`~/.config/proton/settings.json` — `{"research": {"folder": "~/Github/Research"}}`
-— each investigation a folder in it beside whatever else is there.
+or, to keep every investigation in one place whichever project is open, in a
+folder of their own — chosen under the list with Change, and kept in your own
+settings, `~/.config/proton/settings.json`, as
+`{"research": {"folder": "~/Github/Research"}}` — each investigation a folder in
+it beside whatever else is there.
 Run round starts one — about fourteen agent calls, never more than twenty — and
 the Activity tab follows it call by call, each one opening into what it said;
 what you type goes to the team, and `/h Title: statement` adds a hypothesis of

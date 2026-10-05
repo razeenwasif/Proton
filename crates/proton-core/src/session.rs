@@ -218,6 +218,12 @@ pub struct Session {
     /// own: one Research for every project here, rather than one per project
     /// over its `research/`. Polled and stopped here, once.
     research: Option<std::sync::Arc<std::sync::Mutex<crate::research::Research>>>,
+    /// The person's own settings file, where the research folder is kept.
+    /// `None` in tests, which must not touch the developer's.
+    person: Option<PathBuf>,
+    /// How a Research over a folder of its own is made: over the engines and
+    /// the machine's Lab — or, in tests, over a Lab of its own.
+    make_research: fn(&Path) -> crate::research::Research,
 }
 
 impl Session {
@@ -239,6 +245,8 @@ impl Session {
             servers: false,
             plugins: std::sync::Arc::default(),
             research: None,
+            person: None,
+            make_research: crate::research::Research::kept_in,
         }
     }
 
@@ -283,7 +291,15 @@ impl Session {
     /// project here and every one opened later — rather than in each
     /// project's `research/`.
     pub fn with_research_in(self, folder: &Path) -> Session {
-        self.sharing_research(crate::research::Research::kept_in(folder))
+        let research = (self.make_research)(folder);
+        self.sharing_research(research)
+    }
+
+    /// Make a Research over a folder of its own with `make`: for tests, one
+    /// whose Lab is not the machine's.
+    pub fn making_research_with(mut self, make: fn(&Path) -> crate::research::Research) -> Session {
+        self.make_research = make;
+        self
     }
 
     /// The same, with the Research given: in tests, one over scripted engines.
@@ -299,10 +315,85 @@ impl Session {
     /// Where the person's own settings say investigations are kept, if they
     /// keep them in a folder of their own: `research.folder`.
     pub fn with_research(self) -> Session {
-        match crate::settings::Settings::person().research_folder() {
+        match crate::folder::config() {
+            Some(dir) => self.with_person_settings(dir.join("settings.json")),
+            None => self,
+        }
+    }
+
+    /// The same, from a named settings file — which is also where a folder
+    /// chosen in the Research tab is written.
+    pub fn with_person_settings(mut self, file: PathBuf) -> Session {
+        let folder = crate::settings::Settings::at(file.clone()).research_folder();
+        self.person = Some(file);
+        match folder {
             Some(folder) => self.with_research_in(&folder),
             None => self,
         }
+    }
+
+    /// Keep the investigations in the folder somebody typed, for every
+    /// project, or in each project's own `research/` given nothing.
+    ///
+    /// Refused while a round or a run is going, since the Research that has
+    /// them is let go of. A folder that is not there is made only when its
+    /// parent is, so a slip of the keyboard cannot make a tree of them.
+    fn set_research_folder(&mut self, typed: &str) -> Vec<Event> {
+        let lock = |r: &std::sync::Arc<std::sync::Mutex<crate::research::Research>>| r.lock().map(|r| r.has_work()).unwrap_or(false);
+        if self.research.as_ref().is_some_and(lock) || self.workspaces.iter().any(Workspace::research_busy) {
+            return vec![notice(
+                "A round or a Lab run is going. Stop it before moving where investigations are kept.".into(),
+                NoticeLevel::Warn,
+            )];
+        }
+        let typed = typed.trim().trim_end_matches(['/', '\\']);
+        let mut said = Vec::new();
+        let folder = match crate::settings::research_path(typed) {
+            None => None,
+            Some(path) if path.is_dir() => Some(folder::normalise(&path)),
+            Some(path) if path.exists() => {
+                return vec![notice(format!("{}: not a folder", folder::tilde(&path)), NoticeLevel::Error)];
+            }
+            Some(path) => match path.parent().filter(|parent| parent.is_dir()) {
+                Some(_) => match std::fs::create_dir(&path) {
+                    Ok(()) => {
+                        said.push(notice(format!("Made {}.", folder::tilde(&path)), NoticeLevel::Info));
+                        Some(folder::normalise(&path))
+                    }
+                    Err(e) => return vec![notice(format!("{}: {e}", folder::tilde(&path)), NoticeLevel::Error)],
+                },
+                None => {
+                    let parent = path.parent().unwrap_or(&path);
+                    return vec![notice(format!("{}: no such folder", folder::tilde(parent)), NoticeLevel::Error)];
+                }
+            },
+        };
+        if let Some(file) = &self.person {
+            let value = if folder.is_some() { serde_json::Value::from(typed) } else { serde_json::Value::Null };
+            if let Err(why) = crate::settings::Settings::at(file.clone()).set("research.folder", value) {
+                said.push(notice(format!("Where investigations are kept could not be saved: {why}"), NoticeLevel::Warn));
+            }
+        }
+        if let Some(old) = self.research.take() {
+            old.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
+        }
+        match folder {
+            Some(folder) => {
+                let research = std::sync::Arc::new(std::sync::Mutex::new((self.make_research)(&folder)));
+                for workspace in &mut self.workspaces {
+                    workspace.share_research(&research);
+                }
+                self.research = Some(research);
+            }
+            None => {
+                for workspace in &mut self.workspaces {
+                    workspace.own_research();
+                }
+            }
+        }
+        let mut events = self.active_mut().research_events();
+        events.extend(said);
+        events
     }
 
     /// Remember the open set in `file`, and reload it next time.
@@ -512,6 +603,7 @@ impl Session {
             Command::CycleWorkspace { by } => self.cycle(by),
             Command::OpenWorkspacePicker => self.open_picker(),
             Command::SetMode { mode } => self.set_mode(mode),
+            Command::ResearchFolder { folder } => self.set_research_folder(&folder),
 
             // While the workspace picker is open it owns the keyboard, exactly
             // as Telescope does inside a workspace — and for the same reason.

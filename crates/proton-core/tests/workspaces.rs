@@ -1269,3 +1269,51 @@ fn investigations_kept_in_a_folder_of_their_own_are_every_projects() {
     assert_eq!(listed, ["why-is-the-sky-blue"], "the other project does not show it, or a folder that is no investigation is listed");
     assert_eq!(shown, format!("{}{}", folder::tilde(&kept), std::path::MAIN_SEPARATOR));
 }
+
+/// Where investigations are kept, moved from the window: to a folder of
+/// their own — made when only its last part is missing — and back to each
+/// project's `research/`, saved in the person's settings each time.
+#[test]
+fn where_investigations_are_kept_is_moved_from_the_window_and_saved() {
+    fn kept_here(folder: &Path) -> Research {
+        Research::kept_with(folder, Box::new(Engines::default()), "test")
+    }
+    fn folder_of(events: &[Event]) -> Option<String> {
+        events.iter().find_map(|e| match e {
+            Event::ResearchList { folder, .. } => Some(folder.clone()),
+            _ => None,
+        })
+    }
+    let read = |file: &Path| -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap() };
+    let scratch = Scratch::new("research-folder");
+    let settings = scratch.root.join("settings.json");
+    let mut session = Session::new(scratch.at("alpha")).making_research_with(kept_here).with_person_settings(settings.clone());
+
+    let kept = scratch.root.join("kept");
+    let typed = kept.display().to_string();
+    let events = session.apply(Command::ResearchFolder { folder: typed.clone() });
+    assert!(kept.is_dir(), "the folder was not made: {:?}", notices(&events));
+    assert!(notices(&events).iter().any(|n| n.starts_with("Made ")), "{:?}", notices(&events));
+    assert_eq!(folder_of(&events), Some(format!("{}{}", folder::tilde(&folder::normalise(&kept)), std::path::MAIN_SEPARATOR)));
+    assert_eq!(read(&settings)["research"]["folder"], typed.as_str());
+
+    // A project opened since keeps them there too.
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    session.apply(Command::ResearchNew {
+        title: "Why is the sky blue?".into(),
+        goal: "Explain the colour.".into(),
+        discipline: proton_research::Discipline::Physics,
+    });
+    assert!(kept.join("why-is-the-sky-blue").join("investigation.json").is_file());
+
+    // A folder whose parent is not there is refused, and nothing moves.
+    let events = session.apply(Command::ResearchFolder { folder: scratch.root.join("no").join("such").display().to_string() });
+    assert!(notices(&events).iter().any(|n| n.contains("no such folder")), "{:?}", notices(&events));
+    assert!(!scratch.root.join("no").exists());
+    assert_eq!(read(&settings)["research"]["folder"], typed.as_str());
+
+    // Nothing: each project's own research/ again, and the setting goes.
+    let events = session.apply(Command::ResearchFolder { folder: String::new() });
+    assert_eq!(folder_of(&events).as_deref(), Some("research/"));
+    assert!(read(&settings)["research"].get("folder").is_none(), "{}", read(&settings));
+}

@@ -701,7 +701,10 @@ step the scientist did not take.
 
 **Nothing runs unread.** What an agent proposes to run waits in the Lab
 under Waiting for you: what it would test and what it expects, who proposed
-it, and the code, coloured, the first lines shown until it is opened. Run in
+it, and the code, coloured, the first lines shown until it is opened. A round
+proposes a test from a hypothesis's author, its reviewer and its verifier, so
+they are shown one card a hypothesis — the newest, the earlier folded under
+it — the best-ranked hypotheses first, five open and the rest folded. Run in
 the sandbox — no network, nothing written outside its own folder, nothing of
 the home folder read — or Turn down. A machine with no sandbox the Lab can
 trust says so in red, and its button says Run without a sandbox. Runs are

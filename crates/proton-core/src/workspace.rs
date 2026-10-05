@@ -1374,6 +1374,11 @@ impl Workspace {
                 events
             }
             Command::ClaudeOpen { session } => self.claude.open(&session),
+            // Where investigations are kept is the window's: the session
+            // answers it for every project at once.
+            Command::ResearchFolder { .. } => {
+                vec![notice("Where investigations are kept is set for the whole window.".into(), NoticeLevel::Warn)]
+            }
             Command::ResearchNew { title, goal, discipline } => self.research().create(&title, &goal, discipline),
             Command::ResearchOpen { slug } => self.research().open(&slug),
             Command::ResearchShow { hypothesis } => self.research().show(hypothesis),
@@ -3385,6 +3390,26 @@ impl Workspace {
     /// The investigations this workspace shows.
     fn research(&self) -> MutexGuard<'_, crate::research::Research> {
         self.research.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Whether the project's own investigations have a round or a run going.
+    /// One the session shares is the session's to ask.
+    pub fn research_busy(&self) -> bool {
+        !self.research_shared && self.research().has_work()
+    }
+
+    /// Everything the Research tab draws, as `Sync` gives it.
+    pub fn research_events(&mut self) -> Vec<Event> {
+        self.research().sync()
+    }
+
+    /// Show the project's own investigations again, in its `research/`,
+    /// rather than the session's.
+    pub fn own_research(&mut self) {
+        if self.research_shared {
+            self.research = Arc::new(Mutex::new(crate::research::Research::new(&self.root().to_path_buf())));
+            self.research_shared = false;
+        }
     }
 
     /// Show the session's investigations, kept in a folder of their own,

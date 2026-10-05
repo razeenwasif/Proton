@@ -764,7 +764,10 @@ hand what a round said to a project in the background, to be dropped with
 the rest of that project's events. Only folders with an `investigation.json`
 are investigations, so one kept beside the person's own work leaves that
 alone. The setting is read when the shell restores the session, so no test
-reads the developer's.
+reads the developer's; `Command::ResearchFolder`, from Change under the
+Research list, is the session's to answer — it refuses while a round or a run
+is going, makes the folder only when its parent is there, writes the setting,
+and moves every project at once.
 
 The split is three ways. `proton-research::supervisor` decides what each
 task is and what an answer means, and starts nothing. `proton-core`'s

@@ -27,6 +27,9 @@ const SEATS = /** @type {Record<string, string>} */ ({
 });
 
 /** How a run ended, in words. */
+/** How many hypotheses' proposals are shown open; the rest are folded. */
+const OPEN_GROUPS = 5;
+
 const ENDED = /** @type {Record<string, string>} */ ({
   running: "Running", done: "Done", failed: "Failed", timedOut: "Out of time", stopped: "Stopped",
 });
@@ -55,8 +58,8 @@ export function createLab(host) {
   if (!found || !foundWork) return null;
   const box = found;
   const work = foundWork;
-  /** @type {{env: Env | null, maker: Maker | null, confirming: boolean, lab: LabEvent | null, run: RunDetail | null, open: Set<string>, scene: string | null}} */
-  const state = { env: null, maker: null, confirming: false, lab: null, run: null, open: new Set(), scene: null };
+  /** @type {{env: Env | null, maker: Maker | null, confirming: boolean, lab: LabEvent | null, run: RunDetail | null, open: Set<string>, unfolded: Set<string>, scene: string | null}} */
+  const state = { env: null, maker: null, confirming: false, lab: null, run: null, open: new Set(), unfolded: new Set(), scene: null };
   /** Whether the Lab's Python comes from PyPI rather than conda-forge. */
   const pip = () => state.maker?.kind === "pip";
   /** Pictures already read, as object URLs, by key. @type {Map<string, string>} */
@@ -244,6 +247,16 @@ export function createLab(host) {
     </div>`;
   }
 
+  /** Bytes as a `data:` URL: the window's policy lets an <img> load those,
+   *  and refuses `blob:` ones. An SVG drawn by an <img> runs no script.
+   *  @param {ArrayBuffer} bytes @param {string} kind @returns {Promise<string>} */
+  const dataUrl = (bytes, kind) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(new Blob([bytes], { type: kind }));
+  });
+
   /** Pictures read through the shell, each once. */
   async function showFigures() {
     for (const img of /** @type {NodeListOf<HTMLImageElement>} */ (work.querySelectorAll("img[data-lab-figure]"))) {
@@ -253,7 +266,7 @@ export function createLab(host) {
         try {
           const bytes = await host.readLab(key);
           const kind = key.toLowerCase().endsWith(".svg") ? "image/svg+xml" : key.toLowerCase().match(/\.jpe?g$/) ? "image/jpeg" : "image/png";
-          url = URL.createObjectURL(new Blob([bytes], { type: kind }));
+          url = await dataUrl(bytes, kind);
           pictures.set(key, url);
         } catch {
           img.replaceWith(Object.assign(document.createElement("p"), { className: "lab-faint", textContent: `${img.alt} could not be read.` }));
@@ -350,8 +363,32 @@ export function createLab(host) {
     // Only a sandboxed run may start unasked, so only a sandbox offers it.
     const auto = lab.sandbox === "none" ? "" : `<label class="lab-auto" title="Only ever in the sandbox; you can still stop any run">
         <input type="checkbox" data-lab-auto${lab.autoRun ? " checked" : ""}> Run what the agents propose without asking, in the sandbox</label>`;
+    // One card a hypothesis — its newest proposal, the earlier ones folded
+    // under it — in the leaderboard's order, as the core sends them; the
+    // first few open and the rest folded, so a round's dozen proposals read
+    // as what to run first.
+    /** @type {Experiment[][]} */
+    const groups = [];
+    for (const e of waiting) {
+      const last = groups[groups.length - 1];
+      if (last && e.hypothesis && last[0].hypothesis === e.hypothesis) last.push(e);
+      else groups.push([e]);
+    }
+    const fold = (/** @type {string} */ key, /** @type {string} */ summary, /** @type {string} */ body, /** @type {string} */ cls) =>
+      `<details class="${cls}" data-lab-fold="${esc(key)}"${state.unfolded.has(key) ? " open" : ""}><summary>${summary}</summary>${body}</details>`;
+    const groupHtml = (/** @type {Experiment[]} */ g) => {
+      const earlier = g.slice(1);
+      return proposalHtml(g[0], lab.sandbox) + (earlier.length
+        ? fold(`earlier:${g[0].hypothesis}`, `${earlier.length} earlier ${earlier.length === 1 ? "proposal" : "proposals"} for ${esc(g[0].hypothesis ?? "")}`,
+          earlier.map((e) => proposalHtml(e, lab.sandbox)).join(""), "lab-earlier")
+        : "");
+    };
+    const rest = groups.slice(OPEN_GROUPS);
     const proposals = waiting.length
-      ? `<header>Waiting for you <span class="rs-count">${waiting.length}</span></header>${fence}${waiting.map((e) => proposalHtml(e, lab.sandbox)).join("")}`
+      ? `<header>Waiting for you <span class="rs-count">${waiting.length}</span>` +
+        (groups.length < waiting.length ? ` <span class="lab-faint">for ${groups.length} ${groups.length === 1 ? "hypothesis" : "hypotheses"}</span>` : "") +
+        `</header>${fence}${groups.slice(0, OPEN_GROUPS).map(groupHtml).join("")}` +
+        (rest.length ? fold("more", `${rest.length} more, for hypotheses ranked lower`, rest.map(groupHtml).join(""), "lab-more-groups") : "")
       : "";
     const runs = lab.runs.length
       ? `<header>Runs</header><div class="lab-runs">${lab.runs.map(runRow).join("")}</div>`
@@ -366,6 +403,15 @@ export function createLab(host) {
     const box = /** @type {HTMLInputElement} */ (e.target);
     if (box.matches?.("[data-lab-auto]")) host.dispatch({ type: "researchAutoRun", enabled: box.checked });
   });
+
+  // A fold opened stays open when what is waiting is drawn again.
+  work.addEventListener("toggle", (e) => {
+    const fold = /** @type {HTMLDetailsElement} */ (e.target);
+    const key = fold.dataset?.labFold;
+    if (!key) return;
+    if (fold.open) state.unfolded.add(key);
+    else state.unfolded.delete(key);
+  }, true);
 
   work.addEventListener("click", (e) => {
     const target = /** @type {HTMLElement} */ (e.target);

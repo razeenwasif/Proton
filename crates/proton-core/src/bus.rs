@@ -323,8 +323,14 @@ pub enum Command {
         url: String,
     },
     /* ── research ─────────────────────────────────────────────────── */
-    /// Start an investigation, in a folder of its own under the project's
-    /// `research/`.
+    /// Keep the investigations in this folder, for every project — typed as
+    /// a path is, `~` and all — or, given nothing, in each project's own
+    /// `research/` again. Saved in the person's own settings.
+    ResearchFolder {
+        folder: String,
+    },
+    /// Start an investigation, in a folder of its own where investigations
+    /// are kept.
     ResearchNew {
         title: String,
         goal: String,

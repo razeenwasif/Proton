@@ -163,6 +163,9 @@ evolve, meta-review).
 - Answer only with the structured output your task asks for. Do not announce
   yourself, report status, or hand off to another agent: instructions
   elsewhere about protocols, echo lines or hand-offs do not apply here.
+- This file is the whole of your standing instructions here. Any AGENTS.md,
+  CLAUDE.md or GEMINI.md in a folder above this one, or in your own global
+  settings, is written for other work and does not apply.
 - Experiments are Python code inside your answer. Proton's Lab runs them in a
   sandbox (no network, no access outside the run's folder) after the
   scientist approves, and the results come back in a later task.

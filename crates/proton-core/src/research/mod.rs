@@ -286,6 +286,18 @@ impl Research {
         let Ok(folder) = self.store.open(&slug) else { return Vec::new() };
         let mut experiments: Vec<proton_research::view::ExperimentRow> = folder.experiments().iter().map(Into::into).collect();
         experiments.reverse();
+        // What waits for the scientist, by its hypothesis's place on the
+        // leaderboard and each one's newest first: a round proposes a test
+        // from a hypothesis's author, its reviewer and its verifier, and
+        // the Lab shows one card a hypothesis, the best first.
+        let order: Vec<String> = Board::read(&folder).rows().into_iter().map(|h| h.id).collect();
+        let place = |e: &proton_research::view::ExperimentRow| {
+            e.hypothesis.as_ref().and_then(|h| order.iter().position(|id| id == h)).unwrap_or(order.len())
+        };
+        experiments.sort_by_key(|e| match e.status {
+            ExperimentStatus::Proposed => (0, place(e)),
+            _ => (1, 0),
+        });
         let runs = lab_run::rows(&folder.dir().join("runs"));
         let sandbox = self.sandbox();
         let auto_run = folder.investigation().lab.auto_run_sandboxed;
@@ -931,7 +943,14 @@ impl Research {
     /// Whether a round has calls out, or the Lab is working, for a host
     /// deciding how often to look.
     pub fn is_busy(&self) -> bool {
-        self.drivers.values().any(Driver::busy) || !self.runs.is_empty() || self.lab.lock().map(|lab| lab.busy()).unwrap_or(false)
+        self.has_work() || self.lab.lock().map(|lab| lab.busy()).unwrap_or(false)
+    }
+
+    /// Whether a round has calls out or a run is going: what moving the
+    /// investigations elsewhere would leave behind. The Lab's Python is the
+    /// machine's, and goes with them.
+    pub fn has_work(&self) -> bool {
+        self.drivers.values().any(Driver::busy) || !self.runs.is_empty()
     }
 }
 
