@@ -53,6 +53,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-mcp/` | The library, served over MCP to any client you already pay for |
 | `crates/proton-data/` | Notebooks and the Jupyter kernel behind Data mode |
 | `crates/proton-research/` | Research's investigations — the files each is, and the co-scientist round that grows it |
+| `crates/proton-literature/` | Research's literature — arXiv, Semantic Scholar and OpenAlex asked politely, citations checked, open PDFs kept |
 | `crates/proton-lab/` | Research's Lab — the Python its code runs in, made with your say-so |
 | `crates/proton-vcs/` | The gutter, and what git considers changed |
 | `crates/proton-dap/` | The debug-adapter client |

@@ -4445,6 +4445,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-literature"
+version = "0.0.1"
+dependencies = [
+ "proton-research",
+ "quick-xml",
+ "serde_json",
+ "sha2",
+ "ureq",
+]
+
+[[package]]
 name = "proton-lsp"
 version = "0.0.1"
 dependencies = [

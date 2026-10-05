@@ -85,6 +85,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-agent` / `proton-council` | Model conversations and tools / multi-model debates |
 | `proton-claude` | Claude Code, Codex and Antigravity as engines: interactive, and unattended with structured answers |
 | `proton-research` | Investigations as files, and the co-scientist round as a pure state machine |
+| `proton-literature` | The literature's sources — arXiv, Semantic Scholar, OpenAlex, Crossref — each host asked no oftener than it asks, on a worker the core polls; open PDFs downloaded, capped and checked |
 | `proton-lab` | The Lab's Python — a conda environment, or a venv where there is no conda — planned, made and removed on the scientist's say-so, and the jobs that run for it |
 | `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
 | `proton-data` | Notebook documents and kernel integration |

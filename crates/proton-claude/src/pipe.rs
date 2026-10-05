@@ -6,7 +6,7 @@
 //! stream-json, `codex app-server` and Gemini's ACP mode with JSON-RPC — so
 //! what is here is only the plumbing they share.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -48,37 +48,85 @@ pub fn home() -> Option<PathBuf> {
 pub fn login_path() -> Option<&'static str> {
     static PATH: OnceLock<Option<String>> = OnceLock::new();
     PATH.get_or_init(|| {
-        if cfg!(windows) {
-            return None;
-        }
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-        // Interactive as well as login, because that is where nvm and its
-        // kind put themselves; the markers keep whatever the rc files print
-        // out of the answer.
-        let mut child = Command::new(shell)
-            .args(["-i", "-l", "-c", "printf '\\n__PROTON_PATH__%s__PROTON_END__\\n' \"$PATH\""])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        let mut stdout = child.stdout.take()?;
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut text = String::new();
-            let _ = stdout.read_to_string(&mut text);
-            let _ = tx.send(text);
-        });
-        let text = rx.recv_timeout(Duration::from_secs(3)).ok();
-        let _ = child.kill();
-        let _ = child.wait();
-        let text = text?;
+        let text = ask_login_shell("printf '\\n__PROTON_PATH__%s__PROTON_END__\\n' \"$PATH\"")?;
         let start = text.find("__PROTON_PATH__")? + "__PROTON_PATH__".len();
         let end = text[start..].find("__PROTON_END__")? + start;
         let path = text[start..end].trim();
         (!path.is_empty()).then(|| path.to_string())
     })
     .as_deref()
+}
+
+/// What the user's login shell prints for `script`, or nothing if it has
+/// not answered in three seconds. Interactive as well as login, because that
+/// is where nvm and its kind put themselves; the caller's markers keep
+/// whatever the rc files print out of the answer.
+fn ask_login_shell(script: &str) -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let mut child = Command::new(shell)
+        .args(["-i", "-l", "-c", script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stdout.read_to_string(&mut text);
+        let _ = tx.send(text);
+    });
+    let text = rx.recv_timeout(Duration::from_secs(3)).ok();
+    let _ = child.kill();
+    let _ = child.wait();
+    text
+}
+
+/// A variable's name as a shell would take it, and nothing else.
+fn is_variable(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c == '_' || c.is_ascii_alphabetic()) && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
+
+/// The script that prints each of `names` between markers of its own.
+fn vars_script(names: &[&str]) -> String {
+    names
+        .iter()
+        .filter(|n| is_variable(n))
+        .map(|n| format!("printf '\\n__PROTON_VAR_{n}__%s__PROTON_END__\\n' \"${n}\""))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// The values of `names` in what `vars_script` printed: those set and not
+/// empty.
+fn read_vars(text: &str, names: &[&str]) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for name in names.iter().filter(|n| is_variable(n)) {
+        let marker = format!("__PROTON_VAR_{name}__");
+        let Some(start) = text.find(&marker).map(|i| i + marker.len()) else { continue };
+        let Some(end) = text[start..].find("__PROTON_END__").map(|i| i + start) else { continue };
+        let value = text[start..end].trim();
+        if !value.is_empty() {
+            out.insert(name.to_string(), value.to_string());
+        }
+    }
+    out
+}
+
+/// What the login shell has for each of `names` — the keys a person keeps
+/// in their profile, which an app opened from the Dock does not inherit.
+/// Asked each time, so a key put there since is found; never written down.
+pub fn login_vars(names: &[&str]) -> BTreeMap<String, String> {
+    let script = vars_script(names);
+    if script.is_empty() {
+        return BTreeMap::new();
+    }
+    ask_login_shell(&script).map(|text| read_vars(&text, names)).unwrap_or_default()
 }
 
 /// Where a program is: the variable that overrides it if that is set, then
@@ -252,5 +300,35 @@ impl Drop for Pipe {
                 let _ = child.wait();
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variables_are_asked_for_by_name_alone_and_read_between_their_markers() {
+        let script = vars_script(&["SEMANTIC_SCHOLAR_API_KEY", "X; rm -rf ~", "$(whoami)", "", "_OK2"]);
+        assert_eq!(
+            script,
+            "printf '\\n__PROTON_VAR_SEMANTIC_SCHOLAR_API_KEY__%s__PROTON_END__\\n' \"$SEMANTIC_SCHOLAR_API_KEY\"; \
+             printf '\\n__PROTON_VAR__OK2__%s__PROTON_END__\\n' \"$_OK2\"",
+            "a name a shell would read as anything but a name is not asked for"
+        );
+        let printed = "Welcome back!\n\n__PROTON_VAR_SEMANTIC_SCHOLAR_API_KEY__ s2-key __PROTON_END__\n\n__PROTON_VAR_OPENALEX_API_KEY____PROTON_END__\nbye\n";
+        let vars = read_vars(printed, &["SEMANTIC_SCHOLAR_API_KEY", "OPENALEX_API_KEY", "CROSSREF_MAILTO"]);
+        assert_eq!(vars.len(), 1, "an empty one and a missing one are none: {:?}", vars.keys());
+        assert_eq!(vars["SEMANTIC_SCHOLAR_API_KEY"], "s2-key");
+        assert!(login_vars(&["not a name"]).is_empty(), "nothing asked, nothing run");
+    }
+
+    /// Asks the real login shell; run by hand.
+    #[test]
+    #[ignore]
+    fn the_login_shell_is_asked() {
+        let vars = login_vars(&["HOME", "PROTON_NO_SUCH_VARIABLE"]);
+        assert!(vars.get("HOME").is_some_and(|h| !h.is_empty()), "{:?}", vars.keys());
+        assert!(!vars.contains_key("PROTON_NO_SUCH_VARIABLE"));
     }
 }
