@@ -197,6 +197,67 @@ impl Default for LabPolicy {
     }
 }
 
+/// A scholarly source the literature is searched in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub enum LiteratureSource {
+    /// Physics, mathematics and computer science preprints, with their PDFs.
+    Arxiv,
+    /// Every field, with citation counts and who cites whom.
+    SemanticScholar,
+    /// Everything, with where an open copy of each paper is.
+    OpenAlex,
+}
+
+impl LiteratureSource {
+    pub const ALL: [LiteratureSource; 3] = [LiteratureSource::Arxiv, LiteratureSource::SemanticScholar, LiteratureSource::OpenAlex];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            LiteratureSource::Arxiv => "arXiv",
+            LiteratureSource::SemanticScholar => "Semantic Scholar",
+            LiteratureSource::OpenAlex => "OpenAlex",
+        }
+    }
+}
+
+/// What the literature may do on its own: search each round with the team's
+/// queries, in which sources, and how much.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LiteraturePolicy {
+    /// Search the literature at the start of each round.
+    pub enabled: bool,
+    pub sources: Vec<LiteratureSource>,
+    /// The queries a round runs, at most.
+    pub queries: u32,
+    /// The results asked of each source for each query.
+    pub per_query: u32,
+    /// The papers a round adds, at most.
+    pub papers: u32,
+    /// The largest PDF kept, in megabytes.
+    pub pdf_mb: u32,
+    /// How long the hypotheses wait for the literature, in seconds.
+    pub wait_s: u32,
+    /// Check the DOIs and arXiv ids the team cites.
+    pub check: bool,
+}
+
+impl Default for LiteraturePolicy {
+    fn default() -> LiteraturePolicy {
+        LiteraturePolicy { enabled: true, sources: LiteratureSource::ALL.to_vec(), queries: 3, per_query: 8, papers: 6, pdf_mb: 40, wait_s: 120, check: true }
+    }
+}
+
+impl LiteraturePolicy {
+    /// Off: what an investigation made before there was a literature has,
+    /// so it never starts asking third parties about its topic on its own.
+    pub fn off() -> LiteraturePolicy {
+        LiteraturePolicy { enabled: false, ..LiteraturePolicy::default() }
+    }
+}
+
 /// `investigation.json`: how an investigation is set up.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Investigation {
@@ -210,6 +271,8 @@ pub struct Investigation {
     pub budget: Budget,
     #[serde(default)]
     pub lab: LabPolicy,
+    #[serde(default = "LiteraturePolicy::off")]
+    pub literature: LiteraturePolicy,
 }
 
 /// The format version of `investigation.json`.
@@ -231,6 +294,7 @@ impl Investigation {
             ],
             budget: Budget::default(),
             lab: LabPolicy::default(),
+            literature: LiteraturePolicy::default(),
         }
     }
 
@@ -367,6 +431,109 @@ pub struct Experiment {
     pub code: String,
 }
 
+/// Whether a paper's full text can be had freely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "PaperAccess")]
+#[serde(rename_all = "lowercase")]
+pub enum Access {
+    /// An open copy is to be had.
+    Open,
+    /// Behind a paywall, as far as the sources know.
+    Closed,
+    #[default]
+    Unknown,
+}
+
+/// Who added a paper to the literature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "PaperAddedBy")]
+#[serde(rename_all = "lowercase")]
+pub enum AddedBy {
+    /// A round's search, with the team's queries.
+    #[default]
+    Round,
+    /// The scientist.
+    Scientist,
+}
+
+/// The most authors a paper keeps by name; the rest are counted.
+pub const AUTHORS: usize = 50;
+
+/// The longest abstract kept, in characters.
+pub const ABSTRACT: usize = 8_000;
+
+/// What the sources say about a paper.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Record {
+    pub title: String,
+    pub authors: Vec<String>,
+    /// The authors past [`AUTHORS`], counted rather than kept.
+    #[serde(default)]
+    pub authors_more: u32,
+    pub year: Option<u32>,
+    pub venue: Option<String>,
+    pub doi: Option<String>,
+    /// Without its version: `1706.03762`.
+    pub arxiv: Option<String>,
+    /// Semantic Scholar's id for it.
+    pub s2: Option<String>,
+    /// OpenAlex's: `W2741809807`.
+    pub openalex: Option<String>,
+    #[serde(rename = "abstract")]
+    pub abstract_: String,
+    /// Semantic Scholar's one-line summary, when it has one.
+    pub tldr: String,
+    /// How many papers cite it, as the most generous source counts.
+    pub citations: Option<u32>,
+    pub access: Access,
+    /// Where an open copy of its PDF is.
+    pub pdf_url: Option<String>,
+    /// A page about it: arXiv's abstract page, a publisher's.
+    pub url: Option<String>,
+    /// The sources that found it.
+    pub sources: Vec<LiteratureSource>,
+}
+
+impl Record {
+    /// Within what a paper keeps: [`AUTHORS`] by name, [`ABSTRACT`] characters.
+    pub fn capped(mut self) -> Record {
+        if self.authors.len() > AUTHORS {
+            self.authors_more += (self.authors.len() - AUTHORS) as u32;
+            self.authors.truncate(AUTHORS);
+        }
+        if self.abstract_.chars().count() > ABSTRACT {
+            self.abstract_ = self.abstract_.chars().take(ABSTRACT).collect::<String>() + "…";
+        }
+        self
+    }
+}
+
+/// A paper the investigation keeps: `literature/P003.md`, with `P003.pdf`
+/// beside it when an open copy was kept or the scientist put one there.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Paper {
+    pub id: String,
+    pub record: Record,
+    /// When it was added, in seconds since the epoch.
+    pub added: u64,
+    /// The round whose search found it; none when the scientist added it.
+    pub round: Option<u32>,
+    pub by: AddedBy,
+    /// The queries that found it.
+    pub queries: Vec<String>,
+    /// Where its PDF was downloaded from, and what that was: kept so a copy
+    /// can be checked against it.
+    pub pdf_from: Option<String>,
+    pub pdf_sha256: Option<String>,
+    pub pdf_bytes: Option<u64>,
+    /// Why there is no PDF, when there is none.
+    pub pdf_note: Option<String>,
+    /// Whether a PDF is beside it: read from the folder, never written.
+    pub has_pdf: bool,
+    /// Sections someone added by hand, kept as they were.
+    pub extra: Vec<(String, String)>,
+}
+
 /// The id after the highest of `prefix`'s: `H001`, `H002`… with at least
 /// three digits, more when it needs them.
 pub fn next_id<'a>(prefix: &str, existing: impl IntoIterator<Item = &'a str>) -> String {
@@ -400,6 +567,28 @@ mod tests {
         assert_eq!(i.seat_for(Role::Sandbox).map(|s| s.seat), Some(Seat::Antigravity));
         let json = serde_json::to_string(&i).unwrap();
         assert_eq!(serde_json::from_str::<Investigation>(&json).unwrap(), i);
+    }
+
+    #[test]
+    fn an_investigation_from_before_the_literature_does_not_search_on_its_own() {
+        let new = Investigation::new("Primes", Discipline::Mathematics, 1);
+        assert!(new.literature.enabled && new.literature.sources == LiteratureSource::ALL, "a new one searches");
+        let mut old = serde_json::to_value(&new).unwrap();
+        old.as_object_mut().unwrap().remove("literature");
+        let old: Investigation = serde_json::from_value(old).unwrap();
+        assert_eq!(old.literature, LiteraturePolicy::off());
+        // A policy edited down to one field keeps the others' defaults.
+        let mut edited = serde_json::to_value(&new).unwrap();
+        edited["literature"] = serde_json::json!({ "enabled": true, "sources": ["arxiv"] });
+        let edited: Investigation = serde_json::from_value(edited).unwrap();
+        assert_eq!((edited.literature.sources.as_slice(), edited.literature.papers), ([LiteratureSource::Arxiv].as_slice(), 6));
+    }
+
+    #[test]
+    fn a_record_keeps_fifty_authors_and_eight_thousand_characters() {
+        let record = Record { authors: (0..60).map(|i| format!("A{i}")).collect(), abstract_: "x".repeat(9_000), ..Record::default() }.capped();
+        assert_eq!((record.authors.len(), record.authors_more), (50, 10));
+        assert_eq!(record.abstract_.chars().count(), ABSTRACT + 1, "and an ellipsis");
     }
 
     #[test]

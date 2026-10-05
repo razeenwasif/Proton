@@ -932,7 +932,7 @@ bearing rule of the entire project:
 | Game | Engine-native scene files |
 | Video | `.edl` + sidecar `.srt` |
 | Data | `.ipynb` + `.sql` |
-| Research | `research/<slug>/` — Markdown with TOML front matter, `tournament.jsonl` |
+| Research | `research/<slug>/` — Markdown with TOML front matter, `tournament.jsonl`; papers as `literature/P003.md`, their PDFs beside them and out of Git |
 
 It is not tidiness. It is what lets the agent edit a scene or a timeline by
 writing a patch instead of driving a GUI, and what makes any of it reviewable.

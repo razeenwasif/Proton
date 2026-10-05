@@ -13,6 +13,8 @@
 //! reviews/H007.1.md    one review each
 //! tournament.jsonl     one match a line
 //! experiments/E003/    proposal.md and main.py
+//! literature/P003.md   a paper the team found or the scientist added, and
+//!                      P003.pdf beside it when an open copy was kept (not committed)
 //! runs/R005/           what running an experiment gave
 //! rounds/round-002.md  what each round did
 //! tasks/T0031.json     every agent call, for provenance
@@ -22,7 +24,11 @@
 use std::path::{Path, PathBuf};
 
 use crate::markdown;
-use crate::model::{next_id, Discipline, Experiment, Hypothesis, Investigation, Match, Review};
+use crate::model::{next_id, Discipline, Experiment, Hypothesis, Investigation, Match, Paper, Review};
+
+/// What an investigation keeps out of Git: its machine state, what runs
+/// write, and papers' PDFs — megabytes each, and other people's copyright.
+pub const IGNORED: &str = ".investigation/\nruns/*/out/\nliterature/*.pdf\n";
 
 /// Write a file whole or not at all: to a neighbour, then renamed over it.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -120,12 +126,12 @@ impl Store {
             ("VERDICT.md", "# Verdicts\n\n_The Lab Engineer's verifications, newest last._\n".into()),
             ("SANDBOX_LOG.md", "# Sandbox log\n\n_Lab runs and what they showed, newest last._\n".into()),
             ("feedback.md", "# Feedback\n\n_What you told the team, newest last._\n".into()),
-            (".gitignore", ".investigation/\nruns/*/out/\n".into()),
+            (".gitignore", IGNORED.into()),
         ];
         for (name, text) in files {
             atomic_write(&dir.join(name), text.as_bytes())?;
         }
-        for sub in ["hypotheses", "reviews", "experiments", "runs", "rounds", "tasks", ".investigation"] {
+        for sub in ["hypotheses", "reviews", "experiments", "literature", "runs", "rounds", "tasks", ".investigation"] {
             std::fs::create_dir_all(dir.join(sub)).map_err(|e| format!("{}: {e}", dir.join(sub).display()))?;
         }
         let mut folder = Folder { dir, slug: name, investigation: investigation.clone() };
@@ -171,6 +177,10 @@ evolve, meta-review).
   scientist approves, and the results come back in a later task.
 - Cite only sources you have actually checked; give a URL, DOI or arXiv id,
   and say plainly when a reference is from memory and unverified.
+- `literature/` holds the papers the team has gathered: `P003.md` is what the
+  sources say about one, with its abstract, and `P003.pdf` is its text when an
+  open copy was kept. Cite a paper as P003, and a page of it as
+  [[literature/P003.pdf p. 4]].
 
 `README.md` is the scientist's brief and outranks everything else here.
 ";
@@ -255,6 +265,50 @@ impl Folder {
     /// read is passed over.
     pub fn matches(&self) -> Vec<Match> {
         self.read("tournament.jsonl").lines().filter_map(|line| serde_json::from_str(line).ok()).collect()
+    }
+
+    /// The papers in `literature/`, each knowing whether its PDF is beside it.
+    pub fn papers(&self) -> Vec<Paper> {
+        let mut papers = self.each("literature", markdown::parse_paper);
+        for paper in &mut papers {
+            paper.has_pdf = self.dir.join("literature").join(format!("{}.pdf", paper.id)).is_file();
+        }
+        papers
+    }
+
+    pub fn write_paper(&self, p: &Paper) -> Result<(), String> {
+        atomic_write(&self.dir.join("literature").join(format!("{}.md", p.id)), markdown::render_paper(p).as_bytes())
+    }
+
+    /// The next paper's id, counting a PDF left on its own too, so that a
+    /// new paper never takes over somebody's file.
+    pub fn next_paper(&self) -> String {
+        let stems: Vec<String> = std::fs::read_dir(self.dir.join("literature"))
+            .map(|entries| entries.flatten().filter_map(|e| e.path().file_stem()?.to_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        next_id("P", stems.iter().map(String::as_str))
+    }
+
+    /// Where a paper's PDF is, or would be: only for an id that is a
+    /// paper's, so a name from elsewhere cannot point outside the folder.
+    pub fn paper_pdf(&self, id: &str) -> Result<PathBuf, String> {
+        let digits = id.strip_prefix('P').unwrap_or("");
+        if digits.len() < 3 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!("{id}: not a paper"));
+        }
+        Ok(self.dir.join("literature").join(format!("{id}.pdf")))
+    }
+
+    /// Make sure `.gitignore` has `line`, for an investigation made before it
+    /// was one of [`IGNORED`]'s. Whatever else is there is kept.
+    pub fn ensure_ignored(&self, line: &str) -> Result<(), String> {
+        let path = self.dir.join(".gitignore");
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        if text.lines().any(|l| l.trim() == line) {
+            return Ok(());
+        }
+        let joined = if text.is_empty() || text.ends_with('\n') { format!("{text}{line}\n") } else { format!("{text}\n{line}\n") };
+        atomic_write(&path, joined.as_bytes())
     }
 
     pub fn experiments(&self) -> Vec<Experiment> {
@@ -391,7 +445,8 @@ mod tests {
         assert_eq!(folder.slug(), "why-is-the-sky-blue");
         assert!(folder.brief().contains("## Goal\n\nExplain the colour of the daytime sky."));
         assert!(folder.dir().join("AGENTS.md").exists() && folder.dir().join("hypotheses").is_dir());
-        assert_eq!(std::fs::read_to_string(folder.dir().join(".gitignore")).unwrap(), ".investigation/\nruns/*/out/\n");
+        assert_eq!(std::fs::read_to_string(folder.dir().join(".gitignore")).unwrap(), ".investigation/\nruns/*/out/\nliterature/*.pdf\n");
+        assert!(folder.dir().join("literature").is_dir());
         // The same title again gets a folder of its own.
         let again = store.create("Why is the sky blue?", "", Discipline::Physics, 200).unwrap();
         assert_eq!(again.slug(), "why-is-the-sky-blue-2");
@@ -435,6 +490,33 @@ mod tests {
         // A hypothesis file broken by hand does not hide the others.
         std::fs::write(folder.dir().join("hypotheses").join("H009.md"), "no front matter").unwrap();
         assert_eq!(folder.hypotheses().len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn papers_are_numbered_past_any_pdf_and_their_pdfs_kept_out_of_git() {
+        let dir = root("papers");
+        let folder = Store::new(&dir).create("Sky", "", Discipline::Physics, 1).unwrap();
+        assert_eq!(folder.next_paper(), "P001");
+        let paper = |id: &str| Paper { id: id.into(), record: crate::model::Record { title: format!("Paper {id}"), ..Default::default() }, ..Default::default() };
+        folder.write_paper(&paper("P001")).unwrap();
+        // A PDF the scientist dropped in on its own still takes its number.
+        std::fs::write(folder.dir().join("literature").join("P002.pdf"), b"%PDF-1.4").unwrap();
+        assert_eq!(folder.next_paper(), "P003");
+        folder.write_paper(&paper("P002")).unwrap();
+        let papers = folder.papers();
+        assert_eq!(papers.iter().map(|p| (p.id.as_str(), p.has_pdf)).collect::<Vec<_>>(), [("P001", false), ("P002", true)]);
+        assert!(folder.paper_pdf("P002").unwrap().ends_with("literature/P002.pdf"));
+        for bad in ["../x", "P1", "P00a", "H001", ""] {
+            assert!(folder.paper_pdf(bad).is_err(), "{bad}");
+        }
+
+        // An investigation from before: its .gitignore gains the line once,
+        // and keeps what somebody added to it.
+        std::fs::write(folder.dir().join(".gitignore"), ".investigation/\nruns/*/out/\nnotes/private").unwrap();
+        folder.ensure_ignored("literature/*.pdf").unwrap();
+        folder.ensure_ignored("literature/*.pdf").unwrap();
+        assert_eq!(std::fs::read_to_string(folder.dir().join(".gitignore")).unwrap(), ".investigation/\nruns/*/out/\nnotes/private\nliterature/*.pdf\n");
         let _ = std::fs::remove_dir_all(dir);
     }
 

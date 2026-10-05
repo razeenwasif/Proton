@@ -20,8 +20,10 @@
 //! own AGENTS.md: Claude Code the Principal Investigator, Codex the Lab
 //! Engineer, Antigravity the Validation Sandbox.
 
+pub mod cite;
 pub mod classify;
 pub mod elo;
+pub mod literature;
 pub mod lock;
 pub mod markdown;
 pub mod model;
@@ -33,5 +35,5 @@ pub mod store;
 pub mod supervisor;
 pub mod view;
 
-pub use model::{Author, Discipline, Experiment, Family, Hypothesis, Investigation, Match, Review, Role, Seat};
+pub use model::{Author, Discipline, Experiment, Family, Hypothesis, Investigation, LiteratureSource, Match, Paper, Record, Review, Role, Seat};
 pub use store::{Folder, Store};

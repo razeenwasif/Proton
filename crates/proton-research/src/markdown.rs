@@ -1,4 +1,4 @@
-//! Hypotheses, reviews and experiments as files a person can read and edit:
+//! Hypotheses, reviews, experiments and papers as files a person can read and edit:
 //! TOML front matter between `+++` lines, then the text under `##` headings.
 //!
 //! What is written is read back the same, and what someone adds by hand —
@@ -6,7 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Author, Experiment, ExperimentStatus, Hypothesis, HypothesisStatus, Review, ReviewKind, Verdict};
+use crate::model::{
+    Access, AddedBy, Author, Experiment, ExperimentStatus, Hypothesis, HypothesisStatus, LiteratureSource, Paper, Record, Review, ReviewKind, Verdict,
+};
 
 #[derive(Serialize, Deserialize)]
 struct HypothesisFront {
@@ -48,6 +50,58 @@ struct ExperimentFront {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     run: Option<String>,
     proposer: Author,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PaperFront {
+    id: String,
+    title: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    authors: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    authors_more: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    year: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    venue: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    doi: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    arxiv: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    s2: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    openalex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    citations: Option<u32>,
+    #[serde(default)]
+    access: Access,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pdf_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sources: Vec<LiteratureSource>,
+    #[serde(default)]
+    added: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    round: Option<u32>,
+    #[serde(default)]
+    by: AddedBy,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    queries: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pdf_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pdf_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pdf_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pdf_note: Option<String>,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// Front matter and body.
@@ -240,10 +294,138 @@ pub fn parse_experiment(proposal: &str, code: &str) -> Result<Experiment, String
     })
 }
 
+/// A paper's `literature/P003.md`: what the sources said about it, its
+/// abstract, and whatever notes someone has kept on it.
+pub fn render_paper(p: &Paper) -> String {
+    let r = &p.record;
+    let mut out = front(&PaperFront {
+        id: p.id.clone(),
+        title: r.title.clone(),
+        authors: r.authors.clone(),
+        authors_more: r.authors_more,
+        year: r.year,
+        venue: r.venue.clone(),
+        doi: r.doi.clone(),
+        arxiv: r.arxiv.clone(),
+        s2: r.s2.clone(),
+        openalex: r.openalex.clone(),
+        citations: r.citations,
+        access: r.access,
+        url: r.url.clone(),
+        pdf_url: r.pdf_url.clone(),
+        sources: r.sources.clone(),
+        added: p.added,
+        round: p.round,
+        by: p.by,
+        queries: p.queries.clone(),
+        pdf_from: p.pdf_from.clone(),
+        pdf_sha256: p.pdf_sha256.clone(),
+        pdf_bytes: p.pdf_bytes,
+        pdf_note: p.pdf_note.clone(),
+    });
+    out.push_str(&format!("\n# {}: {}\n", p.id, r.title));
+    section(&mut out, "Abstract", &r.abstract_);
+    if !r.tldr.trim().is_empty() {
+        section(&mut out, "TL;DR", &r.tldr);
+    }
+    for (heading, text) in &p.extra {
+        section(&mut out, heading, text);
+    }
+    out
+}
+
+pub fn parse_paper(text: &str) -> Result<Paper, String> {
+    let (front, body) = split(text)?;
+    let front: PaperFront = toml::from_str(front).map_err(|e| e.to_string())?;
+    let mut sections = sections(body);
+    let abstract_ = take(&mut sections, "Abstract");
+    let tldr = take(&mut sections, "TL;DR");
+    Ok(Paper {
+        record: Record {
+            title: front.title,
+            authors: front.authors,
+            authors_more: front.authors_more,
+            year: front.year,
+            venue: front.venue,
+            doi: front.doi,
+            arxiv: front.arxiv,
+            s2: front.s2,
+            openalex: front.openalex,
+            abstract_,
+            tldr,
+            citations: front.citations,
+            access: front.access,
+            pdf_url: front.pdf_url,
+            url: front.url,
+            sources: front.sources,
+        },
+        id: front.id,
+        added: front.added,
+        round: front.round,
+        by: front.by,
+        queries: front.queries,
+        pdf_from: front.pdf_from,
+        pdf_sha256: front.pdf_sha256,
+        pdf_bytes: front.pdf_bytes,
+        pdf_note: front.pdf_note,
+        has_pdf: false,
+        extra: sections,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::Seat;
+
+    fn paper() -> Paper {
+        Paper {
+            id: "P003".into(),
+            record: Record {
+                title: "Colorimetric and spectroradiometric characteristics of \"clear\" skylight".into(),
+                authors: vec!["Javier Hernández-Andrés".into(), "Javier Romero".into(), "Raymond L. Lee".into()],
+                authors_more: 0,
+                year: Some(2001),
+                venue: Some("J. Opt. Soc. Am. A".into()),
+                doi: Some("10.1364/JOSAA.18.000412".into()),
+                arxiv: None,
+                s2: Some("a1b2c3".into()),
+                openalex: Some("W2001234567".into()),
+                abstract_: "We measured the spectra of clear skylight.\n\nTheir chromaticities lie near the Planckian locus.".into(),
+                tldr: "Clear skylight is bluish-white, not violet.".into(),
+                citations: Some(212),
+                access: Access::Closed,
+                pdf_url: None,
+                url: Some("https://doi.org/10.1364/JOSAA.18.000412".into()),
+                sources: vec![LiteratureSource::SemanticScholar, LiteratureSource::OpenAlex],
+            },
+            added: 1_791_200_000,
+            round: Some(2),
+            by: AddedBy::Round,
+            queries: vec!["clear sky chromaticity spectroradiometer".into()],
+            pdf_from: None,
+            pdf_sha256: None,
+            pdf_bytes: None,
+            pdf_note: Some("Behind a paywall: put a copy beside it as P003.pdf.".into()),
+            has_pdf: false,
+            extra: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_paper_reads_back_as_it_was_written_and_keeps_its_notes() {
+        let p = paper();
+        let text = render_paper(&p);
+        assert!(text.starts_with("+++\nid = \"P003\""), "{text}");
+        assert!(text.contains("\n# P003: Colorimetric") && text.contains("\n## Abstract\n\nWe measured") && text.contains("\n## TL;DR\n"), "{text}");
+        assert_eq!(parse_paper(&text).unwrap(), p);
+        assert_eq!(render_paper(&parse_paper(&text).unwrap()), text, "written twice, the same file");
+        let noted = parse_paper(&(text + "\n## My notes\n\nCompare with MODTRAN.\n")).unwrap();
+        assert_eq!(noted.extra, vec![("My notes".to_string(), "Compare with MODTRAN.".to_string())]);
+        // A paper with nothing but a title still reads.
+        let bare = Paper { id: "P001".into(), record: Record { title: "Untitled".into(), ..Record::default() }, ..Paper::default() };
+        assert_eq!(parse_paper(&render_paper(&bare)).unwrap(), bare);
+    }
 
     fn hypothesis() -> Hypothesis {
         Hypothesis {

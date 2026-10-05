@@ -5,8 +5,13 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::cite::{self, Ident};
 use crate::elo::{self, Rating};
-use crate::model::{Author, Discipline, Experiment, ExperimentStatus, Family, Hypothesis, HypothesisStatus, Match, Review, ReviewKind, Role, Seat, Verdict};
+use crate::literature;
+use crate::model::{
+    Access, AddedBy, Author, Discipline, Experiment, ExperimentStatus, Family, Hypothesis, HypothesisStatus, LiteratureSource, Match, Paper, Review,
+    ReviewKind, Role, Seat, Verdict,
+};
 use crate::proximity::{Index, DUPLICATE};
 use crate::store::Folder;
 
@@ -135,6 +140,96 @@ impl From<&Experiment> for ExperimentRow {
     }
 }
 
+/// A paper in the literature, as the Literature tab lists it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct PaperRow {
+    pub id: String,
+    pub title: String,
+    /// The authors as a reference names them: `Lee`, `Lee and Romero`,
+    /// `Hernández-Andrés et al.`
+    pub authors: String,
+    pub year: Option<u32>,
+    pub venue: Option<String>,
+    pub access: Access,
+    /// Whether its PDF is beside it.
+    pub has_pdf: bool,
+    pub by: AddedBy,
+    pub round: Option<u32>,
+    /// How many of the team's reviews and hypotheses cite it.
+    pub cited: u32,
+    pub sources: Vec<LiteratureSource>,
+}
+
+/// Where the team cites a paper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "lowercase")]
+pub enum CitedIn {
+    Review,
+    Hypothesis,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CitedBy {
+    /// The review's id, or the hypothesis's.
+    pub by: String,
+    /// The hypothesis it is about.
+    pub hypothesis: String,
+    pub kind: CitedIn,
+}
+
+/// Everything about one paper.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct PaperDetail {
+    pub row: PaperRow,
+    /// Every author kept by name, and how many more there are.
+    pub authors: Vec<String>,
+    pub authors_more: u32,
+    pub doi: Option<String>,
+    pub arxiv: Option<String>,
+    #[serde(rename = "abstract")]
+    pub abstract_: String,
+    pub tldr: String,
+    pub url: Option<String>,
+    /// Where an open copy is, when one is known.
+    pub pdf_url: Option<String>,
+    /// Why there is no PDF beside it, when there is none.
+    pub pdf_note: Option<String>,
+    /// The queries that found it.
+    pub queries: Vec<String>,
+    /// How many papers cite it, as the sources count.
+    pub citations: Option<u32>,
+    pub cited_by: Vec<CitedBy>,
+    /// Sections someone added by hand.
+    pub extra: Vec<(String, String)>,
+}
+
+/// A paper's authors as a reference names them, by their last names.
+fn named(authors: &[String], more: u32) -> String {
+    let last = |name: &String| name.split_whitespace().last().unwrap_or(name).to_string();
+    match (authors.len() + more as usize, authors) {
+        (_, []) => String::new(),
+        (1, [one]) => last(one),
+        (2, [a, b]) => format!("{} and {}", last(a), last(b)),
+        (_, [first, ..]) => format!("{} et al.", last(first)),
+    }
+}
+
+/// Whether `ident` names `paper`: as one of the investigation's, or by any
+/// name the paper goes by.
+fn names(paper: &Paper, ident: &Ident) -> bool {
+    match ident {
+        Ident::Paper(id) => *id == paper.id,
+        other => literature::keys(&paper.record).contains(&other.key()),
+    }
+}
+
 /// A seat at the table, as the roster draws it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/", rename = "ResearchSeatRow")]
@@ -162,17 +257,76 @@ pub struct Board {
     pub reviews: Vec<Review>,
     pub matches: Vec<Match>,
     pub experiments: Vec<Experiment>,
+    pub papers: Vec<Paper>,
     pub ratings: BTreeMap<String, Rating>,
 }
 
 impl Board {
     pub fn read(folder: &Folder) -> Board {
-        Board::from(folder.hypotheses(), folder.reviews(), folder.matches(), folder.experiments())
+        Board::from(folder.hypotheses(), folder.reviews(), folder.matches(), folder.experiments()).with_papers(folder.papers())
     }
 
     pub fn from(hypotheses: Vec<Hypothesis>, reviews: Vec<Review>, matches: Vec<Match>, experiments: Vec<Experiment>) -> Board {
         let ratings = elo::ratings(&matches);
-        Board { hypotheses, reviews, matches, experiments, ratings }
+        Board { hypotheses, reviews, matches, experiments, papers: Vec::new(), ratings }
+    }
+
+    pub fn with_papers(mut self, papers: Vec<Paper>) -> Board {
+        self.papers = papers;
+        self
+    }
+
+    /// Where the team cites a paper: each review whose citations name it.
+    fn cited_by(&self, paper: &Paper) -> Vec<CitedBy> {
+        self.reviews
+            .iter()
+            .filter(|r| r.citations.iter().any(|c| cite::extract(c).iter().any(|(_, ident)| names(paper, ident))))
+            .map(|r| CitedBy { by: r.id.clone(), hypothesis: r.hypothesis.clone(), kind: CitedIn::Review })
+            .collect()
+    }
+
+    fn paper_row(&self, p: &Paper) -> PaperRow {
+        PaperRow {
+            id: p.id.clone(),
+            title: p.record.title.clone(),
+            authors: named(&p.record.authors, p.record.authors_more),
+            year: p.record.year,
+            venue: p.record.venue.clone(),
+            access: p.record.access,
+            has_pdf: p.has_pdf,
+            by: p.by,
+            round: p.round,
+            cited: self.cited_by(p).len() as u32,
+            sources: p.record.sources.clone(),
+        }
+    }
+
+    /// The literature, in the order it was added.
+    pub fn paper_rows(&self) -> Vec<PaperRow> {
+        let mut rows: Vec<PaperRow> = self.papers.iter().map(|p| self.paper_row(p)).collect();
+        rows.sort_by(|a, b| a.id.cmp(&b.id));
+        rows
+    }
+
+    pub fn paper(&self, id: &str) -> Option<PaperDetail> {
+        let p = self.papers.iter().find(|p| p.id == id)?;
+        let r = &p.record;
+        Some(PaperDetail {
+            row: self.paper_row(p),
+            authors: r.authors.clone(),
+            authors_more: r.authors_more,
+            doi: r.doi.clone(),
+            arxiv: r.arxiv.clone(),
+            abstract_: r.abstract_.clone(),
+            tldr: r.tldr.clone(),
+            url: r.url.clone(),
+            pdf_url: r.pdf_url.clone(),
+            pdf_note: p.pdf_note.clone(),
+            queries: p.queries.clone(),
+            citations: r.citations,
+            cited_by: self.cited_by(p),
+            extra: p.extra.clone(),
+        })
     }
 
     pub fn rating(&self, id: &str) -> Rating {
@@ -300,6 +454,62 @@ mod tests {
 
     fn judged(a: &str, b: &str, winner: &str) -> Match {
         Match { round: 1, a: a.into(), b: b.into(), judge: Author::new(Seat::Codex, ""), winner: winner.into(), rationale: "r".into(), swapped: false, task: None, at: 0 }
+    }
+
+    #[test]
+    fn a_paper_is_listed_with_its_authors_and_who_cites_it_by_any_name() {
+        use crate::model::{Record, Review};
+        let paper = |id: &str, authors: &[&str], doi: Option<&str>, arxiv: Option<&str>| Paper {
+            id: id.into(),
+            record: Record {
+                title: format!("Paper {id}"),
+                authors: authors.iter().map(|a| a.to_string()).collect(),
+                doi: doi.map(str::to_string),
+                arxiv: arxiv.map(str::to_string),
+                ..Record::default()
+            },
+            has_pdf: id == "P002",
+            ..Paper::default()
+        };
+        let review = |id: &str, hypothesis: &str, citations: &[&str]| Review {
+            id: id.into(),
+            hypothesis: hypothesis.into(),
+            reviewer: Author::new(Seat::Codex, ""),
+            kind: ReviewKind::Review,
+            verdict: Verdict::Promising,
+            correctness: 3,
+            novelty: 3,
+            testability: 3,
+            round: 1,
+            task: None,
+            summary: String::new(),
+            critique: String::new(),
+            citations: citations.iter().map(|c| c.to_string()).collect(),
+        };
+        let board = Board::from(
+            Vec::new(),
+            vec![
+                review("H001.1", "H001", &["Hernández-Andrés et al. (2001), https://doi.org/10.1364/josaa.18.000412", "P002, p. 4"]),
+                review("H002.1", "H002", &["arXiv:1706.03762v5"]),
+                review("H003.1", "H003", &["Rayleigh (1871), from memory"]),
+            ],
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_papers(vec![
+            paper("P002", &["Ashish Vaswani", "Noam Shazeer"], None, Some("1706.03762")),
+            paper("P001", &["Javier Hernández-Andrés", "Javier Romero", "Raymond L. Lee"], Some("10.1364/JOSAA.18.000412"), None),
+        ]);
+        let rows = board.paper_rows();
+        assert_eq!(rows.iter().map(|r| (r.id.as_str(), r.authors.as_str(), r.cited, r.has_pdf)).collect::<Vec<_>>(), [
+            ("P001", "Hernández-Andrés et al.", 1, false),
+            ("P002", "Vaswani and Shazeer", 2, true),
+        ]);
+        let detail = board.paper("P002").unwrap();
+        assert_eq!(detail.cited_by.iter().map(|c| c.by.as_str()).collect::<Vec<_>>(), ["H001.1", "H002.1"], "by its own id, and by its arXiv id");
+        assert!(board.paper("P009").is_none());
+        assert_eq!(named(&["Lee".to_string()], 0), "Lee");
+        assert_eq!(named(&["A B".to_string()], 4), "B et al.", "one named and four counted");
     }
 
     #[test]
