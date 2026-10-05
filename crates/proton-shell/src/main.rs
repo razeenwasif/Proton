@@ -183,15 +183,32 @@ fn requested_folder() -> Option<std::path::PathBuf> {
 /// restore and nothing was named — otherwise a bare `proton` typed in a
 /// downloads folder would add it to the projects list for good.
 ///
-/// `None` under a Start-menu shortcut, where the working directory is the
-/// install folder and indexing that would be nonsense.
+/// `None` in the install folder or at the top of a disk — see
+/// [`could_be_a_project`] — and the session then starts in the home folder.
 fn working_folder() -> Option<std::path::PathBuf> {
     let cwd = std::env::current_dir().ok()?;
-    let beside_the_exe = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
-        .is_some_and(|dir| dir == cwd);
-    (!beside_the_exe).then_some(cwd)
+    let exe = std::env::current_exe().ok();
+    could_be_a_project(&cwd, exe.as_deref().and_then(std::path::Path::parent)).then_some(cwd)
+}
+
+/// Whether a process started in `cwd`, from an executable in `exe_folder`, was
+/// started somewhere that could be a project.
+///
+/// Not the install folder, which is where a Start-menu shortcut starts it, and
+/// indexing that would be nonsense. Nor the top of a disk, which is where a Mac
+/// app opened from the Dock, the Finder or Spotlight starts: as a project that
+/// is every file on the machine, walked by the index and then written into the
+/// session to be reopened at every launch.
+///
+/// A drive's root on Windows — `C:\`, or a share's `\\server\share\` — is the
+/// top of a disk as much as `/` is, and is turned away the same way. A project
+/// that really does fill a drive, a `subst` one say, can still be named:
+/// `proton .`.
+fn could_be_a_project(cwd: &std::path::Path, exe_folder: Option<&std::path::Path>) -> bool {
+    let beside_the_exe = exe_folder.is_some_and(|dir| dir == cwd);
+    // Nothing above it: `/`, `C:\`, `\\server\share\`.
+    let top_of_a_disk = cwd.parent().is_none();
+    !beside_the_exe && !top_of_a_disk
 }
 
 /// The bytes of a file the page renders itself.
@@ -425,6 +442,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn the_heartbeat_slows_as_things_go_quiet() {
@@ -447,5 +465,37 @@ mod tests {
         ringer.join().unwrap();
         // Woken once, so the next sleep is a whole one.
         assert!(!beat.sleep(Duration::from_millis(30)));
+    }
+
+    #[test]
+    fn where_a_terminal_was_is_a_guess_and_the_install_folder_is_not() {
+        let exe = Path::new("/opt/proton/bin");
+        let project = Path::new("/home/me/src/thing");
+        assert!(could_be_a_project(project, Some(exe)));
+        // Still a guess when the executable cannot say where it is.
+        assert!(could_be_a_project(project, None));
+        // A Start-menu shortcut starts it in the folder it was installed to.
+        assert!(!could_be_a_project(exe, Some(exe)));
+    }
+
+    #[test]
+    fn the_top_of_the_disk_is_no_guess_at_a_project() {
+        // A Mac app opened from the Dock, the Finder or Spotlight starts in
+        // `/`. Taken as a guess, the first workspace would be rooted there:
+        // every file on the machine indexed, and the whole disk written down
+        // to be reopened at every launch after.
+        let exe = Path::new("/Applications/Proton.app/Contents/MacOS");
+        assert!(!could_be_a_project(Path::new("/"), Some(exe)));
+        assert!(!could_be_a_project(Path::new("/"), None));
+
+        // Only the top itself: a checkout at `/src` is somebody's choice.
+        assert!(could_be_a_project(Path::new("/src"), Some(exe)));
+
+        // A drive's root on Windows is the top of a disk as much as `/` is,
+        // and so is a share's.
+        #[cfg(windows)]
+        for top in [r"C:\", r"D:\", r"\\server\share\"] {
+            assert!(!could_be_a_project(Path::new(top), Some(exe)), "{top}");
+        }
     }
 }
