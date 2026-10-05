@@ -248,10 +248,13 @@ pub fn vendored(root: &Path) -> PathBuf {
 
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            // Where Tauri puts bundled resources, and beside the binary for a
-            // plain `cargo build` copy.
+            // Where Tauri puts bundled resources — beside the binary on
+            // Windows and for a plain `cargo build` copy, `Contents/Resources`
+            // in a Mac's app, `lib/Proton` on Linux — and an older layout.
             tried.push(dir.join("code-visualizer"));
             tried.push(dir.join("resources").join("code-visualizer"));
+            tried.push(dir.join("../Resources").join("code-visualizer"));
+            tried.push(dir.join("../lib/Proton").join("code-visualizer"));
         }
     }
 

@@ -26,8 +26,10 @@
 //! Reading the file is more robust than trying to strip chrome that is not
 //! specified anywhere.
 
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::mpsc;
 use std::time::Duration;
 
 /// How a member is given the question.
@@ -108,6 +110,13 @@ pub struct Member {
     pub prompt: Prompt,
     pub answers: Answers,
     pub wiring: Wiring,
+    /// The `PATH` it is started with, where this process's will not do: an
+    /// app opened from the Dock has the system's bare one, which none of
+    /// these CLIs is on — nor the `node` two of them are scripts for.
+    pub path: Option<String>,
+    /// The name it was found under, once [`installed`](Self::installed) has
+    /// looked: asked on every question, it ran each CLI's `--help` again.
+    pub(crate) resolved: Option<String>,
 }
 
 impl Member {
@@ -124,6 +133,8 @@ impl Member {
                 prompt: Prompt::Stdin,
                 answers: Answers::Stdout,
                 wiring: Wiring::Flag,
+                path: None,
+                resolved: None,
             },
             Member {
                 name: "codex".into(),
@@ -138,6 +149,8 @@ impl Member {
                 prompt: Prompt::Stdin,
                 answers: Answers::File,
                 wiring: Wiring::Config,
+                path: None,
+                resolved: None,
             },
             Member {
                 name: "antigravity".into(),
@@ -148,6 +161,8 @@ impl Member {
                 prompt: Prompt::Argv,
                 answers: Answers::Stdout,
                 wiring: Wiring::Preregistered,
+                path: None,
+                resolved: None,
             },
         ]
     }
@@ -159,6 +174,20 @@ impl Member {
     /// [`runnable`](Self::runnable).
     pub fn is_installed(&self) -> bool {
         self.runnable().is_some()
+    }
+
+    /// The same member, started with `path` as its `PATH` — the login
+    /// shell's, from an app — or this process's, given none.
+    pub fn with_path(mut self, path: Option<&str>) -> Member {
+        self.path = path.map(str::to_string);
+        self
+    }
+
+    /// The member, if its program can be started: found once, under the name
+    /// it answers to, and asked by that name from then on.
+    pub fn installed(mut self) -> Option<Member> {
+        self.resolved = Some(self.runnable()?);
+        Some(self)
     }
 
     /// The name to actually spawn, which is not always the name on `PATH`.
@@ -176,7 +205,11 @@ impl Member {
             names.push(format!("{}.bat", self.program));
         }
         names.into_iter().find(|name| {
-            Command::new(name)
+            let mut probe = Command::new(name);
+            if let Some(path) = &self.path {
+                probe.env("PATH", path);
+            }
+            probe
                 .arg("--help")
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -315,10 +348,19 @@ impl Member {
         into: Option<&PathBuf>,
     ) -> Result<(String, String), String> {
         // Resolved rather than assumed, for the `.cmd` shim reason in
-        // `runnable`. Falls back to the plain name so a failure to start says
-        // so with the name the user recognises.
-        let program = self.runnable().unwrap_or_else(|| self.program.clone());
+        // `runnable` — once, when it was found installed. Falls back to the
+        // plain name so a failure to start says so with the name the user
+        // recognises.
+        let program = match &self.resolved {
+            Some(name) => name.clone(),
+            None => self.runnable().unwrap_or_else(|| self.program.clone()),
+        };
         let mut command = Command::new(&program);
+        // Rust looks the program up on the PATH given here, not this
+        // process's, so this finds the CLI as well as what it starts.
+        if let Some(path) = &self.path {
+            command.env("PATH", path);
+        }
         command.current_dir(cwd);
         command.args(&self.args);
         if let Some(path) = into {
@@ -344,24 +386,31 @@ impl Member {
             .spawn()
             .map_err(|err| format!("could not start {}: {err}", self.program))?;
 
+        // Both pipes read while it runs, each on a thread of its own. Read
+        // only once it had exited, a member that filled one — 64 KB of answer
+        // — waited for it to be read, never exited, and "gave up" at the
+        // deadline with its whole answer written.
+        let stdout = drain(child.stdout.take());
+        let stderr = drain(child.stderr.take());
         if self.prompt == Prompt::Stdin {
-            use std::io::Write;
-            // Dropped straight after, because these wait for end-of-input
-            // before they start, and a pipe left open is a member that never
-            // answers.
-            let mut into = child.stdin.take();
-            if let Some(pipe) = into.as_mut() {
-                let _ = pipe.write_all(prompt.as_bytes());
+            // Written on a thread too, since a long prompt fills the pipe
+            // before a member has read it; and dropped once written, because
+            // these wait for end-of-input before they start, and a pipe left
+            // open is a member that never answers.
+            if let Some(mut pipe) = child.stdin.take() {
+                let prompt = prompt.to_string();
+                std::thread::spawn(move || {
+                    let _ = pipe.write_all(prompt.as_bytes());
+                });
             }
-            drop(into);
         }
 
         // Waited on with a deadline rather than `wait()`, because `wait()` has
         // no timeout and a hung member would hold the whole round.
         let deadline = std::time::Instant::now() + within;
-        loop {
+        let status = loop {
             match child.try_wait() {
-                Ok(Some(_)) => break,
+                Ok(Some(status)) => break status,
                 Ok(None) if std::time::Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(100));
                 }
@@ -372,25 +421,39 @@ impl Member {
                 }
                 Err(err) => return Err(format!("{}: {err}", self.program)),
             }
-        }
+        };
 
-        let done = child
-            .wait_with_output()
-            .map_err(|err| format!("{}: {err}", self.program))?;
-        let complained = String::from_utf8_lossy(&done.stderr).to_string();
-        if !done.status.success() {
+        // What it said, waited for only briefly: something it started can
+        // hold the pipes open after it has gone.
+        let said = |pipe: mpsc::Receiver<Vec<u8>>| {
+            pipe.recv_timeout(Duration::from_secs(5))
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                .unwrap_or_default()
+        };
+        let (out, complained) = (said(stdout), said(stderr));
+        if !status.success() {
             return Err(format!(
                 "{} exited {}: {}",
                 self.program,
-                done.status.code().unwrap_or(-1),
+                status.code().unwrap_or(-1),
                 tail(&complained)
             ));
         }
-        Ok((
-            String::from_utf8_lossy(&done.stdout).to_string(),
-            complained,
-        ))
+        Ok((out, complained))
     }
+}
+
+/// Everything a pipe says, read on a thread of its own until it closes.
+fn drain(pipe: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut bytes);
+        }
+        let _ = tx.send(bytes);
+    });
+    rx
 }
 
 #[cfg(test)]
@@ -439,6 +502,8 @@ mod tests {
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         }
     }
 
@@ -469,6 +534,8 @@ mod tests {
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         };
         let out = quiet.ask("x", &dir("quiet"), Duration::from_secs(30));
         assert!(out.is_err(), "{out:?}");
@@ -513,6 +580,9 @@ if [ -f '{0}' ]; then echo second; else : > '{0}'; fi
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
+        // Found already, so no `--help` runs it first: probing it on every
+        // question once set the flag before the question was asked, and the
+        // first answer was the second.
         let member = Member {
             name: "flaky".into(),
             program: script.display().to_string(),
@@ -520,6 +590,8 @@ if [ -f '{0}' ]; then echo second; else : > '{0}'; fi
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: Some(script.display().to_string()),
         };
         let said = member.ask("x", &dir, Duration::from_secs(30)).unwrap();
         assert_eq!(said, "second", "it did not ask again");
@@ -537,6 +609,8 @@ if [ -f '{0}' ]; then echo second; else : > '{0}'; fi
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         };
         let why = quiet
             .ask("x", &dir("twice"), Duration::from_secs(30))
@@ -553,6 +627,8 @@ if [ -f '{0}' ]; then echo second; else : > '{0}'; fi
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         };
         let why = broken
             .ask("x", &dir("broken"), Duration::from_secs(5))
@@ -577,6 +653,8 @@ if [ -f '{0}' ]; then echo second; else : > '{0}'; fi
             prompt: Prompt::Argv,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         };
         let started = std::time::Instant::now();
         let why = slow
@@ -597,6 +675,8 @@ if [ -f '{0}' ]; then echo second; else : > '{0}'; fi
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         };
         let said = member
             .ask("the whole question", &dir("stdin"), Duration::from_secs(30))
@@ -618,6 +698,8 @@ if [ -f '{0}' ]; then echo second; else : > '{0}'; fi
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         };
         if std::process::Command::new("codex.cmd")
             .arg("--help")
@@ -655,5 +737,76 @@ if [ -f '{0}' ]; then echo second; else : > '{0}'; fi
         // time, so library wiring appended later cannot land between the flag
         // and the path. It did once, and Codex refused every round.
         assert!(!codex.args.iter().any(|a| a == "-o"), "{:?}", codex.args);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_member_that_says_a_lot_is_read_as_it_runs() {
+        // Read only once it had exited, a member that filled a pipe waited for
+        // it to be read, never exited, and "gave up" at the deadline with its
+        // whole answer written.
+        let loud = Member {
+            name: "loud".into(),
+            program: "sh".into(),
+            args: vec![
+                "-c".into(),
+                "head -c 1500000 /dev/zero | tr '\\0' x; head -c 1500000 /dev/zero | tr '\\0' y >&2".into(),
+            ],
+            prompt: Prompt::Argv,
+            answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
+            path: None,
+            resolved: Some("sh".into()),
+        };
+        let started = std::time::Instant::now();
+        let said = loud.ask("x", &dir("loud"), Duration::from_secs(20)).unwrap();
+        assert_eq!(said.len(), 1_500_000);
+        assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_long_prompt_goes_in_while_the_answer_comes_out() {
+        // A prompt longer than a pipe holds, to a member that answers as it
+        // reads: written before anything was read, both waited on the other.
+        let parrot = Member {
+            name: "parrot".into(),
+            program: "cat".into(),
+            args: Vec::new(),
+            prompt: Prompt::Stdin,
+            answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
+            path: None,
+            resolved: Some("cat".into()),
+        };
+        let prompt = "y".repeat(1_000_000);
+        let said = parrot.ask(&prompt, &dir("parrot"), Duration::from_secs(20)).unwrap();
+        assert_eq!(said.len(), 1_000_000);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_member_is_found_on_the_path_it_is_given() {
+        // An app opened from the Dock has the system's bare PATH; the login
+        // shell's is where these CLIs are.
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir("path");
+        let script = bin.join("proton-council-test-voice");
+        std::fs::write(&script, "#!/bin/sh\necho found\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let voice = Member {
+            name: "voice".into(),
+            program: "proton-council-test-voice".into(),
+            args: Vec::new(),
+            prompt: Prompt::Argv,
+            answers: Answers::Stdout,
+            wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
+        };
+        assert!(voice.clone().installed().is_none(), "found without being told where");
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let found = voice.with_path(Some(&path)).installed().expect("not found on the PATH it was given");
+        assert_eq!(found.ask("x", &bin, Duration::from_secs(10)).unwrap(), "found");
     }
 }

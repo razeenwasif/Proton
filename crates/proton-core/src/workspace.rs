@@ -4997,9 +4997,13 @@ impl Workspace {
         // where its CLI can take one for a single run \u{2014} so the council
         // argues about this project's notes and cites them.
         let server = server_beside_us();
+        // On the login shell's PATH: opened from the Dock, Proton has the
+        // system's bare one, and none of the three CLIs is on it.
+        let path = proton_claude::process::login_path();
         let members: Vec<proton_council::Member> = proton_council::Member::usual()
             .into_iter()
-            .filter(proton_council::Member::is_installed)
+            .map(|member| member.with_path(path))
+            .filter_map(proton_council::Member::installed)
             .map(|member| match &server {
                 Some(server) => member.with_library(server, self.pickers.root()),
                 None => member,
@@ -5017,6 +5021,8 @@ impl Workspace {
         }
 
         let room = self.council_room().join(slugged(question));
+        // Said, where there is a library to argue from and no way to it.
+        let unread = server.is_none() && !self.settings.library_roots(self.pickers.root()).is_empty();
         match proton_council::Running::start(question, members, &room) {
             Ok(running) => {
                 self.council = Some(running);
@@ -5025,7 +5031,14 @@ impl Workspace {
                 self.council_brief.clear();
                 self.council_showing.clear();
                 self.council_problem.clear();
-                vec![self.council_event()]
+                let mut events = vec![self.council_event()];
+                if unread {
+                    events.push(notice(
+                        "proton-mcp was not found, so the council argues without your library".into(),
+                        NoticeLevel::Warn,
+                    ));
+                }
+                events
             }
             Err(why) => {
                 self.council_problem = why.clone();
@@ -6127,23 +6140,10 @@ fn snippet(text: &str) -> String {
     }
 }
 
-/// Where `proton-mcp` is, so a council member can be handed the library.
-///
-/// Beside the running executable, which is where the build leaves it and where
-/// the installer keeps it. `None` when it is not there, and the council still
-/// runs \u{2014} the members answer from what they know rather than from the
-/// user's notes, which is worse and is not a reason to refuse.
+/// Where `proton-mcp` is, so a council member can be handed the library:
+/// see [`proton_council::mcp_server`].
 fn server_beside_us() -> Option<PathBuf> {
-    if let Some(named) = std::env::var_os("PROTON_MCP") {
-        let path = PathBuf::from(named);
-        return path.is_file().then_some(path);
-    }
-    let here = std::env::current_exe().ok()?;
-    let beside = here.with_file_name(match cfg!(windows) {
-        true => "proton-mcp.exe",
-        false => "proton-mcp",
-    });
-    beside.is_file().then_some(beside)
+    proton_council::mcp_server(&std::env::current_exe().ok()?)
 }
 
 /// A directory name out of a question.

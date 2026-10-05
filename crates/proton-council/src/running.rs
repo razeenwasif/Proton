@@ -220,6 +220,8 @@ mod tests {
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         }
     }
 
@@ -269,6 +271,8 @@ mod tests {
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         };
         let mut running = Running::start("q", vec![broken], &dir).unwrap();
         let updates = settle(&mut running);

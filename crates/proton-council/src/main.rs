@@ -199,22 +199,9 @@ fn arguments() -> Result<Asked, String> {
     Ok((question, out, library))
 }
 
-/// Where `proton-mcp` is.
-///
-/// Beside this binary by default, because that is where a build leaves them
-/// and where an install keeps them together. `PROTON_MCP` overrides it for
-/// anyone whose layout differs.
+/// Where `proton-mcp` is: see [`proton_council::mcp_server`].
 fn server_path() -> Option<PathBuf> {
-    if let Some(named) = std::env::var_os("PROTON_MCP") {
-        let path = PathBuf::from(named);
-        return path.is_file().then_some(path);
-    }
-    let here = std::env::current_exe().ok()?;
-    let beside = here.with_file_name(match cfg!(windows) {
-        true => "proton-mcp.exe",
-        false => "proton-mcp",
-    });
-    beside.is_file().then_some(beside)
+    proton_council::mcp_server(&std::env::current_exe().ok()?)
 }
 
 /// A directory name out of a question.

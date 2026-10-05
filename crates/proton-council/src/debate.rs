@@ -276,6 +276,8 @@ mod tests {
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         }
     }
 
@@ -289,6 +291,8 @@ mod tests {
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         }
     }
 
@@ -352,6 +356,8 @@ mod tests {
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         };
         let debate = Debate::new("q", vec![saying("one", "alpha"), broken], &dir).unwrap();
         let said = debate.open();
@@ -377,6 +383,8 @@ mod tests {
             prompt: Prompt::Stdin,
             answers: Answers::Stdout,
             wiring: Wiring::Preregistered,
+            path: None,
+            resolved: None,
         };
         let debate = Debate::new("q", vec![slow("a"), slow("b"), slow("c")], &dir).unwrap();
 

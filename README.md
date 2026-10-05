@@ -290,10 +290,13 @@ that could reach anywhere under your home directory is one that can put a medica
 record in a prompt by accident.
 
 **It also works outside Proton.** `proton-mcp` serves the same library over MCP,
-so the CLI you already have a subscription to can search and cite your notes:
+so the CLI you already have a subscription to can search and cite your notes. It
+ships with the app — in `Proton.app/Contents/Resources/` on a Mac, beside
+`Proton.exe` on Windows, in `/usr/lib/Proton/` on Linux — and `/council` hands
+it to each member whose CLI can take one for a single run:
 
 ```bash
-claude mcp add proton -- <path>/proton-mcp.exe
+claude mcp add proton -- <path>/proton-mcp
 ```
 
 Retrieval is BM25 over local files, so it needs no key, costs nothing per query,
