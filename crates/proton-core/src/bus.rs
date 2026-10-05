@@ -372,6 +372,26 @@ pub enum Command {
     ResearchTask {
         task: Option<String>,
     },
+    /// Run an experiment of the open investigation in the Lab, having read
+    /// it: in the sandbox, or — on a machine with none, and only when this
+    /// says so — without one.
+    ResearchApprove {
+        experiment: String,
+        #[serde(default)]
+        unsandboxed: bool,
+    },
+    /// Turn an experiment down.
+    ResearchReject {
+        experiment: String,
+    },
+    /// Stop a run.
+    ResearchStopRun {
+        run: String,
+    },
+    /// Show one of the open investigation's runs whole; `None` for none.
+    ResearchShowRun {
+        run: Option<String>,
+    },
     /// The scientist's first say-so for the Lab's Python: conda works out
     /// what it would be, fetching conda-forge's index if its copy is old.
     LabPlan,
@@ -1095,6 +1115,21 @@ pub enum Event {
     ResearchHypothesis {
         slug: String,
         detail: Option<HypothesisDetail>,
+    },
+    /// The open investigation's experiments and runs, and the sandbox runs
+    /// are in here.
+    #[serde(rename_all = "camelCase")]
+    ResearchLab {
+        slug: String,
+        experiments: Vec<proton_research::view::ExperimentRow>,
+        runs: Vec<proton_lab::run::Row>,
+        sandbox: proton_lab::Sandbox,
+    },
+    /// One run, whole; `None` for none.
+    #[serde(rename_all = "camelCase")]
+    ResearchRun {
+        slug: String,
+        detail: Option<proton_lab::run::Detail>,
     },
     /// Where the Lab's Python stands: one for the machine, whichever
     /// project is open.

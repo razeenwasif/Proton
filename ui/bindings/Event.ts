@@ -20,6 +20,7 @@ import type { DebugPhase } from "./DebugPhase";
 import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
+import type { ExperimentRow } from "./ExperimentRow";
 import type { GameNode } from "./GameNode";
 import type { Geometry } from "./Geometry";
 import type { GitMark } from "./GitMark";
@@ -27,6 +28,9 @@ import type { Hit } from "./Hit";
 import type { HypothesisDetail } from "./HypothesisDetail";
 import type { HypothesisRow } from "./HypothesisRow";
 import type { LabEnv } from "./LabEnv";
+import type { LabRun } from "./LabRun";
+import type { LabRunDetail } from "./LabRunDetail";
+import type { LabSandbox } from "./LabSandbox";
 import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
 import type { LibrarySource } from "./LibrarySource";
@@ -171,7 +175,7 @@ folders: Array<ChatFolder>, active: string, busy: Array<string>, waiting: Array<
 /**
  * What the scientist has told the team.
  */
-feedback: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+feedback: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "researchLab", slug: string, experiments: Array<ExperimentRow>, runs: Array<LabRun>, sandbox: LabSandbox, } | { "type": "researchRun", slug: string, detail: LabRunDetail | null, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
 /**
  * Another Proton is running its rounds, in words: read only here.
  */

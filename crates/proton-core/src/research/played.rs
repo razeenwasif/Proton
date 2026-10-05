@@ -820,3 +820,121 @@ fn a_task_shows_what_it_said_live_and_after() {
     assert!(research.watch(None).is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A Lab whose Python is made: a fake that says what it has, and runs
+/// main.py as a shell script — so runs are tested without a Python.
+#[cfg(unix)]
+fn made_lab(dir: &Path, research: &mut Research) {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = dir.join(".proton-lab/envs/lab/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let python = bin.join("python");
+    std::fs::write(&python, "#!/bin/sh\nif [ \"$1\" = \"-I\" ]; then echo '{\"python\": \"3.12.7\", \"packages\": {\"numpy\": \"2.1.3\"}}'; exit 0; fi\nshift 2\nexec /bin/sh \"$@\"\n").unwrap();
+    std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+    research.sync_at(T0);
+    for _ in 0..500 {
+        research.poll_at(T0);
+        if research.lab_python().is_some() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the Lab's Python was never read");
+}
+
+#[cfg(unix)]
+fn experiment(id: &str, code: &str) -> proton_research::Experiment {
+    proton_research::Experiment {
+        id: id.into(),
+        hypothesis: Some("H001".into()),
+        proposer: proton_research::Author::new(Seat::Codex, "gpt-6.1-sol"),
+        round: 1,
+        status: proton_research::model::ExperimentStatus::Proposed,
+        task: None,
+        run: None,
+        purpose: "Integrate the spectrum.".into(),
+        expectation: "A peak below 500 nm.".into(),
+        code: code.into(),
+    }
+}
+
+/// Real processes: real time.
+#[cfg(unix)]
+fn until_quiet(research: &mut Research) -> Vec<Event> {
+    let mut events = Vec::new();
+    for _ in 0..1000 {
+        events.extend(research.poll_at(T0));
+        if !research.is_busy() {
+            return events;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the run never ended");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_approved_experiment_runs_in_the_lab_and_what_it_showed_is_logged() {
+    use proton_research::model::ExperimentStatus;
+    let dir = root("run");
+    let (factory, _) = Factory::new();
+    let mut research = begin(&dir, factory);
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    folder.write_experiment(&experiment("E001", "echo peak 405\necho '{\"peak\": {\"value\": 405, \"unit\": \"nm\"}}' > metrics.json\n")).unwrap();
+    assert!(notices(&research.approve("E001", false)).iter().any(|n| n.contains("Make the Lab's Python first")), "it ran with no Python to run in");
+
+    made_lab(&dir, &mut research);
+    let unsandboxed = proton_lab::sandbox::available() == proton_lab::Sandbox::None;
+    let events = research.approve("E001", unsandboxed);
+    let lab = events.iter().find_map(|e| match e {
+        Event::ResearchLab { experiments, runs, .. } => Some((experiments.clone(), runs.clone())),
+        _ => None,
+    });
+    let (experiments, runs) = lab.expect("the Lab was not drawn");
+    assert_eq!((experiments[0].status, runs[0].id.as_str(), runs[0].state), (ExperimentStatus::Running, "R001", proton_lab::RunState::Running));
+    let events = until_quiet(&mut research);
+
+    let e = folder.experiments().into_iter().find(|e| e.id == "E001").unwrap();
+    assert_eq!((e.status, e.run.as_deref()), (ExperimentStatus::Done, Some("R001")));
+    let log = folder.sandbox_log();
+    assert!(log.contains("## R001 — E001, testing H001") && log.contains("exit 0") && log.contains("peak = 405 nm") && log.contains("peak 405"), "{log}");
+    let detail = events.iter().rev().find_map(|e| match e {
+        Event::ResearchRun { detail: Some(d), .. } => Some(d.clone()),
+        _ => None,
+    });
+    let detail = detail.expect("the run was not shown");
+    assert!(detail.stdout.contains("peak 405") && detail.metrics["peak"]["unit"] == "nm");
+    assert_eq!(detail.record["about"]["approved"]["by"], "scientist");
+    assert_eq!(detail.record["about"]["experiment"], "E001");
+
+    // Turned down, it is not run.
+    folder.write_experiment(&experiment("E002", "echo should not run")).unwrap();
+    research.reject("E002");
+    assert_eq!(folder.experiments().into_iter().find(|e| e.id == "E002").unwrap().status, ExperimentStatus::Rejected);
+    assert!(notices(&research.approve("E002", unsandboxed)).iter().any(|n| n.contains("turned down")));
+    assert!(!folder.dir().join("runs/R002").exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn without_a_sandbox_nothing_runs_unless_the_scientist_says_so_and_a_run_can_be_stopped() {
+    use proton_research::model::ExperimentStatus;
+    let dir = root("unfenced");
+    let (factory, _) = Factory::new();
+    let mut research = begin(&dir, factory);
+    made_lab(&dir, &mut research);
+    research.sandbox = Some(proton_lab::Sandbox::None);
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    folder.write_experiment(&experiment("E001", "sleep 300")).unwrap();
+    assert!(notices(&research.approve("E001", false)).iter().any(|n| n.contains("no sandbox the Lab can trust")));
+    assert!(!folder.dir().join("runs/R001").exists(), "it ran unsandboxed without being told to");
+    research.approve("E001", true);
+    let record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(folder.dir().join("runs/R001/run.json")).unwrap()).unwrap();
+    assert_eq!((record["sandbox"]["kind"].as_str(), record["sandbox"]["home"].as_str()), (Some("none"), Some("readable")), "the record does not say it ran unfenced");
+    research.stop_run("R001");
+    until_quiet(&mut research);
+    assert_eq!(folder.experiments()[0].status, ExperimentStatus::Failed);
+    assert!(folder.sandbox_log().contains("without a sandbox") && folder.sandbox_log().contains("stopped"));
+    let _ = std::fs::remove_dir_all(dir);
+}

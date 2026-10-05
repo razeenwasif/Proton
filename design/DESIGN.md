@@ -696,10 +696,16 @@ it and Not now. Making it shows what has downloaded; a made one says what it
 has, and asks before it is removed. Nothing is fetched or installed on a
 step the scientist did not take.
 
-**The Lab** is the pane on the right: what an investigation proposes to run
-is shown there before it runs, and runs with no network, nothing of your
-home folder to read and nowhere to write but its own folder. Its figures and
-3D scenes are drawn there too.
+**Nothing runs unread.** What an agent proposes to run waits in the Lab
+under Waiting for you: what it would test and what it expects, who proposed
+it, and the code, coloured, the first lines shown until it is opened. Run in
+the sandbox — no network, nothing written outside its own folder, nothing of
+the home folder read — or Turn down. A machine with no sandbox the Lab can
+trust says so in red, and its button says Run without a sandbox. Runs are
+listed under it, each with how it ended; one opens whole: the numbers it
+recorded, what it saved, the end of its output and errors, and where it came
+from — the code and the environment by digest, the Python, who approved it
+and when. Its figures and 3D scenes are drawn there too.
 
 ---
 

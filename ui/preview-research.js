@@ -131,6 +131,49 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
   /** @type {any} */
   let labTimer = null;
   const labEvent = () => ({ type: "labEnv", env });
+
+  /* Experiments and runs, by investigation. */
+  const SPECTRUM = `import numpy as np
+from proton_lab import metric, figure
+import matplotlib.pyplot as plt
+
+h, c, k = 6.62607015e-34, 2.99792458e8, 1.380649e-23
+lam = np.linspace(300e-9, 800e-9, 2001)
+planck = 2 * h * c**2 / lam**5 / (np.exp(h * c / (lam * k * 5772)) - 1)
+sky = planck * lam**-4
+peak = lam[np.argmax(sky)] * 1e9
+metric("peak_nm", round(float(peak), 1), "nm")
+plt.plot(lam * 1e9, sky / sky.max())
+plt.xlabel("wavelength (nm)")
+figure("spectrum")
+print(f"scattered spectrum peaks at {peak:.1f} nm")`;
+  /** @type {Record<string, any[]>} */
+  const experiments = {
+    "why-is-the-daytime-sky-blue": [
+      { id: "E002", hypothesis: "H004", proposer: { seat: "codex", model: "gpt-6.1-sol" }, round: 1, status: "proposed", run: null,
+        purpose: "Weigh the scattered spectrum by the CIE 1931 observer and find its dominant wavelength.", expectation: "Between 470 and 480 nm.",
+        code: SPECTRUM.replace("peak_nm", "dominant_nm") },
+      { id: "E001", hypothesis: "H001", proposer: { seat: "claude", model: "claude-opus-5-5" }, round: 1, status: "done", run: "R001",
+        purpose: "Integrate the scattered spectrum and find its peak.", expectation: "A peak below 450 nm.", code: SPECTRUM },
+    ],
+  };
+  /** @type {Record<string, any[]>} */
+  const runs = {
+    "why-is-the-daytime-sky-blue": [
+      { row: { id: "R001", experiment: "E001", hypothesis: "H001", state: "done", exit: 0, seconds: 2.4, started: now - 3600, sandbox: "seatbelt" },
+        stdout: "scattered spectrum peaks at 405.2 nm", stdoutCut: false, stderr: "", stderrCut: false,
+        metrics: { peak_nm: { value: 405.2, unit: "nm" } }, figures: ["figures/spectrum.png"], scenes: [],
+        record: { code: { sha256: "9f2c1e7a0b4d5e6f" }, python: "/Users/you/.proton/lab/envs/lab/bin/python",
+          environment: { lock: { sha256: "4b1d3c2a9e8f7d6c" } }, approved: undefined, about: { approved: { by: "scientist", at: now - 3600 } }, limits: { seconds: 600 } } },
+    ],
+  };
+  /** @type {string | null} */
+  let showingRun = null;
+  const labRunsEvent = () => {
+    const out = [{ type: "researchLab", slug: open, experiments: experiments[open] ?? [], runs: (runs[open] ?? []).map((r) => r.row), sandbox: "seatbelt" }];
+    if (showingRun) out.push({ type: "researchRun", slug: open, detail: (runs[open] ?? []).find((r) => r.row.id === showingRun) ?? null });
+    return out;
+  };
   const plan = () => {
     const pkgs = [["python", "3.12.7", 13_412_345], ["numpy", "2.1.3", 5_301_200], ["scipy", "1.14.1", 14_900_000], ["sympy", "1.13.3", 4_620_000],
       ["mpmath", "1.3.0", null], ["matplotlib-base", "3.9.2", 7_830_000], ["networkx", "3.4.2", 1_210_000], ["pandas", "2.2.3", 11_400_000],
@@ -326,7 +369,7 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
   }
 
   function sync() {
-    return [{ type: "researchList", investigations: investigations.map(summary), open }, ...board(), ...roundEvent(), labEvent()];
+    return [{ type: "researchList", investigations: investigations.map(summary), open }, ...board(), ...roundEvent(), labEvent(), ...labRunsEvent()];
   }
 
   /** @param {any} command */
@@ -344,6 +387,7 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
         open = slug;
         showing = null;
         watching = null;
+        showingRun = null;
         return sync();
       }
       case "researchOpen":
@@ -351,6 +395,7 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
         open = command.slug;
         showing = null;
         watching = null;
+        showingRun = null;
         return sync();
       case "researchShow":
         showing = command.hypothesis ?? null;
@@ -417,6 +462,45 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
         if (h) h.status = command.status;
         return board();
       }
+      case "researchApprove": {
+        const e = (experiments[open] ?? []).find((x) => x.id === command.experiment);
+        if (!e) return [];
+        if (env.state !== "ready") return [{ type: "notice", level: "warn", text: "Make the Lab's Python first: the Lab pane says how." }];
+        const list = (runs[open] ??= []);
+        const id = `R${String(list.length + 1).padStart(3, "0")}`;
+        const run = { row: { id, experiment: e.id, hypothesis: e.hypothesis, state: "running", exit: null, seconds: null, started: Math.floor(Date.now() / 1000), sandbox: "seatbelt" },
+          stdout: "", stdoutCut: false, stderr: "", stderrCut: false, metrics: {}, figures: [], scenes: [],
+          record: { code: { sha256: "1a2b3c4d5e6f7a8b" }, python: "/Users/you/.proton/lab/envs/lab/bin/python", about: { approved: { by: "scientist", at: now } }, limits: { seconds: 600 } } };
+        list.unshift(run);
+        e.status = "running";
+        e.run = id;
+        showingRun = id;
+        setTimeout(() => {
+          if (run.row.state !== "running") return;
+          Object.assign(run.row, { state: "done", exit: 0, seconds: 3.1 });
+          Object.assign(run, { stdout: "dominant wavelength 474.8 nm", metrics: { dominant_nm: { value: 474.8, unit: "nm" } }, figures: ["figures/spectrum.png"] });
+          e.status = "done";
+          for (const event of labRunsEvent()) deliver(event);
+        }, 2500);
+        return labRunsEvent();
+      }
+      case "researchReject": {
+        const e = (experiments[open] ?? []).find((x) => x.id === command.experiment);
+        if (e) e.status = "rejected";
+        return labRunsEvent();
+      }
+      case "researchStopRun": {
+        const run = (runs[open] ?? []).find((r) => r.row.id === command.run);
+        if (run && run.row.state === "running") {
+          Object.assign(run.row, { state: "stopped", seconds: 1.2 });
+          const e = (experiments[open] ?? []).find((x) => x.id === run.row.experiment);
+          if (e) e.status = "failed";
+        }
+        return labRunsEvent();
+      }
+      case "researchShowRun":
+        showingRun = command.run ?? null;
+        return showingRun ? labRunsEvent() : [{ type: "researchRun", slug: open, detail: null }];
       case "labPlan":
         clearInterval(labTimer);
         env = { state: "planning", log: ["Collecting package metadata (repodata.json): ...working..."] };

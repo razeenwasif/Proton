@@ -8,5 +8,9 @@
 pub mod conda;
 pub mod env;
 pub mod job;
+pub mod run;
+pub mod sandbox;
 
 pub use env::{EnvState, Lab};
+pub use run::{Run, Spec, State as RunState};
+pub use sandbox::Kind as Sandbox;

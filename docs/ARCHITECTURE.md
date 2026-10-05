@@ -18,7 +18,7 @@ in this document retain historical decisions and measurements.
 | Game | Godot `.tscn` scene hierarchy and property editing | No engine playback process |
 | Video | CMX3600 `.edl` timeline and `.srt` captions | No decoded video/program monitor |
 | Data | `.ipynb` cells, kernel execution, outputs and dataframe views | Execution requires a configured Jupyter kernel |
-| Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | The Lab's Python is made on two say-sos; proposed experiments are written down, not yet run |
+| Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; their figures and 3D scenes are listed, not yet drawn |
 
 ```bash
 cargo test --workspace        # headless; some integrations require external tools
@@ -776,6 +776,29 @@ a second.
 | Proton closed mid-round | back paused: spending the scientist's limits is theirs to start |
 
 One round runs at a time in a project.
+
+### The Lab
+
+`proton-lab` makes the Lab's Python (a conda environment of the scientific
+stack, on two say-sos: a dry-run plan, then exactly that plan, pinned) and
+runs experiments in it. A run is `research/<slug>/runs/R005/`: the approved
+code as `main.py`, a helper it can import, and `run.json` — the code and the
+environment's lock by SHA-256, the Python, the sandbox, the limits, who
+approved it and when, and how it ended. Its output goes to files, not pipes;
+it is a process group of its own, stopped as one on a timeout, a Stop or
+Proton closing; it has an environment of its own (none of the person's
+variables, so none of their keys) and limits on CPU time and file size.
+
+| | |
+|---|---|
+| macOS | Seatbelt via `sandbox-exec`: network denied; writes only in the run's folder; the home folder unreadable but for that folder and the Lab's Python |
+| Linux | bubblewrap: the root read only, the home folder replaced by an empty one, the Lab's Python and the run's folder bound back, no network |
+| Either | tried on the machine before it is trusted: a probe in a stand-in home must write its folder and be refused writing and reading beside it |
+| Neither | runs only when the scientist says so, knowing the code can do what they can; the record says it ran unsandboxed |
+
+When a run ends its experiment is marked done or failed, and what it showed
+— how it ended, its numbers, what it saved, the end of its output — is
+appended to the investigation's `SANDBOX_LOG.md` under a heading naming it.
 
 ### Trace
 

@@ -1365,6 +1365,10 @@ impl Workspace {
             Command::ResearchSetStatus { hypothesis, status } => self.research.set_status(&hypothesis, status),
             Command::ResearchSeat { seat, enabled } => self.research.set_seat(seat, enabled),
             Command::ResearchTask { task } => self.research.watch(task),
+            Command::ResearchApprove { experiment, unsandboxed } => self.research.approve(&experiment, unsandboxed),
+            Command::ResearchReject { experiment } => self.research.reject(&experiment),
+            Command::ResearchStopRun { run } => self.research.stop_run(&run),
+            Command::ResearchShowRun { run } => self.research.show_run(run),
             Command::LabPlan => self.research.lab_do(|lab| lab.plan()),
             Command::LabCreate => self.research.lab_do(|lab| lab.create()),
             Command::LabCancel => self.research.lab_do(|lab| {

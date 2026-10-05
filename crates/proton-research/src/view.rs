@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::elo::{self, Rating};
-use crate::model::{Author, Discipline, Experiment, Family, Hypothesis, HypothesisStatus, Match, Review, ReviewKind, Role, Seat, Verdict};
+use crate::model::{Author, Discipline, Experiment, ExperimentStatus, Family, Hypothesis, HypothesisStatus, Match, Review, ReviewKind, Role, Seat, Verdict};
 use crate::proximity::{Index, DUPLICATE};
 use crate::store::Folder;
 
@@ -100,6 +100,39 @@ pub struct MatchView {
     pub judge: Author,
     pub won: bool,
     pub rationale: String,
+}
+
+/// An experiment, as the Lab lists it: what it would test, and the code.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "ExperimentRow")]
+#[serde(rename_all = "camelCase")]
+pub struct ExperimentRow {
+    pub id: String,
+    pub hypothesis: Option<String>,
+    pub proposer: Author,
+    pub round: u32,
+    pub status: ExperimentStatus,
+    /// Its latest run.
+    pub run: Option<String>,
+    pub purpose: String,
+    pub expectation: String,
+    pub code: String,
+}
+
+impl From<&Experiment> for ExperimentRow {
+    fn from(e: &Experiment) -> ExperimentRow {
+        ExperimentRow {
+            id: e.id.clone(),
+            hypothesis: e.hypothesis.clone(),
+            proposer: e.proposer.clone(),
+            round: e.round,
+            status: e.status,
+            run: e.run.clone(),
+            purpose: e.purpose.clone(),
+            expectation: e.expectation.clone(),
+            code: e.code.clone(),
+        }
+    }
 }
 
 /// A seat at the table, as the roster draws it.

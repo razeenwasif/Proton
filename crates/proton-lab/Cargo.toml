@@ -11,3 +11,9 @@ description = "Research's Lab: the Python it runs code in, and the runs themselv
 serde = { workspace = true }
 serde_json = { workspace = true }
 ts-rs = { workspace = true }
+# A run's record names its code and environment by digest.
+sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+# A run is its own process group, stopped as one.
+libc = "0.2"

@@ -17,9 +17,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use proton_lab::{EnvState, Lab};
+use proton_lab::run::{self as lab_run, Spec};
+use proton_lab::{EnvState, Lab, Run, RunState, Sandbox};
 
-use proton_research::model::{Author, Hypothesis, HypothesisStatus, Seat};
+use proton_research::model::{Author, Experiment, ExperimentStatus, Hypothesis, HypothesisStatus, Seat};
 use proton_research::store::{Folder, Store};
 use proton_research::supervisor::RoundStatus;
 use proton_research::view::{self, Board};
@@ -47,6 +48,19 @@ pub struct Research {
     lab: Arc<Mutex<Lab>>,
     /// The Lab as this window last drew it.
     lab_seen: u64,
+    /// Runs going, whichever investigation they are of.
+    runs: Vec<LiveRun>,
+    /// The run shown whole.
+    showing_run: Option<String>,
+    /// The sandbox runs are in, as the Lab found it; asked once.
+    sandbox: Option<Sandbox>,
+}
+
+/// A run going in the Lab.
+struct LiveRun {
+    slug: String,
+    experiment: String,
+    run: Run,
 }
 
 /// The machine's Lab, made the first time it is asked for.
@@ -65,6 +79,53 @@ impl Default for Research {
     fn default() -> Research {
         Research::new(Path::new("."))
     }
+}
+
+/// What a run showed, for SANDBOX_LOG.md: a heading naming the run — the
+/// simulation review finds it by that — then how it ran and ended, the
+/// numbers it recorded, what it saved, and the end of its output.
+fn sandbox_entry(run: &Run, experiment: &Experiment) -> String {
+    let record = run.record();
+    let how = match record["sandbox"]["kind"].as_str() {
+        Some("seatbelt") => "in Seatbelt (no network, writing only its own folder)",
+        Some("bubblewrap") => "in bubblewrap (no network, writing only its own folder)",
+        _ => "without a sandbox",
+    };
+    let ended = match run.state() {
+        RunState::Done => "exit 0".to_string(),
+        RunState::TimedOut => "out of time".to_string(),
+        RunState::Stopped => "stopped".to_string(),
+        _ => run.exit().map(|c| format!("exit {c}")).unwrap_or_else(|| "killed".into()),
+    };
+    let about = experiment.hypothesis.as_deref().map(|h| format!(", testing {h}")).unwrap_or_default();
+    let mut text = format!("## {} — {}{about}\n\n{}\n\nRan {how} for {:.1} s: {ended}.\n", run.id, experiment.id, experiment.purpose.trim(), run.seconds());
+    let last = |text: &str, n: usize| {
+        let lines: Vec<&str> = text.lines().collect();
+        lines[lines.len().saturating_sub(n)..].join("\n")
+    };
+    if let Some(d) = lab_run::detail(run.dir()) {
+        if let Some(metrics) = d.metrics.as_object().filter(|m| !m.is_empty()) {
+            let list: Vec<String> = metrics
+                .iter()
+                .map(|(k, v)| format!("{k} = {}{}", v["value"], v["unit"].as_str().map(|u| format!(" {u}")).unwrap_or_default()))
+                .collect();
+            text.push_str(&format!("\n**Metrics.** {}\n", list.join("; ")));
+        }
+        let mut saved = d.figures.clone();
+        saved.extend(d.scenes.iter().cloned());
+        if !saved.is_empty() {
+            text.push_str(&format!("\n**Saved.** {}\n", saved.join(", ")));
+        }
+        let out = last(&d.stdout, 20);
+        if !out.trim().is_empty() {
+            text.push_str(&format!("\n**Output** (its end):\n\n```text\n{out}\n```\n"));
+        }
+        let err = last(&d.stderr, 12);
+        if !err.trim().is_empty() && run.state() != RunState::Done {
+            text.push_str(&format!("\n**Errors** (their end):\n\n```text\n{err}\n```\n"));
+        }
+    }
+    text
 }
 
 /// Seconds since the epoch.
@@ -95,6 +156,9 @@ impl Research {
         Research {
             lab: Arc::new(Mutex::new(Lab::new(&root.join(".proton-lab"), None))),
             lab_seen: 0,
+            runs: Vec::new(),
+            showing_run: None,
+            sandbox: None,
             store: Store::new(root.join("research")),
             open: None,
             showing: None,
@@ -126,6 +190,7 @@ impl Research {
         events.extend(self.board());
         events.extend(self.round_event(now));
         events.extend(self.lab_event(true));
+        events.extend(self.runs_event());
         events
     }
 
@@ -135,7 +200,10 @@ impl Research {
     /// has changed since this window last drew it, or `always`.
     fn lab_event(&mut self, always: bool) -> Vec<Event> {
         let mut lab = self.lab.lock().unwrap_or_else(|e| e.into_inner());
-        if matches!(lab.state(), EnvState::Unknown) && !lab.busy() {
+        // Looked at again whenever a window draws it and there is none: one
+        // made outside Proton, or since, is found.
+        let stale = matches!(lab.state(), EnvState::Unknown) || always && matches!(lab.state(), EnvState::Missing { .. } | EnvState::NoConda);
+        if stale && !lab.busy() {
             lab.check();
         }
         if !always && lab.version() == self.lab_seen {
@@ -159,6 +227,158 @@ impl Research {
     pub fn lab_python(&self) -> Option<std::path::PathBuf> {
         self.lab.lock().unwrap_or_else(|e| e.into_inner()).python()
     }
+
+    /// The sandbox runs are in here: tried once, the first time it matters.
+    fn sandbox(&mut self) -> Sandbox {
+        *self.sandbox.get_or_insert_with(proton_lab::sandbox::available)
+    }
+
+    /// The open investigation's experiments and runs.
+    fn runs_event(&mut self) -> Vec<Event> {
+        let Some(slug) = self.open.clone() else { return Vec::new() };
+        let Ok(folder) = self.store.open(&slug) else { return Vec::new() };
+        let mut experiments: Vec<proton_research::view::ExperimentRow> = folder.experiments().iter().map(Into::into).collect();
+        experiments.reverse();
+        let runs = lab_run::rows(&folder.dir().join("runs"));
+        let sandbox = self.sandbox();
+        let mut events = vec![Event::ResearchLab { slug: slug.clone(), experiments, runs, sandbox }];
+        if let Some(run) = &self.showing_run {
+            events.push(Event::ResearchRun { slug, detail: lab_run::detail(&folder.dir().join("runs").join(run)) });
+        }
+        events
+    }
+
+    fn experiment(&self, id: &str) -> Result<(Folder, Experiment), String> {
+        let folder = self.folder()?;
+        let experiment = folder.experiments().into_iter().find(|e| e.id == id).ok_or_else(|| format!("There is no experiment {id}."))?;
+        Ok((folder, experiment))
+    }
+
+    /// Run an experiment, having read it.
+    pub fn approve(&mut self, id: &str, unsandboxed: bool) -> Vec<Event> {
+        let (folder, mut experiment) = match self.experiment(id) {
+            Ok(found) => found,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        if matches!(experiment.status, ExperimentStatus::Running | ExperimentStatus::Rejected) {
+            let what = if experiment.status == ExperimentStatus::Running { "running" } else { "turned down" };
+            return vec![notice(format!("{id} is {what}."), NoticeLevel::Warn)];
+        }
+        let Some(python) = self.lab_python() else {
+            return vec![notice("Make the Lab's Python first: the Lab pane says how.".into(), NoticeLevel::Warn)];
+        };
+        let sandbox = self.sandbox();
+        if sandbox == Sandbox::None && !unsandboxed {
+            return vec![notice(
+                "This machine has no sandbox the Lab can trust. Run it only if you have read it, with Run without a sandbox.".into(),
+                NoticeLevel::Warn,
+            )];
+        }
+        let (env, lock) = {
+            let lab = self.lab.lock().unwrap_or_else(|e| e.into_inner());
+            (lab.prefix(), lab.lock_path())
+        };
+        let run_id = folder.next_in("runs", "R");
+        let spec = Spec {
+            id: run_id.clone(),
+            dir: folder.dir().join("runs").join(&run_id),
+            code: experiment.code.clone(),
+            python,
+            env,
+            home: std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(),
+            timeout: std::time::Duration::from_secs(folder.investigation().lab.timeout_s.max(10) as u64),
+            sandbox,
+            about: serde_json::json!({
+                "investigation": folder.slug(),
+                "experiment": experiment.id,
+                "hypothesis": experiment.hypothesis,
+                "proposer": experiment.proposer,
+                "purpose": experiment.purpose,
+                "approved": { "by": "scientist", "at": now() },
+            }),
+            lock: Some(lock).filter(|p| p.exists()),
+        };
+        let run = match Run::start(&spec) {
+            Ok(run) => run,
+            Err(why) => return vec![notice(format!("The run could not start: {why}"), NoticeLevel::Error)],
+        };
+        experiment.status = ExperimentStatus::Running;
+        experiment.run = Some(run_id.clone());
+        let _ = folder.write_experiment(&experiment);
+        self.runs.push(LiveRun { slug: folder.slug().to_string(), experiment: id.to_string(), run });
+        self.showing_run = Some(run_id);
+        self.runs_event()
+    }
+
+    pub fn reject(&mut self, id: &str) -> Vec<Event> {
+        let (folder, mut experiment) = match self.experiment(id) {
+            Ok(found) => found,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        if experiment.status == ExperimentStatus::Running {
+            return vec![notice(format!("{id} is running: stop its run first."), NoticeLevel::Warn)];
+        }
+        experiment.status = ExperimentStatus::Rejected;
+        match folder.write_experiment(&experiment) {
+            Ok(()) => self.runs_event(),
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    pub fn stop_run(&mut self, id: &str) -> Vec<Event> {
+        match self.runs.iter_mut().find(|r| r.run.id == id) {
+            Some(live) => {
+                live.run.stop();
+                Vec::new()
+            }
+            None => vec![notice(format!("{id} is not running."), NoticeLevel::Info)],
+        }
+    }
+
+    pub fn show_run(&mut self, run: Option<String>) -> Vec<Event> {
+        self.showing_run = run;
+        match &self.showing_run {
+            Some(_) => self.runs_event(),
+            None => self.open.clone().map(|slug| vec![Event::ResearchRun { slug, detail: None }]).unwrap_or_default(),
+        }
+    }
+
+    /// Runs that have ended: their experiments marked, and what each showed
+    /// written to the sandbox log.
+    fn poll_runs(&mut self) -> Vec<Event> {
+        let mut ended = Vec::new();
+        let mut moved = false;
+        for (i, live) in self.runs.iter_mut().enumerate() {
+            if live.run.poll() {
+                ended.push(i);
+            } else if self.showing_run.as_deref() == Some(live.run.id.as_str()) {
+                moved = true;
+            }
+        }
+        let mut redraw = false;
+        let open = self.open.clone().unwrap_or_default();
+        for i in ended.into_iter().rev() {
+            let live = self.runs.remove(i);
+            let Ok(folder) = self.store.open(&live.slug) else { continue };
+            if let Some(mut experiment) = folder.experiments().into_iter().find(|e| e.id == live.experiment) {
+                experiment.status = if live.run.state() == RunState::Done { ExperimentStatus::Done } else { ExperimentStatus::Failed };
+                experiment.run = Some(live.run.id.clone());
+                let _ = folder.write_experiment(&experiment);
+                let _ = folder.add_sandbox_log(&sandbox_entry(&live.run, &experiment));
+            }
+            redraw |= live.slug == open;
+        }
+        let mut events = Vec::new();
+        if redraw {
+            events.extend(self.runs_event());
+            events.extend(self.board());
+        } else if moved {
+            // What the shown run has printed so far.
+            events.extend(self.runs_event().into_iter().filter(|e| matches!(e, Event::ResearchRun { .. })));
+        }
+        events
+    }
+
 
     /// The open investigation's board, and the hypothesis shown whole.
     fn board(&self) -> Vec<Event> {
@@ -230,6 +450,7 @@ impl Research {
                 self.open = Some(slug.to_string());
                 self.showing = None;
                 self.watching = None;
+                self.showing_run = None;
                 self.sync()
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
@@ -496,6 +717,7 @@ impl Research {
         // said, and each draws it when it has changed.
         self.lab.lock().unwrap_or_else(|e| e.into_inner()).poll();
         let mut lab = self.lab_event(false);
+        lab.extend(self.poll_runs());
         let mut all = Vec::new();
         for (slug, driver) in self.drivers.iter_mut() {
             if driver.busy() {
@@ -513,7 +735,7 @@ impl Research {
     /// Whether a round has calls out, or the Lab is working, for a host
     /// deciding how often to look.
     pub fn is_busy(&self) -> bool {
-        self.drivers.values().any(Driver::busy) || self.lab.lock().map(|lab| lab.busy()).unwrap_or(false)
+        self.drivers.values().any(Driver::busy) || !self.runs.is_empty() || self.lab.lock().map(|lab| lab.busy()).unwrap_or(false)
     }
 }
 

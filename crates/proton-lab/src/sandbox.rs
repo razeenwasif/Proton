@@ -1,0 +1,171 @@
+//! Where a run may reach.
+//!
+//! Nothing on the network; nothing written outside its own folder;
+//! nothing of the person's home folder read except that folder and the
+//! Lab's Python. On macOS that is a Seatbelt profile through
+//! `sandbox-exec`; on Linux, bubblewrap. Each is tried on this machine
+//! before it is trusted — a probe that must be refused — and a machine
+//! with neither runs code only when the scientist says so knowing that.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
+
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+/// Which sandbox a run is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "LabSandbox")]
+#[serde(rename_all = "camelCase")]
+pub enum Kind {
+    /// macOS's Seatbelt, through `sandbox-exec`.
+    Seatbelt,
+    /// Linux's bubblewrap.
+    Bubblewrap,
+    /// None: the code can do what the person can.
+    None,
+}
+
+impl Kind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Seatbelt => "Seatbelt",
+            Kind::Bubblewrap => "bubblewrap",
+            Kind::None => "no sandbox",
+        }
+    }
+}
+
+const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+
+/// A path as the kernel will see it: Seatbelt matches resolved paths, and
+/// on macOS `/var` and `/tmp` are links into `/private`.
+pub fn real(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// A path inside a Seatbelt string.
+fn quoted(path: &Path) -> String {
+    let text = path.display().to_string().replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{text}\"")
+}
+
+/// The Seatbelt profile for a run in `run`, with the Lab's Python in `env`,
+/// for a person whose home is `home`.
+pub fn seatbelt(run: &Path, env: &Path, home: &Path) -> String {
+    let (run, env, home) = (quoted(&real(run)), quoted(&real(env)), quoted(&real(home)));
+    format!(
+        "(version 1)\n(allow default)\n(deny network*)\n(deny file-write*)\n\
+         (allow file-write* (subpath {run}) (literal \"/dev/null\") (literal \"/dev/dtracehelper\") (regex #\"^/dev/tty\"))\n\
+         (deny file-read* (subpath {home}))\n\
+         (allow file-read* (subpath {run}) (subpath {env}) (literal {home}))\n"
+    )
+}
+
+/// bubblewrap's arguments for a run, up to the program: the root read only,
+/// the home folder hidden, the Lab's Python read only and the run's folder
+/// writable over it, and no network.
+pub fn bubblewrap(run: &Path, env: &Path, home: &Path) -> Vec<String> {
+    let (run, env, home) = (real(run).display().to_string(), real(env).display().to_string(), real(home).display().to_string());
+    [
+        "--die-with-parent", "--new-session", "--unshare-net", "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+        "--tmpfs", "/tmp", "--tmpfs", &home, "--ro-bind", &env, &env, "--bind", &run, &run, "--chdir", &run,
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+fn bwrap() -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|path| std::env::split_paths(&path).map(|dir| dir.join("bwrap")).find(|p| p.is_file()))
+}
+
+/// `program args` as started inside the sandbox.
+pub fn wrap(kind: Kind, run: &Path, env: &Path, home: &Path, program: &Path, args: &[String]) -> (PathBuf, Vec<String>) {
+    let tail = || std::iter::once(program.display().to_string()).chain(args.iter().cloned());
+    match kind {
+        Kind::Seatbelt => {
+            let mut out = vec!["-p".to_string(), seatbelt(run, env, home)];
+            out.extend(tail());
+            (PathBuf::from(SANDBOX_EXEC), out)
+        }
+        Kind::Bubblewrap => {
+            let mut out = bubblewrap(run, env, home);
+            out.push("--".into());
+            out.extend(tail());
+            (bwrap().unwrap_or_else(|| PathBuf::from("bwrap")), out)
+        }
+        Kind::None => (program.to_path_buf(), args.to_vec()),
+    }
+}
+
+/// Whether `kind` keeps a probe in. The probe runs as a run would, with a
+/// stand-in home folder of its own — the person's is not touched — and
+/// must write in its folder, and be refused writing in the home folder
+/// and reading a file there.
+pub fn holds(kind: Kind) -> bool {
+    if kind == Kind::None {
+        return false;
+    }
+    let base = std::env::temp_dir().join(format!("proton-fence-{}-{:?}", std::process::id(), kind));
+    let _ = std::fs::remove_dir_all(&base);
+    let (inside, home) = (base.join("run"), base.join("home"));
+    if std::fs::create_dir_all(&inside).is_err() || std::fs::create_dir_all(&home).is_err() || std::fs::write(home.join("secret"), "secret").is_err() {
+        return false;
+    }
+    let script = "echo in > \"$1/in\"; echo out > \"$2/out\" 2>/dev/null; cat \"$2/secret\" > \"$1/read\" 2>/dev/null; exit 0";
+    let args: Vec<String> = vec!["-c".into(), script.into(), "probe".into(), real(&inside).display().to_string(), real(&home).display().to_string()];
+    let (program, args) = wrap(kind, &inside, Path::new("/nonexistent"), &home, Path::new("/bin/sh"), &args);
+    let ran = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let read = std::fs::read_to_string(inside.join("read")).unwrap_or_default();
+    let held = ran.is_ok() && inside.join("in").exists() && !home.join("out").exists() && !read.contains("secret");
+    let _ = std::fs::remove_dir_all(&base);
+    held
+}
+
+/// The sandbox this machine has, tried once.
+pub fn available() -> Kind {
+    static KIND: OnceLock<Kind> = OnceLock::new();
+    *KIND.get_or_init(|| {
+        if cfg!(target_os = "macos") && Path::new(SANDBOX_EXEC).is_file() && holds(Kind::Seatbelt) {
+            Kind::Seatbelt
+        } else if cfg!(target_os = "linux") && bwrap().is_some() && holds(Kind::Bubblewrap) {
+            Kind::Bubblewrap
+        } else {
+            Kind::None
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_profile_denies_the_network_and_every_write_but_the_run_and_reads_of_home_but_its_own() {
+        let p = seatbelt(Path::new("/w/proj/research/x/runs/R001"), Path::new("/h/.proton/lab/envs/lab"), Path::new("/h"));
+        assert!(p.contains("(deny network*)") && p.contains("(deny file-write*)"));
+        assert!(p.contains("(allow file-write* (subpath \"/w/proj/research/x/runs/R001\")"));
+        assert!(p.contains("(deny file-read* (subpath \"/h\"))"));
+        assert!(p.contains("(allow file-read* (subpath \"/w/proj/research/x/runs/R001\") (subpath \"/h/.proton/lab/envs/lab\") (literal \"/h\"))"));
+        assert!(seatbelt(Path::new("/a\"b"), Path::new("/e"), Path::new("/h")).contains("\"/a\\\"b\""), "a quote in a path ends the string");
+        let b = bubblewrap(Path::new("/h/p/run"), Path::new("/h/.proton/env"), Path::new("/h"));
+        let at = |flag: &str, value: &str| b.windows(2).any(|w| w[0] == flag && w[1] == value);
+        assert!(b.contains(&"--unshare-net".to_string()) && at("--tmpfs", "/h"), "{b:?}");
+        let hidden = b.iter().position(|a| a == "/h").unwrap();
+        let bound = b.iter().position(|a| a == "/h/p/run").unwrap();
+        assert!(hidden < bound, "the run must be bound over the hidden home, not under it");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn seatbelt_on_this_mac_keeps_a_probe_in() {
+        if !Path::new(SANDBOX_EXEC).is_file() {
+            return;
+        }
+        assert!(holds(Kind::Seatbelt), "Seatbelt let the probe out");
+        assert!(!holds(Kind::None));
+        assert_eq!(available(), Kind::Seatbelt);
+    }
+}

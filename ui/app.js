@@ -4825,6 +4825,14 @@ function renderEvent(event) {
       lab?.env(event);
       break;
 
+    case "researchLab":
+      lab?.experiments(event);
+      break;
+
+    case "researchRun":
+      lab?.run(event);
+      break;
+
     case "chats":
       renderChats(event);
       break;

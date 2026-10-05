@@ -1678,6 +1678,53 @@ await test('The Lab\'s Python is planned, then made, each on its own say-so', as
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('An experiment is read, then run in the sandbox or turned down, and its run opens whole', async () => {
+  await openSky(researchRound({status: 'idle'}));
+  const work = $('[data-lab-work]');
+  const text = () => work.textContent.replace(/\s+/g, ' ');
+  const code = Array.from({length: 20}, (_, i) => `x${i} = ${i}`).join('\n');
+  const proposal = {id: 'E002', hypothesis: 'H004', proposer: {seat: 'codex', model: 'gpt-6.1-sol'}, round: 1, status: 'proposed', run: null,
+    purpose: 'Find the dominant wavelength.', expectation: 'Between 470 and 480 nm.', code};
+  const lab = (extra = {}) => ({type: 'researchLab', slug: 'sky', experiments: [proposal], runs: [], sandbox: 'seatbelt', ...extra});
+  await win.pushEvents([{type: 'labEnv', env: {state: 'missing', conda: '/c', index: null, specs: ['python=3.12'], prefix: '/p'}}, lab()]);
+  assert(text().includes('Waiting for you') && text().includes('E002 for H004') && text().includes('Find the dominant wavelength'), `the proposal is not shown: ${text()}`);
+  assert(work.querySelector('.lab-code code[data-lang="python"] .num'), 'the code is not coloured');
+  assert(work.querySelector('[data-lab-open="E002"]') && !text().includes('x19 = 19'), 'a long proposal is shown whole before it is asked for');
+  work.querySelector('[data-lab-open="E002"]').click(); await settle();
+  assert(text().includes('x19 = 19'), 'the rest of the code did not open');
+  assert(work.querySelector('[data-lab-approve="E002"]').disabled, 'it can be run with no Python to run it in');
+  await win.pushEvents([{type: 'labEnv', env: {state: 'ready', python: '3.12.7', prefix: '/p', packages: []}}]);
+  const run = work.querySelector('[data-lab-approve="E002"]');
+  assert(!run.disabled && run.textContent === 'Run in the sandbox', 'a sandboxed run is not offered');
+  let before = win.commands.length;
+  run.click(); await settle();
+  const approved = win.commands.slice(before).find((c) => c.type === 'researchApprove');
+  assert(approved?.experiment === 'E002' && approved.unsandboxed === false, `wrong approval: ${JSON.stringify(approved)}`);
+  before = win.commands.length;
+  work.querySelector('[data-lab-reject="E002"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchReject')?.experiment === 'E002', 'Turn down did not ask');
+  // With no sandbox, running it says what that means.
+  await win.pushEvents([lab({sandbox: 'none'})]);
+  const bare = work.querySelector('[data-lab-approve="E002"]');
+  assert(bare.dataset.unsandboxed === '1' && bare.textContent === 'Run without a sandbox' && text().includes('can do anything you can'), 'an unsandboxed run is not said to be one');
+  // Runs, and one whole.
+  const row = {id: 'R001', experiment: 'E001', hypothesis: 'H001', state: 'done', exit: 0, seconds: 2.4, started: 0, sandbox: 'seatbelt'};
+  await win.pushEvents([lab({experiments: [], runs: [row, {...row, id: 'R002', state: 'failed', exit: 1}]})]);
+  assert(text().includes('Runs') && text().includes('Failed · exit 1'), 'a failed run does not say how');
+  before = win.commands.length;
+  work.querySelector('[data-lab-run="R001"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchShowRun')?.run === 'R001', 'the run was not asked for');
+  await win.pushEvents([{type: 'researchRun', slug: 'sky', detail: {row, stdout: 'peak at 405.2 nm', stdoutCut: false, stderr: '', stderrCut: false,
+    metrics: {peak_nm: {value: 405.2, unit: 'nm'}}, figures: ['figures/spectrum.png'], scenes: [],
+    record: {code: {sha256: 'abcdef0123456789'}, python: '/Users/you/.proton/lab/envs/lab/bin/python', about: {approved: {by: 'scientist', at: 0}}, limits: {seconds: 600}}}}]);
+  assert(text().includes('Done after 2.4 s, in Seatbelt') && text().includes('peak_nm') && text().includes('figures/spectrum.png') && text().includes('peak at 405.2 nm'),
+    `the run is not drawn whole: ${text()}`);
+  assert(text().includes('abcdef012345') && text().includes('~/.proton/lab/envs/lab/bin/python') && text().includes('by you'), 'the run does not say where it came from');
+  work.querySelector('.lab-detail [data-lab-run=""]').click(); await settle();
+  assert(work.querySelector('.lab-runs'), 'back did not go back to the runs');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('A long name in the project panel scrolls sideways instead of being cut', async () => {
   const tree = $('.workspace.on [data-tree]');
   const space = tree.closest('.workspace');
