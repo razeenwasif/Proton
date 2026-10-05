@@ -2813,6 +2813,39 @@ body { font-size: calc(13px * var(--ui-scale)); }
   width: .5em; height: 1.05em; background: var(--cursor); box-shadow: none;
 }
 
+/* An answer is markdown, drawn by the Chat tab's renderer: its code blocks
+   and tables take Chat's tokens, so a block reads alike in both, and the
+   rest keeps the panel's Zed type. */
+#codex-dock {
+  --cc-code: var(--bg-deep);
+  --cc-line: color-mix(in srgb, var(--text) 8%, var(--bg-deep));
+  --cc-raise: color-mix(in srgb, var(--text) 6%, var(--bg));
+  --cc-text: var(--text);
+  --cc-faint: var(--faint);
+  --cc-font: var(--zed);
+}
+#codex-dock .md { font: var(--z-sm)/1.5 var(--zed); color: var(--text); overflow-wrap: anywhere; }
+#codex-dock .md > :first-child { margin-top: 0; }
+#codex-dock .md > :last-child { margin-bottom: 0; }
+#codex-dock .md :is(h1, h2, h3, h4, h5, h6) { margin: 16px 0 8px; font-size: 1.04em; line-height: 1.35; font-weight: 700; color: var(--text-hi); }
+#codex-dock .md h1 { font-size: 1.2em; }
+#codex-dock .md h2 { font-size: 1.1em; }
+#codex-dock .md :is(ul, ol) { margin: 0 0 10px; padding-left: 22px; }
+#codex-dock .md li { margin: 3px 0; }
+#codex-dock .md li::marker { color: var(--faint); }
+#codex-dock .md li > :is(ul, ol) { margin: 3px 0; }
+#codex-dock .md li.task { list-style: none; margin-left: -18px; }
+#codex-dock .md li.task input { margin: 0 6px 0 0; accent-color: var(--accent); }
+#codex-dock .md blockquote { margin: 0 0 10px; padding-left: 12px; border-left: 2px solid var(--row-on-edge); color: var(--muted); }
+#codex-dock .md hr { border: 0; border-top: 1px solid var(--cc-line); margin: 14px 0; }
+#codex-dock .md a { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); text-underline-offset: 3px; cursor: pointer; }
+#codex-dock .md strong { font-weight: 700; color: var(--text-hi); }
+#codex-dock .md .md-code { margin: 8px 0 12px; }
+#codex-dock .md .md-code pre { font: var(--z-2xs)/1.6 var(--zed); padding: 10px 12px; }
+#codex-dock .md .md-code pre code { padding: 0; border-radius: 0; background: none; font: inherit; color: inherit; }
+#codex-dock .thought .md { margin: 2px 0 8px 24px; font-size: var(--z-xs); color: var(--muted); }
+#codex-dock .thought .md p { margin: 0 0 8px; font: var(--z-xs)/1.55 var(--zed); color: var(--muted); }
+
 /* What it proposed, waiting on you. Flat boxes; the buttons are words. */
 #codex-dock .staged { padding: 0 16px; }
 #codex-dock .staged .head {
@@ -3311,6 +3344,18 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .md-copy { padding: 2px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--cc-faint); font: var(--z-2xs) var(--cc-font); cursor: pointer; }
 .md-copy:hover { background: var(--row-hover); color: var(--cc-text); }
 .md-code pre { margin: 0; padding: 11px 14px; overflow-x: auto; font-size: var(--z-2xs); line-height: 1.6; color: var(--code); white-space: pre; }
+/* A diff's own two: the rest of a block takes the editor's token colours. */
+.md-code .da { color: var(--ok); }
+.md-code .dd { color: var(--err); }
+
+/* Equations. KaTeX draws them in the text's colour; until it has loaded,
+   and while one is still being written, an equation is its source, dimmed. */
+.md-math .katex { font-size: 1.1em; }
+.md-math.md-display { display: block; overflow-x: auto; overflow-y: hidden; padding: 2px 0; text-align: center; }
+.md-math .katex-display { margin: 0; }
+.md-math-block { margin: 8px 0 12px; }
+.md-math[data-tex], .md-math.md-pending { font: .9em/1.5 var(--mono); color: var(--muted); white-space: pre-wrap; text-align: left; }
+.md-math .katex-error { color: var(--err) !important; font: .9em var(--mono); white-space: pre-wrap; }
 .cc-more { padding: 4px 14px 8px; font-size: var(--z-2xs); color: var(--cc-faint); }
 .cc-caret { display: inline-block; width: .5em; height: 1.05em; margin-left: 2px; vertical-align: -2px; background: var(--cursor); }
 .cc-faint { color: var(--cc-faint); font-size: var(--z-2xs); }

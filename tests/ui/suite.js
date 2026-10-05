@@ -1261,6 +1261,52 @@ await test('Antigravity is a provider, with its own models and its own tools nam
   assert(models.includes('gemini-3.1-pro-high') && $('[data-model-pick]').value === 'gemini-3.8-flash-high', `wrong models: ${models}`);
   assert([...doc.querySelectorAll('#codex-dock .tool b')].some(b => b.textContent === 'Read file'), 'its tool row is unnamed');
 });
+await test('An answer in the agent panel colours its code, draws its TeX, keeps its citations, and never becomes HTML', async () => {
+  const agent = (transcript) => win.pushEvents([{type: 'agent', provider: 'codex', model: 'gpt-6-astra', credential: '',
+    activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0, transcript}]);
+  const answer = ['Run it like this:', '', '```rust', '#[derive(Debug)]', 'fn main() { let n: u32 = 42; println!("{n}"); } // done', '```', '',
+    'The energy is $E = mc^2$; $5 and $10 are prices, and \\$x\\$ is not TeX. Then', '$$', '\\int_0^1 x^2\\,dx = \\tfrac{1}{3}', '$$',
+    'See [[notes/physics.md § Energy L1-4]] and [the docs](https://example.com/a).', '', '<img src=x onerror="window.pwned=1">'].join('\n');
+  await agent([{speaker: 'you', text: 'why is $x$ here?', thinking: '', streaming: false, calls: []},
+    {speaker: 'proton', text: answer, thinking: 'Recall $a^2 + b^2 = c^2$.', streaming: false, calls: []}]);
+  const thread = $('#codex-dock [data-agent-thread]');
+  const reply = () => thread.querySelector('.msg:not(.you) > .md');
+  const code = reply().querySelector('.md-code code[data-lang="rust"]');
+  assert(code?.querySelector('.k')?.textContent === 'fn', 'a Rust keyword is not coloured');
+  assert(code.querySelector('.at')?.textContent === '#[derive(Debug)]' && code.querySelector('.ty')?.textContent === 'u32', 'an attribute or a type is not coloured');
+  assert(code.querySelector('.num')?.textContent === '42' && code.querySelector('.cm')?.textContent === '// done', 'a number or a comment is not coloured');
+  assert(code.textContent === '#[derive(Debug)]\nfn main() { let n: u32 = 42; println!("{n}"); } // done', 'the code is not what was written');
+  // KaTeX loads the first time there is an equation; until then each is its source.
+  for (let i = 0; i < 30 && thread.querySelector('.md-math[data-tex]'); i++) await settle();
+  const maths = [...reply().querySelectorAll('.md-math')];
+  assert(maths.length === 2, `${maths.length} equations, not 2`);
+  assert(maths[0].querySelector('.katex') && !maths[0].classList.contains('md-display'), 'the inline equation was not drawn');
+  assert(maths[1].closest('.md-math-block') && maths[1].querySelector('.katex-display'), 'the display equation was not drawn on its own');
+  assert(maths[0].querySelector('annotation')?.textContent === 'E = mc^2', 'the equation drawn is not the one written');
+  assert(reply().textContent.includes('$5 and $10 are prices') && reply().textContent.includes('$x$ is not TeX'), 'prices or escaped dollars were read as TeX');
+  assert(thread.querySelector('.thought .md .katex'), 'the thinking\'s equation was not drawn');
+  assert(thread.querySelector('.msg.you').textContent.includes('why is $x$ here?'), 'what you wrote was read as TeX');
+  assert(reply().querySelector('.cite')?.dataset.cite === 'notes/physics.md § Energy L1-4', 'the citation was lost');
+  assert(!reply().querySelector('img') && !win.pwned && reply().textContent.includes('<img'), 'HTML in an answer was drawn as HTML');
+
+  // A link opens in the browser; the copy button copies the code as written.
+  let before = win.commands.length;
+  const click = new win.MouseEvent('click', {bubbles: true, cancelable: true});
+  reply().querySelector('a[data-link]').dispatchEvent(click); await settle();
+  assert(click.defaultPrevented && win.commands.slice(before).find((c) => c.type === 'openLink')?.url === 'https://example.com/a', 'the link was followed in the window');
+  let copied = null;
+  Object.defineProperty(win.navigator, 'clipboard', {configurable: true, value: {writeText: async (text) => { copied = text; }}});
+  reply().querySelector('[data-copy]').click(); await settle();
+  delete win.navigator.clipboard;
+  assert(copied === code.textContent, 'the copy button did not copy the code');
+
+  // An equation still being written is its source until it closes.
+  await agent([{speaker: 'proton', text: 'So\n$$\n\\frac{a}{', thinking: '', streaming: true, calls: []}]);
+  assert(reply().querySelector('.md-math.md-pending')?.textContent.includes('\\frac{a}{'), 'an unfinished equation is not shown as its source');
+  await agent([{speaker: 'proton', text: 'So\n$$\n\\frac{a}{b}\n$$', thinking: '', streaming: false, calls: []}]);
+  assert(reply().querySelector('.md-math-block .katex-display') && !reply().querySelector('.md-pending'), 'the finished equation was not drawn');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+});
 await test('A long name in the project panel scrolls sideways instead of being cut', async () => {
   const tree = $('.workspace.on [data-tree]');
   const space = tree.closest('.workspace');

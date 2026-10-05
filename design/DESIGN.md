@@ -449,6 +449,17 @@ setting with the stop point named explicitly: *plan → propose diffs → wait*.
 see is a chip you can point at, which is the part the Copilot reference gets
 right and most tools get wrong.
 
+**Answers are documents.** An answer is markdown, drawn by the renderer the
+Chat tab uses (`ui/markdown.js`). A fenced block is coloured with the editor's
+own token classes — Aura's lilac keywords in Aura, Gruvbox's red in Gruvbox —
+by a small lexer per family of languages (`ui/highlight.js`): the core's
+tree-sitter colours buffers, not a few lines that arrive a word at a time. TeX
+— `$…$`, `\(…\)`, `$$…$$`, `\[…\]`, a ```` ```math ```` fence — is drawn by
+KaTeX, vendored and loaded the first time an equation appears, with `trust`
+off so no command in one can become a link or markup. Until it has loaded, and
+while an equation is still being written, the source shows dimmed rather than
+as an error. `$…$` follows Pandoc's rule, so "$5 and $10" stays two prices.
+
 Inline, `⌘K` is an edit-in-place prompt over the selection, and ghost text is
 completion. `⇥` accepts, `⌥⇥` cycles.
 

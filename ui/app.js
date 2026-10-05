@@ -30,6 +30,7 @@ import { createEditorState, createEditorPaints } from "./editor-state.js";
 import { performanceReview, editorPainted } from "./performance.js";
 import { createTerminalGL, xtermHex } from "./term-gl.js";
 import { createClaude } from "./claude.js";
+import { markdown } from "./markdown.js";
 import { keyCommand, changesContext } from "./transport.js";
 import { historyCommand, historyShortcut } from "./history-controls.js";
 import {
@@ -321,6 +322,26 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("click", (e) => {
   const cite = e.target.closest?.("[data-cite]");
   if (cite) dispatch({ type: "openCitation", cite: cite.dataset.cite });
+});
+
+// In an answer, a code block's button copies the code, and a link opens in
+// the browser rather than in the editor's own window. (Chat's answers have
+// the same two, handled in claude.js.)
+document.addEventListener("click", (e) => {
+  if (!e.target.closest?.("[data-agent-thread]")) return;
+  const link = e.target.closest("a[data-link]");
+  if (link) {
+    e.preventDefault();
+    dispatch({ type: "openLink", url: link.getAttribute("href") });
+    return;
+  }
+  const copy = e.target.closest("[data-copy]");
+  if (!copy) return;
+  const code = copy.closest(".md-code")?.querySelector("code")?.textContent ?? "";
+  navigator.clipboard?.writeText(code).then(() => {
+    copy.textContent = "Copied";
+    setTimeout(() => { copy.textContent = "Copy"; }, 1200);
+  }).catch(() => {});
 });
 
 /* The settings page. Each nav row shows one panel; nothing else is hidden or
@@ -5594,8 +5615,8 @@ function toolHtml(call) {
   );
 }
 
-/** Minimal inline markup: backticks, citations and paragraphs. Nothing more —
- *  this is a side panel, not a document viewer.
+/** Minimal inline markup: backticks, citations and paragraphs — for what you
+ *  wrote, and for the council's brief. An answer is markdown (`answerHtml`).
  *
  *  A citation is `[[path § heading L12-34]]`, which is what `search_library`
  *  hands the model and what it is asked to quote back. The brackets are worth
@@ -5620,6 +5641,13 @@ function proseHtml(text) {
     .join("");
 }
 
+/** An answer as the agent wrote it: markdown, its code coloured the way the
+ *  editor colours code and its TeX drawn as equations, with citations kept.
+ *  The same renderer as the Chat tab's, so an answer reads alike in both. */
+function answerHtml(text, streaming) {
+  return text.trim() ? `<div class="md">${markdown(text, {streaming, cite: true})}</div>` : "";
+}
+
 /** The model that is answering, for the transcript's byline. */
 let answeringModel = "";
 
@@ -5632,7 +5660,7 @@ function entryHtml(entry) {
       }`;
 
   const thinking = entry.thinking
-    ? `<details class="thought"><summary><svg class="i"><use href="#i-bulb"/></svg>Thinking</summary>${proseHtml(entry.thinking)}</details>`
+    ? `<details class="thought"><summary><svg class="i"><use href="#i-bulb"/></svg>Thinking</summary>${answerHtml(entry.thinking, entry.streaming && !entry.text)}</details>`
     : "";
   const calls = entry.calls.map(toolHtml).join("");
   // A caret while the text is still arriving, so an empty answer that is on
@@ -5641,7 +5669,7 @@ function entryHtml(entry) {
 
   return (
     `<div class="msg${you ? " you" : ""}"><div class="who">${who}</div>` +
-    `${thinking}${calls}${proseHtml(entry.text)}${caret}</div>`
+    `${thinking}${calls}${you ? proseHtml(entry.text) : answerHtml(entry.text, entry.streaming)}${caret}</div>`
   );
 }
 

@@ -110,7 +110,11 @@ instead of driving a GUI, and what makes any of it reviewable.
 surfaced as a diff, hunk by hunk — nothing is written to disk until you accept
 it, so "I changed that file" is never something it can say truthfully before
 you have looked. It shows its tool calls with results and timings, and what it
-says about your notes carries a citation you can open.
+says about your notes carries a citation you can open. Its answers are
+markdown: code comes in blocks coloured the way the editor colours that
+language, with a button to copy it, and TeX (`$…$`, `\(…\)`, `$$…$$`, `\[…\]`)
+is drawn as equations by [KaTeX](https://katex.org), vendored in
+`ui/vendor/katex/` and loaded the first time an answer has one.
 
 ## Codex agent connection
 
@@ -135,7 +139,8 @@ command in the project, in the stream-json mode Claude Code's SDKs use, so it
 is your account, your settings and CLAUDE.md, your skills and connectors, and
 every tool Claude Code has. Run `claude` once in a terminal to sign in. Proton
 finds it in `~/.local/bin`, where Claude Code's installer puts it, on your login
-shell's PATH, or at `PROTON_CLAUDE_BIN`.
+shell's PATH, or at `PROTON_CLAUDE_BIN`. Replies are drawn as the agent pane's
+answers are, coloured code and equations included.
 
 What Claude Code would ask in a terminal — may it run this command, edit this
 file, go ahead with this plan, which of these did you mean — is asked as a card
