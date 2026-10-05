@@ -380,6 +380,11 @@ pub enum Command {
         #[serde(default)]
         unsandboxed: bool,
     },
+    /// Whether what the agents propose for the open investigation runs,
+    /// in the sandbox, without asking first.
+    ResearchAutoRun {
+        enabled: bool,
+    },
     /// Turn an experiment down.
     ResearchReject {
         experiment: String,
@@ -1124,6 +1129,8 @@ pub enum Event {
         experiments: Vec<proton_research::view::ExperimentRow>,
         runs: Vec<proton_lab::run::Row>,
         sandbox: proton_lab::Sandbox,
+        /// Whether what the agents propose runs, in the sandbox, without asking.
+        auto_run: bool,
     },
     /// One run, whole; `None` for none.
     #[serde(rename_all = "camelCase")]

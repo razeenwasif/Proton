@@ -710,6 +710,13 @@ button until it is opened, and then a canvas to turn by dragging and nearer
 by the wheel, with a slider and Play when it moves; a scene is drawn only
 when it changes, so one left open costs nothing.
 
+**The Lab feeds the loop.** A run that ends is reviewed by a seat of a third
+family — it shows in Activity under Simulation review, and its finding in the
+sandbox log and on the hypothesis — and what it proposes next waits under
+the run that prompted it. Above the proposals, where there is a sandbox, a
+switch lets them run without asking; it is off until the scientist turns it
+on, and it never runs anything unsandboxed.
+
 ---
 
 ## Code Visualizer

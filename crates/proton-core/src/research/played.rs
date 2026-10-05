@@ -82,6 +82,8 @@ struct Fake {
     index: usize,
     log: Shared,
     asked: bool,
+    /// What it proposes to run with its first hypothesis.
+    code: String,
 }
 
 /// The labels a prompt shows hypotheses under, and the pairs it shows.
@@ -100,8 +102,14 @@ fn proposal() -> Value {
     json!({ "purpose": "", "expectation": "", "code": "" })
 }
 
-/// A good answer to a step, read off what it was shown.
-fn answer(phase: Phase, prompt: &str, seat: Seat, n: usize) -> Value {
+/// Code for a hypothesis's experiment, when the engines are told to propose some.
+fn proposing(code: &str) -> Value {
+    json!({ "purpose": "Check it numerically.", "expectation": "It holds.", "code": code })
+}
+
+/// A good answer to a step, read off what it was shown — proposing `code`
+/// with each new hypothesis, if there is any.
+fn answer(phase: Phase, prompt: &str, seat: Seat, n: usize, code: &str) -> Value {
     let (shown, pairs) = labels(prompt);
     let words = ["rayleigh", "ozone", "aerosol", "polarisation", "cone", "spectrum", "twilight", "dipole", "albedo"];
     let hypothesis = |i: usize| {
@@ -110,7 +118,7 @@ fn answer(phase: Phase, prompt: &str, seat: Seat, n: usize) -> Value {
             "title": format!("{} idea {n}.{i}", seat.name()),
             "statement": format!("The sky's colour comes from {w} effect number {n}{i}, as {} argues in proposal {n} item {i}.", seat.name()),
             "rationale": "Because.", "predictions": ["A measurable thing."], "assumptions": [],
-            "experiment": proposal(),
+            "experiment": if i == 0 && !code.is_empty() { proposing(code) } else { proposal() },
         })
     };
     match phase {
@@ -143,7 +151,7 @@ impl Fake {
         match step {
             Step::Answer => {
                 let prompt = self.call(|c| c.sent[0].clone());
-                let value = answer(self.phase, &prompt, self.seat, self.index);
+                let value = answer(self.phase, &prompt, self.seat, self.index, &self.code);
                 self.fold.settle("", Some(value));
                 self.fold.turn_ended(10, false, None);
             }
@@ -267,6 +275,8 @@ struct Factory {
     late: Vec<Seat>,
     unavailable: BTreeMap<Seat, String>,
     fates: Vec<(Seat, Phase, VecDeque<Step>)>,
+    /// Code each new hypothesis comes with, if any.
+    code: String,
 }
 
 impl Factory {
@@ -327,6 +337,7 @@ impl AgentFactory for Factory {
             index,
             log: self.log.clone(),
             asked: false,
+            code: self.code.clone(),
         }))
     }
 }
@@ -962,5 +973,85 @@ fn the_window_reads_only_what_a_run_left_in_its_own_folder() {
     for refused in [format!("../{SLUG}/R001/figures/spectrum.png"), format!("{SLUG}/../R001/figures/spectrum.png"), format!("{SLUG}/X001/figures/spectrum.png"), "nope".into()] {
         assert_eq!(research.lab_file(&refused), None, "{refused} was given");
     }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_run_that_ends_between_rounds_is_reviewed_in_the_next_by_another_family() {
+    use proton_research::model::ReviewKind;
+    let dir = root("simreview");
+    let (factory, log) = Factory::new();
+    let mut research = begin(&dir, factory);
+    made_lab(&dir, &mut research);
+    research.start_at(T0);
+    play(&mut research, T0, 1);
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    let h001 = folder.hypotheses().into_iter().find(|h| h.id == "H001").unwrap();
+    assert_eq!(h001.author.seat, Seat::Claude);
+
+    // Codex proposed it, for Claude Code's hypothesis: only Antigravity may review the run.
+    folder.write_experiment(&experiment("E001", "echo 'peak at 405 nm'")).unwrap();
+    let unsandboxed = proton_lab::sandbox::available() == proton_lab::Sandbox::None;
+    research.approve("E001", unsandboxed);
+    let events = until_quiet(&mut research);
+    let waiting = events.iter().rev().find_map(|e| match e {
+        Event::ResearchRound { tasks, .. } => Some(tasks.clone()),
+        _ => None,
+    });
+    let sim = waiting.unwrap_or_default().into_iter().find(|t| t.phase == Phase::SimReview).expect("the run's review was not planned");
+    assert_eq!((sim.seat, sim.state.as_str()), (Seat::Antigravity, "ready"), "planned for the wrong seat, or started with no round");
+
+    let before = log.lock().unwrap().calls.len();
+    research.start_at(T0 + 10_000);
+    play(&mut research, T0 + 10_000, 1);
+    let log = log.lock().unwrap();
+    let review = log.calls[before..].iter().find(|c| c.phase == Phase::SimReview).expect("the review was not asked for in the next round");
+    assert_eq!(review.seat, Seat::Antigravity);
+    assert!(review.sent[0].contains("peak at 405 nm"), "the review was not shown what the run printed");
+    assert!(folder.reviews().iter().any(|r| r.hypothesis == "H001" && r.kind == ReviewKind::Simulation), "the hypothesis was not reviewed by its run");
+    assert!(folder.sandbox_log().contains("### Review of R001"), "the review is not in the sandbox log");
+    drop(log);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn what_the_agents_propose_runs_without_asking_only_if_allowed_and_sandboxed() {
+    let dir = root("autorun");
+    let (mut factory, _) = Factory::new();
+    factory.code = "echo proposed".into();
+    let mut research = begin(&dir, factory);
+    made_lab(&dir, &mut research);
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    let fenced = proton_lab::sandbox::available() != proton_lab::Sandbox::None;
+    if !fenced {
+        // A machine with no sandbox never runs anything unasked.
+        assert!(notices(&research.set_auto_run(true)).iter().any(|n| n.contains("no sandbox")));
+        assert!(!folder.investigation().lab.auto_run_sandboxed);
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    // Not allowed: proposals wait.
+    research.start_at(T0);
+    for t in 1..=8 {
+        research.poll_at(T0 + t);
+    }
+    assert!(!folder.experiments().is_empty(), "nothing was proposed");
+    assert!(!folder.dir().join("runs/R001").exists(), "a proposal ran without being allowed to");
+    // Allowed: they run, two at a time, said to be the policy's.
+    research.set_auto_run(true);
+    assert!(Store::new(dir.join("research")).open(SLUG).unwrap().investigation().lab.auto_run_sandboxed);
+    let record: Value = serde_json::from_str(&std::fs::read_to_string(folder.dir().join("runs/R001/run.json")).unwrap()).unwrap();
+    assert_eq!(record["about"]["approved"]["by"], "policy");
+    assert!(!folder.dir().join("runs/R003").exists() || folder.experiments().len() > 2, "more than two ran at once");
+    for _ in 0..2000 {
+        research.poll_at(T0 + 100);
+        if !research.is_busy() && folder.experiments().iter().all(|e| e.status != proton_research::model::ExperimentStatus::Proposed) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(folder.experiments().iter().all(|e| e.status == proton_research::model::ExperimentStatus::Done), "not every proposal ran");
     let _ = std::fs::remove_dir_all(dir);
 }

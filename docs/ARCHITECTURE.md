@@ -799,6 +799,13 @@ variables, so none of their keys) and limits on CPU time and file size.
 When a run ends its experiment is marked done or failed, and what it showed
 — how it ended, its numbers, what it saved, the end of its output — is
 appended to the investigation's `SANDBOX_LOG.md` under a heading naming it.
+Then the round has it reviewed: a simulation review, by a seat of neither the
+proposer's model family nor the hypothesis author's, which reads that entry
+and the code, says whether the run supports the hypothesis, and may propose
+the next experiment — at once if a round is running, else first thing in the
+next. An investigation can let what its agents propose run without asking;
+only ever in a sandbox, two at a time, and the record says the policy
+approved it.
 
 ### Trace
 

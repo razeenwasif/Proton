@@ -3995,3 +3995,5 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .lab-frames { display: flex; align-items: center; gap: 8px; }
 .lab-frames input[type="range"] { flex: 1; accent-color: var(--cc-accent); }
 .lab-scene-note { font-size: 11px; }
+.lab-auto { display: flex; align-items: flex-start; gap: 8px; color: var(--cc-muted); cursor: pointer; }
+.lab-auto input { margin: 3px 0 0; accent-color: var(--cc-accent); }

@@ -175,7 +175,11 @@ folders: Array<ChatFolder>, active: string, busy: Array<string>, waiting: Array<
 /**
  * What the scientist has told the team.
  */
-feedback: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "researchLab", slug: string, experiments: Array<ExperimentRow>, runs: Array<LabRun>, sandbox: LabSandbox, } | { "type": "researchRun", slug: string, detail: LabRunDetail | null, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+feedback: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "researchLab", slug: string, experiments: Array<ExperimentRow>, runs: Array<LabRun>, sandbox: LabSandbox, 
+/**
+ * Whether what the agents propose runs, in the sandbox, without asking.
+ */
+autoRun: boolean, } | { "type": "researchRun", slug: string, detail: LabRunDetail | null, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
 /**
  * Another Proton is running its rounds, in words: read only here.
  */

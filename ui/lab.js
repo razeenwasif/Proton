@@ -18,7 +18,7 @@ import { mountScene } from "./lab3d.js";
 /** @typedef {import("./bindings/LabRun").LabRun} RunRow */
 /** @typedef {import("./bindings/LabRunDetail").LabRunDetail} RunDetail */
 /** @typedef {import("./bindings/LabSandbox").LabSandbox} Sandbox */
-/** @typedef {{slug: string, experiments: Experiment[], runs: RunRow[], sandbox: Sandbox}} LabEvent */
+/** @typedef {{slug: string, experiments: Experiment[], runs: RunRow[], sandbox: Sandbox, autoRun: boolean}} LabEvent */
 /** @typedef {{slug: string, detail: RunDetail | null}} RunEvent */
 
 const SEATS = /** @type {Record<string, string>} */ ({
@@ -330,6 +330,9 @@ export function createLab(host) {
     const fence = lab.sandbox === "none"
       ? `<p class="lab-err">This machine has no sandbox the Lab trusts. Code runs only if you say so, and can do anything you can.</p>`
       : "";
+    // Only a sandboxed run may start unasked, so only a sandbox offers it.
+    const auto = lab.sandbox === "none" ? "" : `<label class="lab-auto" title="Only ever in the sandbox; you can still stop any run">
+        <input type="checkbox" data-lab-auto${lab.autoRun ? " checked" : ""}> Run what the agents propose without asking, in the sandbox</label>`;
     const proposals = waiting.length
       ? `<header>Waiting for you <span class="rs-count">${waiting.length}</span></header>${fence}${waiting.map((e) => proposalHtml(e, lab.sandbox)).join("")}`
       : "";
@@ -339,8 +342,13 @@ export function createLab(host) {
     const empty = !waiting.length && !lab.runs.length
       ? `<p class="lab-faint">Nothing has run yet. Code an investigation proposes waits here for you to read it, and runs with no network and nowhere to write but its own folder.</p>`
       : "";
-    work.innerHTML = proposals + runs + empty + (turnedDown ? `<p class="lab-faint">${turnedDown} turned down.</p>` : "");
+    work.innerHTML = auto + proposals + runs + empty + (turnedDown ? `<p class="lab-faint">${turnedDown} turned down.</p>` : "");
   }
+
+  work.addEventListener("change", (e) => {
+    const box = /** @type {HTMLInputElement} */ (e.target);
+    if (box.matches?.("[data-lab-auto]")) host.dispatch({ type: "researchAutoRun", enabled: box.checked });
+  });
 
   work.addEventListener("click", (e) => {
     const target = /** @type {HTMLElement} */ (e.target);

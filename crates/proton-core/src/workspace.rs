@@ -1367,6 +1367,7 @@ impl Workspace {
             Command::ResearchTask { task } => self.research.watch(task),
             Command::ResearchApprove { experiment, unsandboxed } => self.research.approve(&experiment, unsandboxed),
             Command::ResearchReject { experiment } => self.research.reject(&experiment),
+            Command::ResearchAutoRun { enabled } => self.research.set_auto_run(enabled),
             Command::ResearchStopRun { run } => self.research.stop_run(&run),
             Command::ResearchShowRun { run } => self.research.show_run(run),
             Command::LabPlan => self.research.lab_do(|lab| lab.plan()),

@@ -132,7 +132,8 @@ folder keeps what it printed, the numbers and pictures it saved, and a record
 of the code and environment by digest and of who approved it. Its pictures are
 drawn in the Lab, and its 3D scenes — spheres and bonds, points, lines, arrows
 and meshes, in frames for anything that moves — open there to be turned and
-played.
+played. What a run showed goes back to the team: a seat of another model
+family reviews it against its hypothesis, in the round or the next.
 
 ## The three things that hold it together
 

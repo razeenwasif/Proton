@@ -22,7 +22,7 @@ use proton_lab::{EnvState, Lab, Run, RunState, Sandbox};
 
 use proton_research::model::{Author, Experiment, ExperimentStatus, Hypothesis, HypothesisStatus, Seat};
 use proton_research::store::{Folder, Store};
-use proton_research::supervisor::RoundStatus;
+use proton_research::supervisor::{RoundStatus, RunSummary};
 use proton_research::view::{self, Board};
 use proton_research::Discipline;
 
@@ -265,7 +265,8 @@ impl Research {
         experiments.reverse();
         let runs = lab_run::rows(&folder.dir().join("runs"));
         let sandbox = self.sandbox();
-        let mut events = vec![Event::ResearchLab { slug: slug.clone(), experiments, runs, sandbox }];
+        let auto_run = folder.investigation().lab.auto_run_sandboxed;
+        let mut events = vec![Event::ResearchLab { slug: slug.clone(), experiments, runs, sandbox, auto_run }];
         if let Some(run) = &self.showing_run {
             events.push(Event::ResearchRun { slug, detail: lab_run::detail(&folder.dir().join("runs").join(run)) });
         }
@@ -280,23 +281,31 @@ impl Research {
 
     /// Run an experiment, having read it.
     pub fn approve(&mut self, id: &str, unsandboxed: bool) -> Vec<Event> {
-        let (folder, mut experiment) = match self.experiment(id) {
-            Ok(found) => found,
-            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        let Some(slug) = self.open.clone() else {
+            return vec![notice("Make an investigation first.".into(), NoticeLevel::Warn)];
         };
+        match self.start_run(&slug, id, unsandboxed, "scientist") {
+            Ok(run) => {
+                self.showing_run = Some(run);
+                self.runs_event()
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Warn)],
+        }
+    }
+
+    /// Start an experiment's run; its id. `by` is who said it could run:
+    /// the scientist, or the investigation's policy.
+    fn start_run(&mut self, slug: &str, id: &str, unsandboxed: bool, by: &str) -> Result<String, String> {
+        let folder = self.store.open(slug)?;
+        let mut experiment = folder.experiments().into_iter().find(|e| e.id == id).ok_or_else(|| format!("There is no experiment {id}."))?;
         if matches!(experiment.status, ExperimentStatus::Running | ExperimentStatus::Rejected) {
             let what = if experiment.status == ExperimentStatus::Running { "running" } else { "turned down" };
-            return vec![notice(format!("{id} is {what}."), NoticeLevel::Warn)];
+            return Err(format!("{id} is {what}."));
         }
-        let Some(python) = self.lab_python() else {
-            return vec![notice("Make the Lab's Python first: the Lab pane says how.".into(), NoticeLevel::Warn)];
-        };
+        let python = self.lab_python().ok_or("Make the Lab's Python first: the Lab pane says how.")?;
         let sandbox = self.sandbox();
         if sandbox == Sandbox::None && !unsandboxed {
-            return vec![notice(
-                "This machine has no sandbox the Lab can trust. Run it only if you have read it, with Run without a sandbox.".into(),
-                NoticeLevel::Warn,
-            )];
+            return Err("This machine has no sandbox the Lab can trust. Run it only if you have read it, with Run without a sandbox.".into());
         }
         let (env, lock) = {
             let lab = self.lab.lock().unwrap_or_else(|e| e.into_inner());
@@ -318,20 +327,73 @@ impl Research {
                 "hypothesis": experiment.hypothesis,
                 "proposer": experiment.proposer,
                 "purpose": experiment.purpose,
-                "approved": { "by": "scientist", "at": now() },
+                "approved": { "by": by, "at": now() },
             }),
             lock: Some(lock).filter(|p| p.exists()),
         };
-        let run = match Run::start(&spec) {
-            Ok(run) => run,
-            Err(why) => return vec![notice(format!("The run could not start: {why}"), NoticeLevel::Error)],
-        };
+        let run = Run::start(&spec).map_err(|why| format!("The run could not start: {why}"))?;
         experiment.status = ExperimentStatus::Running;
         experiment.run = Some(run_id.clone());
         let _ = folder.write_experiment(&experiment);
         self.runs.push(LiveRun { slug: folder.slug().to_string(), experiment: id.to_string(), run });
-        self.showing_run = Some(run_id);
-        self.runs_event()
+        Ok(run_id)
+    }
+
+    /// Runs going at once that the investigation's policy started: more
+    /// wait for one to end.
+    const AUTO_AT_ONCE: usize = 2;
+
+    /// What the agents proposed, run without asking — only when the
+    /// investigation allows it, its Lab's Python is made and the run would
+    /// be in a sandbox. Never otherwise.
+    fn auto_run(&mut self, slug: &str) -> Vec<Event> {
+        let Ok(folder) = self.store.open(slug) else { return Vec::new() };
+        if !folder.investigation().lab.auto_run_sandboxed || self.lab_python().is_none() || self.sandbox() == Sandbox::None {
+            return Vec::new();
+        }
+        let waiting: Vec<String> = folder
+            .experiments()
+            .iter()
+            .filter(|e| e.status == ExperimentStatus::Proposed && e.proposer.seat != Seat::Scientist)
+            .map(|e| e.id.clone())
+            .collect();
+        let mut events = Vec::new();
+        for id in waiting {
+            if self.runs.iter().filter(|r| r.slug == slug).count() >= Self::AUTO_AT_ONCE {
+                break;
+            }
+            match self.start_run(slug, &id, false, "policy") {
+                Ok(run) => events.push(notice(format!("{id} runs as {run}, in the sandbox, as this investigation allows."), NoticeLevel::Info)),
+                Err(why) => events.push(notice(why, NoticeLevel::Warn)),
+            }
+        }
+        if !events.is_empty() && self.open.as_deref() == Some(slug) {
+            events.extend(self.runs_event());
+        }
+        events
+    }
+
+    /// Whether the open investigation runs what is proposed without asking.
+    pub fn set_auto_run(&mut self, enabled: bool) -> Vec<Event> {
+        let mut folder = match self.folder() {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        if enabled && self.sandbox() == Sandbox::None {
+            return vec![notice("Only a sandboxed run can start without asking, and this machine has no sandbox the Lab can trust.".into(), NoticeLevel::Warn)];
+        }
+        let mut investigation = folder.investigation().clone();
+        investigation.lab.auto_run_sandboxed = enabled;
+        if let Err(why) = folder.save(investigation) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        let slug = folder.slug().to_string();
+        if let Some(driver) = self.drivers.get_mut(&slug) {
+            driver.invalidate();
+        }
+        let mut events = self.runs_event();
+        events.extend(self.auto_run(&slug));
+        events
     }
 
     pub fn reject(&mut self, id: &str) -> Vec<Event> {
@@ -369,7 +431,7 @@ impl Research {
 
     /// Runs that have ended: their experiments marked, and what each showed
     /// written to the sandbox log.
-    fn poll_runs(&mut self) -> Vec<Event> {
+    fn poll_runs(&mut self, now: u64) -> Vec<Event> {
         let mut ended = Vec::new();
         let mut moved = false;
         for (i, live) in self.runs.iter_mut().enumerate() {
@@ -381,6 +443,7 @@ impl Research {
         }
         let mut redraw = false;
         let open = self.open.clone().unwrap_or_default();
+        let mut finished = Vec::new();
         for i in ended.into_iter().rev() {
             let live = self.runs.remove(i);
             let Ok(folder) = self.store.open(&live.slug) else { continue };
@@ -388,11 +451,33 @@ impl Research {
                 experiment.status = if live.run.state() == RunState::Done { ExperimentStatus::Done } else { ExperimentStatus::Failed };
                 experiment.run = Some(live.run.id.clone());
                 let _ = folder.write_experiment(&experiment);
-                let _ = folder.add_sandbox_log(&sandbox_entry(&live.run, &experiment));
+                let entry = sandbox_entry(&live.run, &experiment);
+                let _ = folder.add_sandbox_log(&entry);
+                finished.push((
+                    live.slug.clone(),
+                    RunSummary {
+                        run: live.run.id.clone(),
+                        experiment: experiment.id.clone(),
+                        hypothesis: experiment.hypothesis.clone(),
+                        proposer: Some(experiment.proposer.clone()),
+                        report: entry,
+                    },
+                ));
             }
             redraw |= live.slug == open;
         }
         let mut events = Vec::new();
+        // What a run showed is the round's to review, by another family.
+        for (slug, summary) in finished {
+            if self.driver(&slug).is_none() {
+                continue;
+            }
+            let factory = self.factory.as_mut();
+            let Some(driver) = self.drivers.get_mut(&slug) else { continue };
+            let moved = driver.run_finished(factory, &summary, now);
+            events.extend(self.moved(&slug, moved, now));
+            events.extend(self.auto_run(&slug));
+        }
         if redraw {
             events.extend(self.runs_event());
             events.extend(self.board());
@@ -506,10 +591,14 @@ impl Research {
             };
             events.push(notice(text, NoticeLevel::Info));
         }
+        if moved.wrote {
+            events.extend(self.auto_run(slug));
+        }
         if open && moved.wrote {
             let folders = self.store.list();
             events.push(Event::ResearchList { investigations: folders.iter().map(view::summary).collect(), open: self.open.clone() });
             events.extend(self.board());
+            events.extend(self.runs_event());
         }
         if open && (moved.moved || moved.wrote) {
             events.extend(self.round_event(now));
@@ -741,7 +830,7 @@ impl Research {
         // said, and each draws it when it has changed.
         self.lab.lock().unwrap_or_else(|e| e.into_inner()).poll();
         let mut lab = self.lab_event(false);
-        lab.extend(self.poll_runs());
+        lab.extend(self.poll_runs(now));
         let mut all = Vec::new();
         for (slug, driver) in self.drivers.iter_mut() {
             if driver.busy() {

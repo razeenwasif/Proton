@@ -24,7 +24,7 @@ use proton_research::model::Seat;
 use proton_research::schema::Phase;
 use proton_research::store::{atomic_write, Folder};
 use proton_research::supervisor::{
-    Answered, Dispatch, Effect, RoundState, RoundStatus, Snapshot, Supervisor, TaskRow, TaskState, STATE_VERSION,
+    Answered, Dispatch, Effect, RoundState, RoundStatus, RunSummary, Snapshot, Supervisor, TaskRow, TaskState, STATE_VERSION,
 };
 use proton_research::view::SeatRow;
 use serde_json::{json, Value};
@@ -371,6 +371,22 @@ impl Driver {
         self.save();
         self.lock = None;
         Moved { moved: true, ..Moved::default() }
+    }
+
+    /// A Lab run of this investigation ended, and what it showed is in the
+    /// sandbox log: a seat of another model family is to review it — now,
+    /// if a round is running, or in the next.
+    pub fn run_finished(&mut self, factory: &mut dyn AgentFactory, run: &RunSummary, now: u64) -> Moved {
+        self.snap = None;
+        let snap = self.snapshot(now);
+        let effects = self.supervisor.run_finished(run, &snap, now);
+        let mut moved = self.apply(effects);
+        moved.moved = true;
+        if matches!(self.status(), RoundStatus::Running) && self.lock.is_some() {
+            moved.and(self.pump(factory, now));
+        }
+        self.save();
+        moved
     }
 
     /// Look at every call that is out, and start what is ready.

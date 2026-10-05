@@ -169,8 +169,10 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
   };
   /** @type {string | null} */
   let showingRun = null;
+  /** Investigations that run proposals unasked. @type {Set<string>} */
+  const autoRun = new Set();
   const labRunsEvent = () => {
-    const out = [{ type: "researchLab", slug: open, experiments: experiments[open] ?? [], runs: (runs[open] ?? []).map((r) => r.row), sandbox: "seatbelt" }];
+    const out = [{ type: "researchLab", slug: open, experiments: experiments[open] ?? [], runs: (runs[open] ?? []).map((r) => r.row), sandbox: "seatbelt", autoRun: autoRun.has(open) }];
     if (showingRun) out.push({ type: "researchRun", slug: open, detail: (runs[open] ?? []).find((r) => r.row.id === showingRun) ?? null });
     return out;
   };
@@ -533,6 +535,10 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         }, 2500);
         return labRunsEvent();
       }
+      case "researchAutoRun":
+        if (command.enabled) autoRun.add(open);
+        else autoRun.delete(open);
+        return labRunsEvent();
       case "researchReject": {
         const e = (experiments[open] ?? []).find((x) => x.id === command.experiment);
         if (e) e.status = "rejected";

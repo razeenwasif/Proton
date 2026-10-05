@@ -1759,6 +1759,22 @@ await test('A run\'s pictures are drawn, and its 3D scene opens from it', async 
   work.querySelector('[data-lab-scene-close]').click(); await settle();
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('Proposals run unasked only where a sandbox can hold them, and only when allowed', async () => {
+  await openSky(researchRound({status: 'idle'}));
+  const work = $('[data-lab-work]');
+  // Back from whichever run was open.
+  await win.pushEvents([{type: 'researchRun', slug: 'sky', detail: null},
+    {type: 'researchLab', slug: 'sky', experiments: [], runs: [], sandbox: 'seatbelt', autoRun: false}]);
+  const box = work.querySelector('[data-lab-auto]');
+  assert(box && !box.checked, 'the switch is missing, or on by itself');
+  const before = win.commands.length;
+  box.click(); await settle();
+  const sent = win.commands.slice(before).find((c) => c.type === 'researchAutoRun');
+  assert(sent?.enabled === true, `wrong command: ${JSON.stringify(sent)}`);
+  await win.pushEvents([{type: 'researchLab', slug: 'sky', experiments: [], runs: [], sandbox: 'none', autoRun: false}]);
+  assert(!work.querySelector('[data-lab-auto]'), 'a machine with no sandbox offers to run code unasked');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('A long name in the project panel scrolls sideways instead of being cut', async () => {
   const tree = $('.workspace.on [data-tree]');
   const space = tree.closest('.workspace');
