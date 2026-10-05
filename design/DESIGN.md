@@ -658,11 +658,11 @@ twenty, and nothing starts without a click.
 
 **Drawn as Chat is.** The investigations down the left as Chat lists
 sessions; the board in a column in the middle, under a header that is the
-investigation's — where a round's controls go — with its tabs in a strip of
-their own: Overview (the brief, the overview, the plan, and folded under
-them the verdicts and the sandbox log) and Hypotheses (the leaderboard by
-Elo, the retired last, a narrow board putting each one's name on a line of
-its own). Each section names its file, because each is one: an
+investigation's, with its tabs in a strip of their own: Overview (the brief,
+the overview, the plan, and folded under them what the scientist told the
+team, the verdicts and the sandbox log), Hypotheses (the leaderboard by Elo,
+the retired last, a narrow board putting each one's name on a line of its
+own) and Activity. Each section names its file, because each is one: an
 investigation is a folder, `research/<slug>/`, and everything it knows diffs
 in Git. A hypothesis opens whole — statement, rationale, predictions, its
 reviews and their scores, the matches it won and lost with the judge's
@@ -712,8 +712,8 @@ when it changes, so one left open costs nothing.
 
 **The Lab feeds the loop.** A run that ends is reviewed by a seat of a third
 family — it shows in Activity under Simulation review, and its finding in the
-sandbox log and on the hypothesis — and what it proposes next waits under
-the run that prompted it. Above the proposals, where there is a sandbox, a
+sandbox log and on the hypothesis — and what it proposes next waits with
+the other proposals. Above the proposals, where there is a sandbox, a
 switch lets them run without asking; it is off until the scientist turns it
 on, and it never runs anything unsandboxed.
 
