@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::elo::{self, Rating};
-use crate::model::{Author, Discipline, Experiment, Family, Hypothesis, HypothesisStatus, Match, Review, ReviewKind, Verdict};
+use crate::model::{Author, Discipline, Experiment, Family, Hypothesis, HypothesisStatus, Match, Review, ReviewKind, Role, Seat, Verdict};
 use crate::proximity::{Index, DUPLICATE};
 use crate::store::Folder;
 
@@ -100,6 +100,27 @@ pub struct MatchView {
     pub judge: Author,
     pub won: bool,
     pub rationale: String,
+}
+
+/// A seat at the table, as the roster draws it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "ResearchSeatRow")]
+#[serde(rename_all = "camelCase")]
+pub struct SeatRow {
+    pub seat: Seat,
+    pub role: Role,
+    /// Taking part, as the investigation is set up.
+    pub enabled: bool,
+    /// Why it cannot take part now — not installed, signed out, out for
+    /// the rest of the round — when it cannot.
+    pub why: Option<String>,
+    /// Cooling after a limit until then, in seconds since the epoch.
+    #[ts(type = "number | null")]
+    pub cooling: Option<u64>,
+    /// Its tasks running now.
+    pub running: u32,
+    /// The model it last said it was running.
+    pub model: String,
 }
 
 /// What the board is drawn from, read once.

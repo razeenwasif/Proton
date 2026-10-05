@@ -742,6 +742,40 @@ before `content` on every response — `"refusal"` is an HTTP 200.
 Everything the agent proposes lands in the **shadow worktree** (`proton-vcs`),
 surfaced as per-hunk diffs. Nothing touches the user's tree until accepted.
 
+### Research rounds
+
+Research drives Claude Code, Codex and Antigravity as Chat does — the same
+`proton-claude` conversations — but unattended: each agent task gets a fresh
+conversation that reads and searches and changes nothing, brings none of the
+person's MCP servers, plugins or global instructions, is never asked
+anything, and gives its final answer whole, held to a JSON Schema. Nothing
+carries from one task to the next but the files, because a reviewer must not
+remember writing what it reviews.
+
+The split is three ways. `proton-research::supervisor` decides what each
+task is and what an answer means, and starts nothing. `proton-core`'s
+`research::driver` starts each task through an `AgentFactory` — the engines,
+or in tests scripted conversations over a real `Fold` — watches it on the
+core's heartbeat, and writes what it answers into the investigation's
+folder. Time is passed in, never read, so a round with a timeout, a limit
+that resets in ten minutes and a relaunch is played in a test in a third of
+a second.
+
+| | |
+|---|---|
+| A call | its own conversation, working in `research/<slug>/`, told its role and its rules with the task itself rather than by any instructions file |
+| A question | refused: nobody is there to answer it |
+| An answer that will not read | asked for once more, in the same conversation |
+| No answer in 15 minutes | stopped, and tried once more |
+| Signed out | the seat sits the rest of the round out; its reviews and judging go to another family |
+| At its limit | the seat waits until the limit resets |
+| A judge running its own family's model | stopped as it says so; the task goes elsewhere, or the round goes on without it |
+| Records | `tasks/T0001.json` (what it was asked and answered, by which model), `.investigation/transcripts/`, `.investigation/round.json` |
+| Two Protons | the first holds `.investigation/lock` with a heartbeat; the other is read only until it goes quiet |
+| Proton closed mid-round | back paused: spending the scientist's limits is theirs to start |
+
+One round runs at a time in a project.
+
 ### Trace
 
 Code Visualizer, sidecar first and native second — [`CODE-VISUALIZER.md`](CODE-VISUALIZER.md)

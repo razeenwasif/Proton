@@ -40,7 +40,10 @@ import type { PluginView } from "./PluginView";
 import type { Rate } from "./Rate";
 import type { RepoFile } from "./RepoFile";
 import type { ResearchDiscipline } from "./ResearchDiscipline";
+import type { ResearchSeatRow } from "./ResearchSeatRow";
 import type { ResearchSummary } from "./ResearchSummary";
+import type { ResearchTask } from "./ResearchTask";
+import type { RoundStatus } from "./RoundStatus";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
 import type { Shader } from "./Shader";
@@ -163,7 +166,11 @@ language: string, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>
  * The folders conversations are grouped into, each with what it
  * holds; what is in a folder is not in `sessions` as well.
  */
-folders: Array<ChatFolder>, active: string, busy: Array<string>, waiting: Array<string>, engine: ChatEngine, } | { "type": "claudeItems", session: string, items: Array<ClaudeItem>, reset: boolean, earlier: boolean, } | { "type": "claudeStatus", status: ClaudeStatus, } | { "type": "claudeCapabilities", capabilities: ClaudeCapabilities, } | { "type": "artifacts", artifacts: Array<Artifact>, importing: boolean, } | { "type": "researchList", investigations: Array<ResearchSummary>, open: string | null, } | { "type": "researchBoard", slug: string, title: string, discipline: ResearchDiscipline, brief: string, plan: string, overview: string, verdicts: string, sandbox: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "chats", conversations: Array<Summary>, 
+folders: Array<ChatFolder>, active: string, busy: Array<string>, waiting: Array<string>, engine: ChatEngine, } | { "type": "claudeItems", session: string, items: Array<ClaudeItem>, reset: boolean, earlier: boolean, } | { "type": "claudeStatus", status: ClaudeStatus, } | { "type": "claudeCapabilities", capabilities: ClaudeCapabilities, } | { "type": "artifacts", artifacts: Array<Artifact>, importing: boolean, } | { "type": "researchList", investigations: Array<ResearchSummary>, open: string | null, } | { "type": "researchBoard", slug: string, title: string, discipline: ResearchDiscipline, brief: string, plan: string, overview: string, verdicts: string, sandbox: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+/**
+ * Another Proton is running its rounds, in words: read only here.
+ */
+held: string | null, } | { "type": "chats", conversations: Array<Summary>, 
 /**
  * Which one is open, as a project-relative path. Empty for a
  * conversation that has not been saved yet — one with no question in

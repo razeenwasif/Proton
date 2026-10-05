@@ -1356,6 +1356,10 @@ impl Workspace {
             Command::ResearchNew { title, goal, discipline } => self.research.create(&title, &goal, discipline),
             Command::ResearchOpen { slug } => self.research.open(&slug),
             Command::ResearchShow { hypothesis } => self.research.show(hypothesis),
+            Command::ResearchStart => self.research.start(),
+            Command::ResearchPause => self.research.pause(),
+            Command::ResearchResume => self.research.resume(),
+            Command::ResearchStop => self.research.stop(),
             Command::ClaudeSend { text, images } => self.claude.send(&text, &images),
             Command::ClaudeStop => self.claude.interrupt(),
             Command::ClaudeAnswer { request, answer } => self.claude.answer(&request, answer),
@@ -2658,6 +2662,10 @@ impl Workspace {
         // Claude Code's conversations: every one that is running, whether
         // or not it is on screen.
         events.extend(self.claude.poll());
+
+        // Research's rounds, the same way: their calls are conversations
+        // with the same engines, each one task long.
+        events.extend(self.research.poll());
 
         // And the library's walk, which is the same shape again: a second of
         // reading somebody's vault, on a thread with nothing to call back to.

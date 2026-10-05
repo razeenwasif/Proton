@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 
 use proton_claude::folders::FolderView as ChatFolder;
 use proton_claude::{Artifact, Capabilities as ClaudeCapabilities, Engine as ChatEngine, Item as ClaudeItem, SessionSummary as ClaudeSession, Status as ClaudeStatus};
-use proton_research::view::{HypothesisDetail, HypothesisRow, Summary as ResearchSummary};
+use proton_research::supervisor::{RoundStatus, TaskRow as ResearchTask};
+use proton_research::view::{HypothesisDetail, HypothesisRow, SeatRow as ResearchSeatRow, Summary as ResearchSummary};
 use proton_research::Discipline as ResearchDiscipline;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -336,6 +337,15 @@ pub enum Command {
     ResearchShow {
         hypothesis: Option<String>,
     },
+    /// Run a round of the open investigation: its agents' calls, on their
+    /// own engines, until the overview is written.
+    ResearchStart,
+    /// Start nothing new in the open investigation's round; what is
+    /// running finishes.
+    ResearchPause,
+    ResearchResume,
+    /// Stop the open investigation's round, and every call it has out.
+    ResearchStop,
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1048,6 +1058,20 @@ pub enum Event {
     ResearchHypothesis {
         slug: String,
         detail: Option<HypothesisDetail>,
+    },
+    /// Where the open investigation's round stands: its agent calls spent
+    /// and allowed, the table, and every task.
+    #[serde(rename_all = "camelCase")]
+    ResearchRound {
+        slug: String,
+        round: u32,
+        status: RoundStatus,
+        used: u32,
+        cap: u32,
+        seats: Vec<ResearchSeatRow>,
+        tasks: Vec<ResearchTask>,
+        /// Another Proton is running its rounds, in words: read only here.
+        held: Option<String>,
     },
     /// The saved conversations, most recently changed first.
     #[serde(rename_all = "camelCase")]

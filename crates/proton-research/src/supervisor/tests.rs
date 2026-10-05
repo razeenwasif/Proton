@@ -60,7 +60,18 @@ enum Fate {
 
 /// Play the round to its end, deciding each task's fate with `fate`.
 /// Returns every effect, and the snapshot as the files would have it.
-fn play(sup: &mut Supervisor, mut snap: Snapshot, mut fate: impl FnMut(&Dispatch, usize) -> Fate) -> (Vec<Effect>, Snapshot) {
+fn play(sup: &mut Supervisor, snap: Snapshot, fate: impl FnMut(&Dispatch, usize) -> Fate) -> (Vec<Effect>, Snapshot) {
+    let models = snap.models.clone();
+    play_reporting(sup, snap, fate, move |seat| models.get(&seat).cloned().unwrap_or_default())
+}
+
+/// The same, with each seat reporting the model `report` says as it starts.
+fn play_reporting(
+    sup: &mut Supervisor,
+    mut snap: Snapshot,
+    mut fate: impl FnMut(&Dispatch, usize) -> Fate,
+    report: impl Fn(Seat) -> String,
+) -> (Vec<Effect>, Snapshot) {
     let mut effects = Vec::new();
     let mut now = 1_000;
     for step in 0..400 {
@@ -78,9 +89,11 @@ fn play(sup: &mut Supervisor, mut snap: Snapshot, mut fate: impl FnMut(&Dispatch
             }
         }
         for d in dispatches {
-            let model = snap.models.get(&d.seat).cloned().unwrap_or_default();
-            if let Some(why) = sup.started(&d.task, "native", &model, &snap) {
-                effects.push(Effect::Notice(why));
+            let model = report(d.seat);
+            if let Some(refused) = sup.started(&d.task, "native", &model, &snap, now) {
+                effects.push(Effect::Notice(refused.why));
+                snap = applied(&snap, &refused.effects);
+                effects.extend(refused.effects);
                 continue;
             }
             let mut fate_now = fate(&d, step);
@@ -377,4 +390,19 @@ fn whatever_happens_a_round_ends_within_its_budget_and_judges_fairly() {
         let (_, again, _) = run(seed);
         assert_eq!(format!("{effects:?}"), format!("{again:?}"), "seed {seed} played differently twice");
     }
+}
+
+#[test]
+fn a_judge_refused_as_it_starts_with_nowhere_to_go_does_not_stall_the_round() {
+    // Codex is out, and Antigravity turns out to be running Claude: nobody
+    // may review Claude Code's hypotheses, and the round must end anyway.
+    let mut snap = snapshot();
+    snap.models.remove(&Seat::Antigravity);
+    snap.unavailable.insert(Seat::Codex, "Codex is not installed.".into());
+    let mut sup = Supervisor::new(0, 1, 11);
+    sup.start_round(&snap, 1_000).unwrap();
+    // Claude Code runs Claude, and so — it turns out — does Antigravity.
+    let (effects, _) = play_reporting(&mut sup, snap, |_, _| Fate::Answer, |_| "claude-opus-5-5".into());
+    assert_eq!(sup.state().status, RoundStatus::Idle, "the round stalled: {:?}", sup.state().tasks.iter().map(|t| (&t.id, t.phase, &t.state)).collect::<Vec<_>>());
+    assert!(effects.iter().any(|e| matches!(e, Effect::RoundReport { .. })));
 }

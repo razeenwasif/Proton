@@ -190,6 +190,14 @@ pub enum Effect {
     Notice(String),
 }
 
+/// A task refused as it started: why, and what the round did next —
+/// which, when no other seat may take the task, is to go on without it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Refused {
+    pub why: String,
+    pub effects: Vec<Effect>,
+}
+
 /// What an answer came to.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Answered {
@@ -639,8 +647,9 @@ impl Supervisor {
     /// The engine said which model it is running, and its own id for the
     /// conversation. A reviewer or judge that turns out to be of the
     /// family it must not be is refused: the task is planned again
-    /// elsewhere, and this returns why, for the core to stop it.
-    pub fn started(&mut self, id: &str, native: &str, model: &str, snap: &Snapshot) -> Option<String> {
+    /// elsewhere — or, with nowhere else to go, the round goes on without
+    /// it — and this says why, for the core to stop it.
+    pub fn started(&mut self, id: &str, native: &str, model: &str, snap: &Snapshot, now: u64) -> Option<Refused> {
         let round = self.state.round;
         let task = self.task_mut(id)?;
         task.native = native.to_string();
@@ -657,9 +666,16 @@ impl Supervisor {
         }
         if let Some(t) = self.task_mut(id) {
             t.state = TaskState::Cancelled;
+            t.ended = Some(now);
         }
-        self.reassign(&task, snap, 0);
-        Some(format!("{} is running a model of the same family as one it was to judge; the task goes to another seat.", task.seat.name()))
+        let why = if self.reassign(&task, snap, now) {
+            format!("{} is running a model of the same family as one it was to judge; the task goes to another seat.", task.seat.name())
+        } else {
+            format!("{} is running a model of the same family as one it was to judge, and no other seat may take the task.", task.seat.name())
+        };
+        // Nothing else may be waiting on it: what comes next is planned now.
+        let effects = self.advance(snap, now);
+        Some(Refused { why, effects })
     }
 
     /// Plan a task again on another seat that may do it.

@@ -22,6 +22,12 @@ pub struct Holder {
     pub heartbeat: u64,
 }
 
+/// Who holds an investigation's lock, if anyone alive does: another
+/// instance's, read without taking it.
+pub fn holder(folder: &Path, now: u64) -> Option<Holder> {
+    read(&path(folder)).filter(|holder| now.saturating_sub(holder.heartbeat) < STALE)
+}
+
 /// The lock, while this instance holds it. Let go of on drop.
 #[derive(Debug)]
 pub struct Lock {
