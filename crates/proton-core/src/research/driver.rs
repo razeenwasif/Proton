@@ -373,6 +373,13 @@ impl Driver {
         Moved { moved: true, ..Moved::default() }
     }
 
+    /// Proton is going: the calls out are let go — their processes with
+    /// them — and the round is left as it is on disk, to come back paused.
+    pub fn shutdown(&mut self) {
+        self.live.clear();
+        self.save();
+    }
+
     /// A Lab run of this investigation ended, and what it showed is in the
     /// sandbox log: a seat of another model family is to review it — now,
     /// if a round is running, or in the next.

@@ -409,10 +409,14 @@ fn main() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 if let Some(state) = app.try_state::<Mutex<BridgeSession>>() {
-                    match state.lock() {
-                        Ok(session) => session.session.save(),
-                        Err(poisoned) => poisoned.into_inner().session.save(),
-                    }
+                    let mut session = match state.lock() {
+                        Ok(session) => session,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    session.session.save();
+                    // A Lab run is a process group of its own: it would
+                    // outlive the app if it were not stopped here.
+                    session.session.shutdown();
                 }
             }
         });

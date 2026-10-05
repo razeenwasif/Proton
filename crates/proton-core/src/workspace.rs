@@ -3301,6 +3301,11 @@ impl Workspace {
         self.modeling.mesh_bytes(key)
     }
 
+    /// Proton is going: Research's runs are stopped and its calls let go.
+    pub fn shutdown(&mut self) {
+        self.research.shutdown();
+    }
+
     /// Where a file a Lab run left is: see `Research::lab_file`.
     pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
         self.research.lab_file(key)

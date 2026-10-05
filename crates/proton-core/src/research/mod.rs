@@ -190,6 +190,7 @@ impl Research {
         events.extend(self.board());
         events.extend(self.round_event(now));
         events.extend(self.lab_event(true));
+        self.reap();
         events.extend(self.runs_event());
         events
     }
@@ -303,6 +304,9 @@ impl Research {
             return Err(format!("{id} is {what}."));
         }
         let python = self.lab_python().ok_or("Make the Lab's Python first: the Lab pane says how.")?;
+        if self.runs.len() >= Self::AT_ONCE {
+            return Err(format!("{} runs are going: one has to end before another starts.", Self::AT_ONCE));
+        }
         let sandbox = self.sandbox();
         if sandbox == Sandbox::None && !unsandboxed {
             return Err("This machine has no sandbox the Lab can trust. Run it only if you have read it, with Run without a sandbox.".into());
@@ -342,6 +346,58 @@ impl Research {
     /// Runs going at once that the investigation's policy started: more
     /// wait for one to end.
     const AUTO_AT_ONCE: usize = 2;
+
+    /// Runs going at once in all: the machine is the scientist's too.
+    const AT_ONCE: usize = 4;
+
+    /// Proton is going: every run is stopped — each its own process group,
+    /// which would otherwise outlive it — and marked so, and every call a
+    /// round has out is let go.
+    pub fn shutdown(&mut self) {
+        for live in std::mem::take(&mut self.runs) {
+            let LiveRun { slug, experiment, run } = live;
+            // Let go of, a run stops its whole group and says so in its record.
+            drop(run);
+            if let Ok(folder) = self.store.open(&slug) {
+                self.settle(&folder, &experiment);
+            }
+        }
+        for driver in self.drivers.values_mut() {
+            driver.shutdown();
+        }
+    }
+
+    /// A run that ended without being watched to its end: its experiment
+    /// failed, and the sandbox log says why.
+    fn settle(&self, folder: &Folder, experiment: &str) {
+        let Some(mut e) = folder.experiments().into_iter().find(|e| e.id == experiment) else { return };
+        let Some(run) = e.run.clone() else { return };
+        if e.status == ExperimentStatus::Running {
+            e.status = ExperimentStatus::Failed;
+            let _ = folder.write_experiment(&e);
+        }
+        let about = e.hypothesis.as_deref().map(|h| format!(", testing {h}")).unwrap_or_default();
+        let _ = folder.add_sandbox_log(&format!("## {run} — {}{about}\n\n{}\n\nIt was running when Proton closed, and did not finish.\n", e.id, e.purpose.trim()));
+    }
+
+    /// Runs of the open investigation left running by a Proton that
+    /// crashed: settled, so none is shown running that nothing watches.
+    fn reap(&mut self) {
+        let Some(slug) = self.open.clone() else { return };
+        let Ok(folder) = self.store.open(&slug) else { return };
+        let Ok(entries) = std::fs::read_dir(folder.dir().join("runs")) else { return };
+        for entry in entries.flatten() {
+            let id = entry.file_name().to_string_lossy().to_string();
+            if self.runs.iter().any(|r| r.slug == slug && r.run.id == id) {
+                continue;
+            }
+            if lab_run::reap(&entry.path()).is_some() {
+                if let Some(e) = folder.experiments().into_iter().find(|e| e.run.as_deref() == Some(id.as_str())) {
+                    self.settle(&folder, &e.id);
+                }
+            }
+        }
+    }
 
     /// What the agents proposed, run without asking — only when the
     /// investigation allows it, its Lab's Python is made and the run would

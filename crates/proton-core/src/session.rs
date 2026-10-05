@@ -405,6 +405,14 @@ impl Session {
         self.active_mut().mesh_bytes(key)
     }
 
+    /// Proton is going: what every workspace has running that would outlive
+    /// it — Research's runs and calls — is stopped.
+    pub fn shutdown(&mut self) {
+        for workspace in &mut self.workspaces {
+            workspace.shutdown();
+        }
+    }
+
     /// Where a file a Lab run left is, in the workspace on screen.
     pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
         self.active().lab_file(key)

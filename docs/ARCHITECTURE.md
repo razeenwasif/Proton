@@ -787,7 +787,12 @@ environment's lock by SHA-256, the Python, the sandbox, the limits, who
 approved it and when, and how it ended. Its output goes to files, not pipes;
 it is a process group of its own, stopped as one on a timeout, a Stop or
 Proton closing; it has an environment of its own (none of the person's
-variables, so none of their keys) and limits on CPU time and file size.
+variables, so none of their keys) and limits on CPU time and file size. Four
+run at once at most. Quitting stops every run and says so in its record, its
+experiment and the sandbox log; a run a crashed Proton left marked running is
+settled the next time its investigation is drawn — stopped if its process is
+still there working in the run's folder (a pid something else has since is
+left alone), and closed out either way.
 
 | | |
 |---|---|

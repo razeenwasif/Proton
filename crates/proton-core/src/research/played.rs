@@ -1055,3 +1055,56 @@ fn what_the_agents_propose_runs_without_asking_only_if_allowed_and_sandboxed() {
     assert!(folder.experiments().iter().all(|e| e.status == proton_research::model::ExperimentStatus::Done), "not every proposal ran");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[cfg(unix)]
+#[test]
+fn quitting_stops_every_run_and_says_so_and_a_crash_s_leftover_is_settled_when_seen() {
+    use proton_research::model::ExperimentStatus;
+    let dir = root("quit");
+    let (factory, _) = Factory::new();
+    let mut research = begin(&dir, factory);
+    made_lab(&dir, &mut research);
+    research.sandbox = Some(proton_lab::Sandbox::None);
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    for n in 1..=5 {
+        folder.write_experiment(&experiment(&format!("E00{n}"), "sleep 300")).unwrap();
+    }
+    for n in 1..=4 {
+        research.approve(&format!("E00{n}"), true);
+    }
+    // Four at once, and no more.
+    assert!(notices(&research.approve("E005", true)).iter().any(|n| n.contains("4 runs are going")), "a fifth run started");
+    let pid = |run: &str| -> i32 {
+        let record: Value = serde_json::from_str(&std::fs::read_to_string(folder.dir().join("runs").join(run).join("run.json")).unwrap()).unwrap();
+        record["pid"].as_i64().unwrap() as i32
+    };
+    let first = pid("R001");
+    research.shutdown();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let alive = std::process::Command::new("/bin/kill").args(["-0", &first.to_string()]).stderr(std::process::Stdio::null()).status().unwrap().success();
+    assert!(!alive, "a run outlived Proton");
+    let record: Value = serde_json::from_str(&std::fs::read_to_string(folder.dir().join("runs/R001/run.json")).unwrap()).unwrap();
+    assert_eq!(record["state"], "stopped");
+    assert_eq!(folder.experiments().iter().filter(|e| e.status == ExperimentStatus::Failed).count(), 4);
+    assert!(folder.sandbox_log().contains("It was running when Proton closed"));
+
+    // A Proton that crashed left R009 marked running, with a process long gone.
+    let mut gone = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+    gone.wait().unwrap();
+    std::fs::create_dir_all(folder.dir().join("runs/R009")).unwrap();
+    std::fs::write(folder.dir().join("runs/R009/run.json"), json!({ "id": "R009", "state": "running", "pid": gone.id() }).to_string()).unwrap();
+    let mut e = experiment("E009", "sleep 300");
+    e.status = ExperimentStatus::Running;
+    e.run = Some("R009".into());
+    folder.write_experiment(&e).unwrap();
+    let mut again = Research::with_factory(&dir, Box::new(Factory::new().0), "the-next-proton");
+    let events = again.sync_at(T0);
+    let runs = events.iter().find_map(|e| match e {
+        Event::ResearchLab { runs, .. } => Some(runs.clone()),
+        _ => None,
+    });
+    let r009 = runs.unwrap().into_iter().find(|r| r.id == "R009").unwrap();
+    assert_eq!(r009.state, proton_lab::RunState::Stopped, "a run nothing watches is shown running");
+    assert_eq!(folder.experiments().into_iter().find(|e| e.id == "E009").unwrap().status, ExperimentStatus::Failed);
+    let _ = std::fs::remove_dir_all(dir);
+}

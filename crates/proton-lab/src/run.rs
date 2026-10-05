@@ -413,6 +413,48 @@ pub fn detail(dir: &Path) -> Option<Detail> {
     Some(Detail { row, stdout, stdout_cut, stderr, stderr_cut, metrics, figures, scenes, record })
 }
 
+/// The folder a process is working in, if it can be told.
+#[cfg(unix)]
+fn cwd_of(pid: u32) -> Option<PathBuf> {
+    if cfg!(target_os = "linux") {
+        return std::fs::read_link(format!("/proc/{pid}/cwd")).ok();
+    }
+    let out = Command::new("/usr/sbin/lsof").args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"]).stderr(Stdio::null()).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.strip_prefix('n').map(PathBuf::from))
+}
+
+/// A run its record says is running, though no Proton is watching it —
+/// one that was going when Proton crashed — is settled: stopped, if its
+/// process is still there and is working in the run's own folder (a pid
+/// handed to something else since is left alone), and its record closed.
+/// Its state, if it needed settling.
+pub fn reap(dir: &Path) -> Option<State> {
+    let path = dir.join("run.json");
+    let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    if record["state"] != json!(State::Running) {
+        return None;
+    }
+    #[cfg(unix)]
+    if let Some(pid) = record["pid"].as_u64().map(|p| p as u32) {
+        // SAFETY: signal 0 only asks whether the process exists.
+        let alive = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
+        let ours = alive && cwd_of(pid).is_some_and(|cwd| sandbox::real(&cwd) == sandbox::real(dir));
+        if ours {
+            // SAFETY: the group is the run's own, and its leader is working in
+            // the run's folder: it is that run, not a pid reused since.
+            unsafe {
+                libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+            }
+        }
+    }
+    record["state"] = json!(State::Stopped);
+    record["ended"] = json!(now());
+    record["note"] = json!("It was running when Proton closed, and did not finish.");
+    record["outputs"] = json!(outputs(dir));
+    let _ = write(&path, &(serde_json::to_string_pretty(&record).unwrap_or_default() + "\n"));
+    Some(State::Stopped)
+}
+
 /// The last `lines` lines of a file a run wrote, and whether there were more.
 pub fn tail(path: &Path, lines: usize) -> (String, bool) {
     let text = std::fs::read(path).map(|b| String::from_utf8_lossy(&b).to_string()).unwrap_or_default();
@@ -526,6 +568,42 @@ mod tests {
         drop(run);
         let record: Value = serde_json::from_str(&std::fs::read_to_string(base.join("runs/R001/run.json")).unwrap()).unwrap();
         assert_eq!(record["state"], "stopped");
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_run_left_running_by_a_crash_is_settled_and_only_its_own_process_stopped() {
+        let base = std::env::temp_dir().join(format!("proton-run-reap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (ours, other) = (base.join("runs/R001"), base.join("elsewhere"));
+        std::fs::create_dir_all(&ours).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let record = |pid: u32| json!({ "id": "R001", "state": "running", "pid": pid }).to_string();
+        // Its process, still going in its folder, as its own group.
+        let mut orphan = {
+            use std::os::unix::process::CommandExt;
+            Command::new("/bin/sleep").arg("300").current_dir(&ours).process_group(0).spawn().unwrap()
+        };
+        std::fs::write(ours.join("run.json"), record(orphan.id())).unwrap();
+        assert_eq!(reap(&ours), Some(State::Stopped));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while orphan.try_wait().unwrap().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(orphan.try_wait().unwrap().is_some(), "the orphaned run was not stopped");
+        let settled: Value = serde_json::from_str(&std::fs::read_to_string(ours.join("run.json")).unwrap()).unwrap();
+        assert_eq!(settled["state"], "stopped");
+        assert!(settled["note"].as_str().unwrap().contains("Proton closed"));
+        assert_eq!(reap(&ours), None, "a settled run was settled again");
+
+        // A pid that is something else's now is not touched.
+        let mut stranger = Command::new("/bin/sleep").arg("300").current_dir(&other).spawn().unwrap();
+        std::fs::write(ours.join("run.json"), record(stranger.id())).unwrap();
+        assert_eq!(reap(&ours), Some(State::Stopped));
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(stranger.try_wait().unwrap().is_none(), "a process that was not the run's was killed");
+        let _ = stranger.kill();
+        let _ = stranger.wait();
         let _ = std::fs::remove_dir_all(base);
     }
 
