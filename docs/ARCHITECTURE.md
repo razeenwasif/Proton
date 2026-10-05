@@ -955,6 +955,16 @@ nothing could be found for is said in a notice and told to every task after,
 with where it was cited, so none is cited again and what rests on it is
 weighed for it; a hypothesis's page marks each name it and its reviews cite.
 
+Three kinds of live check are run by hand, since they reach the network or
+spend a plan. `proton-literature`'s `tests/live.rs` asks each source without a
+key (and records what they answer, trimmed, as the fixtures the offline tests
+read); Semantic Scholar's pool for callers without a key answered 429 more
+often than not on 2026-10-06. `proton-claude`'s `tests/literature_live.rs`
+runs Claude Code and Codex unattended, as a round does, with the literature
+server, and checks each searched a paper through it and cited it — it is what
+found `--safe-mode` dropping the server. And `tests/live_round.rs` plays a
+round with the literature on, unless told otherwise.
+
 An investigation made before there was a literature has it off, so none starts
 telling third parties its topic on its own; a new one has it on unless the
 scientist says otherwise. Off, nothing is asked of anybody: the scientist's

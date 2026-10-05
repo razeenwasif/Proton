@@ -15,6 +15,13 @@
 //! folder to be read. What it checks is what a round must do whatever the
 //! models say: it finished, within its cap, with a report, and no model
 //! family reviewed or judged its own hypotheses.
+//!
+//! The investigation searches the literature, as a new one does, unless
+//! `PROTON_LIVE_LITERATURE=0` — asking arXiv, Semantic Scholar and OpenAlex
+//! the team's queries, and Crossref and arXiv what it cites. For Claude Code
+//! and Codex to read the papers through Proton's own server rather than be
+//! given passages, name it: `PROTON_MCP=target/release/proton-mcp` (a test
+//! is not beside it, as the app is).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -43,7 +50,8 @@ fn a_real_round_on_the_real_engines() {
         Ok("mathematics") => Discipline::Mathematics,
         _ => Discipline::Physics,
     };
-    research.create(&title, &goal, discipline);
+    let literature = std::env::var("PROTON_LIVE_LITERATURE").map(|v| v != "0").unwrap_or(true);
+    research.create(&title, &goal, discipline, literature);
     let started = Instant::now();
     let say = |what: String| println!("[{:>5.0}s] {what}", started.elapsed().as_secs_f64());
 
@@ -92,7 +100,27 @@ fn a_real_round_on_the_real_engines() {
     for m in folder.matches() {
         assert!(Some(m.judge.family()) != family(&m.a) && Some(m.judge.family()) != family(&m.b), "{m:?}");
     }
-    println!("\n{}", std::fs::read_to_string(folder.dir().join("rounds/round-001.md")).unwrap_or_default());
+    let report = std::fs::read_to_string(folder.dir().join("rounds/round-001.md")).unwrap_or_default();
+    if literature {
+        assert!(report.contains("## Literature"), "the round's report does not say what the literature did");
+        let papers = folder.papers();
+        for p in &papers {
+            println!("{} {} — {}", p.id, if p.has_pdf { "PDF" } else { "abstract" }, p.record.title);
+        }
+        // Every seat that proposed was shown what was found.
+        if !papers.is_empty() {
+            for entry in std::fs::read_dir(folder.dir().join("tasks")).unwrap().flatten() {
+                let record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(entry.path()).unwrap()).unwrap();
+                if record["phase"] == "generate" {
+                    assert!(record["prompt"].as_str().unwrap_or("").contains("- **P0"), "{} was not shown the literature", record["id"]);
+                }
+            }
+        }
+        for (key, checked) in folder.citations() {
+            println!("cited {key}: {:?}{}", checked.check, checked.title.map(|t| format!(" — {t}")).unwrap_or_default());
+        }
+    }
+    println!("\n{report}");
     println!("{} hypotheses, {} reviews, {} matches, {} experiments proposed", hypotheses.len(), folder.reviews().len(), folder.matches().len(), folder.experiments().len());
     println!("the investigation is in {}", folder.dir().display());
 }
