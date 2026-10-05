@@ -4725,6 +4725,12 @@ function renderEvent(event) {
 
     case "action":
       renderStatus(event.description);
+      // `i`, `a`, `o` and `O` in Data mode put the caret in a cell. The core
+      // has already switched the engine to insert and, for `o`/`O`, added the
+      // cell; this is the half it cannot do.
+      if (activeMode === "data" && event.action.verb === "Insert") {
+        requestAnimationFrame(() => enterCell(event.action.object));
+      }
       break;
 
     case "unsupported":
@@ -4770,15 +4776,6 @@ function renderEvent(event) {
 
     case "notebook":
       renderNotebook(event);
-      break;
-
-    case "action":
-      // `i`, `a`, `o` and `O` in Data mode put the caret in a cell. The core
-      // has already switched the engine to insert and, for `o`/`O`, added the
-      // cell; this is the half it cannot do.
-      if (activeMode === "data" && event.action.verb === "Insert") {
-        requestAnimationFrame(() => enterCell(event.action.object));
-      }
       break;
 
     case "claudeSessions":

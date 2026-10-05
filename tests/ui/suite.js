@@ -1410,6 +1410,21 @@ await test('A notebook colours its code cells as they are typed, and its prose d
     'a link in a notebook was followed in the window');
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('In a notebook, i puts the caret in the selected cell', async () => {
+  await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
+  const cell = (kind, source, selected = false) => ({kind, source, outputs: [], executionCount: null, running: false, selected});
+  await win.pushEvents([{type: 'notebook', path: '/fixture/fit.ipynb', problem: '', language: 'python', cells: [
+    cell('code', 'import numpy as np'), cell('code', 'np.mean([1, 2, 3])', true)]}]);
+  await settle();
+  // What the core sends for `i`. The caret goes in at the next frame.
+  await win.pushEvents([{type: 'action', action: {verb: 'Insert', object: 'Here', count: 1, register: null}, description: 'insert'}]);
+  await new Promise((done) => win.requestAnimationFrame(done));
+  const src = $('.workspace[data-ws="data"] .split.on [data-cell="1"] .cell-src');
+  assert(src && doc.activeElement === src, 'i did not put the caret in the selected cell');
+  assert($('#sl-status').textContent === 'insert', 'the action no longer shows in the statusline');
+  src.blur(); await settle();
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('Research is the eighth mode: ⌃8 opens it, in Codex\'s chrome and on an opaque ground', async () => {
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
   const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
