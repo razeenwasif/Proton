@@ -13,6 +13,7 @@ import { highlight } from "./highlight.js";
 import { mountScene } from "./lab3d.js";
 
 /** @typedef {import("./bindings/LabEnv").LabEnv} Env */
+/** @typedef {import("./bindings/LabMaker").LabMaker} Maker */
 /** @typedef {import("./bindings/LabPlan").LabPlan} Plan */
 /** @typedef {import("./bindings/ExperimentRow").ExperimentRow} Experiment */
 /** @typedef {import("./bindings/LabRun").LabRun} RunRow */
@@ -54,8 +55,10 @@ export function createLab(host) {
   if (!found || !foundWork) return null;
   const box = found;
   const work = foundWork;
-  /** @type {{env: Env | null, confirming: boolean, lab: LabEvent | null, run: RunDetail | null, open: Set<string>, scene: string | null}} */
-  const state = { env: null, confirming: false, lab: null, run: null, open: new Set(), scene: null };
+  /** @type {{env: Env | null, maker: Maker | null, confirming: boolean, lab: LabEvent | null, run: RunDetail | null, open: Set<string>, scene: string | null}} */
+  const state = { env: null, maker: null, confirming: false, lab: null, run: null, open: new Set(), scene: null };
+  /** Whether the Lab's Python comes from PyPI rather than conda-forge. */
+  const pip = () => state.maker?.kind === "pip";
   /** Pictures already read, as object URLs, by key. @type {Map<string, string>} */
   const pictures = new Map();
   /** Scenes already read, by key. @type {Map<string, any>} */
@@ -73,12 +76,15 @@ export function createLab(host) {
 
   /** @param {Plan} plan */
   function planHtml(plan) {
-    const fetched = plan.packages.length - plan.cached;
+    const known = plan.packages.filter((p) => p.size != null).length;
+    const unknown = pip() ? plan.packages.length - known : 0;
+    // conda leaves out the size of what it has cached; pip of what PyPI did not say.
+    const fetched = pip() ? known : plan.packages.length - plan.cached;
     const rows = plan.packages.map((p) =>
-      `<tr><td>${esc(p.name)}</td><td>${esc(p.version)}</td><td>${p.size == null ? `<span class="lab-faint">cached</span>` : esc(bytes(p.size))}</td></tr>`).join("");
+      `<tr><td>${esc(p.name)}</td><td>${esc(p.version)}</td><td>${p.size == null ? `<span class="lab-faint">${pip() ? "—" : "cached"}</span>` : esc(bytes(p.size))}</td></tr>`).join("");
     return `<div class="lab-step">
-        <b>Then, if you agree.</b> ${plan.packages.length} packages from conda-forge:
-        ${fetched ? `<b>${esc(bytes(plan.download))}</b> to download for ${fetched}` : "nothing to download"}${plan.cached ? `, ${plan.cached} already in conda's cache` : ""},
+        <b>Then, if you agree.</b> ${plan.packages.length} packages from ${pip() ? "PyPI" : "conda-forge"}:
+        ${fetched ? `<b>${esc(bytes(plan.download))}</b> to download for ${fetched}` : "nothing to download"}${plan.cached ? `, ${plan.cached} already in conda's cache` : ""}${unknown ? `, and ${unknown} whose size PyPI did not say` : ""},
         into <code>${esc(home(plan.prefix))}</code>.
       </div>
       <details class="lab-packages"><summary>Every package</summary><table>${rows}</table></details>
@@ -94,24 +100,30 @@ export function createLab(host) {
     switch (env.state) {
       case "unknown":
         return `<p class="lab-faint">Looking for the Lab's Python…</p>`;
-      case "noConda":
-        return `<p>The Lab runs code in a Python of its own, made with conda — and there is no conda here.
-          Install Miniforge, conda-forge's own conda, then come back to Research.</p>`;
+      case "noPython":
+        return `<p>The Lab runs code in a Python of its own, made with conda — or, with no conda, as a virtual environment
+          from Python 3.9 or newer. There is neither here. Install Miniforge, conda-forge's own conda, or a current Python,
+          then come back to Research.</p>`;
       case "missing": {
         const cached = env.index
           ? `conda's copy of it is from ${esc(day(env.index))}, and it is refreshed if it is out of date`
           : "conda has no copy of it yet, so it is downloaded — tens of megabytes";
+        const first = env.maker.kind === "pip"
+          ? `<b>First, a plan.</b> Proton makes an empty virtual environment from <code>${esc(home(env.maker.python))}</code>
+            and asks PyPI, the Python package index, what it would install — the packages' descriptions, and a newer pip if this
+            one is too old to answer, a couple of megabytes. Nothing else is installed yet.`
+          : `<b>First, a plan.</b> conda asks conda-forge what that environment would be, which needs
+            conda-forge's package index for this machine: ${cached}. Nothing is installed yet.`;
         const python = env.specs.find((s) => s.startsWith("python"))?.replace(/^python=?/, "") ?? "";
         const stack = env.specs.filter((s) => !s.startsWith("python")).map((s) => s.replace(/=.*$/, "").replace(/-base$/, ""));
         const listed = stack.length > 1 ? `${stack.slice(0, -1).join(", ")} and ${stack[stack.length - 1]}` : stack.join("");
         return `<p>The Lab runs an investigation's code in a Python of its own — Python ${esc(python)} with
           ${esc(listed)} — in <code>${esc(home(env.prefix))}</code>, apart from your own environments.</p>
-          <div class="lab-step"><b>First, a plan.</b> conda asks conda-forge what that environment would be, which needs
-          conda-forge's package index for this machine: ${cached}. Nothing is installed yet.</div>
+          <div class="lab-step">${first}</div>
           <div class="lab-acts"><button class="cc-primary" data-lab="plan">Plan the Lab's Python</button></div>`;
       }
       case "planning":
-        return `<p class="lab-busy"><span class="lab-spin"></span> conda is working out the environment. This can take a minute.</p>
+        return `<p class="lab-busy"><span class="lab-spin"></span> ${pip() ? "pip" : "conda"} is working out the environment. This can take a minute.</p>
           ${tail(env.log)}
           <div class="lab-acts"><button class="cc-quiet" data-lab="cancel">Stop</button></div>`;
       case "planned":
@@ -422,6 +434,7 @@ export function createLab(host) {
   /** @param {{env: Env}} event */
   function env(event) {
     if (event.env.state !== "ready") state.confirming = false;
+    if (event.env.state === "missing") state.maker = event.env.maker;
     state.env = event.env;
     render();
     // Whether a proposal can be run depends on it.

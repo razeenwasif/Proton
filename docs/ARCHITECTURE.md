@@ -85,7 +85,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-agent` / `proton-council` | Model conversations and tools / multi-model debates |
 | `proton-claude` | Claude Code, Codex and Antigravity as engines: interactive, and unattended with structured answers |
 | `proton-research` | Investigations as files, and the co-scientist round as a pure state machine |
-| `proton-lab` | The Lab's conda environment — planned, made and removed on the scientist's say-so — and the jobs that run for it |
+| `proton-lab` | The Lab's Python — a conda environment, or a venv where there is no conda — planned, made and removed on the scientist's say-so, and the jobs that run for it |
 | `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
 | `proton-data` | Notebook documents and kernel integration |
 | `proton-design` | Theme tokens and component markup |
@@ -781,7 +781,15 @@ One round runs at a time in a project.
 
 `proton-lab` makes the Lab's Python (a conda environment of the scientific
 stack, on two say-sos: a dry-run plan, then exactly that plan, pinned) and
-runs experiments in it. A run is `research/<slug>/runs/R005/`: the approved
+runs experiments in it. Where there is no conda it makes a virtual environment
+of a Python 3.9 or newer that is here — Homebrew's, python.org's, pyenv's, one
+on the PATH, macOS's own only when the developer tools are installed, since
+otherwise it offers to install them — with the same two say-sos. Planning makes
+the venv empty and asks its pip, brought up to 22.2 if it is older, for
+`install --dry-run --report`, with each package's size from PyPI; making it
+installs exactly that list, pinned and `--no-deps`, and `pip freeze` is its
+lock. A venv planned and not wanted is removed, so nothing is left behind but
+what the scientist made. A run is `research/<slug>/runs/R005/`: the approved
 code as `main.py`, a helper it can import, and `run.json` — the code and the
 environment's lock by SHA-256, the Python, the sandbox, the limits, who
 approved it and when, and how it ended. Its output goes to files, not pipes;

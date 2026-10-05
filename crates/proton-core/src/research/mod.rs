@@ -203,7 +203,7 @@ impl Research {
         let mut lab = self.lab.lock().unwrap_or_else(|e| e.into_inner());
         // Looked at again whenever a window draws it and there is none: one
         // made outside Proton, or since, is found.
-        let stale = matches!(lab.state(), EnvState::Unknown) || always && matches!(lab.state(), EnvState::Missing { .. } | EnvState::NoConda);
+        let stale = matches!(lab.state(), EnvState::Unknown) || always && matches!(lab.state(), EnvState::Missing { .. } | EnvState::NoPython);
         if stale && !lab.busy() {
             lab.check();
         }
@@ -930,7 +930,7 @@ mod tests {
         let events = research.sync();
         assert!(matches!(events.first(), Some(Event::ResearchList { investigations, open: None }) if investigations.is_empty()));
         // A Lab of its own, with no conda to call: the machine's is not touched.
-        assert!(matches!(events.last(), Some(Event::LabEnv { env: EnvState::NoConda })), "{events:?}");
+        assert!(matches!(events.last(), Some(Event::LabEnv { env: EnvState::NoPython })), "{events:?}");
 
         let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics);
         let Some(Event::ResearchList { investigations, open }) = events.first() else { panic!("{events:?}") };

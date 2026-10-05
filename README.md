@@ -123,9 +123,10 @@ the Activity tab follows it call by call, each one opening into what it said;
 what you type goes to the team, and `/h Title: statement` adds a hypothesis of
 your own. The Lab's Python — Python 3.12 with numpy, scipy, sympy, mpmath,
 matplotlib, networkx and pandas, from conda-forge, apart from your own
-environments — is made with your say-so twice: once for conda to plan it,
-and once to make exactly that plan, every package and its download in front
-of you. Code an agent proposes waits in the Lab for you to read; run, it is
+environments; or, with no conda, a virtual environment of a Python 3.9 or newer
+already here, the same packages from PyPI — is made with your say-so twice:
+once to plan it, and once to make exactly that plan, every package and its
+download in front of you. Code an agent proposes waits in the Lab for you to read; run, it is
 in a sandbox — Seatbelt on macOS, bubblewrap on Linux: no network, nothing
 written outside its own folder, nothing of your home folder read — and its
 folder keeps what it printed, the numbers and pictures it saved, and a record

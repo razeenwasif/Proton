@@ -1,10 +1,13 @@
-//! The Lab's Python: one conda environment of the scientific stack, in
+//! The Lab's Python: one environment of the scientific stack, in
 //! `~/.proton/lab/envs/lab` — Proton's own, apart from every environment
-//! the scientist keeps for their own work.
+//! the scientist keeps for their own work. Made with conda, from
+//! conda-forge; or, on a machine with no conda, as a virtual environment
+//! from a Python already here, with its packages from PyPI (`crate::pip`).
 //!
 //! It is made with their say-so twice. First to plan: conda asks
 //! conda-forge what the environment would be, which means fetching
-//! conda-forge's package index unless conda has a fresh copy. Then to make
+//! conda-forge's package index unless conda has a fresh copy — or pip,
+//! in an empty environment made for the asking, asks PyPI. Then to make
 //! it: the exact packages that plan named, with what downloading them
 //! costs, pinned so that what is installed is what was agreed to. Nothing
 //! is downloaded or installed by Proton on its own.
@@ -18,6 +21,7 @@ use ts_rs::TS;
 
 use crate::conda::{self, Package, Plan};
 use crate::job::{Job, Said};
+use crate::pip;
 
 /// What the Lab's Python has: the scientific stack for physics and
 /// mathematics first, and what plots and tables need.
@@ -29,6 +33,25 @@ const SHOWN: [&str; 8] = ["numpy", "scipy", "sympy", "mpmath", "matplotlib", "ne
 /// Lines of a step's output kept to show.
 const KEPT: usize = 60;
 
+/// What makes the Lab's Python on this machine.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Maker {
+    /// conda, from conda-forge.
+    Conda(PathBuf),
+    /// A Python already here, made into a virtual environment, with its
+    /// packages from PyPI.
+    Pip { python: PathBuf, version: String },
+}
+
+/// The maker, as the window says it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "LabMaker")]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum MakerView {
+    Conda { conda: String },
+    Pip { python: String, version: String },
+}
+
 /// Where the Lab's Python stands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/", rename = "LabEnv")]
@@ -36,15 +59,16 @@ const KEPT: usize = 60;
 pub enum EnvState {
     /// Not looked at yet.
     Unknown,
-    /// No conda here to make one with.
-    NoConda,
+    /// Nothing here to make one with: no conda, and no Python new enough
+    /// to make a virtual environment from.
+    NoPython,
     /// There is none. Making one starts with a plan.
     #[serde(rename_all = "camelCase")]
     Missing {
-        /// The conda that would make it.
-        conda: String,
+        /// What would make it.
+        maker: MakerView,
         /// When conda last fetched conda-forge's index for this machine,
-        /// in seconds since the epoch, if it ever has.
+        /// in seconds since the epoch, if it ever has; none for pip.
         #[ts(type = "number | null")]
         index: Option<u64>,
         specs: Vec<String>,
@@ -68,6 +92,8 @@ pub enum EnvState {
 
 /// What is running for the Lab.
 enum Step {
+    /// The empty environment pip plans in.
+    Venv(Job),
     Plan(Job),
     Create(Job),
     Lock(Job),
@@ -77,7 +103,7 @@ enum Step {
 
 pub struct Lab {
     home: PathBuf,
-    conda: Option<PathBuf>,
+    maker: Option<Maker>,
     specs: Vec<String>,
     state: EnvState,
     /// Bumped on every change, so a window can tell it has seen this one.
@@ -111,12 +137,16 @@ fn quiet() -> Vec<(String, String)> {
 }
 
 impl Lab {
-    /// The Lab under `home` — `~/.proton/lab` — made with `conda`, if there is one.
-    pub fn new(home: &Path, conda: Option<PathBuf>) -> Lab {
+    /// The Lab under `home` — `~/.proton/lab` — made with `maker`, if there is one.
+    pub fn new(home: &Path, maker: Option<Maker>) -> Lab {
+        let specs = match &maker {
+            Some(Maker::Pip { version, .. }) => std::iter::once(format!("python={version}")).chain(pip::SPECS.iter().map(|s| s.to_string())).collect(),
+            _ => SPECS.iter().map(|s| s.to_string()).collect(),
+        };
         Lab {
             home: home.to_path_buf(),
-            conda,
-            specs: SPECS.iter().map(|s| s.to_string()).collect(),
+            maker,
+            specs,
             state: EnvState::Unknown,
             version: 0,
             step: None,
@@ -140,10 +170,12 @@ impl Lab {
         env
     }
 
-    /// `~/.proton/lab`, with the conda people install.
+    /// `~/.proton/lab`, made with the conda people install — or, with none,
+    /// a Python already here.
     pub fn at_home() -> Lab {
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-        Lab::new(&home.join(".proton").join("lab"), conda::find())
+        let maker = conda::find().map(Maker::Conda).or_else(|| pip::find().map(|(python, version)| Maker::Pip { python, version }));
+        Lab::new(&home.join(".proton").join("lab"), maker)
     }
 
     pub fn state(&self) -> &EnvState {
@@ -206,16 +238,30 @@ impl Lab {
     }
 
     fn missing(&mut self) {
-        let state = match &self.conda {
-            None => EnvState::NoConda,
-            Some(conda_path) => EnvState::Missing {
-                conda: conda_path.display().to_string(),
+        let state = match &self.maker {
+            None => EnvState::NoPython,
+            Some(Maker::Conda(conda_path)) => EnvState::Missing {
+                maker: MakerView::Conda { conda: conda_path.display().to_string() },
                 index: conda::root(conda_path).and_then(|root| conda::index_cached(&root, conda::subdir())),
+                specs: self.specs.clone(),
+                prefix: self.prefix().display().to_string(),
+            },
+            Some(Maker::Pip { python, version }) => EnvState::Missing {
+                maker: MakerView::Pip { python: python.display().to_string(), version: version.clone() },
+                index: None,
                 specs: self.specs.clone(),
                 prefix: self.prefix().display().to_string(),
             },
         };
         self.set(state);
+    }
+
+    /// pip plans in an environment it makes for the asking: one that is
+    /// not to be kept is let go of, so nothing is left that was not agreed to.
+    fn unmake(&mut self) {
+        if matches!(self.maker, Some(Maker::Pip { .. })) && !self.lock_path().exists() {
+            let _ = std::fs::remove_dir_all(self.prefix());
+        }
     }
 
     fn begin(&mut self, step: Step) {
@@ -231,11 +277,11 @@ impl Lab {
         self.set(EnvState::Failed { step: step.into(), why, log });
     }
 
-    fn conda(&self) -> Result<PathBuf, String> {
-        self.conda.clone().ok_or_else(|| "conda is not installed here.".into())
+    fn maker(&self) -> Result<Maker, String> {
+        self.maker.clone().ok_or_else(|| "There is no conda here, and no Python new enough to make an environment from.".into())
     }
 
-    /// The first say-so: ask conda what the environment would be.
+    /// The first say-so: ask what the environment would be.
     pub fn plan(&mut self) -> Result<(), String> {
         if self.step.is_some() {
             return Err("The Lab is busy.".into());
@@ -243,9 +289,14 @@ impl Lab {
         if matches!(self.state, EnvState::Ready { .. }) {
             return Err("The Lab's Python is made already.".into());
         }
-        let conda = self.conda()?;
-        let job = Job::start(&conda, &conda::plan_args(&self.prefix(), &self.specs), &self.environment())?;
-        self.begin(Step::Plan(job));
+        let step = match self.maker()? {
+            Maker::Conda(conda) => Step::Plan(Job::start(&conda, &conda::plan_args(&self.prefix(), &self.specs), &self.environment())?),
+            Maker::Pip { python, .. } => {
+                let _ = std::fs::create_dir_all(self.home.join("envs"));
+                Step::Venv(Job::start(&python, &pip::venv_args(&self.prefix()), &self.environment())?)
+            }
+        };
+        self.begin(step);
         self.set(EnvState::Planning { log: Vec::new() });
         Ok(())
     }
@@ -256,10 +307,17 @@ impl Lab {
             return Err("There is no plan to make the Lab's Python from.".into());
         };
         let plan = plan.clone();
-        let conda = self.conda()?;
-        let _ = std::fs::create_dir_all(self.home.join("envs"));
-        let job = Job::start(&conda, &conda::create_args(&self.prefix(), &plan), &self.environment())?;
-        let total = plan.packages.iter().filter(|p| p.size.is_some()).count() as u32;
+        let job = match self.maker()? {
+            Maker::Conda(conda) => {
+                let _ = std::fs::create_dir_all(self.home.join("envs"));
+                Job::start(&conda, &conda::create_args(&self.prefix(), &plan), &self.environment())?
+            }
+            Maker::Pip { .. } => Job::start(&self.python_path(), &pip::install_args(&plan), &self.environment())?,
+        };
+        let total = match plan.packages.iter().filter(|p| p.size.is_some()).count() as u32 {
+            0 => plan.packages.len() as u32,
+            n => n,
+        };
         self.begin(Step::Create(job));
         self.set(EnvState::Creating { fetched: 0, total, log: Vec::new() });
         Ok(())
@@ -270,10 +328,19 @@ impl Lab {
         if self.step.is_some() {
             return Err("The Lab is busy.".into());
         }
-        let conda = self.conda()?;
-        let job = Job::start(&conda, &conda::remove_args(&self.prefix()), &self.environment())?;
-        self.begin(Step::Remove(job));
-        self.set(EnvState::Removing);
+        match self.maker()? {
+            Maker::Conda(conda) => {
+                let job = Job::start(&conda, &conda::remove_args(&self.prefix()), &self.environment())?;
+                self.begin(Step::Remove(job));
+                self.set(EnvState::Removing);
+            }
+            // A virtual environment is its folder.
+            Maker::Pip { .. } => {
+                std::fs::remove_dir_all(self.prefix()).map_err(|e| format!("{}: {e}", self.prefix().display()))?;
+                let _ = std::fs::remove_file(self.lock_path());
+                self.missing();
+            }
+        }
         Ok(())
     }
 
@@ -283,13 +350,17 @@ impl Lab {
         let Some(step) = self.step.take() else {
             // Not now, to a plan or after a failure: back to the start.
             if matches!(self.state, EnvState::Planned { .. } | EnvState::Failed { .. }) {
+                self.unmake();
                 self.missing();
             }
             return;
         };
         match step {
-            Step::Plan(mut job) | Step::Create(mut job) | Step::Lock(mut job) | Step::Inspect(mut job) | Step::Remove(mut job) => job.kill(),
+            Step::Venv(mut job) | Step::Plan(mut job) | Step::Create(mut job) | Step::Lock(mut job) | Step::Inspect(mut job) | Step::Remove(mut job) => {
+                job.kill()
+            }
         }
+        self.unmake();
         self.missing();
     }
 
@@ -297,7 +368,7 @@ impl Lab {
     pub fn poll(&mut self) -> bool {
         let Some(step) = &mut self.step else { return false };
         let job = match step {
-            Step::Plan(job) | Step::Create(job) | Step::Lock(job) | Step::Inspect(job) | Step::Remove(job) => job,
+            Step::Venv(job) | Step::Plan(job) | Step::Create(job) | Step::Lock(job) | Step::Inspect(job) | Step::Remove(job) => job,
         };
         let said = job.poll();
         if said.is_empty() {
@@ -311,6 +382,9 @@ impl Lab {
                         if done {
                             self.fetched.insert(name);
                         }
+                    } else if let Some(name) = pip::downloaded(&line) {
+                        self.fetched.insert(name);
+                        self.log.push(line);
                     } else {
                         self.out.push(line);
                     }
@@ -358,18 +432,51 @@ impl Lab {
                 None => format!("{what} was stopped."),
             })
         };
+        let pip = matches!(self.maker, Some(Maker::Pip { .. }));
+        let tool = if pip { "pip" } else { "conda" };
         match step {
-            Step::Plan(_) => match answer.as_ref().map(conda::plan) {
-                Some(Ok(plan)) if code == Some(0) => self.set(EnvState::Planned { plan }),
-                Some(Err(e)) => self.fail("plan", e),
-                _ => self.fail("plan", why("conda")),
-            },
+            Step::Venv(_) => {
+                if code != Some(0) {
+                    let why = self.log.last().cloned().unwrap_or_else(|| "The environment could not be made.".into());
+                    self.unmake();
+                    return self.fail("plan", why);
+                }
+                // Made, empty: now ask pip what it would hold.
+                match Job::start(&self.python_path(), &pip::plan_args(), &self.environment()) {
+                    Ok(job) => self.begin(Step::Plan(job)),
+                    Err(e) => {
+                        self.unmake();
+                        self.fail("plan", e)
+                    }
+                }
+            }
+            Step::Plan(_) => {
+                let read = answer.as_ref().map(|json| if pip { pip::plan(json) } else { conda::plan(json) });
+                match read {
+                    Some(Ok(plan)) if code == Some(0) => self.set(EnvState::Planned { plan }),
+                    Some(Err(e)) => {
+                        self.unmake();
+                        self.fail("plan", e)
+                    }
+                    _ => {
+                        self.unmake();
+                        self.fail("plan", why(tool))
+                    }
+                }
+            }
             Step::Create(_) => {
                 if code != Some(0) || refused.is_some() {
-                    return self.fail("create", why("conda"));
+                    return self.fail("create", why(tool));
                 }
                 // Made: write down what it is, then read it.
-                let job = self.conda().and_then(|c| Job::start(&c, &conda::lock_args(&self.prefix()), &self.environment()));
+                let job = if pip {
+                    Job::start(&self.python_path(), &pip::freeze_args(), &self.environment())
+                } else {
+                    self.maker().and_then(|m| match m {
+                        Maker::Conda(c) => Job::start(&c, &conda::lock_args(&self.prefix()), &self.environment()),
+                        Maker::Pip { .. } => unreachable!(),
+                    })
+                };
                 match job {
                     Ok(job) => self.begin(Step::Lock(job)),
                     Err(e) => self.fail("create", e),
@@ -403,7 +510,7 @@ impl Lab {
             }
             Step::Remove(_) => {
                 if code != Some(0) || refused.is_some() {
-                    return self.fail("remove", why("conda"));
+                    return self.fail("remove", why(tool));
                 }
                 let _ = std::fs::remove_file(self.lock_path());
                 self.missing();
@@ -469,7 +576,7 @@ esac
         let calls = b.dir.join("calls").display().to_string();
         let mut env = vec![("FIXTURES", fixtures.as_str()), ("CALLS", calls.as_str())];
         env.extend_from_slice(more);
-        Lab::new(&b.dir.join("lab"), Some(b.conda.clone())).with_env(&env)
+        Lab::new(&b.dir.join("lab"), Some(Maker::Conda(b.conda.clone()))).with_env(&env)
     }
 
     fn settle(lab: &mut Lab, until: impl Fn(&EnvState) -> bool) {
@@ -489,7 +596,7 @@ esac
         let b = bench("flow");
         let mut lab = lab(&b, &[]);
         lab.check();
-        let EnvState::Missing { conda, specs, prefix, .. } = lab.state().clone() else { panic!("{:?}", lab.state()) };
+        let EnvState::Missing { maker: MakerView::Conda { conda }, specs, prefix, .. } = lab.state().clone() else { panic!("{:?}", lab.state()) };
         assert_eq!((conda, prefix), (b.conda.display().to_string(), b.dir.join("lab/envs/lab").display().to_string()));
         assert!(specs.contains(&"numpy".to_string()) && specs.contains(&"python=3.12".to_string()));
         assert!(!b.dir.join("calls").exists(), "conda was asked before it was said it could be");
@@ -512,7 +619,7 @@ esac
         assert!(lab.plan().is_err(), "planned over a made one");
 
         // Read again from scratch, it is still ready.
-        let mut again = Lab::new(&b.dir.join("lab"), Some(b.conda.clone()));
+        let mut again = Lab::new(&b.dir.join("lab"), Some(Maker::Conda(b.conda.clone())));
         again.check();
         settle(&mut again, |s| matches!(s, EnvState::Ready { .. }));
 
@@ -550,7 +657,102 @@ esac
     fn without_conda_the_lab_says_so_and_asks_nothing() {
         let mut lab = Lab::new(&std::env::temp_dir().join("proton-lab-none"), None);
         lab.check();
-        assert_eq!(lab.state(), &EnvState::NoConda);
+        assert_eq!(lab.state(), &EnvState::NoPython);
         assert!(lab.plan().is_err());
+    }
+
+    /// A Python that makes virtual environments of itself, and answers in
+    /// one as pip would: a plan, an install, a freeze, what it has.
+    const FAKE_PYTHON: &str = r##"#!/bin/sh
+here=$(cd "$(dirname "$0")/.." && pwd)
+case "$1" in
+  -m)
+    case "$2" in
+      venv) mkdir -p "$3/bin"; cp "$0" "$3/bin/python"; chmod +x "$3/bin/python"; echo "venv $3" >> "$CALLS" ;;
+      pip)
+        case "$3" in
+          install) shift 3; echo "install $*" >> "$CALLS"
+            echo "Collecting numpy==2.1.3"
+            echo "Downloading numpy-2.1.3-cp312-cp312-macosx_14_0_arm64.whl (5.3 MB)"
+            echo "Using cached scipy-1.14.1-cp312-cp312-macosx_14_0_arm64.whl (30.1 MB)"
+            echo "Successfully installed numpy-2.1.3 scipy-1.14.1"
+            touch "$here/installed" ;;
+          freeze) echo "numpy==2.1.3"; echo "scipy==1.14.1" ;;
+        esac ;;
+    esac ;;
+  -c)
+    echo "plan" >> "$CALLS"
+    if [ -n "$FAIL_PLAN" ]; then echo '{"success": false, "message": "ERROR: No matching distribution found for numpy"}'; exit 1; fi
+    printf '{"success": true, "prefix": "%s", "packages": [{"name": "numpy", "version": "2.1.3", "size": 5301200}, {"name": "scipy", "version": "1.14.1", "size": null}]}\n' "$here" ;;
+  -I)
+    if [ -f "$here/installed" ]; then echo '{"python": "3.12.7", "packages": {"numpy": "2.1.3", "scipy": "1.14.1", "pip": "24.2"}}'; else echo '{"python": "3.12.7", "packages": {"pip": "24.2"}}'; fi ;;
+esac
+"##;
+
+    fn pip_bench(tag: &str, more: &[(&str, &str)]) -> (PathBuf, Lab) {
+        let dir = std::env::temp_dir().join(format!("proton-lab-pip-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        let python = dir.join("bin/python3");
+        std::fs::write(&python, FAKE_PYTHON).unwrap();
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let calls = dir.join("calls").display().to_string();
+        let mut env = vec![("CALLS", calls.as_str())];
+        env.extend_from_slice(more);
+        let lab = Lab::new(&dir.join("lab"), Some(Maker::Pip { python, version: "3.12.7".into() })).with_env(&env);
+        (dir, lab)
+    }
+
+    #[test]
+    fn without_conda_a_venv_is_planned_then_made_exactly_and_removed() {
+        let (dir, mut lab) = pip_bench("flow", &[]);
+        lab.check();
+        let EnvState::Missing { maker: MakerView::Pip { version, .. }, specs, index, .. } = lab.state().clone() else { panic!("{:?}", lab.state()) };
+        assert_eq!((version.as_str(), index), ("3.12.7", None));
+        assert_eq!(specs.first().map(String::as_str), Some("python=3.12.7"), "the Python it would be is said first");
+        assert!(specs.contains(&"matplotlib".to_string()), "PyPI's names, not conda's");
+        assert!(!dir.join("calls").exists(), "asked before it was said it could be");
+
+        lab.plan().unwrap();
+        settle(&mut lab, |s| matches!(s, EnvState::Planned { .. }));
+        let EnvState::Planned { plan } = lab.state().clone() else { unreachable!() };
+        assert_eq!(plan.packages.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["numpy", "scipy"]);
+        assert_eq!((plan.download, plan.cached), (5_301_200, 0));
+        assert!(lab.prefix().join("bin/python").exists(), "the plan is asked in an environment of its own");
+
+        lab.create().unwrap();
+        settle(&mut lab, |s| matches!(s, EnvState::Ready { .. }));
+        let calls = std::fs::read_to_string(dir.join("calls")).unwrap();
+        assert!(calls.contains("--no-deps") && calls.contains("numpy==2.1.3") && calls.contains("scipy==1.14.1"), "{calls}");
+        let EnvState::Ready { packages, .. } = lab.state().clone() else { unreachable!() };
+        assert_eq!(packages.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["numpy", "scipy"]);
+        assert!(std::fs::read_to_string(lab.lock_path()).unwrap().contains("numpy==2.1.3"), "what was made was not written down");
+
+        lab.remove().unwrap();
+        assert!(matches!(lab.state(), EnvState::Missing { .. }));
+        assert!(!lab.prefix().exists() && !lab.lock_path().exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_venv_planned_and_not_wanted_is_not_left_behind() {
+        let (dir, mut lab) = pip_bench("unwanted", &[("FAIL_PLAN", "1")]);
+        lab.check();
+        lab.plan().unwrap();
+        settle(&mut lab, |s| matches!(s, EnvState::Failed { .. }));
+        let EnvState::Failed { step, why, .. } = lab.state().clone() else { unreachable!() };
+        assert_eq!(step, "plan");
+        assert!(why.contains("No matching distribution"), "{why}");
+        assert!(!lab.prefix().exists(), "a refused plan left its environment");
+
+        let (dir2, mut lab) = pip_bench("notnow", &[]);
+        lab.check();
+        lab.plan().unwrap();
+        settle(&mut lab, |s| matches!(s, EnvState::Planned { .. }));
+        assert!(lab.prefix().exists());
+        lab.cancel();
+        assert!(matches!(lab.state(), EnvState::Missing { .. }) && !lab.prefix().exists(), "Not now left the environment made for the plan");
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir2);
     }
 }

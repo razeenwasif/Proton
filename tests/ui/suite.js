@@ -1640,7 +1640,7 @@ await test('The Lab\'s Python is planned, then made, each on its own say-so', as
   const text = () => box.textContent.replace(/\s+/g, ' ');
   const prefix = '/Users/you/.proton/lab/envs/lab';
   assert(!win.commands.some((c) => c.type.startsWith('lab')), 'the Lab was asked before it was told to');
-  await win.pushEvents([{type: 'labEnv', env: {state: 'missing', conda: '/Users/you/miniconda3/bin/conda', index: null, specs: ['python=3.12', 'numpy', 'scipy'], prefix}}]);
+  await win.pushEvents([{type: 'labEnv', env: {state: 'missing', maker: {kind: 'conda', conda: '/Users/you/miniconda3/bin/conda'}, index: null, specs: ['python=3.12', 'numpy', 'scipy'], prefix}}]);
   assert(text().includes('Python 3.12 with numpy and scipy') && text().includes('~/.proton/lab/envs/lab'), `the Lab does not say what it would be: ${text()}`);
   assert(text().includes('conda has no copy of it yet') && text().includes('Nothing is installed yet'), 'the first say-so does not say what it costs');
   let before = win.commands.length;
@@ -1673,8 +1673,15 @@ await test('The Lab\'s Python is planned, then made, each on its own say-so', as
   before = win.commands.length;
   box.querySelector('[data-lab="cancel"]').click(); await settle();
   assert(win.commands.slice(before).some((c) => c.type === 'labCancel'), 'Start over did not ask');
-  await win.pushEvents([{type: 'labEnv', env: {state: 'noConda'}}]);
-  assert(text().includes('there is no conda here') && !box.querySelector('button'), 'without conda the Lab offers what it cannot do');
+  await win.pushEvents([{type: 'labEnv', env: {state: 'noPython'}}]);
+  assert(text().includes('There is neither here') && !box.querySelector('button'), 'with nothing to make it, the Lab offers what it cannot do');
+  // No conda, but a Python: a virtual environment, from PyPI.
+  await win.pushEvents([{type: 'labEnv', env: {state: 'missing', maker: {kind: 'pip', python: '/opt/homebrew/bin/python3', version: '3.13.1'}, index: null,
+    specs: ['python=3.13.1', 'numpy', 'scipy'], prefix}}]);
+  assert(text().includes('Python 3.13.1 with numpy and scipy') && text().includes('empty virtual environment') && text().includes('PyPI'), `the pip plan is not said: ${text()}`);
+  await win.pushEvents([{type: 'labEnv', env: {state: 'planned', plan: {packages: [{name: 'numpy', version: '2.1.3', build: '', size: 5301200},
+    {name: 'scipy', version: '1.14.1', build: '', size: null}], download: 5301200, cached: 0, prefix}}}]);
+  assert(text().includes('2 packages from PyPI') && text().includes('1 whose size PyPI did not say') && !text().includes('cached'), `the pip plan is not drawn: ${text()}`);
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
@@ -1686,7 +1693,7 @@ await test('An experiment is read, then run in the sandbox or turned down, and i
   const proposal = {id: 'E002', hypothesis: 'H004', proposer: {seat: 'codex', model: 'gpt-6.1-sol'}, round: 1, status: 'proposed', run: null,
     purpose: 'Find the dominant wavelength.', expectation: 'Between 470 and 480 nm.', code};
   const lab = (extra = {}) => ({type: 'researchLab', slug: 'sky', experiments: [proposal], runs: [], sandbox: 'seatbelt', ...extra});
-  await win.pushEvents([{type: 'labEnv', env: {state: 'missing', conda: '/c', index: null, specs: ['python=3.12'], prefix: '/p'}}, lab()]);
+  await win.pushEvents([{type: 'labEnv', env: {state: 'missing', maker: {kind: 'conda', conda: '/c'}, index: null, specs: ['python=3.12'], prefix: '/p'}}, lab()]);
   assert(text().includes('Waiting for you') && text().includes('E002 for H004') && text().includes('Find the dominant wavelength'), `the proposal is not shown: ${text()}`);
   assert(work.querySelector('.lab-code code[data-lang="python"] .num'), 'the code is not coloured');
   assert(work.querySelector('[data-lab-open="E002"]') && !text().includes('x19 = 19'), 'a long proposal is shown whole before it is asked for');

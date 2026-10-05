@@ -127,7 +127,8 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
   const PREFIX = "/Users/you/.proton/lab/envs/lab";
   const SPECS = ["python=3.12", "numpy", "scipy", "sympy", "mpmath", "matplotlib-base", "networkx", "pandas"];
   /** @type {any} */
-  let env = { state: "missing", conda: "/Users/you/miniconda3/bin/conda", index: now - 86400 * 9, specs: SPECS, prefix: PREFIX };
+  const MAKER = { kind: "conda", conda: "/Users/you/miniconda3/bin/conda" };
+  let env = { state: "missing", maker: MAKER, index: now - 86400 * 9, specs: SPECS, prefix: PREFIX };
   /** @type {any} */
   let labTimer = null;
   const labEvent = () => ({ type: "labEnv", env });
@@ -581,12 +582,12 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
       case "labCancel":
         clearInterval(labTimer);
         clearTimeout(labTimer);
-        env = { state: "missing", conda: "/Users/you/miniconda3/bin/conda", index: now - 86400 * 9, specs: SPECS, prefix: PREFIX };
+        env = { state: "missing", maker: MAKER, index: now - 86400 * 9, specs: SPECS, prefix: PREFIX };
         return [labEvent()];
       case "labRemove":
         env = { state: "removing" };
         setTimeout(() => {
-          env = { state: "missing", conda: "/Users/you/miniconda3/bin/conda", index: now - 86400 * 9, specs: SPECS, prefix: PREFIX };
+          env = { state: "missing", maker: MAKER, index: now - 86400 * 9, specs: SPECS, prefix: PREFIX };
           deliver(labEvent());
         }, 800);
         return [labEvent()];
