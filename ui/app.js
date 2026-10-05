@@ -461,6 +461,9 @@ $$("[data-translucency-set]").forEach((b) =>
    The mode bar asks the core to switch; the core's ModeChanged event is
    what actually moves the UI. That indirection looks pointless with one
    front end and is the reason a second one is possible. */
+/** The raster pictures a notebook output may be, as the core chooses them. */
+const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
 const MODES = ["chat", "codex", "data", "research", "design", "modeling", "game", "video"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
@@ -1318,10 +1321,21 @@ function outputHtml(out) {
     case "table":
       return tableHtml(out.table);
 
-    case "image":
+    case "image": {
       // A data URL, which is the one place a kernel's bytes reach the page —
-      // as an image, where they can only ever be an image.
-      return `<img class="out-img" alt="output" src="data:${encodeURIComponent(out.mime)};base64,${out.base64.replace(/[^A-Za-z0-9+/=]/g, "")}">`;
+      // as an image, where they can only ever be an image. The type is
+      // written as itself, not percent-encoded: a data URL's type is not
+      // decoded, so `image%2Fpng` is read as text and only sniffing saved it.
+      const mime = RASTER.has(out.mime) ? out.mime : "image/png";
+      return `<img class="out-img" alt="output" src="data:${mime};base64,${out.base64.replace(/[^A-Za-z0-9+/=]/g, "")}">`;
+    }
+
+    case "svg":
+      // SVG is text, not base64: percent-encoded, which leaves nothing that
+      // could close the attribute. In an <img> its scripts do not run and its
+      // styles stay its own — inlined, a figure's `*{…}` would restyle the
+      // window and its scripts would be the page's.
+      return `<img class="out-img out-svg" alt="output" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(out.svg)}">`;
 
     case "error":
       // The traceback carries ANSI colour from the kernel; it is stripped

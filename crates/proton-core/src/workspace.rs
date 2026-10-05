@@ -6302,6 +6302,9 @@ fn cell_result(view: &crate::data::CellView) -> String {
                 // and the model cannot see it anyway.
                 text.push_str(&format!("<{mime}>"));
             }
+            // Nor the SVG's text: a figure's paths are as long, and no more
+            // telling.
+            crate::data::OutputView::Svg { .. } => text.push_str("<image/svg+xml>"),
         }
         text.push('\n');
     }
@@ -6341,8 +6344,9 @@ fn short_output(outputs: &[proton_data::notebook::Output]) -> String {
                 text.push_str(&traceback.join("\n"));
             }
             proton_data::notebook::Output::Data { data, .. } => {
-                if let Some(plain) = data.get("text/plain").and_then(|v| v.as_str()) {
-                    text.push_str(plain);
+                // A string, or — saved by Jupyter — a list of lines.
+                if let Some(plain) = data.get("text/plain").and_then(crate::data::as_text) {
+                    text.push_str(&plain);
                 } else {
                     let kinds: Vec<&str> = data.keys().map(String::as_str).collect();
                     text.push_str(&format!("<{}>", kinds.join(", ")));

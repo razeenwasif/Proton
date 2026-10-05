@@ -64,11 +64,16 @@ pub enum OutputView {
     Text { text: String },
     /// A dataframe, or anything else that arrived as an HTML table.
     Table { table: table::Table },
-    /// A picture, as the base64 the kernel sent and the MIME type it called
-    /// it. Passed through rather than decoded: the page can put a data URL in
-    /// an `<img>`, and decoding it here only to re-encode it would be work
-    /// done twice.
+    /// A raster picture — PNG, JPEG, GIF or WebP — as the base64 the kernel
+    /// sent and the MIME type it called it. Passed through rather than
+    /// decoded: the page can put a data URL in an `<img>`, and decoding it
+    /// here only to re-encode it would be work done twice.
     Image { mime: String, base64: String },
+    /// A vector picture, as the SVG's own text: unlike the others it is not
+    /// base64, and a notebook saved by Jupyter keeps it as a list of lines.
+    /// The page draws it in an `<img>`, where whatever script a kernel put
+    /// in it does not run.
+    Svg { svg: String },
     Error {
         ename: String,
         evalue: String,
@@ -94,17 +99,20 @@ impl OutputView {
                 traceback: traceback.clone(),
             },
             Output::Data { data, .. } => {
-                // Richest first, and a table before its own plain-text
-                // rendering: a dataframe sends both, and the fixed-width one
-                // is what you fall back to rather than what you want.
-                for (mime, value) in data {
-                    if mime.starts_with("image/") {
-                        if let Some(base64) = value.as_str() {
-                            return OutputView::Image {
-                                mime: mime.clone(),
-                                base64: base64.replace('\n', ""),
-                            };
-                        }
+                // Richest first, as Jupyter chooses — SVG over the raster
+                // the same figure comes with — and a table before its own
+                // plain-text rendering: a dataframe sends both, and the
+                // fixed-width one is what you fall back to rather than what
+                // you want.
+                if let Some(svg) = data.get("image/svg+xml").and_then(as_text) {
+                    return OutputView::Svg { svg };
+                }
+                for mime in PICTURES {
+                    if let Some(base64) = data.get(mime).and_then(as_text) {
+                        return OutputView::Image {
+                            mime: mime.to_string(),
+                            base64: base64.split_whitespace().collect(),
+                        };
                     }
                 }
                 if let Some(html) = data.get("text/html").and_then(as_text) {
@@ -123,9 +131,13 @@ impl OutputView {
     }
 }
 
+/// The raster pictures drawn, best first. Only these: the page puts the type
+/// in a data URL, and a kernel names its MIME types as it likes.
+const PICTURES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
 /// A MIME bundle's values are a string or a list of lines, like everything
 /// else in a notebook.
-fn as_text(value: &serde_json::Value) -> Option<String> {
+pub(crate) fn as_text(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::String(text) => Some(text.clone()),
         serde_json::Value::Array(lines) => Some(
@@ -819,6 +831,30 @@ fn which(name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_svg_is_drawn_from_its_own_text_and_before_the_png_beside_it() {
+        use proton_data::notebook::Output;
+        use serde_json::Value;
+        let bundle = |pairs: Vec<(&str, Value)>| Output::Data {
+            data: pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            execution_count: None,
+        };
+        // A minus sign, as matplotlib draws one, and the newlines kept.
+        let svg = "<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\">\n<text>\u{2212}1</text>\n</svg>\n";
+        let lines: Vec<Value> = svg.split_inclusive('\n').map(Value::from).collect();
+        // As Jupyter saves it — a list of lines — and as a kernel sends it.
+        for value in [Value::Array(lines), Value::from(svg)] {
+            let out = OutputView::of(&bundle(vec![("image/png", "iVBOR".into()), ("image/svg+xml", value), ("text/plain", "<Figure>".into())]));
+            assert_eq!(out, OutputView::Svg { svg: svg.to_string() });
+        }
+        // Base64 wrapped at 76 columns, as older IPython saved it.
+        let out = OutputView::of(&bundle(vec![("image/png", "iVBOR\nw0KG\n".into()), ("text/plain", "<Figure>".into())]));
+        assert_eq!(out, OutputView::Image { mime: "image/png".into(), base64: "iVBORw0KG".into() });
+        // A type the page could not put in a data URL is not drawn as a picture.
+        let out = OutputView::of(&bundle(vec![("image/x-made-up", "AAAA".into()), ("text/plain", "plain".into())]));
+        assert_eq!(out, OutputView::Text { text: "plain".into() });
+    }
 
     fn scratch(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("proton-kernels-{tag}-{}", std::process::id()));

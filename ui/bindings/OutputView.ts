@@ -9,4 +9,4 @@ import type { Table } from "./Table";
  * and deciding between them is a judgement about the data — which is the
  * core's business — rather than about pixels.
  */
-export type OutputView = { "type": "stream", name: string, text: string, } | { "type": "text", text: string, } | { "type": "table", table: Table, } | { "type": "image", mime: string, base64: string, } | { "type": "error", ename: string, evalue: string, traceback: Array<string>, };
+export type OutputView = { "type": "stream", name: string, text: string, } | { "type": "text", text: string, } | { "type": "table", table: Table, } | { "type": "image", mime: string, base64: string, } | { "type": "svg", svg: string, } | { "type": "error", ename: string, evalue: string, traceback: Array<string>, };

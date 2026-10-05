@@ -1439,6 +1439,29 @@ await test('In a notebook, i puts the caret in the selected cell', async () => {
   src.blur(); await settle();
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('A notebook draws an SVG figure as a picture, whose scripts and styles stay its own', async () => {
+  await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
+  win.svgRan = false;
+  // A kernel's SVG with what must not escape it: a script, a handler, a style
+  // for everything — and a minus sign, which plain btoa would refuse.
+  const svg = '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20" onload="parent.svgRan = true">\n' +
+    '<style>*{display:none !important}</style><script>parent.svgRan = true</script>\n<text x="2" y="15">\u22121</text></svg>\n';
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  await win.pushEvents([{type: 'notebook', path: '/fixture/plot.ipynb', problem: '', language: 'python', cells: [
+    {kind: 'code', source: 'plt.plot(x)', executionCount: 1, running: false, selected: true,
+      outputs: [{type: 'svg', svg}, {type: 'image', mime: 'image/png', base64: png}]}]}]);
+  await settle();
+  const ws = $('.workspace[data-ws="data"]');
+  const [vector, raster] = ws.querySelectorAll('.split.on img.out-img');
+  assert(vector?.src.startsWith('data:image/svg+xml') && raster?.src.startsWith('data:image/png;base64,'), `the pictures are not data URLs of their types: ${vector?.src.slice(0, 40)} ${raster?.src.slice(0, 40)}`);
+  await vector.decode();
+  await raster.decode();
+  assert(vector.naturalWidth > 0 && raster.naturalWidth > 0, 'a picture did not draw');
+  assert(!ws.querySelector('.out-wrap svg, .split.on .cell svg:not(.i)'), 'the SVG was put in the page rather than drawn as a picture');
+  assert(win.svgRan === false, 'the SVG\'s script ran');
+  assert(win.getComputedStyle(ws).display !== 'none', 'the SVG\'s style reached the window');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('Research sits beside Data after Codex: ⌃4 opens it, in Codex\'s chrome and on an opaque ground', async () => {
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
   const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
