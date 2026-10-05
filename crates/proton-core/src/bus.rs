@@ -1093,11 +1093,14 @@ pub enum Event {
         artifacts: Vec<Artifact>,
         importing: bool,
     },
-    /// The project's investigations, newest first, and which one is open.
+    /// The investigations, newest first, which one is open, and where they
+    /// are kept: `research/` in the project, or a folder of their own —
+    /// `~/Github/Research/` — as the window says it.
     #[serde(rename_all = "camelCase")]
     ResearchList {
         investigations: Vec<ResearchSummary>,
         open: Option<String>,
+        folder: String,
     },
     /// The open investigation, as its board draws it: the brief, the plan,
     /// the overview, the logs, and the hypotheses ranked.

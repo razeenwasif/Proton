@@ -214,6 +214,10 @@ pub struct Session {
     /// workspace would mean a second wasm engine and a second compile of
     /// every component the moment you opened a second project.
     plugins: std::sync::Arc<crate::plugins::Plugins>,
+    /// The investigations, where the person keeps them in a folder of their
+    /// own: one Research for every project here, rather than one per project
+    /// over its `research/`. Polled and stopped here, once.
+    research: Option<std::sync::Arc<std::sync::Mutex<crate::research::Research>>>,
 }
 
 impl Session {
@@ -234,6 +238,7 @@ impl Session {
             store: None,
             servers: false,
             plugins: std::sync::Arc::default(),
+            research: None,
         }
     }
 
@@ -274,6 +279,32 @@ impl Session {
         &self.plugins
     }
 
+    /// Keep the investigations in `folder`, each a folder in it, for every
+    /// project here and every one opened later — rather than in each
+    /// project's `research/`.
+    pub fn with_research_in(self, folder: &Path) -> Session {
+        self.sharing_research(crate::research::Research::kept_in(folder))
+    }
+
+    /// The same, with the Research given: in tests, one over scripted engines.
+    pub fn sharing_research(mut self, research: crate::research::Research) -> Session {
+        let research = std::sync::Arc::new(std::sync::Mutex::new(research));
+        for workspace in &mut self.workspaces {
+            workspace.share_research(&research);
+        }
+        self.research = Some(research);
+        self
+    }
+
+    /// Where the person's own settings say investigations are kept, if they
+    /// keep them in a folder of their own: `research.folder`.
+    pub fn with_research(self) -> Session {
+        match crate::settings::Settings::person().research_folder() {
+            Some(folder) => self.with_research_in(&folder),
+            None => self,
+        }
+    }
+
     /// Remember the open set in `file`, and reload it next time.
     pub fn storing_in(mut self, file: impl Into<PathBuf>) -> Session {
         self.store = Some(file.into());
@@ -297,6 +328,7 @@ impl Session {
         Session::restore_from(state_file(), requested, fallback)
             .with_language_servers()
             .with_plugins()
+            .with_research()
     }
 
     /// [`Session::restore`], from a named store and without language servers.
@@ -410,6 +442,9 @@ impl Session {
     pub fn shutdown(&mut self) {
         for workspace in &mut self.workspaces {
             workspace.shutdown();
+        }
+        if let Some(research) = &self.research {
+            research.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
         }
     }
 
@@ -678,6 +713,11 @@ impl Session {
             // dropped here — but they had to be *collected*, or its servers
             // block and the project is stale when you come back to it.
         }
+        // Investigations kept in a folder of their own are every project's,
+        // so what their rounds said is on screen whichever one is.
+        if let Some(research) = &self.research {
+            events.extend(research.lock().unwrap_or_else(|e| e.into_inner()).poll());
+        }
         events.extend(self.crossed(side));
         self.claim(events)
     }
@@ -685,7 +725,7 @@ impl Session {
     /* ── opening, closing, switching ──────────────────────────────── */
 
     fn build(&self, root: &Path) -> Workspace {
-        let mut workspace = Workspace::rooted(root).sharing_plugins(&self.plugins);
+        let mut workspace = Workspace::rooted(root).sharing_plugins(&self.plugins).sharing_research(self.research.as_ref());
         if self.servers {
             workspace.enable_language_servers();
         }

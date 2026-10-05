@@ -1483,6 +1483,16 @@ await test('Research ranks the hypotheses, opens one whole, and lets another inv
   const board = ws.querySelector('[data-research-board]');
   assert(![...board.querySelectorAll('h1')].some((h) => h.textContent === 'Why is the sky blue?'), 'the brief repeats the title over itself');
   assert(board.querySelector('.rs-file[title="research/sky/RESEARCH_PLAN.md"]'), 'the plan does not say which file it is');
+  // Kept in a folder of their own, the files say so, and so does the list.
+  await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?'), researchSummary('cubes', 'Sums of three cubes', 0)], open: 'sky',
+    folder: '~/Github/Research/'}, researchBoard()]);
+  assert(board.querySelector('.rs-file[title="~/Github/Research/sky/RESEARCH_PLAN.md"]'), 'the plan does not say where it is kept');
+  assert(ws.querySelector('[data-research-open="sky"]')?.title.startsWith('~/Github/Research/sky/'), 'the list does not say where it is kept');
+  await win.pushEvents([{type: 'researchList', investigations: [], open: null, folder: '~/Github/Research/'}]);
+  assert(ws.querySelector('[data-research-list] .cc-none')?.textContent.includes('~/Github/Research/'), 'an empty folder of their own does not say which');
+  await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?'), researchSummary('cubes', 'Sums of three cubes', 0)], open: 'sky'},
+    researchBoard()]);
+  assert(board.querySelector('.rs-file[title="research/sky/RESEARCH_PLAN.md"]'), 'a list that does not say where is not the project\'s research/');
   for (let i = 0; i < 30 && board.querySelector('.md-math[data-tex]'); i++) await settle();
   assert(board.querySelector('.md-math .katex'), 'the plan\'s TeX is not drawn');
   ws.querySelector('[data-research-tab="hypotheses"]').click(); await settle();

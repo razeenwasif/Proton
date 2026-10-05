@@ -173,6 +173,15 @@ pub fn complete(query: &str, limit: usize) -> Vec<PathBuf> {
     found
 }
 
+/// A path as somebody would write it: under the home folder, from `~`.
+pub fn tilde(path: &Path) -> String {
+    match home().and_then(|home| path.strip_prefix(home).ok().map(Path::to_path_buf)) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".into(),
+        Some(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 /// What to call a folder. Its own name, or the whole path for a drive root,
 /// which has no name of its own.
 pub fn name_of(path: &Path) -> String {
@@ -290,6 +299,17 @@ impl Root {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_under_home_is_written_from_tilde() {
+        if let Some(home) = home() {
+            assert_eq!(tilde(&home), "~");
+            let sep = std::path::MAIN_SEPARATOR;
+            assert_eq!(tilde(&home.join("Github").join("Research")), format!("~{sep}Github{sep}Research"));
+        }
+        let elsewhere = if cfg!(windows) { PathBuf::from(r"Z:\elsewhere") } else { PathBuf::from("/elsewhere") };
+        assert_eq!(tilde(&elsewhere), elsewhere.display().to_string());
+    }
 
     #[test]
     fn a_name_is_not_a_path_but_a_separator_makes_one() {

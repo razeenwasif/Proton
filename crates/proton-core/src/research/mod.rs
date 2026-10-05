@@ -1,8 +1,10 @@
-//! Research: the project's investigations.
+//! Research: the investigations.
 //!
-//! Each is a folder under the project's `research/` (see
-//! `proton_research::store`), read whenever it is shown, so what was edited
-//! by hand — the brief, a hypothesis — is what the board shows. The round
+//! Each is a folder under the project's `research/` — or, where the person
+//! keeps them in a folder of their own (`research.folder`, see
+//! [`Settings::research_folder`](crate::settings::Settings::research_folder)),
+//! there, whichever project is open — read whenever it is shown, so what was
+//! edited by hand — the brief, a hypothesis — is what the board shows. The round
 //! that grows an investigation is driven from here ([`driver`]), on the
 //! engines a [`factory::AgentFactory`] makes conversations with; the Lab
 //! that runs its code will be too.
@@ -33,6 +35,9 @@ use factory::{AgentFactory, Engines};
 
 pub struct Research {
     store: Store,
+    /// Where the investigations are, as the window says it: `research/` in
+    /// the project, or a folder of their own.
+    folder: String,
     /// The investigation on screen.
     open: Option<String>,
     /// The hypothesis shown whole.
@@ -144,9 +149,27 @@ fn instance() -> &'static str {
 }
 
 impl Research {
+    /// The project's investigations, in its `research/`.
     pub fn new(root: &Path) -> Research {
         let mut research = Research::with_factory(root, Box::new(Engines::default()), instance());
         research.lab = shared_lab();
+        research
+    }
+
+    /// Investigations kept in a folder of their own — each a folder in it —
+    /// whichever project is open.
+    pub fn kept_in(folder: &Path) -> Research {
+        let mut research = Research::kept_with(folder, Box::new(Engines::default()), instance());
+        research.lab = shared_lab();
+        research
+    }
+
+    /// The same over another factory, as another instance, and with a Lab
+    /// of its own that has no conda to call: for tests.
+    pub fn kept_with(folder: &Path, factory: Box<dyn AgentFactory>, instance: &str) -> Research {
+        let mut research = Research::with_factory(folder, factory, instance);
+        research.store = Store::new(folder.to_path_buf());
+        research.folder = format!("{}{}", crate::folder::tilde(folder).trim_end_matches(['/', '\\']), std::path::MAIN_SEPARATOR);
         research
     }
 
@@ -160,6 +183,7 @@ impl Research {
             showing_run: None,
             sandbox: None,
             store: Store::new(root.join("research")),
+            folder: "research/".into(),
             open: None,
             showing: None,
             watching: None,
@@ -183,10 +207,7 @@ impl Research {
             self.open = folders.first().map(|f| f.slug().to_string());
             self.showing = None;
         }
-        let mut events = vec![Event::ResearchList {
-            investigations: folders.iter().map(view::summary).collect(),
-            open: self.open.clone(),
-        }];
+        let mut events = vec![self.list_event(&folders)];
         events.extend(self.board());
         events.extend(self.round_event(now));
         events.extend(self.lab_event(true));
@@ -653,7 +674,7 @@ impl Research {
         }
         if open && moved.wrote {
             let folders = self.store.list();
-            events.push(Event::ResearchList { investigations: folders.iter().map(view::summary).collect(), open: self.open.clone() });
+            events.push(self.list_event(&folders));
             events.extend(self.board());
             events.extend(self.runs_event());
         }
@@ -682,9 +703,14 @@ impl Research {
             driver.invalidate();
         }
         let folders = self.store.list();
-        let mut events = vec![Event::ResearchList { investigations: folders.iter().map(view::summary).collect(), open: self.open.clone() }];
+        let mut events = vec![self.list_event(&folders)];
         events.extend(self.board());
         events
+    }
+
+    /// The investigations, which is open, and where they are kept.
+    fn list_event(&self, folders: &[Folder]) -> Event {
+        Event::ResearchList { investigations: folders.iter().map(view::summary).collect(), open: self.open.clone(), folder: self.folder.clone() }
     }
 
     pub fn feedback(&mut self, text: &str) -> Vec<Event> {
@@ -925,16 +951,35 @@ mod tests {
     }
 
     #[test]
+    fn investigations_kept_in_a_folder_of_their_own_are_made_there_and_said_to_be() {
+        let dir = root("kept");
+        // Not beside the `research/` it must not make: a Mac's disk does not
+        // tell `Research` from `research`.
+        let kept = dir.join("Github").join("Research");
+        // Somebody's own work, beside the investigations.
+        std::fs::create_dir_all(kept.join("Cricket-Analysis")).unwrap();
+        let mut research = Research::kept_with(&kept, Box::new(Engines::default()), "test");
+        let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics);
+        let Some(Event::ResearchList { investigations, folder, .. }) = events.first() else { panic!("{events:?}") };
+        assert_eq!(investigations.iter().map(|i| i.slug.as_str()).collect::<Vec<_>>(), ["why-is-the-sky-blue"], "a folder that is no investigation was listed");
+        assert_eq!(folder, &format!("{}{}", crate::folder::tilde(&kept), std::path::MAIN_SEPARATOR));
+        assert!(kept.join("why-is-the-sky-blue").join("investigation.json").is_file());
+        assert!(!dir.join("research").exists() && !kept.join("research").exists(), "made in a research/ after all");
+        assert!(kept.join("Cricket-Analysis").is_dir());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_new_investigation_is_listed_opened_and_drawn() {
         let dir = root("new");
         let mut research = Research::with_factory(&dir, Box::new(Engines::default()), "test");
         let events = research.sync();
-        assert!(matches!(events.first(), Some(Event::ResearchList { investigations, open: None }) if investigations.is_empty()));
+        assert!(matches!(events.first(), Some(Event::ResearchList { investigations, open: None, folder }) if investigations.is_empty() && folder == "research/"));
         // A Lab of its own, with no conda to call: the machine's is not touched.
         assert!(matches!(events.last(), Some(Event::LabEnv { env: EnvState::NoPython })), "{events:?}");
 
         let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics);
-        let Some(Event::ResearchList { investigations, open }) = events.first() else { panic!("{events:?}") };
+        let Some(Event::ResearchList { investigations, open, .. }) = events.first() else { panic!("{events:?}") };
         assert_eq!((investigations.len(), open.as_deref()), (1, Some("why-is-the-sky-blue")));
         let board = events.iter().find_map(|e| match e {
             Event::ResearchBoard { title, brief, hypotheses, .. } => Some((title.clone(), brief.clone(), hypotheses.len())),

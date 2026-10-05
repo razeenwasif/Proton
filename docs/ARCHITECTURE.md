@@ -753,6 +753,19 @@ anything, and gives its final answer whole, held to a JSON Schema. Nothing
 carries from one task to the next but the files, because a reviewer must not
 remember writing what it reviews.
 
+Investigations are kept in the project's `research/` — or, where the
+person's own settings (`~/.config/proton/settings.json`, beside the session)
+name a `research.folder`, in that folder, each a folder in it, whichever
+project is open. Then one `Research` is the session's, shared by every
+workspace rather than one per project over its `research/`, and it is polled
+and stopped by the session, once: the session polls every workspace but keeps
+only the one on screen's events, so a shared Research polled by each would
+hand what a round said to a project in the background, to be dropped with
+the rest of that project's events. Only folders with an `investigation.json`
+are investigations, so one kept beside the person's own work leaves that
+alone. The setting is read when the shell restores the session, so no test
+reads the developer's.
+
 The split is three ways. `proton-research::supervisor` decides what each
 task is and what an answer means, and starts nothing. `proton-core`'s
 `research::driver` starts each task through an `AgentFactory` — the engines,

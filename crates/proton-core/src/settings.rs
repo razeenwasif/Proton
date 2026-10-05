@@ -53,7 +53,22 @@ impl Settings {
     /// is missing would lose the rest of it, so the defaults are used and the
     /// file is not touched until something is deliberately set.
     pub fn load(root: &Path) -> Settings {
-        let path = Settings::path_in(root);
+        Settings::at(Settings::path_in(root))
+    }
+
+    /// The person's own settings, for what belongs to them rather than to any
+    /// one project: `settings.json` beside the session, in Proton's config
+    /// folder — `~/.config/proton/settings.json`. Read only by a session the
+    /// shell restores, so no test reads the developer's.
+    pub fn person() -> Settings {
+        match crate::folder::config() {
+            Some(dir) => Settings::at(dir.join("settings.json")),
+            None => Settings::default(),
+        }
+    }
+
+    /// The settings in `path`, as `load` reads a project's.
+    pub fn at(path: PathBuf) -> Settings {
         let doc = std::fs::read_to_string(&path)
             .ok()
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
@@ -105,6 +120,20 @@ impl Settings {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Where investigations are kept, for a person who keeps them in a folder
+    /// of their own rather than in each project's `research/`:
+    /// `research.folder`. A leading `~/` is the home folder, and so is what a
+    /// relative path is taken from, there being no project to take it from.
+    pub fn research_folder(&self) -> Option<PathBuf> {
+        let text = self.get("research.folder")?.as_str()?.trim();
+        let home = crate::folder::home()?;
+        match text {
+            "" => None,
+            "~" => Some(home),
+            text => Some(expand(text, &home)),
+        }
     }
 
     /// Everything set, as one object — what the front end draws the panels
@@ -225,6 +254,20 @@ fn expand(text: &str, project: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_research_folder_is_taken_from_home() {
+        let Some(home) = crate::folder::home() else { return };
+        let with = |value: Value| Settings { path: PathBuf::new(), doc: serde_json::json!({ "research": { "folder": value } }) };
+        assert_eq!(with("~/Github/Research".into()).research_folder(), Some(home.join("Github/Research")));
+        assert_eq!(with("Github/Research".into()).research_folder(), Some(home.join("Github/Research")), "a relative path is from home");
+        assert_eq!(with("~".into()).research_folder(), Some(home.clone()));
+        let elsewhere = if cfg!(windows) { r"D:\Research" } else { "/srv/research" };
+        assert_eq!(with(elsewhere.into()).research_folder(), Some(PathBuf::from(elsewhere)));
+        assert_eq!(with("  ".into()).research_folder(), None);
+        assert_eq!(with(3.into()).research_folder(), None);
+        assert_eq!(Settings::default().research_folder(), None, "unset is each project's research/");
+    }
 
     fn root(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(

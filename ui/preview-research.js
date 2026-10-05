@@ -363,7 +363,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
       i.rounds = r.n;
     }
     if (i.slug === open) {
-      for (const event of [...roundEvent(), ...board(), ...transcriptEvent(), { type: "researchList", investigations: investigations.map(summary), open }]) deliver(event);
+      for (const event of [...roundEvent(), ...board(), ...transcriptEvent(), { type: "researchList", investigations: investigations.map(summary), open, folder: "research/" }]) deliver(event);
     }
   }
 
@@ -421,7 +421,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
   }
 
   function sync() {
-    return [{ type: "researchList", investigations: investigations.map(summary), open }, ...board(), ...roundEvent(), labEvent(), ...labRunsEvent()];
+    return [{ type: "researchList", investigations: investigations.map(summary), open, folder: "research/" }, ...board(), ...roundEvent(), labEvent(), ...labRunsEvent()];
   }
 
   /** @param {any} command */
@@ -506,7 +506,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         const id = `H${String(i.hypotheses.length + 1).padStart(3, "0")}`;
         i.hypotheses.push({ id, title: command.title, author: { seat: "scientist", model: "" }, round: r.status === "idle" ? r.n + 1 : r.n,
           status: "active", parents: [], statement: command.statement, rationale: "", predictions: [], assumptions: [] });
-        return [{ type: "researchList", investigations: investigations.map(summary), open }, ...board(),
+        return [{ type: "researchList", investigations: investigations.map(summary), open, folder: "research/" }, ...board(),
           { type: "notice", level: "info", text: `${id} is yours: it is reviewed and played with the others.` }];
       }
       case "researchSetStatus": {

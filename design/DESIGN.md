@@ -622,7 +622,9 @@ same type, its numbers in the syntax's colour for numbers.
 the codebase, so Data keeps projects apart from Codex: its own list in the
 title bar, and its own project on screen. Going to Data brings back the one
 Data had, whatever Codex has open since, and leaving it brings back Codex's.
-Research works in Data's project too, for the same reason. Every other
+Research works in Data's project too, for the same reason — unless its
+investigations are kept in a folder of their own (`research.folder`), when
+every project shows the same ones. Every other
 mode — Chat, Design, Modeling, Game, Video — works on the checkout the code
 is in, and shares Codex's. The first visit starts on
 Codex's project, because a side has to show something; open another from

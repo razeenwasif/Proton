@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use proton_core::bus::Event;
 use proton_core::folder;
+use proton_core::research::factory::Engines;
+use proton_core::research::Research;
 use proton_core::picker::PickerKind;
 use proton_core::{Command, Key, ModeId, Session};
 
@@ -1229,4 +1231,41 @@ fn a_command_nobody_knows_still_reaches_the_front_end() {
             .any(|e| matches!(e, Event::CmdlineRun { text } if text.contains("frobnicate"))),
         "{events:?}"
     );
+}
+
+/// Investigations kept in a folder of their own are every project's: made
+/// from one, listed from another opened later, and never in a `research/`
+/// of either — nor mistaken for the person's own folders beside them.
+#[test]
+fn investigations_kept_in_a_folder_of_their_own_are_every_projects() {
+    let scratch = Scratch::new("research");
+    let kept = scratch.root.join("Research");
+    std::fs::create_dir_all(kept.join("Cricket-Analysis")).unwrap();
+    let research = Research::kept_with(&kept, Box::new(Engines::default()), "test");
+    let mut session = Session::new(scratch.at("alpha")).sharing_research(research);
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+
+    let events = session.apply(Command::ResearchNew {
+        title: "Why is the sky blue?".into(),
+        goal: "Explain the colour.".into(),
+        discipline: proton_research::Discipline::Physics,
+    });
+    assert!(kept.join("why-is-the-sky-blue").join("investigation.json").is_file(), "{events:?}");
+    for project in ["alpha", "beta"] {
+        assert!(!Path::new(&scratch.at(project)).join("research").exists(), "made in {project}'s research/");
+    }
+
+    session.apply(Command::FocusWorkspace { index: 0 });
+    let events = session.apply(Command::Sync);
+    let (listed, shown) = events
+        .iter()
+        .find_map(|e| match e {
+            Event::ResearchList { investigations, folder, .. } => {
+                Some((investigations.iter().map(|i| i.slug.clone()).collect::<Vec<_>>(), folder.clone()))
+            }
+            _ => None,
+        })
+        .expect("Research was not drawn");
+    assert_eq!(listed, ["why-is-the-sky-blue"], "the other project does not show it, or a folder that is no investigation is listed");
+    assert_eq!(shown, format!("{}{}", folder::tilde(&kept), std::path::MAIN_SEPARATOR));
 }

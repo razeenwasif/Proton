@@ -171,7 +171,7 @@ language: string, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>
  * The folders conversations are grouped into, each with what it
  * holds; what is in a folder is not in `sessions` as well.
  */
-folders: Array<ChatFolder>, active: string, busy: Array<string>, waiting: Array<string>, engine: ChatEngine, } | { "type": "claudeItems", session: string, items: Array<ClaudeItem>, reset: boolean, earlier: boolean, } | { "type": "claudeStatus", status: ClaudeStatus, } | { "type": "claudeCapabilities", capabilities: ClaudeCapabilities, } | { "type": "artifacts", artifacts: Array<Artifact>, importing: boolean, } | { "type": "researchList", investigations: Array<ResearchSummary>, open: string | null, } | { "type": "researchBoard", slug: string, title: string, discipline: ResearchDiscipline, brief: string, plan: string, overview: string, verdicts: string, sandbox: string, 
+folders: Array<ChatFolder>, active: string, busy: Array<string>, waiting: Array<string>, engine: ChatEngine, } | { "type": "claudeItems", session: string, items: Array<ClaudeItem>, reset: boolean, earlier: boolean, } | { "type": "claudeStatus", status: ClaudeStatus, } | { "type": "claudeCapabilities", capabilities: ClaudeCapabilities, } | { "type": "artifacts", artifacts: Array<Artifact>, importing: boolean, } | { "type": "researchList", investigations: Array<ResearchSummary>, open: string | null, folder: string, } | { "type": "researchBoard", slug: string, title: string, discipline: ResearchDiscipline, brief: string, plan: string, overview: string, verdicts: string, sandbox: string, 
 /**
  * What the scientist has told the team.
  */

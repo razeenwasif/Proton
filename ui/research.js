@@ -1,6 +1,7 @@
 /* Research: investigations, and the co-scientist round that grows them.
  *
- * Each investigation is a folder in the project — `research/<slug>/` — and
+ * Each investigation is a folder in the project — `research/<slug>/` — or in
+ * the folder of their own the person keeps them in, and
  * this draws what the core reads out of it: the investigations down the
  * left, with who sits at the open one's table under them; in the middle
  * where it stands (its overview, its plan, the brief it answers), its
@@ -25,7 +26,7 @@ import { markdown } from "./markdown.js";
 /** @typedef {import("./bindings/ResearchSeatRow").ResearchSeatRow} SeatRow */
 /** @typedef {import("./bindings/RoundStatus").RoundStatus} RoundStatus */
 /** @typedef {import("./bindings/ClaudeItem").ClaudeItem} Item */
-/** @typedef {{investigations: Summary[], open: string | null}} ListEvent */
+/** @typedef {{investigations: Summary[], open: string | null, folder?: string}} ListEvent */
 /** @typedef {{slug: string, title: string, discipline: Discipline, brief: string, plan: string,
  *   overview: string, verdicts: string, sandbox: string, feedback: string, hypotheses: Row[]}} BoardEvent */
 /** @typedef {{slug: string, detail: Detail | null}} HypothesisEvent */
@@ -149,11 +150,12 @@ export function createResearch(host) {
     send: /** @type {HTMLButtonElement} */ (q("[data-research-send]")),
   };
 
-  /** @type {{list: Summary[], open: string | null, board: BoardEvent | null, detail: Detail | null,
+  /** @type {{list: Summary[], open: string | null, folder: string, board: BoardEvent | null, detail: Detail | null,
    *   round: RoundEvent | null, task: string | null, transcript: TranscriptEvent | null,
    *   tab: Tab, creating: boolean, made: number, draft: {title: string, goal: string, discipline: Discipline}}} */
   const state = {
-    list: [], open: null, board: null, detail: null, round: null, task: null, transcript: null, tab: "overview",
+    // Where the investigations are kept, as the core says it.
+    list: [], open: null, folder: "research/", board: null, detail: null, round: null, task: null, transcript: null, tab: "overview",
     // The form is up, and how many there were when it was sent: it goes when
     // the list grows, and stays with what was typed when the core refuses.
     creating: false, made: -1,
@@ -167,13 +169,14 @@ export function createResearch(host) {
 
   function renderList() {
     if (!state.list.length) {
-      els.list.innerHTML = `<div class="cc-none">No investigations in this project yet. Each is a folder under <code>research/</code>, and starts from a question.</div>`;
+      const where = state.folder === "research/" ? "in this project yet" : "yet";
+      els.list.innerHTML = `<div class="cc-none">No investigations ${where}. Each is a folder in <code>${esc(state.folder)}</code>, and starts from a question.</div>`;
       return;
     }
     const running = round()?.status.status === "running" ? round()?.slug : null;
     els.list.innerHTML = state.list.map((i) => {
       const on = i.slug === state.open && !state.creating;
-      const where = `research/${i.slug}/ · ${count(i.hypotheses, "hypothesis", "hypotheses")} · ${count(i.rounds, "round", "rounds")}`;
+      const where = `${state.folder}${i.slug}/ · ${count(i.hypotheses, "hypothesis", "hypotheses")} · ${count(i.rounds, "round", "rounds")}`;
       return `<button class="cc-session rs-item${on ? " on" : ""}" data-research-open="${esc(i.slug)}" title="${esc(where)}"` +
         `${on ? ' aria-current="true"' : ""}>` +
         (i.slug === running ? `<span class="rs-live" title="A round is running"></span>` : "") +
@@ -300,7 +303,7 @@ export function createResearch(host) {
 
   /** @param {BoardEvent} board */
   function overviewHtml(board) {
-    const path = `research/${board.slug}/`;
+    const path = `${state.folder}${board.slug}/`;
     return `<div class="rs-col">` +
       doc("Brief", `${path}README.md`, withoutTitle(board.brief, board.title)) +
       doc("Overview", `${path}overview.md`, withoutTitle(board.overview, "Overview")) +
@@ -666,6 +669,7 @@ export function createResearch(host) {
   /** @param {ListEvent} event */
   function list_(event) {
     state.list = event.investigations ?? [];
+    state.folder = event.folder || "research/";
     if (state.creating && state.made >= 0 && state.list.length > state.made) {
       state.creating = false;
       state.made = -1;

@@ -6,7 +6,7 @@
 //! headless and lets a second front end reuse it verbatim.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use proton_lsp::client::Incoming;
 
@@ -110,8 +110,15 @@ pub struct Workspace {
     /// The Chat tab: Claude Code's sessions for this project, and the ones
     /// running here.
     claude: crate::claude::Claude,
-    /// The project's investigations, in the Research tab.
-    research: crate::research::Research,
+    /// The investigations, in the Research tab: the project's own, in its
+    /// `research/`, or the session's, where the person keeps them in a
+    /// folder of their own and every project shows the same ones.
+    research: Arc<Mutex<crate::research::Research>>,
+    /// Whether `research` is the session's. The session polls and stops a
+    /// shared one itself, once; were every workspace to poll it, what a
+    /// round said could be drained by a project in the background and
+    /// dropped with the rest of that project's events.
+    research_shared: bool,
     council_progress: Vec<String>,
     council_round: usize,
     /// The brief on screen, and which past debate it came from.
@@ -271,7 +278,8 @@ impl Workspace {
             servers: Servers::new(root),
             agent: Agent::new(&root.display().to_string()),
             claude: crate::claude::Claude::new(root),
-            research: crate::research::Research::new(root),
+            research: Arc::new(Mutex::new(crate::research::Research::new(root))),
+            research_shared: false,
             visualizer: Visualizer::new(root),
             tree: Tree::new(root),
             git: Git::discover(root),
@@ -570,7 +578,7 @@ impl Workspace {
                     },
                 ]);
                 events.extend(self.claude.sync());
-                events.extend(self.research.sync());
+                events.extend(self.research().sync());
                 events
             }
 
@@ -1357,30 +1365,30 @@ impl Workspace {
                 events
             }
             Command::ClaudeOpen { session } => self.claude.open(&session),
-            Command::ResearchNew { title, goal, discipline } => self.research.create(&title, &goal, discipline),
-            Command::ResearchOpen { slug } => self.research.open(&slug),
-            Command::ResearchShow { hypothesis } => self.research.show(hypothesis),
-            Command::ResearchStart => self.research.start(),
-            Command::ResearchPause => self.research.pause(),
-            Command::ResearchResume => self.research.resume(),
-            Command::ResearchStop => self.research.stop(),
-            Command::ResearchFeedback { text } => self.research.feedback(&text),
-            Command::ResearchAddHypothesis { title, statement } => self.research.add_hypothesis(&title, &statement),
-            Command::ResearchSetStatus { hypothesis, status } => self.research.set_status(&hypothesis, status),
-            Command::ResearchSeat { seat, enabled } => self.research.set_seat(seat, enabled),
-            Command::ResearchTask { task } => self.research.watch(task),
-            Command::ResearchApprove { experiment, unsandboxed } => self.research.approve(&experiment, unsandboxed),
-            Command::ResearchReject { experiment } => self.research.reject(&experiment),
-            Command::ResearchAutoRun { enabled } => self.research.set_auto_run(enabled),
-            Command::ResearchStopRun { run } => self.research.stop_run(&run),
-            Command::ResearchShowRun { run } => self.research.show_run(run),
-            Command::LabPlan => self.research.lab_do(|lab| lab.plan()),
-            Command::LabCreate => self.research.lab_do(|lab| lab.create()),
-            Command::LabCancel => self.research.lab_do(|lab| {
+            Command::ResearchNew { title, goal, discipline } => self.research().create(&title, &goal, discipline),
+            Command::ResearchOpen { slug } => self.research().open(&slug),
+            Command::ResearchShow { hypothesis } => self.research().show(hypothesis),
+            Command::ResearchStart => self.research().start(),
+            Command::ResearchPause => self.research().pause(),
+            Command::ResearchResume => self.research().resume(),
+            Command::ResearchStop => self.research().stop(),
+            Command::ResearchFeedback { text } => self.research().feedback(&text),
+            Command::ResearchAddHypothesis { title, statement } => self.research().add_hypothesis(&title, &statement),
+            Command::ResearchSetStatus { hypothesis, status } => self.research().set_status(&hypothesis, status),
+            Command::ResearchSeat { seat, enabled } => self.research().set_seat(seat, enabled),
+            Command::ResearchTask { task } => self.research().watch(task),
+            Command::ResearchApprove { experiment, unsandboxed } => self.research().approve(&experiment, unsandboxed),
+            Command::ResearchReject { experiment } => self.research().reject(&experiment),
+            Command::ResearchAutoRun { enabled } => self.research().set_auto_run(enabled),
+            Command::ResearchStopRun { run } => self.research().stop_run(&run),
+            Command::ResearchShowRun { run } => self.research().show_run(run),
+            Command::LabPlan => self.research().lab_do(|lab| lab.plan()),
+            Command::LabCreate => self.research().lab_do(|lab| lab.create()),
+            Command::LabCancel => self.research().lab_do(|lab| {
                 lab.cancel();
                 Ok(())
             }),
-            Command::LabRemove => self.research.lab_do(|lab| lab.remove()),
+            Command::LabRemove => self.research().lab_do(|lab| lab.remove()),
             Command::ClaudeSend { text, images } => self.claude.send(&text, &images),
             Command::ClaudeStop => self.claude.interrupt(),
             Command::ClaudeAnswer { request, answer } => self.claude.answer(&request, answer),
@@ -2726,8 +2734,11 @@ impl Workspace {
         events.extend(self.claude.poll());
 
         // Research's rounds, the same way: their calls are conversations
-        // with the same engines, each one task long.
-        events.extend(self.research.poll());
+        // with the same engines, each one task long. Unless they are the
+        // session's, which polls them once for every project.
+        if !self.research_shared {
+            events.extend(self.research().poll());
+        }
 
         // And the library's walk, which is the same shape again: a second of
         // reading somebody's vault, on a thread with nothing to call back to.
@@ -3346,14 +3357,38 @@ impl Workspace {
         self.modeling.mesh_bytes(key)
     }
 
-    /// Proton is going: Research's runs are stopped and its calls let go.
+    /// Proton is going: Research's runs are stopped and its calls let go —
+    /// the project's own, that is; the session stops one it shares.
     pub fn shutdown(&mut self) {
-        self.research.shutdown();
+        if !self.research_shared {
+            self.research().shutdown();
+        }
     }
 
     /// Where a file a Lab run left is: see `Research::lab_file`.
     pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
-        self.research.lab_file(key)
+        self.research().lab_file(key)
+    }
+
+    /// The investigations this workspace shows.
+    fn research(&self) -> MutexGuard<'_, crate::research::Research> {
+        self.research.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Show the session's investigations, kept in a folder of their own,
+    /// rather than the project's: see `Session::with_research_in`.
+    pub fn share_research(&mut self, research: &Arc<Mutex<crate::research::Research>>) {
+        self.research().shutdown();
+        self.research = Arc::clone(research);
+        self.research_shared = true;
+    }
+
+    /// The same, for the builder chain a session's `build` uses.
+    pub fn sharing_research(mut self, research: Option<&Arc<Mutex<crate::research::Research>>>) -> Self {
+        if let Some(research) = research {
+            self.share_research(research);
+        }
+        self
     }
 
     /// Everything the agent has proposed and nobody has accepted yet.
@@ -5380,7 +5415,7 @@ impl Workspace {
         // Research reads its folders again: a brief or a hypothesis edited
         // by hand since is what the board should show.
         if mode == ModeId::Research {
-            events.extend(self.research.sync());
+            events.extend(self.research().sync());
         }
 
         // Design with nothing open goes looking, once. Asking somebody to
