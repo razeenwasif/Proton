@@ -65,6 +65,18 @@ export async function readDocument(path) {
  * stand-in's mesh is encoded into the same layout first, so the decoder is
  * exercised here exactly as it is in the app.
  */
+/** A file a Lab run left, as bytes: `<investigation>/<run>/<path>`.
+ *  @param {string} key */
+export async function readLab(key) {
+  if (!tauri) {
+    const adapter = await preview;
+    if (!adapter) throw new Error('Browser preview is unavailable');
+    return adapter.readLab(key);
+  }
+  const body = await tauri.core.invoke("read_lab", { key });
+  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
+}
+
 /** @param {string} key */
 export async function readGeometry(key) {
   if (!tauri) {

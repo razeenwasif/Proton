@@ -162,7 +162,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
     "why-is-the-daytime-sky-blue": [
       { row: { id: "R001", experiment: "E001", hypothesis: "H001", state: "done", exit: 0, seconds: 2.4, started: now - 3600, sandbox: "seatbelt" },
         stdout: "scattered spectrum peaks at 405.2 nm", stdoutCut: false, stderr: "", stderrCut: false,
-        metrics: { peak_nm: { value: 405.2, unit: "nm" } }, figures: ["figures/spectrum.png"], scenes: [],
+        metrics: { peak_nm: { value: 405.2, unit: "nm" } }, figures: ["figures/spectrum.png"], scenes: ["orbit.scene.json"],
         record: { code: { sha256: "9f2c1e7a0b4d5e6f" }, python: "/Users/you/.proton/lab/envs/lab/bin/python",
           environment: { lock: { sha256: "4b1d3c2a9e8f7d6c" } }, approved: undefined, about: { approved: { by: "scientist", at: now - 3600 } }, limits: { seconds: 600 } } },
     ],
@@ -368,6 +368,55 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
     if (!timer) timer = setInterval(beat, 700);
   }
 
+  /** A file a run left, as the shell would read it: a picture drawn here,
+   *  or a scene made here. @param {string} key */
+  async function file(key) {
+    const path = key.split("/").slice(2).join("/");
+    if (path.endsWith(".png")) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 360;
+      const g = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+      g.fillStyle = "#16161e";
+      g.fillRect(0, 0, 640, 360);
+      g.strokeStyle = "#7aa2f7";
+      g.lineWidth = 2.5;
+      const ys = Array.from({ length: 601 }, (_, x) => {
+        const lam = 300 + (x / 600) * 500;
+        return lam ** -9 / (Math.exp(14388e3 / (lam * 5772)) - 1);
+      });
+      const top = Math.max(...ys);
+      g.beginPath();
+      ys.forEach((y, x) => g[x ? "lineTo" : "moveTo"](20 + x, 330 - (y / top) * 280));
+      g.stroke();
+      g.fillStyle = "#a9b1d6";
+      g.font = "14px sans-serif";
+      g.fillText("scattered spectrum, normalised — wavelength 300–800 nm", 24, 28);
+      const blob = await new Promise((done) => canvas.toBlob(done, "image/png"));
+      return /** @type {Blob} */ (blob).arrayBuffer();
+    }
+    if (path.endsWith(".scene.json")) {
+      // A planet on an ellipse round its star, a frame every five degrees.
+      const frames = Array.from({ length: 72 }, (_, k) => {
+        const a = (k / 72) * Math.PI * 2;
+        const r = 1 / (1 + 0.3 * Math.cos(a));
+        const at = [r * Math.cos(a), 0, r * Math.sin(a)];
+        const path = Array.from({ length: k + 1 }, (_, j) => {
+          const b = (j / 72) * Math.PI * 2, s = 1 / (1 + 0.3 * Math.cos(b));
+          return [s * Math.cos(b), 0, s * Math.sin(b)];
+        });
+        return [
+          { kind: "sphere", center: [0, 0, 0], radius: 0.16, color: "#e0af68" },
+          { kind: "sphere", center: at, radius: 0.06, color: "#7aa2f7" },
+          { kind: "line", xyz: path, color: "#565f89" },
+          { kind: "arrow", origin: at, vector: [-Math.sin(a) * 0.35, 0, Math.cos(a) * 0.35], color: "#9ece6a" },
+        ];
+      });
+      return new TextEncoder().encode(JSON.stringify({ format: "proton.scene/1", title: "orbit", units: "AU", frames })).buffer;
+    }
+    throw new Error(`${key}: not a file a run left`);
+  }
+
   function sync() {
     return [{ type: "researchList", investigations: investigations.map(summary), open }, ...board(), ...roundEvent(), labEvent(), ...labRunsEvent()];
   }
@@ -546,5 +595,5 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
     }
   }
 
-  return { sync, command };
+  return { sync, command, file };
 }

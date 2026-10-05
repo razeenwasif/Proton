@@ -1492,7 +1492,7 @@ FCM: NON-DROP FRAME
     if (state.vim === "Command") return [{ type: "cmdline", text: "", prompt: state.prompt }, vimEvent()];
     return state.vim === before ? [] : [vimEvent()];
   };
-  return {send, async readGeometry(key) {
+  return {send, readLab: (key) => research.file(key), async readGeometry(key) {
     const mesh = mockMesh(key);
     const wait = mockLatency.get(key) ?? 0;
     if (wait) await new Promise(done => setTimeout(done, wait));

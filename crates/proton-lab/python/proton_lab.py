@@ -71,7 +71,8 @@ class Scene:
         return self
 
     def frame(self):
-        """Start the next frame: what follows is drawn after what came before."""
+        """Start the next frame. Each frame is the whole picture at one moment,
+        drawn on its own; the viewer plays them in turn."""
         self.frames.append([])
         return self
 

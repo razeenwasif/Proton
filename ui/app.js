@@ -14,7 +14,7 @@
 
 import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
-import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, readGeometry, sendKey, setBackdrop, setOpaque,
+import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, readGeometry, readLab, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
 import { closeDocument, documentIsOpen, openDocument, zoomDocument } from "./document.js";
 import { decodeMesh } from "./meshbytes.js";
@@ -859,7 +859,7 @@ const claude = createClaude({
    out of research/; nothing is kept here that the files do not say. */
 const research = createResearch({ root: document, dispatch });
 /* The Lab: the Python an investigation's code runs in, made with your say-so. */
-const lab = createLab({ root: document, dispatch });
+const lab = createLab({ root: document, dispatch, readLab });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];

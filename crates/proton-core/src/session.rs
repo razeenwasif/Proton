@@ -405,6 +405,11 @@ impl Session {
         self.active_mut().mesh_bytes(key)
     }
 
+    /// Where a file a Lab run left is, in the workspace on screen.
+    pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
+        self.active().lab_file(key)
+    }
+
     pub fn workspaces(&self) -> &[Workspace] {
         &self.workspaces
     }

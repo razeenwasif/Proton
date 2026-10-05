@@ -228,6 +228,30 @@ impl Research {
         self.lab.lock().unwrap_or_else(|e| e.into_inner()).python()
     }
 
+    /// A file a run left — a figure, a scene, its output — by the key the
+    /// page asks with: `<investigation>/<run>/<path>`. Only a file inside
+    /// that run's folder, of a kind the Lab shows, is ever given.
+    pub fn lab_file(&self, key: &str) -> Option<std::path::PathBuf> {
+        use std::path::Component;
+        let mut parts = key.splitn(3, '/');
+        let (slug, run, rel) = (parts.next()?, parts.next()?, parts.next()?);
+        let plain = |s: &str| !s.is_empty() && !s.contains(['/', '\\']) && s != "." && s != "..";
+        if !plain(slug) || !plain(run) || !run.starts_with('R') {
+            return None;
+        }
+        let rel = std::path::Path::new(rel);
+        if !rel.components().all(|c| matches!(c, Component::Normal(_))) {
+            return None;
+        }
+        let ext = rel.extension()?.to_str()?.to_ascii_lowercase();
+        if !["png", "jpg", "jpeg", "svg", "json", "txt", "csv"].contains(&ext.as_str()) {
+            return None;
+        }
+        let dir = self.store.root().join(slug).join("runs").join(run).canonicalize().ok()?;
+        let path = dir.join(rel).canonicalize().ok()?;
+        (path.starts_with(&dir) && path.is_file()).then_some(path)
+    }
+
     /// The sandbox runs are in here: tried once, the first time it matters.
     fn sandbox(&mut self) -> Sandbox {
         *self.sandbox.get_or_insert_with(proton_lab::sandbox::available)

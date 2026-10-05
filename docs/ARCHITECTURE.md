@@ -18,7 +18,7 @@ in this document retain historical decisions and measurements.
 | Game | Godot `.tscn` scene hierarchy and property editing | No engine playback process |
 | Video | CMX3600 `.edl` timeline and `.srt` captions | No decoded video/program monitor |
 | Data | `.ipynb` cells, kernel execution, outputs and dataframe views | Execution requires a configured Jupyter kernel |
-| Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; their figures and 3D scenes are listed, not yet drawn |
+| Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; figures and 3D scenes drawn in the Lab |
 
 ```bash
 cargo test --workspace        # headless; some integrations require external tools
@@ -1721,8 +1721,8 @@ The three limits it named are gone: occlusion is per pixel, the material runs
 per pixel, and the frame is no longer what bounds a mesh's size — a million
 triangles measured 0.3 ms. What bounded it next was the seam, at about 50 bytes
 of JSON a triangle once vertex normals travel with the positions, and the
-answer to that was a binary channel rather than a larger number. It is the one
-exception to "JSON on the seam": `Event::Geometry` describes a mesh and says
+answer to that was a binary channel rather than a larger number. It is one of
+two exceptions to "JSON on the seam": `Event::Geometry` describes a mesh and says
 whether it is ready, and the page then calls the shell's `read_geometry`, which
 returns a raw `ipc::Response` in the layout `proton-mesh/src/bytes.rs` pins
 down. Every section starts four-byte aligned so the page's typed arrays are
@@ -1730,6 +1730,16 @@ views onto the buffer. A late answer for a key that has since been asked again
 is dropped, and switching scenes clears every mesh the last one uploaded. The
 budget — 500,000 triangles — is now set by reading and shading the mesh, not by
 moving it.
+
+The other is the Lab's: `Event::ResearchRun` names the pictures and 3D scenes a
+run saved, and the page asks the shell's `read_lab` for each by
+`<investigation>/<run>/<path>`. The core says where the file is, under the
+session's lock, and gives only a file inside that run's folder of a kind the
+Lab shows — no `..`, no absolute path, no link out, no code; the shell reads it
+after letting go of the lock. A scene is drawn by `ui/lab3d.js`, a small WebGL 2
+renderer of its own — lit spheres, bonds and arrows, points, lines and meshes,
+an orbit camera, frames played in turn — rather than Modeling's, which is one
+context bound to its viewport.
 
 ---
 

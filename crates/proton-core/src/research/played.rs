@@ -938,3 +938,29 @@ fn without_a_sandbox_nothing_runs_unless_the_scientist_says_so_and_a_run_can_be_
     assert!(folder.sandbox_log().contains("without a sandbox") && folder.sandbox_log().contains("stopped"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[cfg(unix)]
+#[test]
+fn the_window_reads_only_what_a_run_left_in_its_own_folder() {
+    let dir = root("files");
+    let (factory, _) = Factory::new();
+    let research = begin(&dir, factory);
+    let run = dir.join("research").join(SLUG).join("runs/R001");
+    std::fs::create_dir_all(run.join("figures")).unwrap();
+    std::fs::write(run.join("figures/spectrum.png"), b"png").unwrap();
+    std::fs::write(run.join("orbit.scene.json"), b"{}").unwrap();
+    std::fs::write(run.join("main.py"), b"print(1)").unwrap();
+    std::fs::write(dir.join("secret.txt"), b"secret").unwrap();
+    std::os::unix::fs::symlink(dir.join("secret.txt"), run.join("figures/escape.txt")).unwrap();
+
+    let key = |rest: &str| format!("{SLUG}/R001/{rest}");
+    assert_eq!(research.lab_file(&key("figures/spectrum.png")), Some(run.join("figures/spectrum.png").canonicalize().unwrap()));
+    assert!(research.lab_file(&key("orbit.scene.json")).is_some());
+    for refused in ["../../../secret.txt", "/etc/hosts", "main.py", "figures/escape.txt", "figures/missing.png", "figures/../../R001/main.py"] {
+        assert_eq!(research.lab_file(&key(refused)), None, "{refused} was given");
+    }
+    for refused in [format!("../{SLUG}/R001/figures/spectrum.png"), format!("{SLUG}/../R001/figures/spectrum.png"), format!("{SLUG}/X001/figures/spectrum.png"), "nope".into()] {
+        assert_eq!(research.lab_file(&refused), None, "{refused} was given");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

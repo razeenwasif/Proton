@@ -10,6 +10,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { highlight } from "./highlight.js";
+import { mountScene } from "./lab3d.js";
 
 /** @typedef {import("./bindings/LabEnv").LabEnv} Env */
 /** @typedef {import("./bindings/LabPlan").LabPlan} Plan */
@@ -46,15 +47,26 @@ const home = (path) => String(path ?? "").replace(/^\/Users\/[^/]+|^\/home\/[^/]
 /** A day, from seconds since the epoch. @param {number} s */
 const day = (s) => new Date(s * 1000).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
 
-/** @param {{root: Document, dispatch: (command: any) => unknown}} host */
+/** @param {{root: Document, dispatch: (command: any) => unknown, readLab?: (key: string) => Promise<ArrayBuffer>}} host */
 export function createLab(host) {
   const found = /** @type {HTMLElement | null} */ (host.root.querySelector("[data-lab-env]"));
   const foundWork = /** @type {HTMLElement | null} */ (host.root.querySelector("[data-lab-work]"));
   if (!found || !foundWork) return null;
   const box = found;
   const work = foundWork;
-  /** @type {{env: Env | null, confirming: boolean, lab: LabEvent | null, run: RunDetail | null, open: Set<string>}} */
-  const state = { env: null, confirming: false, lab: null, run: null, open: new Set() };
+  /** @type {{env: Env | null, confirming: boolean, lab: LabEvent | null, run: RunDetail | null, open: Set<string>, scene: string | null}} */
+  const state = { env: null, confirming: false, lab: null, run: null, open: new Set(), scene: null };
+  /** Pictures already read, as object URLs, by key. @type {Map<string, string>} */
+  const pictures = new Map();
+  /** Scenes already read, by key. @type {Map<string, any>} */
+  const scenes = new Map();
+  /** The scene drawn now, to be let go of before the next. @type {{destroy(): void} | null} */
+  let mounted = null;
+  /** @type {any} */
+  let playing = null;
+
+  /** A run's file, by its path in the run's folder. @param {string} path */
+  const keyOf = (path) => `${state.lab?.slug ?? ""}/${state.run?.row.id ?? ""}/${path}`;
 
   /** @param {string[]} log */
   const tail = (log) => (log.length ? `<pre class="lab-log">${esc(log.slice(-8).join("\n"))}</pre>` : "");
@@ -191,7 +203,13 @@ export function createLab(host) {
       : `in ${r.sandbox === "seatbelt" ? "Seatbelt" : "bubblewrap"}: no network, writing only its own folder`;
     const metrics = Object.entries(d.metrics ?? {}).map(([k, v]) =>
       `<tr><td>${esc(k)}</td><td>${esc(String(/** @type {any} */ (v)?.value ?? ""))}</td><td class="lab-faint">${esc(/** @type {any} */ (v)?.unit ?? "")}</td></tr>`).join("");
-    const saved = [...d.figures, ...d.scenes].map((f) => `<li><code>${esc(f)}</code></li>`).join("");
+    const figures = d.figures.map((f) => `<figure class="lab-figure"><img data-lab-figure="${esc(f)}" alt="${esc(f)}"><figcaption>${esc(f.replace(/^figures\//, ""))}</figcaption></figure>`).join("");
+    const scenesHtml = d.scenes.map((f) => state.scene === f
+      ? `<div class="lab-scene" data-lab-scene="${esc(f)}"><div class="lab-scene-head"><code>${esc(f)}</code><span class="grow"></span>` +
+        `<button class="cc-quiet" data-lab-scene-close>Close</button></div><canvas class="lab-canvas"></canvas>` +
+        `<div class="lab-frames" hidden><button class="cc-quiet" data-lab-play>Play</button><input type="range" min="0" value="0" data-lab-frame aria-label="Frame"><span class="lab-faint" data-lab-frame-n></span></div>` +
+        `<p class="lab-faint lab-scene-note">Drag to turn · the wheel to come nearer · double-click to start again</p></div>`
+      : `<button class="lab-scene-open" data-lab-scene-open="${esc(f)}">${icon("cube")} <span>${esc(f)}</span><span class="lab-faint">Show in 3D</span></button>`).join("");
     const short = (/** @type {string | undefined} */ h) => (h ? `<code title="${esc(h)}">${esc(h.slice(0, 12))}</code>` : "—");
     const approved = record?.about?.approved;
     return `<div class="lab-detail">
@@ -200,7 +218,8 @@ export function createLab(host) {
       <h3>${esc(r.id)} <span class="lab-faint">— ${esc(r.experiment ?? "")}${r.hypothesis ? `, testing ${esc(r.hypothesis)}` : ""}</span></h3>
       <p>${esc(ENDED[r.state] ?? r.state)}${r.exit != null && r.state !== "done" ? `, exit ${r.exit}` : ""}${r.seconds != null ? ` after ${esc(seconds(r.seconds))}` : ""}, ${fence}.</p>
       ${metrics ? `<table class="lab-metrics">${metrics}</table>` : ""}
-      ${saved ? `<div><span class="lab-faint">Saved</span><ul class="lab-saved">${saved}</ul></div>` : ""}
+      ${figures}
+      ${scenesHtml}
       ${d.stdout.trim() ? `<div><span class="lab-faint">Output${d.stdoutCut ? " (its end)" : ""}</span><pre class="lab-log">${esc(d.stdout)}</pre></div>` : ""}
       ${d.stderr.trim() ? `<div><span class="lab-faint">Errors${d.stderrCut ? " (their end)" : ""}</span><pre class="lab-log err">${esc(d.stderr)}</pre></div>` : ""}
       <details class="lab-packages"><summary>Provenance</summary><table>
@@ -213,16 +232,99 @@ export function createLab(host) {
     </div>`;
   }
 
+  /** Pictures read through the shell, each once. */
+  async function showFigures() {
+    for (const img of /** @type {NodeListOf<HTMLImageElement>} */ (work.querySelectorAll("img[data-lab-figure]"))) {
+      const key = keyOf(img.dataset.labFigure ?? "");
+      let url = pictures.get(key);
+      if (!url && host.readLab) {
+        try {
+          const bytes = await host.readLab(key);
+          const kind = key.toLowerCase().endsWith(".svg") ? "image/svg+xml" : key.toLowerCase().match(/\.jpe?g$/) ? "image/jpeg" : "image/png";
+          url = URL.createObjectURL(new Blob([bytes], { type: kind }));
+          pictures.set(key, url);
+        } catch {
+          img.replaceWith(Object.assign(document.createElement("p"), { className: "lab-faint", textContent: `${img.alt} could not be read.` }));
+          continue;
+        }
+      }
+      if (url && img.isConnected) img.src = url;
+    }
+  }
+
+  /** The open scene, drawn — read through the shell the first time. */
+  async function showScene() {
+    mounted?.destroy();
+    mounted = null;
+    clearInterval(playing);
+    const box = /** @type {HTMLElement | null} */ (work.querySelector("[data-lab-scene]"));
+    if (!box || !state.scene) return;
+    const key = keyOf(state.scene);
+    let doc = scenes.get(key);
+    if (!doc && host.readLab) {
+      try {
+        doc = JSON.parse(new TextDecoder().decode(await host.readLab(key)));
+        scenes.set(key, doc);
+      } catch {
+        doc = null;
+      }
+    }
+    if (!box.isConnected) return;
+    if (!doc || doc.format !== "proton.scene/1") {
+      box.querySelector("canvas")?.replaceWith(Object.assign(document.createElement("p"), { className: "lab-err", textContent: "This is not a scene the Lab can draw." }));
+      return;
+    }
+    const canvas = /** @type {HTMLCanvasElement} */ (box.querySelector("canvas"));
+    const view = mountScene(canvas, doc);
+    if (!view) {
+      canvas.replaceWith(Object.assign(document.createElement("p"), { className: "lab-err", textContent: "This window has no WebGL 2, so the scene cannot be drawn." }));
+      return;
+    }
+    mounted = view;
+    const bar = /** @type {HTMLElement} */ (box.querySelector(".lab-frames"));
+    const slider = /** @type {HTMLInputElement} */ (box.querySelector("[data-lab-frame]"));
+    const count = /** @type {HTMLElement} */ (box.querySelector("[data-lab-frame-n]"));
+    bar.hidden = view.frames < 2;
+    slider.max = String(view.frames - 1);
+    const show = (/** @type {number} */ i) => { view.show(i); slider.value = String(i); count.textContent = `${i + 1} / ${view.frames}`; };
+    show(0);
+    slider.oninput = () => show(Number(slider.value));
+    const play = /** @type {HTMLButtonElement} */ (box.querySelector("[data-lab-play]"));
+    play.onclick = () => {
+      if (playing) {
+        clearInterval(playing);
+        playing = null;
+        play.textContent = "Play";
+        return;
+      }
+      play.textContent = "Pause";
+      playing = setInterval(() => {
+        // Gone, it stops; out of sight, it waits.
+        if (!canvas.isConnected) return void clearInterval(playing);
+        if (canvas.offsetParent) show((Number(slider.value) + 1) % view.frames);
+      }, 120);
+    };
+  }
+
   function renderWork() {
     const lab = state.lab;
     if (!lab) {
+      mounted?.destroy();
+      mounted = null;
       work.innerHTML = "";
       return;
     }
     if (state.run) {
+      // A scene being turned is not drawn again under the pointer.
+      const open = state.scene && work.querySelector(`[data-lab-scene="${CSS.escape(state.scene)}"]`);
+      if (open && state.run.row.state !== "running") return;
       work.innerHTML = detailHtml(state.run);
+      void showFigures();
+      void showScene();
       return;
     }
+    mounted?.destroy();
+    mounted = null;
     const waiting = lab.experiments.filter((e) => e.status === "proposed");
     const turnedDown = lab.experiments.filter((e) => e.status === "rejected").length;
     const fence = lab.sandbox === "none"
@@ -256,9 +358,28 @@ export function createLab(host) {
     if (reject) return void host.dispatch({ type: "researchReject", experiment: reject.dataset.labReject });
     const stop = /** @type {HTMLElement | null} */ (target.closest("[data-lab-stop]"));
     if (stop) return void host.dispatch({ type: "researchStopRun", run: stop.dataset.labStop });
+    const scene = /** @type {HTMLElement | null} */ (target.closest("[data-lab-scene-open]"));
+    if (scene) {
+      state.scene = scene.dataset.labSceneOpen ?? null;
+      work.innerHTML = state.run ? detailHtml(state.run) : "";
+      void showFigures();
+      void showScene();
+      return;
+    }
+    if (target.closest("[data-lab-scene-close]")) {
+      state.scene = null;
+      mounted?.destroy();
+      mounted = null;
+      clearInterval(playing);
+      playing = null;
+      work.innerHTML = state.run ? detailHtml(state.run) : "";
+      void showFigures();
+      return;
+    }
     const run = /** @type {HTMLElement | null} */ (target.closest("[data-lab-run]"));
     if (run) {
       const id = run.dataset.labRun || null;
+      state.scene = null;
       if (!id) state.run = null;
       host.dispatch({ type: "researchShowRun", run: id });
       if (!id) renderWork();
@@ -304,6 +425,7 @@ export function createLab(host) {
   /** @param {RunEvent} event */
   function run(event) {
     if (state.lab && event.slug !== state.lab.slug) return;
+    if (event.detail?.row.id !== state.run?.row.id) state.scene = null;
     state.run = event.detail;
     renderWork();
   }

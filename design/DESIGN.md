@@ -705,7 +705,10 @@ trust says so in red, and its button says Run without a sandbox. Runs are
 listed under it, each with how it ended; one opens whole: the numbers it
 recorded, what it saved, the end of its output and errors, and where it came
 from — the code and the environment by digest, the Python, who approved it
-and when. Its figures and 3D scenes are drawn there too.
+and when. Its pictures are drawn in place. Each 3D scene it saved is a
+button until it is opened, and then a canvas to turn by dragging and nearer
+by the wheel, with a slider and Play when it moves; a scene is drawn only
+when it changes, so one left open costs nothing.
 
 ---
 

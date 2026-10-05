@@ -129,7 +129,10 @@ of you. Code an agent proposes waits in the Lab for you to read; run, it is
 in a sandbox — Seatbelt on macOS, bubblewrap on Linux: no network, nothing
 written outside its own folder, nothing of your home folder read — and its
 folder keeps what it printed, the numbers and pictures it saved, and a record
-of the code and environment by digest and of who approved it.
+of the code and environment by digest and of who approved it. Its pictures are
+drawn in the Lab, and its 3D scenes — spheres and bonds, points, lines, arrows
+and meshes, in frames for anything that moves — open there to be turned and
+played.
 
 ## The three things that hold it together
 

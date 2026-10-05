@@ -1725,6 +1725,40 @@ await test('An experiment is read, then run in the sandbox or turned down, and i
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('A run\'s pictures are drawn, and its 3D scene opens from it', async () => {
+  await openSky(researchRound({status: 'idle'}));
+  const work = $('[data-lab-work]');
+  // One pixel of PNG, and two frames of a scene.
+  const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+  const scene = {format: 'proton.scene/1', frames: [[{kind: 'sphere', center: [0, 0, 0], radius: 1}], [{kind: 'points', xyz: [[1, 0, 0], [0, 1, 0]]}]]};
+  win.labFiles = {'sky/R001/figures/spectrum.png': png.buffer, 'sky/R001/orbit.scene.json': new TextEncoder().encode(JSON.stringify(scene)).buffer,
+    'sky/R001/broken.scene.json': new TextEncoder().encode('{"format": "something else"}').buffer};
+  const row = {id: 'R001', experiment: 'E001', hypothesis: 'H001', state: 'done', exit: 0, seconds: 2.4, started: 0, sandbox: 'seatbelt'};
+  await win.pushEvents([{type: 'researchLab', slug: 'sky', experiments: [], runs: [row], sandbox: 'seatbelt'},
+    {type: 'researchRun', slug: 'sky', detail: {row, stdout: '', stdoutCut: false, stderr: '', stderrCut: false, metrics: {},
+      figures: ['figures/spectrum.png'], scenes: ['broken.scene.json', 'orbit.scene.json'], record: {}}}]);
+  for (let i = 0; i < 20 && !work.querySelector('img[data-lab-figure]')?.src; i++) await settle();
+  const img = work.querySelector('img[data-lab-figure]');
+  assert(img?.src.startsWith('blob:'), 'the picture was not read from the run');
+  work.querySelector('[data-lab-scene-open="broken.scene.json"]').click();
+  for (let i = 0; i < 20 && !work.querySelector('.lab-scene .lab-err'); i++) await settle();
+  assert(work.querySelector('.lab-scene .lab-err')?.textContent.includes('not a scene the Lab can draw'), 'a file that is not a scene was drawn');
+  work.querySelector('[data-lab-scene-close]').click(); await settle();
+  work.querySelector('[data-lab-scene-open="orbit.scene.json"]').click();
+  for (let i = 0; i < 20 && !(work.querySelector('.lab-frames:not([hidden])') || work.querySelector('.lab-scene .lab-err')); i++) await settle();
+  const drawn = work.querySelector('.lab-scene canvas.lab-canvas');
+  if (drawn) {
+    assert(work.querySelector('[data-lab-frame-n]').textContent === '1 / 2', 'a scene that moves has no frames to step through');
+    const slider = work.querySelector('[data-lab-frame]');
+    slider.value = '1'; slider.dispatchEvent(new win.Event('input', {bubbles: true}));
+    assert(work.querySelector('[data-lab-frame-n]').textContent === '2 / 2', 'the slider did not step');
+  } else {
+    assert(work.querySelector('.lab-scene .lab-err')?.textContent.includes('no WebGL 2'), 'without WebGL 2 the scene does not say why');
+  }
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  work.querySelector('[data-lab-scene-close]').click(); await settle();
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('A long name in the project panel scrolls sideways instead of being cut', async () => {
   const tree = $('.workspace.on [data-tree]');
   const space = tree.closest('.workspace');

@@ -237,6 +237,21 @@ fn read_geometry(
         .ok_or_else(|| format!("{key}: no geometry to send"))
 }
 
+/// A file a Lab run left — a figure, a 3D scene — as bytes.
+///
+/// Where it is is asked of the core under the session's lock, which only
+/// gives a file inside that run's folder of a kind the Lab shows; it is read
+/// after the lock is let go, so a large picture never holds the core.
+#[tauri::command]
+fn read_lab(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
+    let path = match session.lock() {
+        Ok(it) => it.session.lab_file(&key),
+        Err(poisoned) => poisoned.into_inner().session.lab_file(&key),
+    };
+    let path = path.ok_or_else(|| format!("{key}: not a file a run left"))?;
+    std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
+}
+
 /// Give the core a heartbeat.
 ///
 /// Everything a language server says arrives on a thread the core cannot see,
@@ -358,7 +373,8 @@ fn main() {
             set_backdrop,
             set_opaque,
             read_document,
-            read_geometry
+            read_geometry,
+            read_lab
         ])
         .setup(|app| {
             let Some(window) = app.get_webview_window("main") else {

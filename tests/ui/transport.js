@@ -61,6 +61,12 @@ window.__TAURI__ = {
     const {command} = args;
     if (name !== 'dispatch') (window.invokes ??= []).push({name, args});
     if (name === 'backdrop') return 'vibrancy';
+    // A Lab run's files, as a test puts them.
+    if (name === 'read_lab') {
+      const bytes = window.labFiles?.[args.key];
+      if (!bytes) throw new Error(`${args.key}: not a file a run left`);
+      return bytes;
+    }
     if (name !== 'dispatch') return [];
     window.commands.push(command);
     const events = (() => { switch (command.type) {

@@ -3300,6 +3300,11 @@ impl Workspace {
         self.modeling.mesh_bytes(key)
     }
 
+    /// Where a file a Lab run left is: see `Research::lab_file`.
+    pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
+        self.research.lab_file(key)
+    }
+
     /// Everything the agent has proposed and nobody has accepted yet.
     ///
     /// Computed on the spot, like every other view of the review: the hunks
