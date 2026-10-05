@@ -159,7 +159,29 @@ pub const LANGUAGES: &[Language] = &[
         args: &[],
         extensions: &["go"],
     },
+    // One clangd for C and C++: two would index a C++ project twice, its `.h`
+    // headers starting the second. Each file is still announced as what it is
+    // (`announced_as`). It formats too — with clang-format's rules and the
+    // project's `.clang-format` — which is how `:fmt` and a save format C.
+    Language {
+        id: "c",
+        program: "clangd",
+        args: &[],
+        extensions: &["c", "h", "cc", "cpp", "cxx", "c++", "hh", "hpp", "hxx", "h++", "ipp", "tpp"],
+    },
 ];
+
+/// The language a file is announced to its server as: its table entry's,
+/// but C++ for a C++ file that clangd, under C, serves.
+fn announced_as(path: &Path, language: &'static str) -> &'static str {
+    const CPP: &[&str] = &["cc", "cpp", "cxx", "c++", "hh", "hpp", "hxx", "h++", "ipp", "tpp"];
+    let extension = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    if language == "c" && extension.is_some_and(|e| CPP.contains(&e.as_str())) {
+        "cpp"
+    } else {
+        language
+    }
+}
 
 fn language_for(path: &Path) -> Option<&'static Language> {
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -305,7 +327,7 @@ impl Servers {
 
         if let Some(client) = self.clients.get_mut(language) {
             if first {
-                client.did_open(&path, language, sent, &text);
+                client.did_open(&path, announced_as(&path, language), sent, &text);
             } else {
                 client.did_change(&path, sent, &text);
             }
@@ -836,4 +858,19 @@ pub fn apply_completion(buffer: &mut Buffer, item: &proton_lsp::CompletionItem) 
     let end = end.clamp(start, cursor);
     let landing = start + text.chars().count();
     buffer.apply(vec![Edit { start, end, text }], Cursor::at(landing));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_clangd_serves_c_and_cpp_and_each_file_is_announced_as_what_it_is() {
+        for (file, announced) in [("a.c", "c"), ("a.h", "c"), ("a.cpp", "cpp"), ("a.HPP", "cpp"), ("a.cc", "cpp")] {
+            let language = language_for(Path::new(file)).expect(file);
+            assert_eq!((language.id, language.program), ("c", "clangd"), "{file}");
+            assert_eq!(announced_as(Path::new(file), language.id), announced, "{file}");
+        }
+        assert_eq!(announced_as(Path::new("a.rs"), "rust"), "rust");
+    }
 }

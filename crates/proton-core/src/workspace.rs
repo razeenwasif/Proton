@@ -141,6 +141,10 @@ pub struct Workspace {
     hover_open: bool,
     /// A formatting request in flight.
     formatting: Option<Formatting>,
+    /// clang-format's answer, when it is formatting instead of a server.
+    external_format: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    /// clang-format, once looked for; a test names its own.
+    clang_format: Option<Option<PathBuf>>,
     /// The code actions the picker is showing, in its order. Held because a
     /// picker row carries a label, not an action — and the action is what has
     /// to be applied or resolved when a row is chosen.
@@ -2470,6 +2474,16 @@ impl Workspace {
 
         if self.servers.format(&path).is_none() {
             self.formatting = None;
+            // No server formats it, but clang-format can: C and C++ without clangd.
+            if crate::formatters::is_c_family(&path) {
+                let program = self.clang_format.get_or_insert_with(crate::formatters::clang_format).clone();
+                if let Some(program) = program {
+                    let text = self.editor.buffer().contents();
+                    self.external_format = Some(crate::formatters::start(&program, &path, text));
+                    self.formatting = Some(Formatting { path, version: self.editor.buffer().version(), then_write });
+                    return Vec::new();
+                }
+            }
             return match then_write {
                 // Saving a file whose language has no formatter is the
                 // ordinary case, not something to say anything about.
@@ -2486,6 +2500,36 @@ impl Workspace {
             then_write,
         });
         Vec::new()
+    }
+
+    /// clang-format's answer, once it has one: put in the buffer through the
+    /// same door as a server's edits, so a buffer edited meanwhile is left be.
+    fn poll_external_format(&mut self) -> Vec<Event> {
+        let Some(rx) = &self.external_format else { return Vec::new() };
+        match rx.try_recv() {
+            Ok(Ok(formatted)) => {
+                self.external_format = None;
+                let edits = crate::formatters::edits(&self.editor.buffer().contents(), &formatted);
+                self.formatted(&edits)
+            }
+            Ok(Err(why)) => {
+                self.external_format = None;
+                self.formatting = None;
+                vec![notice(why, NoticeLevel::Warn)]
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => Vec::new(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.external_format = None;
+                self.formatting = None;
+                Vec::new()
+            }
+        }
+    }
+
+    /// Name the clang-format this workspace formats C with.
+    #[cfg(test)]
+    pub(crate) fn use_clang_format(&mut self, program: Option<PathBuf>) {
+        self.clang_format = Some(program);
     }
 
     /// Put a server's formatting edits in the buffer, if they still fit.
@@ -2640,6 +2684,7 @@ impl Workspace {
         // something whose whole job is to end a wait.
         events.extend(self.answer_finished_cells());
         self.answer_embedded_searches();
+        events.extend(self.poll_external_format());
 
         if self.data.poll() {
             // A kernel that died under a running cell is news, not a state:
@@ -6575,4 +6620,61 @@ mod tests {
         assert!(ws.staged().is_empty(), "{:?}", ws.staged());
         assert!(ws.review.is_empty(), "{:?}", ws.review);
     }
+
+    /// Poll until a pending formatting has landed, or give up.
+    fn settle_format(ws: &mut Workspace) -> Vec<Event> {
+        let mut events = Vec::new();
+        for _ in 0..500 {
+            events.extend(ws.apply(Command::Poll));
+            if ws.external_format.is_none() {
+                return events;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("clang-format never answered");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn c_with_no_server_to_format_it_is_formatted_by_clang_format_on_fmt_and_on_save() {
+        use std::os::unix::fs::PermissionsExt;
+        let project = Project::new("clang-format");
+        let root = project.real();
+        std::fs::write(root.join("main.c"), "int main(){\nreturn 0;\n}\n").unwrap();
+        // A stand-in that reformats the way clang-format would, so the test
+        // needs no LLVM: it takes the text on stdin and the name it is for.
+        let fake = project.base.join("clang-format");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\ncase \"$1\" in --assume-filename=*main.c) sed -e 's/^int main(){$/int main() {/' -e 's/^return/  return/' ;; *) exit 2 ;; esac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut ws = Workspace::rooted(&root);
+        ws.use_clang_format(Some(fake));
+        ws.apply(Command::OpenBuffer { path: "main.c".into() });
+        // `:fmt` formats the buffer, unsaved edits and all, and does not write.
+        typed(&mut ws, "ggOint x;");
+        ws.apply(Command::Format);
+        let events = settle_format(&mut ws);
+        assert_eq!(ws.editor().buffer().contents(), "int x;\nint main() {\n  return 0;\n}\n");
+        assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == "formatted main.c")), "{events:?}");
+        assert_eq!(std::fs::read_to_string(root.join("main.c")).unwrap(), "int main(){\nreturn 0;\n}\n", "`:fmt` wrote the file");
+        typed(&mut ws, "u");
+        assert_eq!(ws.editor().buffer().contents(), "int x;\nint main(){\nreturn 0;\n}\n", "one `u` does not take the formatting back");
+
+        // A save formats, and writes what it formatted.
+        ws.apply(Command::Save);
+        settle_format(&mut ws);
+        assert_eq!(std::fs::read_to_string(root.join("main.c")).unwrap(), "int x;\nint main() {\n  return 0;\n}\n");
+
+        // Nothing to format with: `:fmt` says so, a save says nothing.
+        let mut bare = Workspace::rooted(&root);
+        bare.use_clang_format(None);
+        bare.apply(Command::OpenBuffer { path: "main.c".into() });
+        let said = bare.apply(Command::Format);
+        assert!(said.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == "no formatter for this file")), "{said:?}");
+    }
 }
+

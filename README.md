@@ -78,7 +78,9 @@ sessions and Artifact tool — drawn as Claude Code's app draws it, with what it
 publishes in a pane beside the conversation. Codex, Gemini and Antigravity
 answer in the same tab.
 **Codex** · the editor — buffers, LSP, splits, the agent dock, and the mobile
-target's device / layout-inspector / Logcat panel.
+target's device / layout-inspector / Logcat panel. C and C++ are formatted by
+clangd, or by `clang-format` — Xcode's, Homebrew's or LLVM's — where there is
+no clangd, with the project's `.clang-format`.
 **Design** · a web builder with a layer tree and an artboard, two-way bound to
 real component source and design tokens.
 **Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a

@@ -1268,6 +1268,14 @@ offset-preserving cursor lands at the end of the file. The whole set goes to
 
 `:fmt` formats without saving, which is the only reason it exists separately.
 
+C and C++ go to clangd, which formats with `clang-format` behind it. Where
+clangd is not installed — a Mac with Xcode has `clang-format` but keeps it off
+the PATH — the editor runs `clang-format` itself (`formatters.rs`): the buffer
+on stdin, `--assume-filename` so the project's `.clang-format` is found, on a
+thread, so the core waits for nothing. Its answer is turned into one edit of
+the lines that changed and goes through the same door as a server's, so the
+version check, the cursor and the single `u` all hold.
+
 **Rename and code actions — `␣lr` and `␣la`.** Both come back as a
 `WorkspaceEdit`: a set of text edits across however many files the change
 reaches. `Workspace::apply_workspace_edit` is where they land, and it is public
