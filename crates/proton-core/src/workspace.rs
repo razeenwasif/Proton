@@ -2003,6 +2003,9 @@ impl Workspace {
                 PickerKind::Grep => self.pickers.is_scanning() || self.pickers.is_searching(),
                 _ => self.pickers.is_scanning(),
             },
+            // Only the lists read from the walk can be cut short by it.
+            cut_short: matches!(picker.kind(), PickerKind::Files | PickerKind::Grep)
+                && self.pickers.is_cut_short(),
         }
     }
 
@@ -4244,6 +4247,23 @@ impl Workspace {
         })
     }
 
+    /// A search's answer, with what it could not search said after it.
+    ///
+    /// Over a home folder or anything broader, the walk stops at a limit and
+    /// the files past it are never searched. Said plainly, "no matches" reads
+    /// as an answer about the whole folder, and so does a list of hits that
+    /// left out the one wanted. The agent believes both.
+    fn as_far_as_listed(&self, answer: String) -> String {
+        if !self.pickers.is_cut_short() {
+            return answer;
+        }
+        format!(
+            "{answer}\n(this folder is too broad to list whole: only {} of its files were \
+             listed, and only those were searched)",
+            self.pickers.file_count()
+        )
+    }
+
     /// Run one tool against the workspace.
     ///
     /// Public because the tools are the *editor's* capabilities rather than
@@ -4293,9 +4313,9 @@ impl Workspace {
                 }
                 let hits = self.pickers.grep(&query, count("limit", 40));
                 if hits.is_empty() {
-                    return Ok(format!("no matches for {query:?}"));
+                    return Ok(self.as_far_as_listed(format!("no matches for {query:?}")));
                 }
-                Ok(hits.join("\n"))
+                Ok(self.as_far_as_listed(hits.join("\n")))
             }
 
             "find_files" => {
@@ -4305,9 +4325,9 @@ impl Workspace {
                 }
                 let found = self.pickers.find(query, count("limit", 40));
                 if found.is_empty() {
-                    return Ok(format!("no files matching {query:?}"));
+                    return Ok(self.as_far_as_listed(format!("no files matching {query:?}")));
                 }
-                Ok(found.join("\n"))
+                Ok(self.as_far_as_listed(found.join("\n")))
             }
 
             "list_sources" => {
@@ -6777,6 +6797,103 @@ mod tests {
             .run_tool("grep", &serde_json::json!({ "query": "fn one" }))
             .unwrap();
         assert!(hits.starts_with("a.rs:1:"), "{hits}");
+    }
+
+    /* ── a folder too broad to list whole ────────────────────────────── */
+
+    /// Pump the heartbeat until the walk lands, and say what the open picker
+    /// was told when it did: how many files it is choosing from, and whether
+    /// that is fewer than the folder holds.
+    fn listed(ws: &mut Workspace) -> (usize, bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut told = None;
+        while ws.pickers().is_scanning() {
+            for event in ws.apply(Command::Poll) {
+                if let Event::Picker {
+                    total, cut_short, ..
+                } = event
+                {
+                    told = Some((total, cut_short));
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the walk never finished"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        told.expect("the walk landed and the picker was not told")
+    }
+
+    #[test]
+    fn a_walk_cut_short_says_so_to_the_picker_and_to_the_agent() {
+        // Over a home folder or anything broader the walk stops at a limit,
+        // and which files it had reached by then changes from one launch to
+        // the next. A file it never reached looks just like one that does not
+        // exist, to somebody reading the picker and to the agent, which
+        // believes what a search tells it, unless each of them is told.
+        let project = Project::new("cut-short");
+        for name in ["a", "b", "c", "d", "e", "f"] {
+            std::fs::write(project.folder().join(format!("{name}.rs")), SOURCE).unwrap();
+        }
+
+        // A limit the walk reaches with files left over, one it reaches with
+        // none left, and none at all, which is how an ordinary project walks.
+        for (limit, total, cut_short) in [(Some(4), 4, true), (Some(6), 6, false), (None, 6, false)]
+        {
+            let mut ws = Workspace::rooted(project.real());
+            if let Some(limit) = limit {
+                ws.pickers.limit_files(limit);
+            }
+            ws.apply(Command::OpenPicker {
+                kind: PickerKind::Files,
+            });
+            assert_eq!(listed(&mut ws), (total, cut_short), "limit {limit:?}");
+
+            let search = |ws: &mut Workspace, tool: &str, query: &str| {
+                ws.run_tool(tool, &serde_json::json!({ "query": query }))
+                    .unwrap()
+            };
+            let found = search(&mut ws, "find_files", "");
+            let hits = search(&mut ws, "grep", "fn one");
+            let missing = search(&mut ws, "grep", "fn three");
+            assert_eq!(
+                found.lines().filter(|l| l.ends_with(".rs")).count(),
+                total,
+                "{found}"
+            );
+            assert_eq!(
+                hits.lines().filter(|l| l.contains(".rs:1:")).count(),
+                total,
+                "{hits}"
+            );
+            for said in [&found, &hits, &missing] {
+                assert_eq!(
+                    said.contains(&format!("only {total} of its files were listed")),
+                    cut_short,
+                    "limit {limit:?}: {said}"
+                );
+            }
+
+            // The open buffers are not the folder's files, and their list is
+            // never cut short.
+            ws.apply(Command::Key {
+                key: Key::named("Escape"),
+            });
+            let buffers = ws.apply(Command::OpenPicker {
+                kind: PickerKind::Buffers,
+            });
+            assert!(
+                buffers.iter().any(|e| matches!(
+                    e,
+                    Event::Picker {
+                        cut_short: false,
+                        ..
+                    }
+                )),
+                "{buffers:?}"
+            );
+        }
     }
 }
 

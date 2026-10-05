@@ -143,7 +143,14 @@ total: number, elapsedMs: number,
  * The tree is still being walked. An empty list under this flag means
  * "not yet", not "no matches" — and those look identical without it.
  */
-scanning: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "hover", text: string, line: number, column: number, } | { "type": "hoverClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "tasks", tasks: Array<Task>, } | { "type": "plugins", items: Array<PluginView>, themes: Array<ThemeView>, } | { "type": "review", files: Array<ChangeView>, } | { "type": "document", 
+scanning: boolean, 
+/**
+ * The walk stopped at its limit with files left unlisted, so `total`
+ * is some of the folder rather than all of it. Only a home folder or
+ * something broader is walked with a limit, and there a file missing
+ * from the list may simply not have been reached.
+ */
+cutShort: boolean, } | { "type": "pickerClosed" } | { "type": "notice", text: string, level: NoticeLevel, } | { "type": "diagnostics", path: string | null, items: Array<Diagnostic>, errors: number, warnings: number, } | { "type": "completion", items: Array<Completion>, selected: number, } | { "type": "completionClosed" } | { "type": "hover", text: string, line: number, column: number, } | { "type": "hoverClosed" } | { "type": "servers", states: Array<ServerState>, } | { "type": "tasks", tasks: Array<Task>, } | { "type": "plugins", items: Array<PluginView>, themes: Array<ThemeView>, } | { "type": "review", files: Array<ChangeView>, } | { "type": "document", 
 /**
  * Absolute, because the shell reads it and the shell has no idea what
  * the workspace root is.

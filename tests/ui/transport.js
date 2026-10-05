@@ -53,7 +53,7 @@ window.installProjectFixtures = () => {
 };
 const pick = () => ({type: 'picker', kind: 'files', title: 'Find files', query,
   items: [{label: 'fixture.c', detail: 'src', path: 'src/fixture.c', positions: []}],
-  selected: 0, total: 1, elapsedMs: 0, scanning: false});
+  selected: 0, total: 1, elapsedMs: 0, scanning: false, cutShort: false});
 window.__TAURI__ = {
   event: {listen: async (_, callback) => { window.pushBatch = payload => callback({payload}); window.pushEvents = events => callback({payload: window.makeBatch(events)}); return () => {}; }},
   window: {getCurrentWindow: () => ({close() {}, minimize() {}, toggleMaximize() {}, startDragging() {}})},

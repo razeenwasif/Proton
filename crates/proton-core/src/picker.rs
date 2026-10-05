@@ -214,6 +214,14 @@ impl PickerKey {
 
 const LIMIT: usize = 200;
 
+/// How many files are listed of a folder too broad to list whole: a home
+/// folder, a folder with one inside it, the top of a disk.
+///
+/// A large project's worth, so that what was listed is worth searching.
+/// Walked from a warm disk, that many take a fraction of a second, where all
+/// of a home folder takes as long as reading everything on the machine.
+const BROAD_LIMIT: usize = 50_000;
+
 /// How long a keystroke in live grep waits for its own search before leaving
 /// it to finish on its thread. Long enough that over an ordinary project the
 /// answer is simply there, as it always was; short enough that a search
@@ -397,8 +405,18 @@ pub struct Pickers {
 
 impl Pickers {
     pub fn new(root: impl AsRef<Path>) -> Self {
+        let root = root.as_ref();
+        let mut index = FileIndex::new(root);
+        // A home folder, or anything broader, is listed only so far. It is
+        // not walked until somebody asks for a file, but once asked, a walk
+        // with no end would read everything kept on the machine, `~/Library`
+        // included on a Mac, and show nothing until it finished. Projects are
+        // listed whole, however large.
+        if crate::folder::is_too_broad(root, crate::folder::home().as_deref()) {
+            index.set_limit(BROAD_LIMIT);
+        }
         Self {
-            index: FileIndex::new(root),
+            index,
             matcher: Matcher::new(),
             changes: Vec::new(),
             held: Vec::new(),
@@ -483,13 +501,30 @@ impl Pickers {
         self.index.len()
     }
 
+    /// List at most this many of the folder's files, from the next walk on.
+    pub fn limit_files(&mut self, files: usize) {
+        self.index.set_limit(files);
+    }
+
+    /// The most files a walk of this folder lists, if there is a limit.
+    pub fn file_limit(&self) -> Option<usize> {
+        self.index.limit()
+    }
+
+    /// Whether the walk stopped at the limit with files still unlisted, so
+    /// that a file missing from the list may only not have been reached.
+    pub fn is_cut_short(&self) -> bool {
+        self.index.is_cut_short()
+    }
+
     /// Start walking the tree, if nobody has yet.
     ///
     /// Called once the window is up rather than during construction, so the
     /// first paint is never behind a walk, and called before anyone asks for a
     /// picker so that by the time they do the answer is already there. Not
     /// over a home folder or anything broader, though: there it waits for the
-    /// first picker over the files, or the agent's first search.
+    /// first picker over the files, or the agent's first search, and stops at
+    /// a limit when it comes.
     pub fn warm(&mut self) {
         if !self.index.is_scanned() {
             self.index.start();

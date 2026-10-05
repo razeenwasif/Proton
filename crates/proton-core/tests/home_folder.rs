@@ -120,6 +120,17 @@ fn the_home_folder_is_walked_only_once_somebody_asks_for_a_file() {
     assert!(walking(&session), "the file picker did not start the walk");
     settle(&mut session);
     assert_eq!(session.active().pickers().file_count(), 2);
+    // But only so far. Asked about or not, everything kept on the machine is
+    // not a project, and walked in full it takes as long as reading all of it
+    // does, with the list empty until the end.
+    assert!(
+        session.active().pickers().file_limit().is_some(),
+        "the home folder was walked with no limit"
+    );
+    assert!(
+        !session.active().pickers().is_cut_short(),
+        "two files were more than the limit"
+    );
 
     // So is searching inside them, which reads the same list.
     let mut again = Workspace::rooted(folder::normalise(&home.folder()));
@@ -133,11 +144,16 @@ fn the_home_folder_is_walked_only_once_somebody_asks_for_a_file() {
     );
 
     // And a project in the home folder is walked as soon as its window
-    // connects, the way any project is.
+    // connects, the way any project is, and in full.
     let mut project = Workspace::rooted(folder::normalise(&home.folder().join("project")));
     project.apply(Command::Sync);
     assert!(
         project.pickers().is_scanning(),
         "a project was taken for a home folder"
+    );
+    assert_eq!(
+        project.pickers().file_limit(),
+        None,
+        "a project's walk was limited"
     );
 }

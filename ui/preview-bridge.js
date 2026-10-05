@@ -820,7 +820,8 @@ FCM: NON-DROP FRAME
       .map((path) => ({ label: path.split('/').pop(), detail: path, path, positions: [] }));
     filePicker.selected = Math.min(filePicker.selected, Math.max(0, items.length - 1));
     return { type: "picker", kind: "files", title: "Preview files", query: filePicker.query,
-      items, selected: filePicker.selected, total: previewFiles.length, elapsedMs: 0, scanning: false };
+      items, selected: filePicker.selected, total: previewFiles.length, elapsedMs: 0, scanning: false,
+      cutShort: false };
   };
   send = async (command) => {
     if (command.type === "openPicker" && command.kind === "files") {
@@ -1258,6 +1259,7 @@ FCM: NON-DROP FRAME
           total: items.length,
           elapsedMs: 0.6,
           scanning: false,
+          cutShort: false,
         },
       ];
     }
@@ -1299,6 +1301,7 @@ FCM: NON-DROP FRAME
           total: items.length,
           elapsedMs: 0.4,
           scanning: false,
+          cutShort: false,
         },
       ];
     }

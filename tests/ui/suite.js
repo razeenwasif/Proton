@@ -74,6 +74,20 @@ await test('Command-K follows the same search path and Escape closes it', async 
   key('Escape'); await settle();
   assert(!$('#telescope').classList.contains('on'), 'search did not close');
 });
+await test('A file list cut short says so, and says why', async () => {
+  key('k', {metaKey: true}); await settle();
+  const count = $('[data-picker-count]');
+  assert(!/cut short/.test(count.textContent) && !count.title, `a whole list was called cut short: ${count.textContent}`);
+  // Over a home folder the core lists only so many files, and a file it never
+  // reached would otherwise look like one that is not there.
+  await win.pushEvents([{type: 'picker', kind: 'files', title: 'find_files', query: 'zz', items: [],
+    selected: 0, total: 50000, elapsedMs: 2, scanning: false, cutShort: true}]); await settle();
+  assert(/cut short/.test(count.textContent), `the footer does not say the list was cut short: ${count.textContent}`);
+  assert(/50000/.test(count.title), `the footer does not say why: ${count.title}`);
+  const empty = $('[data-picker-results]').textContent;
+  assert(/files listed/.test(empty), `an empty list reads as no matches anywhere: ${empty}`);
+  key('Escape'); await settle();
+});
 await test('Settings contains focus and never forwards typing to Vim', async () => {
   $('.rail [data-open="settings"]').click(); await settle();
   const before = win.commands.length;

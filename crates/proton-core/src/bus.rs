@@ -956,6 +956,11 @@ pub enum Event {
         /// The tree is still being walked. An empty list under this flag means
         /// "not yet", not "no matches" — and those look identical without it.
         scanning: bool,
+        /// The walk stopped at its limit with files left unlisted, so `total`
+        /// is some of the folder rather than all of it. Only a home folder or
+        /// something broader is walked with a limit, and there a file missing
+        /// from the list may simply not have been reached.
+        cut_short: bool,
     },
     /// The picker closed. Distinct from an empty result: one means "nothing
     /// matched", the other means "the keyboard is yours again".

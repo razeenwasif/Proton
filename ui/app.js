@@ -4277,9 +4277,17 @@ function renderPicker(event) {
   // An empty list while the tree is still being walked means "not yet", not
   // "no matches". Saying so is the difference between waiting a beat and
   // deciding the file isn't there.
-  $("[data-picker-count]").textContent = event.scanning
+  //
+  // A list cut short is the same trap from the other side. Over a home folder
+  // or anything broader the core lists only so many files, and one it never
+  // reached looks exactly like one that isn't there.
+  const count = $("[data-picker-count]");
+  count.textContent = event.scanning
     ? "reading…"
-    : `${event.items.length}/${event.total} · ${event.elapsedMs.toFixed(1)} ms`;
+    : `${event.items.length}/${event.total}${event.cutShort ? " · cut short" : ""} · ${event.elapsedMs.toFixed(1)} ms`;
+  count.title = event.cutShort
+    ? `This folder has too many files to list them all. Only ${event.total} were listed, and only those are searched; a project opened on its own is listed whole.`
+    : "";
 
   // What the library is narrowed to, said where the question is being typed.
   const narrowed = $("[data-picker-scope]");
@@ -4328,7 +4336,8 @@ function renderPicker(event) {
     })
     .join("");
   if (!event.items.length) results.innerHTML = `<div class="empty">${event.scanning
-    ? "Reading files…" : "No matches. Try a different search."}</div>`;
+    ? "Reading files…" : event.cutShort ? `No matches in the ${event.total} files listed. The rest of this folder was not searched.`
+    : "No matches. Try a different search."}</div>`;
 
   results.querySelector(".res.on")?.scrollIntoView({ block: "nearest" });
   previewPassage(event);

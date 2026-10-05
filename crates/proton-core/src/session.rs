@@ -1154,6 +1154,9 @@ impl Session {
             // Nothing is walked in the background here: one directory read
             // answers the whole query, so the list is never "not yet".
             scanning: false,
+            // Nor is anything here walked with a limit: the rows are projects,
+            // or the folders in the one directory being typed.
+            cut_short: false,
         }
     }
 

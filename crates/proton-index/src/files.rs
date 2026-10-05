@@ -5,6 +5,7 @@
 //! you stop using, and no amount of fuzzy scoring rescues it.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -23,7 +24,19 @@ pub struct FileIndex {
     scan: Option<Duration>,
     /// A walk in flight. `None` means either "not started" or "already
     /// finished" — [`is_scanning`](Self::is_scanning) tells them apart.
-    walking: Option<Receiver<(Vec<String>, Duration)>>,
+    walking: Option<Receiver<(Walked, Duration)>>,
+    /// The most files a walk lists. `None`, which is every project, lists
+    /// them all.
+    limit: Option<usize>,
+    /// The last walk stopped at the limit with files still unlisted.
+    cut_short: bool,
+}
+
+/// What one walk found.
+#[derive(Debug)]
+struct Walked {
+    paths: Vec<String>,
+    cut_short: bool,
 }
 
 impl FileIndex {
@@ -71,6 +84,31 @@ impl FileIndex {
         self.scan.is_some()
     }
 
+    /// List at most this many files, and none from another file system, from
+    /// the next walk on.
+    ///
+    /// For a folder too broad to list whole, such as a home folder or the top
+    /// of a disk. Walked in full, one of those takes as long as reading
+    /// everything kept on the machine, and the list is empty until the end.
+    /// Not for a project: the walk runs on every core, so which files a limit
+    /// leaves out changes from one walk to the next, and a project missing a
+    /// different few files at every launch is worse than one slow to list.
+    pub fn set_limit(&mut self, files: usize) {
+        self.limit = Some(files);
+    }
+
+    /// The most files a walk lists, if there is a limit at all.
+    pub fn limit(&self) -> Option<usize> {
+        self.limit
+    }
+
+    /// Whether the last walk stopped at the limit with files still unlisted,
+    /// so the list is some of the folder rather than all of it. Reaching the
+    /// limit exactly is not enough: then nothing was left out.
+    pub fn is_cut_short(&self) -> bool {
+        self.cut_short
+    }
+
     /// Walk the tree on a worker thread, returning at once.
     ///
     /// The walk is the one part of a picker that scales with the repository
@@ -86,7 +124,7 @@ impl FileIndex {
             return;
         }
         let (done, waiting) = mpsc::channel();
-        let root = self.root.clone();
+        let (root, limit) = (self.root.clone(), self.limit);
         // Detached on purpose. The walk holds nothing the editor needs and
         // touches nothing it owns; if the window closes first, the send fails
         // and the thread ends.
@@ -94,8 +132,8 @@ impl FileIndex {
             .name("proton-walk".into())
             .spawn(move || {
                 let started = Instant::now();
-                let paths = walk(&root);
-                let _ = done.send((paths, started.elapsed()));
+                let walked = walk(&root, limit);
+                let _ = done.send((walked, started.elapsed()));
             });
         self.walking = Some(waiting);
     }
@@ -109,8 +147,9 @@ impl FileIndex {
             return false;
         };
         match waiting.try_recv() {
-            Ok((paths, elapsed)) => {
-                self.paths = Arc::new(paths);
+            Ok((walked, elapsed)) => {
+                self.paths = Arc::new(walked.paths);
+                self.cut_short = walked.cut_short;
                 self.scan = Some(elapsed);
                 self.walking = None;
                 true
@@ -130,7 +169,9 @@ impl FileIndex {
     /// nothing else to do — everything interactive should use `start`.
     pub fn scan(&mut self) -> usize {
         let started = Instant::now();
-        self.paths = Arc::new(walk(&self.root));
+        let walked = walk(&self.root, self.limit);
+        self.paths = Arc::new(walked.paths);
+        self.cut_short = walked.cut_short;
         self.scan = Some(started.elapsed());
         self.walking = None;
         self.paths.len()
@@ -217,35 +258,68 @@ fn ignore_rules(root: &Path) -> Option<ignore::gitignore::Gitignore> {
     builder.build().ok()
 }
 
-/// Every file under `root` that is not ignored, sorted.
+/// Every file under `root` that is not ignored, sorted. With a limit, that
+/// many of them at most, and whether there were more.
 ///
 /// On every core: directories are independent, and the walker hands them out
 /// to a thread per core, which made a 41,000-file folder several times faster
 /// to index. Each thread collects into its own list and hands it over once,
 /// at the end, rather than taking a lock per file; the sort puts the order
 /// back, so the answer is the one a single thread would give.
-fn walk(root: &Path) -> Vec<String> {
+///
+/// Except under a limit. The threads count against it together, and the
+/// first file past it stops the walk, so which files were listed by then
+/// depends on how the folders happened to be shared out.
+fn walk(root: &Path, limit: Option<usize>) -> Walked {
     let all = Mutex::new(Vec::new());
+    let limit = limit.map(|files| Limit {
+        files,
+        claimed: AtomicUsize::new(0),
+        reached: AtomicBool::new(false),
+    });
     WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
         .git_global(true)
         .parents(true)
+        // A folder broad enough to need a limit can have other disks mounted
+        // inside it: drives, network shares, and at the top of a Linux disk
+        // `/proc` and `/sys`, which are not files at all. None of them is
+        // what a search of the home folder is for, and a share can take
+        // longer to list than the whole of the disk the walk started on.
+        .same_file_system(limit.is_some())
         // `.git` is not in `.gitignore`, and nobody wants to fuzzy-find their
         // way into an object file.
         .filter_entry(|e| e.file_name() != ".git")
         .build_parallel()
-        .visit(&mut Collectors { root, all: &all });
+        .visit(&mut Collectors {
+            root,
+            all: &all,
+            limit: limit.as_ref(),
+        });
 
     let mut paths = all.into_inner().unwrap_or_default();
     paths.sort();
-    paths
+    Walked {
+        paths,
+        cut_short: limit.is_some_and(|limit| limit.reached.into_inner()),
+    }
+}
+
+/// How many files a walk may list, shared by every thread doing the walking.
+struct Limit {
+    files: usize,
+    /// Files listed so far, by all of the threads together.
+    claimed: AtomicUsize,
+    /// A file was found past the limit, and left out.
+    reached: AtomicBool,
 }
 
 /// Makes a [`Collector`] for each walker thread.
 struct Collectors<'s> {
     root: &'s Path,
     all: &'s Mutex<Vec<String>>,
+    limit: Option<&'s Limit>,
 }
 
 impl<'s> ParallelVisitorBuilder<'s> for Collectors<'s> {
@@ -254,6 +328,7 @@ impl<'s> ParallelVisitorBuilder<'s> for Collectors<'s> {
             root: self.root,
             found: Vec::new(),
             all: self.all,
+            limit: self.limit,
         })
     }
 }
@@ -263,6 +338,7 @@ struct Collector<'s> {
     root: &'s Path,
     found: Vec<String>,
     all: &'s Mutex<Vec<String>>,
+    limit: Option<&'s Limit>,
 }
 
 impl ParallelVisitor for Collector<'_> {
@@ -270,10 +346,19 @@ impl ParallelVisitor for Collector<'_> {
         let Ok(entry) = entry else {
             return WalkState::Continue;
         };
-        if entry.file_type().is_some_and(|t| t.is_file()) {
-            if let Ok(relative) = entry.path().strip_prefix(self.root) {
-                self.found.push(relative.to_string_lossy().replace('\\', "/"));
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            return WalkState::Continue;
+        }
+        // Claimed before it is kept, so that two threads finding the last
+        // file the limit allows at the same moment cannot both keep one.
+        if let Some(limit) = self.limit {
+            if limit.claimed.fetch_add(1, Ordering::Relaxed) >= limit.files {
+                limit.reached.store(true, Ordering::Relaxed);
+                return WalkState::Quit;
             }
+        }
+        if let Ok(relative) = entry.path().strip_prefix(self.root) {
+            self.found.push(relative.to_string_lossy().replace('\\', "/"));
         }
         WalkState::Continue
     }
