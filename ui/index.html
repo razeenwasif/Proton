@@ -1007,6 +1007,7 @@
           <div class="rs-tabs" role="tablist" aria-label="Board">
             <button class="rs-tab on" role="tab" aria-selected="true" data-research-tab="overview">Overview</button>
             <button class="rs-tab" role="tab" aria-selected="false" data-research-tab="hypotheses">Hypotheses<span class="rs-count" data-research-count></span></button>
+            <button class="rs-tab" role="tab" aria-selected="false" data-research-tab="literature">Literature<span class="rs-count" data-research-papers></span></button>
             <button class="rs-tab" role="tab" aria-selected="false" data-research-tab="activity">Activity<span class="rs-count live" data-research-busy></span></button>
           </div>
           <!-- The round: where it stands, what it has spent, and its controls. -->
@@ -1018,13 +1019,14 @@
             <button class="cc-primary" data-research-go>Run round</button>
           </div>
         </div>
-        <!-- From Event::ResearchBoard, ResearchHypothesis, ResearchRound and ResearchTranscript. -->
+        <!-- From Event::ResearchBoard, ResearchHypothesis, ResearchLiterature, ResearchPaper,
+             ResearchResults, ResearchRound and ResearchTranscript. -->
         <div class="scroll rs-board" data-research-board></div>
         <!-- What the scientist tells the team, and hypotheses of their own. -->
         <div class="rs-dock" data-research-dock hidden>
           <div class="cc-composer rs-composer">
             <textarea class="cc-input" data-research-input rows="1" spellcheck="true" aria-label="Tell the team"
-                      placeholder="Tell the team something — or /h Title: statement to add a hypothesis of your own"></textarea>
+                      placeholder="Tell the team something — /h Title: statement adds a hypothesis of your own, /p and a DOI a paper"></textarea>
             <div class="cc-foot">
               <span class="rs-hint" data-research-hint>⏎ tells the team · ⇧⏎ a new line</span>
               <span class="grow"></span>

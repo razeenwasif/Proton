@@ -1535,6 +1535,7 @@ await test('Research makes an investigation from a brief, and keeps what was typ
   form.querySelector('[type="submit"]').click(); await settle();
   const sent = win.commands.slice(before).find((c) => c.type === 'researchNew');
   assert(sent?.title === 'Why is the sky blue?' && sent.goal === 'Explain the colour.' && sent.discipline === 'mathematics', `wrong command: ${JSON.stringify(sent)}`);
+  assert(sent.literature === true, 'a new investigation does not search the literature unless told not to');
   // Refused, or merely redrawn: the form stays as it was, caret and all.
   await win.pushEvents([{type: 'researchList', investigations: [], open: null}]);
   assert(ws.querySelector('[data-research-form]') === form && form.title.value === 'Why is the sky blue?', 'what was typed was lost');
@@ -1630,6 +1631,84 @@ await test('Research ranks the hypotheses, opens one whole, and lets another inv
   // A project with none clears the board.
   await win.pushEvents([{type: 'researchList', investigations: [], open: null}]);
   assert(ws.querySelector('.rs-welcome') && $('[data-research-tabs]').hidden && $('[data-research-title]').textContent === 'Research', 'the last project\'s board stayed');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+const litSource = (source, name, chosen, key) => ({source, name, chosen, key, resting: null});
+const litPaper = (id, title, extra = {}) => ({id, title, authors: 'Miles et al.', year: 2001, venue: 'Meas. Sci. Technol.', access: 'open', hasPdf: false,
+  by: 'round', round: 1, cited: 0, sources: ['openAlex'], ...extra});
+const researchLiterature = (extra = {}) => ({type: 'researchLiterature', slug: 'sky', enabled: true, live: true,
+  sources: [litSource('arxiv', 'arXiv', true, 'notNeeded'), litSource('semanticScholar', 'Semantic Scholar', true, 'missing'), litSource('openAlex', 'OpenAlex', false, 'found')],
+  papers: [litPaper('P001', 'Skylight <b>in</b> Granada', {access: 'closed', cited: 1}), litPaper('P002', 'Rayleigh scattering', {hasPdf: true, by: 'scientist', round: null})],
+  fetching: [], adding: [], ...extra});
+await test('Research keeps a literature: searched, added, opened, and turned off', async () => {
+  await win.dispatch({type: 'setMode', mode: 'research'}); await settle();
+  await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?')], open: 'sky'},
+    researchBoard(), {type: 'researchHypothesis', slug: 'sky', detail: null}, researchLiterature(), {type: 'researchPaper', slug: 'sky', detail: null}]);
+  const ws = $('.workspace[data-ws="research"]');
+  assert($('[data-research-papers]').textContent === '2', 'the tab does not count the papers');
+  ws.querySelector('[data-research-tab="literature"]').click(); await settle();
+  const board = ws.querySelector('[data-research-board]');
+  assert(board.querySelector('[data-lit-paper="P001"] .lit-title')?.textContent === 'Skylight <b>in</b> Granada', 'a source\'s title was read as HTML');
+  assert(board.querySelector('[data-lit-paper="P001"] [data-pdf="none"]')?.textContent === 'Paywalled' && board.querySelector('[data-lit-paper="P002"] [data-pdf="kept"]'),
+    'the papers do not say which have their PDF');
+  const line = board.querySelector('.lit-line').textContent;
+  assert(line.includes('Semantic Scholar (no key') && !line.includes('OpenAlex'), `the line does not say who is asked and their keys: ${line}`);
+  let before = win.commands.length;
+  board.querySelector('[data-lit-source="openAlex"]').click(); await settle();
+  const chose = win.commands.slice(before).find((c) => c.type === 'researchSetLiterature');
+  assert(chose?.enabled === null && chose.sources.join() === 'arxiv,semanticScholar,openAlex', `a chip did not choose its source: ${JSON.stringify(chose)}`);
+  // A search, and a redraw while it is typed keeps what is typed and where.
+  const query = board.querySelector('[data-lit-query]');
+  query.focus(); query.value = 'rayleigh sky'; query.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await win.pushEvents([researchLiterature()]);
+  const typed = board.querySelector('[data-lit-query]');
+  assert(doc.activeElement === typed && typed.value === 'rayleigh sky', 'a redraw took the search being typed');
+  before = win.commands.length;
+  board.querySelector('[data-lit-search] [type="submit"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchSearch')?.query === 'rayleigh sky', 'the search was not asked for');
+  const result = (key, title, have = null) => ({key, title, authors: 'Bohren and Fraser', year: 1985, venue: 'The Physics Teacher', doi: null, arxiv: null,
+    abstract: 'Why the sky is blue.', citations: 74, access: 'open', pdf: true, sources: ['arxiv'], queries: ['rayleigh sky'], have});
+  await win.pushEvents([{type: 'researchResults', slug: 'sky', query: 'rayleigh sky', searching: false, failures: ['Semantic Scholar: busy just now'],
+    results: [result('doi:10.1119/1', 'Colors of the sky'), result('doi:10.1088/2', 'Rayleigh scattering', 'P002')]}]);
+  assert(board.querySelectorAll('.lit-result').length === 2 && board.querySelector('.lit-results .cc-notice')?.textContent.includes('busy'), 'the results, or why a source failed, are not drawn');
+  assert(board.querySelector('.lit-result.have [data-lit-paper="P002"]') && !board.querySelector('.lit-result.have [data-lit-add]'), 'a paper it has is offered again');
+  before = win.commands.length;
+  board.querySelector('[data-lit-add="doi:10.1119/1"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchAddPaper')?.paper === 'doi:10.1119/1', 'Add did not ask for the paper');
+  assert(board.querySelector('.lit-result .rs-faint')?.textContent === 'Adding…', 'Add does not say it is adding');
+  // /p in the composer adds a paper, and is not told to the team.
+  const input = ws.querySelector('[data-research-input]');
+  input.value = '/p https://doi.org/10.1364/JOSAA.18.000412'; input.dispatchEvent(new win.Event('input', {bubbles: true}));
+  assert(ws.querySelector('[data-research-hint]').textContent.includes('looks up https://doi.org/10.1364/JOSAA.18.000412'), 'the hint does not say /p adds a paper');
+  before = win.commands.length;
+  ws.querySelector('[data-research-send]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchAddPaper')?.paper === 'https://doi.org/10.1364/JOSAA.18.000412', '/p did not add a paper');
+  assert(!win.commands.slice(before).some((c) => c.type === 'researchFeedback'), '/p went to the team');
+  // A paper whole: its links open in the browser, its PDF in the viewer.
+  await win.pushEvents([{type: 'researchPaper', slug: 'sky', detail: {row: litPaper('P002', 'Rayleigh scattering', {hasPdf: true, by: 'scientist', round: null}),
+    authors: ['Richard B. Miles', 'Walter R. Lempert'], authorsMore: 1, doi: '10.1088/0957-0233/12/5/201', arxiv: '2101.00001', abstract: 'Goes as $\\lambda^{-4}$.',
+    tldr: '', url: 'https://doi.org/10.1088/0957-0233/12/5/201', pdfUrl: 'https://arxiv.org/pdf/2101.00001', pdfFrom: 'https://arxiv.org/pdf/2101.00001', pdfNote: null,
+    queries: ['rayleigh sky'], citations: 590, citedBy: [{by: 'H002.1', hypothesis: 'H002', kind: 'review'}], extra: []}}]);
+  assert(board.querySelector('.lit-paper .rs-h')?.textContent.includes('P002') && board.querySelector('.lit-pdf')?.textContent.includes('arxiv.org'), 'the paper is not drawn whole');
+  assert(board.querySelector('.rs-meta').textContent.includes('Richard B. Miles, Walter R. Lempert and 1 more'), 'the authors are not all said');
+  before = win.commands.length;
+  board.querySelector('.lit-links a[href="https://doi.org/10.1088/0957-0233/12/5/201"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'openLink')?.url === 'https://doi.org/10.1088/0957-0233/12/5/201', 'a DOI does not open in the browser');
+  board.querySelector('[data-lit-open="P002"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchOpenPaper')?.paper === 'P002', 'Open PDF did not ask for it');
+  board.querySelector('.lit-cited [data-research-hypothesis="H002"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchShow')?.hypothesis === 'H002', 'a citing review does not lead to its hypothesis');
+  board.querySelector('[data-lit-back]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'researchShowPaper' && c.paper === null), 'back did not let the paper go');
+  await win.pushEvents([{type: 'researchPaper', slug: 'sky', detail: null}]);
+  // Turned off: nothing can be searched, and the line says nobody is asked.
+  before = win.commands.length;
+  board.querySelector('[data-lit-switch]').click(); await settle();
+  const off = win.commands.slice(before).find((c) => c.type === 'researchSetLiterature');
+  assert(off?.enabled === false && off.sources === null, `the switch did not turn it off: ${JSON.stringify(off)}`);
+  await win.pushEvents([researchLiterature({enabled: false})]);
+  assert(board.querySelector('[data-lit-query]').disabled && board.querySelector('.lit-line').textContent.startsWith('Off: nobody is asked'), 'off, it can still be searched');
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });

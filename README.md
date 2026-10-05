@@ -115,8 +115,13 @@ settings, `~/.config/proton/settings.json`, as
 it beside whatever else is there.
 Run round starts one — about fourteen agent calls, never more than twenty — and
 the Activity tab follows it call by call, each one opening into what it said;
-what you type goes to the team, and `/h Title: statement` adds a hypothesis of
-your own. The Lab's Python — Python 3.12 with numpy, scipy, sympy, mpmath,
+what you type goes to the team, `/h Title: statement` adds a hypothesis of
+your own, and `/p` with a DOI or an arXiv id adds a paper. The Literature tab
+searches arXiv, Semantic Scholar and OpenAlex — told only your queries, never
+your files — and keeps each paper as `literature/P001.md`, with its open PDF
+beside it and out of Git; Semantic Scholar and OpenAlex give more to a free key,
+read from your shell's `SEMANTIC_SCHOLAR_API_KEY` and `OPENALEX_API_KEY` and
+never stored. The Lab's Python — Python 3.12 with numpy, scipy, sympy, mpmath,
 matplotlib, networkx and pandas, from conda-forge, apart from your own
 environments; or, with no conda, a virtual environment of a Python 3.9 or newer
 already here, the same packages from PyPI — is made with your say-so twice:

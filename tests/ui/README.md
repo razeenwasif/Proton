@@ -140,13 +140,19 @@ what it asks back: making an investigation (a refusal keeps what was typed,
 a redraw keeps the caret), the board and a hypothesis drawn whole, a round
 started, followed call by call, paused, resumed, stopped and held by another
 Proton, a call's transcript drawn only for that call, what the scientist tells
-the team and `/h` hypotheses of their own, and the table. The Lab checks
+the team and `/h` hypotheses of their own, and the table. The Literature
+check draws the sources and their keys' states, a search (typed through a
+redraw) and its results, Add, a paper already kept, `/p` adding a paper, a
+paper whole with its links opening in the browser and its PDF in the viewer,
+and the switch turning it off; a source's title is checked to be drawn as
+text. The Lab checks
 cover its Python's two say-sos, from conda or — with no conda — PyPI, a
 proposal read and run or turned down (and said to be unsandboxed where there
 is no sandbox), a run opened whole, its pictures read through `read_lab`, a
 scene drawn or — without WebGL — said not to be, and the switch that lets
 proposals run unasked offered only with a sandbox. `npm run test:unit` checks
-what the composer reads as a hypothesis, sizes, and the 3D view's geometry.
+what the composer reads as a hypothesis or a paper, the literature's sources
+line, sizes, and the 3D view's geometry.
 The rounds, the runs and the sandbox are exercised in Rust:
 `cargo test -p proton-core --lib research::` plays rounds on scripted engines,
 and `cargo test -p proton-lab` drives a fake conda and a fake Python's venv

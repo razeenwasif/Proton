@@ -199,6 +199,9 @@ pub struct PaperDetail {
     pub url: Option<String>,
     /// Where an open copy is, when one is known.
     pub pdf_url: Option<String>,
+    /// Where the PDF beside it was downloaded from: none for one the
+    /// scientist put there.
+    pub pdf_from: Option<String>,
     /// Why there is no PDF beside it, when there is none.
     pub pdf_note: Option<String>,
     /// The queries that found it.
@@ -405,7 +408,8 @@ impl Board {
             tldr: r.tldr.clone(),
             url: r.url.clone(),
             pdf_url: r.pdf_url.clone(),
-            pdf_note: p.pdf_note.clone(),
+            pdf_from: p.pdf_from.clone().filter(|_| p.has_pdf),
+            pdf_note: p.pdf_note.clone().filter(|_| !p.has_pdf),
             queries: p.queries.clone(),
             citations: r.citations,
             cited_by: self.cited_by(p),

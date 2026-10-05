@@ -15,6 +15,11 @@ authors: Array<string>, authorsMore: number, doi: string | null, arxiv: string |
  */
 pdfUrl: string | null, 
 /**
+ * Where the PDF beside it was downloaded from: none for one the
+ * scientist put there.
+ */
+pdfFrom: string | null, 
+/**
  * Why there is no PDF beside it, when there is none.
  */
 pdfNote: string | null, 

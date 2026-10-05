@@ -664,7 +664,7 @@ investigation's, with its tabs in a strip of their own: Overview (the brief,
 the overview, the plan, and folded under them what the scientist told the
 team, the verdicts and the sandbox log), Hypotheses (the leaderboard by Elo,
 the retired last, a narrow board putting each one's name on a line of its
-own) and Activity. Each section names its file, because each is one: an
+own), Literature and Activity. Each section names its file, because each is one: an
 investigation is a folder, `research/<slug>/`, and everything it knows diffs
 in Git. A hypothesis opens whole — statement, rationale, predictions, its
 reviews and their scores, the matches it won and lost with the judge's
@@ -686,7 +686,31 @@ it has out — with a box to stand it down between rounds.
 **The scientist is in the loop.** A composer under the board, as Chat's is:
 what is typed goes to the team, into `feedback.md`, which every later task is
 shown; `/h Title: statement` is a hypothesis of their own, reviewed and played
-with the agents'. A hypothesis's page can pin it, retire it or bring it back.
+with the agents'; `/p` and a DOI, an arXiv id or a link to either is a paper,
+looked up and added to the literature. A hypothesis's page can pin it, retire
+it or bring it back.
+
+**The literature is the investigation's, and says what it tells whom.** The
+Literature tab starts with a switch — Search the literature each round — and
+the sources as chips, arXiv, Semantic Scholar and OpenAlex, each saying in its
+tooltip what it is for and whether its key was found. Under them one sentence
+says who is asked and what they see: "Asks arXiv, Semantic Scholar (key found)
+and OpenAlex (no key: a hundred calls a day), with the team's queries each
+round and yours when you search. They see the queries, never your files." —
+or, off, that nobody is asked anything. A key is never shown, only whether it
+was found; a source that said it was out of calls says until when. A search box
+asks the chosen sources; each result says who wrote it and when, where, how
+often it is cited and who found it, with its abstract cut to three lines, a
+badge — Open PDF, Abstract only, Paywalled — and Add, or the paper it is
+already. The papers are listed by their ids, P001 on, with the same badge (or
+Downloading…), how many of the team's reviews cite them, and the round that
+added them or "you". A paper opens whole: every author, its DOI and arXiv
+links to the browser, where its PDF is — downloaded from where, or put there
+by the scientist — and Open PDF into the document viewer; or why there is none
+and where a copy would go, with Copy path. Then Semantic Scholar's one-line
+TL;DR, the abstract, the reviews that cite it, and the queries that found it.
+A new investigation's form has the same switch, on. Everything a source wrote
+is drawn as text, never as markup.
 
 **The Lab's Python is the scientist's to make.** At the top of the Lab
 pane, a card in two steps. First, what the Lab would be — Python 3.12 with

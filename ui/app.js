@@ -4845,6 +4845,18 @@ function renderEvent(event) {
       research?.transcript(event);
       break;
 
+    case "researchLiterature":
+      research?.literature(event);
+      break;
+
+    case "researchPaper":
+      research?.paper(event);
+      break;
+
+    case "researchResults":
+      research?.results(event);
+      break;
+
     case "labEnv":
       lab?.env(event);
       break;

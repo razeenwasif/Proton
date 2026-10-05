@@ -3866,6 +3866,88 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .rs-match.lost > b { color: var(--err); }
 .rs-why { margin-top: 4px; font-size: var(--z-2xs); color: var(--cc-muted); }
 
+/* ── the literature ── */
+.lit-head { display: grid; gap: 10px; margin: 0 0 16px; }
+.lit-switch { display: flex; align-items: flex-start; gap: 9px; color: var(--cc-text); cursor: pointer; font: var(--z-xs)/1.45 var(--cc-font); }
+.lit-switch input { margin: 3px 0 0; accent-color: var(--cc-accent); }
+.lit-switch > span { display: grid; gap: 2px; }
+.lit-switch b { font-weight: 600; }
+.lit-switch small { color: var(--cc-muted); font-size: var(--z-2xs); line-height: 1.5; }
+.lit-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.lit-source {
+  -webkit-appearance: none; appearance: none; display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border: 1px solid var(--cc-line-2); border-radius: 14px; background: transparent;
+  color: var(--cc-muted); font: var(--z-2xs)/1.2 var(--cc-font); cursor: pointer;
+}
+.lit-source:hover { color: var(--cc-text); border-color: var(--cc-faint); }
+.lit-source.on { border-color: color-mix(in srgb, var(--cc-accent) 55%, transparent); background: var(--cc-accent-soft); color: var(--cc-accent); }
+.lit-source .i { width: 11px; height: 11px; }
+.lit-line { margin: 0; font: var(--z-2xs)/1.6 var(--cc-font); color: var(--cc-muted); }
+.lit-search {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 20px; padding: 4px 4px 4px 10px;
+  border: 1px solid var(--cc-line-2); border-radius: 8px; background: var(--cc-raise);
+}
+.lit-search:focus-within { border-color: var(--cc-accent); }
+.lit-search-icon { display: inline-flex; color: var(--cc-faint); }
+.lit-search-icon .i { width: 14px; height: 14px; }
+.lit-search input { flex: 1 1 auto; min-width: 0; padding: 6px 0; border: 0; outline: none; background: transparent; color: var(--cc-text); font: var(--z-xs)/1.4 var(--cc-font); }
+.lit-search input::placeholder { color: var(--cc-faint); }
+.lit-search .cc-primary { padding: 6px 14px; font-size: var(--z-xs); }
+.lit-results > header { align-items: center; }
+.lit-clear {
+  -webkit-appearance: none; appearance: none; display: inline-grid; place-items: center; width: 22px; height: 22px;
+  border: 0; border-radius: 5px; background: transparent; color: var(--cc-faint); cursor: pointer;
+}
+.lit-clear:hover { color: var(--cc-text); background: var(--row-hover); }
+.lit-clear .i { width: 12px; height: 12px; }
+.lit-results .cc-notice { margin: 0 0 8px; }
+.lit-result { display: flex; gap: 14px; padding: 10px 2px; border-bottom: 1px solid var(--cc-line); }
+.lit-result:last-child { border-bottom: 0; }
+.lit-result-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 3px; }
+.lit-result.have .lit-title { color: var(--cc-muted); }
+.lit-title { font: 600 var(--z-xs)/1.4 var(--cc-font); color: var(--cc-text); }
+.lit-meta { font: var(--z-2xs)/1.5 var(--cc-font); color: var(--cc-faint); }
+.lit-abstract { font: var(--z-2xs)/1.55 var(--cc-font); color: var(--cc-soft); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.lit-result-side { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.lit-result-side .cc-quiet { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; }
+.lit-result-side .cc-quiet .i { width: 11px; height: 11px; }
+.lit-badge { padding: 1px 6px; border-radius: 4px; background: var(--cc-raise-2); color: var(--cc-muted); font: var(--z-2xs)/1.5 var(--cc-font); white-space: nowrap; }
+.lit-badge[data-pdf="kept"], .lit-badge[data-pdf="open"] { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.lit-badge[data-pdf="fetching"] { background: var(--cc-accent-soft); color: var(--cc-accent); }
+.lit-table { display: grid; }
+.lit-row {
+  -webkit-appearance: none; appearance: none; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  min-height: var(--z-row); padding: 7px 10px; border: 0; border-radius: 5px; background: transparent;
+  color: var(--cc-text); font: var(--z-xs)/1.35 var(--cc-font); text-align: left; cursor: pointer;
+}
+.lit-row:hover { background: var(--row-hover); }
+.lit-id { color: var(--cc-accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+.lit-name { min-width: 0; display: grid; gap: 2px; }
+.lit-name .lit-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.lit-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cc-faint); font-size: var(--z-2xs); }
+.lit-badges { display: flex; align-items: center; gap: 6px; }
+.lit-by { min-width: 52px; text-align: right; color: var(--cc-faint); font-size: var(--z-2xs); }
+.lit-adding { margin: 0 0 8px; font-size: var(--z-2xs); }
+@container (max-width: 640px) {
+  .lit-row { grid-template-columns: 36px minmax(0, 1fr); row-gap: 4px; }
+  .lit-badges { grid-column: 2; }
+  .lit-result { flex-direction: column; gap: 8px; }
+  .lit-result-side { flex-direction: row; align-items: center; justify-content: space-between; }
+}
+.lit-links { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 14px; font: var(--z-2xs)/1.5 var(--cc-font); }
+.lit-links a { color: var(--cc-accent); text-decoration: none; }
+.lit-links a:hover { text-decoration: underline; }
+.lit-pdf {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 20px; padding: 10px 12px;
+  border: 1px solid var(--cc-line); border-radius: 8px; background: var(--cc-raise); font: var(--z-2xs)/1.6 var(--cc-font); color: var(--cc-soft);
+}
+.lit-pdf > span { flex: 1 1 260px; min-width: 0; }
+.lit-pdf > .i { width: 15px; height: 15px; color: var(--cc-faint); }
+.lit-pdf[data-pdf="kept"] > .i { color: var(--ok); }
+.lit-pdf a { color: var(--cc-accent); text-decoration: none; }
+.lit-pdf code { word-break: break-all; }
+.lit-cited { margin: 0; padding-left: 18px; font: var(--z-xs)/1.7 var(--cc-font); color: var(--cc-soft); }
+
 /* ── the Lab ── */
 .rs-lab { display: flex; flex-direction: column; min-height: 0; }
 .rs-lab-body { flex: 1 1 auto; min-height: 0; }

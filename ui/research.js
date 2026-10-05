@@ -5,8 +5,9 @@
  * this draws what the core reads out of it: the investigations down the
  * left, with who sits at the open one's table under them; in the middle
  * where it stands (its overview, its plan, the brief it answers), its
- * hypotheses as the tournament ranks them, and what its round is doing,
- * call by call; and the Lab, where its code is run, on the right.
+ * hypotheses as the tournament ranks them, the literature it has read, and
+ * what its round is doing, call by call; and the Lab, where its code is run,
+ * on the right.
  *
  * Nothing here decides anything. The files are the investigation, the core
  * reads them and runs the round, and this draws what it is sent — so a
@@ -15,6 +16,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
+import { literatureHtml, ownPaper, paperHtml } from "./literature.js";
 
 /** @typedef {import("./bindings/ResearchSummary").ResearchSummary} Summary */
 /** @typedef {import("./bindings/HypothesisRow").HypothesisRow} Row */
@@ -33,7 +35,12 @@ import { markdown } from "./markdown.js";
 /** @typedef {{slug: string, round: number, status: RoundStatus, used: number, cap: number,
  *   seats: SeatRow[], tasks: Task[], held: string | null}} RoundEvent */
 /** @typedef {{slug: string, task: string, items: Item[]}} TranscriptEvent */
-/** @typedef {"overview" | "hypotheses" | "activity"} Tab */
+/** @typedef {import("./literature.js").LiteratureEvent} LiteratureEvent */
+/** @typedef {import("./literature.js").PaperEvent} PaperEvent */
+/** @typedef {import("./literature.js").ResultsEvent} ResultsEvent */
+/** @typedef {import("./bindings/PaperDetail").PaperDetail} PaperDetail */
+/** @typedef {import("./bindings/LiteratureSource").LiteratureSource} Source */
+/** @typedef {"overview" | "hypotheses" | "literature" | "activity"} Tab */
 
 /** The disciplines, in the order the form offers them. */
 const DISCIPLINES = /** @type {[Discipline, string][]} */ ([
@@ -143,6 +150,7 @@ export function createResearch(host) {
     stop: /** @type {HTMLButtonElement} */ (q("[data-research-stop]")),
     tabs: q("[data-research-tabs]"),
     count: q("[data-research-count]"),
+    papers: q("[data-research-papers]"),
     busy: q("[data-research-busy]"),
     board: q("[data-research-board]"),
     dock: q("[data-research-dock]"),
@@ -153,17 +161,25 @@ export function createResearch(host) {
 
   /** @type {{list: Summary[], open: string | null, folder: string, moving: string | null, moved: boolean, board: BoardEvent | null, detail: Detail | null,
    *   round: RoundEvent | null, task: string | null, transcript: TranscriptEvent | null,
-   *   tab: Tab, creating: boolean, made: number, draft: {title: string, goal: string, discipline: Discipline}}} */
+   *   literature: LiteratureEvent | null, paper: PaperDetail | null, results: ResultsEvent | null, query: string, adding: string[],
+   *   tab: Tab, creating: boolean, made: number, draft: {title: string, goal: string, discipline: Discipline, literature: boolean}}} */
   const state = {
     // Where the investigations are kept, as the core says it; and the folder
     // being typed to keep them in instead, once asked for, until it is.
     list: [], open: null, folder: "research/", moving: /** @type {string | null} */ (null), moved: false,
     board: null, detail: null, round: null, task: null, transcript: null, tab: "overview",
+    // The literature, the paper shown whole, the last search, what is typed
+    // in its box, and the results asked to be added that the core has not
+    // answered for yet.
+    literature: null, paper: null, results: null, query: "", adding: [],
     // The form is up, and how many there were when it was sent: it goes when
     // the list grows, and stays with what was typed when the core refuses.
     creating: false, made: -1,
-    draft: { title: "", goal: "", discipline: "physics" },
+    draft: { title: "", goal: "", discipline: "physics", literature: true },
   };
+
+  /** The open investigation's literature, if it has been said. */
+  const literature = () => (state.literature && state.literature.slug === state.open ? state.literature : null);
 
   /** The open investigation's round, if it has been said. */
   const round = () => (state.round && state.round.slug === state.open ? state.round : null);
@@ -229,6 +245,8 @@ export function createResearch(host) {
     }
     const n = board?.hypotheses.length ?? 0;
     els.count.textContent = n ? String(n) : "";
+    const papers = board ? literature()?.papers.length ?? 0 : 0;
+    els.papers.textContent = papers ? String(papers) : "";
     const out = round()?.tasks.filter((t) => t.state === "running" || t.state === "repairing").length ?? 0;
     els.busy.textContent = out ? String(out) : "";
     els.dock.hidden = !board;
@@ -287,12 +305,32 @@ export function createResearch(host) {
       </div>`;
       return;
     }
-    // A transcript being read keeps its place as the list under it moves.
+    // A transcript being read keeps its place as the list under it moves,
+    // and a search being typed keeps its caret as the literature moves.
     const scroll = els.board.scrollTop;
+    const typing = /** @type {HTMLInputElement | null} */ (els.board.querySelector("[data-lit-query]"));
+    const caret = typing && typing === document.activeElement ? [typing.selectionStart, typing.selectionEnd] : null;
     els.board.innerHTML = state.tab === "hypotheses"
       ? (state.detail ? detailHtml(state.detail) : leaderboardHtml(board))
+      : state.tab === "literature" ? literatureTabHtml(board)
       : state.tab === "activity" ? activityHtml() : overviewHtml(board);
     els.board.scrollTop = scroll;
+    const field = /** @type {HTMLInputElement | null} */ (els.board.querySelector("[data-lit-query]"));
+    if (caret && field) {
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(caret[0], caret[1]);
+    }
+  }
+
+  /** @param {BoardEvent} board */
+  function literatureTabHtml(board) {
+    const lit = literature();
+    if (!lit) return `<div class="rs-col"><div class="rs-faint">Reading…</div></div>`;
+    if (state.paper) {
+      return paperHtml(state.paper, { folder: state.folder, slug: board.slug, fetching: lit.fetching.includes(state.paper.row.id), enabled: lit.enabled });
+    }
+    const results = state.results && state.results.slug === board.slug ? state.results : null;
+    return literatureHtml({ literature: lit, results, folder: state.folder, query: state.query, adding: state.adding });
   }
 
   /** @param {string} label @param {string} file @param {string} text @param {boolean} [folded] */
@@ -484,6 +522,9 @@ export function createResearch(host) {
       <label class="rs-field"><span>Goal</span>
         <textarea name="goal" rows="7" spellcheck="true"
           placeholder="What a good answer has to explain or prove, what is known already, and anything the team must keep to.">${esc(d.goal)}</textarea></label>
+      <label class="lit-switch"><input type="checkbox" name="literature"${d.literature ? " checked" : ""}>
+        <span><b>Search the literature each round</b><small>The team's queries go to arXiv, Semantic Scholar and OpenAlex, which see the
+          queries but never your files; the papers they find are added, with their open PDFs.</small></span></label>
       <div class="rs-actions">
         <button type="button" class="cc-quiet" data-research-cancel>Cancel</button>
         <button type="submit" class="cc-primary">Create investigation</button>
@@ -530,6 +571,7 @@ export function createResearch(host) {
       title,
       goal: String(data.get("goal") ?? "").trim(),
       discipline: /** @type {Discipline} */ (String(data.get("discipline") ?? "physics")),
+      literature: data.get("literature") === "on",
     };
     if (!title) {
       /** @type {HTMLInputElement | null} */ (form.querySelector('[name="title"]'))?.focus();
@@ -545,7 +587,10 @@ export function createResearch(host) {
     const text = els.input.value.trim();
     els.send.disabled = !text;
     const own = ownHypothesis(text);
-    els.hint.textContent = own ? `⏎ adds “${own.title}” as your hypothesis` : "⏎ tells the team · /h Title: statement adds a hypothesis";
+    const paper = own ? null : ownPaper(text);
+    els.hint.textContent = own ? `⏎ adds “${own.title}” as your hypothesis`
+      : paper ? `⏎ looks up ${paper} and adds it to the literature`
+      : "⏎ tells the team · /h Title: statement adds a hypothesis · /p and a DOI adds a paper";
   }
 
   function autosize() {
@@ -558,7 +603,10 @@ export function createResearch(host) {
     const text = els.input.value.trim();
     if (!text || !state.board) return;
     const own = ownHypothesis(text);
-    host.dispatch(own ? { type: "researchAddHypothesis", ...own } : { type: "researchFeedback", text });
+    const paper = own ? null : ownPaper(text);
+    host.dispatch(own ? { type: "researchAddHypothesis", ...own }
+      : paper ? { type: "researchAddPaper", paper }
+      : { type: "researchFeedback", text });
     els.input.value = "";
     autosize();
     renderComposer();
@@ -579,6 +627,9 @@ export function createResearch(host) {
     // The tab that is on already, asked for again, goes back to its top.
     if (tab === "hypotheses" && state.tab === "hypotheses" && state.detail) {
       host.dispatch({ type: "researchShow", hypothesis: null });
+    }
+    if (tab === "literature" && state.tab === "literature" && state.paper) {
+      host.dispatch({ type: "researchShowPaper", paper: null });
     }
     state.tab = tab;
     renderBoard();
@@ -635,6 +686,7 @@ export function createResearch(host) {
       host.dispatch({ type: "researchShow", hypothesis: null });
       return;
     }
+    if (literatureClick(target)) return;
     const task = /** @type {HTMLElement | null} */ (target.closest("[data-research-task]"));
     if (task) {
       const id = task.dataset.researchTask ?? null;
@@ -661,8 +713,66 @@ export function createResearch(host) {
     }
   });
 
+  /** What is clicked in the Literature tab; whether it was. @param {HTMLElement} target */
+  function literatureClick(target) {
+    const lit = literature();
+    const source = /** @type {HTMLElement | null} */ (target.closest("[data-lit-source]"));
+    if (source && lit) {
+      const which = /** @type {Source} */ (source.dataset.litSource);
+      const chosen = lit.sources.filter((r) => r.chosen).map((r) => r.source);
+      const sources = chosen.includes(which) ? chosen.filter((s) => s !== which) : [...chosen, which];
+      host.dispatch({ type: "researchSetLiterature", enabled: null, sources });
+      return true;
+    }
+    const add = /** @type {HTMLElement | null} */ (target.closest("[data-lit-add]"));
+    if (add) {
+      const key = add.dataset.litAdd ?? "";
+      state.adding = [...state.adding, key];
+      host.dispatch({ type: "researchAddPaper", paper: key });
+      renderBoard();
+      return true;
+    }
+    const paper = /** @type {HTMLElement | null} */ (target.closest("[data-lit-paper]"));
+    if (paper) {
+      host.dispatch({ type: "researchShowPaper", paper: paper.dataset.litPaper ?? null });
+      return true;
+    }
+    if (target.closest("[data-lit-back]")) {
+      host.dispatch({ type: "researchShowPaper", paper: null });
+      return true;
+    }
+    const open = /** @type {HTMLElement | null} */ (target.closest("[data-lit-open]"));
+    if (open) {
+      host.dispatch({ type: "researchOpenPaper", paper: open.dataset.litOpen, page: null });
+      return true;
+    }
+    const again = /** @type {HTMLElement | null} */ (target.closest("[data-lit-fetch]"));
+    if (again) {
+      host.dispatch({ type: "researchFetchPdf", paper: again.dataset.litFetch });
+      return true;
+    }
+    if (target.closest("[data-lit-clear]")) {
+      state.results = null;
+      renderBoard();
+      return true;
+    }
+    const copy = /** @type {HTMLElement | null} */ (target.closest("[data-lit-copy]"));
+    if (copy) {
+      navigator.clipboard?.writeText(copy.dataset.litCopy ?? "").then(() => {
+        copy.textContent = "Copied";
+        setTimeout(() => { copy.textContent = "Copy path"; }, 1200);
+      }).catch(() => {});
+      return true;
+    }
+    return false;
+  }
+
   ws.addEventListener("change", (e) => {
     const box = /** @type {HTMLInputElement} */ (e.target);
+    if (box.matches?.("[data-lit-switch]")) {
+      host.dispatch({ type: "researchSetLiterature", enabled: box.checked, sources: null });
+      return;
+    }
     if (!box.matches?.("[data-research-seat]")) return;
     host.dispatch({ type: "researchSeat", seat: box.dataset.researchSeat, enabled: box.checked });
   });
@@ -673,6 +783,12 @@ export function createResearch(host) {
       // Put away when the core says where they are kept now; a refusal keeps it.
       state.moved = true;
       host.dispatch({ type: "researchFolder", folder: (state.moving ?? "").trim() });
+      return;
+    }
+    if (/** @type {HTMLElement} */ (e.target).closest("[data-lit-search]")) {
+      e.preventDefault();
+      const query = state.query.trim();
+      if (query) host.dispatch({ type: "researchSearch", query });
       return;
     }
     const form = /** @type {HTMLElement} */ (e.target).closest("[data-research-form]");
@@ -689,9 +805,14 @@ export function createResearch(host) {
       state.moving = field.value;
       return;
     }
+    if (field.matches?.("[data-lit-query]")) {
+      state.query = field.value;
+      return;
+    }
     if (!field.closest?.("[data-research-form]")) return;
     if (field.name === "title" || field.name === "goal") state.draft[field.name] = field.value;
     if (field.name === "discipline") state.draft.discipline = /** @type {Discipline} */ (field.value);
+    if (field.name === "literature") state.draft.literature = field.checked;
   });
 
   // ⌘⏎ creates, from anywhere in the form; Escape puts it away.
@@ -730,7 +851,7 @@ export function createResearch(host) {
     if (state.creating && state.made >= 0 && state.list.length > state.made) {
       state.creating = false;
       state.made = -1;
-      state.draft = { title: "", goal: "", discipline: state.draft.discipline };
+      state.draft = { title: "", goal: "", discipline: state.draft.discipline, literature: state.draft.literature };
       state.tab = "overview";
     }
     if (event.open !== state.open) {
@@ -738,6 +859,8 @@ export function createResearch(host) {
       state.detail = null;
       state.task = null;
       state.transcript = null;
+      state.paper = null;
+      state.adding = [];
     }
     if (!state.open) state.board = null;
     renderList();
@@ -773,6 +896,33 @@ export function createResearch(host) {
     renderBoard();
   }
 
+  /** @param {LiteratureEvent} event */
+  function literature_(event) {
+    state.literature = event;
+    // What was asked to be added is in the list now, or was refused.
+    state.adding = [];
+    renderHead();
+    if (state.tab === "literature") renderBoard();
+  }
+
+  /** @param {PaperEvent} event */
+  function paper(event) {
+    if (event.slug !== state.open) return;
+    const was = state.paper?.row.id;
+    state.paper = event.detail;
+    if (event.detail) state.tab = "literature";
+    renderBoard();
+    if (event.detail && event.detail.row.id !== was) els.board.scrollTop = 0;
+  }
+
+  /** @param {ResultsEvent} event */
+  function results(event) {
+    if (event.slug !== state.open) return;
+    state.results = event;
+    if (!state.query) state.query = event.query;
+    if (state.tab === "literature") renderBoard();
+  }
+
   /** @param {TranscriptEvent} event */
   function transcript(event) {
     if (event.slug !== state.open || event.task !== state.task) return;
@@ -787,5 +937,5 @@ export function createResearch(host) {
   renderBoard();
   renderComposer();
 
-  return { list: list_, board, hypothesis, round: round_, transcript };
+  return { list: list_, board, hypothesis, round: round_, transcript, literature: literature_, paper, results };
 }

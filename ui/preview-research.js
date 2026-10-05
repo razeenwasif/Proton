@@ -78,6 +78,41 @@ function cubes() {
 }
 
 const SEAT_MODELS = { claude: "claude-opus-5-5", codex: "gpt-6.1-sol", antigravity: "gemini-3.1-pro-high" };
+
+/** The sky's literature: two papers a round found, paywalled, and one the
+ *  scientist added with a PDF of their own. */
+function skyPapers() {
+  return [
+    { id: "P001", title: "On the light from the sky, its polarization and colour", authors: ["Lord Rayleigh"], authorsMore: 0, year: 1871,
+      venue: "The London, Edinburgh, and Dublin Philosophical Magazine and Journal of Science", doi: "10.1080/14786447108640452", arxiv: null,
+      abstract: "", tldr: "", access: "closed", hasPdf: false, pdfFrom: null, pdfUrl: null, by: "round", round: 1, citations: 1830,
+      queries: ["rayleigh scattering sky colour"], sources: ["openAlex", "semanticScholar"], citedBy: [],
+      pdfNote: "It is behind a paywall, as far as the sources know." },
+    { id: "P002", title: "Explanation of the Brightness and Color of the Sky, Particularly the Twilight Sky", authors: ["E. O. Hulburt"], authorsMore: 0, year: 1953,
+      venue: "Journal of the Optical Society of America", doi: "10.1364/JOSA.43.000113", arxiv: null,
+      abstract: "Calculations of the brightness and color of the sky by Rayleigh scattering alone give a yellowish zenith at sunset; with the absorption of **ozone** in the Chappuis band the zenith stays blue, as it is observed.",
+      tldr: "Ozone's Chappuis absorption, not Rayleigh scattering alone, keeps the twilight zenith blue.", access: "closed", hasPdf: false, pdfFrom: null, pdfUrl: null,
+      by: "round", round: 1, citations: 162, queries: ["ozone chappuis twilight zenith"], sources: ["semanticScholar", "openAlex"],
+      citedBy: [{ by: "H002.1", hypothesis: "H002", kind: "review" }], pdfNote: "It is behind a paywall, as far as the sources know." },
+    { id: "P003", title: "Human color vision and the unsaturated blue color of the daytime sky", authors: ["Glenn S. Smith"], authorsMore: 0, year: 2005,
+      venue: "American Journal of Physics", doi: null, arxiv: null,
+      abstract: "The scattered spectrum peaks in the violet, yet the sky is seen as an unsaturated blue: the eye's cone responses and the solar spectrum together set the hue.",
+      tldr: "", access: "unknown", hasPdf: true, pdfFrom: null, pdfUrl: null, by: "scientist", round: null, citations: 41,
+      queries: [], sources: ["openAlex"], citedBy: [], pdfNote: null },
+  ];
+}
+
+/** What the preview's sources find, whatever is asked: enough to draw. */
+const FOUND = [
+  { title: "Colors of the sky", authors: "Bohren and Fraser", year: 1985, venue: "The Physics Teacher", citations: 74, access: "unknown", pdf: true,
+    abstract: "Why the sky is blue, why sunsets are red, and why neither answer is as simple as it is usually made: multiple scattering, the observer, and the solar spectrum." },
+  { title: "Rayleigh scattering", authors: "Miles et al.", year: 2001, venue: "Measurement Science and Technology", citations: 590, access: "open", pdf: true,
+    abstract: "A review of laser Rayleigh scattering: its cross-sections, depolarisation, and its use to measure density and temperature in gases." },
+  { title: "On the molecular scattering of light in water and the colour of the sea", authors: "Raman", year: 1922, venue: "Proceedings of the Royal Society A", citations: 51, access: "open", pdf: false,
+    abstract: "" },
+  { title: "Explanation of the Brightness and Color of the Sky, Particularly the Twilight Sky", authors: "Hulburt", year: 1953, venue: "Journal of the Optical Society of America",
+    citations: 162, access: "closed", pdf: false, have: "P002", abstract: "Calculations of the brightness and color of the sky by Rayleigh scattering alone give a yellowish zenith at sunset." },
+];
 const ROLES = { claude: "investigator", codex: "engineer", antigravity: "sandbox" };
 
 /** A light round, as the supervisor would plan it: each step, its seat,
@@ -174,6 +209,59 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
   let showingRun = null;
   /** Investigations that run proposals unasked. @type {Set<string>} */
   const autoRun = new Set();
+
+  /* The literature, by investigation: whether it is searched, in which
+     sources, and its papers; the paper shown, the last search, and what is
+     being downloaded and looked up. */
+  const SOURCES = [["arxiv", "arXiv"], ["semanticScholar", "Semantic Scholar"], ["openAlex", "OpenAlex"]];
+  /** @type {Record<string, {enabled: boolean, sources: Set<string>, papers: any[]}>} */
+  const lit = {};
+  const litOf = (/** @type {string} */ slug) => (lit[slug] ??= {
+    enabled: true, sources: new Set(SOURCES.map(([s]) => s)), papers: slug === "why-is-the-daytime-sky-blue" ? skyPapers() : [],
+  });
+  /** @type {string | null} */
+  let showingPaper = null;
+  /** @type {any} */
+  let results = null;
+  /** @type {Set<string>} */
+  const fetching = new Set();
+  /** @type {string[]} */
+  const adding = [];
+  const KEYS = { arxiv: "notNeeded", semanticScholar: "found", openAlex: "missing" };
+  const short = (/** @type {string[]} */ a) => a.length === 1 ? a[0].split(" ").pop() : a.length === 2 ? `${a[0].split(" ").pop()} and ${a[1].split(" ").pop()}` : `${a[0].split(" ").pop()} et al.`;
+  const paperRow = (/** @type {any} */ p) => ({ id: p.id, title: p.title, authors: short(p.authors), year: p.year, venue: p.venue, access: p.access,
+    hasPdf: p.hasPdf, by: p.by, round: p.round, cited: p.citedBy.length, sources: p.sources });
+  const paperDetail = (/** @type {any} */ p) => ({ row: paperRow(p), authors: p.authors, authorsMore: p.authorsMore, doi: p.doi, arxiv: p.arxiv,
+    abstract: p.abstract, tldr: p.tldr, url: p.doi ? `https://doi.org/${p.doi}` : null, pdfUrl: p.pdfUrl, pdfFrom: p.hasPdf ? p.pdfFrom : null,
+    pdfNote: p.hasPdf ? null : p.pdfNote, queries: p.queries, citations: p.citations, citedBy: p.citedBy, extra: [] });
+  function literatureEvents() {
+    const l = litOf(open);
+    const sources = SOURCES.map(([source, name]) => ({ source, name, chosen: l.sources.has(source), key: KEYS[source], resting: null }));
+    const shown = l.papers.find((p) => p.id === showingPaper);
+    return [
+      { type: "researchLiterature", slug: open, enabled: l.enabled, live: true, sources, papers: l.papers.map(paperRow), fetching: [...fetching], adding: [...adding] },
+      { type: "researchPaper", slug: open, detail: shown ? paperDetail(shown) : null },
+    ];
+  }
+  const resultsEvents = () => (results && results.slug === open ? [{ type: "researchResults", ...results }] : []);
+  const say = (/** @type {any[]} */ events) => events.forEach((e) => deliver(e));
+  /** A paper added: its PDF downloaded, a moment later, when one is to be had. @param {any} paper @param {boolean} pdf */
+  function addPaper(paper, pdf) {
+    const l = litOf(open);
+    paper.id = `P${String(l.papers.length + 1).padStart(3, "0")}`;
+    l.papers.push(paper);
+    if (pdf) {
+      const slug = open;
+      fetching.add(paper.id);
+      setTimeout(() => {
+        fetching.delete(paper.id);
+        paper.hasPdf = true;
+        paper.pdfFrom = "https://example.org/paper.pdf";
+        if (open === slug) say(literatureEvents());
+      }, 1400);
+    }
+    return paper.id;
+  }
   const labRunsEvent = () => {
     const out = [{ type: "researchLab", slug: open, experiments: experiments[open] ?? [], runs: (runs[open] ?? []).map((r) => r.row), sandbox: "seatbelt", autoRun: autoRun.has(open) }];
     if (showingRun) out.push({ type: "researchRun", slug: open, detail: (runs[open] ?? []).find((r) => r.row.id === showingRun) ?? null });
@@ -423,7 +511,8 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
   }
 
   function sync() {
-    return [{ type: "researchList", investigations: investigations.map(summary), open, folder: kept }, ...board(), ...roundEvent(), labEvent(), ...labRunsEvent()];
+    return [{ type: "researchList", investigations: investigations.map(summary), open, folder: kept }, ...board(), ...literatureEvents(), ...resultsEvents(),
+      ...roundEvent(), labEvent(), ...labRunsEvent()];
   }
 
   /** @param {any} command */
@@ -448,6 +537,8 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         showing = null;
         watching = null;
         showingRun = null;
+        showingPaper = null;
+        litOf(slug).enabled = Boolean(command.literature);
         return sync();
       }
       case "researchOpen":
@@ -456,7 +547,75 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         showing = null;
         watching = null;
         showingRun = null;
+        showingPaper = null;
         return sync();
+      case "researchSetLiterature": {
+        const l = litOf(open);
+        if (command.enabled != null) l.enabled = command.enabled;
+        if (command.sources) l.sources = new Set(command.sources);
+        return literatureEvents();
+      }
+      case "researchSearch": {
+        const l = litOf(open);
+        if (!l.enabled) return [{ type: "notice", level: "warn", text: "This investigation does not use the literature. Turn it on in the Literature tab first." }];
+        const query = String(command.query ?? "").trim();
+        const slug = open;
+        results = { slug, query, searching: true, results: [], failures: [] };
+        setTimeout(() => {
+          const have = (/** @type {string} */ title) => l.papers.find((p) => p.title === title)?.id ?? null;
+          results = { slug, query, searching: false, failures: l.sources.has("openAlex") ? [] : [],
+            results: FOUND.map((r, i) => ({ key: `title:${r.title.toLowerCase()}|${r.year}`, title: r.title, authors: r.authors, year: r.year, venue: r.venue,
+              doi: null, arxiv: null, abstract: r.abstract, citations: r.citations, access: r.access, pdf: r.pdf,
+              sources: i % 2 ? ["semanticScholar", "openAlex"] : ["arxiv"], queries: [query], have: have(r.title) })) };
+          if (open === slug) say(resultsEvents());
+        }, 900);
+        return resultsEvents();
+      }
+      case "researchAddPaper": {
+        const l = litOf(open);
+        if (!l.enabled) return [{ type: "notice", level: "warn", text: "This investigation does not use the literature. Turn it on in the Literature tab first." }];
+        const key = String(command.paper ?? "").trim();
+        const found = results?.results.find((/** @type {any} */ r) => r.key === key);
+        if (found) {
+          const id = addPaper({ title: found.title, authors: found.authors.replace(" et al.", "").split(" and "), authorsMore: 0, year: found.year, venue: found.venue,
+            doi: null, arxiv: null, abstract: found.abstract, tldr: "", access: found.access, hasPdf: false, pdfFrom: null, pdfUrl: null, by: "scientist", round: null,
+            citations: found.citations, queries: found.queries, sources: found.sources, citedBy: [],
+            pdfNote: found.pdf ? null : found.access === "closed" ? "It is behind a paywall, as far as the sources know." : "No open copy of it is known." }, found.pdf);
+          found.have = id;
+          showingPaper = id;
+          return [{ type: "notice", level: "info", text: `${id} is added: ${found.title}` }, ...literatureEvents(), ...resultsEvents()];
+        }
+        if (!/^(10\.\d{4,}\/\S+|(arxiv:)?\d{4}\.\d{4,5}|https?:\/\/\S+)$/i.test(key.replace(/^doi:/i, ""))) {
+          return [{ type: "notice", level: "warn", text: "Give a DOI or an arXiv id, or a link to either, to add a paper by." }];
+        }
+        adding.push(key);
+        const slug = open;
+        setTimeout(() => {
+          adding.splice(adding.indexOf(key), 1);
+          const id = addPaper({ title: `A paper looked up by ${key}`, authors: ["A. Author"], authorsMore: 0, year: 2024, venue: "A journal",
+            doi: key.replace(/^doi:/i, ""), arxiv: null, abstract: "", tldr: "", access: "unknown", hasPdf: false, pdfFrom: null, pdfUrl: null,
+            by: "scientist", round: null, citations: 0, queries: [], sources: ["openAlex"], citedBy: [], pdfNote: "No open copy of it is known." }, false);
+          if (open === slug) say([{ type: "notice", level: "info", text: `${id} is added: A paper looked up by ${key}` }, ...literatureEvents()]);
+        }, 700);
+        return literatureEvents();
+      }
+      case "researchShowPaper":
+        showingPaper = command.paper ?? null;
+        return literatureEvents();
+      case "researchOpenPaper":
+        return [{ type: "notice", level: "info", text: `In the app, ${command.paper}.pdf opens here in the document viewer.` }];
+      case "researchFetchPdf": {
+        const paper = litOf(open).papers.find((p) => p.id === command.paper);
+        if (!paper) return [];
+        fetching.add(paper.id);
+        const slug = open;
+        setTimeout(() => {
+          fetching.delete(paper.id);
+          paper.pdfNote = "Its PDF could not be kept: the link gives a web page, not a PDF.";
+          if (open === slug) say(literatureEvents());
+        }, 1200);
+        return literatureEvents();
+      }
       case "researchShow":
         showing = command.hypothesis ?? null;
         return board();
