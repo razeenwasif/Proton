@@ -226,3 +226,84 @@ fn a_kept_conversation_carries_its_engines_id_and_rows_back() {
     assert_eq!(back.record().unwrap().native, record.native);
     assert!(!back.running());
 }
+
+/* ── unattended, for Research ─────────────────────────────────────────
+ *
+ * `research-*.jsonl` are one unattended turn each, recorded from the real
+ * CLIs (Claude Code 2.1.288, codex-cli 0.159.3, agy 1.2.16) with the flags
+ * Research starts them with, asked for a hypothesis held to a JSON Schema.
+ * The Codex one ran with the person's MCP servers and plugins switched off,
+ * and its answer lists the tools it had: no computer use among them. */
+
+fn hypothesis_schema() -> proton_claude::engine::Unattended {
+    proton_claude::engine::Unattended {
+        instructions: "You are a read-only research agent.".into(),
+        schema: Some(json!({ "type": "object" })),
+        web: true,
+        max_turns: None,
+    }
+}
+
+#[test]
+fn an_unattended_claude_turn_comes_to_its_structured_output_whole() {
+    let mut fold = proton_claude::Fold::new("s");
+    for (sent, line) in fixture("research-claude") {
+        match sent {
+            true => fold.said(line["message"]["content"][0]["text"].as_str().unwrap(), 0),
+            false => fold.line(&line),
+        }
+    }
+    let outcome = fold.outcome().expect("the turn came to something");
+    let structured = outcome.structured.as_ref().expect("held to the schema");
+    assert!(structured["title"].as_str().unwrap().contains("Rayleigh"), "{structured}");
+    assert!(outcome.text.starts_with('{'), "{}", outcome.text);
+    // Saying something new lets the last answer go.
+    fold.said("And at sunset?", 0);
+    assert!(fold.outcome().is_none());
+}
+
+#[test]
+fn an_unattended_codex_turn_comes_to_its_last_message_read_as_json() {
+    let mut codex = Codex::unattended(project(), Settings::default(), &hypothesis_schema());
+    for (sent, line) in fixture("research-codex") {
+        if !sent {
+            codex.hear(classify(line).unwrap());
+        }
+    }
+    let outcome = codex.fold().outcome().expect("the turn came to something");
+    let structured = outcome.structured.as_ref().expect("read as the JSON it was held to");
+    assert!(!structured["hypothesis"].as_str().unwrap_or_default().is_empty(), "{structured}");
+    let tools: Vec<&str> = structured["tools"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert!(!tools.iter().any(|t| t.contains("cua") || t.contains("computer")), "{tools:?}");
+}
+
+#[test]
+fn an_unattended_antigravity_turn_comes_to_its_structured_output() {
+    let mut agy = Antigravity::unattended(project(), Settings::default(), &hypothesis_schema());
+    for (sent, line) in fixture("research-agy") {
+        if !sent {
+            agy.hear(&line);
+        }
+    }
+    let outcome = agy.fold().outcome().expect("the turn came to something");
+    let structured = outcome.structured.as_ref().expect("held to the schema");
+    assert!(structured["hypothesis"].as_str().unwrap().contains("scatter"), "{structured}");
+    // What it said around the answer — its own protocol's chatter — is in
+    // the text, and is not the answer.
+    assert!(outcome.text.contains("online"), "{}", outcome.text);
+}
+
+#[test]
+fn a_long_answer_is_drawn_cut_and_kept_whole() {
+    let mut codex = Codex::unattended(project(), Settings::default(), &hypothesis_schema());
+    let long = format!("{{\"hypothesis\":\"{}\"}}", "a".repeat(proton_claude::fold::TEXT_LIMIT + 5_000));
+    codex.hear(classify(json!({ "method": "item/completed", "params": { "item": { "type": "agentMessage", "id": "m1", "text": long } } })).unwrap());
+    let drawn = codex.fold().items().iter().find_map(|item| match item {
+        Item::Text { text, .. } => Some(text.clone()),
+        _ => None,
+    });
+    assert!(drawn.unwrap().len() < long.len(), "the row is cut for drawing");
+    let outcome = codex.fold().outcome().unwrap();
+    assert_eq!(outcome.text.len(), long.len(), "the answer is not");
+    assert!(outcome.structured.is_some());
+}

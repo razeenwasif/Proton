@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 
 use crate::artifacts::ArtifactRef;
 use crate::chat::{Answer, Image, Settings};
-use crate::engine::{Conversation, Engine};
+use crate::engine::{Conversation, Engine, Unattended};
 use crate::fold::{Ask, AskKind, Capabilities, Changes, Fold, Item, Level, Limit, ModelChoice, Task, Tool, ToolState};
 use crate::rpc::{Incoming, Rpc};
 use crate::saved::Record;
@@ -49,6 +49,40 @@ pub fn executable() -> Result<PathBuf, String> {
             why
         }
     })
+}
+
+/// Where Codex keeps its config.
+fn codex_home() -> PathBuf {
+    match std::env::var_os("CODEX_HOME") {
+        Some(home) => PathBuf::from(home),
+        None => crate::pipe::home().unwrap_or_default().join(".codex"),
+    }
+}
+
+/// The config overrides that switch off every MCP server and plugin the
+/// person's Codex config names, and the plugins' ids. A config that is
+/// there and cannot be read is a reason not to start: what it might turn on
+/// cannot be turned off.
+fn isolation(home: &std::path::Path) -> Result<(Value, Vec<String>), String> {
+    let path = home.join("config.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((json!({}), Vec::new())),
+        Err(error) => return Err(format!("Codex's config ({}) could not be read, so its MCP servers could not be switched off: {error}", path.display())),
+    };
+    let config: toml::Table = text
+        .parse()
+        .map_err(|error| format!("Codex's config ({}) could not be read, so its MCP servers could not be switched off: {error}", path.display()))?;
+    let names = |key: &str| -> Vec<String> { config.get(key).and_then(toml::Value::as_table).map(|t| t.keys().cloned().collect()).unwrap_or_default() };
+    let mut overrides = serde_json::Map::new();
+    for server in names("mcp_servers") {
+        overrides.insert(format!("mcp_servers.{server}.enabled"), json!(false));
+    }
+    let plugins = names("plugins");
+    for plugin in &plugins {
+        overrides.insert(format!("plugins.{plugin}.enabled"), json!(false));
+    }
+    Ok((Value::Object(overrides), plugins))
 }
 
 /// The approval policy and sandbox a permission mode stands for.
@@ -107,6 +141,10 @@ pub struct Codex {
     /// The thread could not be picked up again, so the next prompt carries
     /// the conversation so far.
     replay: bool,
+    /// Run for an orchestrator: see [`Unattended`].
+    unattended: Option<Unattended>,
+    /// The person's plugins, switched off for an unattended thread.
+    plugins: Vec<String>,
 }
 
 impl Codex {
@@ -130,6 +168,8 @@ impl Codex {
             queue: VecDeque::new(),
             asks: HashMap::new(),
             replay: false,
+            unattended: None,
+            plugins: Vec::new(),
         }
     }
 
@@ -196,9 +236,38 @@ impl Codex {
         )
     }
 
-    fn open_thread(&mut self) -> Result<(), String> {
+    /// A conversation nobody will be asked anything in — see
+    /// [`Unattended`]. Its thread never asks for approval and is sandboxed
+    /// read-only, is kept out of the person's Codex history, is given its
+    /// instructions as Codex's developer instructions, and has every MCP
+    /// server and plugin in their Codex config switched off: those run
+    /// outside Codex's sandbox, and one of them drives the desktop.
+    pub fn unattended(cwd: PathBuf, settings: Settings, how: &Unattended) -> Codex {
+        let mut codex = Codex::new(cwd, Settings { mode: "plan".into(), ..settings });
+        codex.unattended = Some(how.clone());
+        codex
+    }
+
+    /// What a thread is started with: its folder, its policy, and — for an
+    /// unattended one — its instructions and the config that keeps the
+    /// person's MCP servers and plugins out of it.
+    fn thread_params(&mut self, home: &Path) -> Result<Value, String> {
         let (approval, sandbox, _) = policy(&self.settings.mode);
         let mut params = json!({ "cwd": self.cwd, "approvalPolicy": approval, "sandbox": sandbox });
+        if let Some(how) = &self.unattended {
+            let (overrides, plugins) = isolation(home)?;
+            self.plugins = plugins;
+            params["approvalPolicy"] = json!("never");
+            params["sandbox"] = json!("read-only");
+            params["ephemeral"] = json!(true);
+            params["developerInstructions"] = json!(how.instructions);
+            params["config"] = overrides;
+        }
+        Ok(params)
+    }
+
+    fn open_thread(&mut self) -> Result<(), String> {
+        let mut params = self.thread_params(&codex_home())?;
         if let Some(model) = self.settings.model.as_deref().filter(|m| !m.is_empty() && *m != "default") {
             params["model"] = json!(model);
         }
@@ -210,6 +279,27 @@ impl Codex {
             }
             None => self.request("thread/start", params, Wait::Thread),
         }
+    }
+
+    /// What a turn is started with.
+    fn turn_params(&self, thread: &str, input: Vec<Value>) -> Value {
+        let (approval, _, sandbox) = policy(&self.settings.mode);
+        let mut params = json!({ "threadId": thread, "input": input, "approvalPolicy": approval, "sandboxPolicy": sandbox });
+        if let Some(how) = &self.unattended {
+            params["approvalPolicy"] = json!("never");
+            params["sandboxPolicy"] = json!({ "type": "readOnly", "networkAccess": false });
+            params["disabledPluginIds"] = json!(self.plugins);
+            if let Some(schema) = &how.schema {
+                params["outputSchema"] = schema.clone();
+            }
+        }
+        if let Some(model) = self.settings.model.as_deref().filter(|m| !m.is_empty() && *m != "default") {
+            params["model"] = json!(model);
+        }
+        if let Some(effort) = self.settings.effort.as_deref().filter(|e| !e.is_empty()) {
+            params["effort"] = json!(effort);
+        }
+        params
     }
 
     /// Send the next thing said, if the thread is open and idle.
@@ -225,14 +315,7 @@ impl Codex {
                 input.insert(0, text_input(&format!("Our conversation so far, for context:\n\n{earlier}\n\n(The newest message follows.)")));
             }
         }
-        let (approval, _, sandbox) = policy(&self.settings.mode);
-        let mut params = json!({ "threadId": thread, "input": input, "approvalPolicy": approval, "sandboxPolicy": sandbox });
-        if let Some(model) = self.settings.model.as_deref().filter(|m| !m.is_empty() && *m != "default") {
-            params["model"] = json!(model);
-        }
-        if let Some(effort) = self.settings.effort.as_deref().filter(|e| !e.is_empty()) {
-            params["effort"] = json!(effort);
-        }
+        let params = self.turn_params(&thread, input);
         self.starting_turn = true;
         self.fold.working();
         if let Err(why) = self.request("turn/start", params, Wait::Turn) {
@@ -429,7 +512,13 @@ impl Codex {
         match str_of(item, "type") {
             "agentMessage" => {
                 if completed {
-                    self.fold.prose_done(id, item["text"].as_str(), false);
+                    let text = item["text"].as_str().unwrap_or_default();
+                    self.fold.prose_done(id, Some(text), false);
+                    // The last message of a turn is its answer, kept whole —
+                    // the row is cut — and read as the JSON it was held to.
+                    let schema = self.unattended.as_ref().is_some_and(|how| how.schema.is_some());
+                    let structured = schema.then(|| serde_json::from_str::<Value>(text).ok()).flatten().filter(Value::is_object);
+                    self.fold.settle(text, structured);
                 }
             }
             "reasoning" => {
@@ -467,6 +556,22 @@ impl Codex {
     }
 
     fn request_from(&mut self, id: Value, method: &str, params: &Value) {
+        // Unattended, nobody is there to ask: an approval is declined and a
+        // question goes unanswered, at once, and the turn carries on.
+        if self.unattended.is_some() {
+            if let Some(rpc) = self.rpc.as_mut() {
+                let reply = match method {
+                    "item/tool/requestUserInput" => json!({ "answers": {} }),
+                    "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => json!({ "decision": "decline" }),
+                    _ => {
+                        let _ = rpc.refuse(&id, -32601, &format!("Proton does not handle {method}."));
+                        return;
+                    }
+                };
+                let _ = rpc.reply(&id, reply);
+            }
+            return;
+        }
         let key = format!("codex-{id}");
         match method {
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
@@ -942,6 +1047,65 @@ pub fn probe(cwd: PathBuf) -> std::sync::mpsc::Receiver<Capabilities> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn how() -> Unattended {
+        Unattended {
+            instructions: "Review hypothesis H3.".into(),
+            schema: Some(json!({ "type": "object", "properties": { "verdict": { "type": "string" } }, "required": ["verdict"], "additionalProperties": false })),
+            web: true,
+            max_turns: None,
+        }
+    }
+
+    fn home(config: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("proton-codex-home-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.toml"), config).unwrap();
+        dir
+    }
+
+    #[test]
+    fn an_unattended_thread_never_asks_reads_only_and_brings_none_of_the_persons_servers() {
+        let dir = home(
+            "model = \"gpt-6.1-sol\"\n[mcp_servers.computer-use]\ncommand = \"cua\"\n[mcp_servers.node_repl]\ncommand = \"node\"\n\
+             [plugins.\"browser@openai-bundled\"]\nenabled = true\n",
+        );
+        let mut codex = Codex::unattended(PathBuf::from("/tmp/r"), Settings::default(), &how());
+        let thread = codex.thread_params(&dir).unwrap();
+        assert_eq!((thread["approvalPolicy"].as_str(), thread["sandbox"].as_str(), thread["ephemeral"].as_bool()), (Some("never"), Some("read-only"), Some(true)));
+        assert_eq!(thread["developerInstructions"], "Review hypothesis H3.");
+        assert_eq!(thread["config"]["mcp_servers.computer-use.enabled"], false);
+        assert_eq!(thread["config"]["mcp_servers.node_repl.enabled"], false);
+        assert_eq!(thread["config"]["plugins.browser@openai-bundled.enabled"], false);
+
+        let turn = codex.turn_params("t1", vec![text_input("go")]);
+        assert_eq!(turn["approvalPolicy"], "never");
+        assert_eq!(turn["sandboxPolicy"], json!({ "type": "readOnly", "networkAccess": false }));
+        assert_eq!(turn["disabledPluginIds"], json!(["browser@openai-bundled"]));
+        assert_eq!(turn["outputSchema"]["required"], json!(["verdict"]));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_config_that_cannot_be_read_is_a_reason_not_to_start() {
+        let dir = home("[mcp_servers.computer-use\n");
+        let mut codex = Codex::unattended(PathBuf::from("/tmp/r"), Settings::default(), &how());
+        let why = codex.thread_params(&dir).unwrap_err();
+        assert!(why.contains("could not be switched off"), "{why}");
+        // No config at all is nothing to switch off.
+        let empty = std::env::temp_dir().join(format!("proton-codex-none-{}", std::process::id()));
+        assert_eq!(isolation(&empty).unwrap(), (json!({}), Vec::new()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_chat_thread_is_as_it_was() {
+        let mut codex = Codex::new(PathBuf::from("/tmp/r"), Settings::default());
+        let thread = codex.thread_params(Path::new("/nonexistent")).unwrap();
+        assert!(thread.get("developerInstructions").is_none() && thread.get("config").is_none());
+        assert!(codex.turn_params("t1", vec![]).get("outputSchema").is_none());
+    }
 
     #[test]
     fn the_shell_codex_wraps_a_command_in_is_taken_off() {

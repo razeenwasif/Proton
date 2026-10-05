@@ -58,6 +58,9 @@ pub struct Spawn {
     pub effort: Option<String>,
     /// Said after Claude Code's own system prompt.
     pub system: Option<String>,
+    /// More of the command line, after the rest: what an unattended task
+    /// may do (see [`crate::engine::Unattended`]).
+    pub extra: Vec<String>,
 }
 
 impl Spawn {
@@ -100,6 +103,7 @@ impl Spawn {
             args.push("--append-system-prompt".into());
             args.push(system.to_string());
         }
+        args.extend(self.extra.iter().cloned());
         args
     }
 }
@@ -221,6 +225,7 @@ mod tests {
             mode: "acceptEdits".into(),
             effort: Some("high".into()),
             system: Some("Inside Proton.".into()),
+            extra: Vec::new(),
         }
     }
 

@@ -27,7 +27,7 @@ use serde_json::{json, Value};
 
 use crate::artifacts::ArtifactRef;
 use crate::chat::{Answer, Image, Settings};
-use crate::engine::{Conversation, Engine};
+use crate::engine::{Conversation, Engine, Unattended};
 use crate::fold::{Capabilities, Changes, Fold, Level, ModelChoice, Tool, ToolState};
 use crate::pipe::{Line, Pipe};
 use crate::saved::Record;
@@ -49,8 +49,10 @@ pub fn executable() -> Result<PathBuf, String> {
 }
 
 /// The command line for a mode, model and effort, carrying a conversation
-/// on if there is one.
-fn args(settings: &Settings, conversation: Option<&str>) -> Vec<String> {
+/// on if there is one. Unattended, it plans rather than acts — reads and
+/// searches, no edits — with its terminal sandboxed, and its final answer
+/// held to the schema.
+fn args(settings: &Settings, conversation: Option<&str>, unattended: Option<&Unattended>) -> Vec<String> {
     let mut args: Vec<String> =
         ["--input-format", "stream-json", "--output-format", "stream-json", "--print="].iter().map(|s| s.to_string()).collect();
     if let Some(conversation) = conversation {
@@ -64,6 +66,13 @@ fn args(settings: &Settings, conversation: Option<&str>) -> Vec<String> {
     if let Some(effort) = settings.effort.as_deref().filter(|e| !e.is_empty()) {
         args.push("--effort".into());
         args.push(effort.into());
+    }
+    if let Some(how) = unattended {
+        args.extend(["--mode".to_string(), "plan".to_string(), "--sandbox".to_string()]);
+        if let Some(schema) = &how.schema {
+            args.extend(["--json-schema".to_string(), schema.to_string()]);
+        }
+        return args;
     }
     match settings.mode.as_str() {
         "acceptEdits" => args.extend(["--mode".to_string(), "accept-edits".to_string()]),
@@ -87,6 +96,11 @@ pub struct Antigravity {
     /// Which process this is, so the rows of one never share an id with
     /// another's: each numbers its steps afresh.
     run: u32,
+    /// Run for an orchestrator: see [`Unattended`].
+    unattended: Option<Unattended>,
+    /// Whether its instructions have been said yet: agy takes no system
+    /// prompt, so they go before the first thing it is asked.
+    instructed: bool,
 }
 
 impl Antigravity {
@@ -96,7 +110,27 @@ impl Antigravity {
         fold.status_mut().mode = Engine::Antigravity.mode(&settings.mode);
         fold.status_mut().model = settings.model.clone().unwrap_or_default();
         fold.status_mut().effort = settings.effort.clone();
-        Antigravity { id, cwd, settings, pipe: None, fold, conversation: None, in_turn: false, queue: VecDeque::new(), run: 0 }
+        Antigravity {
+            id,
+            cwd,
+            settings,
+            pipe: None,
+            fold,
+            conversation: None,
+            in_turn: false,
+            queue: VecDeque::new(),
+            run: 0,
+            unattended: None,
+            instructed: false,
+        }
+    }
+
+    /// A conversation nobody will be asked anything in — see [`Unattended`].
+    /// agy never stops to ask anyway; what it may do is its mode's.
+    pub fn unattended(cwd: PathBuf, settings: Settings, how: &Unattended) -> Antigravity {
+        let mut agy = Antigravity::new(cwd, Settings { mode: "plan".into(), ..settings });
+        agy.unattended = Some(how.clone());
+        agy
     }
 
     pub fn restore(record: Record) -> Antigravity {
@@ -131,7 +165,8 @@ impl Antigravity {
         }
         self.fold.starting();
         let program = executable()?;
-        self.pipe = Some(Pipe::start(&program, &args(&self.settings, self.conversation.as_deref()), &self.cwd, "Antigravity")?);
+        let args = args(&self.settings, self.conversation.as_deref(), self.unattended.as_ref());
+        self.pipe = Some(Pipe::start(&program, &args, &self.cwd, "Antigravity")?);
         self.run += 1;
         Ok(())
     }
@@ -140,9 +175,12 @@ impl Antigravity {
         if self.in_turn {
             return;
         }
+        if self.pipe.is_none() {
+            return;
+        }
         let Some(text) = self.queue.pop_front() else { return };
+        let message = self.message(text);
         let Some(pipe) = self.pipe.as_mut() else { return };
-        let message = json!({ "event": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } });
         match pipe.write(&message) {
             Ok(()) => {
                 self.in_turn = true;
@@ -150,6 +188,16 @@ impl Antigravity {
             }
             Err(why) => self.fold.failed(&why),
         }
+    }
+
+    /// What is written for something said: unattended, the first carries the
+    /// instructions, because agy takes no system prompt.
+    fn message(&mut self, mut text: String) -> Value {
+        if let Some(how) = self.unattended.as_ref().filter(|_| !self.instructed) {
+            text = format!("{}\n\n---\n\n{text}", how.instructions);
+            self.instructed = true;
+        }
+        json!({ "event": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } })
     }
 
     fn row(&self, step: &Value) -> String {
@@ -209,6 +257,12 @@ impl Antigravity {
                 let result = &message["result"];
                 let ms = (result["duration_seconds"].as_f64().unwrap_or(0.0) * 1000.0) as u64;
                 let error = (result["status"] == "ERROR").then(|| result["error"].as_str().unwrap_or("Antigravity could not finish the turn.").to_string());
+                if error.is_none() {
+                    // The answer whole, and the structure it was held to: the
+                    // rows streamed one step at a time.
+                    let structured = result.get("structured_output").filter(|value| !value.is_null()).cloned();
+                    self.fold.settle(result["response"].as_str().unwrap_or_default(), structured);
+                }
                 self.fold.turn_ended(ms, false, error);
                 if let Some(conversation) = result["conversation_id"].as_str() {
                     self.conversation = Some(conversation.to_string());
@@ -495,14 +549,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_unattended_antigravity_plans_in_a_sandbox_and_hears_its_instructions_once() {
+        let how = Unattended {
+            instructions: "You are the Validation Sandbox.".into(),
+            schema: Some(json!({ "type": "object" })),
+            web: true,
+            max_turns: None,
+        };
+        let mut agy = Antigravity::unattended(PathBuf::from("/tmp/r"), Settings::default(), &how);
+        let args = args(&agy.settings, None, agy.unattended.as_ref());
+        let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+        assert!(has(["--mode", "plan"]) && args.contains(&"--sandbox".to_string()) && has(["--json-schema", "{\"type\":\"object\"}"]), "{args:?}");
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
+        let first = agy.message("Review H3.".into());
+        let second = agy.message("Again.".into());
+        let text = |m: &Value| m["message"]["content"][0]["text"].as_str().unwrap_or_default().to_string();
+        assert!(text(&first).starts_with("You are the Validation Sandbox.") && text(&first).ends_with("Review H3."));
+        assert_eq!(text(&second), "Again.");
+    }
+
+    #[test]
     fn the_mode_model_and_conversation_go_on_the_command_line() {
         let settings = Settings { model: Some("gemini-3.1-pro-high".into()), mode: "acceptEdits".into(), effort: None };
-        let args = args(&settings, Some("a56ae8cb"));
+        let args = args(&settings, Some("a56ae8cb"), None);
         let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
         assert!(args.contains(&"--print=".to_string()), "the prompt comes from stdin, not after --print");
         assert!(has(["--conversation", "a56ae8cb"]) && has(["--model", "gemini-3.1-pro-high"]) && has(["--mode", "accept-edits"]));
         let bypass = Settings { model: None, mode: "bypassPermissions".into(), effort: Some("high".into()) };
-        let args = super::args(&bypass, None);
+        let args = super::args(&bypass, None, None);
         assert!(args.contains(&"--dangerously-skip-permissions".to_string()) && !args.contains(&"--model".to_string()));
     }
 

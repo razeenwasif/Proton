@@ -56,4 +56,8 @@ jobs:
       - run: cargo test --locked -p proton-agent --lib --test transport --test gemini --test assemble
       - run: cargo test --locked -p proton-core --lib
       - run: cargo test --locked -p proton-core --test layout --test workspaces --test working_directory --test reliability
+      # The engines as Research drives them unattended: their flags, and
+      # turns recorded from the real CLIs replayed. Not yet run on Windows.
+      - run: cargo test --locked -p proton-claude --lib --test engines --test fold
+        if: runner.os != 'Windows'
       - run: git diff --exit-code -- ui/bindings

@@ -9,13 +9,13 @@
 //! and what differs is said where it differs: the models on offer, the
 //! permission modes, and whether a session can be picked up again.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::artifacts::ArtifactRef;
-use crate::chat::{Answer, Chat, Image};
+use crate::chat::{Answer, Chat, Image, Settings};
 use crate::fold::{Changes, Fold};
 
 /// Which agent a conversation is with.
@@ -120,6 +120,37 @@ pub struct ModeChoice {
     pub note: String,
     /// One of the window's icon names.
     pub icon: String,
+}
+
+/// How a conversation runs when nobody is there to answer it: an agent
+/// doing one task for an orchestrator — Research's co-scientists.
+///
+/// It is never asked anything: what it may do is settled before it starts.
+/// It reads and searches but does not change files or run commands; it
+/// brings none of the person's own extensions — MCP servers, plugins, hooks,
+/// their CLAUDE.md or AGENTS.md — because those would act, or instruct, in a
+/// run nobody is watching; and its final answer can be held to a JSON
+/// Schema, read whole from [`Fold::outcome`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Unattended {
+    /// Its role and its rules, said before anything else.
+    pub instructions: String,
+    /// The JSON Schema its final answer must meet.
+    pub schema: Option<serde_json::Value>,
+    /// Whether it may search and read the web.
+    pub web: bool,
+    /// At most this many model turns, where the engine can be told.
+    pub max_turns: Option<u32>,
+}
+
+/// A conversation for an orchestrator, on an engine that can run unattended.
+pub fn unattended(engine: Engine, cwd: PathBuf, settings: Settings, how: &Unattended) -> Result<Box<dyn Conversation>, String> {
+    Ok(match engine {
+        Engine::Claude => Box::new(Chat::unattended(cwd, settings, how)),
+        Engine::Codex => Box::new(crate::codex::Codex::unattended(cwd, settings, how)),
+        Engine::Antigravity => Box::new(crate::agy::Antigravity::unattended(cwd, settings, how)),
+        Engine::Gemini => return Err("The Gemini CLI cannot take part unattended yet.".into()),
+    })
 }
 
 /// A conversation with any of the engines, as the Chat tab drives it.

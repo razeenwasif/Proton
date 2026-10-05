@@ -22,6 +22,9 @@ memchr = "2"
 gix-imara-diff = { workspace = true }
 # A deleted conversation goes to the Trash, from where it can be put back.
 trash = "5"
+# Codex's config, read for the MCP servers and plugins an unattended thread
+# must not start.
+toml = "0.9"
 
 # Whether the process a session registered is still alive.
 [target.'cfg(unix)'.dependencies]

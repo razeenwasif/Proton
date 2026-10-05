@@ -287,6 +287,16 @@ pub struct Changes {
     pub published: Vec<(String, Value, Value)>,
 }
 
+/// What a turn came to, whole: its final answer as the engine gave it, not
+/// the rows drawn from it — those are cut to [`TEXT_LIMIT`] — and the answer
+/// in its structured form when the turn was held to a JSON Schema. What an
+/// orchestrator reads of an agent's work.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Outcome {
+    pub text: String,
+    pub structured: Option<Value>,
+}
+
 /// The fold itself.
 #[derive(Debug)]
 pub struct Fold {
@@ -316,6 +326,8 @@ pub struct Fold {
     local: u64,
     /// A cost carried over from before the process was restarted.
     cost_before: f64,
+    /// What the last turn came to, until something new is said.
+    outcome: Option<Outcome>,
 }
 
 /// Cut a text to the limit, saying how much was left out.
@@ -450,6 +462,7 @@ impl Fold {
             thinking: None,
             local: 0,
             cost_before: 0.0,
+            outcome: None,
         }
     }
 
@@ -525,6 +538,7 @@ impl Fold {
 
     /// What you just said, drawn before Claude has heard it.
     pub fn said(&mut self, text: &str, images: u32) {
+        self.outcome = None;
         let id = self.next_id("you");
         self.push(Item::User { id, text: text.to_string(), images });
         if self.status.title.is_empty() {
@@ -757,6 +771,18 @@ impl Fold {
             self.set_activity(Activity::Working);
         }
         self.status_changed = true;
+    }
+
+    /// What the last turn came to, whole, once it has; gone again as soon as
+    /// something new is said.
+    pub fn outcome(&self) -> Option<&Outcome> {
+        self.outcome.as_ref()
+    }
+
+    /// The final answer of a turn, whole, as an engine that is not Claude
+    /// Code gave it: Claude Code's arrives on its `result` line.
+    pub fn settle(&mut self, text: &str, structured: Option<Value>) {
+        self.outcome = Some(Outcome { text: text.to_string(), structured });
     }
 
     /// A turn ended: in how long, whether it was stopped, and why it failed
@@ -1310,6 +1336,12 @@ impl Fold {
             },
             text => text.to_string(),
         });
+        if !failed {
+            // The answer whole, and in the shape it was asked for: the
+            // assistant rows already drawn are cut, and carry no structure.
+            let structured = line.get("structured_output").filter(|value| !value.is_null()).cloned();
+            self.outcome = Some(Outcome { text: str_of(line, "result").to_string(), structured });
+        }
         let cost = line.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0);
         self.status.cost = self.cost_before + cost;
         let id = self.next_id("turn");

@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
+use crate::engine::Unattended;
 use crate::fold::{Changes, Fold};
 use crate::process::{uuid, Line, Process, Spawn};
 
@@ -78,6 +79,8 @@ pub struct Chat {
     /// Open permission requests, as they were asked: the answer has to give
     /// the tool's input back, and "always" needs the suggested rules.
     asks: HashMap<String, Value>,
+    /// More of the command line: what an unattended task may do.
+    extra: Vec<String>,
 }
 
 impl Chat {
@@ -87,7 +90,29 @@ impl Chat {
         let mut fold = Fold::new(&id);
         fold.status_mut().mode = settings.mode.clone();
         fold.status_mut().effort = settings.effort.clone();
-        Chat { id, cwd, settings, system, process: None, fold, has_history: false, fork: false, renamed: None, asks: HashMap::new() }
+        Chat { id, cwd, settings, system, process: None, fold, has_history: false, fork: false, renamed: None, asks: HashMap::new(), extra: Vec::new() }
+    }
+
+    /// A conversation nobody will be asked anything in — see
+    /// [`Unattended`]. Claude Code is started bare: none of the person's own
+    /// CLAUDE.md, hooks, plugins or MCP servers (`--safe-mode`,
+    /// `--strict-mcp-config`), with only the tools that read and search, and
+    /// in the mode that refuses what was not allowed up front instead of
+    /// asking (`dontAsk`).
+    pub fn unattended(cwd: PathBuf, settings: Settings, how: &Unattended) -> Chat {
+        let mut chat = Chat::new(cwd, Settings { mode: "dontAsk".into(), ..settings }, Some(how.instructions.clone()));
+        let mut tools = vec!["Read", "Grep", "Glob"];
+        if how.web {
+            tools.extend(["WebSearch", "WebFetch"]);
+        }
+        chat.extra = vec!["--safe-mode".into(), "--strict-mcp-config".into(), "--tools".into(), tools.join(",")];
+        if let Some(turns) = how.max_turns {
+            chat.extra.extend(["--max-turns".to_string(), turns.to_string()]);
+        }
+        if let Some(schema) = &how.schema {
+            chat.extra.extend(["--json-schema".to_string(), schema.to_string()]);
+        }
+        chat
     }
 
     /// A session read back from its file.
@@ -113,6 +138,7 @@ impl Chat {
             fork: false,
             renamed: None,
             asks: HashMap::new(),
+            extra: Vec::new(),
         }
     }
 
@@ -149,19 +175,25 @@ impl Chat {
         !matches!(self.fold.status().activity, crate::fold::Activity::Idle)
     }
 
+    /// How its process is started.
+    fn spawn(&self) -> Spawn {
+        Spawn {
+            cwd: self.cwd.clone(),
+            session: self.id.clone(),
+            resume: self.has_history,
+            fork: self.fork && self.has_history,
+            model: self.settings.model.clone(),
+            mode: flag_mode(&self.settings.mode).to_string(),
+            effort: self.settings.effort.clone(),
+            system: self.system.clone(),
+            extra: self.extra.clone(),
+        }
+    }
+
     fn start(&mut self) -> Result<&mut Process, String> {
         if self.process.is_none() {
             self.fold.starting();
-            let spawn = Spawn {
-                cwd: self.cwd.clone(),
-                session: self.id.clone(),
-                resume: self.has_history,
-                fork: self.fork && self.has_history,
-                model: self.settings.model.clone(),
-                mode: flag_mode(&self.settings.mode).to_string(),
-                effort: self.settings.effort.clone(),
-                system: self.system.clone(),
-            };
+            let spawn = self.spawn();
             let mut process = Process::start(&spawn)?;
             process.initialize()?;
             // From the first prompt on, Claude Code keeps a file for it.
@@ -380,6 +412,7 @@ pub fn probe(cwd: PathBuf) -> std::sync::mpsc::Receiver<crate::fold::Capabilitie
             mode: "manual".into(),
             effort: None,
             system: None,
+            extra: Vec::new(),
         };
         let Ok(mut process) = Process::start(&spawn) else { return };
         if process.initialize().is_err() {
@@ -408,6 +441,27 @@ pub fn probe(cwd: PathBuf) -> std::sync::mpsc::Receiver<crate::fold::Capabilitie
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unattended_claude_code_starts_bare_with_only_its_reading_tools_and_never_asks() {
+        let how = Unattended {
+            instructions: "You are the Principal Investigator.".into(),
+            schema: Some(json!({ "type": "object" })),
+            web: true,
+            max_turns: Some(8),
+        };
+        let args = Chat::unattended(PathBuf::from("/tmp/r"), Settings::default(), &how).spawn().args();
+        let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+        assert!(has(["--permission-mode", "dontAsk"]), "{args:?}");
+        assert!(args.contains(&"--safe-mode".to_string()) && args.contains(&"--strict-mcp-config".to_string()), "{args:?}");
+        assert!(has(["--tools", "Read,Grep,Glob,WebSearch,WebFetch"]) && has(["--max-turns", "8"]), "{args:?}");
+        assert!(has(["--json-schema", "{\"type\":\"object\"}"]) && has(["--append-system-prompt", "You are the Principal Investigator."]), "{args:?}");
+
+        let offline = Unattended { web: false, schema: None, max_turns: None, ..how };
+        let args = Chat::unattended(PathBuf::from("/tmp/r"), Settings::default(), &offline).spawn().args();
+        assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1] == "Read,Grep,Glob"), "{args:?}");
+        assert!(!args.contains(&"--json-schema".to_string()) && !args.contains(&"--max-turns".to_string()));
+    }
 
     #[test]
     fn the_mode_a_session_calls_default_is_manual_on_the_command_line() {
