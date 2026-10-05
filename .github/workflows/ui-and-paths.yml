@@ -55,7 +55,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked -p proton-agent --lib --test transport --test gemini --test assemble
       - run: cargo test --locked -p proton-core --lib
-      - run: cargo test --locked -p proton-core --test layout --test workspaces --test working_directory --test reliability
+      - run: cargo test --locked -p proton-core --test layout --test workspaces --test working_directory --test home_folder --test reliability
       # Research's investigations: the files, the scoring, the prompts.
       - run: cargo test --locked -p proton-research
       # The engines as Research drives them unattended: their flags, and

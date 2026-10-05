@@ -487,7 +487,9 @@ impl Pickers {
     ///
     /// Called once the window is up rather than during construction, so the
     /// first paint is never behind a walk, and called before anyone asks for a
-    /// picker so that by the time they do the answer is already there.
+    /// picker so that by the time they do the answer is already there. Not
+    /// over a home folder or anything broader, though: there it waits for the
+    /// first picker over the files, or the agent's first search.
     pub fn warm(&mut self) {
         if !self.index.is_scanned() {
             self.index.start();
@@ -609,7 +611,12 @@ impl Pickers {
     /// even on a cold index — the list fills in a beat later rather than the
     /// window stopping for it.
     pub fn begin(&mut self, kind: PickerKind, buffers: Vec<(String, Option<String>)>) {
-        self.warm();
+        // Only the pickers that search the files need them walked. In a home
+        // folder, where the walk waits to be asked for, opening the buffer
+        // list is not asking.
+        if matches!(kind, PickerKind::Files | PickerKind::Grep) {
+            self.warm();
+        }
         // A server-fed picker opens empty and fills when the answer comes.
         // Keeping the last one's rows would show the previous file's symbols
         // for as long as the round trip takes, which reads as a wrong answer

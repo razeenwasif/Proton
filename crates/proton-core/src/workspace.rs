@@ -532,7 +532,16 @@ impl Workspace {
                 // during construction, where it would be behind the first
                 // paint, and not on first `␣ff`, where it would be in front of
                 // the user.
-                self.pickers.warm();
+                //
+                // Except over the home folder or anything broader. A launch
+                // from the Start menu or the Finder lands there with nothing
+                // to restore, and walking it would read everything kept on the
+                // machine, at every such launch, without anybody having asked
+                // for a file. There the walk waits until something does: a
+                // picker over the files, or a search by the agent.
+                if !crate::folder::is_too_broad(self.root(), crate::folder::home().as_deref()) {
+                    self.pickers.warm();
+                }
                 let mut events = vec![
                     self.state_event(),
                     self.splits_event(),
@@ -4218,6 +4227,23 @@ impl Workspace {
         proton_data::notebook::Notebook::read(path)
     }
 
+    /// What a search tells the agent while the project's files are still being
+    /// listed, having started the walk that lists them.
+    ///
+    /// Searched as it stands, an unlisted project finds nothing, and "no
+    /// matches" is an answer the agent believes. The window connecting starts
+    /// the walk, but a question can come before it lands, and in a home folder
+    /// nothing starts it until something asks for the files. This is
+    /// something asking.
+    fn files_unlisted(&mut self) -> Option<String> {
+        self.pickers.warm();
+        self.pickers.is_scanning().then(|| {
+            "the project's files are still being listed, so nothing was searched; \
+             try again in a moment"
+                .to_string()
+        })
+    }
+
     /// Run one tool against the workspace.
     ///
     /// Public because the tools are the *editor's* capabilities rather than
@@ -4262,6 +4288,9 @@ impl Workspace {
 
             "grep" => {
                 let query = text("query")?;
+                if let Some(unlisted) = self.files_unlisted() {
+                    return Ok(unlisted);
+                }
                 let hits = self.pickers.grep(&query, count("limit", 40));
                 if hits.is_empty() {
                     return Ok(format!("no matches for {query:?}"));
@@ -4271,6 +4300,9 @@ impl Workspace {
 
             "find_files" => {
                 let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                if let Some(unlisted) = self.files_unlisted() {
+                    return Ok(unlisted);
+                }
                 let found = self.pickers.find(query, count("limit", 40));
                 if found.is_empty() {
                     return Ok(format!("no files matching {query:?}"));
@@ -6433,8 +6465,9 @@ mod tests {
     //! what most of these use: it needs neither the working directory changed
     //! under the other tests nor, on Windows, the privilege a link does.
     //!
-    //! The last section is about where a file ends rather than how its
-    //! project is named, and lives here for the same reason.
+    //! The later sections are about other things — where a file ends, and
+    //! what the agent's searches see before the files are listed — and live
+    //! here for the same reason.
 
     use super::*;
 
@@ -6710,6 +6743,40 @@ mod tests {
         bare.apply(Command::OpenBuffer { path: "main.c".into() });
         let said = bare.apply(Command::Format);
         assert!(said.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == "no formatter for this file")), "{said:?}");
+    }
+
+    /* ── the agent's searches, before the files are listed ───────────── */
+
+    #[test]
+    fn a_search_before_the_files_are_listed_lists_them_and_says_so() {
+        // The window connecting starts the walk everywhere but a home folder,
+        // and a question can come before it lands. Searched as it stood, the
+        // empty list answered "no matches", which the agent believes; in a
+        // home folder it would have gone on answering that for good.
+        let project = Project::new("unlisted");
+        std::fs::write(project.folder().join("a.rs"), SOURCE).unwrap();
+        let mut ws = Workspace::rooted(project.real());
+
+        for (tool, query) in [("find_files", "a.rs"), ("grep", "fn one")] {
+            let said = ws
+                .run_tool(tool, &serde_json::json!({ "query": query }))
+                .unwrap();
+            assert!(said.contains("still being listed"), "{tool}: {said}");
+        }
+        assert!(ws.pickers().is_scanning(), "and the walk was started");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while ws.pickers().is_scanning() {
+            ws.apply(Command::Poll);
+            assert!(std::time::Instant::now() < deadline, "the walk never finished");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let found = ws.run_tool("find_files", &serde_json::json!({ "query": "a.rs" }));
+        assert_eq!(found.as_deref(), Ok("a.rs"));
+        let hits = ws
+            .run_tool("grep", &serde_json::json!({ "query": "fn one" }))
+            .unwrap();
+        assert!(hits.starts_with("a.rs:1:"), "{hits}");
     }
 }
 

@@ -238,6 +238,23 @@ pub fn normalise(path: &Path) -> PathBuf {
     }
 }
 
+/// Whether a folder holds too much to walk before anybody asks for a file in
+/// it: the home folder, a folder with the home folder in it, or the top of a
+/// disk.
+///
+/// The home folder is where the session lands with nothing else to go on, and
+/// it is not a project. Walking it reads everything a person keeps on the
+/// machine: on a Mac that includes `~/Library`, and the folders the system
+/// asks permission for. The folders above it hold more again.
+///
+/// `home` is given rather than looked up, so that a test can name its own.
+/// Both sides are normalised, because a home folder reached through a link or
+/// a `..` is still the home folder.
+pub fn is_too_broad(path: &Path, home: Option<&Path>) -> bool {
+    let path = normalise(path);
+    path.parent().is_none() || home.is_some_and(|home| normalise(home).starts_with(&path))
+}
+
 /// A project's folder under both of its names.
 ///
 /// One is the name it was opened by: `proton .`, a path through a symlink, or
@@ -492,6 +509,38 @@ mod tests {
         assert_eq!(direct, around);
         // And it is readable — `canonicalize` alone hands back a `\\?\` path.
         assert!(!direct.to_string_lossy().starts_with(r"\\?\"), "{direct:?}");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_home_folder_and_the_top_of_a_disk_are_too_broad_to_walk_unasked() {
+        let root = temp("broad");
+        let home = root.join("home");
+        let project = home.join("project");
+        std::fs::create_dir_all(project.join("sub")).unwrap();
+        std::fs::create_dir_all(root.join("hom")).unwrap();
+        let top = root.ancestors().last().unwrap();
+
+        // The home folder, spelled the long way round on either side. Through
+        // `hom` on the home side, because `home/project/..` begins with the
+        // home folder's own name as written, normalised or not.
+        assert!(is_too_broad(&home, Some(&home)));
+        assert!(is_too_broad(&project.join(".."), Some(&home)));
+        let roundabout = root.join("hom").join("..").join("home");
+        assert!(is_too_broad(&home, Some(&roundabout)));
+        // Anything with the home folder in it, up to the top of the disk —
+        // which is too broad with no home folder to compare against, too.
+        assert!(is_too_broad(&root, Some(&home)));
+        assert!(is_too_broad(top, Some(&home)));
+        assert!(is_too_broad(top, None));
+
+        // A project in the home folder is a project, and a folder whose name
+        // is only the start of the home folder's has nothing to do with it.
+        assert!(!is_too_broad(&project, Some(&home)));
+        assert!(!is_too_broad(&project.join("sub").join(".."), Some(&home)));
+        assert!(!is_too_broad(&root.join("hom"), Some(&home)));
+        assert!(!is_too_broad(&project, None));
 
         std::fs::remove_dir_all(&root).ok();
     }
