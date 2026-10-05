@@ -4469,6 +4469,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-research"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml 0.9.12+spec-1.1.0",
+ "ts-rs",
+]
+
+[[package]]
 name = "proton-scene"
 version = "0.0.1"
 dependencies = [

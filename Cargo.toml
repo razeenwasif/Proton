@@ -15,6 +15,7 @@ members = [
     "crates/proton-lsp",
     "crates/proton-mesh",
     "crates/proton-plugin",
+    "crates/proton-research",
     "crates/proton-scene",
     "crates/proton-shell",
     "crates/proton-syntax",
@@ -48,6 +49,7 @@ proton-mcp = { path = "crates/proton-mcp" }
 proton-mesh = { path = "crates/proton-mesh" }
 proton-lsp = { path = "crates/proton-lsp" }
 proton-plugin = { path = "crates/proton-plugin" }
+proton-research = { path = "crates/proton-research" }
 proton-syntax = { path = "crates/proton-syntax" }
 proton-term = { path = "crates/proton-term" }
 proton-text = { path = "crates/proton-text" }
