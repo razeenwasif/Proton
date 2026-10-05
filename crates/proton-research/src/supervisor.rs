@@ -299,6 +299,8 @@ pub struct Snapshot {
     /// left on its own takes its number too.
     pub papers: Vec<Paper>,
     pub paper_stems: Vec<String>,
+    /// The citations nothing could be found for, and where each was made.
+    pub unverified: Vec<(String, Vec<String>)>,
     /// Which seats can sit at all — installed, signed in — and why not.
     pub unavailable: BTreeMap<Seat, String>,
     /// The model each seat reports by default, for independence before it has started.
@@ -323,6 +325,7 @@ impl Snapshot {
             plan: &self.plan,
             feedback: &self.feedback,
             literature: prompts::literature(&self.papers),
+            unverified: prompts::unverified(&self.unverified),
         }
     }
 

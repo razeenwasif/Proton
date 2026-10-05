@@ -381,6 +381,16 @@ impl Folder {
         append(&self.dir.join("tournament.jsonl"), &(serde_json::to_string(m).map_err(|e| e.to_string())? + "\n"))
     }
 
+    /// What checking the names the team cites found, by each name's key.
+    pub fn citations(&self) -> std::collections::BTreeMap<String, crate::cite::Checked> {
+        std::fs::read_to_string(self.state_path("citations.json")).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+    }
+
+    pub fn write_citations(&self, checked: &std::collections::BTreeMap<String, crate::cite::Checked>) -> Result<(), String> {
+        let text = serde_json::to_string_pretty(checked).map_err(|e| e.to_string())?;
+        atomic_write(&self.state_path("citations.json"), text.as_bytes())
+    }
+
     pub fn write_plan(&self, text: &str) -> Result<(), String> {
         atomic_write(&self.dir.join("RESEARCH_PLAN.md"), text.as_bytes())
     }

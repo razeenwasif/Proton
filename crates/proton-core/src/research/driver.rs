@@ -339,6 +339,10 @@ impl Driver {
         }
         let models = self.folder.investigation().seats.iter().filter_map(|s| self.model_of(s.seat).map(|m| (s.seat, m))).collect();
         let f = &self.folder;
+        let (hypotheses, reviews) = (f.hypotheses(), f.reviews());
+        // What was cited and could not be found, for every task to be told.
+        let unverified =
+            proton_research::view::Board::from(hypotheses.clone(), reviews.clone(), Vec::new(), Vec::new()).with_citations(f.citations()).unverified();
         let snap = Snapshot {
             investigation: Some(f.investigation().clone()),
             brief: f.brief(),
@@ -346,10 +350,11 @@ impl Driver {
             feedback: f.feedback(),
             verdicts: f.verdicts(),
             sandbox: f.sandbox_log(),
-            hypotheses: f.hypotheses(),
-            reviews: f.reviews(),
+            hypotheses,
+            reviews,
             matches: f.matches(),
             experiments: f.experiments(),
+            unverified,
             papers: f.papers(),
             paper_stems: f.paper_stems(),
             unavailable: self.unavailable.clone(),

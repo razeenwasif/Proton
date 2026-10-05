@@ -239,7 +239,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
     const sources = SOURCES.map(([source, name]) => ({ source, name, chosen: l.sources.has(source), key: KEYS[source], resting: null }));
     const shown = l.papers.find((p) => p.id === showingPaper);
     return [
-      { type: "researchLiterature", slug: open, enabled: l.enabled, live: true, sources, papers: l.papers.map(paperRow), fetching: [...fetching], adding: [...adding] },
+      { type: "researchLiterature", slug: open, enabled: l.enabled, check: true, live: true, sources, papers: l.papers.map(paperRow), fetching: [...fetching], adding: [...adding] },
       { type: "researchPaper", slug: open, detail: shown ? paperDetail(shown) : null },
     ];
   }

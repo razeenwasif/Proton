@@ -1737,8 +1737,13 @@ await test('Research shows a round\'s search of the literature, and the papers a
   // A hypothesis's references: its papers open, DOIs and arXiv ids go to the browser.
   await win.pushEvents([{type: 'researchHypothesis', slug: 'sky', detail: {row: researchBoard().hypotheses[0], statement: 'Rayleigh.', rationale: '', predictions: [],
     assumptions: [], references: ['P001', '10.1364/JOSAA.18.000412', 'arXiv:1706.03762', 'Bohren & Fraser, from memory'], children: [], experiments: [], task: null,
+    checks: [{text: '10.1364/JOSAA.18.000412', key: 'doi:10.1364/josaa.18.000412', check: 'unverified', title: null, paper: null},
+      {text: 'arXiv:1706.03762', key: 'arxiv:1706.03762', check: 'verified', title: 'Attention Is All You Need', paper: null}],
     reviews: [{id: 'H002.1', reviewer: {seat: 'claude', model: ''}, kind: 'review', verdict: 'strong', correctness: 5, novelty: 2, testability: 5, round: 1,
       summary: 'As [[literature/P001.pdf § Results p. 4]] measured.', critique: '', citations: []}], matches: []}}]);
+  const marks = [...board.querySelectorAll('.rs-refs .lit-check')].map((m) => m.dataset.check);
+  assert(marks.join() === 'unverified,verified', `the references do not say what checking found: ${marks}`);
+  assert(board.querySelector('.rs-unfound')?.textContent.includes('10.1364/JOSAA.18.000412'), 'a citation that could not be found is not said at the top');
   const cite = board.querySelector('.rs-review .cite');
   assert(cite?.dataset.cite === 'literature/P001.pdf § Results p. 4', `a page the team cites is not a link: ${board.querySelector('.rs-review')?.innerHTML}`);
   let asked = win.commands.length;

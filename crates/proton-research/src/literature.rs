@@ -56,6 +56,22 @@ pub fn keys(record: &Record) -> Vec<String> {
     out
 }
 
+/// Which of `names` are to be checked: none the investigation has as a
+/// paper (the sources found it), none checked already — but one that could
+/// not be checked, once it has waited [`RECHECK`](crate::cite::RECHECK).
+pub fn to_check(names: &[Ident], checked: &std::collections::BTreeMap<String, crate::cite::Checked>, papers: &[Paper], now: u64) -> Vec<Ident> {
+    let known: HashSet<String> = papers.iter().flat_map(|p| keys(&p.record)).collect();
+    names
+        .iter()
+        .filter(|ident| !matches!(ident, Ident::Paper(_)) && !known.contains(&ident.key()))
+        .filter(|ident| match checked.get(&ident.key()) {
+            None => true,
+            Some(c) => c.check == crate::cite::Check::Unknown && now.saturating_sub(c.at) >= crate::cite::RECHECK,
+        })
+        .cloned()
+        .collect()
+}
+
 /// The paper an investigation has that goes by any of `record`'s names.
 pub fn known<'a>(papers: &'a [Paper], record: &Record) -> Option<&'a Paper> {
     let names = keys(record);
@@ -247,6 +263,27 @@ mod tests {
         assert_eq!(near.first().map(|(p, _)| p.id.as_str()), Some("P002"));
         assert!(near.iter().all(|(p, _)| p.id != "P003"), "{near:?}");
         assert!(closest(&[], "anything", 3).is_empty());
+    }
+
+    #[test]
+    fn what_is_checked_is_neither_a_paper_the_investigation_has_nor_checked_already() {
+        use crate::cite::{named_in, Check, Checked};
+        let names: Vec<Ident> = named_in([
+            "As https://doi.org/10.1364/JOSAA.18.000412 shows, and arXiv:1706.03762v5.",
+            "P003, p. 4; doi:10.9999/made.up; 10.1000/unknown; 10.1000/tried",
+            "again: 10.1364/josaa.18.000412",
+        ])
+        .into_iter()
+        .map(|(_, ident)| ident)
+        .collect();
+        assert_eq!(names.len(), 5, "each once, and not the investigation's own: {names:?}");
+        let have = Paper { id: "P001".into(), record: Record { arxiv: Some("1706.03762".into()), ..Record::default() }, ..Paper::default() };
+        let mut checked = std::collections::BTreeMap::new();
+        checked.insert("doi:10.9999/made.up".to_string(), Checked { check: Check::Unverified, at: 100, title: None });
+        checked.insert("doi:10.1000/unknown".to_string(), Checked { check: Check::Unknown, at: 100, title: None });
+        checked.insert("doi:10.1000/tried".to_string(), Checked { check: Check::Unknown, at: 3_000, title: None });
+        let due: Vec<String> = to_check(&names, &checked, &[have], 3_700 + 100).iter().map(Ident::key).collect();
+        assert_eq!(due, ["doi:10.1364/josaa.18.000412", "doi:10.1000/unknown"], "an Unknown is asked again after an hour, an Unverified never");
     }
 
     #[test]

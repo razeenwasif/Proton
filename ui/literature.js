@@ -14,7 +14,8 @@ import { markdown } from "./markdown.js";
 /** @typedef {import("./bindings/PaperRow").PaperRow} PaperRow */
 /** @typedef {import("./bindings/PaperDetail").PaperDetail} PaperDetail */
 /** @typedef {import("./bindings/PaperResult").PaperResult} PaperResult */
-/** @typedef {{slug: string, enabled: boolean, live: boolean, sources: SourceRow[], papers: PaperRow[], fetching: string[], adding: string[]}} LiteratureEvent */
+/** @typedef {import("./bindings/IdentCheck").IdentCheck} IdentCheck */
+/** @typedef {{slug: string, enabled: boolean, check?: boolean, live: boolean, sources: SourceRow[], papers: PaperRow[], fetching: string[], adding: string[]}} LiteratureEvent */
 /** @typedef {{slug: string, detail: PaperDetail | null}} PaperEvent */
 /** @typedef {{slug: string, query: string, searching: boolean, results: PaperResult[], failures: string[]}} ResultsEvent */
 
@@ -59,17 +60,19 @@ function note(row, now) {
 }
 
 /** Which sources are asked, as a sentence: whose keys were found, which have
- *  none, who is resting — and what they are told.
- *  @param {SourceRow[]} rows @param {boolean} enabled @param {number} [now] */
-export function sourcesLine(rows, enabled, now = Date.now() / 1000) {
+ *  none, who is resting — and what they are told; and whether what the team
+ *  cites is checked.
+ *  @param {SourceRow[]} rows @param {boolean} enabled @param {number} [now] @param {boolean} [check] */
+export function sourcesLine(rows, enabled, now = Date.now() / 1000, check = true) {
   const chosen = rows.filter((r) => r.chosen);
   if (!chosen.length) return "Asks no source: choose one above.";
   const said = and(chosen.map((r) => {
     const n = note(r, now);
     return n ? `${r.name} (${n})` : r.name;
   }));
+  const checked = check ? " What the team cites is checked with arXiv, Crossref and the DOI system." : "";
   return enabled
-    ? `Asks ${said}, with the team's queries each round and yours when you search. They see the queries, never your files.`
+    ? `Asks ${said}, with the team's queries each round and yours when you search. They see the queries, never your files.${checked}`
     : `Off: nobody is asked anything. On, it asks ${said}, with the team's queries each round and yours when you search.`;
 }
 
@@ -106,7 +109,7 @@ function headHtml(lit, now) {
       <label class="lit-switch"><input type="checkbox" data-lit-switch${lit.enabled ? " checked" : ""}>
         <span><b>Search the literature each round</b><small>The papers it finds are added to <code>literature/</code>, and given to every seat.</small></span></label>
       <div class="lit-sources" role="group" aria-label="Sources">${lit.sources.map((r) => chip(r, false, now)).join("")}</div>
-      <p class="lit-line">${esc(sourcesLine(lit.sources, lit.enabled, now))}</p>
+      <p class="lit-line">${esc(sourcesLine(lit.sources, lit.enabled, now, lit.check ?? true))}</p>
       ${lit.live ? "" : `<p class="lit-line rs-faint">This Proton asks nobody: a preview, or a test.</p>`}
     </section>`;
 }
@@ -191,12 +194,45 @@ export function literatureHtml({ literature, results, folder, query, adding }) {
     `</div>`;
 }
 
+/** What checking a cited name found, as a mark beside it.
+ *  @type {Record<string, [string, string]>} */
+const CHECKED = {
+  verified: ["✓", "Found"],
+  unverified: ["✗ not found", "Nothing could be found under this name: it may be made up or mistyped. The team is told."],
+  unknown: ["?", "Not checked yet: what issues it could not be reached"],
+  pending: ["…", "Being checked"],
+};
+
+/** A cited name's mark: the investigation's paper it is, or what checking it found.
+ *  @param {IdentCheck} c */
+export function checkBadge(c) {
+  if (c.paper) return `<button class="rs-link" data-lit-paper="${esc(c.paper)}" title="${esc(`${c.text} is ${c.paper} in the literature`)}">${esc(c.paper)}</button>`;
+  const state = c.check ?? "pending";
+  const [mark, why] = CHECKED[state] ?? CHECKED.pending;
+  const title = c.title && state === "verified" ? `${why}: ${c.title}` : why;
+  return `<span class="lit-check" data-check="${esc(state)}" title="${esc(`${c.key} — ${title}`)}">${esc(mark)}</span>`;
+}
+
+/** A citation as the team wrote it, its citations links, each name in it marked.
+ *  @param {string} text @param {IdentCheck[]} checks */
+export function citationHtml(text, checks) {
+  const body = markdown(text, { cite: true }).replace(/^<p>|<\/p>$/g, "");
+  const marks = checks.filter((c) => text.includes(c.text)).map(checkBadge).join(" ");
+  return marks ? `${body} ${marks}` : body;
+}
+
 /** One of a hypothesis's references: one of the investigation's papers, a
  *  button that opens it (with its title, when the literature has it); a DOI
  *  or an arXiv id, a link to it; anything else, as it was written.
- *  @param {string} ref @param {PaperRow[]} papers */
-export function referenceHtml(ref, papers) {
+ *  @param {string} ref @param {PaperRow[]} papers @param {IdentCheck[]} [checks] */
+export function referenceHtml(ref, papers, checks = []) {
   const text = ref.trim();
+  const mark = checks.filter((c) => !c.paper && text.includes(c.text)).map(checkBadge).join(" ");
+  return referenceBody(text, papers) + (mark ? ` ${mark}` : "");
+}
+
+/** @param {string} text @param {PaperRow[]} papers */
+function referenceBody(text, papers) {
   const own = /^\[*(?:literature\/)?(P\d{3,})(?:\.(?:pdf|md))?\b/.exec(text);
   if (own) {
     const paper = papers.find((p) => p.id === own[1]);

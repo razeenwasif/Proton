@@ -2,7 +2,7 @@
 // what the sources line says of each source and its key.
 import {test} from 'node:test';
 import {equal, ok} from 'node:assert/strict';
-import {and, ownPaper, referenceHtml, sourcesLine} from '../../ui/literature.js';
+import {and, checkBadge, citationHtml, ownPaper, referenceHtml, sourcesLine} from '../../ui/literature.js';
 
 test('/p and a DOI, an arXiv id or a link is a paper; anything else is not', () => {
   equal(ownPaper('/p 10.1364/JOSAA.18.000412'), '10.1364/JOSAA.18.000412');
@@ -19,7 +19,8 @@ test('the sources line says who is asked, whose key was found, and who is restin
   const rows = [row('arxiv', 'arXiv', true, 'notNeeded'), row('semanticScholar', 'Semantic Scholar', true, 'found'), row('openAlex', 'OpenAlex', true, 'missing')];
   const on = sourcesLine(rows, true, 0);
   ok(on.startsWith('Asks arXiv, Semantic Scholar (key found) and OpenAlex (no key: a hundred calls a day)'), on);
-  ok(on.includes('never your files'), on);
+  ok(on.includes('never your files') && on.includes('checked with arXiv, Crossref'), on);
+  equal(sourcesLine(rows, true, 0, false).includes('checked'), false, 'a team whose citations are not checked is not said to have them checked');
   ok(sourcesLine(rows, false, 0).startsWith('Off: nobody is asked anything.'));
   const resting = sourcesLine([row('openAlex', 'OpenAlex', true, 'missing', 10_000)], true, 5);
   ok(resting.includes('OpenAlex (out of calls until'), resting);
@@ -40,4 +41,17 @@ test('a reference is the paper it names, a link to a DOI or an arXiv id, or what
   ok(referenceHtml('arXiv:hep-th/9901001', []).includes('href="https://arxiv.org/abs/hep-th/9901001"'));
   const said = referenceHtml('Rayleigh (1871) <script>', []);
   ok(said.includes('&lt;script&gt;') && !said.includes('<script>'), said);
+});
+
+test('a cited name is marked with what checking found, and a paper the investigation has is the paper', () => {
+  const check = (key, check, extra = {}) => ({text: key.replace(/^doi:/, ''), key, check, title: null, paper: null, ...extra});
+  ok(checkBadge(check('doi:10.9999/made.up', 'unverified')).includes('data-check="unverified"'));
+  ok(checkBadge(check('doi:10.9999/made.up', 'unverified')).includes('not found'));
+  ok(checkBadge(check('arxiv:1706.03762', 'verified', {title: 'Attention'})).includes('title="arxiv:1706.03762 — Found: Attention"'));
+  ok(checkBadge(check('doi:10.1/x', null)).includes('data-check="pending"'), 'not yet checked');
+  ok(checkBadge(check('doi:10.1/x', 'verified', {paper: 'P003'})).includes('data-lit-paper="P003"'));
+  const line = citationHtml('Smith (2001), 10.9999/made.up, from memory', [check('doi:10.9999/made.up', 'unverified'), check('doi:10.1/other', 'verified')]);
+  ok(line.includes('data-check="unverified"') && !line.includes('data-check="verified"'), line);
+  ok(citationHtml('As [[literature/P003.pdf p. 4]] shows', []).includes('data-cite="literature/P003.pdf p. 4"'), 'a cited page is a link');
+  ok(referenceHtml('doi:10.9999/made.up', [], [check('doi:10.9999/made.up', 'unverified')]).includes('data-check="unverified"'));
 });

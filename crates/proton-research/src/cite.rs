@@ -8,6 +8,50 @@
 //! results by these keys, numbers papers so as not to add one twice, and
 //! checks what the team cites against them.
 
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+/// What checking a cited name found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "CitationCheck")]
+#[serde(rename_all = "camelCase")]
+pub enum Check {
+    /// What issues names of its kind knows it: Crossref or the DOI system
+    /// for a DOI, arXiv for an arXiv id.
+    Verified,
+    /// What issues names of its kind has no such paper: made up, or mistyped.
+    Unverified,
+    /// It could not be asked. Never taken for made up.
+    Unknown,
+}
+
+/// A check as it is kept: what it found, when, and the title it was given.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Checked {
+    pub check: Check,
+    pub at: u64,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// How long a check that could not be made waits before it is tried again.
+pub const RECHECK: u64 = 60 * 60;
+
+/// The DOIs and arXiv ids named in `texts`, each once, as first written.
+/// The investigation's own papers (`P003`) are not checked: the sources
+/// found them.
+pub fn named_in<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<(String, Ident)> {
+    let mut out: Vec<(String, Ident)> = Vec::new();
+    for text in texts {
+        for (raw, ident) in extract(text) {
+            if !matches!(ident, Ident::Paper(_)) && !out.iter().any(|(_, seen)| seen.key() == ident.key()) {
+                out.push((raw, ident));
+            }
+        }
+    }
+    out
+}
+
 /// A paper, as a citation names it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Ident {

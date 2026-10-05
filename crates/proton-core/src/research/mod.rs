@@ -78,6 +78,15 @@ pub struct Research {
     /// Proton's `proton-mcp`, through which Claude Code and Codex read the
     /// papers' full text.
     mcp: Option<PathBuf>,
+    /// The names the team cited, being checked.
+    checks: Vec<Checking>,
+}
+
+/// Cited DOIs and arXiv ids of one investigation, being checked.
+struct Checking {
+    slug: String,
+    asked: Vec<Ident>,
+    fetch: Fetch,
 }
 
 /// What a citation of an investigation's literature names.
@@ -261,6 +270,7 @@ impl Research {
             showing_paper: None,
             resting: BTreeMap::new(),
             mcp: None,
+            checks: Vec::new(),
         }
     }
 
@@ -293,6 +303,9 @@ impl Research {
         let mut events = vec![self.list_event(&folders)];
         events.extend(self.board());
         events.extend(self.results_event());
+        if let Some(open) = self.open.clone() {
+            self.check_citations(&open, now);
+        }
         events.extend(self.round_event(now));
         events.extend(self.lab_event(true));
         self.reap();
@@ -487,6 +500,7 @@ impl Research {
         self.search = None;
         self.lookups.clear();
         self.downloads.clear();
+        self.checks.clear();
     }
 
     /// A run that ended without being watched to its end: its experiment
@@ -778,6 +792,9 @@ impl Research {
             let until = literature::rest_until(*source, self.literature.key(*source), now);
             self.resting.insert(*source, until);
         }
+        if moved.wrote {
+            self.check_citations(slug, now);
+        }
         for text in moved.notices {
             let text = if open {
                 text
@@ -827,6 +844,7 @@ impl Research {
             Event::ResearchLiterature {
                 slug: slug.clone(),
                 enabled: policy.enabled,
+                check: policy.check,
                 live: self.literature.live(),
                 sources,
                 papers: board.paper_rows(),
@@ -842,6 +860,90 @@ impl Research {
         let Some(slug) = &self.open else { return Vec::new() };
         let Ok(folder) = self.store.open(slug) else { return Vec::new() };
         self.literature_events(&folder, &Board::read(&folder))
+    }
+
+    /// Check the DOIs and arXiv ids an investigation's hypotheses and reviews
+    /// cite that have not been — against what issues each: arXiv, Crossref,
+    /// the DOI system — when its literature is on and it checks citations.
+    fn check_citations(&mut self, slug: &str, now: u64) {
+        if self.checks.iter().any(|c| c.slug == slug) {
+            return;
+        }
+        let Ok(folder) = self.store.open(slug) else { return };
+        let policy = &folder.investigation().literature;
+        if !policy.enabled || !policy.check {
+            return;
+        }
+        let (hypotheses, reviews) = (folder.hypotheses(), folder.reviews());
+        let texts = hypotheses.iter().flat_map(|h| h.references.iter()).chain(reviews.iter().flat_map(|r| r.citations.iter()));
+        let names: Vec<Ident> = cite::named_in(texts.map(String::as_str)).into_iter().map(|(_, ident)| ident).collect();
+        let due = proton_research::literature::to_check(&names, &folder.citations(), &folder.papers(), now);
+        if due.is_empty() {
+            return;
+        }
+        // A few dozen at a time: the rest are checked the next time anything is written.
+        let asked: Vec<Ident> = due.into_iter().take(40).collect();
+        let fetch = self.literature.fetch(Job::Lookup { idents: asked.clone(), sources: Vec::new() });
+        self.checks.push(Checking { slug: slug.to_string(), asked, fetch });
+    }
+
+    /// What checking found, written down; the names nothing was found for
+    /// said, and told to the round's next tasks.
+    fn settle_checks(&mut self, now: u64) -> Vec<Event> {
+        let mut events = Vec::new();
+        let mut i = 0;
+        while i < self.checks.len() {
+            let replies = self.checks[i].fetch.poll();
+            let done = self.checks[i].fetch.is_done();
+            let (slug, asked) = (self.checks[i].slug.clone(), self.checks[i].asked.clone());
+            for reply in replies {
+                let (found, missing, failed): (Vec<(Ident, Record)>, Vec<Ident>, Vec<Ident>) = match reply {
+                    Reply::Resolved { found, missing, failures } => (found, missing, failures.into_iter().map(|(ident, _)| ident).collect()),
+                    Reply::Failed { .. } => (Vec::new(), Vec::new(), asked.clone()),
+                    _ => continue,
+                };
+                let Ok(folder) = self.store.open(&slug) else { continue };
+                let mut checked = folder.citations();
+                for (ident, record) in &found {
+                    let title = Some(record.title.trim().to_string()).filter(|t| !t.is_empty());
+                    checked.insert(ident.key(), cite::Checked { check: cite::Check::Verified, at: now, title });
+                }
+                for ident in &missing {
+                    checked.insert(ident.key(), cite::Checked { check: cite::Check::Unverified, at: now, title: None });
+                }
+                // Not answered either way is not answered: never made up.
+                let answered: Vec<String> = found.iter().map(|(i, _)| i.key()).chain(missing.iter().map(Ident::key)).collect();
+                for ident in failed.iter().chain(asked.iter()).filter(|i| !answered.contains(&i.key())) {
+                    checked.insert(ident.key(), cite::Checked { check: cite::Check::Unknown, at: now, title: None });
+                }
+                if let Err(why) = folder.write_citations(&checked) {
+                    events.push(notice(why, NoticeLevel::Error));
+                    continue;
+                }
+                if !missing.is_empty() {
+                    let said: Vec<String> = missing.iter().map(Ident::text).collect();
+                    let what = if said.len() == 1 { "A citation" } else { "Citations" };
+                    let title = folder.investigation().title.clone();
+                    let mine = self.open.as_deref() == Some(slug.as_str());
+                    events.push(notice(
+                        format!("{}{what} the team made could not be found: {}. The team is told.", if mine { String::new() } else { format!("{title}: ") }, said.join(", ")),
+                        NoticeLevel::Warn,
+                    ));
+                }
+                if let Some(driver) = self.drivers.get_mut(&slug) {
+                    driver.invalidate();
+                }
+                if self.open.as_deref() == Some(slug.as_str()) {
+                    events.extend(self.board());
+                }
+            }
+            if done {
+                self.checks.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+        events
     }
 
     /// The scientist's last search, when it was of the open investigation.
@@ -1100,7 +1202,7 @@ impl Research {
     /// What the literature's fetches have found since last looked: the
     /// search's results, papers looked up and added, PDFs kept.
     fn poll_literature(&mut self, now: u64) -> Vec<Event> {
-        let mut events = Vec::new();
+        let mut events = self.settle_checks(now);
         let mut changed: BTreeSet<String> = BTreeSet::new();
 
         let mut tired = Vec::new();
@@ -1468,6 +1570,7 @@ impl Research {
             || self.search.as_ref().is_some_and(|s| s.fetch.is_some())
             || !self.lookups.is_empty()
             || !self.downloads.is_empty()
+            || !self.checks.is_empty()
     }
 }
 

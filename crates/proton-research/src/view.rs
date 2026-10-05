@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::cite::{self, Ident};
+use crate::cite::{self, Check, Checked, Ident};
 use crate::elo::{self, Rating};
 use crate::literature;
 use crate::model::{
@@ -72,12 +72,31 @@ pub struct HypothesisDetail {
     pub assumptions: Vec<String>,
     /// The papers it rests on, as its author named them.
     pub references: Vec<String>,
+    /// What checking the DOIs and arXiv ids in its references and its
+    /// reviews' citations found.
+    pub checks: Vec<IdentCheck>,
     /// What was evolved from it.
     pub children: Vec<String>,
     pub reviews: Vec<ReviewView>,
     pub matches: Vec<MatchView>,
     pub experiments: Vec<String>,
     pub task: Option<String>,
+}
+
+/// A DOI or an arXiv id the team cited, and what checking it found.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct IdentCheck {
+    /// As it was written.
+    pub text: String,
+    pub key: String,
+    /// What checking it found; none until it has been checked.
+    pub check: Option<Check>,
+    /// The title it was found under.
+    pub title: Option<String>,
+    /// The investigation's paper it is, when it is one: the sources found it.
+    pub paper: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -347,21 +366,30 @@ pub struct Board {
     pub matches: Vec<Match>,
     pub experiments: Vec<Experiment>,
     pub papers: Vec<Paper>,
+    /// What checking the names the team cites found, by key.
+    pub citations: BTreeMap<String, Checked>,
     pub ratings: BTreeMap<String, Rating>,
 }
 
 impl Board {
     pub fn read(folder: &Folder) -> Board {
-        Board::from(folder.hypotheses(), folder.reviews(), folder.matches(), folder.experiments()).with_papers(folder.papers())
+        let mut board = Board::from(folder.hypotheses(), folder.reviews(), folder.matches(), folder.experiments()).with_papers(folder.papers());
+        board.citations = folder.citations();
+        board
     }
 
     pub fn from(hypotheses: Vec<Hypothesis>, reviews: Vec<Review>, matches: Vec<Match>, experiments: Vec<Experiment>) -> Board {
         let ratings = elo::ratings(&matches);
-        Board { hypotheses, reviews, matches, experiments, papers: Vec::new(), ratings }
+        Board { hypotheses, reviews, matches, experiments, papers: Vec::new(), citations: BTreeMap::new(), ratings }
     }
 
     pub fn with_papers(mut self, papers: Vec<Paper>) -> Board {
         self.papers = papers;
+        self
+    }
+
+    pub fn with_citations(mut self, citations: BTreeMap<String, Checked>) -> Board {
+        self.citations = citations;
         self
     }
 
@@ -396,6 +424,50 @@ impl Board {
             cited: self.cited_by(p).len() as u32,
             sources: p.record.sources.clone(),
         }
+    }
+
+    /// What checking each DOI and arXiv id in `texts` found.
+    pub fn checks<'a>(&self, texts: impl IntoIterator<Item = &'a str>) -> Vec<IdentCheck> {
+        cite::named_in(texts)
+            .into_iter()
+            .map(|(text, ident)| {
+                let key = ident.key();
+                let paper = self.papers.iter().find(|p| names(p, &ident)).map(|p| p.id.clone());
+                let found = self.citations.get(&key);
+                IdentCheck {
+                    text,
+                    check: if paper.is_some() { Some(Check::Verified) } else { found.map(|c| c.check) },
+                    title: found.and_then(|c| c.title.clone()),
+                    key,
+                    paper,
+                }
+            })
+            .collect()
+    }
+
+    /// The citations the team made that what issues them has no record of,
+    /// each with where it was made: for the next tasks to be told.
+    pub fn unverified(&self) -> Vec<(String, Vec<String>)> {
+        let mut out: Vec<(String, Vec<String>)> = Vec::new();
+        let mut note = |texts: &[String], by: &str| {
+            for (_, ident) in cite::named_in(texts.iter().map(String::as_str)) {
+                if self.citations.get(&ident.key()).is_some_and(|c| c.check == Check::Unverified) {
+                    // Said one way, however it was written: `doi:10.…`, `arXiv:…`.
+                    match out.iter_mut().find(|(t, _)| Ident::parse(t).is_some_and(|i| i.key() == ident.key())) {
+                        Some((_, by_list)) if !by_list.iter().any(|b| b == by) => by_list.push(by.to_string()),
+                        Some(_) => {}
+                        None => out.push((ident.text(), vec![by.to_string()])),
+                    }
+                }
+            }
+        };
+        for h in &self.hypotheses {
+            note(&h.references, &h.id);
+        }
+        for r in &self.reviews {
+            note(&r.citations, &r.id);
+        }
+        out
     }
 
     /// The literature, in the order it was added.
@@ -488,6 +560,9 @@ impl Board {
             predictions: h.predictions.clone(),
             assumptions: h.assumptions.clone(),
             references: h.references.clone(),
+            checks: self.checks(
+                h.references.iter().chain(self.reviews.iter().filter(|r| r.hypothesis == id).flat_map(|r| r.citations.iter())).map(String::as_str),
+            ),
             children: self.hypotheses.iter().filter(|c| c.parents.iter().any(|p| p == id)).map(|c| c.id.clone()).collect(),
             reviews: self
                 .reviews

@@ -88,6 +88,8 @@ struct Fake {
     asked: bool,
     /// What it proposes to run with its first hypothesis.
     code: String,
+    /// What its hypotheses cite.
+    references: Vec<String>,
 }
 
 /// The labels a prompt shows hypotheses under, and the pairs it shows.
@@ -113,7 +115,7 @@ fn proposing(code: &str) -> Value {
 
 /// A good answer to a step, read off what it was shown — proposing `code`
 /// with each new hypothesis, if there is any.
-fn answer(phase: Phase, prompt: &str, seat: Seat, n: usize, code: &str) -> Value {
+fn answer(phase: Phase, prompt: &str, seat: Seat, n: usize, code: &str, references: &[String]) -> Value {
     let (shown, pairs) = labels(prompt);
     let words = ["rayleigh", "ozone", "aerosol", "polarisation", "cone", "spectrum", "twilight", "dipole", "albedo"];
     let hypothesis = |i: usize| {
@@ -121,7 +123,7 @@ fn answer(phase: Phase, prompt: &str, seat: Seat, n: usize, code: &str) -> Value
         json!({
             "title": format!("{} idea {n}.{i}", seat.name()),
             "statement": format!("The sky's colour comes from {w} effect number {n}{i}, as {} argues in proposal {n} item {i}.", seat.name()),
-            "rationale": "Because.", "predictions": ["A measurable thing."], "assumptions": [],
+            "rationale": "Because.", "predictions": ["A measurable thing."], "assumptions": [], "references": references,
             "experiment": if i == 0 && !code.is_empty() { proposing(code) } else { proposal() },
         })
     };
@@ -157,7 +159,7 @@ impl Fake {
         match step {
             Step::Answer => {
                 let prompt = self.call(|c| c.sent[0].clone());
-                let value = answer(self.phase, &prompt, self.seat, self.index, &self.code);
+                let value = answer(self.phase, &prompt, self.seat, self.index, &self.code, &self.references);
                 self.fold.settle("", Some(value));
                 self.fold.turn_ended(10, false, None);
             }
@@ -283,6 +285,8 @@ struct Factory {
     fates: Vec<(Seat, Phase, VecDeque<Step>)>,
     /// Code each new hypothesis comes with, if any.
     code: String,
+    /// What each seat's hypotheses cite.
+    references: BTreeMap<Seat, Vec<String>>,
     /// The model each seat is given when the investigation names none.
     defaults: BTreeMap<Seat, String>,
 }
@@ -353,6 +357,7 @@ impl AgentFactory for Factory {
             log: self.log.clone(),
             asked: false,
             code: self.code.clone(),
+            references: self.references.get(&task.seat).cloned().unwrap_or_default(),
         }))
     }
 }
@@ -1308,4 +1313,64 @@ fn claude_code_and_codex_read_the_papers_through_protons_server_and_antigravity_
     drop(log);
     let _ = std::fs::remove_dir_all(dir);
     let _ = std::fs::remove_dir_all(dir2);
+}
+
+#[test]
+fn a_made_up_doi_is_found_out_said_and_told_to_the_overview_and_a_real_one_is_not() {
+    use proton_literature::fetch::{Job, Reply};
+    use proton_research::cite::{Check, Ident};
+    use proton_research::model::Record;
+    let dir = root("checked");
+    let (mut factory, log) = Factory::new();
+    factory.references.insert(Seat::Codex, vec!["doi:10.9999/made.up".into(), "arXiv:1706.03762".into(), "10.1000/unreachable".into()]);
+    // Crossref has no record of the made-up DOI; arXiv has the paper; the third could not be asked.
+    let source = super::literature::Scripted::new(|job| match job {
+        Job::Lookup { idents, sources } => {
+            assert!(sources.is_empty(), "a check asks only what issues the names");
+            let mut found = Vec::new();
+            let mut missing = Vec::new();
+            let mut failures = Vec::new();
+            for ident in idents {
+                match ident.key().as_str() {
+                    "arxiv:1706.03762" => found.push((ident.clone(), Record { title: "Attention Is All You Need".into(), ..Record::default() })),
+                    "doi:10.9999/made.up" => missing.push(ident.clone()),
+                    _ => failures.push((ident.clone(), "api.crossref.org could not be reached".to_string())),
+                }
+            }
+            vec![Reply::Resolved { found, missing, failures }]
+        }
+        Job::Search { .. } => vec![Reply::Searched { candidates: Vec::new(), failures: Vec::new() }],
+        Job::Download { .. } => vec![Reply::Finished],
+    });
+    let asked = source.asked.clone();
+    let mut research = Research::with_factory(&dir, Box::new(factory), "this-proton").with_literature(Box::new(source));
+    research.create("Why is the sky blue?", "Explain the colour of the daytime sky.", Discipline::Physics, true);
+    research.start_at(T0);
+    let (_, events) = play(&mut research, T0, 1);
+
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    let checked = folder.citations();
+    assert_eq!(checked["doi:10.9999/made.up"].check, Check::Unverified);
+    assert_eq!((checked["arxiv:1706.03762"].check, checked["arxiv:1706.03762"].title.as_deref()), (Check::Verified, Some("Attention Is All You Need")));
+    assert_eq!(checked["doi:10.1000/unreachable"].check, Check::Unknown, "unreachable is not made up");
+    assert!(notices(&events).iter().any(|n| n.contains("could not be found: doi:10.9999/made.up")), "{:?}", notices(&events));
+    let checks = asked.lock().unwrap().iter().filter(|j| matches!(j, Job::Lookup { .. })).count();
+    assert_eq!(checks, 1, "a name is checked once, however often it is cited");
+
+    let log = log.lock().unwrap();
+    let meta = log.calls.iter().find(|c| c.phase == Phase::Meta).expect("an overview");
+    assert!(meta.sent[0].contains("### Citations that could not be found") && meta.sent[0].contains("doi:10.9999/made.up — in H"), "{}", meta.sent[0]);
+    assert!(!meta.sent[0].contains("1706.03762 — in"), "a citation that was found is not called made up");
+    drop(log);
+
+    // The hypothesis says what each of its names was found to be.
+    let events = research.show(Some(folder.hypotheses().iter().find(|h| h.author.seat == Seat::Codex).unwrap().id.clone()));
+    let checks = events.iter().find_map(|e| match e {
+        Event::ResearchHypothesis { detail: Some(d), .. } => Some(d.checks.clone()),
+        _ => None,
+    });
+    let checks: Vec<(String, Option<Check>)> = checks.unwrap().into_iter().map(|c| (c.key, c.check)).collect();
+    assert!(checks.contains(&("doi:10.9999/made.up".to_string(), Some(Check::Unverified))) && checks.contains(&("arxiv:1706.03762".to_string(), Some(Check::Verified))), "{checks:?}");
+    assert!(Ident::parse("doi:10.9999/made.up").is_some());
+    let _ = std::fs::remove_dir_all(dir);
 }

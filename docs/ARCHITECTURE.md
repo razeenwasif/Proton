@@ -943,6 +943,18 @@ extracts each new PDF into `.investigation/pdf-text/`, so no call waits on it.
 A citation of `literature/…` anywhere on the board opens the paper's PDF at the
 page in the document viewer, or the paper itself.
 
+What the team cites is checked. After anything is written, the DOIs and
+arXiv ids in the hypotheses' references and the reviews' citations that the
+investigation does not have as papers are asked of what issues them — arXiv's
+`id_list`, twenty at a time; Crossref for a DOI, and the DOI system for one
+Crossref has no record of, since a dataset's DOI is real too — with no other
+source. Each name is kept in `.investigation/citations.json` as verified,
+unverified or unknown: unreachable is never taken for made up, and is asked
+again after an hour; an answer either way is never asked again. A name
+nothing could be found for is said in a notice and told to every task after,
+with where it was cited, so none is cited again and what rests on it is
+weighed for it; a hypothesis's page marks each name it and its reviews cite.
+
 An investigation made before there was a literature has it off, so none starts
 telling third parties its topic on its own; a new one has it on unless the
 scientist says otherwise. Off, nothing is asked of anybody: the scientist's

@@ -16,7 +16,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
-import { literatureHtml, ownPaper, paperHtml, referenceHtml } from "./literature.js";
+import { citationHtml, literatureHtml, ownPaper, paperHtml, referenceHtml } from "./literature.js";
 
 /** @typedef {import("./bindings/ResearchSummary").ResearchSummary} Summary */
 /** @typedef {import("./bindings/HypothesisRow").HypothesisRow} Row */
@@ -419,6 +419,10 @@ export function createResearch(host) {
       d.children.length ? `<span>Evolved into ${links(d.children)}</span>` : "",
       h.duplicateOf ? `<span>Says what ${links([h.duplicateOf])} says</span>` : "",
     ].filter(Boolean).join("");
+    const missing = (d.checks ?? []).filter((c) => c.check === "unverified").map((c) => c.text);
+    const unfound = missing.length
+      ? `${missing.length === 1 ? "A citation" : `${missing.length} citations`} here could not be found: ${missing.join(", ")}. It may be made up or mistyped; the team is told.`
+      : "";
     const reviews = d.reviews.map((r) => `<article class="rs-review">
         <header><span class="rs-verdict" data-verdict="${esc(r.verdict)}">${esc(VERDICTS[r.verdict] ?? r.verdict)}</span>
           <span class="rs-review-who">${esc(KINDS[r.kind] ?? r.kind)} by ${esc(who(r.reviewer))}</span>
@@ -426,7 +430,7 @@ export function createResearch(host) {
           <span class="rs-scores" title="Correctness, novelty, testability (1–5)">C ${r.correctness} · N ${r.novelty} · T ${r.testability}</span></header>
         <div class="cc-prose">${prose(r.summary)}</div>
         ${r.critique.trim() ? `<details class="rs-fold"><summary>${r.kind === "verification" ? "Derivation" : "Critique"}</summary><div class="cc-prose">${prose(r.critique)}</div></details>` : ""}
-        ${r.citations.length ? `<div class="rs-cites">${list(r.citations)}</div>` : ""}
+        ${r.citations.length ? `<div class="rs-cites"><ul>${r.citations.map((c) => `<li>${citationHtml(c, d.checks ?? [])}</li>`).join("")}</ul></div>` : ""}
       </article>`).join("");
     const matches = d.matches.map((m) => `<li class="rs-match ${m.won ? "won" : "lost"}">
         <b>${m.won ? "Beat" : "Lost to"}</b> ${links([m.opponent])} ${esc(m.opponentTitle)}
@@ -438,12 +442,13 @@ export function createResearch(host) {
       <h2 class="rs-h"><span class="rs-id">${esc(h.id)}</span> ${esc(h.title)}</h2>
       <div class="rs-meta">${meta}</div>
       ${lineage ? `<div class="rs-lineage">${lineage}</div>` : ""}
+      ${unfound ? `<div class="cc-notice warn rs-unfound">${esc(unfound)}</div>` : ""}
       <section class="rs-doc"><header><span>Statement</span></header><div class="cc-prose">${prose(d.statement)}</div></section>
       ${d.rationale.trim() ? `<section class="rs-doc"><header><span>Rationale</span></header><div class="cc-prose">${prose(d.rationale)}</div></section>` : ""}
       ${d.predictions.length ? `<section class="rs-doc"><header><span>Predictions</span></header><div class="cc-prose">${list(d.predictions)}</div></section>` : ""}
       ${d.assumptions.length ? `<section class="rs-doc"><header><span>Assumptions</span></header><div class="cc-prose">${list(d.assumptions)}</div></section>` : ""}
       ${d.references?.length ? `<section class="rs-doc"><header><span>References</span></header><ul class="rs-refs">${
-        d.references.map((ref) => `<li>${referenceHtml(ref, literature()?.papers ?? [])}</li>`).join("")}</ul></section>` : ""}
+        d.references.map((ref) => `<li>${referenceHtml(ref, literature()?.papers ?? [], d.checks ?? [])}</li>`).join("")}</ul></section>` : ""}
       ${reviews ? `<section class="rs-doc"><header><span>Reviews</span></header>${reviews}</section>` : ""}
       ${matches ? `<section class="rs-doc"><header><span>Tournament</span></header><ul class="rs-matches">${matches}</ul></section>` : ""}
       ${d.experiments.length ? `<section class="rs-doc"><header><span>Experiments</span></header><p class="rs-faint">${d.experiments.map(esc).join(", ")}</p></section>` : ""}

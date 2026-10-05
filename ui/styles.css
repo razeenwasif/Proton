@@ -4014,6 +4014,11 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .rs-lit-step .rs-seat { color: var(--cc-text); }
 .rs-lit-step .rs-link { margin-left: 2px; }
 .rs-refs { margin: 0; padding-left: 18px; font: var(--z-xs)/1.8 var(--cc-font); color: var(--cc-soft); }
+.lit-check { display: inline-block; margin-left: 2px; padding: 0 5px; border-radius: 4px; font: var(--z-2xs)/1.5 var(--cc-font); cursor: help; white-space: nowrap; }
+.lit-check[data-check="verified"] { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.lit-check[data-check="unverified"] { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); font-weight: 600; }
+.lit-check[data-check="unknown"], .lit-check[data-check="pending"] { color: var(--cc-muted); background: var(--cc-raise-2); }
+.rs-unfound { margin: 0 0 16px; }
 .rs-refs a { color: var(--cc-accent); text-decoration: none; }
 .rs-refs a:hover { text-decoration: underline; }
 .rs-task.on { background: var(--row-on); box-shadow: inset 0 0 0 1px var(--row-on-edge); }

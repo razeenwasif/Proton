@@ -1199,6 +1199,8 @@ pub enum Event {
     ResearchLiterature {
         slug: String,
         enabled: bool,
+        /// Whether what the team cites is checked.
+        check: bool,
         /// Whether this Proton asks anybody at all.
         live: bool,
         sources: Vec<LiteratureSourceRow>,

@@ -55,6 +55,8 @@ pub struct Context<'a> {
     pub feedback: &'a str,
     /// The literature, as [`literature`] says it: empty for none.
     pub literature: String,
+    /// The citations nothing could be found for, as [`unverified`] says it.
+    pub unverified: String,
 }
 
 impl Context<'_> {
@@ -67,8 +69,24 @@ impl Context<'_> {
             ("plan", &or(&clip(self.plan, 6_000), "_None yet._")),
             ("feedback", &or(&clip(&tail(self.feedback, 4_000), 4_000), "_Nothing yet._")),
             ("literature", &self.literature),
+            ("unverified", &self.unverified),
         ])
     }
+}
+
+/// The citations the team made that what issues them has no record of —
+/// each with where it was made — for every task after: said once, plainly,
+/// so that none is cited again and what rests on one is weighed for it.
+pub fn unverified(cited: &[(String, Vec<String>)]) -> String {
+    if cited.is_empty() {
+        return String::new();
+    }
+    let list: Vec<String> = cited.iter().take(20).map(|(text, by)| format!("- {text} — in {}", by.join(", "))).collect();
+    format!(
+        "### Citations that could not be found\n\nThe team cited these, and what issues them — Crossref and the DOI system, or arXiv — has no record of \
+         them: they may be made up or mistyped. Do not cite them again, and weigh what rests on them accordingly.\n\n{}\n",
+        list.join("\n")
+    )
 }
 
 /// The most of the literature every task is shown, in bytes: enough for a
@@ -325,7 +343,15 @@ mod tests {
     use crate::model::{Author, HypothesisStatus};
 
     fn ctx() -> Context<'static> {
-        Context { title: "Why is the sky blue?", discipline: Discipline::Physics, brief: "Explain it.", plan: "", feedback: "", literature: String::new() }
+        Context {
+            title: "Why is the sky blue?",
+            discipline: Discipline::Physics,
+            brief: "Explain it.",
+            plan: "",
+            feedback: "",
+            literature: String::new(),
+            unverified: String::new(),
+        }
     }
 
     fn h() -> Hypothesis {
@@ -397,6 +423,16 @@ mod tests {
         ctx.literature = literature(&[paper(1, true)]);
         let prompt = generate(&ctx, 2, &[], &[]);
         assert!(prompt.contains("- **P001**") && !prompt.contains("### The literature the team has gathered:"), "a heading with a colon reads as a label");
+    }
+
+    #[test]
+    fn citations_nothing_was_found_for_are_said_to_every_task_after() {
+        assert_eq!(unverified(&[]), "");
+        let mut ctx = ctx();
+        ctx.unverified = unverified(&[("doi:10.9999/made.up".into(), vec!["H003".into(), "H003.1".into()])]);
+        let prompt = meta(&ctx, &[], "", "");
+        assert!(prompt.contains("### Citations that could not be found") && prompt.contains("- doi:10.9999/made.up — in H003, H003.1"), "{prompt}");
+        assert!(generate(&ctx, 2, &[], &[]).contains("Do not cite them again"));
     }
 
     #[test]

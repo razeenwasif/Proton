@@ -198,6 +198,10 @@ feedback: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypot
  */
 autoRun: boolean, } | { "type": "researchRun", slug: string, detail: LabRunDetail | null, } | { "type": "researchLiterature", slug: string, enabled: boolean, 
 /**
+ * Whether what the team cites is checked.
+ */
+check: boolean, 
+/**
  * Whether this Proton asks anybody at all.
  */
 live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 

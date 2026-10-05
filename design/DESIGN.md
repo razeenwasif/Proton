@@ -686,7 +686,11 @@ it, then what it added, each paper a link to it, or why it did not search,
 with what any source said went wrong. What the team writes cites a paper's
 page as `[[literature/P003.pdf p. 4]]`, drawn as a citation link — in a review,
 a hypothesis, the overview, a call's transcript — which opens the PDF at that
-page in the document viewer; one citing an abstract opens the paper. A hypothesis's page lists the papers
+page in the document viewer; one citing an abstract opens the paper. Each DOI or arXiv id cited there is marked with what
+checking it found — a green ✓, with the title it was found under; a red
+"✗ not found", which a hypothesis's page also says at its top; a grey ? while
+it could not be asked — and one that is a paper of the investigation's is
+that paper's link. A hypothesis's page lists the papers
 it rests on: the investigation's own as links into the Literature tab, with
 their titles; DOIs and arXiv ids as links to the browser; anything else as it
 was written.
