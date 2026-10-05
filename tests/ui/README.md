@@ -132,7 +132,9 @@ The document checks open `fixtures/three-pages.pdf` — three pages, the middle
 one landscape, written by hand to be small — over Data rather than Codex, at
 the page a citation names, and check that its pages are drawn with their text
 over them, that its keys scroll and zoom it and reach nothing underneath, and
-that Escape puts it away. A notebook's SVG figure is checked to be drawn as a
+that Escape puts it away. `fixtures/cjk.pdf`, written by hand, sets 日本語 in a
+CID font it does not embed, encoded with Adobe's `UniJIS-UCS2-H`: its text is
+drawn and read only when pdf.js finds the character maps vendored beside it. A notebook's SVG figure is checked to be drawn as a
 picture whose script does not run and whose style does not reach the window.
 
 The Research checks push the core's research events into the page and read

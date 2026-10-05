@@ -1466,6 +1466,18 @@ await test('A PDF opens over the mode on screen, draws its pages as they come ne
   assert(viewer.hidden && !viewer.querySelector('.doc-page'), 'Escape did not put it away');
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('A PDF that leans on what it does not carry — CJK text in a font it does not embed — is drawn and its text read', async () => {
+  // 日本語 in a CID font encoded with Adobe's UniJIS-UCS2-H: neither drawn nor
+  // extracted unless pdf.js finds its vendored character maps.
+  await win.pushEvents([{type: 'document', path: '/tests/ui/fixtures/cjk.pdf', name: 'cjk.pdf', kind: 'pdf', page: null}]);
+  const viewer = $('#doc-viewer');
+  const text = () => [...viewer.querySelectorAll('.textLayer span')].map((s) => s.textContent).join('');
+  for (let i = 0; i < 60 && !text().includes('日本語'); i++) await settle();
+  assert(text().includes('日本語'), `the CJK text was not read: ${JSON.stringify(text())} ${viewer.querySelector('.doc-note')?.textContent ?? ''}`);
+  assert(viewer.querySelector('.doc-page canvas'), 'the page was not drawn');
+  key('Escape'); await settle();
+  assert(viewer.hidden, 'Escape did not put it away');
+});
 await test('A notebook draws an SVG figure as a picture, whose scripts and styles stay its own', async () => {
   await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
   win.svgRan = false;

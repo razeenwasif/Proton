@@ -63,6 +63,19 @@ async function library() {
   return pdfjs;
 }
 
+/** Where pdf.js finds what a PDF may lean on without carrying it: the
+ *  character maps CJK text is written in, the standard fonts it names
+ *  without embedding, the decoders for JPEG 2000 and JBIG2 images, and the
+ *  colour profile CMYK is converted with — vendored beside the library, as
+ *  it is (see vendor/pdfjs/README.md). The decoders are WebAssembly with a
+ *  plain-JS fallback beside each, which pdf.js imports when a content
+ *  security policy refuses to compile WebAssembly: Proton's allows only
+ *  `script-src 'self'`, and the fallback is that. */
+function assets() {
+  const dir = (/** @type {string} */ name) => new URL(`./vendor/pdfjs/${name}/`, import.meta.url).href;
+  return { cMapUrl: dir("cmaps"), cMapPacked: true, standardFontDataUrl: dir("standard_fonts"), wasmUrl: dir("wasm"), iccUrl: dir("iccs") };
+}
+
 const panel = () => /** @type {HTMLElement | null} */ (document.getElementById("doc-viewer"));
 const box = () => /** @type {HTMLElement | null} */ (panel()?.querySelector("[data-doc-pages-box]") ?? null);
 const label = (/** @type {string} */ name) => panel()?.querySelector(`[data-doc-${name}]`);
@@ -112,7 +125,7 @@ export async function openDocument(event) {
   }
   let doc;
   try {
-    doc = await lib.getDocument({ data: bytes }).promise;
+    doc = await lib.getDocument({ data: bytes, ...assets() }).promise;
   } catch (err) {
     if (mine === generation) note(`This does not look like a PDF.<br>${escape(String(err))}`);
     return;
