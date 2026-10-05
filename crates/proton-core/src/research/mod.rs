@@ -34,7 +34,7 @@ use proton_research::Discipline;
 
 use crate::bus::{Event, NoticeLevel};
 use crate::workspace::notice;
-use driver::{Driver, Moved};
+use driver::{Driver, Kit, Moved};
 use factory::{AgentFactory, Engines};
 
 pub struct Research {
@@ -624,9 +624,9 @@ impl Research {
             if self.driver(&slug).is_none() {
                 continue;
             }
-            let factory = self.factory.as_mut();
+            let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting };
             let Some(driver) = self.drivers.get_mut(&slug) else { continue };
-            let moved = driver.run_finished(factory, &summary, now);
+            let moved = driver.run_finished(&mut kit, &summary, now);
             events.extend(self.moved(&slug, moved, now));
             events.extend(self.auto_run(&slug));
         }
@@ -693,6 +693,7 @@ impl Research {
             cap: driver.cap(),
             seats: driver.seats(),
             tasks: driver.tasks(),
+            literature: driver.literature(),
             held: driver.held(now),
         }]
     }
@@ -747,6 +748,10 @@ impl Research {
     fn moved(&mut self, slug: &str, moved: Moved, now: u64) -> Vec<Event> {
         let open = self.open.as_deref() == Some(slug);
         let mut events = Vec::new();
+        for source in &moved.tired {
+            let until = literature::rest_until(*source, self.literature.key(*source), now);
+            self.resting.insert(*source, until);
+        }
         for text in moved.notices {
             let text = if open {
                 text
@@ -1242,6 +1247,7 @@ impl Research {
             rationale: String::new(),
             predictions: Vec::new(),
             assumptions: Vec::new(),
+            references: Vec::new(),
             extra: Vec::new(),
         };
         match folder.write_hypothesis(&h) {
@@ -1328,9 +1334,9 @@ impl Research {
         if self.driver(&slug).is_none() {
             return vec![notice(format!("research/{slug} could not be read."), NoticeLevel::Error)];
         }
-        let factory = self.factory.as_mut();
+        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting };
         let Some(driver) = self.drivers.get_mut(&slug) else { return Vec::new() };
-        match driver.start(factory, now) {
+        match driver.start(&mut kit, now) {
             Ok(moved) => self.moved(&slug, moved, now),
             Err(why) => {
                 let mut events = vec![notice(why, NoticeLevel::Warn)];
@@ -1360,9 +1366,9 @@ impl Research {
         if self.driver(&slug).is_none() {
             return Vec::new();
         }
-        let factory = self.factory.as_mut();
+        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting };
         let Some(driver) = self.drivers.get_mut(&slug) else { return Vec::new() };
-        match driver.resume(factory, now) {
+        match driver.resume(&mut kit, now) {
             Ok(moved) => self.moved(&slug, moved, now),
             Err(why) => vec![notice(why, NoticeLevel::Warn)],
         }
@@ -1392,9 +1398,10 @@ impl Research {
         lab.extend(self.poll_runs(now));
         lab.extend(self.poll_literature(now));
         let mut all = Vec::new();
+        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting };
         for (slug, driver) in self.drivers.iter_mut() {
-            if driver.busy() {
-                all.push((slug.clone(), driver.poll(self.factory.as_mut(), now)));
+            if driver.busy() || driver.fetching() {
+                all.push((slug.clone(), driver.poll(&mut kit, now)));
             }
         }
         let mut events = Vec::new();
@@ -1415,7 +1422,7 @@ impl Research {
     /// investigations elsewhere would leave behind. The Lab's Python is the
     /// machine's, and goes with them.
     pub fn has_work(&self) -> bool {
-        self.drivers.values().any(Driver::busy)
+        self.drivers.values().any(|d| d.busy() || d.fetching())
             || !self.runs.is_empty()
             || self.search.as_ref().is_some_and(|s| s.fetch.is_some())
             || !self.lookups.is_empty()
@@ -1492,6 +1499,7 @@ mod tests {
                 rationale: "Small scatterers.".into(),
                 predictions: Vec::new(),
                 assumptions: Vec::new(),
+                references: Vec::new(),
                 extra: Vec::new(),
             })
             .unwrap();

@@ -1712,6 +1712,41 @@ await test('Research keeps a literature: searched, added, opened, and turned off
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('Research shows a round\'s search of the literature, and the papers a hypothesis rests on', async () => {
+  await win.dispatch({type: 'setMode', mode: 'research'}); await settle();
+  const step = (state, extra = {}) => ({state, why: null, queries: ['rayleigh scattering skylight'], added: [], notes: [], started: 100, ended: null, ...extra});
+  const tasks = [{id: 'T0001', round: 1, phase: 'frame', seat: 'claude', role: 'investigator', targets: [], state: 'done', why: null, model: '', attempts: 0, started: 90, ended: 99},
+    {id: 'T0002', round: 1, phase: 'generate', seat: 'codex', role: 'engineer', targets: [], state: 'ready', why: null, model: '', attempts: 0, started: null, ended: null}];
+  const roundWith = (literature) => ({type: 'researchRound', slug: 'sky', round: 1, status: {status: 'running'}, used: 1, cap: 20,
+    seats: ['claude', 'codex', 'antigravity'].map((seat) => ({seat, role: 'investigator', enabled: true, why: null, cooling: null, running: 0, model: ''})), tasks, literature, held: null});
+  await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?')], open: 'sky'},
+    researchBoard(), {type: 'researchHypothesis', slug: 'sky', detail: null}, researchLiterature(), roundWith(step('searching'))]);
+  const ws = $('.workspace[data-ws="research"]');
+  ws.querySelector('[data-research-tab="activity"]').click(); await settle();
+  const board = ws.querySelector('[data-research-board]');
+  const headers = [...board.querySelectorAll('.rs-phase > header')].map((h) => h.firstChild.textContent);
+  assert(headers.join() === 'Frame,Literature,Generate', `the literature is not between the plan and the hypotheses: ${headers}`);
+  let row = board.querySelector('.rs-lit-step');
+  assert(row?.dataset.state === 'running' && row.textContent.includes('“rayleigh scattering skylight”') && row.textContent.includes('wait for it'), `the search is not said: ${row?.textContent}`);
+  await win.pushEvents([roundWith(step('done', {added: ['P001', 'P002'], notes: ['Semantic Scholar: busy'], ended: 104}))]);
+  row = board.querySelector('.rs-lit-step');
+  assert(row.querySelectorAll('[data-lit-paper]').length === 2 && row.textContent.includes('Semantic Scholar: busy'), 'what it added, or what went wrong, is not said');
+  let before = win.commands.length;
+  row.querySelector('[data-lit-paper="P002"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchShowPaper')?.paper === 'P002', 'an added paper does not open');
+  // A hypothesis's references: its papers open, DOIs and arXiv ids go to the browser.
+  await win.pushEvents([{type: 'researchHypothesis', slug: 'sky', detail: {row: researchBoard().hypotheses[0], statement: 'Rayleigh.', rationale: '', predictions: [],
+    assumptions: [], references: ['P001', '10.1364/JOSAA.18.000412', 'arXiv:1706.03762', 'Bohren & Fraser, from memory'], children: [], experiments: [], task: null, reviews: [], matches: []}}]);
+  const refs = board.querySelector('.rs-refs');
+  assert(refs?.querySelector('[data-lit-paper="P001"]') && refs.textContent.includes('Skylight <b>in</b> Granada'), 'a reference to a paper is not the paper');
+  assert(refs.querySelector('a[href="https://doi.org/10.1364/JOSAA.18.000412"]') && refs.querySelector('a[href="https://arxiv.org/abs/1706.03762"]'), 'a DOI or an arXiv id is not a link');
+  assert(refs.textContent.includes('Bohren & Fraser, from memory'), 'a reference as written is lost');
+  before = win.commands.length;
+  refs.querySelector('[data-lit-paper="P001"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchShowPaper')?.paper === 'P001', 'a reference does not open its paper');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 const researchSeats = (over = {}) => ['claude', 'codex', 'antigravity'].map((seat) => ({seat,
   role: {claude: 'investigator', codex: 'engineer', antigravity: 'sandbox'}[seat], enabled: true, why: null, cooling: null, running: 0, model: '', ...(over[seat] ?? {})}));
 const researchRound = (status, extra = {}) => ({type: 'researchRound', slug: 'sky', round: 1, status, used: 0, cap: 20,

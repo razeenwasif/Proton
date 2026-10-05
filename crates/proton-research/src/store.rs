@@ -289,6 +289,16 @@ impl Folder {
         next_id("P", stems.iter().map(String::as_str))
     }
 
+    /// Every name in `literature/`: each paper's, and any PDF's left on its own.
+    pub fn paper_stems(&self) -> Vec<String> {
+        let mut stems: Vec<String> = std::fs::read_dir(self.dir.join("literature"))
+            .map(|entries| entries.flatten().filter_map(|e| e.path().file_stem()?.to_str().map(str::to_string)).filter(|s| !s.starts_with('.')).collect())
+            .unwrap_or_default();
+        stems.sort();
+        stems.dedup();
+        stems
+    }
+
     /// Where a paper's PDF is, or would be: only for an id that is a
     /// paper's, so a name from elsewhere cannot point outside the folder.
     pub fn paper_pdf(&self, id: &str) -> Result<PathBuf, String> {
@@ -433,6 +443,7 @@ mod tests {
             rationale: "Because.".into(),
             predictions: vec!["This.".into()],
             assumptions: Vec::new(),
+            references: Vec::new(),
             extra: Vec::new(),
         }
     }

@@ -811,6 +811,24 @@ a second.
 
 One round runs at a time in a project.
 
+A round of an investigation that uses the literature searches it first, for
+no agent call: once the plan is framed — on the plan's own `queries`, or the
+last overview's, or, with neither, the title's words — the driver hands the
+supervisor's `LiteratureSearch` to its source and the hypotheses wait for
+the answer, two minutes at most (`wait_s`). The best of what each query
+found that the investigation does not already have, by any of a paper's
+names, is numbered on (`P004`…) and written as an `Effect::Paper`, at most six
+a round; open PDFs are sent for. Every task is then shown the literature —
+a line a paper, who and when, its DOI or arXiv id, whether its full text is
+beside it, and the start of its abstract, within 5 kB — and each reviewer the
+papers closest to each hypothesis (TF-IDF, as the tournament pairs them), to
+judge novelty by. A hypothesis names the papers it rests on in `references`;
+the overview names next round's `queries`. A search that fails is said and
+the round goes on; one past its deadline is not waited for, and what it finds
+still reaches the reviews; one still out when the round ends is let go.
+`used` counts agent calls only, and a round's report ends with what was
+searched for and added.
+
 `tests/live_round.rs` plays one round on the real engines, signed in as
 whoever runs it; it is ignored unless asked for, since it spends their
 limits, and it is run from a clean environment, as Proton is started, because

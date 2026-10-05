@@ -34,6 +34,7 @@ import type { LabSandbox } from "./LabSandbox";
 import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
 import type { LibrarySource } from "./LibrarySource";
+import type { LiteratureRow } from "./LiteratureRow";
 import type { LiteratureSourceRow } from "./LiteratureSourceRow";
 import type { Material } from "./Material";
 import type { MediaItem } from "./MediaItem";
@@ -200,6 +201,10 @@ autoRun: boolean, } | { "type": "researchRun", slug: string, detail: LabRunDetai
  * Whether this Proton asks anybody at all.
  */
 live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+/**
+ * The round's search of the literature, if it has one.
+ */
+literature: LiteratureRow | null, 
 /**
  * Another Proton is running its rounds, in words: read only here.
  */

@@ -4009,6 +4009,13 @@ body { font-size: calc(13px * var(--ui-scale)); }
   color: var(--cc-text); font: var(--z-2xs)/1.4 var(--cc-font); text-align: left; cursor: pointer;
 }
 .rs-task:hover { background: var(--row-hover); }
+.rs-lit-step { cursor: default; }
+.rs-lit-step:hover { background: transparent; }
+.rs-lit-step .rs-seat { color: var(--cc-text); }
+.rs-lit-step .rs-link { margin-left: 2px; }
+.rs-refs { margin: 0; padding-left: 18px; font: var(--z-xs)/1.8 var(--cc-font); color: var(--cc-soft); }
+.rs-refs a { color: var(--cc-accent); text-decoration: none; }
+.rs-refs a:hover { text-decoration: underline; }
 .rs-task.on { background: var(--row-on); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
 .rs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cc-faint); }
 .rs-task[data-state="running"] .rs-dot, .rs-task[data-state="repairing"] .rs-dot { background: var(--ok); animation: rs-pulse 1.4s ease-in-out infinite; }

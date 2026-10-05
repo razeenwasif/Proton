@@ -18,18 +18,28 @@ use proton_claude::chat::{Answer, Settings};
 use proton_claude::engine::Unattended;
 use proton_claude::fold::{Fold, Item};
 use proton_claude::{Activity, Conversation};
+use proton_literature::fetch::{Fetch, Job, Reply};
 use proton_research::classify::{classify, Failure};
 use proton_research::lock::{self, Lock};
-use proton_research::model::Seat;
+use proton_research::model::{LiteratureSource, Paper, Seat};
 use proton_research::schema::Phase;
 use proton_research::store::{atomic_write, Folder};
 use proton_research::supervisor::{
-    Answered, Dispatch, Effect, RoundState, RoundStatus, RunSummary, Snapshot, Supervisor, TaskRow, TaskState, STATE_VERSION,
+    Answered, Dispatch, Effect, LiteratureRow, RoundState, RoundStatus, RunSummary, Snapshot, Supervisor, TaskRow, TaskState, STATE_VERSION,
 };
 use proton_research::view::SeatRow;
 use serde_json::{json, Value};
 
 use super::factory::AgentFactory;
+use super::literature::{self, Source};
+
+/// What a round is driven with: the engines its calls run on, what asks
+/// the literature, and the sources that said they were out of calls, until when.
+pub struct Kit<'a> {
+    pub agents: &'a mut dyn AgentFactory,
+    pub literature: &'a mut dyn Source,
+    pub resting: &'a BTreeMap<LiteratureSource, u64>,
+}
 
 /// How long one agent call may take.
 pub const TIMEOUT: u64 = 15 * 60;
@@ -71,6 +81,8 @@ pub struct Moved {
     /// The calls that said something: their transcripts, if shown, are
     /// drawn again.
     pub talked: Vec<String>,
+    /// Sources that said they were out of calls, to be left alone a while.
+    pub tired: Vec<LiteratureSource>,
 }
 
 impl Moved {
@@ -79,6 +91,7 @@ impl Moved {
         self.wrote |= other.wrote;
         self.moved |= other.moved;
         self.talked.extend(other.talked);
+        self.tired.extend(other.tired);
     }
 }
 
@@ -96,6 +109,12 @@ pub struct Driver {
     /// The model each seat runs when the investigation names none, where
     /// one must be named.
     defaults: BTreeMap<Seat, String>,
+    /// The round's search of the literature, while it is out.
+    search: Option<Fetch>,
+    /// Papers the round added whose open PDFs are to be sent for.
+    fresh: Vec<Paper>,
+    /// Open PDFs being downloaded, and the papers still waiting for theirs.
+    downloads: Vec<(Fetch, Vec<String>)>,
 }
 
 /// The highest round the folder has a report of.
@@ -166,6 +185,9 @@ impl Driver {
             beat: 0,
             unavailable: BTreeMap::new(),
             defaults: BTreeMap::new(),
+            search: None,
+            fresh: Vec::new(),
+            downloads: Vec::new(),
         }
     }
 
@@ -185,9 +207,20 @@ impl Driver {
         self.folder.investigation().budget.calls
     }
 
-    /// Whether anything is happening: a round running, or calls still out.
+    /// Whether anything is happening: a round running, or calls or its
+    /// search of the literature still out.
     pub fn busy(&self) -> bool {
-        matches!(self.status(), RoundStatus::Running) || !self.live.is_empty()
+        matches!(self.status(), RoundStatus::Running) || !self.live.is_empty() || self.search.is_some()
+    }
+
+    /// Whether open PDFs the round sent for are still coming.
+    pub fn fetching(&self) -> bool {
+        !self.downloads.is_empty()
+    }
+
+    /// The round's search of the literature, as the Activity list draws it.
+    pub fn literature(&self) -> Option<LiteratureRow> {
+        self.supervisor.state().literature.as_ref().map(LiteratureRow::from)
     }
 
     /// This round's tasks, and any planned for the next.
@@ -301,6 +334,8 @@ impl Driver {
             reviews: f.reviews(),
             matches: f.matches(),
             experiments: f.experiments(),
+            papers: f.papers(),
+            paper_stems: f.paper_stems(),
             unavailable: self.unavailable.clone(),
             models,
         };
@@ -333,9 +368,9 @@ impl Driver {
     }
 
     /// A new round.
-    pub fn start(&mut self, factory: &mut dyn AgentFactory, now: u64) -> Result<Moved, String> {
+    pub fn start(&mut self, kit: &mut Kit, now: u64) -> Result<Moved, String> {
         self.take_lock(now)?;
-        self.preflight(factory);
+        self.preflight(kit.agents);
         self.snap = None;
         let snap = self.snapshot(now);
         let effects = match self.supervisor.start_round(&snap, now) {
@@ -347,7 +382,7 @@ impl Driver {
         };
         let mut moved = Moved { moved: true, ..Moved::default() };
         moved.and(self.apply(effects));
-        moved.and(self.pump(factory, now));
+        moved.and(self.pump(kit, now));
         self.save();
         Ok(moved)
     }
@@ -359,23 +394,24 @@ impl Driver {
         Moved { moved: true, ..Moved::default() }
     }
 
-    pub fn resume(&mut self, factory: &mut dyn AgentFactory, now: u64) -> Result<Moved, String> {
+    pub fn resume(&mut self, kit: &mut Kit, now: u64) -> Result<Moved, String> {
         if !matches!(self.status(), RoundStatus::Paused { .. }) {
             return Err("There is no paused round to resume.".into());
         }
         self.take_lock(now)?;
-        self.preflight(factory);
+        self.preflight(kit.agents);
         self.snap = None;
         self.supervisor.resume();
         let mut moved = Moved { moved: true, ..Moved::default() };
-        moved.and(self.pump(factory, now));
+        moved.and(self.pump(kit, now));
         self.save();
         Ok(moved)
     }
 
-    /// Stop the round, and every call it has out.
+    /// Stop the round, and every call it has out — and its search.
     pub fn stop(&mut self, now: u64) -> Moved {
         self.supervisor.stop(now);
+        self.search = None;
         let ids: Vec<String> = self.live.keys().cloned().collect();
         for id in ids {
             if let Some(mut live) = self.live.remove(&id) {
@@ -392,29 +428,36 @@ impl Driver {
     /// them — and the round is left as it is on disk, to come back paused.
     pub fn shutdown(&mut self) {
         self.live.clear();
+        // Let go of, a fetch is cancelled, and a PDF half-downloaded removed.
+        self.search = None;
+        self.downloads.clear();
         self.save();
     }
 
     /// A Lab run of this investigation ended, and what it showed is in the
     /// sandbox log: a seat of another model family is to review it — now,
     /// if a round is running, or in the next.
-    pub fn run_finished(&mut self, factory: &mut dyn AgentFactory, run: &RunSummary, now: u64) -> Moved {
+    pub fn run_finished(&mut self, kit: &mut Kit, run: &RunSummary, now: u64) -> Moved {
         self.snap = None;
         let snap = self.snapshot(now);
         let effects = self.supervisor.run_finished(run, &snap, now);
         let mut moved = self.apply(effects);
         moved.moved = true;
         if matches!(self.status(), RoundStatus::Running) && self.lock.is_some() {
-            moved.and(self.pump(factory, now));
+            moved.and(self.pump(kit, now));
         }
         self.save();
         moved
     }
 
     /// Look at every call that is out, and start what is ready.
-    pub fn poll(&mut self, factory: &mut dyn AgentFactory, now: u64) -> Moved {
-        let mut moved = Moved::default();
+    pub fn poll(&mut self, kit: &mut Kit, now: u64) -> Moved {
+        let mut moved = self.poll_literature(now);
+        self.send_for_pdfs(kit);
         if !self.busy() {
+            if moved.moved || moved.wrote {
+                self.save();
+            }
             return moved;
         }
         if now.saturating_sub(self.beat) >= BEAT {
@@ -441,13 +484,105 @@ impl Driver {
             moved.and(self.watch(&id, now));
         }
         if matches!(self.status(), RoundStatus::Running) && self.lock.is_some() {
-            moved.and(self.pump(factory, now));
+            moved.and(self.pump(kit, now));
         }
+        self.send_for_pdfs(kit);
         if moved.moved || moved.wrote {
             self.save();
         }
         if !self.busy() && matches!(self.status(), RoundStatus::Idle) {
             self.lock = None;
+        }
+        moved
+    }
+
+    /// What the round's search and its downloads have come to.
+    fn poll_literature(&mut self, now: u64) -> Moved {
+        let mut moved = Moved::default();
+        if let Some(fetch) = self.search.as_mut() {
+            let replies = fetch.poll();
+            let done = fetch.is_done();
+            for reply in replies {
+                let (found, notes) = match reply {
+                    Reply::Searched { candidates, failures } => {
+                        moved.tired.extend(failures.iter().filter(|f| f.exhausted).map(|f| f.source));
+                        (Ok(candidates), failures.iter().map(|f| format!("{}: {}", f.source.name(), f.why)).collect())
+                    }
+                    Reply::Failed { why } => (Err(why), Vec::new()),
+                    _ => continue,
+                };
+                let snap = self.snapshot(now);
+                let effects = self.supervisor.literature_answered(found, notes, &snap, now);
+                moved.moved = true;
+                moved.and(self.apply(effects));
+            }
+            if done {
+                self.search = None;
+            }
+        }
+        // A search the round no longer waits for — it ended, or was stopped — is let go.
+        if self.supervisor.state().literature.as_ref().is_none_or(|s| s.state.terminal()) {
+            self.search = None;
+        }
+        for (fetch, waiting) in &mut self.downloads {
+            for reply in fetch.poll() {
+                match &reply {
+                    Reply::Saved { key, .. } | Reply::Unsaved { key, .. } => {
+                        literature::settle_download(&self.folder, &reply);
+                        waiting.retain(|id| id != key);
+                        moved.wrote = true;
+                    }
+                    // The worker gave up: every paper still waiting says why.
+                    Reply::Failed { why } => {
+                        for key in std::mem::take(waiting) {
+                            literature::settle_download(&self.folder, &Reply::Unsaved { key, why: why.clone() });
+                        }
+                        moved.wrote = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.downloads.retain(|(fetch, _)| !fetch.is_done());
+        if moved.wrote {
+            self.snap = None;
+        }
+        moved
+    }
+
+    /// Send for the open PDFs of the papers the round has added.
+    fn send_for_pdfs(&mut self, kit: &mut Kit) {
+        if self.fresh.is_empty() {
+            return;
+        }
+        let fresh = std::mem::take(&mut self.fresh);
+        if let Some(started) = literature::start_downloads(kit.literature, &self.folder, &fresh) {
+            self.downloads.push(started);
+        }
+    }
+
+    /// The round's search of the literature, when it is due: in the sources
+    /// not resting. Past its deadline, the hypotheses stop waiting.
+    fn literature_step(&mut self, kit: &mut Kit, now: u64) -> Moved {
+        let mut moved = Moved::default();
+        if self.search.is_none() {
+            let snap = self.snapshot(now);
+            if let Some(mut asked) = self.supervisor.literature_due(&snap, now) {
+                moved.moved = true;
+                asked.sources.retain(|s| kit.resting.get(s).is_none_or(|until| *until <= now));
+                if asked.sources.is_empty() {
+                    let why = "every source it asks said it was out of calls, and is left alone for now".to_string();
+                    let effects = self.supervisor.literature_answered(Err(why), Vec::new(), &snap, now);
+                    moved.and(self.apply(effects));
+                } else {
+                    self.search = Some(kit.literature.fetch(Job::Search { queries: asked.queries, sources: asked.sources, per_query: asked.per_query }));
+                }
+            }
+        }
+        let effects = self.supervisor.literature_overdue(now);
+        if !effects.is_empty() {
+            moved.moved = true;
+            moved.and(self.apply(effects));
         }
         moved
     }
@@ -586,9 +721,9 @@ impl Driver {
         }
     }
 
-    /// Start what is ready.
-    fn pump(&mut self, factory: &mut dyn AgentFactory, now: u64) -> Moved {
-        let mut moved = Moved::default();
+    /// Start what is ready: the literature first, for the hypotheses wait on it.
+    fn pump(&mut self, kit: &mut Kit, now: u64) -> Moved {
+        let mut moved = self.literature_step(kit, now);
         // A call that cannot start can make another ready: its task given to
         // another seat, say. A few passes, never a loop.
         for _ in 0..8 {
@@ -599,7 +734,7 @@ impl Driver {
             }
             moved.moved = true;
             for dispatch in dispatches {
-                moved.and(self.launch(dispatch, factory, now));
+                moved.and(self.launch(dispatch, kit.agents, now));
             }
         }
         moved
@@ -656,6 +791,14 @@ impl Driver {
                     continue;
                 }
                 Effect::Hypothesis(h) => f.write_hypothesis(&h),
+                Effect::Paper(p) => {
+                    let paper = literature::noted(p);
+                    let written = f.write_paper(&paper);
+                    if written.is_ok() {
+                        self.fresh.push(paper);
+                    }
+                    written
+                }
                 Effect::Status { hypothesis, status } => match f.hypotheses().into_iter().find(|h| h.id == hypothesis) {
                     Some(mut h) => {
                         h.status = status;

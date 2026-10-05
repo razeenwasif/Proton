@@ -1,10 +1,19 @@
 //! Rounds played with made-up answers.
 
 use super::*;
-use crate::model::Discipline;
+use crate::model::{Discipline, LiteraturePolicy, Record};
 use serde_json::json;
 
+/// An investigation that does not use the literature: what a round was
+/// before there was one.
 fn snapshot() -> Snapshot {
+    let mut snap = lit_snapshot();
+    snap.investigation.as_mut().unwrap().literature = LiteraturePolicy::off();
+    snap
+}
+
+/// A new investigation, which does.
+fn lit_snapshot() -> Snapshot {
     let mut models = BTreeMap::new();
     models.insert(Seat::Claude, "claude-opus-5-5".to_string());
     models.insert(Seat::Codex, "gpt-6.1-sol".to_string());
@@ -15,6 +24,31 @@ fn snapshot() -> Snapshot {
         models,
         ..Snapshot::default()
     }
+}
+
+/// A paper a search found.
+fn found(title: &str, doi: &str, query: &str, rank: u32) -> Candidate {
+    Candidate {
+        record: Record {
+            title: title.into(),
+            doi: Some(doi.into()),
+            year: Some(2001),
+            abstract_: format!("{title}: a mechanism that scatters light, by molecules in the sky."),
+            sources: vec![LiteratureSource::OpenAlex],
+            ..Record::default()
+        },
+        queries: vec![query.into()],
+        rank,
+    }
+}
+
+/// What the literature does in a test: answers with these papers, fails,
+/// or never answers.
+#[derive(Clone)]
+enum Lit {
+    Found(Vec<Candidate>),
+    Failed(String),
+    Never,
 }
 
 fn proposal(code: &str) -> Value {
@@ -34,7 +68,7 @@ fn answer(sup: &Supervisor, d: &Dispatch, n: usize) -> Value {
         })
     };
     match d.phase {
-        Phase::Frame => json!({ "plan": "Test scattering laws.", "criteria": ["Quantitative"], "questions": ["Why blue not violet?"] }),
+        Phase::Frame => json!({ "plan": "Test scattering laws.", "criteria": ["Quantitative"], "questions": ["Why blue not violet?"], "queries": ["rayleigh scattering sky"] }),
         Phase::Generate => json!({ "hypotheses": [hypothesis(0), hypothesis(1)] }),
         Phase::Reflect => json!({ "reviews": labels.iter().map(|l| json!({ "label": l, "verdict": "promising", "correctness": 4, "novelty": 3,
             "testability": 4, "summary": "Sound.", "critique": "Check the dipole approximation.", "citations": [], "experiment": proposal("") })).collect::<Vec<_>>() }),
@@ -45,7 +79,8 @@ fn answer(sup: &Supervisor, d: &Dispatch, n: usize) -> Value {
             h["parents"] = json!(labels);
             json!({ "hypotheses": [h] })
         }
-        Phase::Meta => json!({ "overview": "Rayleigh leads.", "plan": "Next: polarisation.", "guidance": ["Look at polarisation."], "retire": labels.iter().take(1).collect::<Vec<_>>() }),
+        Phase::Meta => json!({ "overview": "Rayleigh leads.", "plan": "Next: polarisation.", "guidance": ["Look at polarisation."], "retire": labels.iter().take(1).collect::<Vec<_>>(),
+            "queries": ["skylight polarisation"] }),
         Phase::SimReview => json!({ "finding": "supports", "summary": "The spectrum peaks at 470 nm.", "issues": [], "follow_up": proposal("") }),
     }
 }
@@ -66,16 +101,39 @@ fn play(sup: &mut Supervisor, snap: Snapshot, fate: impl FnMut(&Dispatch, usize)
 }
 
 /// The same, with each seat reporting the model `report` says as it starts.
-fn play_reporting(
+fn play_reporting(sup: &mut Supervisor, snap: Snapshot, fate: impl FnMut(&Dispatch, usize) -> Fate, report: impl Fn(Seat) -> String) -> (Vec<Effect>, Snapshot) {
+    let (effects, snap, _) = play_with(sup, snap, fate, report, Lit::Found(Vec::new()));
+    (effects, snap)
+}
+
+/// The same, the literature doing what `lit` says; and what it was asked.
+fn play_with(
     sup: &mut Supervisor,
     mut snap: Snapshot,
     mut fate: impl FnMut(&Dispatch, usize) -> Fate,
     report: impl Fn(Seat) -> String,
-) -> (Vec<Effect>, Snapshot) {
+    lit: Lit,
+) -> (Vec<Effect>, Snapshot, Vec<LiteratureSearch>) {
     let mut effects = Vec::new();
+    let mut asked = Vec::new();
     let mut now = 1_000;
     for step in 0..400 {
         now += 30;
+        // As the driver does: the literature first, for the hypotheses wait on it.
+        if let Some(search) = sup.literature_due(&snap, now) {
+            asked.push(search);
+            let answered = match &lit {
+                Lit::Found(papers) => Some(Ok(papers.clone())),
+                Lit::Failed(why) => Some(Err(why.clone())),
+                Lit::Never => None,
+            };
+            if let Some(answered) = answered {
+                let out = sup.literature_answered(answered, Vec::new(), &snap, now);
+                snap = applied(&snap, &out);
+                effects.extend(out);
+            }
+        }
+        effects.extend(sup.literature_overdue(now));
         let dispatches = sup.ready(&snap, now);
         if dispatches.is_empty() {
             let running: Vec<String> = sup.state().tasks.iter().filter(|t| matches!(t.state, TaskState::Running | TaskState::Repairing)).map(|t| t.id.clone()).collect();
@@ -128,7 +186,158 @@ fn play_reporting(
             }
         }
     }
-    (effects, snap)
+    (effects, snap, asked)
+}
+
+fn papers(effects: &[Effect]) -> Vec<&Paper> {
+    effects.iter().filter_map(|e| if let Effect::Paper(p) = e { Some(p) } else { None }).collect()
+}
+
+/// The calls the round counted are the calls its tasks made: the
+/// literature is asked by the core, for none.
+fn counted(sup: &Supervisor) {
+    assert_eq!(sup.state().used, sup.state().tasks.iter().filter(|t| t.round == sup.state().round).map(|t| t.calls).sum::<u32>(), "{:#?}", sup.state().tasks);
+}
+
+#[test]
+fn the_hypotheses_wait_for_the_literature_the_plan_asked_for_and_are_shown_it() {
+    let snap = lit_snapshot();
+    let mut sup = Supervisor::new(0, 1, 7);
+    sup.start_round(&snap, 1_000).unwrap();
+    // Before the plan is framed nothing is searched.
+    assert_eq!(sup.literature_due(&snap, 1_001), None, "searched before the plan said what for");
+    let mut prompts: Vec<(Phase, String)> = Vec::new();
+    let lit = Lit::Found(vec![
+        found("Skylight spectra", "10.1364/josaa.18.000412", "rayleigh scattering sky", 0),
+        found("Ozone and the twilight zenith", "10.1364/josa.43.000113", "rayleigh scattering sky", 1),
+    ]);
+    let (effects, snap, asked) = play_with(&mut sup, snap, |d, _| {
+        prompts.push((d.phase, d.prompt.clone()));
+        Fate::Answer
+    }, |seat| lit_snapshot().models[&seat].clone(), lit);
+    assert_eq!(sup.state().status, RoundStatus::Idle);
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0].queries, ["rayleigh scattering sky"], "the plan's queries");
+    assert_eq!(asked[0].sources, LiteratureSource::ALL);
+    let added = papers(&effects);
+    assert_eq!(added.iter().map(|p| (p.id.as_str(), p.round, p.by)).collect::<Vec<_>>(), [("P001", Some(1), AddedBy::Round), ("P002", Some(1), AddedBy::Round)]);
+    assert_eq!(snap.papers.len(), 2);
+    let generate: Vec<&String> = prompts.iter().filter(|(p, _)| *p == Phase::Generate).map(|(_, prompt)| prompt).collect();
+    assert_eq!(generate.len(), 3);
+    assert!(generate.iter().all(|p| p.contains("### The literature the team has gathered") && p.contains("- **P001**") && p.contains("references")));
+    let reflect = prompts.iter().find(|(p, _)| *p == Phase::Reflect).map(|(_, prompt)| prompt).unwrap();
+    assert!(reflect.contains("closest to it") && reflect.contains("P001 *Skylight spectra*"), "{reflect}");
+    counted(&sup);
+    assert!(effects.iter().any(|e| matches!(e, Effect::RoundReport { text, .. } if text.contains("## Literature") && text.contains("Added P001, P002."))));
+    assert_eq!(sup.state().queries, ["skylight polarisation"], "the overview's queries, for the next round");
+
+    // The next round searches for what the overview asked, numbers on, and adds none it has.
+    let snap = Snapshot { plan: "# Research plan\n\nNext: polarisation.".into(), ..snap };
+    sup.start_round(&snap, 90_000).unwrap();
+    assert!(sup.ready(&snap, 90_001).is_empty(), "the hypotheses did not wait for the literature");
+    let search = sup.literature_due(&snap, 90_002).expect("searched at once, with no plan to frame");
+    assert_eq!(search.queries, ["skylight polarisation"]);
+    let again = vec![found("Skylight spectra, again", "10.1364/JOSAA.18.000412", "skylight polarisation", 0), found("Polarised skylight", "10.1/pol", "skylight polarisation", 1)];
+    let effects = sup.literature_answered(Ok(again), vec!["Semantic Scholar: busy".into()], &snap, 90_003);
+    assert_eq!(papers(&effects).iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["P003"], "the one it has is not added twice");
+    assert!(effects.iter().any(|e| matches!(e, Effect::Notice(n) if n.contains("Semantic Scholar: busy"))));
+    assert!(sup.ready(&snap, 90_004).iter().any(|d| d.phase == Phase::Generate));
+}
+
+#[test]
+fn the_literature_is_waited_for_until_its_deadline_and_what_comes_late_still_comes() {
+    let mut snap = lit_snapshot();
+    snap.plan = "# Research plan\n\nAlready framed.".into();
+    let mut sup = Supervisor::new(1, 1, 3);
+    sup.start_round(&snap, 1_000).unwrap();
+    let search = sup.literature_due(&snap, 1_000).unwrap();
+    assert_eq!(search.queries, ["sky blue"], "the title's words, with nothing else to go on");
+    assert_eq!(sup.literature_due(&snap, 1_001), None, "asked once");
+    assert!(sup.ready(&snap, 1_060).is_empty() && sup.literature_overdue(1_060).is_empty());
+    // Two minutes on, the hypotheses go without it, once.
+    let overdue = sup.literature_overdue(1_120);
+    assert!(matches!(overdue.as_slice(), [Effect::Notice(n)] if n.contains("go on without it")));
+    assert!(sup.literature_overdue(1_121).is_empty());
+    assert_eq!(sup.ready(&snap, 1_121).len(), 3);
+    // What it finds after reaches the reviews.
+    let late = sup.literature_answered(Ok(vec![found("Late", "10.1/late", "daytime sky blue", 0)]), Vec::new(), &snap, 1_500);
+    assert_eq!(papers(&late).len(), 1);
+    counted(&sup);
+    // Proton closed mid-search asks again when the round is resumed.
+    let mut sup = Supervisor::new(1, 1, 3);
+    sup.start_round(&snap, 2_000).unwrap();
+    sup.literature_due(&snap, 2_000).unwrap();
+    let mut back = Supervisor::restore(serde_json::from_str(&serde_json::to_string(sup.state()).unwrap()).unwrap());
+    back.resume();
+    assert!(back.literature_due(&snap, 2_010).is_some());
+}
+
+#[test]
+fn a_search_that_fails_is_said_and_one_never_answered_is_not_waited_on_forever() {
+    for lit in [Lit::Failed("arXiv could not be reached".into()), Lit::Never] {
+        let never = matches!(lit, Lit::Never);
+        let snap = lit_snapshot();
+        let mut sup = Supervisor::new(0, 1, 5);
+        sup.start_round(&snap, 1_000).unwrap();
+        let (effects, _, asked) = play_with(&mut sup, snap, |_, _| Fate::Answer, |seat| lit_snapshot().models[&seat].clone(), lit);
+        assert_eq!(asked.len(), 1);
+        assert_eq!(sup.state().status, RoundStatus::Idle, "the round did not end");
+        assert_eq!(hypotheses(&effects).iter().filter(|h| h.parents.is_empty()).count(), 6, "the hypotheses went on without it");
+        let said = if never { "go on without it" } else { "could not be searched: arXiv could not be reached" };
+        assert!(effects.iter().any(|e| matches!(e, Effect::Notice(n) if n.contains(said))), "{effects:#?}");
+        let step = sup.state().literature.as_ref().unwrap();
+        assert_eq!(step.state.terminal(), true, "{:?}", step.state);
+        counted(&sup);
+    }
+}
+
+#[test]
+fn an_investigation_without_the_literature_waits_for_none() {
+    let snap = snapshot();
+    let mut sup = Supervisor::new(1, 1, 9);
+    let snap = Snapshot { plan: "# Research plan\n\nFramed.".into(), ..snap };
+    sup.start_round(&snap, 1_000).unwrap();
+    assert!(sup.state().literature.is_none());
+    assert_eq!(sup.literature_due(&snap, 1_000), None);
+    assert_eq!(sup.ready(&snap, 1_000).len(), 3, "the hypotheses wait for nothing");
+}
+
+/// Rounds with the literature doing anything at all: the round ends, every
+/// call is counted and the literature is none of them, papers are numbered
+/// in turn and never more than a round adds, and a seed plays the same twice.
+#[test]
+fn whatever_the_literature_does_the_round_ends_and_costs_no_call() {
+    for seed in 1..=40u64 {
+        let run = |seed: u64| {
+            let mut snap = lit_snapshot();
+            snap.investigation.as_mut().unwrap().literature.papers = 1 + (seed % 4) as u32;
+            let mut sup = Supervisor::new(0, 1, seed);
+            sup.start_round(&snap, 1_000).unwrap();
+            let lit = match seed % 3 {
+                0 => Lit::Never,
+                1 => Lit::Failed("no".into()),
+                _ => Lit::Found((0..(seed % 7) as u32).map(|n| found(&format!("Paper {n}"), &format!("10.1/{n}"), "rayleigh scattering sky", n)).collect()),
+            };
+            let mut rng = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+            let (effects, snap, _) = play_with(&mut sup, snap, |_, _| match next_random(&mut rng) % 10 {
+                0 => Fate::Garbage,
+                1 => Fate::Fail(Failure::Crashed { why: "gone".into() }),
+                2 => Fate::Fail(Failure::Limited { why: "limit".into(), resets: None }),
+                _ => Fate::Answer,
+            }, |seat| lit_snapshot().models[&seat].clone(), lit);
+            (sup, effects, snap)
+        };
+        let (sup, effects, snap) = run(seed);
+        assert_eq!(sup.state().status, RoundStatus::Idle, "seed {seed}");
+        assert!(sup.state().literature.as_ref().is_some_and(|s| s.state.terminal()), "seed {seed}");
+        counted(&sup);
+        let ids: Vec<&str> = papers(&effects).iter().map(|p| p.id.as_str()).collect();
+        let most = snap.investigation.as_ref().unwrap().literature.papers as usize;
+        assert!(ids.len() <= most, "seed {seed}: {ids:?}");
+        assert_eq!(ids, (1..=ids.len()).map(|n| format!("P{n:03}")).collect::<Vec<_>>(), "seed {seed}");
+        let (_, again, _) = run(seed);
+        assert_eq!(format!("{effects:?}"), format!("{again:?}"), "seed {seed} played differently twice");
+    }
 }
 
 fn hypotheses(effects: &[Effect]) -> Vec<&Hypothesis> {

@@ -8,6 +8,10 @@ import type { ReviewView } from "./ReviewView";
  */
 export type HypothesisDetail = { row: HypothesisRow, statement: string, rationale: string, predictions: Array<string>, assumptions: Array<string>, 
 /**
+ * The papers it rests on, as its author named them.
+ */
+references: Array<string>, 
+/**
  * What was evolved from it.
  */
 children: Array<string>, reviews: Array<ReviewView>, matches: Array<MatchView>, experiments: Array<string>, task: string | null, };

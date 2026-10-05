@@ -336,6 +336,8 @@ pub struct Hypothesis {
     pub rationale: String,
     pub predictions: Vec<String>,
     pub assumptions: Vec<String>,
+    /// The papers it rests on: the investigation's own (P003), DOIs, arXiv ids.
+    pub references: Vec<String>,
     /// Sections someone added by hand, kept as they were.
     pub extra: Vec<(String, String)>,
 }

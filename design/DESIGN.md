@@ -679,6 +679,14 @@ step — Frame, Generate, Review, Verify, Tournament, Evolve, Overview — with
 its seat in that seat's colour, what it is about, its model and how long it
 took, and a failure's reason in the row itself. A row opens into what the call
 said: what it was asked, folded; the searches it ran, a line each; its answer.
+Between Frame and Generate, a round that uses the literature has a Literature
+group of one row, Proton's rather than an agent's — "no agent call" where a
+model would be — saying what it searched for and that the hypotheses wait for
+it, then what it added, each paper a link to it, or why it did not search,
+with what any source said went wrong. A hypothesis's page lists the papers
+it rests on: the investigation's own as links into the Literature tab, with
+their titles; DOIs and arXiv ids as links to the browser; anything else as it
+was written.
 Under the investigations, the table: each seat, its role and model, and
 whether it can sit — not installed, at its limit until when, how many calls
 it has out — with a box to stand it down between rounds.

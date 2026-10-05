@@ -70,6 +70,8 @@ pub struct HypothesisDetail {
     pub rationale: String,
     pub predictions: Vec<String>,
     pub assumptions: Vec<String>,
+    /// The papers it rests on, as its author named them.
+    pub references: Vec<String>,
     /// What was evolved from it.
     pub children: Vec<String>,
     pub reviews: Vec<ReviewView>,
@@ -298,7 +300,7 @@ impl PaperResult {
 }
 
 /// A paper's authors as a reference names them, by their last names.
-fn named(authors: &[String], more: u32) -> String {
+pub(crate) fn named(authors: &[String], more: u32) -> String {
     let last = |name: &String| name.split_whitespace().last().unwrap_or(name).to_string();
     match (authors.len() + more as usize, authors) {
         (_, []) => String::new(),
@@ -363,13 +365,21 @@ impl Board {
         self
     }
 
-    /// Where the team cites a paper: each review whose citations name it.
+    /// Where the team cites a paper: each hypothesis whose references name
+    /// it, and each review whose citations do.
     fn cited_by(&self, paper: &Paper) -> Vec<CitedBy> {
-        self.reviews
+        let names_it = |texts: &[String]| texts.iter().any(|c| cite::extract(c).iter().any(|(_, ident)| names(paper, ident)));
+        let hypotheses = self
+            .hypotheses
             .iter()
-            .filter(|r| r.citations.iter().any(|c| cite::extract(c).iter().any(|(_, ident)| names(paper, ident))))
-            .map(|r| CitedBy { by: r.id.clone(), hypothesis: r.hypothesis.clone(), kind: CitedIn::Review })
-            .collect()
+            .filter(|h| names_it(&h.references))
+            .map(|h| CitedBy { by: h.id.clone(), hypothesis: h.id.clone(), kind: CitedIn::Hypothesis });
+        let reviews = self
+            .reviews
+            .iter()
+            .filter(|r| names_it(&r.citations))
+            .map(|r| CitedBy { by: r.id.clone(), hypothesis: r.hypothesis.clone(), kind: CitedIn::Review });
+        hypotheses.chain(reviews).collect()
     }
 
     fn paper_row(&self, p: &Paper) -> PaperRow {
@@ -477,6 +487,7 @@ impl Board {
             rationale: h.rationale.clone(),
             predictions: h.predictions.clone(),
             assumptions: h.assumptions.clone(),
+            references: h.references.clone(),
             children: self.hypotheses.iter().filter(|c| c.parents.iter().any(|p| p == id)).map(|c| c.id.clone()).collect(),
             reviews: self
                 .reviews
@@ -536,6 +547,7 @@ mod tests {
             rationale: String::new(),
             predictions: Vec::new(),
             assumptions: Vec::new(),
+            references: Vec::new(),
             extra: Vec::new(),
         }
     }
@@ -574,8 +586,10 @@ mod tests {
             critique: String::new(),
             citations: citations.iter().map(|c| c.to_string()).collect(),
         };
+        let mut resting = h("H004", "Skylight measured", HypothesisStatus::Active, &[]);
+        resting.references = vec!["doi:10.1364/JOSAA.18.000412".into()];
         let board = Board::from(
-            Vec::new(),
+            vec![resting],
             vec![
                 review("H001.1", "H001", &["Hernández-Andrés et al. (2001), https://doi.org/10.1364/josaa.18.000412", "P002, p. 4"]),
                 review("H002.1", "H002", &["arXiv:1706.03762v5"]),
@@ -590,11 +604,13 @@ mod tests {
         ]);
         let rows = board.paper_rows();
         assert_eq!(rows.iter().map(|r| (r.id.as_str(), r.authors.as_str(), r.cited, r.has_pdf)).collect::<Vec<_>>(), [
-            ("P001", "Hernández-Andrés et al.", 1, false),
+            ("P001", "Hernández-Andrés et al.", 2, false),
             ("P002", "Vaswani and Shazeer", 2, true),
         ]);
         let detail = board.paper("P002").unwrap();
         assert_eq!(detail.cited_by.iter().map(|c| c.by.as_str()).collect::<Vec<_>>(), ["H001.1", "H002.1"], "by its own id, and by its arXiv id");
+        let p001 = board.paper("P001").unwrap();
+        assert_eq!(p001.cited_by.iter().map(|c| (c.by.as_str(), c.kind)).collect::<Vec<_>>(), [("H004", CitedIn::Hypothesis), ("H001.1", CitedIn::Review)]);
         assert!(board.paper("P009").is_none());
         assert_eq!(named(&["Lee".to_string()], 0), "Lee");
         assert_eq!(named(&["A B".to_string()], 4), "B et al.", "one named and four counted");

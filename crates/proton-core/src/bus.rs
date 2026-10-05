@@ -1246,6 +1246,8 @@ pub enum Event {
         cap: u32,
         seats: Vec<ResearchSeatRow>,
         tasks: Vec<ResearchTask>,
+        /// The round's search of the literature, if it has one.
+        literature: Option<proton_research::supervisor::LiteratureRow>,
         /// Another Proton is running its rounds, in words: read only here.
         held: Option<String>,
     },

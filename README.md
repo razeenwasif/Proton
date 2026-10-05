@@ -119,7 +119,9 @@ what you type goes to the team, `/h Title: statement` adds a hypothesis of
 your own, and `/p` with a DOI or an arXiv id adds a paper. The Literature tab
 searches arXiv, Semantic Scholar and OpenAlex — told only your queries, never
 your files — and keeps each paper as `literature/P001.md`, with its open PDF
-beside it and out of Git; Semantic Scholar and OpenAlex give more to a free key,
+beside it and out of Git. Each round searches it first, with the plan's or the
+last overview's queries, and every seat proposes its hypotheses knowing what
+was found; Semantic Scholar and OpenAlex give more to a free key,
 read from your shell's `SEMANTIC_SCHOLAR_API_KEY` and `OPENALEX_API_KEY` and
 never stored. The Lab's Python — Python 3.12 with numpy, scipy, sympy, mpmath,
 matplotlib, networkx and pandas, from conda-forge, apart from your own

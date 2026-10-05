@@ -12,6 +12,9 @@
 //! done:
 //!
 //! 1. **Frame** — the first round only: the Principal Investigator writes the plan.
+//!    **Literature** — once the plan is framed, the core searches the literature with
+//!    its queries (or the last overview's): no agent call. What it finds is added
+//!    and shown to every task; the hypotheses wait for it, for a while.
 //! 2. **Generate** — every seat, two hypotheses each.
 //! 3. **Review** — each new hypothesis by a seat of another model family, two to a call.
 //! 4. **Verify** and **Tournament**, once the reviews are in: the Lab Engineer checks the
@@ -33,8 +36,10 @@ use ts_rs::TS;
 
 use crate::classify::Failure;
 use crate::elo;
+use crate::literature::{self, Candidate};
 use crate::model::{
-    Author, Experiment, ExperimentStatus, Family, Hypothesis, HypothesisStatus, Investigation, Match, Review, ReviewKind, Role, Seat, Verdict,
+    AddedBy, Author, Experiment, ExperimentStatus, Family, Hypothesis, HypothesisStatus, Investigation, LiteratureSource, Match, Paper, Review, ReviewKind,
+    Role, Seat, Verdict,
 };
 use crate::parse;
 use crate::prompts::{self, Context, Evolution};
@@ -160,8 +165,63 @@ pub struct RoundState {
     /// What the last overview said the next hypotheses should go after.
     #[serde(default)]
     pub guidance: Vec<String>,
+    /// What the literature is to be searched for: the plan's queries, then
+    /// each overview's for the round after it.
+    #[serde(default)]
+    pub queries: Vec<String>,
+    /// This round's search of the literature, if it has one.
+    #[serde(default)]
+    pub literature: Option<LiteratureStep>,
     pub next_task: u32,
     pub rng: u64,
+}
+
+/// A round's search of the literature: run by the core, for no agent call,
+/// before the hypotheses are proposed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiteratureStep {
+    pub state: StepState,
+    /// What it asked.
+    #[serde(default)]
+    pub queries: Vec<String>,
+    /// The papers it added.
+    #[serde(default)]
+    pub added: Vec<String>,
+    /// What the sources said went wrong, if anything did.
+    #[serde(default)]
+    pub notes: Vec<String>,
+    #[serde(default)]
+    pub started: Option<u64>,
+    #[serde(default)]
+    pub ended: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum StepState {
+    /// To be searched once the plan is framed.
+    Due,
+    /// Asked: the hypotheses wait for it until `deadline`.
+    Searching { deadline: u64 },
+    /// Asked, and waited for long enough: the hypotheses went on without
+    /// it, and what it finds reaches the reviews.
+    Overdue,
+    Done,
+    Skipped { why: String },
+}
+
+impl StepState {
+    pub fn terminal(&self) -> bool {
+        matches!(self, StepState::Done | StepState::Skipped { .. })
+    }
+}
+
+/// What the core is to search the literature for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiteratureSearch {
+    pub queries: Vec<String>,
+    pub sources: Vec<LiteratureSource>,
+    pub per_query: u32,
 }
 
 /// A task to start: on which seat, told what, held to which schema.
@@ -180,6 +240,8 @@ pub struct Dispatch {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     Hypothesis(Hypothesis),
+    /// A paper the round's search found, for `literature/`.
+    Paper(Paper),
     /// A hypothesis's status changed.
     Status { hypothesis: String, status: HypothesisStatus },
     Review(Review),
@@ -233,6 +295,10 @@ pub struct Snapshot {
     pub reviews: Vec<Review>,
     pub matches: Vec<Match>,
     pub experiments: Vec<Experiment>,
+    /// The literature: its papers, and every name in `literature/` — a PDF
+    /// left on its own takes its number too.
+    pub papers: Vec<Paper>,
+    pub paper_stems: Vec<String>,
     /// Which seats can sit at all — installed, signed in — and why not.
     pub unavailable: BTreeMap<Seat, String>,
     /// The model each seat reports by default, for independence before it has started.
@@ -250,7 +316,19 @@ impl Snapshot {
 
     fn context(&self) -> Context<'_> {
         let i = self.investigation();
-        Context { title: &i.title, discipline: i.discipline, brief: &self.brief, plan: &self.plan, feedback: &self.feedback }
+        Context {
+            title: &i.title,
+            discipline: i.discipline,
+            brief: &self.brief,
+            plan: &self.plan,
+            feedback: &self.feedback,
+            literature: prompts::literature(&self.papers),
+        }
+    }
+
+    /// The ids for `n` new papers: after every name in `literature/`.
+    fn next_papers(&self, n: usize) -> Vec<String> {
+        literature::number(self.papers.iter().map(|p| p.id.as_str()).chain(self.paper_stems.iter().map(String::as_str)), n)
     }
 
     fn next_hypothesis(&self, made: u32) -> String {
@@ -315,6 +393,8 @@ impl Supervisor {
                 cooling: BTreeMap::new(),
                 planned: BTreeSet::new(),
                 guidance: Vec::new(),
+                queries: Vec::new(),
+                literature: None,
                 next_task,
                 rng: seed | 1,
             },
@@ -336,6 +416,10 @@ impl Supervisor {
         }
         if !matches!(state.status, RoundStatus::Idle) {
             state.status = RoundStatus::Paused { interrupted: interrupted || matches!(state.status, RoundStatus::Paused { interrupted: true }) };
+        }
+        // A search that was out is lost with the process that asked it: asked again.
+        if let Some(step) = state.literature.as_mut().filter(|s| matches!(s.state, StepState::Searching { .. } | StepState::Overdue)) {
+            step.state = StepState::Due;
         }
         Supervisor { state, made: Made::default() }
     }
@@ -455,6 +539,9 @@ impl Supervisor {
             }
         }
         self.state.planned.insert(Phase::Frame);
+        let policy = &snap.investigation().literature;
+        self.state.literature = (policy.enabled && !policy.sources.is_empty())
+            .then(|| LiteratureStep { state: StepState::Due, queries: Vec::new(), added: Vec::new(), notes: Vec::new(), started: None, ended: None });
         for (seat, role) in self.seats(snap) {
             if self.free(snap) == 0 {
                 effects.push(Effect::Notice("The round's budget is spent before every seat could generate.".into()));
@@ -471,11 +558,118 @@ impl Supervisor {
         self.state.tasks.iter().filter(|t| t.round == self.state.round && t.phase == phase).all(|t| t.state.terminal())
     }
 
-    fn waits_on(&self, phase: Phase) -> bool {
+    /// Whether a phase's tasks wait: the hypotheses for the plan, and for
+    /// the literature until its deadline.
+    fn waits_on(&self, phase: Phase, now: u64) -> bool {
         match phase {
-            Phase::Generate => !self.settled(Phase::Frame),
+            Phase::Generate => !self.settled(Phase::Frame) || self.literature_holds(now),
             _ => false,
         }
+    }
+
+    fn literature_holds(&self, now: u64) -> bool {
+        match self.state.literature.as_ref().map(|s| &s.state) {
+            Some(StepState::Due) => true,
+            Some(StepState::Searching { deadline }) => now < *deadline,
+            _ => false,
+        }
+    }
+
+    /// The round's search of the literature, when it is time: once the plan
+    /// is framed, with its queries — or the last overview's, or the title's
+    /// words. Marked as asked; `None` when there is nothing to ask now. It
+    /// costs no agent call.
+    pub fn literature_due(&mut self, snap: &Snapshot, now: u64) -> Option<LiteratureSearch> {
+        if !matches!(self.state.status, RoundStatus::Running) || !self.settled(Phase::Frame) {
+            return None;
+        }
+        if self.state.literature.as_ref()?.state != StepState::Due {
+            return None;
+        }
+        let policy = snap.investigation().literature.clone();
+        let mut queries: Vec<String> = Vec::new();
+        for query in self.state.queries.iter().map(|q| q.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|q| !q.is_empty()) {
+            if !queries.contains(&query) {
+                queries.push(query);
+            }
+        }
+        if queries.is_empty() {
+            queries = literature::fallback_queries(&snap.investigation().title, &snap.brief);
+        }
+        queries.truncate(policy.queries.max(1) as usize);
+        let step = self.state.literature.as_mut()?;
+        let skip = if !policy.enabled || policy.sources.is_empty() {
+            Some("the literature is off for this investigation")
+        } else if queries.is_empty() {
+            Some("there was nothing to search for")
+        } else {
+            None
+        };
+        if let Some(why) = skip {
+            step.state = StepState::Skipped { why: why.into() };
+            return None;
+        }
+        step.queries = queries.clone();
+        step.started = Some(now);
+        step.state = StepState::Searching { deadline: now + u64::from(policy.wait_s) };
+        Some(LiteratureSearch { queries, sources: policy.sources, per_query: policy.per_query.max(1) })
+    }
+
+    /// The literature waited for long enough: the hypotheses go on without
+    /// it. Said once.
+    pub fn literature_overdue(&mut self, now: u64) -> Vec<Effect> {
+        match self.state.literature.as_mut() {
+            Some(step) if matches!(step.state, StepState::Searching { deadline } if now >= deadline) => {
+                step.state = StepState::Overdue;
+                vec![Effect::Notice("The literature has not answered yet: the hypotheses go on without it, and what it finds reaches the reviews.".into())]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// What the search came to: the papers it found, of which those new to
+    /// the investigation — the best of each query in turn, as many as the
+    /// round adds — are numbered and written; or why it could not search.
+    /// `notes` are what went wrong with a source that did not answer.
+    pub fn literature_answered(&mut self, found: Result<Vec<Candidate>, String>, notes: Vec<String>, snap: &Snapshot, now: u64) -> Vec<Effect> {
+        let round = self.state.round;
+        let Some(step) = self.state.literature.as_mut().filter(|s| matches!(s.state, StepState::Searching { .. } | StepState::Overdue)) else {
+            return Vec::new();
+        };
+        step.ended = Some(now);
+        step.state = StepState::Done;
+        let mut effects = Vec::new();
+        if !notes.is_empty() {
+            effects.push(Effect::Notice(format!("The literature: {}", notes.join("; "))));
+            step.notes.extend(notes);
+        }
+        match found {
+            Err(why) => {
+                effects.push(Effect::Notice(format!("The literature could not be searched: {why}")));
+                step.notes.push(why);
+            }
+            Ok(found) => {
+                let max = snap.investigation().literature.papers as usize;
+                let kept = literature::select(&snap.papers, &found, max);
+                let ids = snap.next_papers(kept.len());
+                for (id, candidate) in ids.iter().zip(kept) {
+                    effects.push(Effect::Paper(Paper {
+                        id: id.clone(),
+                        record: candidate.record,
+                        added: now,
+                        round: Some(round),
+                        by: AddedBy::Round,
+                        queries: candidate.queries,
+                        ..Paper::default()
+                    }));
+                }
+                if ids.is_empty() {
+                    effects.push(Effect::Notice("The literature had nothing new for this round's queries.".into()));
+                }
+                step.added = ids;
+            }
+        }
+        effects
     }
 
     /// The tasks to start now: planned, their seat free, within the budget.
@@ -490,7 +684,7 @@ impl Supervisor {
         let ids: Vec<String> = self.state.tasks.iter().filter(|t| t.state == TaskState::Ready).map(|t| t.id.clone()).collect();
         for id in ids {
             let Some(task) = self.task(&id).cloned() else { continue };
-            if self.waits_on(task.phase) {
+            if self.waits_on(task.phase, now) {
                 continue;
             }
             if self.state.cooling.get(&task.seat).is_some_and(|until| *until > now) {
@@ -540,7 +734,8 @@ impl Supervisor {
                 for (n, id) in task.targets.iter().enumerate() {
                     let h = snap.hypothesis(id)?;
                     let label = ((b'A' + n as u8) as char).to_string();
-                    shown.push(prompts::shown(&label, h, &self.lab_notes(snap, id)));
+                    let notes = [self.lab_notes(snap, id), Self::closest_papers(snap, h)].into_iter().filter(|n| !n.is_empty()).collect::<Vec<_>>();
+                    shown.push(prompts::shown(&label, h, &notes.join("\n\n")));
                     labels.insert(label, id.clone());
                 }
                 prompts::reflect(&ctx, &shown)
@@ -638,6 +833,17 @@ impl Supervisor {
             out.push(lab);
         }
         out.join("\n\n")
+    }
+
+    /// The investigation's papers most like a hypothesis, for a reviewer
+    /// judging whether it is new.
+    fn closest_papers(snap: &Snapshot, h: &Hypothesis) -> String {
+        let near = literature::closest(&snap.papers, &format!("{} {} {}", h.title, h.statement, h.rationale), 3);
+        if near.is_empty() {
+            return String::new();
+        }
+        let list: Vec<String> = near.iter().map(|(p, _)| format!("{} *{}*", p.id, p.record.title.trim())).collect();
+        format!("**The papers in the literature closest to it.** {}.", list.join("; "))
     }
 
     fn lab_notes(&self, snap: &Snapshot, id: &str) -> String {
@@ -780,6 +986,9 @@ impl Supervisor {
     }
 
     fn framed(&mut self, a: FrameAnswer) -> Vec<Effect> {
+        if !a.queries.is_empty() {
+            self.state.queries = a.queries.clone();
+        }
         let list = |items: &[String]| items.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n");
         let mut plan = format!("# Research plan\n\n{}\n", a.plan.trim());
         if !a.criteria.is_empty() {
@@ -809,6 +1018,7 @@ impl Supervisor {
                 rationale: h.rationale,
                 predictions: h.predictions,
                 assumptions: h.assumptions,
+                references: h.references,
                 extra: Vec::new(),
             }));
             effects.extend(experiment);
@@ -918,6 +1128,7 @@ impl Supervisor {
                 rationale: h.rationale,
                 predictions: h.predictions,
                 assumptions: h.assumptions,
+                references: h.references,
                 extra: Vec::new(),
             }));
             effects.extend(experiment);
@@ -927,6 +1138,9 @@ impl Supervisor {
 
     fn reviewed_round(&mut self, task: &Task, a: MetaAnswer, snap: &Snapshot) -> Vec<Effect> {
         self.state.guidance = a.guidance.clone();
+        if !a.queries.is_empty() {
+            self.state.queries = a.queries.clone();
+        }
         let mut effects = vec![Effect::Overview(format!("# Overview — round {}\n\n{}\n", self.state.round, a.overview.trim()))];
         if !a.plan.trim().is_empty() {
             effects.push(Effect::Plan(format!("# Research plan\n\n_Rewritten after round {}._\n\n{}\n", self.state.round, a.plan.trim())));
@@ -1030,6 +1244,10 @@ impl Supervisor {
         }
         let all_done = self.state.tasks.iter().filter(|t| t.round == round).all(|t| t.state.terminal());
         if self.state.planned.contains(&Phase::Meta) && all_done {
+            // A search still out when the round is over is not waited for.
+            if let Some(step) = self.state.literature.as_mut().filter(|s| !s.state.terminal()) {
+                step.state = StepState::Skipped { why: "the round was over before it answered".into() };
+            }
             effects.push(self.report());
             self.state.status = RoundStatus::Idle;
         }
@@ -1172,6 +1390,22 @@ impl Supervisor {
             let result = if t.calls > 1 { format!("{result}, in {} calls", t.calls) } else { result };
             text.push_str(&format!("| {} | {} | {} | {} | {result} |\n", t.id, t.phase.name(), t.seat.name(), t.model));
         }
+        if let Some(step) = &self.state.literature {
+            let asked = step.queries.iter().map(|q| format!("“{q}”")).collect::<Vec<_>>().join(", ");
+            let came = match &step.state {
+                StepState::Done if !step.added.is_empty() => format!("Added {}.", step.added.join(", ")),
+                StepState::Done => "Nothing new was found.".to_string(),
+                StepState::Skipped { why } => format!("Not searched: {why}."),
+                _ => "It had not answered.".to_string(),
+            };
+            text.push_str(&format!("\n## Literature\n\n{}{came}\n", if asked.is_empty() { String::new() } else { format!("Searched for {asked}. ") }));
+            for note in &step.notes {
+                text.push_str(&format!("\n- {note}"));
+            }
+            if !step.notes.is_empty() {
+                text.push('\n');
+            }
+        }
         Effect::RoundReport { round, text }
     }
 
@@ -1289,6 +1523,9 @@ impl Supervisor {
                 _ => {}
             }
         }
+        if let Some(step) = self.state.literature.as_mut().filter(|s| !s.state.terminal()) {
+            step.state = StepState::Skipped { why: "the round was stopped".into() };
+        }
         self.state.status = RoundStatus::Idle;
         running
     }
@@ -1309,6 +1546,10 @@ pub fn applied(snap: &Snapshot, effects: &[Effect]) -> Snapshot {
     for effect in effects {
         match effect {
             Effect::Hypothesis(h) => snap.hypotheses.push(h.clone()),
+            Effect::Paper(p) => {
+                snap.paper_stems.push(p.id.clone());
+                snap.papers.push(p.clone());
+            }
             Effect::Status { hypothesis, status } => {
                 if let Some(h) = snap.hypotheses.iter_mut().find(|h| h.id == *hypothesis) {
                     h.status = *status;
@@ -1324,6 +1565,37 @@ pub fn applied(snap: &Snapshot, effects: &[Effect]) -> Snapshot {
         }
     }
     snap
+}
+
+/// A round's search of the literature, as the Activity list draws it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LiteratureRow {
+    /// `due`, `searching`, `overdue`, `done` or `skipped`.
+    pub state: String,
+    /// Why it was skipped.
+    pub why: Option<String>,
+    pub queries: Vec<String>,
+    pub added: Vec<String>,
+    pub notes: Vec<String>,
+    #[ts(type = "number | null")]
+    pub started: Option<u64>,
+    #[ts(type = "number | null")]
+    pub ended: Option<u64>,
+}
+
+impl From<&LiteratureStep> for LiteratureRow {
+    fn from(s: &LiteratureStep) -> LiteratureRow {
+        let (state, why) = match &s.state {
+            StepState::Due => ("due", None),
+            StepState::Searching { .. } => ("searching", None),
+            StepState::Overdue => ("overdue", None),
+            StepState::Done => ("done", None),
+            StepState::Skipped { why } => ("skipped", Some(why.clone())),
+        };
+        LiteratureRow { state: state.into(), why, queries: s.queries.clone(), added: s.added.clone(), notes: s.notes.clone(), started: s.started, ended: s.ended }
+    }
 }
 
 /// A task as the Activity list draws it.

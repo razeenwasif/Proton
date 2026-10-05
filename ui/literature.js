@@ -191,6 +191,26 @@ export function literatureHtml({ literature, results, folder, query, adding }) {
     `</div>`;
 }
 
+/** One of a hypothesis's references: one of the investigation's papers, a
+ *  button that opens it (with its title, when the literature has it); a DOI
+ *  or an arXiv id, a link to it; anything else, as it was written.
+ *  @param {string} ref @param {PaperRow[]} papers */
+export function referenceHtml(ref, papers) {
+  const text = ref.trim();
+  const own = /^\[*(?:literature\/)?(P\d{3,})(?:\.(?:pdf|md))?\b/.exec(text);
+  if (own) {
+    const paper = papers.find((p) => p.id === own[1]);
+    const rest = text.slice(own[0].length).replace(/^\]*\s*/, "");
+    return `<button class="rs-link" data-lit-paper="${esc(own[1])}">${esc(own[1])}</button>` +
+      (paper ? ` <span class="rs-faint">${esc(paper.title)}</span>` : "") + (rest ? ` ${esc(rest)}` : "");
+  }
+  const doi = /^(?:doi:\s*|https?:\/\/(?:dx\.)?doi\.org\/)?(10\.\d{4,9}\/\S+)$/i.exec(text);
+  if (doi) return link(`https://doi.org/${encodeURI(doi[1])}`, `doi:${doi[1]}`);
+  const arxiv = /^(?:arxiv:\s*|https?:\/\/arxiv\.org\/abs\/)(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?\/\d{7}(?:v\d+)?)$/i.exec(text);
+  if (arxiv) return link(`https://arxiv.org/abs/${arxiv[1]}`, `arXiv:${arxiv[1]}`);
+  return markdown(text).replace(/^<p>|<\/p>$/g, "");
+}
+
 /** The host a URL names, or the URL when it names none. @param {string} url */
 function hostOf(url) {
   try {

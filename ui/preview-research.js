@@ -333,7 +333,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
     }));
     const status = r.status === "paused" ? { status: "paused", interrupted: r.interrupted } : { status: r.status };
     return [{ type: "researchRound", slug: i.slug, round: r.n, status, used: r.used, cap: 20, seats,
-      tasks: r.tasks.map(({ prompt, answer, ...t }) => t), held: null }];
+      tasks: r.tasks.map(({ prompt, answer, ...t }) => t), literature: r.literature ?? null, held: null }];
   }
 
   /** What a task said, as the transcript draws it. @param {any} t */
@@ -436,12 +436,31 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
     const r = rounds[i.slug];
     const running = r.tasks.find((/** @type {any} */ t) => t.state === "running");
     if (running) land(i, r, running);
+    // The literature, searched once the plan is framed: a beat to answer, a paper found.
+    const lit = r.literature;
+    if (lit && r.status === "running") {
+      const now = Math.floor(Date.now() / 1000);
+      if (lit.state === "searching") {
+        const l = litOf(i.slug);
+        const id = `P${String(l.papers.length + 1).padStart(3, "0")}`;
+        l.papers.push({ id, title: "On the representation of integers as sums of three cubes", authors: ["A. Author", "B. Author"], authorsMore: 0, year: 2021,
+          venue: "A journal of number theory", doi: null, arxiv: null, abstract: "Which integers are sums of three cubes, and how a search finds the representations.",
+          tldr: "", access: "open", hasPdf: true, pdfFrom: "https://example.org/paper.pdf", pdfUrl: null, by: "round", round: r.n, citations: 12,
+          queries: lit.queries, sources: ["arxiv"], citedBy: [], pdfNote: null });
+        Object.assign(lit, { state: "done", ended: now, added: [id] });
+        if (i.slug === open) say(literatureEvents());
+      } else if (lit.state === "due" && r.tasks.filter((/** @type {any} */ t) => t.phase === "frame").every((/** @type {any} */ t) => t.state === "done")) {
+        Object.assign(lit, { state: "searching", started: now, queries: [i.title.toLowerCase().replace(/[^a-z0-9 ]/g, "")] });
+      }
+    }
     if (r.status === "running") {
       const now = Math.floor(Date.now() / 1000);
       // A step starts once every step before it has landed; two to an engine.
       for (const t of r.tasks.filter((/** @type {any} */ t) => t.state === "ready")) {
         const before = r.tasks.filter((/** @type {any} */ x) => ORDER.indexOf(x.phase) < ORDER.indexOf(t.phase));
         if (before.some((/** @type {any} */ x) => x.state !== "done")) break;
+        // The hypotheses wait for the literature.
+        if (t.phase === "generate" && lit && (lit.state === "due" || lit.state === "searching")) break;
         if (r.tasks.filter((/** @type {any} */ x) => x.seat === t.seat && x.state === "running").length >= 2) continue;
         t.state = "running";
         t.started = now;
@@ -627,6 +646,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         r.n += 1;
         r.status = "running";
         r.used = 0;
+        r.literature = litOf(open).enabled ? { state: "due", why: null, queries: [], added: [], notes: [], started: null, ended: null } : null;
         r.tasks = PLAN.filter(([, seat]) => !r.off.has(seat)).map(([phase, seat]) => ({
           id: `T${String(nextTask++).padStart(4, "0")}`, round: r.n, phase, seat, role: ROLES[seat], targets: [], state: "ready",
           why: null, model: SEAT_MODELS[seat], attempts: 0, started: null, ended: null,

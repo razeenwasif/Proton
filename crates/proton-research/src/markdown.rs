@@ -186,6 +186,9 @@ pub fn render_hypothesis(h: &Hypothesis) -> String {
     section(&mut out, "Rationale", &h.rationale);
     section(&mut out, "Predictions", &list(&h.predictions));
     section(&mut out, "Assumptions", &list(&h.assumptions));
+    if !h.references.is_empty() {
+        section(&mut out, "References", &list(&h.references));
+    }
     for (heading, text) in &h.extra {
         section(&mut out, heading, text);
     }
@@ -201,6 +204,7 @@ pub fn parse_hypothesis(text: &str) -> Result<Hypothesis, String> {
         rationale: take(&mut sections, "Rationale"),
         predictions: items(&take(&mut sections, "Predictions")),
         assumptions: items(&take(&mut sections, "Assumptions")),
+        references: items(&take(&mut sections, "References")),
         extra: sections,
         id: front.id,
         title: front.title,
@@ -440,6 +444,7 @@ mod tests {
             rationale: "Molecules are much smaller than the wavelength.".into(),
             predictions: vec!["The sky is polarised at 90° from the sun.".into(), "Sunsets redden.".into()],
             assumptions: vec!["Dry air".into()],
+            references: vec!["P003".into(), "doi:10.1364/JOSAA.18.000412".into()],
             extra: Vec::new(),
         }
     }

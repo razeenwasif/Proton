@@ -16,7 +16,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
-import { literatureHtml, ownPaper, paperHtml } from "./literature.js";
+import { literatureHtml, ownPaper, paperHtml, referenceHtml } from "./literature.js";
 
 /** @typedef {import("./bindings/ResearchSummary").ResearchSummary} Summary */
 /** @typedef {import("./bindings/HypothesisRow").HypothesisRow} Row */
@@ -32,8 +32,9 @@ import { literatureHtml, ownPaper, paperHtml } from "./literature.js";
 /** @typedef {{slug: string, title: string, discipline: Discipline, brief: string, plan: string,
  *   overview: string, verdicts: string, sandbox: string, feedback: string, hypotheses: Row[]}} BoardEvent */
 /** @typedef {{slug: string, detail: Detail | null}} HypothesisEvent */
+/** @typedef {import("./bindings/LiteratureRow").LiteratureRow} LiteratureStep */
 /** @typedef {{slug: string, round: number, status: RoundStatus, used: number, cap: number,
- *   seats: SeatRow[], tasks: Task[], held: string | null}} RoundEvent */
+ *   seats: SeatRow[], tasks: Task[], literature?: LiteratureStep | null, held: string | null}} RoundEvent */
 /** @typedef {{slug: string, task: string, items: Item[]}} TranscriptEvent */
 /** @typedef {import("./literature.js").LiteratureEvent} LiteratureEvent */
 /** @typedef {import("./literature.js").PaperEvent} PaperEvent */
@@ -438,6 +439,8 @@ export function createResearch(host) {
       ${d.rationale.trim() ? `<section class="rs-doc"><header><span>Rationale</span></header><div class="cc-prose">${markdown(d.rationale)}</div></section>` : ""}
       ${d.predictions.length ? `<section class="rs-doc"><header><span>Predictions</span></header><div class="cc-prose">${list(d.predictions)}</div></section>` : ""}
       ${d.assumptions.length ? `<section class="rs-doc"><header><span>Assumptions</span></header><div class="cc-prose">${list(d.assumptions)}</div></section>` : ""}
+      ${d.references?.length ? `<section class="rs-doc"><header><span>References</span></header><ul class="rs-refs">${
+        d.references.map((ref) => `<li>${referenceHtml(ref, literature()?.papers ?? [])}</li>`).join("")}</ul></section>` : ""}
       ${reviews ? `<section class="rs-doc"><header><span>Reviews</span></header>${reviews}</section>` : ""}
       ${matches ? `<section class="rs-doc"><header><span>Tournament</span></header><ul class="rs-matches">${matches}</ul></section>` : ""}
       ${d.experiments.length ? `<section class="rs-doc"><header><span>Experiments</span></header><p class="rs-faint">${d.experiments.map(esc).join(", ")}</p></section>` : ""}
@@ -462,6 +465,26 @@ export function createResearch(host) {
       (on ? `<div class="rs-transcript">${transcriptHtml()}</div>` : "");
   }
 
+  /** The round's search of the literature, a row of its own: no agent's call, Proton's.
+   *  @param {LiteratureStep} lit */
+  function literatureStepHtml(lit) {
+    const now = Date.now() / 1000;
+    const time = lit.started == null ? "" : lit.ended != null ? span(lit.ended - lit.started) : span(now - lit.started);
+    const asked = lit.queries.map((q) => `“${q}”`).join(", ");
+    const what = lit.state === "due" ? "Searches once the plan is framed"
+      : lit.state === "searching" ? `Searching for ${asked}; the hypotheses wait for it`
+      : lit.state === "overdue" ? `Searching for ${asked}; the hypotheses went on without it`
+      : lit.state === "skipped" ? `Not searched: ${lit.why ?? ""}`
+      : lit.added.length ? `Found for ${asked}:` : `Nothing new for ${asked}`;
+    const added = lit.added.map((id) => `<button class="rs-link" data-lit-paper="${esc(id)}">${esc(id)}</button>`).join(" ");
+    const state = { due: "ready", searching: "running", overdue: "running", done: "done", skipped: "skipped" }[lit.state] ?? "ready";
+    const notes = lit.notes.length ? `<span class="rs-task-why">${esc(lit.notes.join("; "))}</span>` : "";
+    return `<div class="rs-task rs-lit-step" data-state="${state}">` +
+      `<i class="rs-dot"></i><span class="rs-seat">Proton</span>` +
+      `<span class="rs-task-what">${esc(what)} ${added}${notes}</span>` +
+      `<span class="rs-task-model">no agent call</span><span class="rs-task-time">${esc(time)}</span></div>`;
+  }
+
   function activityHtml() {
     const r = round();
     if (!r || !r.tasks.length) {
@@ -471,8 +494,12 @@ export function createResearch(host) {
     }
     const groups = PHASES.map(([phase, name]) => {
       const tasks = r.tasks.filter((t) => t.phase === phase);
-      if (!tasks.length) return "";
-      return `<section class="rs-phase"><header>${esc(name)}<span class="rs-faint">${tasks.filter((t) => t.state === "done").length}/${tasks.length}</span></header>` +
+      // The literature is searched between the plan and the hypotheses.
+      const lit = phase === "generate" && r.literature
+        ? `<section class="rs-phase"><header>Literature<span class="rs-faint">${r.literature.added.length ? `${r.literature.added.length} added` : ""}</span></header>` +
+          literatureStepHtml(r.literature) + `</section>` : "";
+      if (!tasks.length) return lit;
+      return lit + `<section class="rs-phase"><header>${esc(name)}<span class="rs-faint">${tasks.filter((t) => t.state === "done").length}/${tasks.length}</span></header>` +
         tasks.map(taskRow).join("") + `</section>`;
     }).join("");
     return `<div class="rs-col rs-wide">${groups}</div>`;

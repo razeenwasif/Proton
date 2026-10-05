@@ -171,14 +171,21 @@ impl Source for Scripted {
 /// A paper of a record, as it is first written: with why it has no PDF when
 /// no open copy of it is known anywhere.
 pub fn paper(id: String, record: Record, by: AddedBy, round: Option<u32>, queries: Vec<String>, now: u64) -> Paper {
-    let pdf_note = pdf::links(&record).is_empty().then(|| {
-        match record.access {
-            Access::Closed => "It is behind a paywall, as far as the sources know.",
-            _ => "No open copy of it is known.",
-        }
-        .to_string()
-    });
-    Paper { id, record, added: now, round, by, queries, pdf_note, ..Paper::default() }
+    noted(Paper { id, record, added: now, round, by, queries, ..Paper::default() })
+}
+
+/// A paper saying why it has no PDF, when no open copy of it is known.
+pub fn noted(mut paper: Paper) -> Paper {
+    if paper.pdf_note.is_none() && pdf::links(&paper.record).is_empty() {
+        paper.pdf_note = Some(
+            match paper.record.access {
+                Access::Closed => "It is behind a paywall, as far as the sources know.",
+                _ => "No open copy of it is known.",
+            }
+            .to_string(),
+        );
+    }
+    paper
 }
 
 /// Start keeping the open PDFs of `papers` in `folder`, no bigger than its

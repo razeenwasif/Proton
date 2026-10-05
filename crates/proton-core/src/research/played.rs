@@ -124,7 +124,8 @@ fn answer(phase: Phase, prompt: &str, seat: Seat, n: usize, code: &str) -> Value
         })
     };
     match phase {
-        Phase::Frame => json!({ "plan": "Test the scattering laws.", "criteria": ["Quantitative"], "questions": ["Why blue, not violet?"] }),
+        Phase::Frame => json!({ "plan": "Test the scattering laws.", "criteria": ["Quantitative"], "questions": ["Why blue, not violet?"],
+            "queries": ["rayleigh scattering skylight"] }),
         Phase::Generate => json!({ "hypotheses": [hypothesis(0), hypothesis(1)] }),
         Phase::Reflect => json!({ "reviews": shown.iter().map(|l| json!({ "label": l, "verdict": "promising", "correctness": 4, "novelty": 3,
             "testability": 4, "summary": "Sound.", "critique": "Check the dipole approximation.", "citations": [], "experiment": proposal() })).collect::<Vec<_>>() }),
@@ -137,7 +138,8 @@ fn answer(phase: Phase, prompt: &str, seat: Seat, n: usize, code: &str) -> Value
             h["parents"] = json!(shown);
             json!({ "hypotheses": [h] })
         }
-        Phase::Meta => json!({ "overview": "# Overview\n\nRayleigh leads.", "plan": "Next: polarisation.", "guidance": ["Polarisation."], "retire": [] }),
+        Phase::Meta => json!({ "overview": "# Overview\n\nRayleigh leads.", "plan": "Next: polarisation.", "guidance": ["Polarisation."], "retire": [],
+            "queries": ["skylight polarisation"] }),
         Phase::SimReview => json!({ "finding": "supports", "summary": "It peaks below 500 nm.", "issues": [], "follow_up": proposal() }),
     }
 }
@@ -1148,5 +1150,110 @@ fn a_seat_that_does_not_say_its_model_is_told_one_and_judged_by_it() {
     let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
     assert!(folder.hypotheses().iter().filter(|h| h.author.seat == Seat::Antigravity).all(|h| h.author.model == "gemini-3.8-flash-high"));
     drop(log);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A literature that finds two papers, one open and one paywalled, and
+/// keeps the open one's PDF as the worker would.
+fn bookshelf() -> super::literature::Scripted {
+    use proton_literature::fetch::{Job, Reply};
+    use proton_research::literature::Candidate;
+    use proton_research::model::{Access, LiteratureSource, Record};
+    let found = |title: &str, doi: Option<&str>, arxiv: Option<&str>, access: Access| Candidate {
+        record: Record {
+            title: title.into(),
+            doi: doi.map(str::to_string),
+            arxiv: arxiv.map(str::to_string),
+            year: Some(2001),
+            abstract_: format!("{title}: the colour of the sky as an effect of rayleigh scattering of sunlight by molecules."),
+            access,
+            sources: vec![LiteratureSource::OpenAlex],
+            ..Record::default()
+        },
+        queries: vec!["rayleigh scattering skylight".into()],
+        rank: 0,
+    };
+    super::literature::Scripted::new(move |job| match job {
+        Job::Search { .. } => vec![Reply::Searched {
+            candidates: vec![
+                found("Rayleigh scattering of sunlight", None, Some("2101.00001"), Access::Open),
+                found("Skylight in Granada", Some("10.1364/josaa.18.000412"), None, Access::Closed),
+            ],
+            failures: Vec::new(),
+        }],
+        Job::Download { items, .. } => {
+            let mut replies: Vec<Reply> = items
+                .iter()
+                .map(|item| {
+                    std::fs::write(&item.dest, b"%PDF-1.7 the paper").unwrap();
+                    Reply::Saved { key: item.key.clone(), bytes: 18, sha256: "cd".repeat(32), url: item.urls[0].clone() }
+                })
+                .collect();
+            replies.push(Reply::Finished);
+            replies
+        }
+        Job::Lookup { .. } => vec![Reply::Failed { why: "not in this test".into() }],
+    })
+}
+
+#[test]
+fn a_round_grounded_in_the_literature_shows_every_seat_its_papers_and_charges_no_call_for_them() {
+    use proton_literature::fetch::Job;
+    let dir = root("literature");
+    let (factory, log) = Factory::new();
+    let source = bookshelf();
+    let asked = source.asked.clone();
+    let mut research = Research::with_factory(&dir, Box::new(factory), "this-proton").with_literature(Box::new(source));
+    research.create("Why is the sky blue?", "Explain the colour of the daytime sky.", Discipline::Physics, true);
+    research.start_at(T0);
+    let (_, events) = play(&mut research, T0, 1);
+    let (status, used, _) = round(&events).unwrap();
+    assert_eq!(status, RoundStatus::Idle);
+
+    let jobs = asked.lock().unwrap().clone();
+    assert!(matches!(&jobs[0], Job::Search { queries, .. } if queries == &["rayleigh scattering skylight"]), "the plan's queries: {jobs:?}");
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    let papers = folder.papers();
+    assert_eq!(papers.iter().map(|p| (p.id.as_str(), p.has_pdf, p.round)).collect::<Vec<_>>(), [("P001", true, Some(1)), ("P002", false, Some(1))]);
+    assert!(papers[1].pdf_note.as_deref().is_some_and(|n| n.contains("paywall")));
+    assert!(std::fs::read_to_string(folder.dir().join(".gitignore")).unwrap().lines().any(|l| l == "literature/*.pdf"), "the PDF would go into Git");
+
+    let log = log.lock().unwrap();
+    let generate: Vec<&Call> = log.calls.iter().filter(|c| c.phase == Phase::Generate).collect();
+    assert_eq!(generate.len(), 3);
+    for c in &generate {
+        assert!(c.sent[0].contains("- **P001**") && c.sent[0].contains("full text: literature/P001.pdf") && c.sent[0].contains("- **P002**"), "{:?} was not shown the papers", c.seat);
+    }
+    assert!(log.calls.iter().any(|c| c.phase == Phase::Reflect && c.sent[0].contains("closest to it")), "no reviewer was shown the closest papers");
+    assert_eq!(used as usize, log.calls.len(), "the literature cost a call");
+    let report = std::fs::read_to_string(folder.dir().join("rounds/round-001.md")).unwrap();
+    assert!(report.contains("## Literature") && report.contains("Added P001, P002."), "{report}");
+    let step = events.iter().rev().find_map(|e| match e {
+        Event::ResearchRound { literature, .. } => literature.clone(),
+        _ => None,
+    });
+    assert!(step.is_some_and(|s| s.state == "done" && s.added == ["P001", "P002"]));
+    drop(log);
+
+    // The next round asks for what the overview said to.
+    research.start_at(T0 + 10_000);
+    play(&mut research, T0 + 10_000, 1);
+    let jobs = asked.lock().unwrap().clone();
+    assert!(jobs.iter().any(|j| matches!(j, Job::Search { queries, .. } if queries == &["skylight polarisation"])), "{jobs:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_round_of_an_investigation_without_the_literature_asks_nobody() {
+    let dir = root("no-literature");
+    let source = bookshelf();
+    let asked = source.asked.clone();
+    let mut research = Research::with_factory(&dir, Box::new(Factory::new().0), "this-proton").with_literature(Box::new(source));
+    research.create("Why is the sky blue?", "Explain the colour of the daytime sky.", Discipline::Physics, false);
+    research.start_at(T0);
+    let (_, events) = play(&mut research, T0, 1);
+    assert_eq!(round(&events).unwrap().0, RoundStatus::Idle);
+    assert!(asked.lock().unwrap().is_empty(), "the literature was asked");
+    assert!(Store::new(dir.join("research")).open(SLUG).unwrap().papers().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }

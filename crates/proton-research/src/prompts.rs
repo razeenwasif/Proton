@@ -10,7 +10,7 @@
 //! Hypotheses are shown under labels, never with their authors: a judge or
 //! a reviewer that knows whose idea it is can favour its own.
 
-use crate::model::{Discipline, Hypothesis, Role, Seat};
+use crate::model::{Discipline, Hypothesis, Paper, Role, Seat};
 
 const CONTEXT: &str = include_str!("prompts/context.md");
 const FRAME: &str = include_str!("prompts/frame.md");
@@ -53,6 +53,8 @@ pub struct Context<'a> {
     pub brief: &'a str,
     pub plan: &'a str,
     pub feedback: &'a str,
+    /// The literature, as [`literature`] says it: empty for none.
+    pub literature: String,
 }
 
 impl Context<'_> {
@@ -64,8 +66,72 @@ impl Context<'_> {
             ("brief", &clip(self.brief, 6_000)),
             ("plan", &or(&clip(self.plan, 6_000), "_None yet._")),
             ("feedback", &or(&clip(&tail(self.feedback, 4_000), 4_000), "_Nothing yet._")),
+            ("literature", &self.literature),
         ])
     }
+}
+
+/// The most of the literature every task is shown, in bytes: enough for a
+/// round's papers and more, never so much it crowds out the task.
+const LITERATURE: usize = 5_000;
+
+/// The most of a paper's abstract shown with it.
+const ABSTRACT: usize = 280;
+
+/// The investigation's papers, as every task is shown them: a line each —
+/// who, when, what, where, how to reach it — and the start of its abstract.
+/// Empty when there are none.
+pub fn literature(papers: &[Paper]) -> String {
+    if papers.is_empty() {
+        return String::new();
+    }
+    let mut sorted: Vec<&Paper> = papers.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut out = String::from(
+        "### The literature the team has gathered\n\nCite these by their ids. Each is a file in `literature/`, its PDF beside it when it has one.\n\n",
+    );
+    let mut shown = 0;
+    for p in &sorted {
+        let entry = paper_entry(p);
+        if shown > 0 && out.len() + entry.len() > LITERATURE {
+            break;
+        }
+        out.push_str(&entry);
+        shown += 1;
+    }
+    if shown < sorted.len() {
+        out.push_str(&format!("\n[… {} more papers in `literature/`]\n", sorted.len() - shown));
+    }
+    out
+}
+
+/// One paper, as the literature lists it.
+fn paper_entry(p: &Paper) -> String {
+    let r = &p.record;
+    let who = crate::view::named(&r.authors, r.authors_more);
+    let who = match (who.is_empty(), r.year) {
+        (false, Some(year)) => format!("{who} ({year}), "),
+        (false, None) => format!("{who}, "),
+        (true, Some(year)) => format!("({year}) "),
+        (true, None) => String::new(),
+    };
+    let venue = r.venue.as_deref().map(|v| format!(", {v}")).unwrap_or_default();
+    let name = match (&r.doi, &r.arxiv) {
+        (Some(doi), _) => format!(" — doi:{doi}"),
+        (None, Some(id)) => format!(" — arXiv:{id}"),
+        (None, None) => String::new(),
+    };
+    let text = if p.has_pdf { format!(" · full text: literature/{}.pdf", p.id) } else { " · abstract only".to_string() };
+    let mut entry = format!("- **{}** {who}*{}*{venue}{name}{text}\n", p.id, r.title.trim());
+    let abstract_ = r.abstract_.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !abstract_.is_empty() {
+        let mut cut: String = abstract_.chars().take(ABSTRACT).collect();
+        if abstract_.chars().count() > ABSTRACT {
+            cut = format!("{}…", cut.trim_end());
+        }
+        entry.push_str(&format!("  {cut}\n"));
+    }
+    entry
 }
 
 /// The end of a log, where the newest entries are.
@@ -152,7 +218,9 @@ pub fn instructions(role_: Role, discipline: Discipline, seat: Seat, timeout_s: 
          your answer and runs experiments itself.\n\
          - Answer only with the structured output the task asks for. Do not announce yourself, report status or hand \
          off to anyone: instructions elsewhere about protocols, echo lines or hand-offs do not apply.\n\
-         - Cite only what you have checked (URL, DOI or arXiv id). Say plainly when a reference is from memory.\n\
+         - Cite only what you have checked (URL, DOI or arXiv id). Say plainly when a reference is from memory. \
+         The investigation's own papers are cited by their ids, P003, and a page you have read as \
+         [[literature/P003.pdf p. 4]].\n\
          - Write mathematics as TeX: `$...$` inline, `$$...$$` displayed.\n\
          - {} Keep a run under {} seconds.\n",
         seat.name(),
@@ -257,7 +325,7 @@ mod tests {
     use crate::model::{Author, HypothesisStatus};
 
     fn ctx() -> Context<'static> {
-        Context { title: "Why is the sky blue?", discipline: Discipline::Physics, brief: "Explain it.", plan: "", feedback: "" }
+        Context { title: "Why is the sky blue?", discipline: Discipline::Physics, brief: "Explain it.", plan: "", feedback: "", literature: String::new() }
     }
 
     fn h() -> Hypothesis {
@@ -273,6 +341,7 @@ mod tests {
             rationale: "Small scatterers.".into(),
             predictions: vec!["Polarised at 90°.".into()],
             assumptions: Vec::new(),
+            references: Vec::new(),
             extra: Vec::new(),
         }
     }
@@ -296,6 +365,38 @@ mod tests {
             assert!(prompt.contains("Why is the sky blue? — Physics"), "{prompt}");
         }
         assert!(prompts[1].contains("- Ozone") && prompts[1].contains("- Look at polarisation."));
+        assert!(!prompts[0].contains("The literature the team has gathered"), "no papers, no literature");
+    }
+
+    #[test]
+    fn the_literature_is_listed_whole_within_its_share_of_the_prompt() {
+        use crate::model::Record;
+        let paper = |n: u32, pdf: bool| Paper {
+            id: format!("P{n:03}"),
+            record: Record {
+                title: format!("Skylight study {n}"),
+                authors: vec!["Javier Hernández-Andrés".into(), "Raymond L. Lee".into(), "Javier Romero".into()],
+                year: Some(2001),
+                venue: Some("JOSA A".into()),
+                doi: Some(format!("10.1364/josaa.18.{n:06}")),
+                abstract_: "word ".repeat(100),
+                ..Record::default()
+            },
+            has_pdf: pdf,
+            ..Paper::default()
+        };
+        let block = literature(&[paper(2, false), paper(1, true)]);
+        assert!(block.starts_with("### The literature the team has gathered\n"), "{block}");
+        let first = block.lines().find(|l| l.starts_with("- **")).unwrap();
+        assert_eq!(first, "- **P001** Hernández-Andrés et al. (2001), *Skylight study 1*, JOSA A — doi:10.1364/josaa.18.000001 · full text: literature/P001.pdf");
+        assert!(block.contains("- **P002**") && block.contains("· abstract only") && block.contains("word word…"));
+        let many: Vec<Paper> = (1..=40).map(|n| paper(n, false)).collect();
+        let block = literature(&many);
+        assert!(block.len() < 5_400 && block.contains("more papers in `literature/`"), "{}", block.len());
+        let mut ctx = ctx();
+        ctx.literature = literature(&[paper(1, true)]);
+        let prompt = generate(&ctx, 2, &[], &[]);
+        assert!(prompt.contains("- **P001**") && !prompt.contains("### The literature the team has gathered:"), "a heading with a colon reads as a label");
     }
 
     #[test]

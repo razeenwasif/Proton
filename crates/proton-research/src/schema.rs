@@ -64,6 +64,10 @@ pub struct NewHypothesis {
     pub rationale: String,
     pub predictions: Vec<String>,
     pub assumptions: Vec<String>,
+    /// The papers it rests on. Required by the schema; an engine that leaves
+    /// it out anyway is not asked again for it.
+    #[serde(default)]
+    pub references: Vec<String>,
     pub experiment: Proposal,
 }
 
@@ -75,6 +79,9 @@ pub struct FrameAnswer {
     pub criteria: Vec<String>,
     /// The questions the investigation breaks into.
     pub questions: Vec<String>,
+    /// What to search the literature for.
+    #[serde(default)]
+    pub queries: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -135,6 +142,8 @@ pub struct EvolvedHypothesis {
     pub rationale: String,
     pub predictions: Vec<String>,
     pub assumptions: Vec<String>,
+    #[serde(default)]
+    pub references: Vec<String>,
     pub experiment: Proposal,
 }
 
@@ -153,6 +162,9 @@ pub struct MetaAnswer {
     pub guidance: Vec<String>,
     /// Labels of hypotheses to retire.
     pub retire: Vec<String>,
+    /// What the next round should search the literature for.
+    #[serde(default)]
+    pub queries: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -221,6 +233,7 @@ fn hypothesis(parents: bool) -> Value {
         ("rationale", string()),
         ("predictions", strings()),
         ("assumptions", strings()),
+        ("references", strings()),
         ("experiment", proposal()),
     ]);
     object(&fields)
@@ -229,7 +242,7 @@ fn hypothesis(parents: bool) -> Value {
 /// The schema a phase's answer is held to.
 pub fn schema(phase: Phase) -> Value {
     match phase {
-        Phase::Frame => object(&[("plan", string()), ("criteria", strings()), ("questions", strings())]),
+        Phase::Frame => object(&[("plan", string()), ("criteria", strings()), ("questions", strings()), ("queries", strings())]),
         Phase::Generate => object(&[("hypotheses", array(hypothesis(false)))]),
         Phase::Reflect => object(&[(
             "reviews",
@@ -254,7 +267,7 @@ pub fn schema(phase: Phase) -> Value {
         ]),
         Phase::Rank => object(&[("matches", array(object(&[("pair", string()), ("winner", one_of(&["A", "B"])), ("rationale", string())])))]),
         Phase::Evolve => object(&[("hypotheses", array(hypothesis(true)))]),
-        Phase::Meta => object(&[("overview", string()), ("plan", string()), ("guidance", strings()), ("retire", strings())]),
+        Phase::Meta => object(&[("overview", string()), ("plan", string()), ("guidance", strings()), ("retire", strings()), ("queries", strings())]),
         Phase::SimReview => object(&[
             ("finding", one_of(&["supports", "contradicts", "inconclusive"])),
             ("summary", string()),
@@ -318,5 +331,11 @@ mod tests {
         serde_json::from_value::<MetaAnswer>(json!({ "overview": "o", "plan": "p", "guidance": [], "retire": ["C"] })).unwrap();
         serde_json::from_value::<VerifyAnswer>(json!({ "label": "A", "verdict": "strong", "derivation": "d", "issues": [], "experiment": proposal })).unwrap();
         serde_json::from_value::<FrameAnswer>(json!({ "plan": "p", "criteria": [], "questions": [] })).unwrap();
+        // What the literature added is required of an engine, but one that leaves it out is still read.
+        let frame = serde_json::from_value::<FrameAnswer>(json!({ "plan": "p", "criteria": [], "questions": [], "queries": ["rayleigh sky"] })).unwrap();
+        assert_eq!(frame.queries, ["rayleigh sky"]);
+        let mut cited = h.clone();
+        cited["references"] = json!(["P003"]);
+        assert_eq!(serde_json::from_value::<GenerateAnswer>(json!({ "hypotheses": [cited] })).unwrap().hypotheses[0].references, ["P003"]);
     }
 }

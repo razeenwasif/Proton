@@ -64,6 +64,9 @@ pub fn repair(why: &str) -> String {
 const FIELD: usize = 12_000;
 /// Longest code is kept.
 const CODE: usize = 40_000;
+/// The most search queries an answer gives, and the longest one kept.
+const QUERIES: usize = 6;
+const QUERY: usize = 200;
 
 fn bound(text: &mut String, limit: usize) {
     if text.len() > limit {
@@ -112,6 +115,7 @@ impl Check for FrameAnswer {
         bound(&mut self.plan, FIELD * 2);
         self.criteria = bound_all(&mut self.criteria, 600, 12);
         self.questions = bound_all(&mut self.questions, 600, 12);
+        self.queries = bound_all(&mut self.queries, QUERY, QUERIES);
         Ok(())
     }
 }
@@ -126,6 +130,7 @@ macro_rules! hypothesis_fields {
         bound(&mut $h.rationale, FIELD);
         $h.predictions = bound_all(&mut $h.predictions, 1_000, 10);
         $h.assumptions = bound_all(&mut $h.assumptions, 1_000, 10);
+        $h.references = bound_all(&mut $h.references, 300, 12);
         $h.experiment.check(&[])?;
     }};
 }
@@ -222,6 +227,7 @@ impl Check for MetaAnswer {
         bound(&mut self.overview, FIELD * 3);
         bound(&mut self.plan, FIELD * 2);
         self.guidance = bound_all(&mut self.guidance, 800, 12);
+        self.queries = bound_all(&mut self.queries, QUERY, QUERIES);
         // A label it was not shown is dropped rather than refused: retiring
         // nothing is a safe answer.
         self.retire.retain(|label| named(label, labels).is_ok());

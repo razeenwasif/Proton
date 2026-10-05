@@ -10,4 +10,6 @@ Propose {{count}} new hypotheses that answer the goal. Each must be specific and
 
 For each, say what experiment in the Lab would test it: Python code that runs on its own and prints what it found (or `code` as "" if a computation would not help).
 
-Answer with `hypotheses`: each with `title`, `statement`, `rationale`, `predictions`, `assumptions` and `experiment` (`purpose`, `expectation`, `code`).
+Ground each in what is known. In `references`, name the papers it rests on: the investigation's own by id (P003), any other by its DOI or arXiv id — only ones you have read or that are listed above; `[]` if none.
+
+Answer with `hypotheses`: each with `title`, `statement`, `rationale`, `predictions`, `assumptions`, `references` and `experiment` (`purpose`, `expectation`, `code`).

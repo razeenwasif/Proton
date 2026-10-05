@@ -123,6 +123,19 @@ pub fn select(existing: &[Paper], found: &[Candidate], max: usize) -> Vec<Candid
     out
 }
 
+/// How alike a paper is to a text, for a reviewer judging novelty: the
+/// `n` papers most like it, alike enough to say so, the most alike first.
+pub fn closest<'a>(papers: &'a [Paper], text: &str, n: usize) -> Vec<(&'a Paper, f64)> {
+    const ALIKE: f64 = 0.05;
+    let docs: Vec<(String, String)> = papers.iter().map(|p| (p.id.clone(), format!("{} {}", p.record.title, p.record.abstract_))).collect();
+    let query = "\u{0}query";
+    let index = crate::proximity::Index::new(docs.iter().map(|(id, t)| (id.as_str(), t.as_str())).chain([(query, text)]));
+    let mut alike: Vec<(&Paper, f64)> = papers.iter().map(|p| (p, index.similarity(query, &p.id))).filter(|(_, s)| *s >= ALIKE).collect();
+    alike.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.id.cmp(&b.0.id)));
+    alike.truncate(n);
+    alike
+}
+
 /// `n` paper ids after the highest of `stems` — the names in `literature/`.
 pub fn number<'a>(stems: impl IntoIterator<Item = &'a str>, n: usize) -> Vec<String> {
     let first = next_id("P", stems);
@@ -216,6 +229,24 @@ mod tests {
         assert_eq!(select(&[have.clone()], &all, 4), select(&[have.clone()], &all, 4), "the same answer, the same papers");
         assert_eq!(select(&[have], &all, 1).len(), 1);
         assert!(select(&[], &[], 6).is_empty());
+    }
+
+    #[test]
+    fn the_papers_closest_to_an_idea_are_found_and_the_unlike_left_out() {
+        let paper = |id: &str, title: &str, abstract_: &str| Paper {
+            id: id.into(),
+            record: Record { title: title.into(), abstract_: abstract_.into(), ..Record::default() },
+            ..Paper::default()
+        };
+        let papers = vec![
+            paper("P001", "Ozone absorption in the Chappuis band", "Ozone absorbs yellow and red light at twilight."),
+            paper("P002", "Rayleigh scattering of sunlight by nitrogen molecules", "Scattering by molecules goes as the inverse fourth power of wavelength."),
+            paper("P003", "Deep learning", "Neural networks with many layers."),
+        ];
+        let near = closest(&papers, "Molecular Rayleigh scattering of sunlight makes the sky blue: the inverse fourth power of wavelength.", 3);
+        assert_eq!(near.first().map(|(p, _)| p.id.as_str()), Some("P002"));
+        assert!(near.iter().all(|(p, _)| p.id != "P003"), "{near:?}");
+        assert!(closest(&[], "anything", 3).is_empty());
     }
 
     #[test]

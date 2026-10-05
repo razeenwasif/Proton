@@ -11,3 +11,5 @@
 ### What the scientist has told the team
 
 {{feedback}}
+
+{{literature}}

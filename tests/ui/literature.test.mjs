@@ -2,7 +2,7 @@
 // what the sources line says of each source and its key.
 import {test} from 'node:test';
 import {equal, ok} from 'node:assert/strict';
-import {and, ownPaper, sourcesLine} from '../../ui/literature.js';
+import {and, ownPaper, referenceHtml, sourcesLine} from '../../ui/literature.js';
 
 test('/p and a DOI, an arXiv id or a link is a paper; anything else is not', () => {
   equal(ownPaper('/p 10.1364/JOSAA.18.000412'), '10.1364/JOSAA.18.000412');
@@ -28,4 +28,16 @@ test('the sources line says who is asked, whose key was found, and who is restin
   equal(sourcesLine([row('semanticScholar', 'Semantic Scholar', true, 'notLooked')], true, 0).startsWith('Asks Semantic Scholar,'), true, 'a key not looked for yet is not said to be missing');
   equal(and(['a']), 'a');
   equal(and(['a', 'b', 'c']), 'a, b and c');
+});
+
+test('a reference is the paper it names, a link to a DOI or an arXiv id, or what was written', () => {
+  const papers = [{id: 'P003', title: 'Skylight <i>spectra</i>'}];
+  const own = referenceHtml('P003', papers);
+  ok(own.includes('data-lit-paper="P003"') && own.includes('Skylight &lt;i&gt;spectra&lt;/i&gt;'), own);
+  ok(referenceHtml('[[literature/P003.pdf p. 4]]', papers).includes('data-lit-paper="P003"'), 'a page of a paper is the paper');
+  ok(referenceHtml('doi:10.1364/JOSAA.18.000412', []).includes('href="https://doi.org/10.1364/JOSAA.18.000412"'));
+  ok(referenceHtml('https://doi.org/10.1364/josaa.18.000412', []).includes('href="https://doi.org/10.1364/josaa.18.000412"'));
+  ok(referenceHtml('arXiv:hep-th/9901001', []).includes('href="https://arxiv.org/abs/hep-th/9901001"'));
+  const said = referenceHtml('Rayleigh (1871) <script>', []);
+  ok(said.includes('&lt;script&gt;') && !said.includes('<script>'), said);
 });
