@@ -14,7 +14,7 @@ use ts_rs::TS;
 use crate::model::Verdict;
 
 /// The co-scientist's steps, as Research runs them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/", rename = "ResearchPhase")]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {

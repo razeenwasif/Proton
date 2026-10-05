@@ -3,7 +3,7 @@
 //! "these two are the same idea" and to pair similar ones in the
 //! tournament, where a match says the most.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Two hypotheses this alike are the same idea said twice.
 pub const DUPLICATE: f64 = 0.82;
@@ -41,25 +41,28 @@ fn tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Every document as a unit vector of weighted words.
+/// Every document as a unit vector of weighted words. Ordered maps
+/// throughout: a sum of floats taken in a different order each run is a
+/// different number in its last place, and the round must pair the same
+/// hypotheses every time it is played the same way.
 pub struct Index {
-    vectors: BTreeMap<String, HashMap<String, f64>>,
+    vectors: BTreeMap<String, BTreeMap<String, f64>>,
 }
 
 impl Index {
     pub fn new<'a>(documents: impl IntoIterator<Item = (&'a str, &'a str)>) -> Index {
         let documents: Vec<(String, Vec<String>)> = documents.into_iter().map(|(id, text)| (id.to_string(), tokens(text))).collect();
         let n = documents.len().max(1) as f64;
-        let mut seen: HashMap<&str, usize> = HashMap::new();
+        let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
         for (_, words) in &documents {
-            for word in words.iter().map(String::as_str).collect::<HashSet<_>>() {
+            for word in words.iter().map(String::as_str).collect::<BTreeSet<_>>() {
                 *seen.entry(word).or_default() += 1;
             }
         }
         let vectors = documents
             .iter()
             .map(|(id, words)| {
-                let mut counts: HashMap<String, f64> = HashMap::new();
+                let mut counts: BTreeMap<String, f64> = BTreeMap::new();
                 for word in words {
                     *counts.entry(word.clone()).or_default() += 1.0;
                 }

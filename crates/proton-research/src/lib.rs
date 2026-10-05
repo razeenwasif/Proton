@@ -30,6 +30,7 @@ pub mod prompts;
 pub mod proximity;
 pub mod schema;
 pub mod store;
+pub mod supervisor;
 pub mod view;
 
 pub use model::{Author, Discipline, Experiment, Family, Hypothesis, Investigation, Match, Review, Role, Seat};

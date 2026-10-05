@@ -44,7 +44,7 @@ impl Seat {
 
 /// Whose model it is. Independence is decided on this, not on the seat: a
 /// judge never judges its own family's work, and a reviewer never reviews it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/", rename = "ResearchFamily")]
 #[serde(rename_all = "lowercase")]
 pub enum Family {
