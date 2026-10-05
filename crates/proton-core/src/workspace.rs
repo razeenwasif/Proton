@@ -411,7 +411,17 @@ impl Workspace {
                 .collect(),
             focused: self.splits.focused(),
             vertical: self.splits.is_vertical(),
+            chat: self
+                .chat_path
+                .as_ref()
+                .and_then(|path| path.strip_prefix(self.pickers.root()).ok())
+                .map(Path::to_path_buf),
         }
+    }
+
+    /// The conversation the agent has open, if it has been saved.
+    pub fn open_chat(&self) -> Option<&Path> {
+        self.chat_path.as_deref()
     }
 
     /// Put one back. Best effort, and deliberately so.
@@ -455,6 +465,17 @@ impl Workspace {
         // The focused pane's buffer is the one the editor is showing, and the
         // two disagreeing is what makes a restored window edit the wrong file.
         self.restore_cursor();
+
+        // The agent's conversation, if its file is still there. One deleted
+        // since is passed over like a file that was, and the panel starts on
+        // a new thread.
+        if let Some(chat) = &layout.chat {
+            let full = self.pickers.root().join(chat);
+            if let Ok(saved) = crate::chats::read(&full) {
+                self.agent.restore(saved.messages);
+                self.chat_path = Some(full);
+            }
+        }
     }
 
     /// Whether anything in this workspace has unsaved changes. The session
@@ -6239,6 +6260,11 @@ pub struct Layout {
     pub focused: usize,
     #[serde(default)]
     pub vertical: bool,
+    /// The conversation the agent panel had open: its file in
+    /// `.proton/chats/`, relative to the project. The conversation itself is
+    /// already in that file; this is only which one was on screen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<PathBuf>,
 }
 
 /// One pane, as stored.

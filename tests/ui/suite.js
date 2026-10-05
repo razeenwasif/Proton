@@ -999,6 +999,33 @@ await test('Replies are markdown that never becomes HTML, and their links open i
   assert(click.defaultPrevented && sentSince(before, 'openLink')[0]?.url === 'https://example.com/a?b=1&c=2', 'the link was followed in the window');
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('A tool\'s code is coloured by the file it is in: a read, an edit\'s diff, a command — and its output is not', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
+  const source = 'fn main() {\n    /* a comment\n       over two lines */\n    let n: u32 = 42;\n}';
+  await ccPush(ccItems([
+    ccTool('hl-read', 'Read', {file_path: '/fixture/src/main.rs'}, {detail: {file: {content: source, numLines: 5}}}),
+    ccTool('hl-edit', 'Edit', {file_path: '/fixture/src/main.rs', old_string: 'u32', new_string: 'u64'},
+      {detail: {structuredPatch: [{oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
+        lines: [' /* keep', '-  of this */ let n: u32 = 42;', '+  of this */ let n: u64 = 43;']}]}}),
+    ccTool('hl-bash', 'Bash', {command: 'cargo test --release | grep -v ok'}, {result: 'test result: ok <b>'}),
+  ]));
+  for (const id of ['hl-read', 'hl-edit', 'hl-bash']) { ws.querySelector(`[data-toggle="${id}"]`).click(); await settle(); }
+  const read = ws.querySelector('[data-item="hl-read"] .cc-tool-detail code[data-lang="rust"]');
+  assert(read?.querySelector('.k')?.textContent === 'fn' && read.querySelector('.ty')?.textContent === 'u32', 'the file read is not coloured as Rust');
+  assert(read.querySelector('.cm')?.textContent === '/* a comment\n       over two lines */', 'a comment over two lines is not one');
+  assert(read.textContent === source, 'the code shown is not the code read');
+  const rows = [...ws.querySelectorAll('[data-item="hl-edit"] .cc-diff tr:not(.hunk)')];
+  assert(rows.length === 3, `${rows.length} diff rows`);
+  // The context line opens a comment that the changed lines close.
+  assert(rows[1].classList.contains('del') && rows[1].querySelector('td:last-child .cm')?.textContent === '  of this */', `the comment did not carry into the removed line: ${rows[1].innerHTML}`);
+  assert(rows[2].classList.contains('add') && rows[2].querySelector('.ty')?.textContent === 'u64' && rows[2].querySelector('.num')?.textContent === '43', 'the added line is not coloured');
+  assert(rows[1].lastElementChild.textContent === '  of this */ let n: u32 = 42;', 'the removed line is not what was removed');
+  const bash = ws.querySelector('[data-item="hl-bash"] .cc-tool-detail');
+  assert(bash.querySelector('code[data-lang="bash"] .fn')?.textContent === 'cargo' && bash.querySelector('code .at')?.textContent === '--release', 'the command is not coloured');
+  assert(bash.querySelector('.cc-output').textContent === 'test result: ok <b>' && !bash.querySelector('.cc-output b, .cc-output span'), 'the output was coloured or drawn as HTML');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('The desktop app\'s sessions from other folders are listed apart, by folder, and one open elsewhere says so', async () => {
   const ws = $('.workspace[data-ws="chat"]');
   await ccPush({type: 'claudeSessions', active: 's1', busy: [], waiting: [], engine: 'claude', sessions: [
@@ -1306,6 +1333,43 @@ await test('An answer in the agent panel colours its code, draws its TeX, keeps 
   await agent([{speaker: 'proton', text: 'So\n$$\n\\frac{a}{b}\n$$', thinking: '', streaming: false, calls: []}]);
   assert(reply().querySelector('.md-math-block .katex-display') && !reply().querySelector('.md-pending'), 'the finished equation was not drawn');
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
+});
+await test('The agent panel keeps its threads: the clock lists them, a row opens one, and one is deleted after asking', async () => {
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  // An earlier check may have left the dock on another of its panels.
+  $('#codex-dock .dock-tab[data-dockpanel="agent"]').click(); await settle();
+  assert($('#codex-dock').dataset.showing === 'agent', 'the dock is not on the agent');
+  await win.pushEvents([{type: 'chats', current: '.proton/chats/why.json', conversations: [
+    {path: '.proton/chats/why.json', title: 'Why is it slow', turns: 4, provider: 'claude'},
+    {path: '.proton/chats/notes.json', title: 'Notes on <b>caching</b>', turns: 1, provider: 'codex'}]}]);
+  const list = $('[data-chat-threads]'), clock = $('[data-chat-history]');
+  assert(list.hidden, 'the threads are showing before they were asked for');
+  assert($('[data-dock-title]').textContent === 'Why is it slow', 'the header does not name the open thread');
+  clock.click(); await settle();
+  assert(!list.hidden && clock.getAttribute('aria-expanded') === 'true', 'the clock did not open the threads');
+  const rows = [...list.querySelectorAll('.row.chat[data-chat]')];
+  assert(rows.length === 2 && rows[0].classList.contains('sel') && !rows[1].classList.contains('sel'), 'the threads are not listed with the open one marked');
+  assert(rows[1].querySelector('.chat-name').textContent === 'Notes on <b>caching</b>' && rows[1].querySelector('.chat-meta').textContent === '1 turn · Codex',
+    `the row says ${rows[1].textContent}`);
+  let before = win.commands.length;
+  rows[1].click(); await settle();
+  assert(sentSince(before, 'openChat')[0]?.path === '.proton/chats/notes.json' && list.hidden, 'a row did not open its thread');
+
+  // Deleting asks first, in the row; Cancel keeps it.
+  clock.click(); await settle();
+  list.querySelector('[data-chat-forget=".proton/chats/notes.json"]').click(); await settle();
+  assert(list.querySelector('.row.chat.ask')?.textContent.includes('Delete “Notes on <b>caching</b>”?'), 'deleting did not ask');
+  before = win.commands.length;
+  list.querySelector('[data-chat-keep]').click(); await settle();
+  assert(!list.querySelector('.row.chat.ask') && !sentSince(before, 'deleteChat').length && !list.hidden, 'cancelling deleted it or closed the list');
+  list.querySelector('[data-chat-forget=".proton/chats/notes.json"]').click(); await settle();
+  list.querySelector('[data-chat-forget-yes]').click(); await settle();
+  assert(sentSince(before, 'deleteChat')[0]?.path === '.proton/chats/notes.json', 'confirming did not delete it');
+  assert(!sentSince(before, 'openChat').length, 'deleting a thread opened it');
+
+  // Somewhere else puts the list away.
+  doc.querySelector('.workspace.on')?.click(); await settle();
+  assert(list.hidden && clock.getAttribute('aria-expanded') === 'false', 'the list stayed open');
 });
 await test('A long name in the project panel scrolls sideways instead of being cut', async () => {
   const tree = $('.workspace.on [data-tree]');

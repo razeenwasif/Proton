@@ -24,6 +24,17 @@
 //! that reports an unresolved `␣fp` is reporting that nothing below knew what
 //! it meant, and the session takes it from there. Nothing about the modal
 //! engine has to know the session exists.
+//!
+//! ## Data keeps projects of its own
+//!
+//! The window has two sides. Data is one; every other mode is the other —
+//! Codex, and the modes that work on the checkout the code is in: Chat,
+//! Design, Modeling, Game and Video. Each side lists the projects opened on
+//! it and shows one of them, so the folder open in Codex is not carried into
+//! Data: going to Data brings back the project Data had, and leaving it brings
+//! back Codex's. Notebooks live in a research folder more often than in the
+//! codebase. A folder open on both sides is still one workspace, listed and
+//! shown by both — two would be two file indexes over the same files.
 
 use std::path::{Path, PathBuf};
 
@@ -33,6 +44,7 @@ use serde::{Deserialize, Serialize};
 use crate::bus::{Command, Event, NoticeLevel, WorkspaceTab};
 use crate::folder;
 use crate::key::Key;
+use crate::mode::ModeId;
 use crate::picker::{Accepted, Picker, PickerItem, PickerKey, PickerKind};
 use crate::workspace::{notice, Workspace};
 
@@ -114,10 +126,70 @@ const RECENTS: usize = 40;
 /// anything else is ignored rather than guessed at.
 const VERSION: u32 = 1;
 
+/// The half of the window a mode is in, which decides the project it shows.
+/// See the module documentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Code,
+    Data,
+}
+
+impl Side {
+    fn of(mode: ModeId) -> Side {
+        match mode {
+            ModeId::Data => Side::Data,
+            _ => Side::Code,
+        }
+    }
+
+    fn other(self) -> Side {
+        match self {
+            Side::Code => Side::Data,
+            Side::Data => Side::Code,
+        }
+    }
+}
+
+/// Which sides list a workspace in their switcher.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Listed {
+    code: bool,
+    data: bool,
+}
+
+impl Listed {
+    fn on(side: Side) -> Listed {
+        let mut listed = Listed::default();
+        listed.set(side, true);
+        listed
+    }
+
+    fn has(self, side: Side) -> bool {
+        match side {
+            Side::Code => self.code,
+            Side::Data => self.data,
+        }
+    }
+
+    fn set(&mut self, side: Side, on: bool) {
+        match side {
+            Side::Code => self.code = on,
+            Side::Data => self.data = on,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Session {
     workspaces: Vec<Workspace>,
     active: usize,
+    /// Which sides list each workspace, index for index with `workspaces`.
+    listed: Vec<Listed>,
+    /// The project the side that is not on screen shows, by root: Codex's
+    /// while Data is up, and Data's while any other mode is. `None` until
+    /// Data has been opened; the first time it is, it starts on the project
+    /// Codex has, because a side has to show something.
+    away: Option<PathBuf>,
     /// Projects opened before, most recent first. Includes the open ones.
     recents: Vec<PathBuf>,
     /// The workspace picker, when it is open. The session's rather than a
@@ -153,6 +225,8 @@ impl Session {
         Session {
             workspaces: vec![Workspace::rooted(root)],
             active: 0,
+            listed: vec![Listed::on(Side::Code)],
+            away: None,
             recents: Vec::new(),
             picker: None,
             matcher: Matcher::new(),
@@ -280,6 +354,7 @@ impl Session {
                 .collect();
             if !alive.is_empty() {
                 session.workspaces = alive.iter().map(|path| session.build(path)).collect();
+                session.listed = vec![Listed::on(Side::Code); session.workspaces.len()];
                 session.active = saved.open.get(saved.active)
                     .and_then(|root| alive.iter().position(|path| path == Path::new(root)))
                     .unwrap_or_else(|| saved.active.min(session.workspaces.len() - 1));
@@ -292,6 +367,9 @@ impl Session {
                     if let Some(stored) = saved.layouts.iter().find(|l| l.root == root) {
                         workspace.restore_layout(&stored.layout);
                     }
+                }
+                if let Some(sides) = &saved.sides {
+                    session.restore_sides(sides);
                 }
             }
         }
@@ -343,12 +421,14 @@ impl Session {
 
     pub fn apply(&mut self, command: Command) -> Vec<Event> {
         let before = self.shape();
+        let chats = self.chats();
         let events = self.dispatch(command);
         // Saved when the arrangement moved, rather than after a list of
         // commands somebody has to remember to extend. A command added next
         // year that opens a file in a pane is covered by this and would not
-        // have been covered by an enumeration.
-        if self.shape() != before {
+        // have been covered by an enumeration. The same goes for which
+        // conversation each agent panel has open.
+        if self.shape() != before || self.chats() != chats {
             self.save();
         }
         events
@@ -359,15 +439,31 @@ impl Session {
         self.workspaces.iter().map(Workspace::shape).collect()
     }
 
+    /// The conversation each workspace's agent has open.
+    fn chats(&self) -> Vec<Option<PathBuf>> {
+        self.workspaces
+            .iter()
+            .map(|workspace| workspace.open_chat().map(Path::to_path_buf))
+            .collect()
+    }
+
     fn dispatch(&mut self, command: Command) -> Vec<Event> {
         match command {
             Command::Poll => self.poll(),
 
             Command::OpenWorkspace { path } => self.open(&path),
-            Command::FocusWorkspace { index } => self.focus(index),
-            Command::CloseWorkspace { index } => self.close(index),
+            // By place in the switcher, which lists the side on screen.
+            Command::FocusWorkspace { index } => match self.listed_on(self.side()).get(index) {
+                Some(&index) => self.focus(index),
+                None => vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)],
+            },
+            Command::CloseWorkspace { index } => match self.listed_on(self.side()).get(index) {
+                Some(&index) => self.close(index),
+                None => vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)],
+            },
             Command::CycleWorkspace { by } => self.cycle(by),
             Command::OpenWorkspacePicker => self.open_picker(),
+            Command::SetMode { mode } => self.set_mode(mode),
 
             // While the workspace picker is open it owns the keyboard, exactly
             // as Telescope does inside a workspace — and for the same reason.
@@ -417,8 +513,27 @@ impl Session {
     /// Hand a command to the active workspace, and take back anything it did
     /// not resolve.
     fn delegate(&mut self, command: Command) -> Vec<Event> {
-        let events = self.active_mut().apply(command);
+        let side = self.side();
+        let mut events = self.active_mut().apply(command);
+        events.extend(self.crossed(side));
         self.claim(events)
+    }
+
+    /// A workspace that changed side by itself took its project along: a
+    /// notebook opened from Codex is Data's document, and a source file opened
+    /// from Data's finder is Codex's. The side it left goes on showing that
+    /// project and the side it went to shows it now, so both list it — and
+    /// the switcher on screen is the other side's.
+    fn crossed(&mut self, from: Side) -> Option<Event> {
+        let to = self.side();
+        if to == from {
+            return None;
+        }
+        let index = self.active;
+        self.listed[index].set(to, true);
+        self.away = Some(self.workspaces[index].root().to_path_buf());
+        self.save();
+        Some(self.workspaces_event())
     }
 
     /// The session's right of first refusal on unresolved leader sequences.
@@ -477,17 +592,24 @@ impl Session {
             // is not this — or, when the project the window started in was
             // never recorded as visited, the first other one that is open.
             ExClaim::Cd(Some(to)) if to == "-" => {
-                // Compared canonically, for the reason `index_of` gives.
+                // Compared canonically, for the reason `index_of` gives. Back
+                // on this side: a project only the other side has open is not
+                // where you were.
                 let here = folder::normalise(self.active().root());
+                let side = self.side();
+                let theirs: Vec<PathBuf> = (0..self.workspaces.len())
+                    .filter(|&index| !self.listed[index].has(side))
+                    .map(|index| folder::normalise(self.workspaces[index].root()))
+                    .collect();
                 let previous = self
                     .recents
                     .iter()
                     .map(|path| folder::normalise(path))
-                    .find(|path| *path != here)
+                    .find(|path| *path != here && !theirs.contains(path))
                     .or_else(|| {
-                        self.workspaces
-                            .iter()
-                            .map(|workspace| folder::normalise(workspace.root()))
+                        self.listed_on(side)
+                            .into_iter()
+                            .map(|index| folder::normalise(self.workspaces[index].root()))
                             .find(|path| *path != here)
                     });
                 match previous {
@@ -513,7 +635,7 @@ impl Session {
                 self.active().root().display().to_string(),
                 NoticeLevel::Info,
             )],
-            ExClaim::Cycle(by) => match self.workspaces.len() {
+            ExClaim::Cycle(by) => match self.listed_on(self.side()).len() {
                 // Saying so beats doing nothing: `:pn` with one project open
                 // is usually someone who meant to open a second.
                 1 => vec![notice(
@@ -532,6 +654,7 @@ impl Session {
     /// Drain every workspace, show only the active one.
     fn poll(&mut self) -> Vec<Event> {
         let active = self.active;
+        let side = self.side();
         let mut events = Vec::new();
         for (index, workspace) in self.workspaces.iter_mut().enumerate() {
             let produced = workspace.apply(Command::Poll);
@@ -542,6 +665,7 @@ impl Session {
             // dropped here — but they had to be *collected*, or its servers
             // block and the project is stale when you come back to it.
         }
+        events.extend(self.crossed(side));
         self.claim(events)
     }
 
@@ -576,12 +700,18 @@ impl Session {
             return self.focus(index);
         }
 
+        // Opened on the side on screen, and in its mode: a folder opened from
+        // Data is Data's.
+        let mode = self.active().mode();
         let workspace = self.build(&root);
         self.workspaces.push(workspace);
+        self.listed.push(Listed::on(Side::of(mode)));
         self.active = self.workspaces.len() - 1;
+        let mut events = self.active_mut().apply(Command::SetMode { mode });
         self.remember(&root);
         self.save();
-        self.enter()
+        events.extend(self.enter());
+        events
     }
 
     fn focus(&mut self, index: usize) -> Vec<Event> {
@@ -591,34 +721,100 @@ impl Session {
         if index == self.active {
             return Vec::new();
         }
+        // The project changes and the mode does not. It comes to the side on
+        // screen, in that side's mode, whichever mode it was last shown in:
+        // picking a project is not picking a mode.
+        let mode = self.active().mode();
+        self.listed[index].set(Side::of(mode), true);
         self.active = index;
+        let mut events = self.active_mut().apply(Command::SetMode { mode });
         let root = self.active().root().to_path_buf();
         self.remember(&root);
         self.save();
-        self.enter()
+        events.extend(self.enter());
+        events
     }
 
+    /// Step through the projects of the side on screen, wrapping.
     fn cycle(&mut self, by: i64) -> Vec<Event> {
-        let count = self.workspaces.len() as i64;
+        let listed = self.listed_on(self.side());
+        let count = listed.len() as i64;
         if count < 2 {
             return Vec::new();
         }
-        let next = (self.active as i64 + by).rem_euclid(count) as usize;
-        self.focus(next)
+        let at = listed.iter().position(|&index| index == self.active).unwrap_or(0) as i64;
+        self.focus(listed[(at + by).rem_euclid(count) as usize])
+    }
+
+    /// Change mode. Within a side that is the workspace's business. Across
+    /// one the project changes too: going to Data brings back the one Data
+    /// had, leaving it brings back Codex's, and the one left waits.
+    fn set_mode(&mut self, mode: ModeId) -> Vec<Event> {
+        let to = Side::of(mode);
+        if self.side() == to {
+            return self.delegate(Command::SetMode { mode });
+        }
+        let here = self.active().root().to_path_buf();
+        let there = self
+            .away
+            .take()
+            .and_then(|root| self.index_of(&root))
+            .unwrap_or(self.active);
+        self.away = Some(here);
+        self.listed[there].set(to, true);
+
+        // A prompt over one side's projects is not a prompt over the other's.
+        let mut events = Vec::new();
+        if self.picker.take().is_some() {
+            events.push(Event::PickerClosed);
+        }
+        if there == self.active {
+            events.extend(self.active_mut().apply(Command::SetMode { mode }));
+            events.push(self.workspaces_event());
+        } else {
+            self.active = there;
+            events.extend(self.active_mut().apply(Command::SetMode { mode }));
+            events.extend(self.enter());
+        }
+        self.save();
+        events
     }
 
     fn close(&mut self, index: usize) -> Vec<Event> {
         if index >= self.workspaces.len() {
             return vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)];
         }
-        if self.workspaces.len() == 1 {
+        let side = self.side();
+        let listed = self.listed_on(side);
+        if listed.len() <= 1 {
             // There is no editor without a project, and an empty window with a
-            // "+" in it is a worse answer than refusing.
+            // "+" in it is a worse answer than refusing. A side is the same.
             return vec![notice(
                 "that is the last workspace — open another first".into(),
                 NoticeLevel::Warn,
             )];
         }
+        // Where to land, if it is the one on screen: its neighbour in this
+        // side's list.
+        let landing = (index == self.active).then(|| {
+            let at = listed.iter().position(|&i| i == index).unwrap_or(0);
+            listed[if at + 1 < listed.len() { at + 1 } else { at.saturating_sub(1) }]
+        });
+
+        // Open on the other side as well: it stays open there and only leaves
+        // this side's list. Nothing is discarded, so unsaved work is no reason
+        // to refuse.
+        if self.listed[index].has(side.other()) {
+            self.listed[index].set(side, false);
+            return match landing {
+                Some(next) => self.focus(next),
+                None => {
+                    self.save();
+                    vec![self.workspaces_event()]
+                }
+            };
+        }
+
         if self.workspaces[index].is_modified() {
             // Closing takes the buffers with it and there is no undo for that.
             let name = folder::name_of(self.workspaces[index].root());
@@ -628,24 +824,26 @@ impl Session {
             )];
         }
 
+        let mode = self.active().mode();
         self.workspaces.remove(index);
-        let moved = if index < self.active {
-            // Everything after it shifted down; the same project is still
-            // active and nothing needs redrawing but the switcher.
-            self.active -= 1;
-            false
-        } else if index == self.active {
-            self.active = index.min(self.workspaces.len() - 1);
-            true
-        } else {
-            false
-        };
-
-        self.save();
-        if moved {
-            self.enter()
-        } else {
-            vec![self.workspaces_event()]
+        self.listed.remove(index);
+        // Everything after it shifted down by one.
+        let shifted = |i: usize| if i > index { i - 1 } else { i };
+        match landing {
+            Some(next) => {
+                self.active = shifted(next);
+                let mut events = self.active_mut().apply(Command::SetMode { mode });
+                self.save();
+                events.extend(self.enter());
+                events
+            }
+            None => {
+                // The same project is still active, and nothing needs
+                // redrawing but the switcher.
+                self.active = shifted(self.active);
+                self.save();
+                vec![self.workspaces_event()]
+            }
         }
     }
 
@@ -671,6 +869,44 @@ impl Session {
         self.workspaces
             .iter()
             .position(|w| w.root() == root || folder::normalise(w.root()) == root)
+    }
+
+    /// The side on screen: the one the mode on screen is in.
+    fn side(&self) -> Side {
+        Side::of(self.active().mode())
+    }
+
+    /// The workspaces a side lists, in the order they were opened.
+    fn listed_on(&self, side: Side) -> Vec<usize> {
+        (0..self.workspaces.len())
+            .filter(|&index| self.listed[index].has(side))
+            .collect()
+    }
+
+    /// Which side lists what, and what Data shows, as they were saved.
+    fn restore_sides(&mut self, sides: &StoredSides) {
+        for (listed, workspace) in self.listed.iter_mut().zip(&self.workspaces) {
+            let root = workspace.root().display().to_string();
+            *listed = Listed {
+                code: sides.code.contains(&root),
+                data: sides.data.contains(&root),
+            };
+            // A project neither side lists would be open and out of reach.
+            if !listed.code && !listed.data {
+                listed.code = true;
+            }
+        }
+        // The window opens in Codex, on the project Codex had.
+        self.listed[self.active].code = true;
+        let shown = sides
+            .shown
+            .as_deref()
+            .and_then(|root| self.index_of(Path::new(root)))
+            .or_else(|| self.listed.iter().position(|listed| listed.data));
+        if let Some(index) = shown {
+            self.listed[index].data = true;
+            self.away = Some(self.workspaces[index].root().to_path_buf());
+        }
     }
 
     /* ── the workspace picker ─────────────────────────────────────── */
@@ -799,14 +1035,29 @@ impl Session {
     /// is how you switch — and hiding them would make the picker useless for
     /// exactly the thing it is most often wanted for.
     fn known(&mut self, query: &str) -> Vec<PickerItem> {
-        let open: Vec<PathBuf> = self.workspaces.iter().map(|w| w.root().into()).collect();
+        // This side's projects, then the ones only the other side has open,
+        // which say so: choosing one brings it to this side as well.
+        let side = self.side();
+        let mut open: Vec<PathBuf> = Vec::new();
+        let mut theirs: Vec<PathBuf> = Vec::new();
+        for (index, workspace) in self.workspaces.iter().enumerate() {
+            match self.listed[index].has(side) {
+                true => open.push(workspace.root().into()),
+                false => theirs.push(workspace.root().into()),
+            }
+        }
         let mut paths = open.clone();
+        paths.extend(theirs.iter().cloned());
         paths.extend(
             self.recents
                 .iter()
-                .filter(|path| !open.contains(path))
+                .filter(|path| !open.contains(path) && !theirs.contains(path))
                 .cloned(),
         );
+        let elsewhere = match side {
+            Side::Code => "open in Data",
+            Side::Data => "open in Codex",
+        };
 
         let names = folder::disambiguate(&paths);
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
@@ -816,11 +1067,12 @@ impl Session {
             .into_iter()
             .map(|found| {
                 let path = &paths[found.index];
-                let is_open = open.contains(path);
                 PickerItem {
                     label: names[found.index].clone(),
-                    detail: if is_open {
+                    detail: if open.contains(path) {
                         format!("open · {}", path.display())
+                    } else if theirs.contains(path) {
+                        format!("{elsewhere} · {}", path.display())
                     } else {
                         path.display().to_string()
                     },
@@ -854,21 +1106,28 @@ impl Session {
 
     /* ── events ───────────────────────────────────────────────────── */
 
+    /// The switcher: what the side on screen has open.
     fn workspaces_event(&self) -> Event {
-        let paths: Vec<PathBuf> = self.workspaces.iter().map(|w| w.root().into()).collect();
+        let listed = self.listed_on(self.side());
+        let paths: Vec<PathBuf> = listed
+            .iter()
+            .map(|&index| self.workspaces[index].root().into())
+            .collect();
         let names = folder::disambiguate(&paths);
         Event::Workspaces {
-            items: self
-                .workspaces
+            items: listed
                 .iter()
                 .zip(names)
-                .map(|(workspace, name)| WorkspaceTab {
+                .map(|(&index, name)| WorkspaceTab {
                     name,
-                    path: workspace.root().display().to_string(),
-                    modified: workspace.is_modified(),
+                    path: self.workspaces[index].root().display().to_string(),
+                    modified: self.workspaces[index].is_modified(),
                 })
                 .collect(),
-            active: self.active,
+            active: listed
+                .iter()
+                .position(|&index| index == self.active)
+                .unwrap_or(0),
         }
     }
 
@@ -886,6 +1145,14 @@ impl Session {
     /// command that triggered it.
     pub fn save(&self) {
         let Some(file) = &self.store else { return };
+        let root = |index: usize| self.workspaces[index].root().display().to_string();
+        // `active` is what the code side shows, because that is where the
+        // window opens — and what a build from before Data kept its own
+        // reads as the project on screen.
+        let (code, data) = match self.side() {
+            Side::Code => (Some(self.active), self.away.as_deref().and_then(|r| self.index_of(r))),
+            Side::Data => (self.away.as_deref().and_then(|r| self.index_of(r)), Some(self.active)),
+        };
         let state = Stored {
             version: VERSION,
             open: self
@@ -893,7 +1160,14 @@ impl Session {
                 .iter()
                 .map(|w| w.root().display().to_string())
                 .collect(),
-            active: self.active,
+            active: code.unwrap_or(self.active),
+            // Only once Data has a project, so a file that never needed them
+            // is written as it always was.
+            sides: self.listed.iter().any(|listed| listed.data).then(|| StoredSides {
+                code: self.listed_on(Side::Code).into_iter().map(root).collect(),
+                data: self.listed_on(Side::Data).into_iter().map(root).collect(),
+                shown: data.map(root),
+            }),
             recents: self
                 .recents
                 .iter()
@@ -937,8 +1211,23 @@ struct Stored {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     layouts: Vec<StoredLayout>,
     open: Vec<String>,
+    /// The project the code side shows, in `open`.
     active: usize,
     recents: Vec<String>,
+    /// Which side lists each project, and the one Data shows. Absent in a
+    /// file from before Data kept projects of its own, which restores every
+    /// project as Codex's, as it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sides: Option<StoredSides>,
+}
+
+/// The two sides' lists, by root. See `Side`.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct StoredSides {
+    code: Vec<String>,
+    data: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shown: Option<String>,
 }
 
 /// Where the session lives.

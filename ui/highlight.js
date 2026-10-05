@@ -626,6 +626,25 @@ function lexDiff(code) {
  *  it helps, and nobody reads a block that long in a reply. */
 const LIMIT = 200_000;
 
+/** The same a line at a time, for a diff, which draws each line in a row
+ *  of its own. The code is coloured whole first, so a comment or a string
+ *  that spans lines is one; a run still open at the end of a line is closed
+ *  there and opened again on the next. (Every run is a flat span, and the
+ *  source's own `<` is escaped, so a `<span class="` can only be one.)
+ *  @param {string} code @param {string} lang @returns {string[]} */
+export function highlightLines(code, lang) {
+  let open = "";
+  return highlight(code, lang).split("\n").map((line) => {
+    let html = open ? `<span class="${open}">${line}` : line;
+    const start = html.lastIndexOf('<span class="');
+    if (start > html.lastIndexOf("</span>")) {
+      open = html.slice(start + 13, html.indexOf('"', start + 13));
+      html += "</span>";
+    } else open = "";
+    return html;
+  });
+}
+
 /** A block of code as markup: escaped, and coloured if its language is one
  *  this file knows.
  *  @param {string} code @param {string} lang */

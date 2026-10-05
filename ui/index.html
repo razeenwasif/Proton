@@ -421,8 +421,15 @@
         <header class="dock-head">
           <span class="dock-title" data-dock-title>New Thread</span>
           <button class="hbtn" data-chat-new data-dock-only="agent" title="New thread" aria-label="New thread"><svg class="i"><use href="#i-plus"/></svg></button>
+          <button class="hbtn" data-chat-history data-dock-only="agent" title="Past threads" aria-label="Past threads" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-clock"/></svg></button>
           <button class="hbtn" data-mode-go="chat" data-dock-only="agent" title="Claude Code, in the Chat tab" aria-label="Open in Chat"><svg class="i"><use href="#i-expand"/></svg></button>
           <button class="hbtn" data-dock-menu title="Panels" aria-label="Panels" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-dots"/></svg><span class="dot" data-task-dot hidden></span></button>
+          <!-- This project's threads, newest first: each is a file in
+               .proton/chats/, and the one open comes back after a restart. -->
+          <div class="dock-threads" role="menu" aria-label="Past threads" data-chat-threads hidden>
+            <div class="dock-threads-head">Threads in this project</div>
+            <div class="dock-threads-list" data-chats></div>
+          </div>
           <div class="dock-tabs" aria-label="Panels" hidden>
             <button class="dock-tab on"  data-dockpanel="agent">Agent</button>
             <button class="dock-tab"     data-dockpanel="tasks">Tasks <span class="chip accent" data-task-badge hidden></span></button>

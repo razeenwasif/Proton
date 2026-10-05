@@ -2766,6 +2766,46 @@ body { font-size: calc(13px * var(--ui-scale)); }
 #codex-dock .dock-tab.on { background: var(--row-on); color: var(--text); box-shadow: none; }
 #codex-dock .dock-tab .chip { margin-left: auto; }
 
+/* Past threads, behind the clock: the same dropdown as the panels menu,
+   wider, one row per thread — what it was about, and how far it went. */
+#codex-dock .dock-threads {
+  position: absolute; top: calc(100% - 2px); right: 8px; z-index: 20;
+  display: flex; flex-direction: column; width: min(340px, calc(100% - 16px)); max-height: 60vh;
+  padding: 4px; overflow: hidden;
+  background: var(--bg-deep); border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, var(--bg-deep));
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, .75);
+}
+#codex-dock .dock-threads[hidden] { display: none; }
+#codex-dock .dock-threads-head { padding: 6px 10px 5px; font: var(--z-2xs)/1.2 var(--zed); color: var(--faint); }
+#codex-dock .dock-threads-list { overflow-y: auto; min-height: 0; }
+#codex-dock .dock-threads .empty { padding: 8px 10px 10px; font: var(--z-xs)/1.4 var(--zed); color: var(--muted); }
+#codex-dock .dock-threads .row.chat {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  padding: 7px 34px 7px 10px; border-radius: 4px; cursor: pointer;
+}
+#codex-dock .dock-threads .row.chat:hover,
+#codex-dock .dock-threads .row.chat:focus-visible { background: var(--row-hover); outline: none; }
+#codex-dock .dock-threads .row.chat.sel { background: var(--row-on); }
+#codex-dock .dock-threads .chat-name { font: var(--z-xs)/1.3 var(--zed); color: var(--text); }
+#codex-dock .dock-threads .chat-meta { font: var(--z-2xs)/1.2 var(--zed); color: var(--faint); }
+#codex-dock .dock-threads .chat-x {
+  -webkit-appearance: none; appearance: none; position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px;
+  background: transparent; color: var(--faint); cursor: pointer; opacity: 0;
+}
+#codex-dock .dock-threads .row.chat:hover .chat-x,
+#codex-dock .dock-threads .row.chat:focus-within .chat-x { opacity: 1; }
+#codex-dock .dock-threads .chat-x:hover { background: var(--row-hover); color: var(--text); }
+#codex-dock .dock-threads .chat-x .i { width: 12px; height: 12px; }
+#codex-dock .dock-threads .row.chat.ask { cursor: default; padding-right: 10px; }
+#codex-dock .dock-threads .chat-acts { display: flex; gap: 6px; align-self: flex-end; }
+#codex-dock .dock-threads .chat-acts button {
+  -webkit-appearance: none; appearance: none; padding: 4px 9px; border: 0; border-radius: 4px;
+  background: var(--row-hover); color: var(--text); font: var(--z-2xs)/1 var(--zed); cursor: pointer;
+}
+#codex-dock .dock-threads .chat-acts button.danger { background: color-mix(in srgb, var(--err) 22%, transparent); color: var(--err); }
+
 /* The transcript. No bylines and no rules between turns: what you wrote sits
    in a box, what came back does not, and the tools it used are lines of
    their own — an icon, what it did, and to what. */

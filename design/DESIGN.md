@@ -449,6 +449,11 @@ setting with the stop point named explicitly: *plan → propose diffs → wait*.
 see is a chip you can point at, which is the part the Copilot reference gets
 right and most tools get wrong.
 
+**Threads are kept.** Every conversation is a file in the project's
+`.proton/chats/`, written after each turn. The clock in the agent header
+lists the project's threads, newest first, to reopen one or delete it (after
+asking, in the row); the one open comes back after a restart.
+
 **Answers are documents.** An answer is markdown, drawn by the renderer the
 Chat tab uses (`ui/markdown.js`). A fenced block is coloured with the editor's
 own token classes — Aura's lilac keywords in Aura, Gruvbox's red in Gruvbox —
@@ -612,6 +617,17 @@ Codex's, one ground from edge to edge. The notebook is a column of cells on
 it, each a little raised from the ground as Zed raises a tool call in its
 agent, the one the keys are on outlined; the frame beside it is a table in the
 same type, its numbers in the syntax's colour for numbers.
+
+**Its own projects.** Notebooks live in a research folder more often than in
+the codebase, so Data keeps projects apart from Codex: its own list in the
+title bar, and its own project on screen. Going to Data brings back the one
+Data had, whatever Codex has open since, and leaving it brings back Codex's.
+Every other mode — Chat, Design, Modeling, Game, Video — works on the
+checkout the code is in, and shares Codex's. The first visit starts on
+Codex's project, because a side has to show something; open another from
+Data's switcher and the two are separate from then on, across restarts.
+Opening a notebook from Codex takes its project to Data, since that is where
+the notebook is; closing a project on one side leaves it open on the other.
 
 Notebook, SQL, grid and charts over the same kernel. Cells record their inputs,
 so lineage is real: the analyst cell can say "open sat 17 in Codex" and land on

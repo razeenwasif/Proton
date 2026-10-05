@@ -5938,32 +5938,108 @@ function renderChats(event) {
   const box = $("[data-chats]");
   if (!box) return;
   if (!event.conversations.length) {
-    box.innerHTML = `<div class="empty">No conversations yet. Ask something.</div>`;
+    box.innerHTML = `<div class="empty">No threads yet. Ask something.</div>`;
     return;
   }
 
   box.innerHTML = event.conversations
     .map((chat) => {
+      const path = escapeHtml(chat.path);
+      // Deleting asks first, in the row, because the file has no undo.
+      if (chat.path === forgetting) {
+        return (
+          `<div class="row chat ask"><span class="chat-name">Delete “${escapeHtml(chat.title)}”?</span>` +
+          `<span class="chat-acts"><button data-chat-keep>Cancel</button>` +
+          `<button class="danger" data-chat-forget-yes="${path}">Delete</button></span></div>`
+        );
+      }
       // The turn count is what distinguishes a question you abandoned from one
       // you worked through, which is the thing you are scanning for.
       const turns = chat.turns === 1 ? "1 turn" : `${chat.turns} turns`;
-      const who = chat.provider === "gemini" ? " · Gemini" : "";
+      const who = PROVIDER_NAMES[chat.provider] ? ` · ${PROVIDER_NAMES[chat.provider]}` : "";
       return (
-        `<div class="row chat${chat.path === event.current ? " sel" : ""}"` +
-        ` data-chat="${escapeHtml(chat.path)}" title="${escapeHtml(chat.path)}">` +
+        `<div class="row chat${chat.path === event.current ? " sel" : ""}" role="menuitem" tabindex="-1"` +
+        ` data-chat="${path}" title="${path}">` +
         `<span class="chat-name">${escapeHtml(chat.title)}</span>` +
         `<span class="chat-meta">${turns}${escapeHtml(who)}</span>` +
-        `</div>`
+        `<button class="chat-x" data-chat-forget="${path}" title="Delete this thread" aria-label="Delete ${escapeHtml(chat.title)}">` +
+        `<svg class="i"><use href="#i-close"/></svg></button></div>`
       );
     })
     .join("");
 }
 
+/** Which providers a thread can say it is from. */
+const PROVIDER_NAMES = /** @type {Record<string, string>} */ ({
+  claude: "Claude", gemini: "Gemini", codex: "Codex", antigravity: "Antigravity",
+});
+
+/** The thread a row is asking whether to delete, if one is. */
+let forgetting = "";
+
+/** Show or put away the agent's past threads. */
+function showThreads(on) {
+  const list = $("[data-chat-threads]");
+  const button = $("[data-chat-history]");
+  if (!list || !button) return;
+  if (!on && forgetting) {
+    forgetting = "";
+    renderChats(lastChats);
+  }
+  list.hidden = !on;
+  button.setAttribute("aria-expanded", String(on));
+  if (on) ($(".row.chat.sel", list) ?? $(".row.chat", list))?.focus();
+}
+
+$("[data-chat-threads]")?.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    showThreads(false);
+    $("[data-chat-history]")?.focus();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const rows = $$("[data-chat-threads] .row.chat[data-chat]");
+    const at = rows.indexOf(document.activeElement);
+    rows[(at + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length]?.focus();
+  } else if (e.key === "Enter" && document.activeElement?.matches?.("[data-chat]")) {
+    e.preventDefault();
+    document.activeElement.click();
+  }
+});
+
 document.addEventListener("click", (e) => {
   if (e.target.closest?.("[data-chat-new]")) {
+    showThreads(false);
     dispatch({ type: "newChat" });
     return;
   }
+
+  // The past threads: open, close, and delete after asking. Checked before
+  // the row itself, because the buttons sit inside it.
+  const threads = $("[data-chat-threads]");
+  if (e.target.closest?.("[data-chat-history]")) {
+    showThreads(Boolean(threads?.hidden));
+    return;
+  }
+  const forget = e.target.closest?.("[data-chat-forget]");
+  if (forget) {
+    forgetting = forget.dataset.chatForget;
+    renderChats(lastChats);
+    return;
+  }
+  if (e.target.closest?.("[data-chat-keep]")) {
+    forgetting = "";
+    renderChats(lastChats);
+    return;
+  }
+  const gone = e.target.closest?.("[data-chat-forget-yes]");
+  if (gone) {
+    forgetting = "";
+    dispatch({ type: "deleteChat", path: gone.dataset.chatForgetYes });
+    return;
+  }
+  if (threads && !threads.hidden && !e.target.closest?.("[data-chat-threads]")) showThreads(false);
 
   if (e.target.closest?.("[data-chat-rename]")) {
     const open = lastChats.conversations.find((c) => c.path === lastChats.current);
@@ -5976,17 +6052,11 @@ document.addEventListener("click", (e) => {
     return;
   }
 
-  if (e.target.closest?.("[data-chat-delete]")) {
-    const open = lastChats.conversations.find((c) => c.path === lastChats.current);
-    // Asked, because it is a file and there is no undo.
-    if (open && confirm(`Delete "${open.title}"? This cannot be undone.`)) {
-      dispatch({ type: "deleteChat", path: open.path });
-    }
-    return;
-  }
-
   const row = e.target.closest?.("[data-chat]");
-  if (row) dispatch({ type: "openChat", path: row.dataset.chat });
+  if (row) {
+    showThreads(false);
+    dispatch({ type: "openChat", path: row.dataset.chat });
+  }
 });
 
 function renderAgent(event) {

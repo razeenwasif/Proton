@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use proton_core::bus::Event;
 use proton_core::folder;
 use proton_core::picker::PickerKind;
-use proton_core::{Command, Key, Session};
+use proton_core::{Command, Key, ModeId, Session};
 
 /// A scratch tree with three projects in it, two of which share a name.
 ///
@@ -364,6 +364,239 @@ fn cycling_wraps_in_both_directions() {
     assert_eq!(session.active_index(), 0, "off the end and round");
     session.apply(Command::CycleWorkspace { by: -1 });
     assert_eq!(session.active_index(), 2, "and back the other way");
+}
+
+/* ── Data's own projects ──────────────────────────────────────────── */
+
+fn mode(session: &mut Session, mode: ModeId) -> Vec<Event> {
+    session.apply(Command::SetMode { mode })
+}
+
+fn here(session: &Session) -> String {
+    dir_name(session.active().root())
+}
+
+#[test]
+fn a_project_opened_in_codex_is_not_carried_into_data() {
+    // The folder open in Codex is rarely the one being analysed. Data keeps
+    // its own, and going there brings it back whatever Codex has open now.
+    let scratch = Scratch::new("data-own");
+    let mut session = Session::new(scratch.at("alpha"));
+
+    // The first visit has nothing to come back to and starts where Codex is.
+    let events = mode(&mut session, ModeId::Data);
+    assert_eq!(here(&session), "alpha");
+    assert_eq!(tabs(&events).unwrap(), (vec!["alpha".to_string()], 0), "{events:?}");
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    assert_eq!((here(&session), session.active().mode()), ("beta".to_string(), ModeId::Data), "opened in Data, for Data");
+
+    // Back in Codex: its project, its list.
+    let events = mode(&mut session, ModeId::Codex);
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Codex));
+    assert_eq!(tabs(&events).unwrap(), (vec!["alpha".to_string()], 0), "Data's project is not in Codex's switcher");
+    assert!(events.iter().any(|e| kind_of(e) == "viewport"), "it redrew: another project is on screen");
+
+    // Codex moves on to another project; Data does not follow it.
+    session.apply(Command::OpenWorkspace { path: scratch.at("nested/alpha") });
+    let events = mode(&mut session, ModeId::Data);
+    assert_eq!((here(&session), session.active().mode()), ("beta".to_string(), ModeId::Data));
+    let (names, active) = tabs(&events).unwrap();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert_eq!(names[active], "beta");
+
+    // Every other mode is on Codex's side, and shows Codex's project.
+    mode(&mut session, ModeId::Chat);
+    assert!(session.active().root().ends_with("nested/alpha"));
+    mode(&mut session, ModeId::Design);
+    assert!(session.active().root().ends_with("nested/alpha"), "Chat to Design is not a change of project");
+}
+
+#[test]
+fn the_switcher_numbers_the_projects_of_the_side_on_screen() {
+    // The front end sends a tile's place in the list it was given, and each
+    // side is given its own list.
+    let scratch = Scratch::new("data-index");
+    let mut session = Session::new(&scratch.root);
+    mode(&mut session, ModeId::Data);
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    mode(&mut session, ModeId::Codex);
+    session.apply(Command::OpenWorkspace { path: scratch.at("alpha") });
+    session.apply(Command::FocusWorkspace { index: 0 });
+    assert_eq!(here(&session), dir_name(&scratch.root));
+
+    // Codex lists the scratch root and alpha; beta is Data's alone.
+    session.apply(Command::FocusWorkspace { index: 1 });
+    assert_eq!(here(&session), "alpha", "the second of Codex's, not the second opened");
+    session.apply(Command::CycleWorkspace { by: 1 });
+    assert_eq!(here(&session), dir_name(&scratch.root), "cycling stays on Codex's side");
+    session.apply(Command::CycleWorkspace { by: 1 });
+    assert_eq!(here(&session), "alpha");
+
+    mode(&mut session, ModeId::Data);
+    session.apply(Command::FocusWorkspace { index: 0 });
+    assert_eq!((here(&session), session.active().mode()), (dir_name(&scratch.root), ModeId::Data), "picked in Data, shown in Data");
+}
+
+#[test]
+fn closing_a_project_on_one_side_leaves_it_open_on_the_other() {
+    let scratch = Scratch::new("data-close");
+    let mut session = Session::new(scratch.at("alpha"));
+    session.apply(Command::OpenBuffer { path: "main.rs".into() });
+    keys(&mut session, "ix");
+    mode(&mut session, ModeId::Data);
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+
+    // Alpha came to Data on the first visit. Closing it there takes it off
+    // Data's list and nothing else, so its unsaved work is no reason to refuse.
+    let events = session.apply(Command::CloseWorkspace { index: 0 });
+    assert_eq!(tabs(&events).unwrap(), (vec!["beta".to_string()], 0), "{events:?}");
+    assert_eq!(session.workspaces().len(), 2, "still open for Codex");
+    assert!(notices(&events).is_empty(), "{events:?}");
+
+    // Data's last project stays, as the window's last always has.
+    let events = session.apply(Command::CloseWorkspace { index: 0 });
+    assert!(!notices(&events).is_empty(), "{events:?}");
+    assert_eq!(here(&session), "beta");
+
+    mode(&mut session, ModeId::Codex);
+    assert_eq!(here(&session), "alpha");
+    assert!(session.active().is_modified(), "its unsaved work is still there");
+}
+
+#[test]
+fn a_notebook_opened_from_codex_takes_its_project_to_data() {
+    // A notebook is Data's document, so opening one from Codex goes to Data —
+    // and with the project it is in, which Data shows from then on.
+    let scratch = Scratch::new("data-notebook");
+    std::fs::write(
+        scratch.root.join("alpha").join("n.ipynb"),
+        r#"{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 4}"#,
+    )
+    .unwrap();
+    let mut session = Session::new(scratch.at("alpha"));
+    mode(&mut session, ModeId::Data);
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    mode(&mut session, ModeId::Codex);
+
+    let events = session.apply(Command::OpenBuffer { path: "n.ipynb".into() });
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Data));
+    let (names, active) = tabs(&events).expect("Data's switcher, which now has alpha on screen");
+    assert_eq!(names[active], "alpha", "{names:?}");
+
+    // Each side shows alpha now: Codex never left it, and Data has its notebook.
+    mode(&mut session, ModeId::Codex);
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Codex));
+    mode(&mut session, ModeId::Data);
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Data));
+}
+
+#[test]
+fn each_side_has_its_own_project_after_a_restart() {
+    let scratch = Scratch::new("data-restore");
+    let store = scratch.root.join("session.json");
+    {
+        let mut session = Session::new(scratch.at("alpha")).storing_in(&store);
+        mode(&mut session, ModeId::Data);
+        session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+        session.apply(Command::CloseWorkspace { index: 0 });
+        // Quit in Data. The window opens in Codex, so on Codex's project.
+    }
+
+    let mut session = Session::restore_from(Some(store), None, None);
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Codex));
+    let events = session.apply(Command::Sync);
+    assert_eq!(tabs(&events).unwrap(), (vec!["alpha".to_string()], 0));
+
+    let events = mode(&mut session, ModeId::Data);
+    assert_eq!(here(&session), "beta");
+    assert_eq!(tabs(&events).unwrap(), (vec!["beta".to_string()], 0), "{events:?}");
+}
+
+#[test]
+fn the_prompt_says_which_projects_the_other_side_has_open() {
+    let scratch = Scratch::new("data-prompt");
+    let mut session = Session::new(scratch.at("alpha"));
+    mode(&mut session, ModeId::Data);
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    session.apply(Command::CloseWorkspace { index: 0 });
+
+    let events = session.apply(Command::OpenWorkspacePicker);
+    let (_, labels, details) = picker(&events).unwrap();
+    assert_eq!(labels[..2], ["beta".to_string(), "alpha".to_string()], "this side's first");
+    assert!(details[0].starts_with("open ·"), "{details:?}");
+    assert!(details[1].starts_with("open in Codex ·"), "{details:?}");
+}
+
+/* ── the agent's conversation ───────────────────────────────────── */
+
+/// A conversation as the agent writes them into `.proton/chats/`.
+const CONVERSATION: &str = r#"{
+  "version": 1,
+  "title": "Why is it slow",
+  "provider": "claude",
+  "model": "claude-opus-5",
+  "messages": [
+    {"role": "user", "content": [{"type": "text", "text": "why is it slow?"}]},
+    {"role": "assistant", "content": [{"type": "text", "text": "The index is rebuilt on every key."}]}
+  ]
+}
+"#;
+
+fn open_chat(events: &[Event]) -> Option<String> {
+    events.iter().rev().find_map(|event| match event {
+        Event::Chats { current, .. } => Some(current.clone()),
+        _ => None,
+    })
+}
+
+fn said(events: &[Event]) -> Vec<String> {
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            Event::Agent { transcript, .. } => Some(transcript.iter().map(|e| e.text.clone()).collect()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn the_agent_panel_comes_back_to_its_conversation_after_a_restart() {
+    // Every conversation is in its own file already. What a restart lost was
+    // which one was on screen, so the panel always came back a new thread.
+    let scratch = Scratch::new("chat-restore");
+    let store = scratch.root.join("session.json");
+    let chats = scratch.root.join("alpha").join(".proton").join("chats");
+    std::fs::create_dir_all(&chats).unwrap();
+    std::fs::write(chats.join("why-is-it-slow.json"), CONVERSATION).unwrap();
+    {
+        let mut session = Session::new(scratch.at("alpha")).storing_in(&store);
+        session.apply(Command::OpenChat {
+            path: ".proton/chats/why-is-it-slow.json".into(),
+        });
+    }
+
+    let mut session = Session::restore_from(Some(store.clone()), None, None);
+    let events = session.apply(Command::Sync);
+    assert_eq!(open_chat(&events).as_deref(), Some(".proton/chats/why-is-it-slow.json"));
+    assert_eq!(said(&events), ["why is it slow?", "The index is rebuilt on every key."], "{events:?}");
+
+    // A new thread is what comes back after one is started.
+    session.apply(Command::NewChat);
+    drop(session);
+    let mut session = Session::restore_from(Some(store.clone()), None, None);
+    assert_eq!(open_chat(&session.apply(Command::Sync)).as_deref(), Some(""));
+
+    // And a conversation deleted in the meantime is passed over, not an error.
+    session.apply(Command::OpenChat {
+        path: ".proton/chats/why-is-it-slow.json".into(),
+    });
+    drop(session);
+    std::fs::remove_file(chats.join("why-is-it-slow.json")).unwrap();
+    let mut session = Session::restore_from(Some(store), None, None);
+    let events = session.apply(Command::Sync);
+    assert_eq!(open_chat(&events).as_deref(), Some(""));
+    assert!(notices(&events).is_empty(), "{events:?}");
 }
 
 /* ── the folder prompt ────────────────────────────────────────────── */

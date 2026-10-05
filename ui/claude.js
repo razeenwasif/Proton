@@ -14,6 +14,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
+import { highlight, highlightLines } from "./highlight.js";
 
 /** @typedef {import("./bindings/ClaudeItem").ClaudeItem} Item */
 /** @typedef {import("./bindings/ClaudeTool").ClaudeTool} Tool */
@@ -400,21 +401,32 @@ export function createClaude(host) {
 
   /* ── the conversation ─────────────────────────────────────────── */
 
-  /** Lines of a structured patch as a diff. @param {any[]} hunks */
-  function diffHtml(hunks) {
+  /** Lines of a structured patch as a diff, coloured for the file they are in.
+   *  @param {any[]} hunks @param {string} [lang] */
+  function diffHtml(hunks, lang = "") {
     if (!Array.isArray(hunks) || !hunks.length) return "";
     let rows = "";
     for (const hunk of hunks) {
       let oldLine = hunk.oldStart ?? 1, newLine = hunk.newStart ?? 1;
       rows += `<tr class="hunk"><td colspan="3">@@ −${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@</td></tr>`;
-      for (const line of hunk.lines ?? []) {
-        const mark = line[0], text = line.slice(1);
+      /** @type {string[]} */
+      const lines = hunk.lines ?? [];
+      // Each side coloured whole, the file's language, then taken a row at a
+      // time: a comment that spans lines is still one.
+      const before = highlightLines(lines.filter((l) => l[0] !== "+").map((l) => l.slice(1)).join("\n"), lang);
+      const after = highlightLines(lines.filter((l) => l[0] !== "-").map((l) => l.slice(1)).join("\n"), lang);
+      let b = 0, a = 0;
+      for (const line of lines) {
+        const mark = line[0];
         if (mark === "-") {
-          rows += `<tr class="del"><td class="n">${oldLine++}</td><td class="m">−</td><td>${esc(text)}</td></tr>`;
+          rows += `<tr class="del"><td class="n">${oldLine++}</td><td class="m">−</td><td>${before[b++] ?? ""}</td></tr>`;
         } else if (mark === "+") {
-          rows += `<tr class="add"><td class="n">${newLine++}</td><td class="m">+</td><td>${esc(text)}</td></tr>`;
+          rows += `<tr class="add"><td class="n">${newLine++}</td><td class="m">+</td><td>${after[a++] ?? ""}</td></tr>`;
         } else {
-          rows += `<tr><td class="n">${newLine++}</td><td class="m"></td><td>${esc(text)}</td></tr>`;
+          // "\ No newline at end of file" is a note about the line above, not code.
+          const text = mark === "\\" ? esc(line) : after[a] ?? "";
+          rows += `<tr><td class="n">${newLine++}</td><td class="m"></td><td>${text}</td></tr>`;
+          a++, b++;
           oldLine++;
         }
       }
@@ -422,12 +434,13 @@ export function createClaude(host) {
     return `<div class="cc-diff"><table>${rows}</table></div>`;
   }
 
-  /** A before/after for an edit that has not happened yet. @param {string} before @param {string} after */
-  function proposedDiff(before, after) {
+  /** A before/after for an edit that has not happened yet.
+   *  @param {string} before @param {string} after @param {string} [lang] */
+  function proposedDiff(before, after, lang = "") {
     const lines = [];
     for (const l of String(before ?? "").split("\n")) lines.push(`-${l}`);
     for (const l of String(after ?? "").split("\n")) lines.push(`+${l}`);
-    return diffHtml([{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 0, lines }]).replace(/<tr class="hunk">.*?<\/tr>/, "");
+    return diffHtml([{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 0, lines }], lang).replace(/<tr class="hunk">.*?<\/tr>/, "");
   }
 
   /** @param {any[]} hunks */
@@ -446,7 +459,7 @@ export function createClaude(host) {
       const verb = f.kind === "add" ? "Create" : f.kind === "delete" ? "Delete" : f.movePath ? `Move to ${rel(f.movePath)} and edit` : "Edit";
       const c = counts(f.structuredPatch);
       return `<div class="cc-patch-file"><span>${esc(verb)}</span> <code>${esc(rel(f.path))}</code>` +
-        `<span class="cc-patch-n">+${c.add} −${c.del}</span></div>` + diffHtml(f.structuredPatch ?? []);
+        `<span class="cc-patch-n">+${c.add} −${c.del}</span></div>` + diffHtml(f.structuredPatch ?? [], language(f.path ?? ""));
     }).join("");
   }
 
@@ -455,7 +468,8 @@ export function createClaude(host) {
     const lines = String(text ?? "").split("\n");
     const shown = lines.slice(0, max).join("\n");
     const more = lines.length > max ? `<div class="cc-more">… ${lines.length - max} more lines</div>` : "";
-    return `<div class="md-code"><div class="md-code-head"><span>${esc(lang || "text")}</span><button class="md-copy" data-copy title="Copy">Copy</button></div><pre><code>${esc(shown)}</code></pre>${more}</div>`;
+    return `<div class="md-code"><div class="md-code-head"><span>${esc(lang || "text")}</span><button class="md-copy" data-copy title="Copy">Copy</button></div>` +
+      `<pre><code${lang ? ` data-lang="${esc(lang)}"` : ""}>${highlight(shown, lang)}</code></pre>${more}</div>`;
   }
 
   /** What one tool row says: a verb, what it acted on, and a note. @param {Tool} t */
@@ -522,10 +536,12 @@ export function createClaude(host) {
     const detail = /** @type {any} */ (t.detail ?? {});
     const result = t.result ?? "";
     switch (t.name) {
-      case "Edit": case "MultiEdit":
-        return diffHtml(detail.structuredPatch) || (input.old_string != null ? proposedDiff(input.old_string, input.new_string) : "");
+      case "Edit": case "MultiEdit": {
+        const lang = language(input.file_path ?? "");
+        return diffHtml(detail.structuredPatch, lang) || (input.old_string != null ? proposedDiff(input.old_string, input.new_string, lang) : "");
+      }
       case "Write":
-        return detail.structuredPatch?.length ? diffHtml(detail.structuredPatch) : code(input.content ?? "", language(input.file_path ?? ""));
+        return detail.structuredPatch?.length ? diffHtml(detail.structuredPatch, language(input.file_path ?? "")) : code(input.content ?? "", language(input.file_path ?? ""));
       case "Read":
         return detail.file?.content ? code(detail.file.content, language(input.file_path ?? ""), 40) : result ? code(result, "") : "";
       case "Bash": {
@@ -590,8 +606,8 @@ export function createClaude(host) {
       case "Edit": case "MultiEdit":
         question = `Allow ${who} to edit <code>${esc(rel(input.file_path))}</code>?`;
         preview = Array.isArray(input.edits)
-          ? input.edits.map((/** @type {any} */ e) => proposedDiff(e.old_string, e.new_string)).join("")
-          : proposedDiff(input.old_string, input.new_string);
+          ? input.edits.map((/** @type {any} */ e) => proposedDiff(e.old_string, e.new_string, language(input.file_path ?? ""))).join("")
+          : proposedDiff(input.old_string, input.new_string, language(input.file_path ?? ""));
         break;
       case "Write":
         question = `Allow ${who} to write <code>${esc(rel(input.file_path))}</code>?`;
@@ -599,7 +615,7 @@ export function createClaude(host) {
         break;
       case "NotebookEdit":
         question = `Allow ${who} to edit <code>${esc(rel(input.notebook_path))}</code>?`;
-        preview = code(input.new_source ?? "", "", 24);
+        preview = code(input.new_source ?? "", input.cell_type === "markdown" ? "" : "python", 24);
         break;
       case "WebFetch":
         question = `Allow ${who} to fetch <code>${esc(input.url ?? "")}</code>?`;
