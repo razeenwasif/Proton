@@ -275,9 +275,14 @@ export function createLab(host) {
       return;
     }
     const canvas = /** @type {HTMLCanvasElement} */ (box.querySelector("canvas"));
-    const view = mountScene(canvas, doc);
+    const view = await mountScene(canvas, doc);
+    // Closed, or another opened, while three.js was on its way.
+    if (!canvas.isConnected) {
+      view?.destroy();
+      return;
+    }
     if (!view) {
-      canvas.replaceWith(Object.assign(document.createElement("p"), { className: "lab-err", textContent: "This window has no WebGL 2, so the scene cannot be drawn." }));
+      canvas.replaceWith(Object.assign(document.createElement("p"), { className: "lab-err", textContent: "This window has no WebGL, so the scene cannot be drawn." }));
       return;
     }
     mounted = view;

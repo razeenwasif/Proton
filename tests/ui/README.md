@@ -136,7 +136,7 @@ Proton, a call's transcript drawn only for that call, what the scientist tells
 the team and `/h` hypotheses of their own, and the table. The Lab checks
 cover its Python's two say-sos, a proposal read and run or turned down (and
 said to be unsandboxed where there is no sandbox), a run opened whole, its
-pictures read through `read_lab`, a scene drawn or — without WebGL 2 — said
+pictures read through `read_lab`, a scene drawn or — without WebGL — said
 not to be, and the switch that lets proposals run unasked offered only with a
 sandbox. `npm run test:unit` checks what the composer reads as a hypothesis,
 sizes, and the 3D view's geometry. The rounds, the runs and the sandbox are

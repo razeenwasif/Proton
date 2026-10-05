@@ -1748,10 +1748,13 @@ run saved, and the page asks the shell's `read_lab` for each by
 `<investigation>/<run>/<path>`. The core says where the file is, under the
 session's lock, and gives only a file inside that run's folder of a kind the
 Lab shows — no `..`, no absolute path, no link out, no code; the shell reads it
-after letting go of the lock. A scene is drawn by `ui/lab3d.js`, a small WebGL 2
-renderer of its own — lit spheres, bonds and arrows, points, lines and meshes,
-an orbit camera, frames played in turn — rather than Modeling's, which is one
-context bound to its viewport.
+after letting go of the lock. A scene is drawn by `ui/lab3d.js` with three.js —
+`ui/vendor/three/`, its own build files unminified and imported the first time
+a scene is opened — rather than Modeling's renderer, which is one context bound
+to its viewport: spheres, bonds and arrows sharing three geometries, points as
+one instanced mesh, lines and meshes, OrbitControls, and frames built the
+first time they are shown. It draws only on a change, so a scene left open
+costs nothing.
 
 ---
 

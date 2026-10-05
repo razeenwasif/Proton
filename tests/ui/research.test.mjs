@@ -32,33 +32,21 @@ test('a download is said in the unit people read it in', () => {
   equal(bytes(3 * 1024 ** 3), '3.00 GB');
 });
 
-import {icosphere, tube, faceted, bounds, between} from '../../ui/lab3d.js';
+import {bounds, triangles} from '../../ui/lab3d.js';
 
-test('a sphere, a tube and a mesh are built the shape they say', () => {
-  const ball = icosphere(1);
-  equal(ball.indices.length / 3, 80, 'an icosahedron split once has 80 faces');
-  for (let i = 0; i < ball.positions.length; i += 3) {
-    const r = Math.hypot(ball.positions[i], ball.positions[i + 1], ball.positions[i + 2]);
-    equal(Math.abs(r - 1) < 1e-6, true, 'every point of the sphere is on it');
-  }
-  const rod = tube(8);
-  equal(rod.indices.length / 3, 16);
-  const ys = Array.from(rod.positions).filter((_, i) => i % 3 === 1);
-  equal(Math.min(...ys), 0);
-  equal(Math.max(...ys), 1);
-  const square = faceted([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], [[0, 1, 2, 3]]);
-  equal(square.positions.length / 3, 6, 'a quad is two triangles');
-  deepEqual(Array.from(square.normals.slice(0, 3)), [0, 0, 1]);
+test('a mesh\'s polygons become triangles, and a corner that names no vertex is dropped', () => {
+  deepEqual(triangles([[0, 1, 2, 3]], 4), [0, 1, 2, 0, 2, 3], 'a quad is a fan of two');
+  deepEqual(triangles([[0, 1, 2], [0, 1, 9]], 3), [0, 1, 2], 'a face reaching past the vertices is left out');
+  deepEqual(triangles([[0, 1]], 2), [], 'two corners make no triangle');
+  deepEqual(triangles(undefined, 0), []);
 });
 
-test('a scene is framed by everything in every frame, and a bond reaches from end to end', () => {
+test('a scene is framed by everything in every frame', () => {
   const doc = {format: 'proton.scene/1', frames: [[{kind: 'sphere', center: [0, 0, 0], radius: 1}], [{kind: 'points', xyz: [[10, 0, 0]]}]]};
   const b = bounds(doc);
   deepEqual(b.center, [4.5, 0, 0]);
   equal(Math.abs(b.radius - Math.hypot(11, 2, 2) / 2) < 1e-9, true);
   deepEqual(bounds({format: 'proton.scene/1', frames: [[]]}), {center: [0, 0, 0], radius: 1}, 'an empty scene still has somewhere to look');
-  const m = between([1, 2, 3], [1, 2, 7], 0.5);
-  // The tube's far end, (0, 1, 0), lands on the bond's.
-  const end = [m[4] + m[12], m[5] + m[13], m[6] + m[14]];
-  deepEqual(end.map((v) => Math.round(v * 1e9) / 1e9), [1, 2, 7]);
+  const arrow = bounds({format: 'proton.scene/1', frames: [[{kind: 'arrow', origin: [0, 0, 0], vector: [0, 4, 0]}]]});
+  deepEqual(arrow.center, [0, 2, 0], 'an arrow is framed to its tip');
 });

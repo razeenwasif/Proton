@@ -1753,7 +1753,7 @@ await test('A run\'s pictures are drawn, and its 3D scene opens from it', async 
     slider.value = '1'; slider.dispatchEvent(new win.Event('input', {bubbles: true}));
     assert(work.querySelector('[data-lab-frame-n]').textContent === '2 / 2', 'the slider did not step');
   } else {
-    assert(work.querySelector('.lab-scene .lab-err')?.textContent.includes('no WebGL 2'), 'without WebGL 2 the scene does not say why');
+    assert(work.querySelector('.lab-scene .lab-err')?.textContent.includes('no WebGL'), 'without WebGL the scene does not say why');
   }
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
   work.querySelector('[data-lab-scene-close]').click(); await settle();
