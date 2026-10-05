@@ -2408,14 +2408,16 @@ body { font-size: calc(13px * var(--ui-scale)); }
    size. The one place Codex parts from that setup on purpose is the title
    bar, which stands on its end down the right edge.
 
-   Scoped to Codex, and to the modes drawn this way since — Chat and Data.
+   Scoped to Codex, and to the modes drawn this way since — Chat, Data and
+   Research.
    The others keep the glass until they are, which is why everything here
    hangs off `data-mode` or the workspace rather than replacing a rule.
    ═══════════════════════════════════════════════════════════════════ */
 
 :root[data-mode="codex"],
 :root[data-mode="chat"],
-:root[data-mode="data"] {
+:root[data-mode="data"],
+:root[data-mode="research"] {
   --z-ui:  calc(17.5px * var(--ui-scale));  /* tree, breadcrumb, headers */
   --z-sm:  calc(15px * var(--ui-scale));    /* the agent's prose */
   --z-xs:  calc(14px * var(--ui-scale));    /* tool rows, composer controls */
@@ -2446,19 +2448,26 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .rail,
 :root[data-mode="data"] .statusline,
 :root[data-mode="data"] .hint,
-/* The terminal is Codex's; in Chat and Data its toggle would open
-   something that is not on screen. */
+:root[data-mode="research"] .chrome-rail,
+:root[data-mode="research"] .rail,
+:root[data-mode="research"] .statusline,
+:root[data-mode="research"] .hint,
+/* The terminal is Codex's; in Chat, Data and Research its toggle would
+   open something that is not on screen. */
 :root[data-mode="chat"] .titlebar [data-term-toggle],
-:root[data-mode="data"] .titlebar [data-term-toggle] { display: none; }
+:root[data-mode="data"] .titlebar [data-term-toggle],
+:root[data-mode="research"] .titlebar [data-term-toggle] { display: none; }
 :root[data-mode="codex"] .app,
 :root[data-mode="chat"] .app,
-:root[data-mode="data"] .app {
+:root[data-mode="data"] .app,
+:root[data-mode="research"] .app {
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr) auto;
 }
 :root[data-mode="codex"] .body,
 :root[data-mode="chat"] .body,
-:root[data-mode="data"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
+:root[data-mode="data"] .body,
+:root[data-mode="research"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
 
 /* Opaque, as Zed is. The window's own fill may be a veil over the desktop;
    these two cover it, and the veils the backdrop puts on the panes are the
@@ -2466,12 +2475,14 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="codex"] .titlebar,
 :root[data-mode="chat"] .titlebar,
 :root[data-mode="data"] .titlebar,
+:root[data-mode="research"] .titlebar,
 .workspace[data-ws="codex"],
 .workspace[data-ws="data"] { background: var(--bg); }
 
 :root[data-mode="codex"] .titlebar,
 :root[data-mode="chat"] .titlebar,
-:root[data-mode="data"] .titlebar {
+:root[data-mode="data"] .titlebar,
+:root[data-mode="research"] .titlebar {
   grid-row: 1; grid-column: 2;
   display: flex; flex-direction: column; align-items: center; gap: 14px;
   width: 40px; padding: 14px 0 8px;
@@ -3669,3 +3680,151 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cc-gallery-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 12px 10px; font-size: var(--z-2xs); color: var(--cc-faint); }
 .cc-gallery-group { margin: 12px 14px 6px; font: var(--z-2xs)/1 var(--cc-font); color: var(--cc-faint); }
 .cc-importing { display: inline-flex; align-items: center; gap: 8px; color: var(--cc-muted); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Research: investigations, worn as Chat wears Claude Code.
+
+   The section is a `.cc` one, so it has Chat's tokens and ground: the
+   investigations down the left as Chat lists sessions, the board in a
+   column in the middle, and the Lab on the right. The board is files —
+   each section says which — drawn as Chat draws prose, so an overview's
+   equations are KaTeX's as an answer's are.
+   ═══════════════════════════════════════════════════════════════════ */
+.rs-main { display: flex; flex-direction: column; min-height: 0; }
+.rs-board { flex: 1 1 auto; min-height: 0; padding: 22px clamp(14px, 3vw, 28px) 40px; container-type: inline-size; }
+.rs-col { max-width: 780px; margin: 0 auto; }
+.rs-col.rs-wide { max-width: 980px; }
+.rs-faint { color: var(--cc-faint); }
+.rs-board code, .rs-lab code, .rs-side code { font: var(--z-2xs) var(--zed); color: var(--cc-soft); }
+
+/* ── the header ── */
+.rs-chip {
+  flex: 0 0 auto; padding: 3px 8px; border-radius: 5px;
+  background: var(--cc-accent-soft); color: var(--cc-accent); font: var(--z-2xs)/1.2 var(--cc-font);
+}
+.rs-head .cc-title { flex: 0 1 auto; min-width: 0; text-overflow: ellipsis; }
+/* The board's tabs, a strip of their own under the header: the header is
+   the investigation's, and where the round's controls go. */
+.rs-tabs { flex: 0 0 auto; display: flex; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--cc-line); }
+.rs-tab {
+  -webkit-appearance: none; appearance: none; display: flex; align-items: center; gap: 6px;
+  padding: 10px 8px 9px; border: 0; border-radius: 0; background: transparent;
+  color: var(--cc-faint); font: var(--z-xs)/1 var(--cc-font); cursor: pointer;
+}
+.rs-tab:hover { color: var(--cc-text); }
+.rs-tab.on { color: var(--cc-text); box-shadow: inset 0 -2px 0 var(--cc-accent); }
+.rs-count:empty { display: none; }
+.rs-count { padding: 1px 6px; border-radius: 8px; background: var(--cc-raise-2); color: var(--cc-muted); font-size: var(--z-2xs); }
+
+/* ── the welcome and the form ── */
+.rs-welcome { padding-top: 8vh; text-align: center; }
+.rs-welcome h2 { margin: 14px 0 10px; font: 600 1.2em/1.35 var(--cc-font); color: var(--text-hi); }
+.rs-welcome p { margin: 0 auto 12px; max-width: 560px; font: var(--z-sm)/1.65 var(--cc-font); color: var(--cc-soft); }
+.rs-welcome .cc-primary { margin-top: 10px; padding: 8px 16px; font-size: var(--z-xs); }
+.rs-welcome-mark { display: inline-grid; place-items: center; width: 52px; height: 52px; border-radius: 12px; background: var(--cc-accent-soft); color: var(--cc-accent); }
+.rs-welcome-mark .i { width: 26px; height: 26px; }
+.rs-new { display: grid; gap: 16px; padding-top: 6px; }
+.rs-new > p { margin: 0; font: var(--z-xs)/1.6 var(--cc-font); }
+.rs-field { display: grid; gap: 7px; font: var(--z-2xs)/1 var(--cc-font); color: var(--cc-muted); }
+.rs-field input, .rs-field select, .rs-field textarea {
+  width: 100%; padding: 9px 11px; border: 1px solid var(--cc-line-2); border-radius: 6px; outline: none;
+  background: var(--cc-raise); color: var(--cc-text); font: var(--z-xs)/1.5 var(--cc-font);
+}
+.rs-field textarea { resize: vertical; min-height: 120px; }
+.rs-field input:focus, .rs-field select:focus, .rs-field textarea:focus { border-color: var(--cc-accent); }
+.rs-field input::placeholder, .rs-field textarea::placeholder { color: var(--cc-faint); }
+.rs-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.rs-actions .cc-primary, .rs-actions .cc-quiet { padding: 7px 14px; font-size: var(--z-xs); }
+
+/* ── the files, as sections ── */
+.rs-doc { margin: 0 0 22px; }
+.rs-doc > header, .rs-doc > summary {
+  display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; padding: 0 0 6px;
+  border-bottom: 1px solid var(--cc-line); font: 600 var(--z-xs)/1.3 var(--cc-font); color: var(--cc-text);
+}
+.rs-doc .rs-file { margin-left: auto; font-weight: 400; color: var(--cc-faint); }
+.rs-fold > summary { display: flex; align-items: baseline; gap: 6px; cursor: pointer; list-style: none; }
+.rs-fold > summary::-webkit-details-marker { display: none; }
+.rs-fold > summary::before { content: "▸"; color: var(--cc-faint); font-weight: 400; }
+.rs-fold[open] > summary::before { content: "▾"; }
+.rs-doc .cc-prose em:only-child { color: var(--cc-faint); }
+
+/* ── the leaderboard ── */
+.rs-table { display: grid; }
+.rs-row {
+  -webkit-appearance: none; appearance: none;
+  display: grid; grid-template-columns: 34px minmax(0, 1fr) 128px 56px 54px 78px; align-items: center; gap: 10px;
+  min-height: var(--z-row); padding: 6px 10px; border: 0; border-radius: 5px; background: transparent;
+  color: var(--cc-text); font: var(--z-xs)/1.35 var(--cc-font); text-align: left; cursor: pointer;
+}
+.rs-row:hover { background: var(--row-hover); }
+.rs-row-head { cursor: default; color: var(--cc-faint); font-size: var(--z-2xs); border-bottom: 1px solid var(--cc-line); border-radius: 0; }
+.rs-row-head:hover { background: transparent; }
+.rs-row-head > span { color: inherit; }
+.rs-row.retired { color: var(--cc-faint); }
+.rs-rank, .rs-elo, .rs-wl { font-variant-numeric: tabular-nums; color: var(--cc-muted); }
+.rs-elo { color: var(--cc-text); }
+.rs-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-name b { color: var(--cc-accent); font-weight: 600; margin-right: 4px; }
+.rs-dup, .rs-tag { margin-left: 8px; padding: 1px 6px; border-radius: 4px; background: var(--cc-raise-2); color: var(--cc-muted); font-size: var(--z-2xs); }
+.rs-seat { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--z-2xs); color: var(--cc-muted); }
+.rs-seat[data-seat="claude"] { color: var(--cc-accent); }
+.rs-seat[data-seat="codex"] { color: color-mix(in srgb, var(--ok) 70%, var(--cc-faint)); }
+.rs-seat[data-seat="antigravity"], .rs-seat[data-seat="gemini"] { color: color-mix(in srgb, var(--warn) 60%, var(--cc-faint)); }
+.rs-seat[data-seat="scientist"] { color: var(--cc-text); }
+.rs-pips { display: flex; gap: 4px; }
+.rs-pip { width: 9px; height: 9px; border-radius: 50%; background: var(--cc-faint); }
+.rs-pip[data-verdict="strong"], .rs-verdict[data-verdict="strong"] { --v: var(--ok); }
+.rs-pip[data-verdict="promising"], .rs-verdict[data-verdict="promising"] { --v: var(--info, var(--accent)); }
+.rs-pip[data-verdict="weak"], .rs-verdict[data-verdict="weak"] { --v: var(--warn); }
+.rs-pip[data-verdict="flawed"], .rs-verdict[data-verdict="flawed"] { --v: var(--err); }
+.rs-pip { background: var(--v, var(--cc-faint)); }
+.rs-none { padding: 18px 0; font-size: var(--z-xs); }
+/* A narrow board keeps the hypothesis whole: its name on a line of its own,
+   what the tournament says of it under it. */
+@container (max-width: 640px) {
+  .rs-row { grid-template-columns: 22px minmax(0, 1fr) 40px 32px 52px; row-gap: 4px; align-items: baseline; padding: 9px 8px; }
+  .rs-row-head { display: none; }
+  .rs-rank { grid-row: 1 / span 2; }
+  .rs-name { grid-column: 2 / -1; grid-row: 1; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .rs-seat { grid-column: 2; grid-row: 2; }
+  .rs-elo { grid-column: 3; grid-row: 2; font-size: var(--z-2xs); }
+  .rs-wl { grid-column: 4; grid-row: 2; font-size: var(--z-2xs); }
+  .rs-pips { grid-column: 5; grid-row: 2; }
+}
+
+/* ── one hypothesis ── */
+.rs-back {
+  -webkit-appearance: none; appearance: none; display: inline-flex; align-items: center; gap: 4px;
+  margin: 0 0 14px -6px; padding: 4px 8px 4px 4px; border: 0; border-radius: 5px; background: transparent;
+  color: var(--cc-muted); font: var(--z-2xs)/1 var(--cc-font); cursor: pointer;
+}
+.rs-back:hover { color: var(--cc-text); background: var(--row-hover); }
+.rs-back .i { width: 13px; height: 13px; transform: rotate(90deg); }
+.rs-h { margin: 0 0 6px; font: 600 1.15em/1.4 var(--cc-font); color: var(--text-hi); }
+.rs-id { color: var(--cc-accent); }
+.rs-meta { margin: 0 0 12px; font: var(--z-2xs)/1.5 var(--cc-font); color: var(--cc-faint); }
+.rs-lineage { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 18px; font: var(--z-2xs)/1.6 var(--cc-font); color: var(--cc-muted); }
+.rs-link {
+  -webkit-appearance: none; appearance: none; padding: 0 5px; border: 0; border-radius: 4px;
+  background: var(--cc-raise-2); color: var(--cc-accent); font: var(--z-2xs)/1.5 var(--cc-font); cursor: pointer;
+}
+.rs-link:hover { background: var(--cc-accent-soft); }
+.rs-review { margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--cc-line); border-radius: 8px; background: var(--cc-raise); }
+.rs-review > header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 8px; font: var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.rs-verdict { padding: 2px 7px; border-radius: 4px; background: color-mix(in srgb, var(--v, var(--cc-faint)) 16%, transparent); color: var(--v, var(--cc-muted)); font-weight: 600; }
+.rs-scores { font-variant-numeric: tabular-nums; color: var(--cc-faint); white-space: nowrap; }
+.rs-review .rs-fold { margin-top: 6px; }
+.rs-review .rs-fold > summary { margin: 0 0 6px; padding: 0; border: 0; font-weight: 400; color: var(--cc-muted); font-size: var(--z-2xs); }
+.rs-cites { margin-top: 6px; font-size: var(--z-2xs); color: var(--cc-muted); }
+.rs-cites ul { margin: 0; padding-left: 18px; }
+.rs-matches { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.rs-match { font: var(--z-xs)/1.5 var(--cc-font); color: var(--cc-soft); }
+.rs-match.won > b { color: var(--ok); }
+.rs-match.lost > b { color: var(--err); }
+.rs-why { margin-top: 4px; font-size: var(--z-2xs); color: var(--cc-muted); }
+
+/* ── the Lab ── */
+.rs-lab { display: flex; flex-direction: column; min-height: 0; }
+.rs-lab-body { flex: 1 1 auto; min-height: 0; }
+.rs-lab .cc-none { line-height: 1.65; }

@@ -30,6 +30,7 @@ import { createEditorState, createEditorPaints } from "./editor-state.js";
 import { performanceReview, editorPainted } from "./performance.js";
 import { createTerminalGL, xtermHex } from "./term-gl.js";
 import { createClaude } from "./claude.js";
+import { createResearch } from "./research.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -459,7 +460,7 @@ $$("[data-translucency-set]").forEach((b) =>
    The mode bar asks the core to switch; the core's ModeChanged event is
    what actually moves the UI. That indirection looks pointless with one
    front end and is the reason a second one is possible. */
-const MODES = ["chat", "codex", "design", "modeling", "game", "video", "data"];
+const MODES = ["chat", "codex", "design", "modeling", "game", "video", "data", "research"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -485,9 +486,9 @@ function hexOf(css) {
 
 function renderWindowGround(again = false) {
   if (!HAS_SHELL) return;
-  // Chat and Data are drawn as Codex is — every pixel the theme's ground —
-  // so they get the same opaque window.
-  const want = ["codex", "chat", "data"].includes(activeMode) ? hexOf(token("--bg")) : null;
+  // Chat, Data and Research are drawn as Codex is — every pixel the theme's
+  // ground — so they get the same opaque window.
+  const want = ["codex", "chat", "data", "research"].includes(activeMode) ? hexOf(token("--bg")) : null;
   if (!again && want === groundAsked) return;
   groundAsked = want;
   setOpaque(want);
@@ -495,8 +496,9 @@ function renderWindowGround(again = false) {
 
 function renderMode(mode) {
   activeMode = mode;
-  // Codex wears a different chrome from the other six — a title bar in place
-  // of the rails, no statusline — and the stylesheet keys all of it off this.
+  // Codex, and the modes drawn as it is, wear a different chrome from the
+  // rest — a title bar in place of the rails, no statusline — and the
+  // stylesheet keys all of it off this.
   document.documentElement.dataset.mode = mode;
   // After the mode is set, not before: Codex has a ground of its own, and
   // reading the token any earlier gets the mode being left.
@@ -851,6 +853,10 @@ const claude = createClaude({
   shell: HAS_SHELL,
   convene: (question) => dispatch({ type: "convene", question }),
 });
+
+/* Research: the project's investigations. Drawn from what the core reads
+   out of research/; nothing is kept here that the files do not say. */
+const research = createResearch({ root: document, dispatch });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -4792,6 +4798,18 @@ function renderEvent(event) {
       claude?.artifacts(event);
       break;
 
+    case "researchList":
+      research?.list(event);
+      break;
+
+    case "researchBoard":
+      research?.board(event);
+      break;
+
+    case "researchHypothesis":
+      research?.hypothesis(event);
+      break;
+
     case "chats":
       renderChats(event);
       break;
@@ -5105,13 +5123,13 @@ document.addEventListener("keydown", (e) => {
     }
   }
 
-  // ⌃1-7 and ⌘K/⌘, are deliberately two different modifiers, not
+  // ⌃1-8 and ⌘K/⌘, are deliberately two different modifiers, not
   // interchangeable ones — aliasing them here used to let ⌃K and ⌃,
   // trigger the shell chords too, which stole them from the modal engine
   // below (⌃-prefixed commands are exactly what a Vim keymap is made of,
   // and on macOS ⌃K in particular already means "kill to end of line"
   // everywhere else on the system).
-  if (e.ctrlKey && /^[1-7]$/.test(e.key)) {
+  if (e.ctrlKey && /^[1-8]$/.test(e.key)) {
     e.preventDefault();
     coreSetMode(MODES[Number(e.key) - 1]);
     return;

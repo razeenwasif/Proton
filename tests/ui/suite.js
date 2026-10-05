@@ -1,7 +1,7 @@
 import {orderingChecks} from './ordering.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
-const layoutKeys = [...['chat', 'codex', 'design', 'modeling', 'game', 'video', 'data'].map((mode) => `proton.panes.${mode}`),
+const layoutKeys = [...['chat', 'codex', 'design', 'modeling', 'game', 'video', 'data', 'research'].map((mode) => `proton.panes.${mode}`),
   // Which artifact each conversation had open.
   'proton.chat.panes'];
 const savedLayouts = layoutKeys.map((key) => [key, localStorage.getItem(key)]);
@@ -130,7 +130,7 @@ await test('Narrow windows show the requested panel without squeezing out the ed
   assert(!section.querySelector('aside').hidden, 'wide layout did not restore sidebar');
 });
 await test('Each mode keeps a usable stage, and every one has a right panel to toggle', async () => {
-  for (const mode of ['chat', 'design', 'modeling', 'game', 'video', 'data', 'codex']) {
+  for (const mode of ['chat', 'design', 'modeling', 'game', 'video', 'data', 'research', 'codex']) {
     await win.dispatch({type: 'setMode', mode}); await settle();
     const section = $('.workspace.on'), stage = section.querySelector('main');
     assert(stage.clientWidth >= 320, `${mode} lost its stage`);
@@ -1408,6 +1408,113 @@ await test('A notebook colours its code cells as they are typed, and its prose d
   prose.querySelector('a[data-link]').dispatchEvent(click); await settle();
   assert(click.defaultPrevented && win.commands.slice(sent).find((c) => c.type === 'openLink')?.url === 'https://example.com/fit',
     'a link in a notebook was followed in the window');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+await test('Research is the eighth mode: ⌃8 opens it, in Codex\'s chrome and on an opaque ground', async () => {
+  const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
+  const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
+  await win.dispatch({type: 'setMode', mode: 'design'}); await settle();
+  const before = win.commands.length, opaque = asked().length;
+  doc.body.focus();
+  key('8', {ctrlKey: true}); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'setMode' && c.mode === 'research'), '⌃8 did not ask for Research');
+  assert($('.workspace.on')?.dataset.ws === 'research', 'Research is not on screen');
+  assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.rail')) && !shown($('.statusline')), 'Research kept the old chrome');
+  assert(!shown($('.titlebar [data-term-toggle]')), 'Research offers a terminal it cannot show');
+  const tab = $('.titlebar [data-mode="research"]');
+  assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃8'), 'the title bar does not show Research');
+  assert(asked().slice(opaque).at(-1) === ground, `Research did not ask for the ground: ${JSON.stringify(asked().slice(opaque))}`);
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+const researchRow = (id, elo, seat, title, status = 'active') => ({id, title, author: {seat, model: ''}, family: seat === 'claude' ? 'anthropic' : 'openai',
+  round: 1, status, elo, wins: elo > 1200 ? 1 : 0, losses: elo < 1200 ? 1 : 0, verdicts: ['strong'], parents: [], duplicateOf: null, experiments: 0});
+const researchBoard = (slug = 'sky', title = 'Why is the sky blue?') => ({type: 'researchBoard', slug, title, discipline: 'physics',
+  brief: `# ${title}\n\n**Discipline:** Physics\n\n## Goal\n\nExplain the colour.\n`, plan: '# Research plan\n\n1. Rayleigh: $I \\propto \\lambda^{-4}$\n',
+  overview: '# Overview\n\n_Nothing yet._\n', verdicts: '# Verdicts\n', sandbox: '# Sandbox log\n',
+  hypotheses: [researchRow('H002', 1216, 'codex', 'Cones and the sun'), researchRow('H001', 1184, 'claude', 'Absorption', 'retired')]});
+const researchSummary = (slug, title, hypotheses = 2) => ({slug, title, discipline: 'physics', created: 0, hypotheses, rounds: 1});
+await test('Research makes an investigation from a brief, and keeps what was typed when that is refused', async () => {
+  await win.dispatch({type: 'setMode', mode: 'research'}); await settle();
+  await win.pushEvents([{type: 'researchList', investigations: [], open: null}]);
+  const ws = $('.workspace[data-ws="research"]');
+  assert(ws.querySelector('[data-research-list] .cc-none'), 'an empty project says nothing of it');
+  assert(ws.querySelector('.rs-welcome [data-research-new]') && $('[data-research-tabs]').hidden, 'no welcome, or tabs with nothing to show');
+  ws.querySelector('.cc-side [data-research-new]').click(); await settle();
+  const form = ws.querySelector('[data-research-form]');
+  assert(form && doc.activeElement === form.querySelector('[name="title"]'), 'the form did not open with its title focused');
+  let before = win.commands.length;
+  form.querySelector('[type="submit"]').click(); await settle();
+  assert(!win.commands.slice(before).some((c) => c.type === 'researchNew'), 'an untitled investigation was asked for');
+  const type = (name, value) => { form[name].value = value; form[name].dispatchEvent(new win.Event('input', {bubbles: true})); };
+  type('title', 'Why is the sky blue?'); type('discipline', 'mathematics'); type('goal', 'Explain the colour.');
+  form.goal.focus();
+  form.querySelector('[type="submit"]').click(); await settle();
+  const sent = win.commands.slice(before).find((c) => c.type === 'researchNew');
+  assert(sent?.title === 'Why is the sky blue?' && sent.goal === 'Explain the colour.' && sent.discipline === 'mathematics', `wrong command: ${JSON.stringify(sent)}`);
+  // Refused, or merely redrawn: the form stays as it was, caret and all.
+  await win.pushEvents([{type: 'researchList', investigations: [], open: null}]);
+  assert(ws.querySelector('[data-research-form]') === form && form.title.value === 'Why is the sky blue?', 'what was typed was lost');
+  assert(doc.activeElement === form.goal, 'a redraw took the caret');
+  // Escape puts it away without sending anything.
+  before = win.commands.length;
+  form.goal.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+  assert(!ws.querySelector('[data-research-form]') && ws.querySelector('.rs-welcome'), 'Escape did not put the form away');
+  assert(!win.commands.slice(before).some((c) => c.type === 'key' || c.type === 'researchNew'), 'Escape reached the core');
+  // ⌘⏎ sends it; when the list grows the form goes and the board is the new one's.
+  ws.querySelector('.rs-welcome [data-research-new]').click(); await settle();
+  const again = ws.querySelector('[data-research-form]');
+  assert(again.title.value === 'Why is the sky blue?', 'the draft was not kept');
+  before = win.commands.length;
+  again.goal.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Enter', metaKey: true, bubbles: true, cancelable: true})); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'researchNew'), '⌘⏎ did not create');
+  await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?', 0)], open: 'sky'}, {...researchBoard(), hypotheses: []},
+    {type: 'researchHypothesis', slug: 'sky', detail: null}]);
+  assert(!ws.querySelector('[data-research-form]'), 'the form stayed after it was made');
+  assert($('[data-research-title]').textContent === 'Why is the sky blue?' && !$('[data-research-tabs]').hidden, 'the board is not the new one');
+  assert(ws.querySelector('.rs-item.on')?.dataset.researchOpen === 'sky', 'the list does not mark it');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+await test('Research ranks the hypotheses, opens one whole, and lets another investigation be chosen', async () => {
+  await win.dispatch({type: 'setMode', mode: 'research'}); await settle();
+  const ws = $('.workspace[data-ws="research"]');
+  await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?'), researchSummary('cubes', 'Sums of three cubes', 0)], open: 'sky'},
+    researchBoard(), {type: 'researchHypothesis', slug: 'sky', detail: null}]);
+  assert(ws.querySelectorAll('[data-research-open]').length === 2, 'the list is not the investigations');
+  const board = ws.querySelector('[data-research-board]');
+  assert(![...board.querySelectorAll('h1')].some((h) => h.textContent === 'Why is the sky blue?'), 'the brief repeats the title over itself');
+  assert(board.querySelector('.rs-file[title="research/sky/RESEARCH_PLAN.md"]'), 'the plan does not say which file it is');
+  for (let i = 0; i < 30 && board.querySelector('.md-math[data-tex]'); i++) await settle();
+  assert(board.querySelector('.md-math .katex'), 'the plan\'s TeX is not drawn');
+  ws.querySelector('[data-research-tab="hypotheses"]').click(); await settle();
+  const rows = [...board.querySelectorAll('.rs-row[data-research-hypothesis]')];
+  assert(rows.map((r) => r.dataset.researchHypothesis).join() === 'H002,H001', 'the leaderboard is not in the core\'s order');
+  assert(rows[1].classList.contains('retired') && rows[1].querySelector('.rs-rank').textContent === '–', 'a retired hypothesis is ranked');
+  assert($('[data-research-count]').textContent === '2', 'the tab does not count them');
+  let before = win.commands.length;
+  rows[0].click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchShow')?.hypothesis === 'H002', 'the row did not ask for its hypothesis');
+  await win.pushEvents([{type: 'researchHypothesis', slug: 'sky', detail: {row: researchBoard().hypotheses[0], statement: 'Scattering goes as $\\lambda^{-4}$.',
+    rationale: 'Small scatterers.', predictions: ['A peak near 405 nm.'], assumptions: [], children: [], experiments: [], task: null,
+    reviews: [{id: 'H002.1', reviewer: {seat: 'claude', model: 'claude-opus-5-5'}, kind: 'review', verdict: 'strong', correctness: 5, novelty: 2, testability: 5,
+      round: 1, summary: 'Sound.', critique: 'Quantify it.', citations: ['Bohren (1985)']}],
+    matches: [{round: 1, opponent: 'H001', opponentTitle: 'Absorption', judge: {seat: 'antigravity', model: ''}, won: true, rationale: 'Explains it.'}]}}]);
+  assert(board.querySelector('.rs-h')?.textContent.includes('H002') && board.querySelectorAll('.rs-review').length === 1, 'the hypothesis is not drawn whole');
+  assert(board.querySelector('.rs-match.won [data-research-hypothesis="H001"]'), 'the tournament does not link its opponent');
+  // Another investigation's hypothesis is not this one's.
+  await win.pushEvents([{type: 'researchHypothesis', slug: 'cubes', detail: null}]);
+  assert(board.querySelector('.rs-detail'), 'a stray event closed the hypothesis');
+  before = win.commands.length;
+  board.querySelector('[data-research-back]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'researchShow' && c.hypothesis === null), 'back did not let it go');
+  await win.pushEvents([{type: 'researchHypothesis', slug: 'sky', detail: null}]);
+  assert(board.querySelector('.rs-table') && !board.querySelector('.rs-detail'), 'the leaderboard did not come back');
+  before = win.commands.length;
+  ws.querySelector('[data-research-open="cubes"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchOpen')?.slug === 'cubes', 'the list did not open the investigation');
+  // A project with none clears the board.
+  await win.pushEvents([{type: 'researchList', investigations: [], open: null}]);
+  assert(ws.querySelector('.rs-welcome') && $('[data-research-tabs]').hidden && $('[data-research-title]').textContent === 'Research', 'the last project\'s board stayed');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
 await test('A long name in the project panel scrolls sideways instead of being cut', async () => {

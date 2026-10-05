@@ -21,11 +21,14 @@ pub enum ModeId {
     Game,
     Video,
     Data,
+    /// A team of AI researchers with a scientist in the loop: co-scientist's
+    /// rounds over an investigation's files, and a Lab that runs their code.
+    Research,
 }
 
 impl ModeId {
-    /// Ordered as the rail shows them, which is also the `1`–`7` binding.
-    pub const ALL: [ModeId; 7] = [
+    /// Ordered as the rail shows them, which is also the `1`–`8` binding.
+    pub const ALL: [ModeId; 8] = [
         ModeId::Chat,
         ModeId::Codex,
         ModeId::Design,
@@ -33,6 +36,7 @@ impl ModeId {
         ModeId::Game,
         ModeId::Video,
         ModeId::Data,
+        ModeId::Research,
     ];
 
     pub fn slug(self) -> &'static str {
@@ -44,6 +48,7 @@ impl ModeId {
             ModeId::Game => "game",
             ModeId::Video => "video",
             ModeId::Data => "data",
+            ModeId::Research => "research",
         }
     }
 
@@ -51,7 +56,7 @@ impl ModeId {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`7`, one-indexed as the user sees them.
+    /// `1`–`8`, one-indexed as the user sees them.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }

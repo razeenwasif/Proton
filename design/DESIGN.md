@@ -1,6 +1,6 @@
 # Proton — design
 
-Proton is one workspace with seven modes, a modal editor underneath all of them,
+Proton is one workspace with eight modes, a modal editor underneath all of them,
 and an agent that can act in any of them. It is not a code editor with extra
 tabs bolted on; the tabs are the point.
 
@@ -10,7 +10,7 @@ Run the prototype:
 node ui/serve.mjs
 ```
 
-Then open <http://localhost:5178>. Keys: `⌃1`–`⌃7` switch mode, `␣` opens the
+Then open <http://localhost:5178>. Keys: `⌃1`–`⌃8` switch mode, `␣` opens the
 leader menu, `⌘K` Telescope, `:` the command line, `i` / `v` / `⎋` change vim
 mode, `⌘,` settings. The layout targets 1440px and wider.
 
@@ -324,7 +324,7 @@ agent's darker header.
 **What the setup turns off stays off.** No rails, no file tabs, no statusline,
 no scrollbars, no git gutter, no current-line wash, no borders. What the rails
 held that Codex still needs moved to a title bar: the window controls, the
-modes as quiet words — mouse users need a way out of Codex, and ⌃1–7 is not
+modes as quiet words — mouse users need a way out of Codex, and ⌃1–8 is not
 discoverable — and the panel toggles a hidden statusline would otherwise have
 taken with it.
 
@@ -622,8 +622,9 @@ same type, its numbers in the syntax's colour for numbers.
 the codebase, so Data keeps projects apart from Codex: its own list in the
 title bar, and its own project on screen. Going to Data brings back the one
 Data had, whatever Codex has open since, and leaving it brings back Codex's.
-Every other mode — Chat, Design, Modeling, Game, Video — works on the
-checkout the code is in, and shares Codex's. The first visit starts on
+Research works in Data's project too, for the same reason. Every other
+mode — Chat, Design, Modeling, Game, Video — works on the checkout the code
+is in, and shares Codex's. The first visit starts on
 Codex's project, because a side has to show something; open another from
 Data's switcher and the two are separate from then on, across restarts.
 Opening a notebook from Codex takes its project to Data, since that is where
@@ -642,6 +643,35 @@ column — nulls, σ, outliers, a histogram. The analyst is held to the same
 standard as the rest of the agent: it names the test it ran and the p-value,
 and it distinguishes "the fleet is degrading" from "two satellites on one ground
 station are degrading".
+
+### Research
+
+Investigations, after Google's AI co-scientist, with the roles of the
+user's own AGENTS.md: Claude Code the Principal Investigator, Codex the Lab
+Engineer, Antigravity the Validation Sandbox. A round frames a plan (the
+first round only), has every seat propose hypotheses, has each reviewed by
+a model of another family, verifies the leader's derivation, ranks them in a
+tournament judged blind — A and B in random order, by a judge whose family
+wrote neither — evolves the best, and ends with an overview that rewrites
+the plan. Light on purpose: about fourteen agent calls, never more than
+twenty, and nothing starts without a click.
+
+**Drawn as Chat is.** The investigations down the left as Chat lists
+sessions; the board in a column in the middle, under a header that is the
+investigation's — where a round's controls go — with its tabs in a strip of
+their own: Overview (the brief, the overview, the plan, and folded under
+them the verdicts and the sandbox log) and Hypotheses (the leaderboard by
+Elo, the retired last, a narrow board putting each one's name on a line of
+its own). Each section names its file, because each is one: an
+investigation is a folder, `research/<slug>/`, and everything it knows diffs
+in Git. A hypothesis opens whole — statement, rationale, predictions, its
+reviews and their scores, the matches it won and lost with the judge's
+reasons, and what it was evolved from and into as links.
+
+**The Lab** is the pane on the right: what an investigation proposes to run
+is shown there before it runs, and runs with no network, nothing of your
+home folder to read and nowhere to write but its own folder. Its figures and
+3D scenes are drawn there too.
 
 ---
 

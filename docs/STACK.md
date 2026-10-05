@@ -77,7 +77,7 @@ This is where the proposal and the design collide, and it deserves a straight
 answer rather than a list of options.
 
 **GPUI is the right tool for a code editor and the wrong tool for six of
-Proton's seven modes.**
+Proton's eight modes.**
 
 The case for it is real. Text at the monitor's refresh rate, a design-driven
 layout model, and it is the only Rust GUI framework built by people shipping a
@@ -129,7 +129,7 @@ actually develop on.
         ┌───────▼────────┐             ┌────────▼─────────┐
         │  webview shell │             │  GPU editor      │
         │  chrome + all  │   later →   │  surface, if     │
-        │  seven modes   │             │  measurement     │
+        │  eight modes   │             │  measurement     │
         └────────────────┘             │  demands it      │
                                        └──────────────────┘
 ```
@@ -139,7 +139,7 @@ actions (`Delete·Line`) rather than keys, which is exactly the boundary that
 makes the front end replaceable.
 
 Ship the webview shell first. It is what the prototype already is, so the design
-work is not thrown away, and it is the only way one person gets seven modes
+work is not thrown away, and it is the only way one person gets eight modes
 built this decade. Then **measure the editor pane**: input-to-photon latency,
 frame time at 4k lines with inlay hints and semantic tokens. If it fails, you
 replace one pane — with a GPU surface driven by the same core — instead of

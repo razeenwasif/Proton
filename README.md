@@ -3,7 +3,7 @@
 # Proton
 
 A code editor that is also a chat client, a design tool, a 3D workspace, a game
-editor, a video editor and a data notebook — one window, seven modes, a shared Vim-style modal engine
+editor, a video editor, a data notebook and a research workbench — one window, eight modes, a shared Vim-style modal engine
 underneath all of them, and an agent that can act in any of them.
 
 **M0 through M7 are built**, and every mode in the window now reads and writes
@@ -31,7 +31,7 @@ wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
 on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
 already call it `cmake`.
 
-Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
+Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃8` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
 `␣w` splits · `` ⌃` `` terminal · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
@@ -51,6 +51,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-library/` | Your own notes and PDFs — passages, BM25, and answers that cite the note and line or the paper and page |
 | `crates/proton-mcp/` | The library, served over MCP to any client you already pay for |
 | `crates/proton-data/` | Notebooks and the Jupyter kernel behind Data mode |
+| `crates/proton-research/` | Research's investigations — the files each is, and the co-scientist round that grows it |
 | `crates/proton-vcs/` | The gutter, and what git considers changed |
 | `crates/proton-dap/` | The debug-adapter client |
 | `crates/proton-term/` | The pseudo-terminal, and the screen it paints |
@@ -60,14 +61,14 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-game/` | Godot `.tscn` scenes, for Game mode |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
-| `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
+| `ui/` | The front end — the app's real chrome, and the interactive prototype — all eight modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
 | `design/DESIGN.md` | The design system, the mode-by-mode spec, and which reference each idea came from |
 | `docs/ARCHITECTURE.md` | The build document — crate layout, the core/UI seam, the mode contract, milestones |
 | `docs/STACK.md` | Language, renderer, parser, plugin runtime — what is settled and what is still a real decision |
 | `docs/CODE-VISUALIZER.md` | Integration plan for [Code-Visualizer](https://github.com/razeenwasif/Code-Visualizer) |
 | `assets/` | The reference designs the whole thing was drawn from |
 
-## The seven modes
+## The eight modes
 
 See the [current capability matrix](docs/ARCHITECTURE.md) for implemented documents and runtime limitations.
 
@@ -107,6 +108,18 @@ how to add it. For a project of its own:
 ```bash
 python3 -m venv .venv && .venv/bin/python -m pip install ipykernel
 ```
+
+**Research** · investigations, after Google's AI co-scientist, put to Claude
+Code, Codex and Antigravity together — physics and mathematics first, and
+chemistry, biology and computer science beside them. In a round each proposes
+hypotheses, another model family reviews each one, a tournament judged blind
+ranks them by Elo, the best are evolved, and an overview rewrites the plan.
+An investigation is a folder, `research/<slug>/`: the brief, the plan, each
+hypothesis and review, the tournament one match to a line — files that diff
+in Git and can be edited by hand. Research works in the project Data has open.
+So far investigations are made, listed and drawn, and the round is a state
+machine tested without a model; running a round from the window, and the Lab
+that runs an investigation's code in a sandbox, come next.
 
 ## The three things that hold it together
 

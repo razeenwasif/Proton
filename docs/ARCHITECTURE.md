@@ -1,7 +1,7 @@
 # Proton — architecture
 
 This document describes the implemented system and records its build history.
-All seven modes read real documents. Modeling includes a WebGL renderer;
+All eight modes read real documents. Modeling includes a WebGL renderer;
 Game and Video edit scenes and timelines but still need engine playback and
 media decoding. The design reference is [`DESIGN.md`](../design/DESIGN.md),
 and the tool choices are in [`STACK.md`](STACK.md).
@@ -18,6 +18,7 @@ in this document retain historical decisions and measurements.
 | Game | Godot `.tscn` scene hierarchy and property editing | No engine playback process |
 | Video | CMX3600 `.edl` timeline and `.srt` captions | No decoded video/program monitor |
 | Data | `.ipynb` cells, kernel execution, outputs and dataframe views | Execution requires a configured Jupyter kernel |
+| Research | `research/<slug>/` investigations: made, listed, and drawn as overview, plan and an Elo leaderboard | Rounds are not yet run from the window; no Lab yet |
 
 ```bash
 cargo test --workspace        # headless; some integrations require external tools
@@ -50,7 +51,7 @@ dependency, and the front end is replaceable.**
       ╭─────────▼──────────╮        ╭────────────▼───────────╮
       │  proton-shell      │        │  GPU editor surface    │
       │  webview · chrome  │  ────▶ │  later, only if the    │
-      │  all seven modes   │        │  latency budget fails  │
+      │  all eight modes   │        │  latency budget fails  │
       ╰────────────────────╯        ╰────────────────────────╯
 ```
 
@@ -63,7 +64,7 @@ Two rules keep that seam honest:
    (`Delete·Line`, count 2), which is exactly the boundary that lets a different
    front end reuse it verbatim.
 
-The webview ships first because seven modes demand it. The GPU surface is held
+The webview ships first because eight modes demand it. The GPU surface is held
 in reserve for the editor pane alone, and only once a measured
 input-to-photon number justifies it. See STACK.md § "The actual decision".
 
@@ -82,6 +83,8 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-lsp` / `proton-dap` | Language-server / debug-adapter protocols and supervision |
 | `proton-vcs` / `proton-term` | Git state / pseudo-terminal and terminal screen |
 | `proton-agent` / `proton-council` | Model conversations and tools / multi-model debates |
+| `proton-claude` | Claude Code, Codex and Antigravity as engines: interactive, and unattended with structured answers |
+| `proton-research` | Investigations as files, and the co-scientist round as a pure state machine |
 | `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
 | `proton-data` | Notebook documents and kernel integration |
 | `proton-design` | Theme tokens and component markup |
@@ -91,7 +94,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-trace` | Code Visualizer client and sidecar integration |
 | `proton-shell` | Tauri window, IPC, native backdrop, packaging |
 
-These are the 21 current workspace members. The modal engine remains in
+These are the 23 current workspace members. The modal engine remains in
 `proton-core/src/vim.rs`; there is no separate `proton-vim` or `proton-cli` crate.
 
 `proton-lsp` ended up with no async runtime and no protocol crate. Two threads
@@ -762,9 +765,9 @@ trait Mode {
 }
 ```
 
-That is the whole contract. Chat, Codex, Design, Modeling, Game, Video and Data
-are the seven that ship; nothing about them is privileged, so an eighth is an
-extension rather than a fork.
+That is the whole contract. Chat, Codex, Design, Modeling, Game, Video, Data
+and Research are the eight that ship; nothing about them is privileged, and the
+eighth was an extension rather than a fork.
 
 **It is built, in `proton-core::contract`, and it is a struct rather than a
 trait.** Every answer above is data: none of it needs to run, and a mode that
@@ -806,6 +809,7 @@ bearing rule of the entire project:
 | Game | Engine-native scene files |
 | Video | `.edl` + sidecar `.srt` |
 | Data | `.ipynb` + `.sql` |
+| Research | `research/<slug>/` — Markdown with TOML front matter, `tournament.jsonl` |
 
 It is not tidiness. It is what lets the agent edit a scene or a timeline by
 writing a patch instead of driving a GUI, and what makes any of it reviewable.

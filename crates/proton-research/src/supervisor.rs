@@ -1300,7 +1300,7 @@ pub fn applied(snap: &Snapshot, effects: &[Effect]) -> Snapshot {
 }
 
 /// A task as the Activity list draws it.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/", rename = "ResearchTask")]
 #[serde(rename_all = "camelCase")]
 pub struct TaskRow {

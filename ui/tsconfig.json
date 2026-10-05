@@ -33,6 +33,7 @@
     "term-gl.js",
     "markdown.js",
     "highlight.js",
-    "claude.js"
+    "claude.js",
+    "research.js"
   ]
 }

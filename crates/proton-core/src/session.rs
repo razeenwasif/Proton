@@ -27,13 +27,13 @@
 //!
 //! ## Data keeps projects of its own
 //!
-//! The window has two sides. Data is one; every other mode is the other —
-//! Codex, and the modes that work on the checkout the code is in: Chat,
-//! Design, Modeling, Game and Video. Each side lists the projects opened on
-//! it and shows one of them, so the folder open in Codex is not carried into
-//! Data: going to Data brings back the project Data had, and leaving it brings
-//! back Codex's. Notebooks live in a research folder more often than in the
-//! codebase. A folder open on both sides is still one workspace, listed and
+//! The window has two sides. Data and Research are one; every other mode is
+//! the other — Codex, and the modes that work on the checkout the code is
+//! in: Chat, Design, Modeling, Game and Video. Each side lists the projects
+//! opened on it and shows one of them, so the folder open in Codex is not
+//! carried into Data: going to Data brings back the project Data had, and
+//! leaving it brings back Codex's. Notebooks and investigations live in a
+//! research folder more often than in the codebase. A folder open on both sides is still one workspace, listed and
 //! shown by both — two would be two file indexes over the same files.
 
 use std::path::{Path, PathBuf};
@@ -137,7 +137,7 @@ enum Side {
 impl Side {
     fn of(mode: ModeId) -> Side {
         match mode {
-            ModeId::Data => Side::Data,
+            ModeId::Data | ModeId::Research => Side::Data,
             _ => Side::Code,
         }
     }
@@ -1055,7 +1055,7 @@ impl Session {
                 .cloned(),
         );
         let elsewhere = match side {
-            Side::Code => "open in Data",
+            Side::Code => "open in Data and Research",
             Side::Data => "open in Codex",
         };
 

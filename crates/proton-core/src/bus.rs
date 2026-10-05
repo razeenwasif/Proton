@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 
 use proton_claude::folders::FolderView as ChatFolder;
 use proton_claude::{Artifact, Capabilities as ClaudeCapabilities, Engine as ChatEngine, Item as ClaudeItem, SessionSummary as ClaudeSession, Status as ClaudeStatus};
+use proton_research::view::{HypothesisDetail, HypothesisRow, Summary as ResearchSummary};
+use proton_research::Discipline as ResearchDiscipline;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -317,6 +319,22 @@ pub enum Command {
     /// Open a web address in the browser.
     OpenLink {
         url: String,
+    },
+    /* ── research ─────────────────────────────────────────────────── */
+    /// Start an investigation, in a folder of its own under the project's
+    /// `research/`.
+    ResearchNew {
+        title: String,
+        goal: String,
+        discipline: ResearchDiscipline,
+    },
+    /// Show one of the project's investigations.
+    ResearchOpen {
+        slug: String,
+    },
+    /// Show one hypothesis of the open investigation, or none.
+    ResearchShow {
+        hypothesis: Option<String>,
     },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
@@ -1004,6 +1022,32 @@ pub enum Event {
     Artifacts {
         artifacts: Vec<Artifact>,
         importing: bool,
+    },
+    /// The project's investigations, newest first, and which one is open.
+    #[serde(rename_all = "camelCase")]
+    ResearchList {
+        investigations: Vec<ResearchSummary>,
+        open: Option<String>,
+    },
+    /// The open investigation, as its board draws it: the brief, the plan,
+    /// the overview, the logs, and the hypotheses ranked.
+    #[serde(rename_all = "camelCase")]
+    ResearchBoard {
+        slug: String,
+        title: String,
+        discipline: ResearchDiscipline,
+        brief: String,
+        plan: String,
+        overview: String,
+        verdicts: String,
+        sandbox: String,
+        hypotheses: Vec<HypothesisRow>,
+    },
+    /// One hypothesis of the open investigation, whole; `None` for none.
+    #[serde(rename_all = "camelCase")]
+    ResearchHypothesis {
+        slug: String,
+        detail: Option<HypothesisDetail>,
     },
     /// The saved conversations, most recently changed first.
     #[serde(rename_all = "camelCase")]

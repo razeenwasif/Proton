@@ -110,6 +110,8 @@ pub struct Workspace {
     /// The Chat tab: Claude Code's sessions for this project, and the ones
     /// running here.
     claude: crate::claude::Claude,
+    /// The project's investigations, in the Research tab.
+    research: crate::research::Research,
     council_progress: Vec<String>,
     council_round: usize,
     /// The brief on screen, and which past debate it came from.
@@ -265,6 +267,7 @@ impl Workspace {
             servers: Servers::new(root),
             agent: Agent::new(&root.display().to_string()),
             claude: crate::claude::Claude::new(root),
+            research: crate::research::Research::new(root),
             visualizer: Visualizer::new(root),
             tree: Tree::new(root),
             git: Git::discover(root),
@@ -563,6 +566,7 @@ impl Workspace {
                     },
                 ]);
                 events.extend(self.claude.sync());
+                events.extend(self.research.sync());
                 events
             }
 
@@ -1349,6 +1353,9 @@ impl Workspace {
                 events
             }
             Command::ClaudeOpen { session } => self.claude.open(&session),
+            Command::ResearchNew { title, goal, discipline } => self.research.create(&title, &goal, discipline),
+            Command::ResearchOpen { slug } => self.research.open(&slug),
+            Command::ResearchShow { hypothesis } => self.research.show(hypothesis),
             Command::ClaudeSend { text, images } => self.claude.send(&text, &images),
             Command::ClaudeStop => self.claude.interrupt(),
             Command::ClaudeAnswer { request, answer } => self.claude.answer(&request, answer),
@@ -5289,6 +5296,12 @@ impl Workspace {
                 layout: mode.layout(),
             },
         ];
+
+        // Research reads its folders again: a brief or a hypothesis edited
+        // by hand since is what the board should show.
+        if mode == ModeId::Research {
+            events.extend(self.research.sync());
+        }
 
         // Design with nothing open goes looking, once. Asking somebody to
         // find their own stylesheet before the inspector will show anything

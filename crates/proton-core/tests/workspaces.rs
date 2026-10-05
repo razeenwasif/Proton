@@ -412,6 +412,23 @@ fn a_project_opened_in_codex_is_not_carried_into_data() {
 }
 
 #[test]
+fn research_works_in_the_project_data_has() {
+    // Investigations, like notebooks, live in a research folder rather than
+    // in the codebase: Research is on Data's side.
+    let scratch = Scratch::new("research-side");
+    let mut session = Session::new(scratch.at("alpha"));
+    mode(&mut session, ModeId::Data);
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    mode(&mut session, ModeId::Research);
+    assert_eq!((here(&session), session.active().mode()), ("beta".to_string(), ModeId::Research));
+    mode(&mut session, ModeId::Codex);
+    assert_eq!(here(&session), "alpha");
+    let events = mode(&mut session, ModeId::Research);
+    assert_eq!(here(&session), "beta", "back on Data's side, on its project");
+    assert!(tabs(&events).is_some(), "the switcher is redrawn for the side");
+}
+
+#[test]
 fn the_switcher_numbers_the_projects_of_the_side_on_screen() {
     // The front end sends a tile's place in the list it was given, and each
     // side is given its own list.

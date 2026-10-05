@@ -63,6 +63,12 @@ pub enum Slot {
     Layers,
     /// Properties of whatever is selected.
     Inspector,
+    /// A project's investigations.
+    Investigations,
+    /// One investigation: its overview, its hypotheses ranked, the round's work.
+    Board,
+    /// Runs of code, and what they drew.
+    Lab,
 }
 
 /// How a mode's work persists.
@@ -89,6 +95,9 @@ pub enum DocumentKind {
     Level,
     /// An `.edl` and its sidecar captions.
     Timeline,
+    /// `research/<slug>/`: Markdown hypotheses and reviews, a JSON-lines
+    /// tournament, the plan and the logs.
+    Investigation,
 }
 
 /// The whole of a mode, as anything outside it needs to know.
@@ -162,6 +171,15 @@ impl Layout {
                 Slot::Inspector,
                 DocumentKind::Timeline,
             ),
+            // The investigations to pick from, the one picked, and the Lab
+            // beside it: what a run drew wants to be seen next to the
+            // hypothesis it tests.
+            ModeId::Research => (
+                Slot::Investigations,
+                Slot::Board,
+                Slot::Lab,
+                DocumentKind::Investigation,
+            ),
         };
         Layout {
             mode,
@@ -182,7 +200,7 @@ impl Layout {
         match self.mode {
             // The noun is prose, so the editing verbs belong to the composer
             // rather than to the mode.
-            ModeId::Chat => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
+            ModeId::Chat | ModeId::Research => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
             _ => true,
         }
     }
@@ -194,7 +212,7 @@ mod tests {
 
     #[test]
     fn every_mode_has_a_layout_and_a_document() {
-        // The contract is only a contract if it covers all seven. A mode
+        // The contract is only a contract if it covers all eight. A mode
         // added later fails to compile rather than falling through to a
         // default that puts an editor where its stage should be.
         for mode in ModeId::ALL {

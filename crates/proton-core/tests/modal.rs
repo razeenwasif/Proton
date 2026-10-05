@@ -195,7 +195,7 @@ fn mode_ids_round_trip_through_their_slugs_and_indices() {
         assert_eq!(ModeId::from_index(i + 1), Some(*mode));
     }
     assert_eq!(ModeId::from_index(0), None);
-    assert_eq!(ModeId::from_index(8), None);
+    assert_eq!(ModeId::from_index(9), None);
 }
 
 #[test]

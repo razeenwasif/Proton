@@ -4352,6 +4352,7 @@ dependencies = [
  "proton-lsp",
  "proton-mesh",
  "proton-plugin",
+ "proton-research",
  "proton-scene",
  "proton-syntax",
  "proton-term",

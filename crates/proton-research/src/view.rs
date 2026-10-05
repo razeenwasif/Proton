@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::elo::{self, Rating};
@@ -11,7 +11,7 @@ use crate::proximity::{Index, DUPLICATE};
 use crate::store::Folder;
 
 /// An investigation in the list.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/", rename = "ResearchSummary")]
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
@@ -34,7 +34,7 @@ pub fn summary(folder: &Folder) -> Summary {
 }
 
 /// A hypothesis on the leaderboard.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct HypothesisRow {
@@ -56,7 +56,7 @@ pub struct HypothesisRow {
 }
 
 /// Everything about one hypothesis.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct HypothesisDetail {
@@ -73,7 +73,7 @@ pub struct HypothesisDetail {
     pub task: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewView {
@@ -90,7 +90,7 @@ pub struct ReviewView {
     pub citations: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct MatchView {
