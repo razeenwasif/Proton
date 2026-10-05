@@ -17,7 +17,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
+use proton_research::model::{Author, Hypothesis, HypothesisStatus, Seat};
 use proton_research::store::{Folder, Store};
+use proton_research::supervisor::RoundStatus;
 use proton_research::view::{self, Board};
 use proton_research::Discipline;
 
@@ -32,6 +34,8 @@ pub struct Research {
     open: Option<String>,
     /// The hypothesis shown whole.
     showing: Option<String>,
+    /// The task whose transcript is shown.
+    watching: Option<String>,
     /// Each investigation's round, once it has been looked at.
     drivers: BTreeMap<String, Driver>,
     factory: Box<dyn AgentFactory>,
@@ -78,6 +82,7 @@ impl Research {
             store: Store::new(root.join("research")),
             open: None,
             showing: None,
+            watching: None,
             drivers: BTreeMap::new(),
             factory,
             instance: instance.to_string(),
@@ -123,6 +128,7 @@ impl Research {
                 overview: folder.overview(),
                 verdicts: folder.verdicts(),
                 sandbox: folder.sandbox_log(),
+                feedback: folder.feedback(),
                 hypotheses: board.rows(),
             },
             Event::ResearchHypothesis { slug: slug.clone(), detail: self.showing.as_deref().and_then(|id| board.detail(id)) },
@@ -135,7 +141,10 @@ impl Research {
         if !self.drivers.contains_key(slug) {
             let folder: Folder = self.store.open(slug).ok()?;
             let seed = now() ^ (slug.len() as u64).rotate_left(17);
-            self.drivers.insert(slug.to_string(), Driver::open(folder, &self.instance, seed));
+            let mut driver = Driver::open(folder, &self.instance, seed);
+            // So the table says who cannot sit before a round finds out.
+            driver.preflight(self.factory.as_mut());
+            self.drivers.insert(slug.to_string(), driver);
         }
         self.drivers.get_mut(slug)
     }
@@ -172,6 +181,7 @@ impl Research {
             Ok(_) => {
                 self.open = Some(slug.to_string());
                 self.showing = None;
+                self.watching = None;
                 self.sync()
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
@@ -211,7 +221,155 @@ impl Research {
         if open && (moved.moved || moved.wrote) {
             events.extend(self.round_event(now));
         }
+        if open && self.watching.as_ref().is_some_and(|task| moved.talked.contains(task)) {
+            events.extend(self.transcript_event());
+        }
         events
+    }
+
+    /* ── the scientist ─────────────────────────────────────────────── */
+
+    /// The open investigation's folder, for the scientist to write to.
+    fn folder(&self) -> Result<Folder, String> {
+        let slug = self.open.as_deref().ok_or("Make an investigation first.")?;
+        self.store.open(slug)
+    }
+
+    /// The scientist wrote to the open investigation: its round reads it
+    /// again before planning, and the window draws it again.
+    fn wrote(&mut self) -> Vec<Event> {
+        let slug = self.open.clone().unwrap_or_default();
+        if let Some(driver) = self.drivers.get_mut(&slug) {
+            driver.invalidate();
+        }
+        let folders = self.store.list();
+        let mut events = vec![Event::ResearchList { investigations: folders.iter().map(view::summary).collect(), open: self.open.clone() }];
+        events.extend(self.board());
+        events
+    }
+
+    pub fn feedback(&mut self, text: &str) -> Vec<Event> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Vec::new();
+        }
+        let folder = match self.folder() {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let slug = folder.slug().to_string();
+        let when = match self.driver(&slug) {
+            Some(d) if !matches!(d.status(), RoundStatus::Idle) => format!("During round {}", d.round()),
+            Some(d) => format!("Before round {}", d.round() + 1),
+            None => "Before round 1".to_string(),
+        };
+        match folder.add_feedback(text, &when) {
+            Ok(()) => {
+                let mut events = self.wrote();
+                events.push(notice("Told the team. Every task from now on is shown it.".into(), NoticeLevel::Info));
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    pub fn add_hypothesis(&mut self, title: &str, statement: &str) -> Vec<Event> {
+        let (title, statement) = (title.trim(), statement.trim());
+        if title.is_empty() || statement.is_empty() {
+            return vec![notice("A hypothesis needs a title and a statement.".into(), NoticeLevel::Warn)];
+        }
+        let folder = match self.folder() {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let slug = folder.slug().to_string();
+        // A round under way reviews it in this round; otherwise the next does.
+        let round = match self.driver(&slug) {
+            Some(d) if !matches!(d.status(), RoundStatus::Idle) => d.round(),
+            Some(d) => d.round() + 1,
+            None => 1,
+        };
+        let h = Hypothesis {
+            id: folder.next_hypothesis(),
+            title: title.to_string(),
+            author: Author::scientist(),
+            round,
+            parents: Vec::new(),
+            status: HypothesisStatus::Active,
+            task: None,
+            statement: statement.to_string(),
+            rationale: String::new(),
+            predictions: Vec::new(),
+            assumptions: Vec::new(),
+            extra: Vec::new(),
+        };
+        match folder.write_hypothesis(&h) {
+            Ok(()) => {
+                let mut events = self.wrote();
+                events.push(notice(format!("{} is yours: it is reviewed and played with the others.", h.id), NoticeLevel::Info));
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    pub fn set_status(&mut self, id: &str, status: HypothesisStatus) -> Vec<Event> {
+        let folder = match self.folder() {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let Some(mut h) = folder.hypotheses().into_iter().find(|h| h.id == id) else {
+            return vec![notice(format!("There is no hypothesis {id}."), NoticeLevel::Warn)];
+        };
+        h.status = status;
+        match folder.write_hypothesis(&h) {
+            Ok(()) => self.wrote(),
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    pub fn set_seat(&mut self, seat: Seat, enabled: bool) -> Vec<Event> {
+        let mut folder = match self.folder() {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let slug = folder.slug().to_string();
+        if self.driver(&slug).is_some_and(|d| matches!(d.status(), RoundStatus::Running)) {
+            return vec![notice("Pause or stop the round to change who sits at the table.".into(), NoticeLevel::Warn)];
+        }
+        let mut investigation = folder.investigation().clone();
+        let Some(config) = investigation.seats.iter_mut().find(|s| s.seat == seat) else {
+            return vec![notice(format!("{} has no seat here.", seat.name()), NoticeLevel::Warn)];
+        };
+        config.enabled = enabled;
+        let can = |s: &Seat| Seat::ENGINES.contains(s) && self.drivers.get(&slug).is_none_or(|d| d.unavailable(*s).is_none());
+        if !investigation.sitting().any(|s| can(&s.seat)) {
+            return vec![notice("At least one engine that can take part has to sit at the table.".into(), NoticeLevel::Warn)];
+        }
+        if let Err(why) = folder.save(investigation) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        // The table is the round's: it is read again, and the roster redrawn.
+        let factory = self.factory.as_mut();
+        if let Some(driver) = self.drivers.get_mut(&slug) {
+            driver.invalidate();
+            driver.preflight(factory);
+        }
+        let mut events = self.wrote();
+        events.extend(self.round_event(now()));
+        events
+    }
+
+    /// Show a task's transcript, or none.
+    pub fn watch(&mut self, task: Option<String>) -> Vec<Event> {
+        self.watching = task;
+        self.transcript_event()
+    }
+
+    fn transcript_event(&mut self) -> Vec<Event> {
+        let (Some(slug), Some(task)) = (self.open.clone(), self.watching.clone()) else { return Vec::new() };
+        let items = self.driver(&slug).and_then(|d| d.transcript(&task)).unwrap_or_default();
+        vec![Event::ResearchTranscript { slug, task, items }]
     }
 
     /// Run a round of the open investigation.

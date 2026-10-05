@@ -117,9 +117,10 @@ ranks them by Elo, the best are evolved, and an overview rewrites the plan.
 An investigation is a folder, `research/<slug>/`: the brief, the plan, each
 hypothesis and review, the tournament one match to a line — files that diff
 in Git and can be edited by hand. Research works in the project Data has open.
-So far investigations are made, listed and drawn, and the round is a state
-machine tested without a model; running a round from the window, and the Lab
-that runs an investigation's code in a sandbox, come next.
+Run round starts one — about fourteen agent calls, never more than twenty — and
+the Activity tab follows it call by call, each one opening into what it said;
+what you type goes to the team, and `/h Title: statement` adds a hypothesis of
+your own. The Lab, which runs an investigation's code in a sandbox, comes next.
 
 ## The three things that hold it together
 

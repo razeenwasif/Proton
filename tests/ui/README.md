@@ -127,3 +127,12 @@ with what the page reports. Nothing in it is asserted; the suite's GPU check
 is that the canvas draws the right colours where it should, that the rows
 under it catch up once the screen is still, and that switching back leaves
 nothing behind.
+
+The Research checks push the core's research events into the page and read
+what it asks back: making an investigation (a refusal keeps what was typed,
+a redraw keeps the caret), the board and a hypothesis drawn whole, a round
+started, followed call by call, paused, resumed, stopped and held by another
+Proton, a call's transcript drawn only for that call, what the scientist tells
+the team and `/h` hypotheses of their own, and the table. `npm run test:unit`
+checks what the composer reads as a hypothesis. The rounds themselves are
+played in Rust, on scripted engines: `cargo test -p proton-core --lib research::`.

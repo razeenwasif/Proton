@@ -68,6 +68,9 @@ pub struct Moved {
     pub wrote: bool,
     /// The round or a task moved: the round's state is to be drawn again.
     pub moved: bool,
+    /// The calls that said something: their transcripts, if shown, are
+    /// drawn again.
+    pub talked: Vec<String>,
 }
 
 impl Moved {
@@ -75,6 +78,7 @@ impl Moved {
         self.notices.extend(other.notices);
         self.wrote |= other.wrote;
         self.moved |= other.moved;
+        self.talked.extend(other.talked);
     }
 }
 
@@ -226,6 +230,30 @@ impl Driver {
                 }
             })
             .collect()
+    }
+
+    /// What a call said, as Chat draws a conversation: live while it is
+    /// out, and as kept once it is done.
+    pub fn transcript(&self, id: &str) -> Option<Vec<Item>> {
+        if let Some(live) = self.live.get(id) {
+            return Some(live.conversation.fold().items().to_vec());
+        }
+        let text = std::fs::read_to_string(self.folder.state_path("transcripts").join(format!("{id}.json"))).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    /// The investigation was written to from outside the round — by the
+    /// scientist — and is to be read again before anything is planned.
+    pub fn invalidate(&mut self) {
+        self.snap = None;
+        if let Ok(fresh) = Folder::open(self.folder.dir()) {
+            self.folder = fresh;
+        }
+    }
+
+    /// Why a seat cannot sit at all, as last asked.
+    pub fn unavailable(&self, seat: Seat) -> Option<&str> {
+        self.unavailable.get(&seat).map(String::as_str)
     }
 
     /// Ask each seat whether it can sit at all.
@@ -391,8 +419,11 @@ impl Driver {
         let mut moved = Moved::default();
         let Some(live) = self.live.get_mut(id) else { return moved };
         live.conversation.poll();
-        // The rows stay in the fold, for the transcript; nothing draws them live yet.
-        let _ = live.conversation.take();
+        // The rows stay in the fold, for the transcript; what changed only
+        // says whether it is to be drawn again.
+        if !live.conversation.take().items.is_empty() {
+            moved.talked.push(id.to_string());
+        }
         let status = live.conversation.fold().status().clone();
 
         if !live.told && !status.model.is_empty() {

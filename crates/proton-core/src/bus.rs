@@ -11,6 +11,7 @@ use proton_claude::folders::FolderView as ChatFolder;
 use proton_claude::{Artifact, Capabilities as ClaudeCapabilities, Engine as ChatEngine, Item as ClaudeItem, SessionSummary as ClaudeSession, Status as ClaudeStatus};
 use proton_research::supervisor::{RoundStatus, TaskRow as ResearchTask};
 use proton_research::view::{HypothesisDetail, HypothesisRow, SeatRow as ResearchSeatRow, Summary as ResearchSummary};
+use proton_research::model::{HypothesisStatus, Seat as ResearchSeat};
 use proton_research::Discipline as ResearchDiscipline;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -346,6 +347,31 @@ pub enum Command {
     ResearchResume,
     /// Stop the open investigation's round, and every call it has out.
     ResearchStop,
+    /// Tell the open investigation's team something. It goes into
+    /// `feedback.md`, which every task after it is shown.
+    ResearchFeedback {
+        text: String,
+    },
+    /// A hypothesis of the scientist's own: reviewed, and played in the
+    /// tournament, with the agents' ones.
+    ResearchAddHypothesis {
+        title: String,
+        statement: String,
+    },
+    /// Pin a hypothesis of the open investigation, retire it, or bring it back.
+    ResearchSetStatus {
+        hypothesis: String,
+        status: HypothesisStatus,
+    },
+    /// Seat an engine at the open investigation's table, or stand it down.
+    ResearchSeat {
+        seat: ResearchSeat,
+        enabled: bool,
+    },
+    /// Show what one of the open investigation's tasks said; `None` for none.
+    ResearchTask {
+        task: Option<String>,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1051,6 +1077,8 @@ pub enum Event {
         overview: String,
         verdicts: String,
         sandbox: String,
+        /// What the scientist has told the team.
+        feedback: String,
         hypotheses: Vec<HypothesisRow>,
     },
     /// One hypothesis of the open investigation, whole; `None` for none.
@@ -1058,6 +1086,14 @@ pub enum Event {
     ResearchHypothesis {
         slug: String,
         detail: Option<HypothesisDetail>,
+    },
+    /// What one task said, drawn as Chat draws a conversation: live while
+    /// it runs.
+    #[serde(rename_all = "camelCase")]
+    ResearchTranscript {
+        slug: String,
+        task: String,
+        items: Vec<ClaudeItem>,
     },
     /// Where the open investigation's round stands: its agent calls spent
     /// and allowed, the table, and every task.

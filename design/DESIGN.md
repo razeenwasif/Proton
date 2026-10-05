@@ -668,6 +668,24 @@ in Git. A hypothesis opens whole — statement, rationale, predictions, its
 reviews and their scores, the matches it won and lost with the judge's
 reasons, and what it was evolved from and into as links.
 
+**The round is the board's.** Run round sits at the end of the tab strip,
+with what the round has spent of its cap as a thin bar, and turns into Pause
+and Stop while it runs, and Resume when it is paused — or paused because
+Proton closed in the middle of it, which it says. A round that starts is
+followed: the board turns to Activity, where each call is a row under its
+step — Frame, Generate, Review, Verify, Tournament, Evolve, Overview — with
+its seat in that seat's colour, what it is about, its model and how long it
+took, and a failure's reason in the row itself. A row opens into what the call
+said: what it was asked, folded; the searches it ran, a line each; its answer.
+Under the investigations, the table: each seat, its role and model, and
+whether it can sit — not installed, at its limit until when, how many calls
+it has out — with a box to stand it down between rounds.
+
+**The scientist is in the loop.** A composer under the board, as Chat's is:
+what is typed goes to the team, into `feedback.md`, which every later task is
+shown; `/h Title: statement` is a hypothesis of their own, reviewed and played
+with the agents'. A hypothesis's page can pin it, retire it or bring it back.
+
 **The Lab** is the pane on the right: what an investigation proposes to run
 is shown there before it runs, and runs with no network, nothing of your
 home folder to read and nowhere to write but its own folder. Its figures and

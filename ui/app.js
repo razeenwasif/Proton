@@ -4810,6 +4810,14 @@ function renderEvent(event) {
       research?.hypothesis(event);
       break;
 
+    case "researchRound":
+      research?.round(event);
+      break;
+
+    case "researchTranscript":
+      research?.transcript(event);
+      break;
+
     case "chats":
       renderChats(event);
       break;

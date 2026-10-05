@@ -2,13 +2,15 @@
  *
  * Each investigation is a folder in the project — `research/<slug>/` — and
  * this draws what the core reads out of it: the investigations down the
- * left; in the middle where the open one stands (its overview, its plan,
- * the brief it answers) and its hypotheses as the tournament ranks them;
- * and the Lab, where its code is run, on the right.
+ * left, with who sits at the open one's table under them; in the middle
+ * where it stands (its overview, its plan, the brief it answers), its
+ * hypotheses as the tournament ranks them, and what its round is doing,
+ * call by call; and the Lab, where its code is run, on the right.
  *
  * Nothing here decides anything. The files are the investigation, the core
- * reads them, and this draws what it is sent — so a hypothesis edited by
- * hand is what the board shows the next time it is drawn. */
+ * reads them and runs the round, and this draws what it is sent — so a
+ * hypothesis edited by hand is what the board shows the next time it is
+ * drawn. What is asked of the core is asked, and drawn when it answers. */
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
@@ -19,11 +21,18 @@ import { markdown } from "./markdown.js";
 /** @typedef {import("./bindings/ResearchDiscipline").ResearchDiscipline} Discipline */
 /** @typedef {import("./bindings/ResearchAuthor").ResearchAuthor} Author */
 /** @typedef {import("./bindings/ReviewVerdict").ReviewVerdict} Verdict */
+/** @typedef {import("./bindings/ResearchTask").ResearchTask} Task */
+/** @typedef {import("./bindings/ResearchSeatRow").ResearchSeatRow} SeatRow */
+/** @typedef {import("./bindings/RoundStatus").RoundStatus} RoundStatus */
+/** @typedef {import("./bindings/ClaudeItem").ClaudeItem} Item */
 /** @typedef {{investigations: Summary[], open: string | null}} ListEvent */
 /** @typedef {{slug: string, title: string, discipline: Discipline, brief: string, plan: string,
- *   overview: string, verdicts: string, sandbox: string, hypotheses: Row[]}} BoardEvent */
+ *   overview: string, verdicts: string, sandbox: string, feedback: string, hypotheses: Row[]}} BoardEvent */
 /** @typedef {{slug: string, detail: Detail | null}} HypothesisEvent */
-/** @typedef {"overview" | "hypotheses"} Tab */
+/** @typedef {{slug: string, round: number, status: RoundStatus, used: number, cap: number,
+ *   seats: SeatRow[], tasks: Task[], held: string | null}} RoundEvent */
+/** @typedef {{slug: string, task: string, items: Item[]}} TranscriptEvent */
+/** @typedef {"overview" | "hypotheses" | "activity"} Tab */
 
 /** The disciplines, in the order the form offers them. */
 const DISCIPLINES = /** @type {[Discipline, string][]} */ ([
@@ -41,12 +50,36 @@ const SEATS = /** @type {Record<string, string>} */ ({
   claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", gemini: "Gemini", scientist: "You",
 });
 
+/** The roles of the user's AGENTS.md. */
+const ROLES = /** @type {Record<string, string>} */ ({
+  investigator: "Principal Investigator", engineer: "Lab Engineer", sandbox: "Validation Sandbox",
+});
+
+/** A round's steps, in the order they run. */
+const PHASES = /** @type {[string, string][]} */ ([
+  ["frame", "Frame"],
+  ["generate", "Generate"],
+  ["reflect", "Review"],
+  ["verify", "Verify"],
+  ["rank", "Tournament"],
+  ["evolve", "Evolve"],
+  ["meta", "Overview"],
+  ["simReview", "Simulation review"],
+]);
+const PHASE = Object.fromEntries(PHASES);
+
 const VERDICTS = /** @type {Record<Verdict, string>} */ ({
   strong: "Strong", promising: "Promising", weak: "Weak", flawed: "Flawed",
 });
 
 const KINDS = /** @type {Record<string, string>} */ ({
   review: "Review", verification: "Verification", simulation: "Simulation review",
+});
+
+/** What a task's state is called. */
+const STATES = /** @type {Record<string, string>} */ ({
+  ready: "Waiting", running: "Working", repairing: "Mending its answer", done: "Done",
+  failed: "Failed", skipped: "Skipped", cancelled: "Stopped",
 });
 
 /** @param {Author} author */
@@ -58,11 +91,35 @@ function who(author) {
 /** @param {number} n @param {string} one @param {string} many */
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+/** How long, in words a list can hold. @param {number} s */
+function span(s) {
+  if (s < 60) return `${Math.max(0, Math.round(s))}s`;
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m}m ${Math.round(s % 60)}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/** A time of day, from seconds since the epoch. @param {number} s */
+function clock(s) {
+  return new Date(s * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 /** A file's heading is the board's own: the title is already over it.
  *  @param {string} text @param {string} title */
 function withoutTitle(text, title) {
   const m = /^#\s+(.*)\n+/.exec(text);
   return m && m[1].trim() === title.trim() ? text.slice(m[0].length) : text;
+}
+
+/** `/h Title: statement` — a hypothesis of the scientist's own.
+ *  @param {string} text @returns {{title: string, statement: string} | null} */
+export function ownHypothesis(text) {
+  const m = /^\/h(?:ypothesis)?\s+([\s\S]+)$/.exec(text.trim());
+  if (!m) return null;
+  const body = m[1].trim();
+  const colon = body.indexOf(":");
+  if (colon > 0 && colon <= 120) return { title: body.slice(0, colon).trim(), statement: body.slice(colon + 1).trim() || body.slice(0, colon).trim() };
+  const firstLine = body.split("\n")[0];
+  return { title: firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine, statement: body };
 }
 
 /** @param {{root: Document, dispatch: (command: any) => unknown}} host */
@@ -72,22 +129,39 @@ export function createResearch(host) {
   const q = (/** @type {string} */ sel) => /** @type {HTMLElement} */ (ws.querySelector(sel));
   const els = {
     list: q("[data-research-list]"),
+    seatsBox: q("[data-research-seats-box]"),
+    seats: q("[data-research-seats]"),
     title: q("[data-research-title]"),
     discipline: q("[data-research-discipline]"),
+    run: q("[data-research-run]"),
+    status: q("[data-research-status]"),
+    meter: q("[data-research-meter]"),
+    go: /** @type {HTMLButtonElement} */ (q("[data-research-go]")),
+    pause: /** @type {HTMLButtonElement} */ (q("[data-research-pause]")),
+    stop: /** @type {HTMLButtonElement} */ (q("[data-research-stop]")),
     tabs: q("[data-research-tabs]"),
     count: q("[data-research-count]"),
+    busy: q("[data-research-busy]"),
     board: q("[data-research-board]"),
+    dock: q("[data-research-dock]"),
+    input: /** @type {HTMLTextAreaElement} */ (q("[data-research-input]")),
+    hint: q("[data-research-hint]"),
+    send: /** @type {HTMLButtonElement} */ (q("[data-research-send]")),
   };
 
   /** @type {{list: Summary[], open: string | null, board: BoardEvent | null, detail: Detail | null,
+   *   round: RoundEvent | null, task: string | null, transcript: TranscriptEvent | null,
    *   tab: Tab, creating: boolean, made: number, draft: {title: string, goal: string, discipline: Discipline}}} */
   const state = {
-    list: [], open: null, board: null, detail: null, tab: "overview",
+    list: [], open: null, board: null, detail: null, round: null, task: null, transcript: null, tab: "overview",
     // The form is up, and how many there were when it was sent: it goes when
     // the list grows, and stays with what was typed when the core refuses.
     creating: false, made: -1,
     draft: { title: "", goal: "", discipline: "physics" },
   };
+
+  /** The open investigation's round, if it has been said. */
+  const round = () => (state.round && state.round.slug === state.open ? state.round : null);
 
   /* ── the list ──────────────────────────────────────────────────── */
 
@@ -96,13 +170,41 @@ export function createResearch(host) {
       els.list.innerHTML = `<div class="cc-none">No investigations in this project yet. Each is a folder under <code>research/</code>, and starts from a question.</div>`;
       return;
     }
+    const running = round()?.status.status === "running" ? round()?.slug : null;
     els.list.innerHTML = state.list.map((i) => {
       const on = i.slug === state.open && !state.creating;
       const where = `research/${i.slug}/ · ${count(i.hypotheses, "hypothesis", "hypotheses")} · ${count(i.rounds, "round", "rounds")}`;
       return `<button class="cc-session rs-item${on ? " on" : ""}" data-research-open="${esc(i.slug)}" title="${esc(where)}"` +
         `${on ? ' aria-current="true"' : ""}>` +
+        (i.slug === running ? `<span class="rs-live" title="A round is running"></span>` : "") +
         `<span class="cc-session-name">${esc(i.title)}</span>` +
         `<span class="cc-session-where">${esc(DISCIPLINE[i.discipline] ?? "")}</span></button>`;
+    }).join("");
+  }
+
+  /* ── the table ─────────────────────────────────────────────────── */
+
+  function renderSeats() {
+    const r = state.creating ? null : round();
+    els.seatsBox.hidden = !r;
+    if (!r) return;
+    const running = r.status.status === "running";
+    const now = Date.now() / 1000;
+    els.seats.innerHTML = r.seats.filter((s) => s.seat !== "scientist").map((s) => {
+      const name = SEATS[s.seat] ?? s.seat;
+      const cooling = s.cooling && s.cooling > now ? `At its limit until ${clock(s.cooling)}` : "";
+      const line = !s.enabled ? "Stood down"
+        : s.why ? s.why
+        : cooling ? cooling
+        : s.running ? `${count(s.running, "call", "calls")} out`
+        : "Ready";
+      const kind = !s.enabled ? "off" : s.why ? "out" : cooling ? "cooling" : s.running ? "busy" : "ready";
+      return `<label class="rs-seat-row" data-kind="${kind}" title="${esc(line)}">` +
+        `<input type="checkbox" data-research-seat="${esc(s.seat)}"${s.enabled ? " checked" : ""}${running || r.held ? " disabled" : ""}` +
+        ` aria-label="${esc(name)} sits at the table">` +
+        `<span class="rs-seat-text"><b class="rs-seat" data-seat="${esc(s.seat)}">${esc(name)}</b>` +
+        `<small>${esc(ROLES[s.role] ?? s.role)}${s.model ? ` · ${esc(s.model)}` : ""}</small>` +
+        `<small class="rs-seat-line">${esc(line)}</small></span></label>`;
     }).join("");
   }
 
@@ -121,12 +223,45 @@ export function createResearch(host) {
     }
     const n = board?.hypotheses.length ?? 0;
     els.count.textContent = n ? String(n) : "";
+    const out = round()?.tasks.filter((t) => t.state === "running" || t.state === "repairing").length ?? 0;
+    els.busy.textContent = out ? String(out) : "";
+    els.dock.hidden = !board;
+    renderRun();
+  }
+
+  function renderRun() {
+    const r = state.creating || !state.board ? null : round();
+    els.run.hidden = !r;
+    if (!r) return;
+    const s = r.status;
+    const n = r.round;
+    let text = "";
+    if (r.held) text = "Read only";
+    else if (s.status === "running") text = `Round ${n} · running`;
+    else if (s.status === "paused") text = s.interrupted ? `Round ${n} · paused when Proton closed` : `Round ${n} · paused`;
+    else text = n ? `${count(n, "round", "rounds")} so far` : "No rounds yet";
+    els.status.textContent = text;
+    els.status.title = r.held ?? "";
+    els.status.dataset.status = r.held ? "held" : s.status;
+    const live = s.status !== "idle";
+    els.meter.hidden = !live;
+    els.meter.title = `${r.used} of ${r.cap} agent calls this round`;
+    const bar = /** @type {HTMLElement} */ (els.meter.firstElementChild);
+    bar.style.width = `${Math.min(100, (r.used / Math.max(1, r.cap)) * 100)}%`;
+    els.meter.dataset.label = `${r.used}/${r.cap}`;
+    els.pause.hidden = s.status !== "running";
+    els.stop.hidden = !live;
+    els.go.hidden = s.status === "running";
+    els.go.textContent = s.status === "paused" ? "Resume" : "Run round";
+    els.go.title = s.status === "paused" ? "Carry on with the round" : `A round: about fourteen agent calls, at most ${r.cap}`;
+    for (const b of [els.go, els.pause, els.stop]) b.disabled = Boolean(r.held);
   }
 
   /* ── the board ─────────────────────────────────────────────────── */
 
   function renderBoard() {
     renderHead();
+    renderSeats();
     // The form is drawn once: drawn again, under whatever the core sends
     // while it is up, it would take the caret from the field being typed in.
     if (state.creating) {
@@ -146,9 +281,12 @@ export function createResearch(host) {
       </div>`;
       return;
     }
+    // A transcript being read keeps its place as the list under it moves.
+    const scroll = els.board.scrollTop;
     els.board.innerHTML = state.tab === "hypotheses"
       ? (state.detail ? detailHtml(state.detail) : leaderboardHtml(board))
-      : overviewHtml(board);
+      : state.tab === "activity" ? activityHtml() : overviewHtml(board);
+    els.board.scrollTop = scroll;
   }
 
   /** @param {string} label @param {string} file @param {string} text @param {boolean} [folded] */
@@ -167,6 +305,7 @@ export function createResearch(host) {
       doc("Brief", `${path}README.md`, withoutTitle(board.brief, board.title)) +
       doc("Overview", `${path}overview.md`, withoutTitle(board.overview, "Overview")) +
       doc("Plan", `${path}RESEARCH_PLAN.md`, withoutTitle(board.plan, "Research plan")) +
+      doc("What you told the team", `${path}feedback.md`, withoutTitle(board.feedback ?? "", "Feedback"), true) +
       doc("Verdicts", `${path}VERDICT.md`, withoutTitle(board.verdicts, "Verdicts"), true) +
       doc("Sandbox log", `${path}SANDBOX_LOG.md`, withoutTitle(board.sandbox, "Sandbox log"), true) +
       `</div>`;
@@ -182,7 +321,7 @@ export function createResearch(host) {
     if (!board.hypotheses.length) {
       return `<div class="rs-col"><div class="cc-none rs-none">No hypotheses yet. In a round each agent proposes two,
         the others review them, and a tournament judged blind ranks them by Elo. Each is a file in
-        <code>research/${esc(board.slug)}/hypotheses/</code>.</div></div>`;
+        <code>research/${esc(board.slug)}/hypotheses/</code>. Add one of your own with <code>/h</code> below.</div></div>`;
     }
     let rank = 0;
     const rows = board.hypotheses.map((h) => {
@@ -214,6 +353,15 @@ export function createResearch(host) {
     return ids.map((id) => `<button class="rs-link" data-research-hypothesis="${esc(id)}">${esc(id)}</button>`).join(" ");
   }
 
+  /** What can be done to a hypothesis, as it stands. @param {Row} h */
+  function actions(h) {
+    const button = (/** @type {string} */ status, /** @type {string} */ label, /** @type {string} */ title) =>
+      `<button class="cc-quiet" data-research-status="${status}" data-id="${esc(h.id)}" title="${esc(title)}">${label}</button>`;
+    if (h.status === "retired") return button("active", "Bring back", "Back into the tournament");
+    return (h.status === "pinned" ? button("active", "Unpin", "Let the tournament decide") : button("pinned", "Pin", "Keep it in every round")) +
+      button("retired", "Retire", "Out of the tournament");
+  }
+
   /** @param {Detail} d */
   function detailHtml(d) {
     const h = d.row;
@@ -229,7 +377,7 @@ export function createResearch(host) {
           <span class="grow"></span>
           <span class="rs-scores" title="Correctness, novelty, testability (1–5)">C ${r.correctness} · N ${r.novelty} · T ${r.testability}</span></header>
         <div class="cc-prose">${markdown(r.summary)}</div>
-        ${r.critique.trim() ? `<details class="rs-fold"><summary>Critique</summary><div class="cc-prose">${markdown(r.critique)}</div></details>` : ""}
+        ${r.critique.trim() ? `<details class="rs-fold"><summary>${r.kind === "verification" ? "Derivation" : "Critique"}</summary><div class="cc-prose">${markdown(r.critique)}</div></details>` : ""}
         ${r.citations.length ? `<div class="rs-cites">${list(r.citations)}</div>` : ""}
       </article>`).join("");
     const matches = d.matches.map((m) => `<li class="rs-match ${m.won ? "won" : "lost"}">
@@ -237,7 +385,8 @@ export function createResearch(host) {
         <span class="rs-faint">— judged by ${esc(who(m.judge))}, round ${m.round}</span>
         ${m.rationale.trim() ? `<div class="cc-prose rs-why">${markdown(m.rationale)}</div>` : ""}</li>`).join("");
     return `<div class="rs-col rs-detail">
-      <button class="rs-back" data-research-back>${icon("chev")}All hypotheses</button>
+      <div class="rs-detail-bar"><button class="rs-back" data-research-back>${icon("chev")}All hypotheses</button>
+        <span class="grow"></span>${actions(h)}</div>
       <h2 class="rs-h"><span class="rs-id">${esc(h.id)}</span> ${esc(h.title)}</h2>
       <div class="rs-meta">${meta}</div>
       ${lineage ? `<div class="rs-lineage">${lineage}</div>` : ""}
@@ -249,6 +398,69 @@ export function createResearch(host) {
       ${matches ? `<section class="rs-doc"><header><span>Tournament</span></header><ul class="rs-matches">${matches}</ul></section>` : ""}
       ${d.experiments.length ? `<section class="rs-doc"><header><span>Experiments</span></header><p class="rs-faint">${d.experiments.map(esc).join(", ")}</p></section>` : ""}
     </div>`;
+  }
+
+  /* ── the round, call by call ───────────────────────────────────── */
+
+  /** @param {Task} t */
+  function taskRow(t) {
+    const now = Date.now() / 1000;
+    const time = t.started == null ? "" : t.ended != null ? span(t.ended - t.started) : span(now - t.started);
+    const on = t.id === state.task;
+    const why = t.why ? `<span class="rs-task-why">${esc(t.why)}</span>` : "";
+    const tries = t.attempts ? `<span class="rs-tag" title="Tried again">×${t.attempts + 1}</span>` : "";
+    return `<button class="rs-task${on ? " on" : ""}" data-research-task="${esc(t.id)}" data-state="${esc(t.state)}" aria-expanded="${on}">` +
+      `<i class="rs-dot" title="${esc(STATES[t.state] ?? t.state)}"></i>` +
+      `<span class="rs-seat" data-seat="${esc(t.seat)}">${esc(SEATS[t.seat] ?? t.seat)}</span>` +
+      `<span class="rs-task-what">${t.targets.length ? esc(t.targets.join(", ")) : esc(STATES[t.state] ?? t.state)}${tries}${why}</span>` +
+      `<span class="rs-task-model">${esc(t.model)}</span>` +
+      `<span class="rs-task-time">${esc(time)}</span></button>` +
+      (on ? `<div class="rs-transcript">${transcriptHtml()}</div>` : "");
+  }
+
+  function activityHtml() {
+    const r = round();
+    if (!r || !r.tasks.length) {
+      return `<div class="rs-col"><div class="cc-none rs-none">Nothing has run yet. A round is about fourteen agent calls —
+        framing, two hypotheses from each seat, reviews, a verification, a tournament, evolution and an overview —
+        and never more than ${r?.cap ?? 20}. Each call is listed here as it runs, with what it said.</div></div>`;
+    }
+    const groups = PHASES.map(([phase, name]) => {
+      const tasks = r.tasks.filter((t) => t.phase === phase);
+      if (!tasks.length) return "";
+      return `<section class="rs-phase"><header>${esc(name)}<span class="rs-faint">${tasks.filter((t) => t.state === "done").length}/${tasks.length}</span></header>` +
+        tasks.map(taskRow).join("") + `</section>`;
+    }).join("");
+    return `<div class="rs-col rs-wide">${groups}</div>`;
+  }
+
+  /** What a call said, drawn plainly: the agent's words, its tools as a line
+   *  each, and how it ended. */
+  function transcriptHtml() {
+    const t = state.transcript;
+    if (!t || t.task !== state.task) return `<div class="rs-faint">Reading…</div>`;
+    if (!t.items.length) return `<div class="rs-faint">Nothing was kept of this call.</div>`;
+    return t.items.map((item) => {
+      switch (item.kind) {
+        case "user":
+          return `<details class="rs-said"><summary>What it was asked</summary><div class="cc-prose">${markdown(item.text)}</div></details>`;
+        case "text":
+          return item.text.trim() ? `<div class="cc-prose">${markdown(item.text, { streaming: !item.done })}</div>` : "";
+        case "thinking":
+          return item.text.trim() ? `<details class="rs-said"><summary>Thought</summary><div class="cc-prose">${markdown(item.text)}</div></details>` : "";
+        case "tool": {
+          const input = /** @type {any} */ (item.input ?? {});
+          const what = String(input.query ?? input.url ?? input.pattern ?? input.file_path ?? input.command ?? Object.values(input).find((v) => typeof v === "string") ?? "");
+          return `<div class="rs-tool" data-state="${esc(item.state)}"><b>${esc(item.name)}</b> <span>${esc(what.split("\n")[0].slice(0, 160))}</span></div>`;
+        }
+        case "notice":
+          return `<div class="cc-notice ${esc(item.level)}">${esc(item.text)}</div>`;
+        case "turn":
+          return item.error ? `<div class="cc-notice error">${esc(item.error)}</div>` : `<div class="rs-faint">Answered in ${span(item.ms / 1000)}.</div>`;
+        default:
+          return "";
+      }
+    }).join("");
   }
 
   /* ── a new investigation ───────────────────────────────────────── */
@@ -297,7 +509,50 @@ export function createResearch(host) {
     host.dispatch({ type: "researchNew", ...state.draft });
   }
 
+  /* ── the composer ──────────────────────────────────────────────── */
+
+  function renderComposer() {
+    const text = els.input.value.trim();
+    els.send.disabled = !text;
+    const own = ownHypothesis(text);
+    els.hint.textContent = own ? `⏎ adds “${own.title}” as your hypothesis` : "⏎ tells the team · /h Title: statement adds a hypothesis";
+  }
+
+  function autosize() {
+    els.input.style.height = "auto";
+    // Empty, it is a line: Chrome measures a placeholder that wraps as text.
+    if (els.input.value) els.input.style.height = `${Math.min(els.input.scrollHeight, 220)}px`;
+  }
+
+  function say() {
+    const text = els.input.value.trim();
+    if (!text || !state.board) return;
+    const own = ownHypothesis(text);
+    host.dispatch(own ? { type: "researchAddHypothesis", ...own } : { type: "researchFeedback", text });
+    els.input.value = "";
+    autosize();
+    renderComposer();
+  }
+
+  els.input.addEventListener("input", () => { autosize(); renderComposer(); });
+  els.input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      say();
+    }
+  });
+
   /* ── what is clicked ───────────────────────────────────────────── */
+
+  /** @param {Tab} tab */
+  function showTab(tab) {
+    // The tab that is on already, asked for again, goes back to its top.
+    if (tab === "hypotheses" && state.tab === "hypotheses" && state.detail) {
+      host.dispatch({ type: "researchShow", hypothesis: null });
+    }
+    state.tab = tab;
+    renderBoard();
+  }
 
   ws.addEventListener("click", (e) => {
     const target = /** @type {HTMLElement} */ (e.target);
@@ -307,6 +562,13 @@ export function createResearch(host) {
       renderList();
       return renderBoard();
     }
+    if (target.closest("[data-research-send]")) return say();
+    if (target.closest("[data-research-go]")) {
+      host.dispatch({ type: round()?.status.status === "paused" ? "researchResume" : "researchStart" });
+      return;
+    }
+    if (target.closest("[data-research-pause]")) return void host.dispatch({ type: "researchPause" });
+    if (target.closest("[data-research-stop]")) return void host.dispatch({ type: "researchStop" });
     const open = /** @type {HTMLElement | null} */ (target.closest("[data-research-open]"));
     if (open) {
       const slug = open.dataset.researchOpen ?? "";
@@ -320,14 +582,11 @@ export function createResearch(host) {
       return;
     }
     const tab = /** @type {HTMLElement | null} */ (target.closest("[data-research-tab]"));
-    if (tab) {
-      const next = /** @type {Tab} */ (tab.dataset.researchTab);
-      // The tab that is on already, asked for again, goes back to its top.
-      if (next === "hypotheses" && state.tab === "hypotheses" && state.detail) {
-        host.dispatch({ type: "researchShow", hypothesis: null });
-      }
-      state.tab = next;
-      return renderBoard();
+    if (tab) return showTab(/** @type {Tab} */ (tab.dataset.researchTab));
+    const status = /** @type {HTMLElement | null} */ (target.closest("[data-research-status]"));
+    if (status) {
+      host.dispatch({ type: "researchSetStatus", hypothesis: status.dataset.id, status: status.dataset.researchStatus });
+      return;
     }
     const hypothesis = /** @type {HTMLElement | null} */ (target.closest("[data-research-hypothesis]"));
     if (hypothesis) {
@@ -336,6 +595,14 @@ export function createResearch(host) {
     }
     if (target.closest("[data-research-back]")) {
       host.dispatch({ type: "researchShow", hypothesis: null });
+      return;
+    }
+    const task = /** @type {HTMLElement | null} */ (target.closest("[data-research-task]"));
+    if (task) {
+      const id = task.dataset.researchTask ?? null;
+      state.task = id === state.task ? null : id;
+      host.dispatch({ type: "researchTask", task: state.task });
+      renderBoard();
       return;
     }
     // In what the agents wrote a link opens in the browser, and a code
@@ -356,6 +623,12 @@ export function createResearch(host) {
     }
   });
 
+  ws.addEventListener("change", (e) => {
+    const box = /** @type {HTMLInputElement} */ (e.target);
+    if (!box.matches?.("[data-research-seat]")) return;
+    host.dispatch({ type: "researchSeat", seat: box.dataset.researchSeat, enabled: box.checked });
+  });
+
   ws.addEventListener("submit", (e) => {
     const form = /** @type {HTMLElement} */ (e.target).closest("[data-research-form]");
     if (!form) return;
@@ -372,7 +645,7 @@ export function createResearch(host) {
     if (field.name === "discipline") state.draft.discipline = /** @type {Discipline} */ (field.value);
   });
 
-  // ⌘⏎ creates, from anywhere in the form.
+  // ⌘⏎ creates, from anywhere in the form; Escape puts it away.
   ws.addEventListener("keydown", (e) => {
     const form = /** @type {HTMLElement} */ (e.target).closest?.("[data-research-form]");
     if (!form) return;
@@ -402,6 +675,8 @@ export function createResearch(host) {
     if (event.open !== state.open) {
       state.open = event.open;
       state.detail = null;
+      state.task = null;
+      state.transcript = null;
     }
     if (!state.open) state.board = null;
     renderList();
@@ -427,8 +702,29 @@ export function createResearch(host) {
     if (event.detail && event.detail.row.id !== was) els.board.scrollTop = 0;
   }
 
+  /** @param {RoundEvent} event */
+  function round_(event) {
+    const starting = event.slug === state.open && event.status.status === "running" && round()?.status.status !== "running";
+    state.round = event;
+    // A round just started is followed where it happens.
+    if (starting && !state.detail) state.tab = "activity";
+    renderList();
+    renderBoard();
+  }
+
+  /** @param {TranscriptEvent} event */
+  function transcript(event) {
+    if (event.slug !== state.open || event.task !== state.task) return;
+    state.transcript = event;
+    const box = els.board.querySelector(".rs-transcript");
+    // Only the transcript is redrawn: the list above it stays as it is.
+    if (box) box.innerHTML = transcriptHtml();
+    else renderBoard();
+  }
+
   renderList();
   renderBoard();
+  renderComposer();
 
-  return { list: list_, board, hypothesis };
+  return { list: list_, board, hypothesis, round: round_, transcript };
 }

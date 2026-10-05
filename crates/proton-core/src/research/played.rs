@@ -15,7 +15,7 @@ use proton_claude::chat::{Answer, Image, Settings};
 use proton_claude::engine::Unattended;
 use proton_claude::fold::Changes;
 use proton_claude::{ArtifactRef, Ask, AskKind, Conversation, Engine, Fold, Limit, Tool, ToolState};
-use proton_research::model::{Family, Seat};
+use proton_research::model::{Family, HypothesisStatus, Seat};
 use proton_research::schema::Phase;
 use proton_research::store::Store;
 use proton_research::supervisor::{Dispatch, RoundStatus};
@@ -719,5 +719,104 @@ fn a_round_taken_over_by_another_proton_lets_its_calls_go_and_waits() {
     }
     assert_eq!(log.lock().unwrap().calls.len(), made);
     assert!(folder.state_path("lock").exists(), "the other's lock was let go of");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_scientist_tells_the_team_adds_a_hypothesis_and_it_is_played_with_theirs() {
+    let dir = root("scientist");
+    let (factory, log) = Factory::new();
+    let mut research = begin(&dir, factory);
+    let events = research.feedback("Focus on polarisation.");
+    let board = events.iter().find_map(|e| match e {
+        Event::ResearchBoard { feedback, .. } => Some(feedback.clone()),
+        _ => None,
+    });
+    assert!(board.is_some_and(|f| f.contains("## Before round 1\n\nFocus on polarisation.")), "the board does not show what was said");
+    research.add_hypothesis("Mine", "Multiple scattering whitens the horizon.");
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    let mine = folder.hypotheses().into_iter().find(|h| h.title == "Mine").expect("the hypothesis was not written");
+    assert_eq!((mine.id.as_str(), mine.author.seat, mine.round), ("H001", Seat::Scientist, 1));
+
+    research.start_at(T0);
+    play(&mut research, T0, 1);
+    let log = log.lock().unwrap();
+    // Every task was shown what the scientist said.
+    assert!(log.calls.iter().all(|c| c.sent[0].contains("Focus on polarisation.")), "a task was not told");
+    let reviews = folder.reviews();
+    assert!(reviews.iter().any(|r| r.hypothesis == "H001"), "the scientist's hypothesis was not reviewed");
+    assert!(folder.matches().iter().any(|m| m.a == "H001" || m.b == "H001"), "the scientist's hypothesis was not played");
+    assert!(folder.hypotheses().iter().filter(|h| h.author.seat != Seat::Scientist).all(|h| h.id != "H001"), "an agent's hypothesis took its number");
+    drop(log);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_hypothesis_is_pinned_retired_and_brought_back() {
+    let dir = root("status");
+    let (factory, _) = Factory::new();
+    let mut research = begin(&dir, factory);
+    research.add_hypothesis("Mine", "Multiple scattering whitens the horizon.");
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    let status = || folder.hypotheses().into_iter().find(|h| h.id == "H001").unwrap().status;
+    for wanted in [HypothesisStatus::Pinned, HypothesisStatus::Retired, HypothesisStatus::Active] {
+        let events = research.set_status("H001", wanted);
+        assert_eq!(status(), wanted);
+        assert!(events.iter().any(|e| matches!(e, Event::ResearchBoard { hypotheses, .. } if hypotheses.iter().any(|h| h.status == wanted))));
+    }
+    assert!(notices(&research.set_status("H404", HypothesisStatus::Pinned)).iter().any(|n| n.contains("no hypothesis H404")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_table_changes_between_rounds_and_says_who_cannot_sit() {
+    let dir = root("table");
+    let (mut factory, log) = Factory::new();
+    factory.unavailable.insert(Seat::Codex, "Codex is not installed.".into());
+    let mut research = begin(&dir, factory);
+    let seats = |events: &[Event]| {
+        events.iter().rev().find_map(|e| match e {
+            Event::ResearchRound { seats, .. } => Some(seats.clone()),
+            _ => None,
+        })
+    };
+    let before = seats(&research.sync_at(T0)).unwrap();
+    assert_eq!(before.iter().find(|s| s.seat == Seat::Codex).unwrap().why.as_deref(), Some("Codex is not installed."), "the table does not say who cannot sit");
+    let events = research.set_seat(Seat::Antigravity, false);
+    assert!(!seats(&events).unwrap().iter().find(|s| s.seat == Seat::Antigravity).unwrap().enabled);
+    research.start_at(T0);
+    assert!(notices(&research.set_seat(Seat::Antigravity, true)).iter().any(|n| n.contains("Pause or stop")), "the table changed under a running round");
+    play(&mut research, T0, 1);
+    assert!(log.lock().unwrap().calls.iter().all(|c| c.seat == Seat::Claude), "a seat that was stood down was asked");
+    // Not the last engine, though.
+    assert!(notices(&research.set_seat(Seat::Claude, false)).iter().any(|n| n.contains("At least one engine")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_task_shows_what_it_said_live_and_after() {
+    let dir = root("transcript");
+    let (factory, _) = Factory::new();
+    let mut research = begin(&dir, factory);
+    research.start_at(T0);
+    let transcript = |events: &[Event]| {
+        events.iter().rev().find_map(|e| match e {
+            Event::ResearchTranscript { task, items, .. } => Some((task.clone(), items.len())),
+            _ => None,
+        })
+    };
+    let shown = transcript(&research.watch(Some("T0001".into()))).expect("no transcript");
+    assert_eq!(shown.0, "T0001");
+    assert!(shown.1 >= 1, "the call's prompt is not in its transcript");
+    // As it answers, it is drawn again.
+    let mut redrawn = false;
+    for t in 1..=3 {
+        redrawn |= transcript(&research.poll_at(T0 + t)).is_some();
+    }
+    assert!(redrawn, "a call that said something was not drawn again");
+    play(&mut research, T0 + 3, 1);
+    let after = transcript(&research.watch(Some("T0001".into()))).unwrap();
+    assert!(after.1 >= 2, "the kept transcript lost its rows");
+    assert!(research.watch(None).is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -18,7 +18,7 @@ in this document retain historical decisions and measurements.
 | Game | Godot `.tscn` scene hierarchy and property editing | No engine playback process |
 | Video | CMX3600 `.edl` timeline and `.srt` captions | No decoded video/program monitor |
 | Data | `.ipynb` cells, kernel execution, outputs and dataframe views | Execution requires a configured Jupyter kernel |
-| Research | `research/<slug>/` investigations: made, listed, and drawn as overview, plan and an Elo leaderboard | Rounds are not yet run from the window; no Lab yet |
+| Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | No Lab yet: proposed experiments are written down, not run |
 
 ```bash
 cargo test --workspace        # headless; some integrations require external tools

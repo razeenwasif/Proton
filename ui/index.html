@@ -982,6 +982,12 @@
         </div>
         <!-- From Event::ResearchList: the project's investigations, newest first. -->
         <div class="scroll cc-sessions" data-research-list></div>
+        <!-- From Event::ResearchRound: who sits at the open investigation's
+             table, in which role, and whether each can. -->
+        <div class="rs-seats-box" data-research-seats-box hidden>
+          <header>Table</header>
+          <div data-research-seats></div>
+        </div>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
@@ -992,12 +998,35 @@
           <span class="rs-chip" data-research-discipline hidden></span>
           <span class="grow"></span>
         </header>
-        <div class="rs-tabs" role="tablist" aria-label="Board" data-research-tabs hidden>
-          <button class="rs-tab on" role="tab" aria-selected="true" data-research-tab="overview">Overview</button>
-          <button class="rs-tab" role="tab" aria-selected="false" data-research-tab="hypotheses">Hypotheses<span class="rs-count" data-research-count></span></button>
+        <div class="rs-strip" data-research-tabs hidden>
+          <div class="rs-tabs" role="tablist" aria-label="Board">
+            <button class="rs-tab on" role="tab" aria-selected="true" data-research-tab="overview">Overview</button>
+            <button class="rs-tab" role="tab" aria-selected="false" data-research-tab="hypotheses">Hypotheses<span class="rs-count" data-research-count></span></button>
+            <button class="rs-tab" role="tab" aria-selected="false" data-research-tab="activity">Activity<span class="rs-count live" data-research-busy></span></button>
+          </div>
+          <!-- The round: where it stands, what it has spent, and its controls. -->
+          <div class="rs-run" data-research-run hidden>
+            <span class="rs-status" data-research-status></span>
+            <span class="rs-meter" data-research-meter><i></i></span>
+            <button class="cc-quiet" data-research-pause hidden>Pause</button>
+            <button class="cc-quiet" data-research-stop hidden>Stop</button>
+            <button class="cc-primary" data-research-go>Run round</button>
+          </div>
         </div>
-        <!-- From Event::ResearchBoard and Event::ResearchHypothesis. -->
+        <!-- From Event::ResearchBoard, ResearchHypothesis, ResearchRound and ResearchTranscript. -->
         <div class="scroll rs-board" data-research-board></div>
+        <!-- What the scientist tells the team, and hypotheses of their own. -->
+        <div class="rs-dock" data-research-dock hidden>
+          <div class="cc-composer rs-composer">
+            <textarea class="cc-input" data-research-input rows="1" spellcheck="true" aria-label="Tell the team"
+                      placeholder="Tell the team something — or /h Title: statement to add a hypothesis of your own"></textarea>
+            <div class="cc-foot">
+              <span class="rs-hint" data-research-hint>⏎ tells the team · ⇧⏎ a new line</span>
+              <span class="grow"></span>
+              <button class="cc-send" data-research-send title="Send  ⏎" aria-label="Send" disabled><svg class="i"><use href="#i-arrow-up"/></svg></button>
+            </div>
+          </div>
+        </div>
       </main>
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>

@@ -1517,6 +1517,123 @@ await test('Research ranks the hypotheses, opens one whole, and lets another inv
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+const researchSeats = (over = {}) => ['claude', 'codex', 'antigravity'].map((seat) => ({seat,
+  role: {claude: 'investigator', codex: 'engineer', antigravity: 'sandbox'}[seat], enabled: true, why: null, cooling: null, running: 0, model: '', ...(over[seat] ?? {})}));
+const researchRound = (status, extra = {}) => ({type: 'researchRound', slug: 'sky', round: 1, status, used: 0, cap: 20,
+  seats: researchSeats(), tasks: [], held: null, ...extra});
+const researchTask = (id, phase, seat, state, extra = {}) => ({id, round: 1, phase, seat, role: 'investigator', targets: [], state,
+  why: null, model: '', attempts: 0, started: 100, ended: state === 'done' ? 112 : null, ...extra});
+const openSky = async (round) => {
+  await win.dispatch({type: 'setMode', mode: 'research'}); await settle();
+  await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?')], open: 'sky'},
+    researchBoard(), {type: 'researchHypothesis', slug: 'sky', detail: null}, round]);
+  return $('.workspace[data-ws="research"]');
+};
+await test('Research runs a round from the board and follows it call by call', async () => {
+  const ws = await openSky(researchRound({status: 'idle'}, {round: 0}));
+  const go = ws.querySelector('[data-research-go]');
+  assert(shown(go) && go.textContent === 'Run round' && $('[data-research-status]').textContent === 'No rounds yet', 'no way to start a round');
+  assert(!shown(ws.querySelector('[data-research-meter]')) && !shown(ws.querySelector('[data-research-pause]')), 'an idle round shows its spending');
+  let before = win.commands.length;
+  go.click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'researchStart'), 'Run round did not ask for one');
+  await win.pushEvents([researchRound({status: 'running'}, {used: 4, tasks: [researchTask('T0001', 'frame', 'claude', 'done', {model: 'claude-opus-5-5'}),
+    researchTask('T0002', 'generate', 'claude', 'running'), researchTask('T0003', 'generate', 'codex', 'failed', {why: 'Not logged in'}),
+    researchTask('T0004', 'reflect', 'antigravity', 'ready', {targets: ['H001', 'H002']})]})]);
+  assert($('[data-research-status]').textContent === 'Round 1 · running', 'the round does not say it is running');
+  assert(ws.querySelector('[data-research-meter]').dataset.label === '4/20', 'the meter does not say what is spent');
+  assert(shown(ws.querySelector('[data-research-pause]')) && shown(ws.querySelector('[data-research-stop]')) && !shown(go), 'wrong controls for a running round');
+  assert(ws.querySelector('[data-research-tab="activity"]').getAttribute('aria-selected') === 'true', 'a round that starts is not followed');
+  assert($('[data-research-busy]').textContent === '1', 'the tab does not count the calls out');
+  const rows = [...ws.querySelectorAll('[data-research-task]')];
+  assert(rows.map((r) => r.dataset.researchTask).join() === 'T0001,T0002,T0003,T0004', 'the calls are not in the round\'s order');
+  assert(rows[2].textContent.includes('Not logged in') && rows[2].dataset.state === 'failed', 'a failed call does not say why');
+  assert(rows[3].textContent.includes('H001, H002'), 'a call does not say what it is about');
+  assert(ws.querySelector('.rs-item.on .rs-live'), 'the list does not mark the running investigation');
+  before = win.commands.length;
+  ws.querySelector('[data-research-pause]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'researchPause'), 'Pause did not ask');
+  await win.pushEvents([researchRound({status: 'paused', interrupted: true}, {used: 4})]);
+  assert($('[data-research-status]').textContent.includes('paused when Proton closed') && go.textContent === 'Resume', 'a round paused by a relaunch does not say so');
+  before = win.commands.length;
+  go.click(); await settle();
+  ws.querySelector('[data-research-stop]').click(); await settle();
+  const sent = win.commands.slice(before).map((c) => c.type);
+  assert(sent.includes('researchResume') && sent.includes('researchStop'), `wrong commands: ${sent}`);
+  await win.pushEvents([researchRound({status: 'running'}, {held: 'Another Proton (process 42) is running this investigation\'s rounds.'})]);
+  assert($('[data-research-status]').textContent === 'Read only' && ws.querySelector('[data-research-pause]').disabled, 'a held investigation can be driven');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+await test('A call opens into what it said, and only that call\'s words are drawn there', async () => {
+  const ws = await openSky(researchRound({status: 'running'}, {tasks: [researchTask('T0001', 'frame', 'claude', 'done'), researchTask('T0002', 'generate', 'claude', 'running')]}));
+  ws.querySelector('[data-research-tab="activity"]').click(); await settle();
+  let before = win.commands.length;
+  ws.querySelector('[data-research-task="T0001"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchTask')?.task === 'T0001', 'the call was not asked for');
+  assert(ws.querySelector('.rs-transcript')?.textContent.includes('Reading'), 'no place for what it said');
+  await win.pushEvents([{type: 'researchTranscript', slug: 'sky', task: 'T0002', items: [{kind: 'text', id: 'x', text: 'Wrong call.', done: true, parent: null}]}]);
+  assert(!ws.querySelector('.rs-transcript').textContent.includes('Wrong call'), 'another call\'s words were drawn');
+  await win.pushEvents([{type: 'researchTranscript', slug: 'sky', task: 'T0001', items: [
+    {kind: 'user', id: 'u', text: 'Frame the investigation.', images: 0},
+    {kind: 'tool', id: 't', name: 'WebSearch', input: {query: 'Rayleigh scattering'}, state: 'done', streamed: 0, result: null, detail: null, parent: null, ask: null, artifact: null},
+    {kind: 'text', id: 'a', text: 'The plan is to integrate the spectrum.', done: true, parent: null},
+    {kind: 'turn', id: 'e', ms: 12000, turns: 1, cost: 0, error: null}]}]);
+  const box = ws.querySelector('.rs-transcript');
+  assert(box.querySelector('.rs-tool')?.textContent.includes('Rayleigh scattering') && box.textContent.includes('integrate the spectrum') && box.textContent.includes('Answered in 12s'),
+    `the transcript is not drawn: ${box.textContent}`);
+  before = win.commands.length;
+  ws.querySelector('[data-research-task="T0001"]').click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchTask')?.task === null && !ws.querySelector('.rs-transcript'), 'the transcript did not close');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+await test('The scientist tells the team, and adds hypotheses of their own with /h', async () => {
+  const ws = await openSky(researchRound({status: 'idle'}));
+  const input = ws.querySelector('[data-research-input]');
+  assert(shown(input), 'no composer');
+  const type = (text) => { input.value = text; input.dispatchEvent(new win.Event('input', {bubbles: true})); };
+  const enter = (shiftKey = false) => input.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Enter', shiftKey, bubbles: true, cancelable: true}));
+  type('Focus on polarisation.');
+  let before = win.commands.length;
+  enter(true); await settle();
+  assert(!win.commands.slice(before).some((c) => c.type === 'researchFeedback'), '⇧⏎ sent');
+  enter(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'researchFeedback')?.text === 'Focus on polarisation.' && input.value === '', 'it was not told to the team');
+  type('/h Ozone: The Chappuis band deepens the zenith blue.');
+  assert($('[data-research-hint]').textContent.includes('“Ozone”'), 'the composer does not say it will add a hypothesis');
+  before = win.commands.length;
+  ws.querySelector('[data-research-send]').click(); await settle();
+  const own = win.commands.slice(before).find((c) => c.type === 'researchAddHypothesis');
+  assert(own?.title === 'Ozone' && own.statement === 'The Chappuis band deepens the zenith blue.', `wrong hypothesis: ${JSON.stringify(own)}`);
+  assert(ws.querySelector('[data-research-send]').disabled, 'an empty composer can send');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+await test('The table says who cannot sit, and a hypothesis is pinned or retired from its page', async () => {
+  const later = Math.floor(Date.now() / 1000) + 600;
+  const seats = researchSeats({claude: {running: 1}, codex: {why: 'Codex is not installed.'}, antigravity: {cooling: later}});
+  const ws = await openSky(researchRound({status: 'running'}, {seats}));
+  let rows = [...ws.querySelectorAll('.rs-seat-row')];
+  assert(rows.length === 3 && rows[0].textContent.includes('1 call out'), 'the table does not say who is working');
+  assert(rows[1].dataset.kind === 'out' && rows[1].textContent.includes('Codex is not installed.'), 'the table does not say who cannot sit');
+  assert(rows[2].dataset.kind === 'cooling' && rows[2].textContent.includes('At its limit until'), 'the table does not say who is at its limit');
+  assert(rows.every((r) => r.querySelector('input').disabled), 'the table can change under a running round');
+  await win.pushEvents([researchRound({status: 'idle'}, {seats})]);
+  rows = [...ws.querySelectorAll('.rs-seat-row')];
+  let before = win.commands.length;
+  rows[2].querySelector('input').click(); await settle();
+  const seat = win.commands.slice(before).find((c) => c.type === 'researchSeat');
+  assert(seat?.seat === 'antigravity' && seat.enabled === false, `wrong seat command: ${JSON.stringify(seat)}`);
+  const detail = (status) => ({type: 'researchHypothesis', slug: 'sky', detail: {row: {...researchBoard().hypotheses[0], status}, statement: 'Cones.', rationale: '',
+    predictions: [], assumptions: [], children: [], experiments: [], task: null, reviews: [], matches: []}});
+  await win.pushEvents([detail('active')]);
+  before = win.commands.length;
+  ws.querySelector('[data-research-status="retired"]').click(); await settle();
+  const retire = win.commands.slice(before).find((c) => c.type === 'researchSetStatus');
+  assert(retire?.hypothesis === 'H002' && retire.status === 'retired', `wrong status command: ${JSON.stringify(retire)}`);
+  await win.pushEvents([detail('retired')]);
+  assert(ws.querySelector('[data-research-status="active"]')?.textContent === 'Bring back' && !ws.querySelector('[data-research-status="pinned"]'), 'a retired hypothesis cannot be brought back');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('A long name in the project panel scrolls sideways instead of being cut', async () => {
   const tree = $('.workspace.on [data-tree]');
   const space = tree.closest('.workspace');

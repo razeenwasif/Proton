@@ -9,7 +9,7 @@ export function createPreview(deliver, mockLatency) {
   let mockMesh = () => null;
   let send;
   const claude = createClaudePreview(deliver);
-  const research = createResearchPreview();
+  const research = createResearchPreview(deliver);
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
