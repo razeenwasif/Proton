@@ -683,7 +683,10 @@ Between Frame and Generate, a round that uses the literature has a Literature
 group of one row, Proton's rather than an agent's — "no agent call" where a
 model would be — saying what it searched for and that the hypotheses wait for
 it, then what it added, each paper a link to it, or why it did not search,
-with what any source said went wrong. A hypothesis's page lists the papers
+with what any source said went wrong. What the team writes cites a paper's
+page as `[[literature/P003.pdf p. 4]]`, drawn as a citation link — in a review,
+a hypothesis, the overview, a call's transcript — which opens the PDF at that
+page in the document viewer; one citing an abstract opens the paper. A hypothesis's page lists the papers
 it rests on: the investigation's own as links into the Literature tab, with
 their titles; DOIs and arXiv ids as links to the browser; anything else as it
 was written.

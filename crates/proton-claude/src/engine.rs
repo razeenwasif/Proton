@@ -141,6 +141,27 @@ pub struct Unattended {
     pub web: bool,
     /// At most this many model turns, where the engine can be told.
     pub max_turns: Option<u32>,
+    /// MCP servers it may use — Proton's own, never the person's — and
+    /// only the tools of theirs named, each allowed up front.
+    pub mcp: Vec<McpServer>,
+}
+
+/// An MCP server a call is given: Proton's `proton-mcp`, serving one
+/// investigation's papers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpServer {
+    pub name: String,
+    pub command: PathBuf,
+    pub args: Vec<String>,
+    /// The tools it may call, by the server's names for them.
+    pub tools: Vec<String>,
+}
+
+impl McpServer {
+    /// Its tools as Claude Code names them to allow them.
+    pub fn allowed(&self) -> Vec<String> {
+        self.tools.iter().map(|tool| format!("mcp__{}__{tool}", self.name)).collect()
+    }
 }
 
 /// A conversation for an orchestrator, on an engine that can run unattended.

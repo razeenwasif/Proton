@@ -15,3 +15,7 @@ path = "src/main.rs"
 proton-core = { workspace = true }
 proton-library = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# A PDF written by hand, for the literature's tests.
+proton-library = { workspace = true, features = ["fixture"] }

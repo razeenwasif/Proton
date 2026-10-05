@@ -121,7 +121,9 @@ searches arXiv, Semantic Scholar and OpenAlex — told only your queries, never
 your files — and keeps each paper as `literature/P001.md`, with its open PDF
 beside it and out of Git. Each round searches it first, with the plan's or the
 last overview's queries, and every seat proposes its hypotheses knowing what
-was found; Semantic Scholar and OpenAlex give more to a free key,
+was found — Claude Code and Codex searching the papers' full text through
+Proton's own MCP server, Antigravity given the passages that matter — and a
+citation of a page, `[[literature/P003.pdf p. 4]]`, opens the PDF there; Semantic Scholar and OpenAlex give more to a free key,
 read from your shell's `SEMANTIC_SCHOLAR_API_KEY` and `OPENALEX_API_KEY` and
 never stored. The Lab's Python — Python 3.12 with numpy, scipy, sympy, mpmath,
 matplotlib, networkx and pandas, from conda-forge, apart from your own

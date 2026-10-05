@@ -155,6 +155,11 @@ pub struct Shelf {
     looked: Option<Instant>,
     /// Why the last walk made no vectors, when it was asked to.
     trouble: Option<String>,
+    /// Whether `.gitignore` is passed over: an investigation keeps its PDFs
+    /// out of Git, and they are the very thing to read.
+    read_ignored: bool,
+    /// Where citations are written from, when not the roots themselves.
+    cite_from: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for Shelf {
@@ -283,6 +288,21 @@ impl Shelf {
         self.built.is_some()
     }
 
+    /// Whether `.gitignore` decides what is read — by default it does. An
+    /// investigation's `literature/*.pdf` is ignored by Git and is exactly
+    /// what its shelf is for, and the `ignore` crate honours a `.gitignore`
+    /// in a parent folder too, so a root inside a repository would read none
+    /// of them.
+    pub fn honour_gitignore(&mut self, on: bool) {
+        self.read_ignored = !on;
+    }
+
+    /// Write citations relative to `base` rather than to the roots — see
+    /// [`Library::cite_from`] — and find them there again in [`locate`](Self::locate).
+    pub fn cite_from(&mut self, base: Option<PathBuf>) {
+        self.cite_from = base;
+    }
+
     /// Point the shelf at a set of roots. `true` if they changed.
     ///
     /// Changing them starts a fresh walk rather than adding to what is there:
@@ -348,6 +368,8 @@ impl Shelf {
         let cache = self.cache.clone();
         let embedder = self.embedder.clone();
         let counted = Arc::clone(&self.counted);
+        let gitignore = !self.read_ignored;
+        let cite_from = self.cite_from.clone();
         // Detached, like the picker's walk: it holds nothing the editor needs,
         // and if the window closes first the send fails and the thread ends.
         let _ = std::thread::Builder::new()
@@ -355,10 +377,10 @@ impl Shelf {
             .spawn(move || {
                 // Before reading, so a note written *during* the walk is not
                 // stamped as already read and then never picked up.
-                let stamp = fingerprint(&roots);
+                let stamp = fingerprint(&roots, gitignore);
                 read(
                     &roots,
-                    pdfs,
+                    Reading { pdfs, gitignore, cite_from: cite_from.as_deref() },
                     cache.as_deref(),
                     &counted,
                     &done,
@@ -413,10 +435,11 @@ impl Shelf {
         self.looked = Some(Instant::now());
         let (done, waiting) = mpsc::channel();
         let roots = self.roots.clone();
+        let gitignore = !self.read_ignored;
         let _ = std::thread::Builder::new()
             .name("proton-library-watch".into())
             .spawn(move || {
-                let _ = done.send(fingerprint(&roots));
+                let _ = done.send(fingerprint(&roots, gitignore));
             });
         self.checking = Some(waiting);
     }
@@ -521,6 +544,13 @@ impl Shelf {
         }) {
             return None;
         }
+        // Written from a base: found there, and only inside a root.
+        if let Some(base) = &self.cite_from {
+            let path = base.join(rel);
+            if path.is_file() && self.roots.iter().any(|root| path.starts_with(root)) {
+                return Some(path);
+            }
+        }
         self.roots
             .iter()
             .map(|root| root.join(rel))
@@ -535,9 +565,16 @@ impl Shelf {
 /// second and two hundred PDFs took three and a half minutes the first time —
 /// and holding the fast half hostage to the slow one would mean a library that
 /// is unusable for the length of the slow one.
+/// How a walk reads: PDFs or not, `.gitignore` or not, citations from where.
+struct Reading<'a> {
+    pdfs: bool,
+    gitignore: bool,
+    cite_from: Option<&'a Path>,
+}
+
 fn read(
     roots: &[PathBuf],
-    pdfs: bool,
+    reading: Reading,
     cache: Option<&Path>,
     counted: &Counted,
     done: &mpsc::Sender<Built>,
@@ -545,7 +582,11 @@ fn read(
     embedder: Option<&crate::Embedder>,
 ) {
     let started = Instant::now();
+    let Reading { pdfs, gitignore, cite_from } = reading;
     let mut library = Library::new();
+    if let Some(base) = cite_from {
+        library.cite_from(base);
+    }
     let mut missing = Vec::new();
     let mut papers = Vec::new();
     // One root inside another is an ordinary thing to write — a courses
@@ -560,7 +601,7 @@ fn read(
             continue;
         }
         library.add_root(root);
-        let (text, pdf) = documents(root, pdfs);
+        let (text, pdf) = documents(root, pdfs, gitignore);
         let text: Vec<PathBuf> = text
             .into_iter()
             .filter(|p| seen.insert(p.clone()))
@@ -669,14 +710,16 @@ fn read(
 /// time alone misses a deletion. Together they miss only the case where a
 /// document is deleted and another added, older than the newest, inside one
 /// interval — and anything else changing picks that up on the next check.
-fn fingerprint(roots: &[PathBuf]) -> (usize, u64) {
+fn fingerprint(roots: &[PathBuf], gitignore: bool) -> (usize, u64) {
     let mut files = 0usize;
     let mut newest = 0u64;
     for root in roots {
         for entry in ignore::WalkBuilder::new(root)
             .follow_links(false)
             .hidden(true)
-            .git_ignore(true)
+            .git_ignore(gitignore)
+            .git_exclude(gitignore)
+            .git_global(gitignore)
             .build()
             .flatten()
         {
@@ -700,14 +743,16 @@ fn fingerprint(roots: &[PathBuf]) -> (usize, u64) {
 /// Two lists rather than one because they are read at completely different
 /// speeds and the caller has to be able to finish the first before starting
 /// the second.
-fn documents(root: &Path, pdfs: bool) -> (Vec<PathBuf>, Vec<PathBuf>) {
+fn documents(root: &Path, pdfs: bool, gitignore: bool) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let walk = ignore::WalkBuilder::new(root)
         // Every one of these is a default, written out because they are the
         // difference between "the roots are what is read" and "the roots are
         // where reading starts".
         .follow_links(false)
         .hidden(true)
-        .git_ignore(true)
+        .git_ignore(gitignore)
+        .git_exclude(gitignore)
+        .git_global(gitignore)
         // The cap is applied per kind below instead: a megabyte of markdown is
         // a log, and a megabyte of PDF is a short paper.
         .build();
@@ -984,6 +1029,51 @@ mod tests {
             "{:#?}",
             hits.iter().map(|h| &h.cite).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn an_investigations_papers_are_read_past_its_gitignore_and_cited_from_its_folder() {
+        // As an investigation keeps them: in a repository whose .gitignore
+        // keeps the PDFs out of Git, which the walker would honour from the
+        // folder above.
+        let dir = root("literature");
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        write(&dir, ".gitignore", "literature/*.pdf\n");
+        write(&dir, "README.md", "# The brief\nnot a paper, and not to be read\n");
+        std::fs::create_dir_all(dir.join("literature")).unwrap();
+        std::fs::write(
+            dir.join("literature/P001.pdf"),
+            crate::pdf::fixture(&["Introduction\nnothing much happens here", "Results\nmolecular scattering goes as the inverse fourth power"]),
+        )
+        .unwrap();
+        write(&dir, "literature/P001.md", "# P001: Skylight\n\n## Abstract\n\nThe colour of the daytime sky.\n");
+
+        let open = |honour: bool| {
+            let mut shelf = Shelf::new();
+            shelf.set_pdfs(true);
+            shelf.honour_gitignore(honour);
+            shelf.cite_from(Some(dir.clone()));
+            shelf.set_roots(vec![dir.join("literature")]);
+            settle_fully(&mut shelf);
+            shelf
+        };
+        let shelf = open(false);
+        let hits = shelf.search("inverse fourth power", 3);
+        assert_eq!(hits.first().map(|h| h.cite.as_str()), Some("literature/P001.pdf § Results p. 2"), "{shelf:?}");
+        assert!(shelf.search("daytime sky colour", 3).iter().any(|h| h.cite.starts_with("literature/P001.md")));
+        assert!(shelf.search("brief", 3).is_empty(), "read outside its root");
+        assert_eq!(shelf.locate("literature/P001.pdf"), Some(dir.join("literature/P001.pdf")));
+        assert_eq!(shelf.locate("P001.pdf"), Some(dir.join("literature/P001.pdf")), "as the root names it, too");
+        assert_eq!(shelf.locate("README.md"), None, "the base is not a root");
+        assert_eq!(shelf.locate("literature/../README.md"), None);
+        assert_eq!(shelf.locate("../README.md"), None);
+        // Honouring .gitignore, as a library of notes does, it would read none of them.
+        assert!(open(true).search("inverse fourth power", 3).is_empty());
+        assert!(quote_of(&hits).starts_with("[[literature/P001.pdf § Results p. 2]]\n"));
+    }
+
+    fn quote_of(hits: &[Hit]) -> String {
+        crate::quote(hits)
     }
 
     #[test]

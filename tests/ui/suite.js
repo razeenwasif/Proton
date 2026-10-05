@@ -1736,7 +1736,14 @@ await test('Research shows a round\'s search of the literature, and the papers a
   assert(win.commands.slice(before).find((c) => c.type === 'researchShowPaper')?.paper === 'P002', 'an added paper does not open');
   // A hypothesis's references: its papers open, DOIs and arXiv ids go to the browser.
   await win.pushEvents([{type: 'researchHypothesis', slug: 'sky', detail: {row: researchBoard().hypotheses[0], statement: 'Rayleigh.', rationale: '', predictions: [],
-    assumptions: [], references: ['P001', '10.1364/JOSAA.18.000412', 'arXiv:1706.03762', 'Bohren & Fraser, from memory'], children: [], experiments: [], task: null, reviews: [], matches: []}}]);
+    assumptions: [], references: ['P001', '10.1364/JOSAA.18.000412', 'arXiv:1706.03762', 'Bohren & Fraser, from memory'], children: [], experiments: [], task: null,
+    reviews: [{id: 'H002.1', reviewer: {seat: 'claude', model: ''}, kind: 'review', verdict: 'strong', correctness: 5, novelty: 2, testability: 5, round: 1,
+      summary: 'As [[literature/P001.pdf § Results p. 4]] measured.', critique: '', citations: []}], matches: []}}]);
+  const cite = board.querySelector('.rs-review .cite');
+  assert(cite?.dataset.cite === 'literature/P001.pdf § Results p. 4', `a page the team cites is not a link: ${board.querySelector('.rs-review')?.innerHTML}`);
+  let asked = win.commands.length;
+  cite.click(); await settle();
+  assert(win.commands.slice(asked).find((c) => c.type === 'openCitation')?.cite === 'literature/P001.pdf § Results p. 4', 'a cited page does not open');
   const refs = board.querySelector('.rs-refs');
   assert(refs?.querySelector('[data-lit-paper="P001"]') && refs.textContent.includes('Skylight <b>in</b> Granada'), 'a reference to a paper is not the paper');
   assert(refs.querySelector('a[href="https://doi.org/10.1364/JOSAA.18.000412"]') && refs.querySelector('a[href="https://arxiv.org/abs/1706.03762"]'), 'a DOI or an arXiv id is not a link');

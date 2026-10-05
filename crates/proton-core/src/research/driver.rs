@@ -13,9 +13,12 @@
 //! with a clock that jumps.
 
 use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use proton_claude::chat::{Answer, Settings};
-use proton_claude::engine::Unattended;
+use proton_claude::engine::{Engine, McpServer, Unattended};
 use proton_claude::fold::{Fold, Item};
 use proton_claude::{Activity, Conversation};
 use proton_literature::fetch::{Fetch, Job, Reply};
@@ -30,7 +33,7 @@ use proton_research::supervisor::{
 use proton_research::view::SeatRow;
 use serde_json::{json, Value};
 
-use super::factory::AgentFactory;
+use super::factory::{engine_of, AgentFactory};
 use super::literature::{self, Source};
 
 /// What a round is driven with: the engines its calls run on, what asks
@@ -39,7 +42,17 @@ pub struct Kit<'a> {
     pub agents: &'a mut dyn AgentFactory,
     pub literature: &'a mut dyn Source,
     pub resting: &'a BTreeMap<LiteratureSource, u64>,
+    /// Proton's `proton-mcp`, to give Claude Code and Codex the papers' full
+    /// text through; without it, everyone is given passages instead.
+    pub mcp: Option<&'a Path>,
 }
+
+/// The name Proton's literature server goes by, and the tools it is allowed.
+pub const LITERATURE_SERVER: &str = "proton-literature";
+const LITERATURE_TOOLS: [&str; 2] = ["search_literature", "literature_status"];
+
+/// The most of the papers' passages put into a prompt, in bytes.
+const PASSAGES: usize = 8_000;
 
 /// How long one agent call may take.
 pub const TIMEOUT: u64 = 15 * 60;
@@ -115,6 +128,8 @@ pub struct Driver {
     fresh: Vec<Paper>,
     /// Open PDFs being downloaded, and the papers still waiting for theirs.
     downloads: Vec<(Fetch, Vec<String>)>,
+    /// A worker reading the papers' PDFs into the text cache, while it runs.
+    warming: Arc<AtomicBool>,
 }
 
 /// The highest round the folder has a report of.
@@ -188,6 +203,7 @@ impl Driver {
             search: None,
             fresh: Vec::new(),
             downloads: Vec::new(),
+            warming: Arc::default(),
         }
     }
 
@@ -382,6 +398,7 @@ impl Driver {
         };
         let mut moved = Moved { moved: true, ..Moved::default() };
         moved.and(self.apply(effects));
+        self.warm();
         moved.and(self.pump(kit, now));
         self.save();
         Ok(moved)
@@ -499,6 +516,7 @@ impl Driver {
     /// What the round's search and its downloads have come to.
     fn poll_literature(&mut self, now: u64) -> Moved {
         let mut moved = Moved::default();
+        let mut warm = false;
         if let Some(fetch) = self.search.as_mut() {
             let replies = fetch.poll();
             let done = fetch.is_done();
@@ -531,6 +549,9 @@ impl Driver {
                         literature::settle_download(&self.folder, &reply);
                         waiting.retain(|id| id != key);
                         moved.wrote = true;
+                        if matches!(reply, Reply::Saved { .. }) {
+                            warm = true;
+                        }
                     }
                     // The worker gave up: every paper still waiting says why.
                     Reply::Failed { why } => {
@@ -547,6 +568,10 @@ impl Driver {
         if moved.wrote {
             self.snap = None;
         }
+        // A PDF kept is read into the cache now, for the calls after this one.
+        if warm {
+            self.warm();
+        }
         moved
     }
 
@@ -559,6 +584,132 @@ impl Driver {
         if let Some(started) = literature::start_downloads(kit.literature, &self.folder, &fresh) {
             self.downloads.push(started);
         }
+    }
+
+    /// Where the papers' extracted text is kept: out of Git, with the rest
+    /// of what the round keeps for itself.
+    fn text_cache(&self) -> PathBuf {
+        self.folder.state_path("pdf-text")
+    }
+
+    /// Read the papers' PDFs into the text cache on a worker, one at a time,
+    /// so that what a call is given never waits on an extraction.
+    fn warm(&self) {
+        if self.warming.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let dir = self.folder.dir().join("literature");
+        let cache = self.text_cache();
+        let warming = self.warming.clone();
+        let spawned = std::thread::Builder::new().name("proton-literature-text".into()).spawn(move || {
+            let mut pdfs: Vec<PathBuf> = std::fs::read_dir(&dir)
+                .map(|entries| entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("pdf"))).collect())
+                .unwrap_or_default();
+            pdfs.sort();
+            for pdf in pdfs {
+                if proton_library::pdf::cached(&pdf, &cache).is_none() {
+                    let _ = proton_library::pdf::text(&pdf, Some(&cache));
+                }
+            }
+            warming.store(false, Ordering::SeqCst);
+        });
+        if spawned.is_err() {
+            self.warming.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// The investigation's papers, read for one call: every abstract, and
+    /// each PDF whose text is already extracted — never one that is not.
+    fn shelf_now(&self) -> proton_library::Library {
+        let dir = self.folder.dir().join("literature");
+        let cache = self.text_cache();
+        let mut library = proton_library::Library::new();
+        library.add_root(&dir);
+        library.cite_from(self.folder.dir());
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir).map(|entries| entries.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+        files.sort();
+        for path in files {
+            match path.extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase).as_deref() {
+                Some("md") => {
+                    if let Ok(text) = std::fs::read_to_string(&path) {
+                        library.add(&path, &text);
+                    }
+                }
+                Some("pdf") => {
+                    if let Some(text) = proton_library::pdf::cached(&path, &cache) {
+                        library.add_pages(&path, &text.pages);
+                    }
+                }
+                _ => {}
+            }
+        }
+        library
+    }
+
+    /// What a call is about, for searching the papers: the round's queries
+    /// for proposing, the hypotheses in front of it for judging them.
+    fn about(&self, d: &Dispatch, snap: &Snapshot) -> String {
+        let task = self.supervisor.task(&d.task);
+        let mut ids: Vec<String> = task.map(|t| t.targets.clone()).unwrap_or_default();
+        ids.extend(task.into_iter().flat_map(|t| t.pairs.iter().flat_map(|p| [p.a.clone(), p.b.clone()])));
+        let shown: Vec<String> = ids.iter().filter_map(|id| snap.hypotheses.iter().find(|h| &h.id == id)).map(|h| format!("{} {}", h.title, h.statement)).collect();
+        if !shown.is_empty() {
+            return shown.join(" ");
+        }
+        let queries = self.supervisor.state().literature.as_ref().map(|s| s.queries.join(" ")).unwrap_or_default();
+        if queries.trim().is_empty() {
+            snap.investigation.as_ref().map(|i| i.title.clone()).unwrap_or_default()
+        } else {
+            queries
+        }
+    }
+
+    /// The papers, for one call: Claude Code and Codex search their full
+    /// text through Proton's server; anyone else — Antigravity, which takes
+    /// no server, or everyone when there is no server to give — is given the
+    /// passages most about its task, in its prompt.
+    fn ground(&self, d: &Dispatch, kit: &Kit, now: u64) -> (String, Vec<McpServer>) {
+        let papers = self.folder.paper_stems();
+        if papers.is_empty() || matches!(d.phase, Phase::Meta) {
+            return (d.prompt.clone(), Vec::new());
+        }
+        let served = matches!(engine_of(d.seat), Some(Engine::Claude | Engine::Codex));
+        if let (true, Some(server)) = (served, kit.mcp) {
+            let mcp = McpServer {
+                name: LITERATURE_SERVER.into(),
+                command: server.to_path_buf(),
+                args: vec!["--literature".into(), self.folder.dir().display().to_string(), "--cache".into(), self.text_cache().display().to_string()],
+                tools: LITERATURE_TOOLS.iter().map(|t| t.to_string()).collect(),
+            };
+            let note = "\n\n## The papers' full text\n\nSearch the full text of the investigation's papers with the `search_literature` tool, \
+                        and cite a passage you use by the citation it comes with, as given: [[literature/P003.pdf p. 4]].\n";
+            return (format!("{}{note}", d.prompt), vec![mcp]);
+        }
+        let _ = now;
+        let snap = self.snap.as_ref().map(|(s, _)| s.clone()).unwrap_or_default();
+        let about = self.about(d, &snap);
+        if about.trim().is_empty() {
+            return (d.prompt.clone(), Vec::new());
+        }
+        let library = self.shelf_now();
+        let hits = library.search(&about, 6);
+        if hits.is_empty() {
+            return (d.prompt.clone(), Vec::new());
+        }
+        let mut quoted = proton_library::quote(&hits);
+        if quoted.len() > PASSAGES {
+            let mut end = PASSAGES;
+            while !quoted.is_char_boundary(end) {
+                end -= 1;
+            }
+            quoted.truncate(end);
+            quoted.push_str(" …");
+        }
+        let passages = format!(
+            "\n\n## Passages from the papers\n\nThe investigation's papers, searched for what this task is about. Cite a passage you use \
+             by the citation above it, as given.\n\n{quoted}\n"
+        );
+        (format!("{}{passages}", d.prompt), Vec::new())
     }
 
     /// The round's search of the literature, when it is due: in the sources
@@ -734,20 +885,29 @@ impl Driver {
             }
             moved.moved = true;
             for dispatch in dispatches {
-                moved.and(self.launch(dispatch, kit.agents, now));
+                moved.and(self.launch(dispatch, kit, now));
             }
         }
         moved
     }
 
-    fn launch(&mut self, d: Dispatch, factory: &mut dyn AgentFactory, now: u64) -> Moved {
+    fn launch(&mut self, d: Dispatch, kit: &mut Kit, now: u64) -> Moved {
+        let (prompt, mcp) = self.ground(&d, kit, now);
+        let d = Dispatch { prompt, ..d };
+        let factory = &mut *kit.agents;
         let config = self.folder.investigation().seats.iter().find(|s| s.seat == d.seat).cloned();
         let settings = Settings {
             model: self.model_of(d.seat),
             mode: "default".into(),
             effort: config.as_ref().and_then(|c| c.effort.clone()),
         };
-        let how = Unattended { instructions: d.instructions.clone(), schema: Some(d.schema.clone()), web: web(d.phase), max_turns: Some(turns(d.phase)) };
+        let how = Unattended {
+            instructions: d.instructions.clone(),
+            schema: Some(d.schema.clone()),
+            web: web(d.phase),
+            max_turns: Some(turns(d.phase)),
+            mcp,
+        };
         let attempt = self.supervisor.task(&d.task).map(|t| t.attempts).unwrap_or(0);
         let record = json!({
             "id": d.task,

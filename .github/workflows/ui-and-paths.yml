@@ -61,6 +61,13 @@ jobs:
       # The literature: the sources' answers as recorded, read offline; the
       # worker, the gates and the PDF download over a scripted network.
       - run: cargo test --locked -p proton-literature
+      # The library, and the MCP server Research's calls read the papers
+      # through: PDFs read past an investigation's .gitignore, citations from
+      # its folder, the literature served page by page. Not yet run on Windows.
+      - run: cargo test --locked -p proton-library --lib
+        if: runner.os != 'Windows'
+      - run: cargo test --locked -p proton-mcp
+        if: runner.os != 'Windows'
       # The engines as Research drives them unattended: their flags, and
       # turns recorded from the real CLIs replayed. Not yet run on Windows.
       - run: cargo test --locked -p proton-claude --lib --test engines --test fold

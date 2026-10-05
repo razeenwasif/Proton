@@ -334,9 +334,12 @@ export function createResearch(host) {
     return literatureHtml({ literature: lit, results, folder: state.folder, query: state.query, adding: state.adding });
   }
 
+  /** What the team wrote, its citations — `[[literature/P003.pdf p. 4]]` — made links. @param {string} text */
+  const prose = (text) => markdown(text, { cite: true });
+
   /** @param {string} label @param {string} file @param {string} text @param {boolean} [folded] */
   function doc(label, file, text, folded = false) {
-    const body = `<div class="cc-prose">${markdown(text)}</div>`;
+    const body = `<div class="cc-prose">${prose(text)}</div>`;
     const head = `<span>${esc(label)}</span><code class="rs-file" title="${esc(file)}">${esc(file.split("/").pop() ?? file)}</code>`;
     return folded
       ? `<details class="rs-doc rs-fold"><summary>${head}</summary>${body}</details>`
@@ -390,7 +393,7 @@ export function createResearch(host) {
 
   /** @param {string[]} items */
   function list(items) {
-    return items.length ? `<ul>${items.map((i) => `<li>${markdown(i).replace(/^<p>|<\/p>$/g, "")}</li>`).join("")}</ul>` : "";
+    return items.length ? `<ul>${items.map((i) => `<li>${prose(i).replace(/^<p>|<\/p>$/g, "")}</li>`).join("")}</ul>` : "";
   }
 
   /** @param {string[]} ids */
@@ -421,22 +424,22 @@ export function createResearch(host) {
           <span class="rs-review-who">${esc(KINDS[r.kind] ?? r.kind)} by ${esc(who(r.reviewer))}</span>
           <span class="grow"></span>
           <span class="rs-scores" title="Correctness, novelty, testability (1–5)">C ${r.correctness} · N ${r.novelty} · T ${r.testability}</span></header>
-        <div class="cc-prose">${markdown(r.summary)}</div>
-        ${r.critique.trim() ? `<details class="rs-fold"><summary>${r.kind === "verification" ? "Derivation" : "Critique"}</summary><div class="cc-prose">${markdown(r.critique)}</div></details>` : ""}
+        <div class="cc-prose">${prose(r.summary)}</div>
+        ${r.critique.trim() ? `<details class="rs-fold"><summary>${r.kind === "verification" ? "Derivation" : "Critique"}</summary><div class="cc-prose">${prose(r.critique)}</div></details>` : ""}
         ${r.citations.length ? `<div class="rs-cites">${list(r.citations)}</div>` : ""}
       </article>`).join("");
     const matches = d.matches.map((m) => `<li class="rs-match ${m.won ? "won" : "lost"}">
         <b>${m.won ? "Beat" : "Lost to"}</b> ${links([m.opponent])} ${esc(m.opponentTitle)}
         <span class="rs-faint">— judged by ${esc(who(m.judge))}, round ${m.round}</span>
-        ${m.rationale.trim() ? `<div class="cc-prose rs-why">${markdown(m.rationale)}</div>` : ""}</li>`).join("");
+        ${m.rationale.trim() ? `<div class="cc-prose rs-why">${prose(m.rationale)}</div>` : ""}</li>`).join("");
     return `<div class="rs-col rs-detail">
       <div class="rs-detail-bar"><button class="rs-back" data-research-back>${icon("chev")}All hypotheses</button>
         <span class="grow"></span>${actions(h)}</div>
       <h2 class="rs-h"><span class="rs-id">${esc(h.id)}</span> ${esc(h.title)}</h2>
       <div class="rs-meta">${meta}</div>
       ${lineage ? `<div class="rs-lineage">${lineage}</div>` : ""}
-      <section class="rs-doc"><header><span>Statement</span></header><div class="cc-prose">${markdown(d.statement)}</div></section>
-      ${d.rationale.trim() ? `<section class="rs-doc"><header><span>Rationale</span></header><div class="cc-prose">${markdown(d.rationale)}</div></section>` : ""}
+      <section class="rs-doc"><header><span>Statement</span></header><div class="cc-prose">${prose(d.statement)}</div></section>
+      ${d.rationale.trim() ? `<section class="rs-doc"><header><span>Rationale</span></header><div class="cc-prose">${prose(d.rationale)}</div></section>` : ""}
       ${d.predictions.length ? `<section class="rs-doc"><header><span>Predictions</span></header><div class="cc-prose">${list(d.predictions)}</div></section>` : ""}
       ${d.assumptions.length ? `<section class="rs-doc"><header><span>Assumptions</span></header><div class="cc-prose">${list(d.assumptions)}</div></section>` : ""}
       ${d.references?.length ? `<section class="rs-doc"><header><span>References</span></header><ul class="rs-refs">${
@@ -516,7 +519,7 @@ export function createResearch(host) {
         case "user":
           return `<details class="rs-said"><summary>What it was asked</summary><div class="cc-prose">${markdown(item.text)}</div></details>`;
         case "text":
-          return item.text.trim() ? `<div class="cc-prose">${markdown(item.text, { streaming: !item.done })}</div>` : "";
+          return item.text.trim() ? `<div class="cc-prose">${markdown(item.text, { streaming: !item.done, cite: true })}</div>` : "";
         case "thinking":
           return item.text.trim() ? `<details class="rs-said"><summary>Thought</summary><div class="cc-prose">${markdown(item.text)}</div></details>` : "";
         case "tool": {

@@ -61,6 +61,8 @@ pub struct Spawn {
     /// More of the command line, after the rest: what an unattended task
     /// may do (see [`crate::engine::Unattended`]).
     pub extra: Vec<String>,
+    /// Variables set for it besides the environment's own.
+    pub env: Vec<(String, String)>,
 }
 
 impl Spawn {
@@ -117,7 +119,7 @@ pub struct Process {
 impl Process {
     pub fn start(spawn: &Spawn) -> Result<Process, String> {
         let program = executable()?;
-        let pipe = Pipe::start(&program, &spawn.args(), &spawn.cwd, "Claude Code")?;
+        let pipe = Pipe::start_with(&program, &spawn.args(), &spawn.env, &spawn.cwd, "Claude Code")?;
         Ok(Process { pipe, requests: 0 })
     }
 
@@ -226,6 +228,7 @@ mod tests {
             effort: Some("high".into()),
             system: Some("Inside Proton.".into()),
             extra: Vec::new(),
+            env: Vec::new(),
         }
     }
 

@@ -75,6 +75,18 @@ pub struct Research {
     showing_paper: Option<String>,
     /// Sources left alone until then, having said they were out of calls.
     resting: BTreeMap<LiteratureSource, u64>,
+    /// Proton's `proton-mcp`, through which Claude Code and Codex read the
+    /// papers' full text.
+    mcp: Option<PathBuf>,
+}
+
+/// What a citation of an investigation's literature names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Cited {
+    /// A paper's PDF, to be opened at the page cited.
+    Pdf(PathBuf),
+    /// A paper, by its id: its abstract was cited.
+    Paper(String),
 }
 
 /// A search the scientist asked for: of which investigation, what, and
@@ -175,6 +187,11 @@ fn sandbox_entry(run: &Run, experiment: &Experiment) -> String {
     text
 }
 
+/// Proton's `proton-mcp`, where this build or install keeps it.
+fn beside_proton() -> Option<PathBuf> {
+    proton_council::mcp_server(&std::env::current_exe().ok()?)
+}
+
 /// Seconds since the epoch.
 fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -196,6 +213,7 @@ impl Research {
         let mut research = Research::with_factory(root, Box::new(Engines::default()), instance());
         research.lab = shared_lab();
         research.literature = Box::new(literature::Live::new());
+        research.mcp = beside_proton();
         research
     }
 
@@ -205,6 +223,7 @@ impl Research {
         let mut research = Research::kept_with(folder, Box::new(Engines::default()), instance());
         research.lab = shared_lab();
         research.literature = Box::new(literature::Live::new());
+        research.mcp = beside_proton();
         research
     }
 
@@ -241,7 +260,14 @@ impl Research {
             downloads: Vec::new(),
             showing_paper: None,
             resting: BTreeMap::new(),
+            mcp: None,
         }
+    }
+
+    /// Give Claude Code and Codex the papers through this server: for tests.
+    pub fn with_mcp(mut self, server: Option<PathBuf>) -> Research {
+        self.mcp = server;
+        self
     }
 
     /// Asking `source` for the literature: a script, in tests.
@@ -624,7 +650,7 @@ impl Research {
             if self.driver(&slug).is_none() {
                 continue;
             }
-            let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting };
+            let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
             let Some(driver) = self.drivers.get_mut(&slug) else { continue };
             let moved = driver.run_finished(&mut kit, &summary, now);
             events.extend(self.moved(&slug, moved, now));
@@ -1021,6 +1047,21 @@ impl Research {
         self.literature()
     }
 
+    /// What a citation of the open investigation's literature names —
+    /// `literature/P003.pdf`, a page of its PDF; `literature/P003.md`, the
+    /// paper itself — or `None` if it names neither.
+    pub fn cited(&self, path: &str) -> Option<Cited> {
+        let name = path.strip_prefix("literature/")?;
+        let (id, ext) = name.rsplit_once('.')?;
+        let folder = self.folder().ok()?;
+        let pdf = folder.paper_pdf(id).ok()?;
+        match ext {
+            "pdf" => pdf.is_file().then_some(Cited::Pdf(pdf)),
+            "md" => folder.papers().iter().any(|p| p.id == id).then(|| Cited::Paper(id.to_string())),
+            _ => None,
+        }
+    }
+
     /// Where a paper of the open investigation has its PDF.
     pub fn paper_pdf(&self, paper: &str) -> Result<PathBuf, String> {
         let path = self.folder()?.paper_pdf(paper)?;
@@ -1334,7 +1375,7 @@ impl Research {
         if self.driver(&slug).is_none() {
             return vec![notice(format!("research/{slug} could not be read."), NoticeLevel::Error)];
         }
-        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting };
+        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
         let Some(driver) = self.drivers.get_mut(&slug) else { return Vec::new() };
         match driver.start(&mut kit, now) {
             Ok(moved) => self.moved(&slug, moved, now),
@@ -1366,7 +1407,7 @@ impl Research {
         if self.driver(&slug).is_none() {
             return Vec::new();
         }
-        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting };
+        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
         let Some(driver) = self.drivers.get_mut(&slug) else { return Vec::new() };
         match driver.resume(&mut kit, now) {
             Ok(moved) => self.moved(&slug, moved, now),
@@ -1398,7 +1439,7 @@ impl Research {
         lab.extend(self.poll_runs(now));
         lab.extend(self.poll_literature(now));
         let mut all = Vec::new();
-        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting };
+        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
         for (slug, driver) in self.drivers.iter_mut() {
             if driver.busy() || driver.fetching() {
                 all.push((slug.clone(), driver.poll(&mut kit, now)));

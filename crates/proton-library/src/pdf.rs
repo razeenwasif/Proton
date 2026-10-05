@@ -90,6 +90,13 @@ pub fn text(path: &Path, cache: Option<&Path>) -> Option<Extracted> {
     Some(out)
 }
 
+/// A PDF's text if the cache holds it for the file as it is now — never
+/// extracting it, which can take seconds: for a caller that must not wait.
+pub fn cached(path: &Path, cache: &Path) -> Option<Extracted> {
+    let stamp = stamp(path)?;
+    read_cache(cache, path).filter(|held| (held.size, held.mtime) == stamp)
+}
+
 /// The pages of a PDF, or `None` if there are no words in it.
 ///
 /// Panics inside the extractor are caught here rather than left to kill the

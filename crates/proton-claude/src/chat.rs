@@ -81,6 +81,8 @@ pub struct Chat {
     asks: HashMap<String, Value>,
     /// More of the command line: what an unattended task may do.
     extra: Vec<String>,
+    /// Variables set for its process besides the environment's own.
+    env: Vec<(String, String)>,
 }
 
 impl Chat {
@@ -90,7 +92,20 @@ impl Chat {
         let mut fold = Fold::new(&id);
         fold.status_mut().mode = settings.mode.clone();
         fold.status_mut().effort = settings.effort.clone();
-        Chat { id, cwd, settings, system, process: None, fold, has_history: false, fork: false, renamed: None, asks: HashMap::new(), extra: Vec::new() }
+        Chat {
+            id,
+            cwd,
+            settings,
+            system,
+            process: None,
+            fold,
+            has_history: false,
+            fork: false,
+            renamed: None,
+            asks: HashMap::new(),
+            extra: Vec::new(),
+            env: Vec::new(),
+        }
     }
 
     /// A conversation nobody will be asked anything in — see
@@ -99,6 +114,13 @@ impl Chat {
     /// `--strict-mcp-config`), with only the tools that read and search, and
     /// in the mode that refuses what was not allowed up front instead of
     /// asking (`dontAsk`).
+    ///
+    /// Given Proton's own MCP servers it is started `--restricted` instead:
+    /// `--safe-mode` drops even the servers `--mcp-config` names (checked on
+    /// 2.1.288). Restricted ignores the person's settings — so their hooks
+    /// and plugins — and `--strict-mcp-config` their servers; skills are
+    /// switched off by `--disable-slash-commands`, and CLAUDE.md and the
+    /// automatic memory by the variables that turn them off.
     pub fn unattended(cwd: PathBuf, settings: Settings, how: &Unattended) -> Chat {
         let mut chat = Chat::new(cwd, Settings { mode: "dontAsk".into(), ..settings }, Some(how.instructions.clone()));
         let mut tools = vec!["Read", "Grep", "Glob"];
@@ -106,6 +128,17 @@ impl Chat {
             tools.extend(["WebSearch", "WebFetch"]);
         }
         chat.extra = vec!["--safe-mode".into(), "--strict-mcp-config".into(), "--tools".into(), tools.join(",")];
+        // Proton's own servers, and nobody else's: `--strict-mcp-config`
+        // keeps the person's out, and each tool is allowed up front, since
+        // `dontAsk` refuses what was not.
+        if !how.mcp.is_empty() {
+            chat.extra = vec!["--restricted".into(), "--strict-mcp-config".into(), "--disable-slash-commands".into(), "--tools".into(), tools.join(",")];
+            chat.env = vec![("CLAUDE_CODE_DISABLE_CLAUDE_MDS".into(), "1".into()), ("CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(), "1".into())];
+            let servers: serde_json::Map<String, Value> =
+                how.mcp.iter().map(|s| (s.name.clone(), serde_json::json!({ "command": s.command, "args": s.args }))).collect();
+            chat.extra.extend(["--mcp-config".to_string(), serde_json::json!({ "mcpServers": servers }).to_string()]);
+            chat.extra.extend(["--allowedTools".to_string(), how.mcp.iter().flat_map(|s| s.allowed()).collect::<Vec<_>>().join(",")]);
+        }
         if let Some(turns) = how.max_turns {
             chat.extra.extend(["--max-turns".to_string(), turns.to_string()]);
         }
@@ -139,6 +172,7 @@ impl Chat {
             renamed: None,
             asks: HashMap::new(),
             extra: Vec::new(),
+            env: Vec::new(),
         }
     }
 
@@ -187,6 +221,7 @@ impl Chat {
             effort: self.settings.effort.clone(),
             system: self.system.clone(),
             extra: self.extra.clone(),
+            env: self.env.clone(),
         }
     }
 
@@ -413,6 +448,7 @@ pub fn probe(cwd: PathBuf) -> std::sync::mpsc::Receiver<crate::fold::Capabilitie
             effort: None,
             system: None,
             extra: Vec::new(),
+            env: Vec::new(),
         };
         let Ok(mut process) = Process::start(&spawn) else { return };
         if process.initialize().is_err() {
@@ -449,6 +485,7 @@ mod tests {
             schema: Some(json!({ "type": "object" })),
             web: true,
             max_turns: Some(8),
+            mcp: Vec::new(),
         };
         let args = Chat::unattended(PathBuf::from("/tmp/r"), Settings::default(), &how).spawn().args();
         let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
@@ -461,6 +498,29 @@ mod tests {
         let args = Chat::unattended(PathBuf::from("/tmp/r"), Settings::default(), &offline).spawn().args();
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1] == "Read,Grep,Glob"), "{args:?}");
         assert!(!args.contains(&"--json-schema".to_string()) && !args.contains(&"--max-turns".to_string()));
+        assert!(!args.contains(&"--mcp-config".to_string()), "a server nobody asked for");
+    }
+
+    #[test]
+    fn an_unattended_claude_code_is_given_protons_literature_and_may_use_its_tools_unasked() {
+        let server = crate::engine::McpServer {
+            name: "proton-literature".into(),
+            command: PathBuf::from("/Applications/Proton.app/Contents/Resources/proton-mcp"),
+            args: vec!["--literature".into(), "/tmp/inv".into()],
+            tools: vec!["search_literature".into(), "literature_status".into()],
+        };
+        let how = Unattended { instructions: "Review.".into(), mcp: vec![server], ..Unattended::default() };
+        let args = Chat::unattended(PathBuf::from("/tmp/inv"), Settings::default(), &how).spawn().args();
+        let after = |flag: &str| args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone()).unwrap_or_default();
+        let config: Value = serde_json::from_str(&after("--mcp-config")).unwrap();
+        assert_eq!(config["mcpServers"]["proton-literature"]["args"], json!(["--literature", "/tmp/inv"]));
+        assert_eq!(config["mcpServers"]["proton-literature"]["command"], json!("/Applications/Proton.app/Contents/Resources/proton-mcp"));
+        assert_eq!(after("--allowedTools"), "mcp__proton-literature__search_literature,mcp__proton-literature__literature_status");
+        assert!(args.contains(&"--strict-mcp-config".to_string()), "the person's own servers would come too");
+        // Safe mode would drop the server; restricted keeps the person's settings, skills and CLAUDE.md out instead.
+        assert!(!args.contains(&"--safe-mode".to_string()) && args.contains(&"--restricted".to_string()) && args.contains(&"--disable-slash-commands".to_string()), "{args:?}");
+        let spawn = Chat::unattended(PathBuf::from("/tmp/inv"), Settings::default(), &how).spawn();
+        assert!(spawn.env.contains(&("CLAUDE_CODE_DISABLE_CLAUDE_MDS".to_string(), "1".to_string())), "{:?}", spawn.env);
     }
 
     #[test]

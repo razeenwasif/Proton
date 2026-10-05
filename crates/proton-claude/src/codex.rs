@@ -261,6 +261,14 @@ impl Codex {
             params["sandbox"] = json!("read-only");
             params["ephemeral"] = json!(true);
             params["developerInstructions"] = json!(how.instructions);
+            // Proton's own servers, after the person's are switched off.
+            let mut overrides = overrides;
+            for server in &how.mcp {
+                overrides[format!("mcp_servers.{}.command", server.name)] = json!(server.command);
+                overrides[format!("mcp_servers.{}.args", server.name)] = json!(server.args);
+                overrides[format!("mcp_servers.{}.enabled", server.name)] = json!(true);
+                overrides[format!("mcp_servers.{}.enabled_tools", server.name)] = json!(server.tools);
+            }
             params["config"] = overrides;
         }
         Ok(params)
@@ -1054,6 +1062,7 @@ mod tests {
             schema: Some(json!({ "type": "object", "properties": { "verdict": { "type": "string" } }, "required": ["verdict"], "additionalProperties": false })),
             web: true,
             max_turns: None,
+            mcp: Vec::new(),
         }
     }
 
@@ -1084,6 +1093,27 @@ mod tests {
         assert_eq!(turn["sandboxPolicy"], json!({ "type": "readOnly", "networkAccess": false }));
         assert_eq!(turn["disabledPluginIds"], json!(["browser@openai-bundled"]));
         assert_eq!(turn["outputSchema"]["required"], json!(["verdict"]));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_unattended_thread_is_given_protons_literature_and_still_none_of_the_persons_servers() {
+        let dir = home("[mcp_servers.computer-use]\ncommand = \"cua\"\n");
+        let how = Unattended {
+            mcp: vec![crate::engine::McpServer {
+                name: "proton-literature".into(),
+                command: PathBuf::from("/opt/proton/proton-mcp"),
+                args: vec!["--literature".into(), "/tmp/inv".into()],
+                tools: vec!["search_literature".into()],
+            }],
+            ..how()
+        };
+        let mut codex = Codex::unattended(PathBuf::from("/tmp/inv"), Settings::default(), &how);
+        let config = codex.thread_params(&dir).unwrap()["config"].clone();
+        assert_eq!(config["mcp_servers.computer-use.enabled"], false);
+        assert_eq!(config["mcp_servers.proton-literature.command"], "/opt/proton/proton-mcp");
+        assert_eq!(config["mcp_servers.proton-literature.args"], json!(["--literature", "/tmp/inv"]));
+        assert_eq!(config["mcp_servers.proton-literature.enabled_tools"], json!(["search_literature"]));
         let _ = std::fs::remove_dir_all(dir);
     }
 

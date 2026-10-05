@@ -65,6 +65,13 @@ impl Sorted for Vec<(usize, f32)> {
     }
 }
 
+/// Passages as an agent is given them: each citation in double brackets on
+/// a line above its text, so what to quote back is unambiguous even after
+/// the text runs to sixty lines.
+pub fn quote(hits: &[Hit]) -> String {
+    hits.iter().map(|hit| format!("[[{}]]\n{}", hit.cite, hit.passage.text)).collect::<Vec<_>>().join("\n\n---\n\n")
+}
+
 /// One result: a passage, and why it was chosen.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hit {
@@ -90,6 +97,8 @@ pub struct Library {
     docs: Vec<String>,
     /// Which document each passage came from, as an index into `docs`.
     doc_of: Vec<usize>,
+    /// Where citations are written from, when not each document's root.
+    cite_from: Option<PathBuf>,
     /// One vector per passage, when they have been made. Empty otherwise, and
     /// then a search is BM25 alone \u2014 which is a complete answer, just a
     /// narrower one.
@@ -157,6 +166,14 @@ impl Library {
         out
     }
 
+    /// Write citations relative to `base` rather than to each root: an
+    /// investigation's papers, read from its `literature/`, cited as
+    /// `literature/P003.pdf p. 4` — the path an agent in the investigation's
+    /// folder reads them by.
+    pub fn cite_from(&mut self, base: &Path) {
+        self.cite_from = Some(base.to_path_buf());
+    }
+
     /// Note a root, so citations can be written relative to it.
     pub fn add_root(&mut self, root: &Path) {
         if !self.roots.iter().any(|r| r == root) {
@@ -194,9 +211,10 @@ impl Library {
                 .replace('\\', "/"),
         );
 
+        let base = self.cite_from.clone().filter(|base| path.starts_with(base)).unwrap_or(root);
         for passage in passages {
             self.index.add(&passage.text, &passage.title);
-            let cite = passage.cite(&root);
+            let cite = passage.cite(&base);
             self.passages.push(passage);
             // Kept beside the passage rather than computed on the way out: the
             // root a document came from is known now and would have to be

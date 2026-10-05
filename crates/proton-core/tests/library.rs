@@ -570,3 +570,47 @@ fn a_citation_into_a_pdf_opens_it_in_the_viewer_at_its_page() {
         "the shell would not read it for the page"
     );
 }
+
+#[test]
+fn a_citation_of_an_investigations_paper_opens_its_pdf_at_the_page_or_the_paper_itself() {
+    let (mut space, project, _vault) = open("literature-cite");
+    space.apply(Command::ResearchNew {
+        title: "Why is the sky blue?".into(),
+        goal: "Explain the colour.".into(),
+        discipline: proton_research::Discipline::Physics,
+        literature: true,
+    });
+    let folder = proton_research::Store::new(project.join("research")).open("why-is-the-sky-blue").unwrap();
+    let paper = proton_research::Paper {
+        id: "P003".into(),
+        record: proton_research::Record { title: "Skylight".into(), abstract_: "The colour of the sky.".into(), ..Default::default() },
+        ..Default::default()
+    };
+    folder.write_paper(&paper).unwrap();
+    std::fs::write(folder.dir().join("literature/P003.pdf"), b"%PDF-1.4\n%%EOF\n").unwrap();
+
+    // A page of its PDF, as a call cites it: the viewer, at that page.
+    let events = space.apply(Command::OpenCitation { cite: "[[literature/P003.pdf § Results p. 4]]".into() });
+    let (path, page) = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Document { path, page, .. } => Some((path.clone(), *page)),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the viewer was not asked to show it: {events:#?}"));
+    assert_eq!(page, Some(4));
+    assert!(path.ends_with("literature/P003.pdf"), "{path}");
+    assert!(space.document_file(Path::new(&path)).is_some(), "the shell would not read it for the page");
+
+    // Its abstract: the paper, whole.
+    let events = space.apply(Command::OpenCitation { cite: "[[literature/P003.md § P003: Skylight › Abstract L3-5]]".into() });
+    assert!(
+        events.iter().any(|e| matches!(e, Event::ResearchPaper { detail: Some(d), .. } if d.row.id == "P003")),
+        "the paper was not shown: {events:#?}"
+    );
+    // One it does not have, or a path out of the folder, opens nothing of the investigation's.
+    for cite in ["[[literature/P009.pdf p. 1]]", "[[literature/../README.md L1-2]]"] {
+        let events = space.apply(Command::OpenCitation { cite: cite.into() });
+        assert!(!events.iter().any(|e| matches!(e, Event::Document { .. } | Event::ResearchPaper { .. })), "{cite}: {events:#?}");
+    }
+}

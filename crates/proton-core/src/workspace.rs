@@ -1096,6 +1096,18 @@ impl Workspace {
                         NoticeLevel::Error,
                     )];
                 };
+                // One of the open investigation's papers, as the team cites
+                // them: a page of its PDF opens the viewer there, its
+                // abstract the paper. Anything else is the library's.
+                let paper = self.research().cited(&cited.path);
+                match paper {
+                    Some(crate::research::Cited::Pdf(path)) => {
+                        let page = (cited.place == proton_library::chunk::Place::Pages).then(|| u32::try_from(cited.from).ok()).flatten();
+                        return vec![self.document_event(&path, ViewerKind::Pdf, page)];
+                    }
+                    Some(crate::research::Cited::Paper(id)) => return self.research().show_paper(Some(id)),
+                    None => {}
+                }
                 // Through the library's roots rather than the workspace's: a
                 // citation names a file in somebody's vault, which is nowhere
                 // near the project. `locate` is also what refuses to leave the
@@ -4899,11 +4911,7 @@ impl Workspace {
         }
         // The citation on its own line above the passage, so what to quote back
         // is unambiguous even after the text runs to sixty lines.
-        Ok(hits
-            .iter()
-            .map(|hit| format!("[[{}]]\n{}", hit.cite, hit.passage.text))
-            .collect::<Vec<_>>()
-            .join("\n\n---\n\n"))
+        Ok(proton_library::quote(&hits))
     }
 
     /// What a new conversation in the Chat tab starts with: the engine, the

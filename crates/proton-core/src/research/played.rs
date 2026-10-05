@@ -58,6 +58,8 @@ struct Call {
     stopped: bool,
     /// The model it was told to run, if any.
     model: Option<String>,
+    /// The MCP servers it was given: each one's name and arguments.
+    mcp: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -330,6 +332,7 @@ impl AgentFactory for Factory {
                 interrupted: false,
                 stopped: false,
                 model: settings.model.clone(),
+                mcp: how.mcp.iter().map(|s| format!("{} {} {}", s.name, s.args.join(" "), s.tools.join(","))).collect(),
             });
             log.calls.len() - 1
         };
@@ -1256,4 +1259,53 @@ fn a_round_of_an_investigation_without_the_literature_asks_nobody() {
     assert!(asked.lock().unwrap().is_empty(), "the literature was asked");
     assert!(Store::new(dir.join("research")).open(SLUG).unwrap().papers().is_empty());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn claude_code_and_codex_read_the_papers_through_protons_server_and_antigravity_is_given_passages() {
+    let dir = root("grounded");
+    let (factory, log) = Factory::new();
+    let server = dir.join("bin").join("proton-mcp");
+    let mut research =
+        Research::with_factory(&dir, Box::new(factory), "this-proton").with_literature(Box::new(bookshelf())).with_mcp(Some(server.clone()));
+    research.create("Why is the sky blue?", "Explain the colour of the daytime sky.", Discipline::Physics, true);
+    research.start_at(T0);
+    play(&mut research, T0, 1);
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    let log = log.lock().unwrap();
+    // The plan was framed before there were papers: nothing to give it.
+    let frame = log.calls.iter().find(|c| c.phase == Phase::Frame).unwrap();
+    assert!(frame.mcp.is_empty() && !frame.sent[0].contains("## Passages"));
+    for c in log.calls.iter().filter(|c| c.phase == Phase::Generate) {
+        match c.seat {
+            Seat::Antigravity => {
+                assert!(c.mcp.is_empty(), "Antigravity takes no server");
+                assert!(c.sent[0].contains("## Passages from the papers") && c.sent[0].contains("[[literature/P001.md"), "{}", c.sent[0]);
+            }
+            _ => {
+                let expected = format!(
+                    "proton-literature --literature {} --cache {} search_literature,literature_status",
+                    folder.dir().display(),
+                    folder.state_path("pdf-text").display()
+                );
+                assert_eq!(c.mcp, [expected], "{:?}", c.seat);
+                assert!(c.sent[0].contains("`search_literature`") && !c.sent[0].contains("## Passages"), "{:?}", c.seat);
+            }
+        }
+    }
+    drop(log);
+
+    // With no server to give, everyone is given passages.
+    let dir2 = root("grounded-no-server");
+    let (factory, log) = Factory::new();
+    let mut research = Research::with_factory(&dir2, Box::new(factory), "this-proton").with_literature(Box::new(bookshelf()));
+    research.create("Why is the sky blue?", "Explain the colour of the daytime sky.", Discipline::Physics, true);
+    research.start_at(T0);
+    play(&mut research, T0, 1);
+    let log = log.lock().unwrap();
+    let generate: Vec<&Call> = log.calls.iter().filter(|c| c.phase == Phase::Generate).collect();
+    assert!(generate.iter().all(|c| c.mcp.is_empty() && c.sent[0].contains("## Passages from the papers")), "{:?}", generate.iter().map(|c| c.seat).collect::<Vec<_>>());
+    drop(log);
+    let _ = std::fs::remove_dir_all(dir);
+    let _ = std::fs::remove_dir_all(dir2);
 }

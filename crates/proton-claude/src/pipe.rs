@@ -171,9 +171,15 @@ pub struct Pipe {
 
 impl Pipe {
     pub fn start(program: &Path, args: &[String], cwd: &Path, name: &'static str) -> Result<Pipe, String> {
+        Pipe::start_with(program, args, &[], cwd, name)
+    }
+
+    /// The same, with these variables set in its environment besides ours.
+    pub fn start_with(program: &Path, args: &[String], env: &[(String, String)], cwd: &Path, name: &'static str) -> Result<Pipe, String> {
         let mut command = Command::new(program);
         command
             .args(args)
+            .envs(env.iter().map(|(k, v)| (k, v)))
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

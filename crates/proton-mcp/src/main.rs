@@ -36,6 +36,16 @@
 //! decides which directories may be searched. Defaults to the working
 //! directory, which is what a client launching it from a project will give.
 //!
+//! ## An investigation's literature
+//!
+//! `--literature <investigation>` serves one Research investigation's papers
+//! instead: the PDFs and abstracts in its `literature/`, page by page,
+//! cited as `literature/P003.pdf p. 4` — the path an agent working in the
+//! investigation's folder knows them by. Its PDFs are kept out of Git there,
+//! so the investigation's `.gitignore` is passed over, and nothing else in
+//! the folder is read. Research hands it to Claude Code and Codex for each
+//! round's calls; `--cache` says where extracted text is kept.
+//!
 //! ## What it does not do
 //!
 //! It does not reach into a running Proton. It reads the same settings and the
@@ -80,6 +90,13 @@ const PATIENCE: Duration = Duration::from_secs(600);
 /// what it has and says what is missing.
 const GRACE: Duration = Duration::from_secs(25);
 
+/// Which shelf this serves: the person's library, or one investigation's papers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Library,
+    Literature,
+}
+
 /// How much of the library a search got to look at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Ready {
@@ -92,6 +109,9 @@ enum Ready {
 }
 
 fn main() {
+    if let Some(investigation) = arg("--literature") {
+        return literature(PathBuf::from(investigation), arg("--cache").map(PathBuf::from));
+    }
     let project = project_from_args();
     let settings = proton_core::settings::Settings::load(&project);
     let roots = settings.library_roots(&project);
@@ -126,7 +146,33 @@ fn main() {
     // it; `initialize` does not.
     shelf.set_roots(roots);
 
-    serve(&mut shelf, embedder.as_ref());
+    serve(&mut shelf, embedder.as_ref(), Mode::Library);
+}
+
+/// One investigation's papers: its `literature/`, PDFs and all, whatever
+/// Git is told to leave out, cited from the investigation's folder.
+fn literature(investigation: PathBuf, cache: Option<PathBuf>) {
+    eprintln!("proton-mcp: the literature of {}", investigation.display());
+    let mut shelf = proton_library::Shelf::new();
+    shelf.cache_in(cache.or_else(proton_library::pdf::cache_dir));
+    shelf.set_pdfs(true);
+    shelf.honour_gitignore(false);
+    shelf.cite_from(Some(investigation.clone()));
+    // A paper added while a call runs is read when it lands.
+    shelf.set_watching(true);
+    shelf.set_roots(vec![investigation.join("literature")]);
+    serve(&mut shelf, None, Mode::Literature);
+}
+
+/// The value after `name` on the command line, if it is there.
+fn arg(name: &str) -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == name {
+            return args.next();
+        }
+    }
+    None
 }
 
 /// `--project <path>`, or the working directory.
@@ -142,7 +188,7 @@ fn project_from_args() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-fn serve(shelf: &mut proton_library::Shelf, embedder: Option<&proton_library::Embedder>) {
+fn serve(shelf: &mut proton_library::Shelf, embedder: Option<&proton_library::Embedder>, mode: Mode) {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
 
@@ -151,7 +197,7 @@ fn serve(shelf: &mut proton_library::Shelf, embedder: Option<&proton_library::Em
         let Some(call) = Call::parse(&line) else {
             continue;
         };
-        let Some(answer) = handle(&call, shelf, embedder) else {
+        let Some(answer) = handle(&call, shelf, embedder, mode) else {
             continue;
         };
         // Flushed every time. A buffered answer is an answer the client waits
@@ -165,6 +211,7 @@ fn handle(
     call: &Call,
     shelf: &mut proton_library::Shelf,
     embedder: Option<&proton_library::Embedder>,
+    mode: Mode,
 ) -> Option<Value> {
     // A notification is acted on and never answered.
     if !call.wants_an_answer() {
@@ -180,11 +227,14 @@ fn handle(
                     .and_then(Value::as_str)
                     .unwrap_or(PROTOCOL),
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "proton-library", "version": env!("CARGO_PKG_VERSION") },
+                "serverInfo": {
+                    "name": if mode == Mode::Literature { "proton-literature" } else { "proton-library" },
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
             }),
         ),
 
-        "tools/list" => rpc::result(&id, json!({ "tools": tools() })),
+        "tools/list" => rpc::result(&id, json!({ "tools": match mode { Mode::Library => tools(), Mode::Literature => literature_tools() } })),
 
         "tools/call" => {
             let name = call
@@ -197,14 +247,20 @@ fn handle(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            match name {
-                "search_library" => {
+            match (mode, name) {
+                (Mode::Literature, "search_literature") => {
+                    let (text, failed) = search_literature(shelf, &args);
+                    rpc::result(&id, rpc::tool_output(text, failed))
+                }
+                (Mode::Literature, "literature_status") => rpc::result(&id, rpc::tool_output(literature_status(shelf), false)),
+                (Mode::Literature, other) => rpc::failure(&id, rpc::INVALID_PARAMS, &format!("no tool named {other}")),
+                (Mode::Library, "search_library") => {
                     let (text, failed) = search(shelf, embedder, &args);
                     rpc::result(&id, rpc::tool_output(text, failed))
                 }
-                "library_status" => rpc::result(&id, rpc::tool_output(status(shelf), false)),
-                "library_sources" => rpc::result(&id, rpc::tool_output(sources(shelf), false)),
-                other => rpc::failure(&id, rpc::INVALID_PARAMS, &format!("no tool named {other}")),
+                (Mode::Library, "library_status") => rpc::result(&id, rpc::tool_output(status(shelf), false)),
+                (Mode::Library, "library_sources") => rpc::result(&id, rpc::tool_output(sources(shelf), false)),
+                (Mode::Library, other) => rpc::failure(&id, rpc::INVALID_PARAMS, &format!("no tool named {other}")),
             }
         }
 
@@ -216,8 +272,93 @@ fn handle(
     })
 }
 
+/// What every tool here is: it reads, and changes nothing — which is what
+/// lets a client that asks before anything else run it unasked.
+fn read_only(mut tools: Value) -> Value {
+    for tool in tools.as_array_mut().into_iter().flatten() {
+        tool["annotations"] = json!({ "readOnlyHint": true, "openWorldHint": false });
+    }
+    tools
+}
+
+fn literature_tools() -> Value {
+    read_only(json!([
+        {
+            "name": "search_literature",
+            "description": "Search the full text of the papers this investigation has gathered — their \
+                            PDFs page by page, and every paper's abstract — for passages about something. \
+                            Ask in the words a paper would use: matching is lexical, so the exact terms \
+                            matter. Each result begins with a citation in double brackets, such as \
+                            [[literature/P003.pdf § Results p. 4]]: quote it back exactly as given whenever \
+                            you use what a passage says. A PDF's text was extracted from the page and may \
+                            be imperfect; a paper with no PDF answers from its abstract, in P003.md.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Terms to look for." },
+                    "limit": { "type": "integer", "description": "Defaults to 6." },
+                    "papers": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Search only these papers, by their ids: P003. Omit to search all of them."
+                    }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "literature_status",
+            "description": "Which of the investigation's papers can be searched: how many papers, how \
+                            many have their full text, and whether any is still being read. Worth \
+                            calling once if a search comes back empty.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }
+    ]))
+}
+
+/// A search of the investigation's papers.
+fn search_literature(shelf: &mut proton_library::Shelf, args: &Value) -> (String, bool) {
+    let Some(query) = args.get("query").and_then(Value::as_str).filter(|q| !q.trim().is_empty()) else {
+        return ("search_literature: `query` is required, and must be words to look for".into(), true);
+    };
+    let ready = ready(shelf);
+    if ready == Ready::None {
+        return ("the papers are still being read — ask again in a moment".into(), true);
+    }
+    if shelf.is_empty() {
+        return ("the investigation has no papers yet: nothing is in its literature/".into(), false);
+    }
+    let limit = args.get("limit").and_then(Value::as_u64).map(|n| n as usize).unwrap_or(6).clamp(1, 25);
+    let papers: Vec<String> = args
+        .get("papers")
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(Value::as_str).map(|p| p.trim().trim_end_matches(".pdf").trim_end_matches(".md").to_string()).collect())
+        .unwrap_or_default();
+    let scope = proton_library::Scope::of(papers.iter().flat_map(|p| [format!("{p}.pdf"), format!("{p}.md")]));
+    let hits = shelf.search_in(query, limit, &scope);
+    let partial = if ready == Ready::Some { "\n\n---\n\n(Some papers are still being read. Ask again shortly if this looks thin.)" } else { "" };
+    if hits.is_empty() {
+        let within = if papers.is_empty() { String::new() } else { format!(" within {}", papers.join(", ")) };
+        return (format!("nothing in the papers about {query:?}{within}{partial}"), false);
+    }
+    (format!("{}{partial}", proton_library::quote(&hits)), false)
+}
+
+fn literature_status(shelf: &mut proton_library::Shelf) -> String {
+    let done = ready(shelf) == Ready::All;
+    let sources = shelf.sources();
+    let docs: Vec<String> = sources.iter().map(|s| s.path.clone()).collect();
+    let pdfs = docs.iter().filter(|d| d.ends_with(".pdf")).count();
+    let papers = docs.iter().filter(|d| d.ends_with(".md")).count();
+    format!(
+        "{papers} papers, {pdfs} with their full text; {} passages{}",
+        shelf.len(),
+        if done { String::new() } else { " (still reading)".into() }
+    )
+}
+
 fn tools() -> Value {
-    json!([
+    read_only(json!([
         {
             "name": "search_library",
             "description": "Search the user's own notes and documents — their vault, course \
@@ -259,7 +400,7 @@ fn tools() -> Value {
                             subject.",
             "inputSchema": { "type": "object", "properties": {} }
         }
-    ])
+    ]))
 }
 
 fn search(
@@ -353,11 +494,7 @@ fn search(
     }
     // The citation on its own line above the passage, so what to quote back is
     // unambiguous even after the text runs to sixty lines.
-    let out = hits
-        .iter()
-        .map(|hit| format!("[[{}]]\n{}", hit.cite, hit.passage.text))
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n");
+    let out = proton_library::quote(&hits);
     (format!("{out}{partial}"), false)
 }
 
@@ -481,6 +618,7 @@ mod tests {
             &call("initialize", json!({ "protocolVersion": "2024-11-05" })),
             &mut shelf(),
             None,
+            Mode::Library,
         )
         .unwrap();
         assert_eq!(out["result"]["protocolVersion"], json!("2024-11-05"));
@@ -490,7 +628,7 @@ mod tests {
 
     #[test]
     fn the_tools_are_listed_with_schemas() {
-        let out = handle(&call("tools/list", json!({})), &mut shelf(), None).unwrap();
+        let out = handle(&call("tools/list", json!({})), &mut shelf(), None, Mode::Library).unwrap();
         let tools = out["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(
@@ -514,18 +652,19 @@ mod tests {
         // Replying to one is a protocol error, not a harmless extra.
         let note =
             Call::parse(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).unwrap();
-        assert!(handle(&note, &mut shelf(), None).is_none());
+        assert!(handle(&note, &mut shelf(), None, Mode::Library).is_none());
     }
 
     #[test]
     fn an_unknown_method_is_an_error_and_an_unknown_tool_is_too() {
-        let out = handle(&call("wat", json!({})), &mut shelf(), None).unwrap();
+        let out = handle(&call("wat", json!({})), &mut shelf(), None, Mode::Library).unwrap();
         assert_eq!(out["error"]["code"], json!(rpc::METHOD_NOT_FOUND));
 
         let out = handle(
             &call("tools/call", json!({ "name": "delete_everything" })),
             &mut shelf(),
             None,
+            Mode::Library,
         )
         .unwrap();
         assert_eq!(out["error"]["code"], json!(rpc::INVALID_PARAMS));
@@ -542,6 +681,7 @@ mod tests {
             ),
             &mut shelf(),
             None,
+            Mode::Library,
         )
         .unwrap();
         let text = out["result"]["content"][0]["text"].as_str().unwrap();
@@ -557,6 +697,7 @@ mod tests {
             &call("tools/call", json!({ "name": "search_library" })),
             &mut shelf(),
             None,
+            Mode::Library,
         )
         .unwrap();
         assert!(out.get("error").is_none(), "{out}");
@@ -600,6 +741,7 @@ gradients and descent
             ),
             &mut shelf,
             None,
+            Mode::Library,
         )
         .unwrap();
         let text = out["result"]["content"][0]["text"].as_str().unwrap();
@@ -608,8 +750,50 @@ gradients and descent
     }
 
     #[test]
+    fn an_investigations_literature_is_served_page_by_page_and_cited_from_its_folder() {
+        let dir = std::env::temp_dir().join(format!("proton-mcp-literature-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        std::fs::create_dir_all(dir.join("literature")).unwrap();
+        std::fs::write(dir.join(".gitignore"), "literature/*.pdf\n").unwrap();
+        std::fs::write(dir.join("README.md"), "# Brief\nscattering in the brief\n").unwrap();
+        std::fs::write(
+            dir.join("literature/P003.pdf"),
+            proton_library::pdf::fixture(&["Introduction\nnothing here", "Results\nmolecular scattering goes as the inverse fourth power"]),
+        )
+        .unwrap();
+        std::fs::write(dir.join("literature/P004.md"), "# P004: Ozone\n\n## Abstract\n\nChappuis absorption and scattering at twilight.\n").unwrap();
+        let mut shelf = proton_library::Shelf::new();
+        shelf.set_pdfs(true);
+        shelf.honour_gitignore(false);
+        shelf.cite_from(Some(dir.clone()));
+        shelf.set_roots(vec![dir.join("literature")]);
+
+        let out = handle(&call("initialize", json!({})), &mut shelf, None, Mode::Literature).unwrap();
+        assert_eq!(out["result"]["serverInfo"]["name"], json!("proton-literature"));
+        let out = handle(&call("tools/list", json!({})), &mut shelf, None, Mode::Literature).unwrap();
+        let tools = out["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.iter().map(|t| t["name"].as_str().unwrap()).collect::<Vec<_>>(), ["search_literature", "literature_status"]);
+        assert!(tools.iter().all(|t| t["annotations"]["readOnlyHint"] == json!(true)), "a client that asks first would ask");
+
+        let search = |args: Value, shelf: &mut proton_library::Shelf| {
+            let out = handle(&call("tools/call", json!({ "name": "search_literature", "arguments": args })), shelf, None, Mode::Literature).unwrap();
+            out["result"]["content"][0]["text"].as_str().unwrap().to_string()
+        };
+        let text = search(json!({ "query": "inverse fourth power" }), &mut shelf);
+        assert!(text.starts_with("[[literature/P003.pdf § Results p. 2]]"), "{text}");
+        assert!(!text.contains("brief"), "read outside literature/");
+        let only = search(json!({ "query": "scattering", "papers": ["P004"] }), &mut shelf);
+        assert!(only.contains("[[literature/P004.md") && !only.contains("P003"), "{only}");
+        assert!(search(json!({ "query": "ozone", "papers": ["P003"] }), &mut shelf).contains("within P003"));
+        let out = handle(&call("tools/call", json!({ "name": "search_library", "arguments": { "query": "x" } })), &mut shelf, None, Mode::Literature).unwrap();
+        assert_eq!(out["error"]["code"], json!(rpc::INVALID_PARAMS), "the library's tools are not the literature's");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn ping_is_answered() {
-        let out = handle(&call("ping", json!({})), &mut shelf(), None).unwrap();
+        let out = handle(&call("ping", json!({})), &mut shelf(), None, Mode::Library).unwrap();
         assert!(out["result"].is_object());
     }
 }

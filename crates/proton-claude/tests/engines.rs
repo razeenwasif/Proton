@@ -241,6 +241,7 @@ fn hypothesis_schema() -> proton_claude::engine::Unattended {
         schema: Some(json!({ "type": "object" })),
         web: true,
         max_turns: None,
+        mcp: Vec::new(),
     }
 }
 

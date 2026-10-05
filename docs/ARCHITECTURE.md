@@ -920,6 +920,29 @@ sign-in page is not a paper, and arXiv's copy is tried next); written to a
 scientist put there is theirs — and never into a folder that has gone. A
 paywalled paper keeps its abstract, and says where a copy would go.
 
+The agents read the papers' full text. Claude Code and Codex are given
+`proton-mcp --literature <investigation>` for each call once there are papers:
+its `search_literature` searches every PDF page by page and every abstract —
+the shelf reads past the investigation's `.gitignore`, which keeps the PDFs out
+of Git and which the walker would otherwise honour from the folder above — and
+cites from the investigation's folder, `[[literature/P003.pdf § Results p. 4]]`,
+the path a call working there knows the paper by. Its tools are marked
+read-only and allowed up front. Claude Code is started `--restricted` for these
+calls rather than `--safe-mode`, which drops even the servers `--mcp-config`
+names (Claude Code 2.1.288): restricted ignores the person's settings, and so
+their hooks and plugins; `--strict-mcp-config` their servers;
+`--disable-slash-commands` their skills; and `CLAUDE_CODE_DISABLE_CLAUDE_MDS`
+and `CLAUDE_CODE_DISABLE_AUTO_MEMORY` their CLAUDE.md and memory. Codex is given
+the server in its thread's config, after the overrides that switch the
+person's off, and calls it unasked with approval `never`. Antigravity takes no
+server, so it — and everyone, where no `proton-mcp` is found beside Proton — is
+given the passages most about its task in its prompt instead: the round's
+queries for proposing, the hypotheses in front of it for judging. Those are
+read at once from the abstracts and from PDF text already extracted; a worker
+extracts each new PDF into `.investigation/pdf-text/`, so no call waits on it.
+A citation of `literature/…` anywhere on the board opens the paper's PDF at the
+page in the document viewer, or the paper itself.
+
 An investigation made before there was a literature has it off, so none starts
 telling third parties its topic on its own; a new one has it on unless the
 scientist says otherwise. Off, nothing is asked of anybody: the scientist's
