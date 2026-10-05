@@ -109,6 +109,9 @@ pub struct Task {
     pub state: TaskState,
     pub attempts: u8,
     pub repairs: u8,
+    /// The calls it has cost: each time it was started, and each repair.
+    #[serde(default)]
+    pub calls: u32,
     /// The model it reported, once it started.
     #[serde(default)]
     pub model: String,
@@ -409,6 +412,7 @@ impl Supervisor {
             state: TaskState::Ready,
             attempts: 0,
             repairs: 0,
+            calls: 0,
             model: String::new(),
             native: String::new(),
             queued: now,
@@ -512,6 +516,7 @@ impl Supervisor {
             if let Some(t) = self.task_mut(&id) {
                 t.state = TaskState::Running;
                 t.started = Some(now);
+                t.calls += 1;
             }
             out.push(dispatch);
         }
@@ -726,6 +731,7 @@ impl Supervisor {
                 if let Some(t) = self.task_mut(id) {
                     t.state = TaskState::Repairing;
                     t.repairs += 1;
+                    t.calls += 1;
                 }
                 self.state.used += 1;
                 Answered::Repair(parse::repair(&why))
@@ -1162,6 +1168,8 @@ impl Supervisor {
                 TaskState::Cancelled => "cancelled".into(),
                 other => format!("{other:?}"),
             };
+            // A task that cost more than one call says so, so the calls add up.
+            let result = if t.calls > 1 { format!("{result}, in {} calls", t.calls) } else { result };
             text.push_str(&format!("| {} | {} | {} | {} | {result} |\n", t.id, t.phase.name(), t.seat.name(), t.model));
         }
         Effect::RoundReport { round, text }
@@ -1204,6 +1212,9 @@ impl Supervisor {
                     t.attempts += 1;
                     t.started = None;
                 }
+                // Said, not done quietly: it costs the round a call.
+                let why = failure.describe();
+                effects.push(Effect::Notice(format!("{} {}: {}. It is started again.", task.seat.name(), task.phase.name(), why.trim_end_matches('.'))));
                 return effects;
             }
             _ => {

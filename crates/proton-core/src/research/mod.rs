@@ -145,7 +145,7 @@ fn instance() -> &'static str {
 
 impl Research {
     pub fn new(root: &Path) -> Research {
-        let mut research = Research::with_factory(root, Box::new(Engines), instance());
+        let mut research = Research::with_factory(root, Box::new(Engines::default()), instance());
         research.lab = shared_lab();
         research
     }
@@ -926,7 +926,7 @@ mod tests {
     #[test]
     fn a_new_investigation_is_listed_opened_and_drawn() {
         let dir = root("new");
-        let mut research = Research::with_factory(&dir, Box::new(Engines), "test");
+        let mut research = Research::with_factory(&dir, Box::new(Engines::default()), "test");
         let events = research.sync();
         assert!(matches!(events.first(), Some(Event::ResearchList { investigations, open: None }) if investigations.is_empty()));
         // A Lab of its own, with no conda to call: the machine's is not touched.

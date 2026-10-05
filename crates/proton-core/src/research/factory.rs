@@ -5,7 +5,9 @@
 //! must not remember writing what it reviews, so nothing is carried from
 //! one task to the next but what the files say.
 
+use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::Duration;
 
 use proton_claude::chat::Settings;
 use proton_claude::engine::{self, Unattended};
@@ -22,6 +24,12 @@ pub trait AgentFactory: Send {
 
     /// A fresh unattended conversation for one task, working in `cwd`.
     fn create(&mut self, task: &Dispatch, how: &Unattended, settings: Settings, cwd: &Path) -> Result<Box<dyn Conversation>, String>;
+
+    /// The model a seat is to run when the investigation names none, if it
+    /// must be named: see [`Engines::default_model`].
+    fn default_model(&mut self, _seat: Seat) -> Option<String> {
+        None
+    }
 }
 
 /// The engine a seat is.
@@ -36,9 +44,40 @@ pub fn engine_of(seat: Seat) -> Option<Engine> {
 }
 
 /// Claude Code, Codex and Antigravity, as they are installed here.
-pub struct Engines;
+#[derive(Default)]
+pub struct Engines {
+    /// The models chosen for seats that name none, once chosen.
+    chosen: BTreeMap<Seat, Option<String>>,
+}
+
+/// The first Gemini model Antigravity offers: it lists its newest first.
+fn gemini(capabilities: &proton_claude::Capabilities) -> Option<String> {
+    capabilities.models.iter().map(|m| m.value.clone()).find(|v| v.starts_with("gemini"))
+}
 
 impl AgentFactory for Engines {
+    /// Antigravity runs Gemini, Claude and GPT models alike and does not say
+    /// which it is running, so a seat whose investigation names none is
+    /// given a Gemini model by name: its family is then known, not assumed,
+    /// and nobody reviews or judges their own. The list is the one the Chat
+    /// tab remembers, else asked of `agy` once.
+    fn default_model(&mut self, seat: Seat) -> Option<String> {
+        if seat != Seat::Antigravity {
+            return None;
+        }
+        self.chosen
+            .entry(seat)
+            .or_insert_with(|| {
+                let remembered = engine::remembered().into_iter().find(|c| c.engine == Engine::Antigravity);
+                remembered.as_ref().and_then(gemini).or_else(|| {
+                    let asked = proton_claude::agy::probe().recv_timeout(Duration::from_secs(25)).ok()?;
+                    engine::remember(&asked);
+                    gemini(&asked)
+                })
+            })
+            .clone()
+    }
+
     fn unavailable(&mut self, seat: Seat) -> Option<String> {
         match engine_of(seat) {
             Some(Engine::Gemini) => Some("The Gemini CLI cannot take part unattended yet.".into()),

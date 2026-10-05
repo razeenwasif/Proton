@@ -767,15 +767,25 @@ a second.
 | A call | its own conversation, working in `research/<slug>/`, told its role and its rules with the task itself rather than by any instructions file |
 | A question | refused: nobody is there to answer it |
 | An answer that will not read | asked for once more, in the same conversation |
-| No answer in 15 minutes | stopped, and tried once more |
+| No answer, or none in 15 minutes | stopped, and tried once more — said in a notice, and counted in the round's report, which gives each task's calls |
 | Signed out | the seat sits the rest of the round out; its reviews and judging go to another family |
 | At its limit | the seat waits until the limit resets |
 | A judge running its own family's model | stopped as it says so; the task goes elsewhere, or the round goes on without it |
+| A seat that does not say its model | Antigravity runs Gemini, Claude and GPT models alike and no longer reports which, so a seat whose investigation names none is given Antigravity's newest Gemini by name: its family is known, not assumed |
 | Records | `tasks/T0001.json` (what it was asked and answered, by which model), `.investigation/transcripts/`, `.investigation/round.json` |
 | Two Protons | the first holds `.investigation/lock` with a heartbeat; the other is read only until it goes quiet |
 | Proton closed mid-round | back paused: spending the scientist's limits is theirs to start |
 
 One round runs at a time in a project.
+
+`tests/live_round.rs` plays one round on the real engines, signed in as
+whoever runs it; it is ignored unless asked for, since it spends their
+limits, and it is run from a clean environment, as Proton is started, because
+a shell inside another agent's session carries that session's variables and
+the engines read them. The first, on a physics question, took 31 minutes and
+fifteen calls of its twenty: Claude's calls took under a minute,
+Antigravity's one to five, Codex's up to ten. It is what found Antigravity's
+missing model and a retry the report did not account for.
 
 ### The Lab
 

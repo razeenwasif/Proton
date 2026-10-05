@@ -56,6 +56,8 @@ struct Call {
     schema: bool,
     interrupted: bool,
     stopped: bool,
+    /// The model it was told to run, if any.
+    model: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -277,6 +279,8 @@ struct Factory {
     fates: Vec<(Seat, Phase, VecDeque<Step>)>,
     /// Code each new hypothesis comes with, if any.
     code: String,
+    /// The model each seat is given when the investigation names none.
+    defaults: BTreeMap<Seat, String>,
 }
 
 impl Factory {
@@ -301,7 +305,11 @@ impl AgentFactory for Factory {
         self.unavailable.get(&seat).cloned()
     }
 
-    fn create(&mut self, task: &Dispatch, how: &Unattended, _: Settings, cwd: &Path) -> Result<Box<dyn Conversation>, String> {
+    fn default_model(&mut self, seat: Seat) -> Option<String> {
+        self.defaults.get(&seat).cloned()
+    }
+
+    fn create(&mut self, task: &Dispatch, how: &Unattended, settings: Settings, cwd: &Path) -> Result<Box<dyn Conversation>, String> {
         let steps = match self.fates.iter().position(|(s, p, _)| *s == task.seat && *p == task.phase) {
             Some(at) => self.fates.remove(at).2,
             None => VecDeque::new(),
@@ -319,6 +327,7 @@ impl AgentFactory for Factory {
                 schema: how.schema.is_some(),
                 interrupted: false,
                 stopped: false,
+                model: settings.model.clone(),
             });
             log.calls.len() - 1
         };
@@ -328,7 +337,8 @@ impl AgentFactory for Factory {
             id,
             engine,
             cwd: cwd.to_path_buf(),
-            model: self.models.get(&task.seat).cloned().unwrap_or_default(),
+            // As the engines do: the model it was told to run is the one it says.
+            model: settings.model.clone().or_else(|| self.models.get(&task.seat).cloned()).unwrap_or_default(),
             late: self.late.contains(&task.seat),
             steps,
             current: None,
@@ -539,6 +549,8 @@ fn an_answer_that_will_not_read_is_asked_for_again_once() {
     assert_eq!(frame.sent.len(), 2, "the repair was not asked in the same conversation");
     assert!(frame.sent[1].contains("could not be used"), "{}", frame.sent[1]);
     assert_eq!(log.calls.iter().filter(|c| c.phase == Phase::Frame).count(), 1, "the repair was a call of its own");
+    let report = std::fs::read_to_string(folder.dir().join("rounds/round-001.md")).unwrap();
+    assert!(report.lines().any(|l| l.contains("| Frame |") && l.ends_with("| done, in 2 calls |")), "the repair is not counted: {report}");
     drop(log);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -566,7 +578,7 @@ fn a_call_that_hangs_is_stopped_at_its_deadline_and_tried_again() {
     let factory = factory.then(Seat::Antigravity, Phase::Generate, &[Step::Hang]);
     let mut research = begin(&dir, factory);
     research.start_at(T0);
-    let (end, _) = play(&mut research, T0, 30);
+    let (end, events) = play(&mut research, T0, 30);
     assert!(end >= T0 + TIMEOUT, "it was not waited for");
     let log = log.lock().unwrap();
     let tries: Vec<&Call> = log.calls.iter().filter(|c| c.seat == Seat::Antigravity && c.phase == Phase::Generate).collect();
@@ -574,6 +586,11 @@ fn a_call_that_hangs_is_stopped_at_its_deadline_and_tried_again() {
     assert!(tries[0].interrupted && tries[0].stopped && tries[0].task == tries[1].task, "the hung call was not stopped, or the retry was another task");
     let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
     assert_eq!(folder.hypotheses().iter().filter(|h| h.author.seat == Seat::Antigravity && h.parents.is_empty()).count(), 2);
+    // The call it cost again is said, and counted where the round adds up.
+    assert!(notices(&events).iter().any(|n| n == "Antigravity Generate: It ran out of time. It is started again."), "{:?}", notices(&events));
+    let report = std::fs::read_to_string(folder.dir().join("rounds/round-001.md")).unwrap();
+    let row = report.lines().find(|l| l.contains(&tries[0].task)).unwrap();
+    assert!(row.ends_with("| done, in 2 calls |"), "{row}");
     drop(log);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1106,5 +1123,30 @@ fn quitting_stops_every_run_and_says_so_and_a_crash_s_leftover_is_settled_when_s
     let r009 = runs.unwrap().into_iter().find(|r| r.id == "R009").unwrap();
     assert_eq!(r009.state, proton_lab::RunState::Stopped, "a run nothing watches is shown running");
     assert_eq!(folder.experiments().into_iter().find(|e| e.id == "E009").unwrap().status, ExperimentStatus::Failed);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_seat_that_does_not_say_its_model_is_told_one_and_judged_by_it() {
+    // Antigravity says nothing of the model it runs, so it is given one.
+    let dir = root("named");
+    let (mut factory, log) = Factory::new();
+    factory.models.insert(Seat::Antigravity, String::new());
+    factory.defaults.insert(Seat::Antigravity, "gemini-3.8-flash-high".into());
+    let mut research = begin(&dir, factory);
+    research.start_at(T0);
+    let (_, events) = play(&mut research, T0, 1);
+    let log = log.lock().unwrap();
+    let agy: Vec<&Call> = log.calls.iter().filter(|c| c.seat == Seat::Antigravity).collect();
+    assert!(!agy.is_empty() && agy.iter().all(|c| c.model.as_deref() == Some("gemini-3.8-flash-high")), "{agy:?}");
+    assert!(log.calls.iter().filter(|c| c.seat != Seat::Antigravity).all(|c| c.model.is_none()), "a seat that says its model was told one");
+    let tasks = events.iter().rev().find_map(|e| match e {
+        Event::ResearchRound { tasks, .. } => Some(tasks.clone()),
+        _ => None,
+    });
+    assert!(tasks.unwrap().iter().filter(|t| t.seat == Seat::Antigravity).all(|t| t.model == "gemini-3.8-flash-high"), "the round does not know what it ran");
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    assert!(folder.hypotheses().iter().filter(|h| h.author.seat == Seat::Antigravity).all(|h| h.author.model == "gemini-3.8-flash-high"));
+    drop(log);
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -93,6 +93,9 @@ pub struct Driver {
     beat: u64,
     /// Seats that cannot sit at all, and why: asked when a round starts or resumes.
     unavailable: BTreeMap<Seat, String>,
+    /// The model each seat runs when the investigation names none, where
+    /// one must be named.
+    defaults: BTreeMap<Seat, String>,
 }
 
 /// The highest round the folder has a report of.
@@ -162,6 +165,7 @@ impl Driver {
             snap: None,
             beat: 0,
             unavailable: BTreeMap::new(),
+            defaults: BTreeMap::new(),
         }
     }
 
@@ -217,7 +221,7 @@ impl Driver {
                     .rev()
                     .find(|t| t.seat == config.seat && !t.model.is_empty())
                     .map(|t| t.model.clone())
-                    .or_else(|| config.model.clone())
+                    .or_else(|| self.model_of(config.seat))
                     .unwrap_or_default();
                 SeatRow {
                     seat: config.seat,
@@ -256,10 +260,21 @@ impl Driver {
         self.unavailable.get(&seat).map(String::as_str)
     }
 
-    /// Ask each seat whether it can sit at all.
+    /// Ask each seat whether it can sit at all, and which model one that
+    /// must be named runs.
     pub fn preflight(&mut self, factory: &mut dyn AgentFactory) {
-        let seats: Vec<Seat> = self.folder.investigation().sitting().map(|s| s.seat).collect();
-        self.unavailable = seats.into_iter().filter_map(|seat| factory.unavailable(seat).map(|why| (seat, why))).collect();
+        let seats: Vec<(Seat, Option<String>)> = self.folder.investigation().sitting().map(|s| (s.seat, s.model.clone())).collect();
+        self.unavailable = seats.iter().filter_map(|(seat, _)| factory.unavailable(*seat).map(|why| (*seat, why))).collect();
+        self.defaults = seats
+            .iter()
+            .filter(|(seat, model)| model.is_none() && !self.unavailable.contains_key(seat))
+            .filter_map(|(seat, _)| factory.default_model(*seat).map(|m| (*seat, m)))
+            .collect();
+    }
+
+    /// The model a seat runs: the investigation's, else the one chosen for it.
+    fn model_of(&self, seat: Seat) -> Option<String> {
+        self.folder.investigation().seats.iter().find(|s| s.seat == seat).and_then(|s| s.model.clone()).or_else(|| self.defaults.get(&seat).cloned())
     }
 
     /// The investigation as it stands, read again when it may have changed.
@@ -273,8 +288,8 @@ impl Driver {
         if let Ok(fresh) = Folder::open(self.folder.dir()) {
             self.folder = fresh;
         }
+        let models = self.folder.investigation().seats.iter().filter_map(|s| self.model_of(s.seat).map(|m| (s.seat, m))).collect();
         let f = &self.folder;
-        let models = f.investigation().seats.iter().filter_map(|s| s.model.clone().map(|m| (s.seat, m))).collect();
         let snap = Snapshot {
             investigation: Some(f.investigation().clone()),
             brief: f.brief(),
@@ -593,7 +608,7 @@ impl Driver {
     fn launch(&mut self, d: Dispatch, factory: &mut dyn AgentFactory, now: u64) -> Moved {
         let config = self.folder.investigation().seats.iter().find(|s| s.seat == d.seat).cloned();
         let settings = Settings {
-            model: config.as_ref().and_then(|c| c.model.clone()),
+            model: self.model_of(d.seat),
             mode: "default".into(),
             effort: config.as_ref().and_then(|c| c.effort.clone()),
         };
