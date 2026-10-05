@@ -1439,19 +1439,24 @@ await test('In a notebook, i puts the caret in the selected cell', async () => {
   src.blur(); await settle();
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
-await test('Research is the eighth mode: ⌃8 opens it, in Codex\'s chrome and on an opaque ground', async () => {
+await test('Research sits beside Data after Codex: ⌃4 opens it, in Codex\'s chrome and on an opaque ground', async () => {
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
   const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
   await win.dispatch({type: 'setMode', mode: 'design'}); await settle();
   const before = win.commands.length, opaque = asked().length;
   doc.body.focus();
-  key('8', {ctrlKey: true}); await settle();
-  assert(win.commands.slice(before).some((c) => c.type === 'setMode' && c.mode === 'research'), '⌃8 did not ask for Research');
+  key('4', {ctrlKey: true}); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'setMode' && c.mode === 'research'), '⌃4 did not ask for Research');
   assert($('.workspace.on')?.dataset.ws === 'research', 'Research is not on screen');
   assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.rail')) && !shown($('.statusline')), 'Research kept the old chrome');
   assert(!shown($('.titlebar [data-term-toggle]')), 'Research offers a terminal it cannot show');
   const tab = $('.titlebar [data-mode="research"]');
-  assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃8'), 'the title bar does not show Research');
+  assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃4'), 'the title bar does not show Research');
+  // Codex, Data and Research side by side, in the title bar and on the rail.
+  for (const list of ['.tb-modes', '.mode-rail']) {
+    const order = [...doc.querySelectorAll(`${list} [data-mode]`)].map((b) => b.dataset.mode).join();
+    assert(order === 'chat,codex,data,research,design,modeling,game,video', `${list} is not in the new order: ${order}`);
+  }
   assert(asked().slice(opaque).at(-1) === ground, `Research did not ask for the ground: ${JSON.stringify(asked().slice(opaque))}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });

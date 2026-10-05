@@ -2,9 +2,10 @@
 
 # Proton
 
-A code editor that is also a chat client, a design tool, a 3D workspace, a game
-editor, a video editor, a data notebook and a research workbench — one window, eight modes, a shared Vim-style modal engine
-underneath all of them, and an agent that can act in any of them.
+A code editor that is also a chat client, a data notebook, a research
+workbench, a design tool, a 3D workspace, a game editor and a video editor —
+one window, eight modes, a shared Vim-style modal engine underneath all of
+them, and an agent that can act in any of them.
 
 **M0 through M7 are built**, and every mode in the window now reads and writes
 a real document. The editor, Telescope and language servers, the agent, the
@@ -81,20 +82,6 @@ answer in the same tab.
 target's device / layout-inspector / Logcat panel. C and C++ are formatted by
 clangd, or by `clang-format` — Xcode's, Homebrew's or LLVM's — where there is
 no clangd, with the project's `.clang-format`.
-**Design** · a web builder with a layer tree and an artboard, two-way bound to
-real component source and design tokens.
-**Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a
-scene serialised to diffable JSON. An object names the `.obj` its geometry is
-in, a stack of operations says what to do to it, and the material graph is
-compiled into a program a WebGL renderer runs on every pixel.
-**Game** · a Godot project's scene tree and an inspector that edits the
-`.tscn` without reformatting it. The play transport, profiler, hot reload and
-the agent that verifies changes by replaying recorded input all need an engine
-process, and wait on one.
-**Video** · a multitrack timeline over a CMX3600 edit decision list, with the
-captions from the `.srt` beside it. Both files are spliced, never re-printed.
-There is no program monitor: a frame of the programme is a decoded frame of
-video, and decoding needs ffmpeg.
 **Data** · notebook + SQL + dataframe grid + charts, with real cell lineage back
 into the codebase, drawn as Codex is. Data keeps projects of its own, apart
 from Codex's: the folder open in Codex is not carried into it, and going back
@@ -140,8 +127,22 @@ folder keeps what it printed, the numbers and pictures it saved, and a record
 of the code and environment by digest and of who approved it. Its pictures are
 drawn in the Lab, and its 3D scenes — spheres and bonds, points, lines, arrows
 and meshes, in frames for anything that moves — open there in three.js to be
-turned and played. What a run showed goes back to the team: a seat of another model
-family reviews it against its hypothesis, in the round or the next.
+turned and played. What a run showed goes back to the team: a seat of another
+model family reviews it against its hypothesis, in the round or the next.
+**Design** · a web builder with a layer tree and an artboard, two-way bound to
+real component source and design tokens.
+**Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a
+scene serialised to diffable JSON. An object names the `.obj` its geometry is
+in, a stack of operations says what to do to it, and the material graph is
+compiled into a program a WebGL renderer runs on every pixel.
+**Game** · a Godot project's scene tree and an inspector that edits the
+`.tscn` without reformatting it. The play transport, profiler, hot reload and
+the agent that verifies changes by replaying recorded input all need an engine
+process, and wait on one.
+**Video** · a multitrack timeline over a CMX3600 edit decision list, with the
+captions from the `.srt` beside it. Both files are spliced, never re-printed.
+There is no program monitor: a frame of the programme is a decoded frame of
+video, and decoding needs ffmpeg.
 
 ## The three things that hold it together
 

@@ -16,27 +16,28 @@ pub enum ModeId {
     Chat,
     #[default]
     Codex,
-    Design,
-    Modeling,
-    Game,
-    Video,
     Data,
     /// A team of AI researchers with a scientist in the loop: co-scientist's
     /// rounds over an investigation's files, and a Lab that runs their code.
     Research,
+    Design,
+    Modeling,
+    Game,
+    Video,
 }
 
 impl ModeId {
-    /// Ordered as the rail shows them, which is also the `1`–`8` binding.
+    /// Ordered as the rail shows them, which is also the `1`–`8` binding:
+    /// Data and Research beside Codex, the three a working day moves between.
     pub const ALL: [ModeId; 8] = [
         ModeId::Chat,
         ModeId::Codex,
+        ModeId::Data,
+        ModeId::Research,
         ModeId::Design,
         ModeId::Modeling,
         ModeId::Game,
         ModeId::Video,
-        ModeId::Data,
-        ModeId::Research,
     ];
 
     pub fn slug(self) -> &'static str {

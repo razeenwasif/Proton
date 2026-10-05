@@ -461,7 +461,7 @@ $$("[data-translucency-set]").forEach((b) =>
    The mode bar asks the core to switch; the core's ModeChanged event is
    what actually moves the UI. That indirection looks pointless with one
    front end and is the reason a second one is possible. */
-const MODES = ["chat", "codex", "design", "modeling", "game", "video", "data", "research"];
+const MODES = ["chat", "codex", "data", "research", "design", "modeling", "game", "video"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -5071,7 +5071,7 @@ document.addEventListener("focusin", (e) => {
 });
 
 /* ── keys ─────────────────────────────────────────────────────────────
-   Two layers, and the split matters. Shell chords (⌘K, ⌘,, ⌃1-7) are the
+   Two layers, and the split matters. Shell chords (⌘K, ⌘,, ⌃1-8) are the
    window's own bindings and never reach the core. Everything else is a
    keystroke the core interprets — including the digits, which are vim
    counts, not mode switches. */
