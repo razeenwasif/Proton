@@ -611,15 +611,9 @@ impl Workspace {
             /* ── notebooks ────────────────────────────────────────── */
             Command::RunCell { index } => {
                 let cwd = self.pickers.root().to_path_buf();
-                match crate::data::python(&cwd) {
-                    Some(python) => match self.data.run(index, &python, &cwd) {
-                        Ok(()) => vec![self.notebook_event()],
-                        Err(why) => vec![notice(why, NoticeLevel::Error)],
-                    },
-                    None => vec![notice(
-                        "no python to run a notebook with — set PROTON_PYTHON".into(),
-                        NoticeLevel::Error,
-                    )],
+                match self.data.run(index, &cwd) {
+                    Ok(()) => vec![self.notebook_event()],
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
                 }
             }
 
@@ -962,22 +956,16 @@ impl Workspace {
 
             Command::RunAll => {
                 let cwd = self.pickers.root().to_path_buf();
-                match crate::data::python(&cwd) {
-                    Some(python) => match self.data.run_all(&python, &cwd) {
-                        Ok(0) => vec![notice(
-                            "nothing to run: no code cells".into(),
-                            NoticeLevel::Info,
-                        )],
-                        Ok(n) => vec![
-                            notice(format!("running {n} cells"), NoticeLevel::Info),
-                            self.notebook_event(),
-                        ],
-                        Err(why) => vec![notice(why, NoticeLevel::Error)],
-                    },
-                    None => vec![notice(
-                        "no python to run a notebook with — set PROTON_PYTHON".into(),
-                        NoticeLevel::Error,
+                match self.data.run_all(&cwd) {
+                    Ok(0) => vec![notice(
+                        "nothing to run: no code cells".into(),
+                        NoticeLevel::Info,
                     )],
+                    Ok(n) => vec![
+                        notice(format!("running {n} cells"), NoticeLevel::Info),
+                        self.notebook_event(),
+                    ],
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
                 }
             }
 
@@ -4032,9 +4020,7 @@ impl Workspace {
         }
 
         let cwd = self.pickers.root().to_path_buf();
-        let python = crate::data::python(&cwd)
-            .ok_or("no python to run a notebook with — set PROTON_PYTHON")?;
-        self.data.run(cell, &python, &cwd)?;
+        self.data.run(cell, &cwd)?;
         Ok(cell)
     }
 
@@ -5250,6 +5236,7 @@ impl Workspace {
                 .unwrap_or_default(),
             cells: self.data.cells(),
             problem: self.data.problem().unwrap_or_default().to_string(),
+            language: self.data.language(),
         }
     }
 

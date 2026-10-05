@@ -94,7 +94,19 @@ video, and decoding needs ffmpeg.
 **Data** · notebook + SQL + dataframe grid + charts, with real cell lineage back
 into the codebase, drawn as Codex is. Data keeps projects of its own, apart
 from Codex's: the folder open in Codex is not carried into it, and going back
-to Data brings back the one it had.
+to Data brings back the one it had. Code cells are coloured as you type them,
+and prose cells are drawn as the agent's answers are, TeX included.
+
+Cells run in a Jupyter kernel, in the first of these that has one:
+`PROTON_PYTHON`; the project's `.venv`, `venv` or `.env`; the Jupyter kernel
+the notebook names (`metadata.kernelspec`), as `jupyter kernelspec list`
+shows it; then the first Python on your login shell's PATH that has
+`ipykernel`. A kernel that stops because its Python has no ipykernel says
+how to add it. For a project of its own:
+
+```bash
+python3 -m venv .venv && .venv/bin/python -m pip install ipykernel
+```
 
 ## The three things that hold it together
 

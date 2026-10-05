@@ -149,7 +149,12 @@ path: string, cells: Array<CellView>,
 /**
  * Why there is no kernel, when there is a reason worth showing.
  */
-problem: string, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
+problem: string, 
+/**
+ * The language its code cells are in, to colour them by: what the
+ * notebook says, else Python.
+ */
+language: string, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
 /**
  * The folders conversations are grouped into, each with what it
  * holds; what is in a folder is not in `sessions` as well.

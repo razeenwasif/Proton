@@ -629,6 +629,12 @@ Data's switcher and the two are separate from then on, across restarts.
 Opening a notebook from Codex takes its project to Data, since that is where
 the notebook is; closing a project on one side leaves it open on the other.
 
+A code cell is coloured as it is typed, by the lexer the agent's answers use:
+the colours are the source drawn again behind the cell, whose own text is
+clear, so what you type into stays plain text with the browser's own undo.
+Prose cells go through the answers' renderer too — code blocks, tables and
+TeX, which notebooks are full of.
+
 Notebook, SQL, grid and charts over the same kernel. Cells record their inputs,
 so lineage is real: the analyst cell can say "open sat 17 in Codex" and land on
 the scheduler code that emits `SAFE_HOLD`. The right pane profiles the selected

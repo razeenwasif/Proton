@@ -1371,6 +1371,45 @@ await test('The agent panel keeps its threads: the clock lists them, a row opens
   doc.querySelector('.workspace.on')?.click(); await settle();
   assert(list.hidden && clock.getAttribute('aria-expanded') === 'false', 'the list stayed open');
 });
+await test('A notebook colours its code cells as they are typed, and its prose draws code, TeX and links', async () => {
+  await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
+  const cell = (kind, source, selected = false) => ({kind, source, outputs: [], executionCount: null, running: false, selected});
+  await win.pushEvents([{type: 'notebook', path: '/fixture/fit.ipynb', problem: '', language: 'python', cells: [
+    cell('markdown', '# Fit\nThe loss is $L = \\frac{1}{n}\\sum_i (y_i - \\hat y_i)^2$; see [the docs](https://example.com/fit).\n\n```python\nprint("hi")\n```'),
+    cell('code', 'import numpy as np\ndef fit(x):\n    return np.mean(x)  # the average', true)]}]);
+  await settle();
+  const box = $('.workspace[data-ws="data"] [data-cells]');
+  const code = box?.querySelector('[data-cell="1"]');
+  const behind = code?.querySelector('.cell-code > .cell-hl'), src = code?.querySelector('.cell-code > .cell-src[data-src="1"]');
+  assert(behind?.querySelector('.k')?.textContent === 'import' && behind.querySelector('.cm')?.textContent === '# the average', 'the code cell is not coloured as Python');
+  assert(src.textContent === 'import numpy as np\ndef fit(x):\n    return np.mean(x)  # the average' && !src.querySelector('span'), 'what is typed into is not plain text');
+  assert(win.getComputedStyle(src).color === 'rgba(0, 0, 0, 0)', 'the typed text is not clear over its colours');
+  const a = src.getBoundingClientRect(), b = behind.getBoundingClientRect();
+  assert(Math.abs(a.top - b.top) < 1 && Math.abs(a.left - b.left) < 1 && Math.abs(a.width - b.width) < 1, 'the colours are not under the text');
+
+  // Typing recolours what is behind and leaves what is typed into alone —
+  // in the markup a browser types: Chrome ends each line with a <br>, and
+  // keeps one more at the end for an empty last line.
+  src.focus();
+  src.innerHTML = 'while True:<br>    pass<br><br>';
+  src.dispatchEvent(new win.InputEvent('input', {bubbles: true}));
+  assert(behind.querySelector('.k')?.textContent === 'while' && behind.querySelector('.cn')?.textContent === 'True', 'typing did not recolour the cell');
+  assert(behind.textContent === 'while True:\n    pass\n', `the colours lost a line: ${JSON.stringify(behind.textContent)}`);
+  let sent = win.commands.length;
+  src.blur(); await settle();
+  assert(win.commands.slice(sent).find((c) => c.type === 'setCell')?.source === 'while True:\n    pass\n', 'the cell was saved with its lines run together');
+
+  const prose = box.querySelector('[data-cell="0"] .cell-md');
+  for (let i = 0; i < 30 && prose.querySelector('.md-math[data-tex]'); i++) await settle();
+  assert(prose.querySelector('h1')?.textContent === 'Fit' && prose.querySelector('.md-math .katex'), 'the prose is not drawn, TeX and all');
+  assert(prose.querySelector('.md-code code[data-lang="python"] .fn')?.textContent === 'print', 'a code block in the prose is not coloured');
+  sent = win.commands.length;
+  const click = new win.MouseEvent('click', {bubbles: true, cancelable: true});
+  prose.querySelector('a[data-link]').dispatchEvent(click); await settle();
+  assert(click.defaultPrevented && win.commands.slice(sent).find((c) => c.type === 'openLink')?.url === 'https://example.com/fit',
+    'a link in a notebook was followed in the window');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('A long name in the project panel scrolls sideways instead of being cut', async () => {
   const tree = $('.workspace.on [data-tree]');
   const space = tree.closest('.workspace');

@@ -31,6 +31,8 @@ import { performanceReview, editorPainted } from "./performance.js";
 import { createTerminalGL, xtermHex } from "./term-gl.js";
 import { createClaude } from "./claude.js";
 import { markdown } from "./markdown.js";
+// As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
+import { highlight as highlightCode } from "./highlight.js";
 import { keyCommand, changesContext } from "./transport.js";
 import { historyCommand, historyShortcut } from "./history-controls.js";
 import {
@@ -324,11 +326,11 @@ document.addEventListener("click", (e) => {
   if (cite) dispatch({ type: "openCitation", cite: cite.dataset.cite });
 });
 
-// In an answer, a code block's button copies the code, and a link opens in
-// the browser rather than in the editor's own window. (Chat's answers have
-// the same two, handled in claude.js.)
+// In an answer or a notebook's prose, a code block's button copies the code,
+// and a link opens in the browser rather than in the editor's own window.
+// (Chat's answers have the same two, handled in claude.js.)
 document.addEventListener("click", (e) => {
-  if (!e.target.closest?.("[data-agent-thread]")) return;
+  if (!e.target.closest?.("[data-agent-thread], [data-cells]")) return;
   const link = e.target.closest("a[data-link]");
   if (link) {
     e.preventDefault();
@@ -1283,7 +1285,7 @@ let lastTheme = null;
 /** The last notebook the core sent, so a re-render can be asked for without
  * waiting for another event — `i` has to turn prose into source before there
  * is anything to put a caret in. */
-let lastNotebook = { path: "", cells: [], problem: "" };
+let lastNotebook = { path: "", cells: [], problem: "", language: "python" };
 
 /** Which markdown cell is showing its source, if any.
  *
@@ -1364,58 +1366,9 @@ function tableHtml(table) {
   return `<div class="out" style="padding:0"><table class="df"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${more}</div>`;
 }
 
-/** Markdown, for a cell that holds prose rather than code.
- *
- * A small subset on purpose — headings, emphasis, code, links, lists, rules —
- * because a notebook is a file somebody downloaded and a full renderer is a
- * large surface to point at one. **Everything is escaped first and markup is
- * applied to the escaped text**, so nothing in the document can become a tag:
- * the same rule the dataframe table follows.
- *
- * A link's text is kept but its target is dropped. A notebook cell offering a
- * clickable URL into the editor's own window is not something this needs to
- * support to be useful.
- */
-function markdownHtml(source) {
-  const inline = (text) =>
-    escapeHtml(text)
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-      .replace(/(^|\W)\*([^*]+)\*/g, "$1<em>$2</em>")
-      .replace(/(^|\W)_([^_]+)_/g, "$1<em>$2</em>")
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, "<u>$1</u>");
-
-  const out = [];
-  let list = false;
-  const closeList = () => {
-    if (list) out.push("</ul>");
-    list = false;
-  };
-
-  for (const line of source.split("\n")) {
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    const item = /^\s*[-*+]\s+(.*)$/.exec(line);
-
-    if (heading) {
-      closeList();
-      const level = Math.min(heading[1].length, 6);
-      out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
-    } else if (item) {
-      if (!list) out.push("<ul>");
-      list = true;
-      out.push(`<li>${inline(item[1])}</li>`);
-    } else if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) {
-      closeList();
-      out.push("<hr>");
-    } else if (line.trim() === "") {
-      closeList();
-    } else {
-      closeList();
-      out.push(`<p>${inline(line)}</p>`);
-    }
-  }
-  closeList();
-  return out.join("");
+/** What the open notebook's code is in, to colour its cells by. */
+function notebookLanguage() {
+  return lastNotebook?.language || "python";
 }
 
 function cellHtml(cell, index) {
@@ -1437,8 +1390,11 @@ function cellHtml(cell, index) {
     // `#` and `**` is a notebook pretending to be a text file — but it still
     // has to be editable, so double-clicking it puts the source back.
     (cell.kind === "markdown" && index !== markdownEditing
-      ? `<div class="cell-md" data-md="${index}" title="Double-click to edit">${markdownHtml(cell.source)}</div>`
-      : `<pre class="cell-src" contenteditable="plaintext-only" spellcheck="false" data-src="${index}">${escapeHtml(cell.source)}</pre>`) +
+      ? `<div class="cell-md" data-md="${index}" title="Double-click to edit">${markdown(cell.source)}</div>`
+      : cell.kind === "code"
+        ? `<div class="cell-code"><pre class="cell-hl" aria-hidden="true">${highlightCode(cell.source, notebookLanguage())}</pre>` +
+          `<pre class="cell-src" contenteditable="plaintext-only" spellcheck="false" data-src="${index}">${escapeHtml(cell.source)}</pre></div>`
+        : `<pre class="cell-src" contenteditable="plaintext-only" spellcheck="false" data-src="${index}">${escapeHtml(cell.source)}</pre>`) +
     (outputs ? `<div class="out-wrap">${outputs}</div>` : "") +
     `</div>`
   );
@@ -1494,6 +1450,35 @@ document.addEventListener("dblclick", (e) => {
   dispatch({ type: "selectCell", index: markdownEditing });
 });
 
+/** A cell's source as typed. A browser ends a line typed into a cell with a
+ *  `<br>` as readily as with a newline — Chrome always does — and keeps a
+ *  last `<br>` only so an empty last line has somewhere for the caret, so
+ *  `textContent` would run the lines together. */
+function cellSource(el) {
+  let text = "";
+  const nodes = [...el.childNodes];
+  nodes.forEach((node, i) => {
+    if (node.nodeName === "BR") {
+      if (i < nodes.length - 1) text += "\n";
+    } else if (node.nodeName === "DIV") {
+      // A line some engines wrap in a block of its own.
+      text += (text && !text.endsWith("\n") ? "\n" : "") + cellSource(node);
+    } else {
+      text += node.textContent;
+    }
+  });
+  return text;
+}
+
+// A code cell is coloured as it is typed. The colours are the source drawn
+// again behind it, whose own text is clear; the source itself stays as the
+// browser typed it, so it keeps its undo and nothing moves the caret.
+document.addEventListener("input", (e) => {
+  const src = e.target.closest?.("[data-src]");
+  const behind = src?.previousElementSibling;
+  if (behind?.classList.contains("cell-hl")) behind.innerHTML = highlightCode(cellSource(src), notebookLanguage());
+});
+
 // A cell's source goes back to the core when you leave it, not on every
 // keystroke: the core answers an edit by re-sending the notebook, and
 // re-rendering the box you are typing in would move the caret to the start
@@ -1506,7 +1491,7 @@ document.addEventListener(
     dispatch({
       type: "setCell",
       index: Number(src.dataset.src),
-      source: src.textContent,
+      source: cellSource(src),
     });
   },
   true,
@@ -1526,7 +1511,7 @@ document.addEventListener("keydown", (e) => {
 
   if (e.key === "Escape") {
     e.preventDefault();
-    dispatch({ type: "setCell", index, source: src.textContent });
+    dispatch({ type: "setCell", index, source: cellSource(src) });
     src.blur();
     // The core still thinks the engine is in insert mode, and only a key
     // it sees will change that.
@@ -1535,7 +1520,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Enter" && e.shiftKey) {
     e.preventDefault();
-    dispatch({ type: "setCell", index, source: src.textContent });
+    dispatch({ type: "setCell", index, source: cellSource(src) });
     dispatch({ type: "runCell", index });
     // Back to normal mode, so `j` moves to the next cell rather than typing
     // a `j` into the one that just ran.

@@ -151,6 +151,9 @@ pub struct Data {
     /// What the kernel said when it failed to start, so the panel can say so
     /// rather than showing a notebook that silently never runs.
     problem: Option<String>,
+    /// The Python the kernel was started with, to name in what it says if it
+    /// stops.
+    python: Option<PathBuf>,
     /// A problem discovered on the heartbeat and not yet told to anybody.
     ///
     /// Separate from `problem`, which is the standing state drawn as a chip.
@@ -356,7 +359,7 @@ impl Data {
     /// Sent in one go rather than waited on: the kernel runs them in the order
     /// it received them — the queue is the kernel's, not this one's — and
     /// waiting for each would mean blocking a core that has no clock.
-    pub fn run_all(&mut self, python: &Path, cwd: &Path) -> Result<usize, String> {
+    pub fn run_all(&mut self, cwd: &Path) -> Result<usize, String> {
         let Some(notebook) = &self.notebook else {
             return Err("no notebook is open".into());
         };
@@ -370,10 +373,10 @@ impl Data {
         if code.is_empty() {
             return Ok(0);
         }
-        self.start(python, cwd)?;
+        self.start(cwd)?;
         let mut sent = 0;
         for index in code {
-            if self.run(index, python, cwd).is_ok() {
+            if self.run(index, cwd).is_ok() {
                 sent += 1;
             }
         }
@@ -449,7 +452,7 @@ impl Data {
     }
 
     /// Run one cell. Answers once it has been *sent*, not once it is done.
-    pub fn run(&mut self, index: usize, python: &Path, cwd: &Path) -> Result<(), String> {
+    pub fn run(&mut self, index: usize, cwd: &Path) -> Result<(), String> {
         let Some(notebook) = &self.notebook else {
             return Err("no notebook is open".into());
         };
@@ -462,7 +465,7 @@ impl Data {
         }
         let source = cell.source.clone();
 
-        self.start(python, cwd)?;
+        self.start(cwd)?;
         let kernel = self.kernel.as_mut().expect("just started");
         let id = kernel.execute(&source)?;
         self.running.insert(id, index);
@@ -481,7 +484,7 @@ impl Data {
         };
         // Asked before the kernel is dropped — this is its stderr, and it is
         // the only place the real reason is written down.
-        let why = format!("the kernel exited: {}", kernel.said());
+        let why = explain(&kernel.said(), self.python.as_deref());
         self.kernel = None;
         self.problem = Some(why.clone());
         self.complaint = Some(why);
@@ -491,11 +494,26 @@ impl Data {
         true
     }
 
-    /// Start a kernel if there is not one already.
-    fn start(&mut self, python: &Path, cwd: &Path) -> Result<(), String> {
+    /// The language the notebook's code is in. Python unless it says
+    /// otherwise, because Python is what the kernel here runs.
+    pub fn language(&self) -> String {
+        self.notebook
+            .as_ref()
+            .and_then(Notebook::language)
+            .unwrap_or("python")
+            .to_string()
+    }
+
+    /// Start a kernel if there is not one already, in the Python the
+    /// notebook should run in. Looked for only then: a kernel that is up is
+    /// already in one.
+    fn start(&mut self, cwd: &Path) -> Result<(), String> {
         if self.kernel.as_mut().is_some_and(Kernel::is_alive) {
             return Ok(());
         }
+        let kernel = self.notebook.as_ref().and_then(Notebook::kernel);
+        let python = python_for(cwd, kernel).ok_or_else(|| NO_PYTHON.to_string())?;
+        self.python = Some(python.clone());
         let argv = vec![
             python.display().to_string(),
             "-m".into(),
@@ -630,17 +648,47 @@ impl Data {
     }
 }
 
+/// What is said when there is no Python at all.
+pub const NO_PYTHON: &str = "no python to run a notebook with — set PROTON_PYTHON";
+
+/// What a kernel that stopped said, and what to do about it. A Python
+/// without ipykernel is the usual reason by far, and its own words for it —
+/// `No module named ipykernel_launcher` — name the module and not the fix.
+fn explain(said: &str, python: Option<&Path>) -> String {
+    match python {
+        Some(python) if said.contains("No module named ipykernel") => {
+            let python = python.display();
+            format!(
+                "{python} has no ipykernel. Install it there with `{python} -m pip install ipykernel`, \
+                 give the project a .venv that has it, or name another Python in PROTON_PYTHON"
+            )
+        }
+        _ => format!("the kernel exited: {said}"),
+    }
+}
+
+/// The Python a notebook runs in, for a notebook that names no kernel.
+pub fn python(root: &Path) -> Option<PathBuf> {
+    python_for(root, None)
+}
+
 /// The Python a notebook runs in.
 ///
-/// Looked for in the order somebody would look themselves: what they said,
-/// then the project's own virtual environment, then whatever is on the path.
-/// A project venv beats `python` on `PATH` deliberately — a notebook in a
-/// project almost always means that project's packages, and finding a bare
-/// interpreter without them produces import errors rather than an answer.
+/// Looked for in the order somebody would look themselves: what they said;
+/// the project's own virtual environment; the Jupyter kernel the notebook
+/// names, as Jupyter registered it; a Python on the login shell's PATH that
+/// has ipykernel; and last whatever this process finds on its own PATH. A
+/// project venv beats the rest deliberately — a notebook in a project almost
+/// always means that project's packages, and finding a bare interpreter
+/// without them produces import errors rather than an answer.
+///
+/// The login shell is asked because an app opened from the Dock inherits
+/// launchd's PATH, whose `python3` is Apple's — with no ipykernel, so the
+/// kernel died on the first cell whatever else was installed.
 ///
 /// `None` is an ordinary answer. It means the panel says there is no kernel,
 /// which is more useful than starting one that cannot import anything.
-pub fn python(root: &Path) -> Option<PathBuf> {
+pub fn python_for(root: &Path, kernel: Option<&str>) -> Option<PathBuf> {
     if let Some(named) = std::env::var_os("PROTON_PYTHON") {
         let path = PathBuf::from(named);
         if path.is_file() {
@@ -659,7 +707,99 @@ pub fn python(root: &Path) -> Option<PathBuf> {
             }
         }
     }
-    which("python3").or_else(|| which("python"))
+    registered(kernel.unwrap_or("python3"), &kernel_dirs())
+        .or_else(|| proton_claude::process::login_path().and_then(|path| with_ipykernel(path.as_ref())))
+        .or_else(|| which("python3"))
+        .or_else(|| which("python"))
+}
+
+/// Where Jupyter keeps kernelspecs, in the order `jupyter kernelspec list`
+/// reads them: `JUPYTER_PATH`, the user's own, then the system's.
+fn kernel_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("JUPYTER_PATH")
+        .map(|path| std::env::split_paths(&path).map(|dir| dir.join("kernels")).collect())
+        .unwrap_or_default();
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    if cfg!(windows) {
+        dirs.extend(std::env::var_os("APPDATA").map(|dir| PathBuf::from(dir).join("jupyter").join("kernels")));
+        dirs.extend(std::env::var_os("PROGRAMDATA").map(|dir| PathBuf::from(dir).join("jupyter").join("kernels")));
+    } else {
+        if cfg!(target_os = "macos") {
+            dirs.extend(home.as_ref().map(|home| home.join("Library/Jupyter/kernels")));
+        }
+        let data = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home.map(|home| home.join(".local/share")));
+        dirs.extend(data.map(|data| data.join("jupyter/kernels")));
+        for system in ["/usr/local/share/jupyter/kernels", "/usr/share/jupyter/kernels", "/opt/homebrew/share/jupyter/kernels"] {
+            dirs.push(PathBuf::from(system));
+        }
+    }
+    dirs
+}
+
+/// The Python of the ipykernel kernelspec called `name`, if one is
+/// registered and its interpreter is still there. A kernel registered from
+/// a virtual environment outlives the environment, and starting it would be
+/// a kernel that dies before it says anything.
+fn registered(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
+    dirs.iter().find_map(|dir| {
+        let text = std::fs::read_to_string(dir.join(name).join("kernel.json")).ok()?;
+        let spec: serde_json::Value = serde_json::from_str(&text).ok()?;
+        let argv: Vec<&str> = spec["argv"].as_array()?.iter().filter_map(serde_json::Value::as_str).collect();
+        if !argv.iter().any(|arg| arg.starts_with("ipykernel")) {
+            return None;
+        }
+        let python = PathBuf::from(argv.first()?);
+        (python.is_absolute() && python.is_file()).then_some(python)
+    })
+}
+
+/// The first Python on `path` that has ipykernel.
+///
+/// Apple's `/usr/bin/python3` is passed over on a Mac: it never has
+/// ipykernel unless somebody put it there, and on a Mac without the
+/// developer tools it offers to install them rather than answering. It is
+/// still what `which` finds last, so a Mac that only has that one gets told
+/// what to do with it.
+fn with_ipykernel(path: &std::ffi::OsStr) -> Option<PathBuf> {
+    std::env::split_paths(path)
+        .filter(|dir| !(cfg!(target_os = "macos") && dir.starts_with("/usr/bin")))
+        .flat_map(|dir| ["python3", "python"].map(|name| dir.join(name)))
+        .filter(|candidate| candidate.is_file())
+        .find(|candidate| has_ipykernel(candidate))
+}
+
+/// Whether a Python can find ipykernel, without importing it: finding is a
+/// fraction of the cost. A Python that does not answer within a few seconds
+/// is taken to not have it.
+fn has_ipykernel(python: &Path) -> bool {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let Ok(mut child) = Command::new(python)
+        .args([
+            "-c",
+            "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('ipykernel_launcher') else 1)",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 /// The first `name` on `PATH` that is actually a file.
@@ -674,4 +814,93 @@ fn which(name: &str) -> Option<PathBuf> {
         }
         None
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("proton-kernels-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A kernelspec as `python -m ipykernel install` writes one.
+    fn spec(dir: &Path, name: &str, argv: &[&str]) {
+        let at = dir.join(name);
+        std::fs::create_dir_all(&at).unwrap();
+        let spec = serde_json::json!({"argv": argv, "display_name": name, "language": "python"});
+        std::fs::write(at.join("kernel.json"), spec.to_string()).unwrap();
+    }
+
+    #[test]
+    fn a_python_without_ipykernel_is_told_how_to_get_it() {
+        let said = "/Applications/Xcode.app/Contents/Developer/usr/bin/python3: No module named ipykernel_launcher";
+        let why = explain(said, Some(Path::new("/usr/bin/python3")));
+        assert!(why.contains("`/usr/bin/python3 -m pip install ipykernel`"), "{why}");
+        assert_eq!(explain("Segmentation fault", None), "the kernel exited: Segmentation fault");
+    }
+
+    #[test]
+    fn the_kernel_a_notebook_names_is_the_one_jupyter_registered() {
+        let dir = scratch("named");
+        let python = dir.join("env").join("python");
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(&python, "").unwrap();
+        let named = python.display().to_string();
+        spec(&dir, "research", &[&named, "-m", "ipykernel_launcher", "-f", "{connection_file}"]);
+        // Registered from a venv that has since gone: passed over, not started.
+        spec(&dir, "python3", &["/no/such/venv/bin/python", "-m", "ipykernel_launcher", "-f", "{connection_file}"]);
+        // Not a Python kernel at all.
+        spec(&dir, "ir", &["R", "--slave", "-e", "IRkernel::main()", "--args", "{connection_file}"]);
+
+        let dirs = [dir.join("elsewhere"), dir.clone()];
+        assert_eq!(registered("research", &dirs), Some(python));
+        assert_eq!(registered("python3", &dirs), None);
+        assert_eq!(registered("ir", &dirs), None);
+        assert_eq!(registered("nothing", &dirs), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_first_python_on_the_path_with_ipykernel_is_the_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("path");
+        // Two "pythons": the first cannot find ipykernel, the second can.
+        let fake = |at: &str, code: i32| {
+            let bin = dir.join(at);
+            std::fs::create_dir_all(&bin).unwrap();
+            let exe = bin.join("python3");
+            std::fs::write(&exe, format!("#!/bin/sh\nexit {code}\n")).unwrap();
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+            exe
+        };
+        let without = fake("homebrew", 1);
+        let with = fake("conda", 0);
+        let path = std::env::join_paths([without.parent().unwrap(), with.parent().unwrap()]).unwrap();
+        assert_eq!(with_ipykernel(&path), Some(with));
+        assert_eq!(with_ipykernel(&std::env::join_paths([without.parent().unwrap()]).unwrap()), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_notebook_says_what_language_it_is_in() {
+        let dir = scratch("language");
+        let file = dir.join("n.ipynb");
+        std::fs::write(
+            &file,
+            r#"{"cells": [], "nbformat": 4, "nbformat_minor": 5,
+                "metadata": {"kernelspec": {"name": "ir", "language": "R"}, "language_info": {"name": "R"}}}"#,
+        )
+        .unwrap();
+        let mut data = Data::default();
+        assert_eq!(data.language(), "python", "nothing open is Python, which is what runs here");
+        data.open(&file).unwrap();
+        assert_eq!(data.language(), "R");
+        assert_eq!(data.notebook.as_ref().and_then(Notebook::kernel), Some("ir"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

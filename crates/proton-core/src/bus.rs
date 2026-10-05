@@ -964,6 +964,9 @@ pub enum Event {
         cells: Vec<crate::data::CellView>,
         /// Why there is no kernel, when there is a reason worth showing.
         problem: String,
+        /// The language its code cells are in, to colour them by: what the
+        /// notebook says, else Python.
+        language: String,
     },
     /// The project's conversations, newest first — Claude Code's sessions
     /// and the other engines' — then the desktop app's from other folders;

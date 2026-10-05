@@ -269,6 +269,21 @@ impl Notebook {
         self.raw_cells().len()
     }
 
+    /// The Jupyter kernel it was last run with, by the name Jupyter gives it
+    /// in `metadata.kernelspec.name`: `python3`, or one somebody installed.
+    pub fn kernel(&self) -> Option<&str> {
+        self.json.pointer("/metadata/kernelspec/name")?.as_str()
+    }
+
+    /// The language its code is in: what the kernel said it was the last
+    /// time it ran, else what the kernelspec says.
+    pub fn language(&self) -> Option<&str> {
+        self.json
+            .pointer("/metadata/language_info/name")
+            .and_then(Value::as_str)
+            .or_else(|| self.json.pointer("/metadata/kernelspec/language")?.as_str())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
