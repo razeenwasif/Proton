@@ -1,0 +1,6 @@
+{"parentUuid":null,"isSidechain":false,"promptId":"p1","type":"user","message":{"role":"user","content":[{"text":"What is in the folder?","type":"text"}]},"uuid":"u1","timestamp":"2026-10-06T10:07:33.000Z","promptSource":"sdk","entrypoint":"sdk-cli","sessionId":"s1","version":"2.1.288"}
+{"parentUuid":"u1","isSidechain":false,"attachment":{"type":"date"},"type":"attachment","uuid":"t1","timestamp":"2026-10-06T10:07:33.100Z","sessionId":"s1","version":"2.1.288"}
+{"parentUuid":"t1","isSidechain":false,"message":{"model":"claude-x","id":"msg_1","type":"message","role":"assistant","content":[{"type":"thinking","thinking":"","signature":"SIG"}],"stop_reason":"end_turn"},"requestId":"req_1","type":"assistant","uuid":"a1","timestamp":"2026-10-06T10:07:46.000Z","entrypoint":"sdk-cli","sessionId":"s1","version":"2.1.288"}
+{"parentUuid":"a1","isSidechain":false,"message":{"model":"claude-x","id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"Two notes and a plan."}],"stop_reason":"end_turn"},"requestId":"req_1","type":"assistant","uuid":"a2","timestamp":"2026-10-06T10:07:51.000Z","entrypoint":"sdk-cli","sessionId":"s1","version":"2.1.288"}
+{"type":"last-prompt","lastPrompt":"What is in the folder?","leafUuid":"a2","sessionId":"s1"}
+{"type":"mode","mode":"default","sessionId":"s1"}

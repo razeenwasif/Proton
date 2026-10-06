@@ -374,9 +374,12 @@ fn alive(_pid: u32) -> bool {
     false
 }
 
+/// The kinds of line a transcript is drawn from.
+const KEPT: [&str; 6] = ["user", "assistant", "system", "custom-title", "summary", "mode"];
+
 /// The lines a transcript is drawn from.
 fn kept(kind: &str) -> bool {
-    matches!(kind, "user" | "assistant" | "system" | "custom-title" | "summary" | "mode")
+    KEPT.contains(&kind)
 }
 
 /// How many messages of a long session are read back: the latest, which is
@@ -387,23 +390,31 @@ pub const READ_BACK: usize = 600;
 /// messages of it, and whether anything earlier was left out.
 pub fn load(path: &Path) -> std::io::Result<(Vec<Value>, bool)> {
     let reader = BufReader::new(File::open(path)?);
+    // Cheap tests first: most of a long file is attachments and file
+    // snapshots, and parsing them only to drop them is most of the work. A
+    // line goes on to be parsed if a kept kind's `"type"` is anywhere in it,
+    // and its own top-level `type` decides: Claude Code writes an answer's
+    // message, which has a `"type":"message"` of its own, before the line's
+    // `"type":"assistant"`, so the first `"type"` in a line is not always the
+    // line's — taken as if it were, every answer was dropped.
     let mut lines = Vec::new();
     for line in reader.lines() {
         let line = line?;
-        // Cheap tests first: most of a long file is attachments and file
-        // snapshots, and parsing them only to drop them is most of the work.
-        let Some(start) = line.find("\"type\":") else { continue };
-        let rest = line[start + 7..].trim_start();
-        let kind = rest.trim_start_matches('"').split('"').next().unwrap_or_default();
-        if !kept(kind) {
+        let wanted = line.match_indices("\"type\":").any(|(at, _)| {
+            let rest = line[at + 7..].trim_start().trim_start_matches('"');
+            KEPT.iter().any(|kind| rest.strip_prefix(kind).is_some_and(|after| after.starts_with('"')))
+        });
+        if !wanted {
             continue;
         }
-        if let Ok(value) = serde_json::from_str::<Value>(&line) {
-            if value.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-                continue;
-            }
-            lines.push(value);
+        let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
+        if !value.get("type").and_then(Value::as_str).is_some_and(kept) {
+            continue;
         }
+        if value.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        lines.push(value);
     }
     let messages = lines
         .iter()
