@@ -4,7 +4,7 @@
 /** @typedef {{firstLine: number, lines: string[], totalLines: number,
  * cursor: {line: number, column: number}, selection: Cursor['selection'],
  * highlights: Viewport['highlights'], matches: Viewport['matches'], git: Viewport['git'],
- * stops: Map<number, Viewport['stops'][number]>, painted: string[] | null}} Pane */
+ * stops: Map<number, Viewport['stops'][number]>, painted: string[] | null, tabSize: number}} Pane */
 
 export function createEditorState() {
   /** @type {Map<number, Pane>} */
@@ -14,7 +14,7 @@ export function createEditorState() {
     let value = panes.get(index);
     if (!value) {
       value = {firstLine: 0, lines: [], totalLines: 0, cursor: {line: 0, column: 0},
-        selection: null, highlights: [], matches: [], git: [], stops: new Map(), painted: null};
+        selection: null, highlights: [], matches: [], git: [], stops: new Map(), painted: null, tabSize: 4};
       panes.set(index, value);
     }
     return value;
@@ -33,6 +33,7 @@ export function createEditorState() {
       value.matches = event.matches;
       value.git = event.git;
       value.stops = new Map(event.stops.map(stop => [stop.line, stop]));
+      value.tabSize = event.tabSize || 4;
     }
   }
   return {panes, pane, update};

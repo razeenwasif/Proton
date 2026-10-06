@@ -32,20 +32,13 @@ fn type_keys(ws: &mut Workspace, keys: &str) {
 
 fn open(text: &str) -> Workspace {
     let mut ws = Workspace::new();
-    // Replace the empty scratch buffer's contents by typing them in, then undo
-    // history is irrelevant because we reset the cursor afterwards.
+    // Fill the empty scratch buffer as a paste would — typed, its lines would
+    // be indented and its brackets closed — then undo history is irrelevant
+    // because we reset the cursor afterwards.
     ws.apply(Command::Key {
         key: Key::char('i'),
     });
-    for c in text.chars() {
-        if c == '\n' {
-            ws.apply(Command::Key {
-                key: Key::named("Enter"),
-            });
-        } else {
-            ws.apply(Command::Key { key: Key::char(c) });
-        }
-    }
+    ws.paste_text(text);
     ws.apply(Command::Key {
         key: Key::named("Escape"),
     });

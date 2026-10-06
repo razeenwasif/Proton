@@ -46,6 +46,13 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Settings that say this and were never read from a file, for a test:
+    /// like a defaulted one, they refuse to write.
+    #[cfg(test)]
+    pub(crate) fn saying(doc: Value) -> Settings {
+        Settings { path: PathBuf::new(), doc }
+    }
+
     /// Read `.proton/settings.json`, or start an empty one.
     ///
     /// A missing file is the normal case and not a problem. A *malformed* one

@@ -1033,6 +1033,10 @@ function paintEditor(index) {
   if (target.style.getPropertyValue("--digits") !== String(digits)) {
     target.style.setProperty("--digits", String(digits));
   }
+  // A tab as wide as the file's own, where the browser would draw eight.
+  if (target.style.getPropertyValue("--tab") !== String(drawing.tabSize)) {
+    target.style.setProperty("--tab", String(drawing.tabSize));
+  }
 
   const cursorRow = drawing.cursor.line - drawing.firstLine;
   const rows = drawing.lines.map((text, i) =>

@@ -155,7 +155,12 @@ git: Array<GitMark | null>,
  * one. A list rather than one-per-line because there are usually
  * none, and a screenful of `null` to say so is waste.
  */
-stops: Array<Stop>, } | { "type": "cursor", 
+stops: Array<Stop>, 
+/**
+ * How many columns a tab is drawn as: the file's `.editorconfig`, or
+ * `editor.tabSize`. A browser draws one as eight.
+ */
+tabSize: number, } | { "type": "cursor", 
 /**
  * Which split the cursor belongs to. Every view has one; only the
  * focused one can move.

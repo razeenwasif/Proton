@@ -37,6 +37,7 @@ pub mod study;
 pub mod tasks;
 pub mod trace;
 pub mod tree;
+pub mod typing;
 pub mod video;
 pub mod vim;
 pub mod workspace;

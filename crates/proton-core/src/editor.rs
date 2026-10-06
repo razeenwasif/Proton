@@ -408,6 +408,7 @@ impl Editor {
             }
 
             Verb::Insert => {
+                let unit = self.indent.clone();
                 let buf = self.buffer_mut();
                 match action.object {
                     Object::After => {
@@ -422,14 +423,34 @@ impl Editor {
                         let at = buf.line_end();
                         buf.cursor = Cursor::at(at);
                     }
+                    // At the indentation of the line it opens beside — a level
+                    // in below a line that opens a block, and above one that
+                    // closes it — with that line's own line ending.
                     Object::LineBelow => {
+                        let here = buf.position(buf.cursor.offset).line;
+                        let line = buf.line(here);
+                        let extension = extension(&buf.name());
+                        let mut lead = crate::typing::lead(&line).to_string();
+                        if crate::typing::opens(&line, &extension) {
+                            lead.push_str(&unit);
+                        }
+                        let text = format!("{}{lead}", crate::typing::eol(buf, here));
                         let at = buf.line_end();
-                        buf.apply(vec![Edit::insert(at, "\n")], Cursor::at(at + 1));
+                        let cursor = at + text.chars().count();
+                        buf.apply(vec![Edit::insert(at, text)], Cursor::at(cursor));
                         return true;
                     }
                     Object::LineAbove => {
+                        let here = buf.position(buf.cursor.offset).line;
+                        let line = buf.line(here);
+                        let mut lead = crate::typing::lead(&line).to_string();
+                        if matches!(line.trim_start().chars().next(), Some('}' | ']' | ')')) {
+                            lead.push_str(&unit);
+                        }
+                        let text = format!("{lead}{}", crate::typing::eol(buf, here));
                         let at = buf.line_start();
-                        buf.apply(vec![Edit::insert(at, "\n")], Cursor::at(at));
+                        let cursor = at + lead.chars().count();
+                        buf.apply(vec![Edit::insert(at, text)], Cursor::at(cursor));
                         return true;
                     }
                     Object::BlockStart | Object::BlockEnd => {
@@ -1165,4 +1186,9 @@ impl Editor {
         buf.apply(edits, Cursor::at(landing));
         true
     }
+}
+
+/// A file name's extension, as the typing rules know languages by.
+fn extension(name: &str) -> String {
+    name.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default()
 }

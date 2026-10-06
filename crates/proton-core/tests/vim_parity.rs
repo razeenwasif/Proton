@@ -47,11 +47,10 @@ fn keys_of(s: &str) -> Vec<Key> {
 
 fn run(text: &str, keys: &str) -> (String, usize, usize, String) {
     let mut ws = Workspace::new();
+    // As a paste puts it: typed, its lines would be indented and its brackets
+    // closed, and the buffer would not be the one vim is given.
     ws.apply(Command::Key { key: Key::char('i') });
-    for c in text.chars() {
-        let key = if c == '\n' { Key::named("Enter") } else { Key::char(c) };
-        ws.apply(Command::Key { key });
-    }
+    ws.paste_text(text);
     ws.apply(Command::Key { key: Key::named("Escape") });
     for k in keys_of("gg0") {
         ws.apply(Command::Key { key: k });

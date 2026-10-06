@@ -79,6 +79,10 @@ pub struct Workspace {
     data: crate::data::Data,
     design: crate::design::Design,
     settings: crate::settings::Settings,
+    /// What each file's `.editorconfig` says about its indentation, read the
+    /// first time it is needed and forgotten when an `.editorconfig` is
+    /// written here.
+    editorconfigs: std::collections::HashMap<PathBuf, crate::typing::Config>,
     /// The user's own documents, from the roots the settings name. Empty
     /// unless somebody listed one: nothing here discovers a vault, because a
     /// library that could reach anywhere under the home directory is one that
@@ -337,6 +341,17 @@ impl Workspace {
 
     pub fn vim_mode(&self) -> VimMode {
         self.vim.mode()
+    }
+
+    /// Put text at the cursor exactly as it is, as a paste does: none of the
+    /// indentation or closing brackets typing it would add.
+    pub fn paste_text(&mut self, text: &str) {
+        let buf = self.editor.buffer_mut();
+        let at = buf.cursor.offset;
+        buf.apply(
+            vec![proton_text::Edit::insert(at, text)],
+            proton_text::Cursor::at(at + text.chars().count()),
+        );
     }
 
     pub fn editor(&self) -> &Editor {
@@ -1781,12 +1796,12 @@ impl Workspace {
                     match key.key.as_str() {
                         "Enter" => {
                             self.editor.buffer_mut().ensure_group();
-                            self.editor.insert_newline();
+                            self.enter();
                             changed = true;
                         }
                         "Backspace" => {
                             self.editor.buffer_mut().ensure_group();
-                            changed = self.editor.backspace();
+                            changed = self.backspace();
                         }
                         _ => {}
                     }
@@ -2530,6 +2545,9 @@ impl Workspace {
         match self.editor.save() {
             Ok(()) => {
                 let name = self.editor.buffer().name();
+                if name == ".editorconfig" {
+                    self.editorconfigs.clear();
+                }
                 // Some servers only run the expensive checks on save —
                 // `cargo check` diagnostics do not exist until then.
                 self.servers.saved(self.editor.buffer());
@@ -4008,24 +4026,19 @@ impl Workspace {
     }
 
     /// What Tab inserts at the cursor: a tab where the file is indented with
-    /// tabs, and otherwise spaces to the next tab stop — so a Tab after two
-    /// characters of a four-wide indent adds two, and the code lines up.
-    fn indent_here(&self) -> String {
-        let buffer = self.editor.buffer();
-        if indents_with_tabs(buffer) {
+    /// tabs, and otherwise spaces to the next stop of the file's own indent —
+    /// so a Tab after two characters of a four-wide indent adds two, and in a
+    /// file indented by two a Tab is two.
+    fn indent_here(&mut self) -> String {
+        let indent = self.indent();
+        if indent.tabs {
             return "\t".into();
         }
-        let width = self.tab_size();
+        let buffer = self.editor.buffer();
         let at = buffer.position(buffer.cursor.offset);
-        let column = buffer
-            .line(at.line)
-            .chars()
-            .take(at.column)
-            .fold(0, |col, c| match c {
-                '\t' => (col / width + 1) * width,
-                _ => col + 1,
-            });
-        " ".repeat(width - column % width)
+        let before: String = buffer.line(at.line).chars().take(at.column).collect();
+        let column = crate::typing::columns(&before, indent.tab);
+        " ".repeat(indent.width - column % indent.width)
     }
 
     /// How wide a tab stop is: `editor.tabSize`, four unless it says.
@@ -4033,12 +4046,131 @@ impl Workspace {
         self.settings.number("editor.tabSize", 4).clamp(1, 16) as usize
     }
 
-    /// One level of indentation in the buffer being edited.
-    fn indent_unit(&self) -> String {
-        match indents_with_tabs(self.editor.buffer()) {
-            true => "\t".into(),
-            false => " ".repeat(self.tab_size()),
+    /// How the buffer being edited is indented: its `.editorconfig`, then its
+    /// own lines, then `editor.tabSize` (`typing::indent_of`).
+    fn indent(&mut self) -> crate::typing::Indent {
+        let fallback = self.tab_size();
+        let buffer = self.editor.buffer();
+        let (path, name, lines) = (buffer.path().map(Path::to_path_buf), buffer.name(), buffer.lines(0, 1000));
+        let config = path.map(|path| self.editorconfig(&path)).unwrap_or_default();
+        crate::typing::indent_of(config, &name, &lines, fallback)
+    }
+
+    /// What the `.editorconfig` files above a file say about it, read once.
+    fn editorconfig(&mut self, path: &Path) -> crate::typing::Config {
+        *self
+            .editorconfigs
+            .entry(path.to_path_buf())
+            .or_insert_with(|| crate::typing::editorconfig(path))
+    }
+
+    /// How wide a tab in the buffer at `index` is drawn.
+    fn tab_drawn(&mut self, index: usize) -> usize {
+        let path = self.editor.buffers().get(index).and_then(|b| b.path().map(Path::to_path_buf));
+        let config = path.map(|path| self.editorconfig(&path)).unwrap_or_default();
+        config.tab.or(config.width).unwrap_or_else(|| self.tab_size())
+    }
+
+    /// Enter in insert mode: a new line indented as the code it starts
+    /// belongs (`typing::newline`), or bare with `editor.autoIndent` off.
+    fn enter(&mut self) {
+        if !self.settings.bool("editor.autoIndent", true) {
+            self.editor.insert_newline();
+            return;
         }
+        let indent = self.indent();
+        let buf = self.editor.buffer();
+        let at = buf.cursor.offset;
+        let here = buf.position(at);
+        let line = buf.line(here.line);
+        let before: String = line.chars().take(here.column).collect();
+        let after: String = line.chars().skip(here.column).collect();
+        let eol = crate::typing::eol(buf, here.line);
+        let extension = extension_of(&buf.name());
+        let (take_before, take_after, text, cursor) = crate::typing::newline(&before, &after, &indent, &extension, eol);
+        let start = at - take_before;
+        self.editor.buffer_mut().apply(
+            vec![proton_text::Edit::replace(proton_text::Range::new(start, at + take_after), text)],
+            proton_text::Cursor::at(start + cursor),
+        );
+    }
+
+    /// Backspace in insert mode: both halves of an empty pair, spaces back to
+    /// the last indent stop, a line ending whole, or one character.
+    fn backspace(&mut self) -> bool {
+        let pairs = self.settings.bool("editor.autoClosingBrackets", true);
+        let buf = self.editor.buffer();
+        let at = buf.cursor.offset;
+        if at == 0 {
+            return false;
+        }
+        let here = buf.position(at);
+        let line = buf.line(here.line);
+        let before: String = line.chars().take(here.column).collect();
+        let (prev, next) = (before.chars().last(), line.chars().nth(here.column));
+        let crlf = here.column == 0 && at >= 2 && buf.slice(proton_text::Range::new(at - 2, at)) == "\r\n";
+        let (from, to) = if here.column > 0 && pairs && crate::typing::empty_pair(prev, next) {
+            (at - 1, at + 1)
+        } else if here.column > 0 && before.chars().all(|c| c == ' ') {
+            let indent = self.indent();
+            (at - crate::typing::back_to_stop(&before, &indent), at)
+        } else if crlf {
+            (at - 2, at)
+        } else {
+            (at - 1, at)
+        };
+        self.editor.buffer_mut().apply(
+            vec![proton_text::Edit::delete(proton_text::Range::new(from, to))],
+            proton_text::Cursor::at(from),
+        );
+        true
+    }
+
+    /// A character typed in insert mode: with its partner, or as a step over
+    /// the one already there (`typing::typed`), unless
+    /// `editor.autoClosingBrackets` is off; and a closing bracket typed where
+    /// only indentation comes before it, back at its block's indentation.
+    fn type_char(&mut self, c: char) {
+        let pairs = self.settings.bool("editor.autoClosingBrackets", true);
+        let outdent = self.settings.bool("editor.autoIndent", true);
+        let buf = self.editor.buffer();
+        let at = buf.cursor.offset;
+        let here = buf.position(at);
+        let line = buf.line(here.line);
+        let before: String = line.chars().take(here.column).collect();
+        let (prev, next) = (before.chars().last(), line.chars().nth(here.column));
+        let extension = extension_of(&buf.name());
+        let typed = match pairs {
+            true => crate::typing::typed(c, prev, next, &extension),
+            false => crate::typing::Typed::Insert(c.to_string()),
+        };
+        let text = match typed {
+            crate::typing::Typed::Over => {
+                let buf = self.editor.buffer_mut();
+                buf.cursor = proton_text::Cursor::at(at + 1);
+                return;
+            }
+            crate::typing::Typed::Insert(text) => text,
+        };
+        if outdent && matches!(c, ')' | ']' | '}') && !before.is_empty() && before.trim().is_empty() {
+            let previous = (0..here.line).rev().map(|l| buf.line(l)).find(|l| !l.trim().is_empty());
+            if let Some(previous) = previous {
+                let indent = self.indent();
+                if let Some(target) = crate::typing::outdented(&before, &previous, &indent, &extension) {
+                    let start = at - here.column;
+                    let cursor = start + target.chars().count() + 1;
+                    self.editor.buffer_mut().apply(
+                        vec![proton_text::Edit::replace(proton_text::Range::new(start, at), format!("{target}{text}"))],
+                        proton_text::Cursor::at(cursor),
+                    );
+                    return;
+                }
+            }
+        }
+        self.editor.buffer_mut().apply(
+            vec![proton_text::Edit::insert(at, text)],
+            proton_text::Cursor::at(at + 1),
+        );
     }
 
     /// Re-read the open files a provider changed on its own.
@@ -5754,9 +5886,12 @@ impl Workspace {
         {
             self.editor.buffer_mut().end_group();
         }
-        // `>` and `<` shift by the file's own indent — the same one Tab types.
-        if matches!(action.verb, Verb::Indent | Verb::Outdent) {
-            let unit = self.indent_unit();
+        // `>` and `<` shift by the file's own indent — the same one Tab types —
+        // and `o` and `O` open a line a level in where the code calls for it.
+        if matches!(action.verb, Verb::Indent | Verb::Outdent)
+            || (action.verb == Verb::Insert && matches!(action.object, Object::LineBelow | Object::LineAbove))
+        {
+            let unit = self.indent().unit();
             self.editor.set_indent(&unit);
         }
         let changed = self.mode == ModeId::Codex && self.editor.execute(action, was);
@@ -5836,7 +5971,10 @@ impl Workspace {
             Outcome::Input(c) => {
                 if self.mode == ModeId::Codex {
                     self.editor.buffer_mut().ensure_group();
-                    self.editor.insert_char(c);
+                    match was {
+                        VimMode::Insert => self.type_char(c),
+                        _ => self.editor.insert_char(c),
+                    }
                     (Vec::new(), true)
                 } else {
                     (
@@ -6032,6 +6170,7 @@ impl Workspace {
                 matches: Vec::new(),
                 git: Vec::new(),
                 stops: Vec::new(),
+                tab_size: self.tab_size() as u32,
             };
         };
         let first_line = pane.first_line;
@@ -6039,6 +6178,7 @@ impl Workspace {
         let buffer = pane
             .buffer
             .min(self.editor.buffers().len().saturating_sub(1));
+        let tab_size = self.tab_drawn(buffer) as u32;
 
         // Highlighting is computed here rather than in a second event,
         // because the colours and the text they colour must never be a frame
@@ -6107,6 +6247,7 @@ impl Workspace {
             matches,
             git,
             stops,
+            tab_size,
         }
     }
 
@@ -6589,23 +6730,9 @@ pub struct StoredView {
     pub line: usize,
 }
 
-/// Whether a buffer is indented with tabs: a Makefile, which must be, or a
-/// file where more of the indented lines begin with a tab than with spaces.
-/// An empty or unindented file says nothing, and gets spaces.
-fn indents_with_tabs(buffer: &proton_text::Buffer) -> bool {
-    let name = buffer.name();
-    if name == "Makefile" || name == "makefile" || name == "GNUmakefile" || name.ends_with(".mk") {
-        return true;
-    }
-    let (mut tabs, mut spaces) = (0, 0);
-    for line in 0..buffer.len_lines().min(1000) {
-        match buffer.line(line).chars().next() {
-            Some('\t') => tabs += 1,
-            Some(' ') => spaces += 1,
-            _ => {}
-        }
-    }
-    tabs > spaces
+/// A file name's extension, as the typing rules know languages by.
+fn extension_of(name: &str) -> String {
+    name.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -6679,6 +6806,84 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.base);
         }
+    }
+
+    /// A file of `text` opened in a project of its own, the cursor at its
+    /// start, in normal mode.
+    fn opened(tag: &str, name: &str, text: &str) -> (Project, Workspace) {
+        let project = Project::new(tag);
+        std::fs::write(project.folder().join(name), text).unwrap();
+        let mut ws = Workspace::rooted(project.real());
+        ws.apply(Command::OpenBuffer { path: name.into() });
+        (project, ws)
+    }
+
+    /// Press these: characters as typed, `\n` as Enter, `\x08` as Backspace,
+    /// `\t` as Tab and `\x1b` as Escape.
+    fn press(ws: &mut Workspace, keys: &str) {
+        for c in keys.chars() {
+            let key = match c {
+                '\n' => Key::named("Enter"),
+                '\x08' => Key::named("Backspace"),
+                '\t' => Key::named("Tab"),
+                '\x1b' => Key::named("Escape"),
+                c => Key::char(c),
+            };
+            ws.apply(Command::Key { key });
+        }
+    }
+
+    fn contents(ws: &Workspace) -> String {
+        ws.editor().buffer().contents()
+    }
+
+    #[test]
+    fn brackets_close_as_they_are_typed_and_open_into_an_indented_block() {
+        let (_project, mut ws) = opened("pairs", "main.rs", "fn main() \n");
+        // Typed in, the closing halves step over the ones already there.
+        press(&mut ws, "A{\nlet v = vec![(1, \"a\")];\x1b");
+        assert_eq!(contents(&ws), "fn main() {\n    let v = vec![(1, \"a\")];\n}\n");
+        // Backspace in an empty pair takes both halves.
+        press(&mut ws, "ox(\x08\x1b");
+        assert_eq!(contents(&ws), "fn main() {\n    let v = vec![(1, \"a\")];\n    x\n}\n");
+        // `o` below a line that opens a block goes a level in, and a closing
+        // bracket typed there goes back to the block's own indentation.
+        press(&mut ws, "ggo\x1b");
+        assert_eq!(ws.editor().buffer().line(1), "    ");
+        press(&mut ws, "ddggo}\x1b");
+        assert_eq!(ws.editor().buffer().line(1), "}");
+        // With the setting off, a bracket is only itself.
+        ws.settings = crate::settings::Settings::saying(serde_json::json!({"editor": {"autoClosingBrackets": false}}));
+        press(&mut ws, "ddGOf(\x1b");
+        assert!(contents(&ws).contains("\nf(\n"), "{:?}", contents(&ws));
+    }
+
+    #[test]
+    fn tab_and_enter_follow_the_files_own_indentation() {
+        let (project, mut ws) = opened("two", "app.js", "function a() {\n  return 1;\n}\n");
+        press(&mut ws, "jA\nif (b) {\n\tc();\x1b");
+        assert_eq!(contents(&ws), "function a() {\n  return 1;\n  if (b) {\n      c();\n  }\n}\n");
+        // An `.editorconfig` says otherwise, and is believed — and says how
+        // wide a tab is drawn.
+        std::fs::write(project.folder().join(".editorconfig"), "root = true\n[*.go]\nindent_style = tab\ntab_width = 8\n").unwrap();
+        std::fs::write(project.folder().join("main.go"), "package main\n").unwrap();
+        let events = ws.apply(Command::OpenBuffer { path: "main.go".into() });
+        assert!(events.iter().any(|e| matches!(e, Event::Viewport { tab_size: 8, .. })), "{events:?}");
+        press(&mut ws, "ggofunc main() {\nx\x1b");
+        assert_eq!(contents(&ws), "package main\nfunc main() {\n\tx\n}\n");
+    }
+
+    #[test]
+    fn a_crlf_file_keeps_its_line_endings_as_lines_are_opened_and_joined() {
+        let (_project, mut ws) = opened("crlf", "a.c", "int a() {\r\n}\r\n");
+        press(&mut ws, "A\nreturn 0;\x1b");
+        assert_eq!(contents(&ws), "int a() {\r\n    return 0;\r\n}\r\n");
+        press(&mut ws, "o\x1b");
+        assert_eq!(contents(&ws), "int a() {\r\n    return 0;\r\n    \r\n}\r\n");
+        // A level of indentation goes with one Backspace, and the line ending
+        // after it with one more, both halves of it.
+        press(&mut ws, "I\x08\x08\x1b");
+        assert_eq!(contents(&ws), "int a() {\r\n    return 0;\r\n}\r\n");
     }
 
     /// Call `edit_file` the way the agent's tool runner does.

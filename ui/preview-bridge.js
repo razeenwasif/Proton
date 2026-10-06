@@ -712,6 +712,7 @@ FCM: NON-DROP FRAME
     lines: doc.lines.slice(doc.first, doc.first + doc.height),
     totalLines: doc.lines.length,
     version: 0,
+    tabSize: 4,
     highlights: [],
     // A couple of breakpoints, so the sign column has something to draw.
     stops: [{ line: 3, verified: true, here: true }, { line: 9, verified: false, here: false }],

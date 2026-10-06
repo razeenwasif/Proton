@@ -730,7 +730,7 @@ kbd {
    its place inside. The scrollbar is then the file's, not the window's. */
 .code .doc { position: relative; }
 .code .win { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
-.ln { display: flex; padding: 0 12px 0 0; white-space: pre; }
+.ln { display: flex; padding: 0 12px 0 0; white-space: pre; tab-size: var(--tab, 4); }
 /* The line's text, as one flex item. Not decoration: a flex container never
    renders a text node that is only whitespace, so the single spaces between
    highlighted tokens would vanish and `from typing import List` would read

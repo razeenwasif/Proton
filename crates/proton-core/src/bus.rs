@@ -1227,6 +1227,9 @@ pub enum Event {
         /// one. A list rather than one-per-line because there are usually
         /// none, and a screenful of `null` to say so is waste.
         stops: Vec<Stop>,
+        /// How many columns a tab is drawn as: the file's `.editorconfig`, or
+        /// `editor.tabSize`. A browser draws one as eight.
+        tab_size: u32,
     },
     /// Where the cursor is now. Split from `Viewport` because a motion is the
     /// common case and must not cost a re-render of the text.
