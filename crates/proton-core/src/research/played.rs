@@ -60,6 +60,8 @@ struct Call {
     model: Option<String>,
     /// The MCP servers it was given: each one's name and arguments.
     mcp: Vec<String>,
+    /// The folders besides its own it may read.
+    read: Vec<PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -342,6 +344,7 @@ impl AgentFactory for Factory {
                 stopped: false,
                 model: settings.model.clone(),
                 mcp: how.mcp.iter().map(|s| format!("{} {} {}", s.name, s.args.join(" "), s.tools.join(","))).collect(),
+                read: how.read.clone(),
             });
             log.calls.len() - 1
         };
@@ -1377,5 +1380,227 @@ fn a_made_up_doi_is_found_out_said_and_told_to_the_overview_and_a_real_one_is_no
     let checks: Vec<(String, Option<Check>)> = checks.unwrap().into_iter().map(|c| (c.key, c.check)).collect();
     assert!(checks.contains(&("doi:10.9999/made.up".to_string(), Some(Check::Unverified))) && checks.contains(&("arxiv:1706.03762".to_string(), Some(Check::Verified))), "{checks:?}");
     assert!(Ident::parse("doi:10.9999/made.up").is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/* ── Lean ─────────────────────────────────────────────────────────── */
+
+use super::lean::{Checked, Job as LeanJob, Scripted};
+use proton_research::lean::Ended;
+use proton_research::model::{FormalOutcome, ReviewKind};
+
+const MATH: &str = "does-adding-zero-change-a-number";
+
+/// A mathematics investigation, its proofs checked by `checker`.
+fn mathematics(dir: &Path, factory: Factory, checker: Box<dyn super::lean::Checker>) -> Research {
+    let mut research = Research::with_factory(dir, Box::new(factory), "this-proton").with_checker(checker);
+    research.create("Does adding zero change a number?", "Prove what can be proved.", Discipline::Mathematics, false);
+    research
+}
+
+/// What Lean says of a job, as `lean --json` writes it: `clean` or `error`.
+fn lean_says(job: &LeanJob, verdict: &str) -> Checked {
+    let lines: Vec<&str> = job.source.lines().collect();
+    let n = lines.len() as u32;
+    let theorem = lines.iter().find_map(|l| l.strip_prefix("#check @")).unwrap_or("H001").to_string();
+    let info = |line: u32, data: String| json!({ "severity": "information", "pos": { "line": line, "column": 0 }, "data": data, "kind": "[anonymous]" }).to_string();
+    let (mut said, axioms, ended) = match verdict {
+        "clean" => (Vec::new(), "propext", Ended::Exited(Some(0))),
+        "error" => (
+            vec![json!({ "severity": "error", "pos": { "line": 3, "column": 30 }, "data": "unknown identifier 'Nat.add_zero_left'", "kind": "[anonymous]" }).to_string()],
+            "sorryAx",
+            Ended::Exited(Some(1)),
+        ),
+        other => panic!("Lean says {other}?"),
+    };
+    said.push(info(n - 1, format!("@{theorem} : ∀ (n : ℕ), n + 0 = n")));
+    said.push(info(n, format!("'{theorem}' depends on axioms: [{axioms}]")));
+    Checked { lines: said, ended, err: String::new(), seconds: 1.5 }
+}
+
+/// Poll until `done` says so, a second at a time, giving a real check real time.
+fn play_until(research: &mut Research, t: &mut u64, done: impl Fn(&Research) -> bool) {
+    for _ in 0..4000 {
+        *t += 1;
+        research.poll_at(*t);
+        if done(research) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    panic!("it never came to pass");
+}
+
+#[test]
+fn a_mathematics_round_proves_its_leader_after_lean_says_what_was_wrong() {
+    let dir = root("lean-proved");
+    let (factory, log) = Factory::new();
+    let mut checks = 0;
+    let checker = Scripted::new(move |job| {
+        checks += 1;
+        lean_says(job, if checks == 1 { "error" } else { "clean" })
+    });
+    let asked = checker.asked.clone();
+    let mut research = mathematics(&dir, factory, Box::new(checker));
+    research.start_at(T0);
+    let (_, events) = play(&mut research, T0, 1);
+    assert_eq!(round(&events).map(|r| r.0), Some(RoundStatus::Idle));
+
+    let folder = Store::new(dir.join("research")).open(MATH).unwrap();
+    let proofs = folder.proofs();
+    assert_eq!(proofs.len(), 1, "{:?}", notices(&events));
+    let p = &proofs[0];
+    assert_eq!((p.outcome, p.attempts, p.attempt, p.lean.as_str()), (FormalOutcome::Proved, 2, 2, "v4.34.1"));
+    assert!(folder.proof_file(&p.hypothesis).unwrap().contains(&format!("theorem {} (n : ℕ)", p.hypothesis)));
+    assert!(folder.verdicts().contains(&format!("## {}, round 1 — Lean: proved", p.hypothesis)), "{}", folder.verdicts());
+    // Each check in a folder of its own, Proton's questions at the end of its file.
+    let jobs = asked.lock().unwrap().clone();
+    assert_eq!(jobs.len(), 2);
+    for (n, job) in jobs.iter().enumerate() {
+        assert!(job.dir.ends_with(format!("proofs/{}/attempt-{}", p.hypothesis, n + 1)), "{}", job.dir.display());
+        assert!(job.source.ends_with(&format!("#check @{0}\n#print axioms {0}\n", p.hypothesis)));
+        assert_eq!(job.timeout, std::time::Duration::from_secs(300));
+    }
+    // The prover heard what Lean said in its own conversation, and could read Mathlib.
+    let log = log.lock().unwrap();
+    let prover = log.calls.iter().find(|c| c.phase == Phase::Prove).expect("a prover");
+    assert_eq!(prover.sent.len(), 2, "{:?}", prover.sent);
+    assert!(prover.sent[1].contains("unknown identifier 'Nat.add_zero_left'") && prover.sent[1].contains("Line 3, column 30"), "{}", prover.sent[1]);
+    assert_eq!(prover.read, [PathBuf::from("/h/.proton/lean/project/.lake/packages/mathlib")]);
+    assert!(prover.stopped);
+    let record: Value = serde_json::from_str(&std::fs::read_to_string(folder.dir().join(format!("tasks/{}.json", prover.task))).unwrap()).unwrap();
+    assert_eq!(record["checks"].as_array().map(Vec::len), Some(2), "{record}");
+    // Reviewed formally by a family other than the author's; the overview after it.
+    let h = folder.hypotheses().into_iter().find(|h| h.id == p.hypothesis).unwrap();
+    let formal = folder.reviews().into_iter().find(|r| r.kind == ReviewKind::Formal).expect("a formal review");
+    assert_ne!(formal.reviewer.family(), h.author.family());
+    let at = |phase: Phase| log.calls.iter().position(|c| c.phase == phase).unwrap();
+    assert!(at(Phase::Meta) > at(Phase::Prove));
+    assert!(std::fs::read_to_string(folder.dir().join("rounds/round-001.md")).unwrap().contains("## Proof"));
+    drop(log);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn physics_never_asks_lean_and_mathematics_without_it_says_so_once() {
+    let dir = root("lean-none");
+    let (factory, log) = Factory::new();
+    let checker = Scripted::new(|job| lean_says(job, "clean"));
+    let asked = checker.asked.clone();
+    let mut research = Research::with_factory(&dir, Box::new(factory), "this-proton").with_checker(Box::new(checker));
+    research.create("Why is the sky blue?", "Explain the colour of the daytime sky.", Discipline::Physics, false);
+    research.start_at(T0);
+    play(&mut research, T0, 1);
+    assert!(asked.lock().unwrap().is_empty() && !log.lock().unwrap().calls.iter().any(|c| c.phase == Phase::Prove));
+
+    let dir = root("lean-unmade");
+    let (factory, log) = Factory::new();
+    let mut research = mathematics(&dir, factory, Box::new(super::lean::Offline));
+    research.start_at(T0);
+    let (_, events) = play(&mut research, T0, 1);
+    let said: Vec<String> = notices(&events).into_iter().filter(|n| n.contains("Lean is not made")).collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(!log.lock().unwrap().calls.iter().any(|c| c.phase == Phase::Prove));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_stopped_round_lets_its_check_go_and_a_relaunched_one_picks_the_proof_up_again() {
+    let dir = root("lean-stopped");
+    let (factory, log) = Factory::new();
+    let mut checker = Scripted::new(|job| lean_says(job, "clean"));
+    checker.polls = 1_000_000;
+    let asked = checker.asked.clone();
+    let mut research = mathematics(&dir, factory, Box::new(checker));
+    research.start_at(T0);
+    let mut t = T0;
+    play_until(&mut research, &mut t, |_| !asked.lock().unwrap().is_empty());
+    research.stop_at(t);
+    assert!(!research.is_busy(), "the check held the round");
+    let folder = Store::new(dir.join("research")).open(MATH).unwrap();
+    assert!(folder.proofs().is_empty(), "a stopped check proved something");
+    assert!(log.lock().unwrap().calls.iter().filter(|c| c.phase == Phase::Prove).all(|c| c.stopped));
+
+    // Proton closes while Lean checks: the round comes back paused, and
+    // the proof is asked for again with the file that was being checked.
+    let dir = root("lean-relaunch");
+    let (factory, _) = Factory::new();
+    let mut checker = Scripted::new(|job| lean_says(job, "clean"));
+    checker.polls = 1_000_000;
+    let asked = checker.asked.clone();
+    let mut research = mathematics(&dir, factory, Box::new(checker));
+    research.start_at(T0);
+    let mut t = T0;
+    play_until(&mut research, &mut t, |_| !asked.lock().unwrap().is_empty());
+    drop(research);
+
+    let (factory, log) = Factory::new();
+    let checker = Scripted::new(|job| lean_says(job, "clean"));
+    let mut again = Research::with_factory(&dir, Box::new(factory), "the-next-proton").with_checker(Box::new(checker));
+    let events = again.sync_at(t + 100);
+    assert!(matches!(round(&events), Some((RoundStatus::Paused { interrupted: true }, ..))), "{:?}", round(&events));
+    again.resume_at(t + 101);
+    play(&mut again, t + 101, 1);
+    let log = log.lock().unwrap();
+    let prover = log.calls.iter().find(|c| c.phase == Phase::Prove).expect("the proof was asked for again");
+    assert!(prover.sent[0].contains("## The last attempt") && prover.sent[0].contains("being checked when Proton closed"), "{}", prover.sent[0]);
+    let folder = Store::new(dir.join("research")).open(MATH).unwrap();
+    let p = &folder.proofs()[0];
+    assert_eq!((p.outcome, p.attempt), (FormalOutcome::Proved, 2), "after the attempt that was cut short");
+    drop(log);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The whole of it, but the model: a Lean that stands in for the real one,
+/// in a home that stands in for the person's, run by the machine's checker
+/// in the sandbox.
+#[cfg(unix)]
+#[test]
+fn a_round_proves_through_the_machines_lean_in_the_sandbox() {
+    use proton_lab::lean::check::Gate;
+    use proton_lab::lean::{github, LeanEnv, Marker, Tools};
+    use std::os::unix::fs::PermissionsExt;
+    if proton_lab::sandbox::available() == proton_lab::Sandbox::None {
+        return;
+    }
+    let dir = root("lean-live");
+    let person = dir.join("home");
+    let home = person.join(".proton/lean");
+    let bin = home.join("elan/toolchains/leanprover--lean4---v4.34.1/bin");
+    let lib = home.join("project/.lake/packages/mathlib/.lake/build/lib/lean");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join("Mathlib.olean"), "olean").unwrap();
+    // It finds itself and Mathlib as Lean does, and proves whatever it is asked about.
+    let lean = r#"#!/bin/sh
+/bin/realpath "$0" >/dev/null || exit 3
+[ -f "$LEAN_PATH/Mathlib.olean" ] || { echo '{"severity":"error","pos":{"line":1,"column":0},"data":"unknown module prefix Mathlib"}'; exit 1; }
+n=$(wc -l < Proof.lean | tr -d ' ')
+t=$(sed -n 's/^#check @//p' Proof.lean)
+echo "{\"severity\":\"information\",\"pos\":{\"line\":$((n - 1)),\"column\":0},\"data\":\"@$t : ∀ (n : ℕ), n + 0 = n\"}"
+echo "{\"severity\":\"information\",\"pos\":{\"line\":$n,\"column\":0},\"data\":\"'$t' depends on axioms: [propext]\"}"
+"#;
+    std::fs::write(bin.join("lean"), lean).unwrap();
+    std::fs::set_permissions(bin.join("lean"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let marker = Marker { lean: "v4.34.1".into(), mathlib: "v4.34.1".into(), commit: "c0ffee".into(), lean_bin: bin.join("lean"), lean_path: vec![lib], size: 1, made: 1 };
+    std::fs::write(home.join("ready.json"), serde_json::to_string(&marker).unwrap()).unwrap();
+    let env = LeanEnv::new(&home, Arc::new(github::Offline), proton_lab::lean::platform(), Tools::default()).with_person(&person).with_gate(Arc::new(Gate::default()));
+    let env = Arc::new(Mutex::new(env));
+
+    let (factory, _) = Factory::new();
+    let mut research = Research::with_factory(&dir, Box::new(factory), "this-proton").with_lean(env.clone()).with_checker(Box::new(super::lean::Live::new(env)));
+    research.create("Does adding zero change a number?", "Prove what can be proved.", Discipline::Mathematics, false);
+    research.start_at(T0);
+    let mut t = T0;
+    play_until(&mut research, &mut t, |r| !r.is_busy());
+    let folder = Store::new(dir.join("research")).open(MATH).unwrap();
+    let proofs = folder.proofs();
+    assert_eq!(proofs.len(), 1, "no proof: {}", folder.verdicts());
+    let p = &proofs[0];
+    assert_eq!((p.outcome, p.statement.as_deref(), p.axioms.as_slice()), (FormalOutcome::Proved, Some("∀ (n : ℕ), n + 0 = n"), ["propext".to_string()].as_slice()));
+    let attempt = folder.dir().join(format!("proofs/{}/attempt-1", p.hypothesis));
+    let record: Value = serde_json::from_str(&std::fs::read_to_string(attempt.join("check.json")).unwrap()).unwrap();
+    assert_eq!((record["state"].as_str(), record["sandbox"]["network"].as_bool()), (Some("done"), Some(false)), "{record}");
+    assert!(std::fs::read_to_string(attempt.join("Proof.lean")).unwrap().contains("#print axioms"));
     let _ = std::fs::remove_dir_all(dir);
 }

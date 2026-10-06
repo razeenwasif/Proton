@@ -14,12 +14,14 @@
 
 pub mod driver;
 pub mod factory;
+pub mod lean;
 pub mod literature;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use proton_lab::lean::{github, LeanEnv, LeanState, Tools};
 use proton_lab::run::{self as lab_run, Spec};
 use proton_lab::{EnvState, Lab, Run, RunState, Sandbox};
 
@@ -80,6 +82,12 @@ pub struct Research {
     mcp: Option<PathBuf>,
     /// The names the team cited, being checked.
     checks: Vec<Checking>,
+    /// Lean and Mathlib: one for the machine, shared by every project.
+    lean: Arc<Mutex<LeanEnv>>,
+    /// Lean as this window last drew it.
+    lean_seen: u64,
+    /// What checks the rounds' proofs.
+    checker: Box<dyn lean::Checker>,
 }
 
 /// Cited DOIs and arXiv ids of one investigation, being checked.
@@ -135,6 +143,22 @@ struct LiveRun {
 fn shared_lab() -> Arc<Mutex<Lab>> {
     static LAB: OnceLock<Arc<Mutex<Lab>>> = OnceLock::new();
     LAB.get_or_init(|| Arc::new(Mutex::new(Lab::at_home()))).clone()
+}
+
+/// The machine's Lean, in `~/.proton/lean`, made the first time it is asked for.
+static LEAN: OnceLock<Arc<Mutex<LeanEnv>>> = OnceLock::new();
+
+fn shared_lean() -> Arc<Mutex<LeanEnv>> {
+    LEAN.get_or_init(|| Arc::new(Mutex::new(LeanEnv::at_home()))).clone()
+}
+
+/// Proton is closing: Lean, if it is being made, stops; what the making
+/// left is taken away the next time Proton looks. Not when an investigation
+/// folder moves: Lean is the machine's, not a project's.
+pub fn quit_lean() {
+    if let Some(lean) = LEAN.get() {
+        lean.lock().unwrap_or_else(|e| e.into_inner()).quit();
+    }
 }
 
 impl std::fmt::Debug for Research {
@@ -223,6 +247,8 @@ impl Research {
         research.lab = shared_lab();
         research.literature = Box::new(literature::Live::new());
         research.mcp = beside_proton();
+        research.lean = shared_lean();
+        research.checker = Box::new(lean::Live::new(research.lean.clone()));
         research
     }
 
@@ -233,6 +259,8 @@ impl Research {
         research.lab = shared_lab();
         research.literature = Box::new(literature::Live::new());
         research.mcp = beside_proton();
+        research.lean = shared_lean();
+        research.checker = Box::new(lean::Live::new(research.lean.clone()));
         research
     }
 
@@ -246,8 +274,8 @@ impl Research {
     }
 
     /// Over another factory — scripted engines, in tests — as another
-    /// instance, with a Lab of its own that has no conda to call, and asking
-    /// nobody for the literature.
+    /// instance, with a Lab of its own that has no conda to call, asking
+    /// nobody for the literature, and with a Lean that is never made.
     pub fn with_factory(root: &Path, factory: Box<dyn AgentFactory>, instance: &str) -> Research {
         Research {
             lab: Arc::new(Mutex::new(Lab::new(&root.join(".proton-lab"), None))),
@@ -271,6 +299,9 @@ impl Research {
             resting: BTreeMap::new(),
             mcp: None,
             checks: Vec::new(),
+            lean: Arc::new(Mutex::new(LeanEnv::new(&root.join(".proton-lean"), Arc::new(github::Offline), None, Tools::default()))),
+            lean_seen: 0,
+            checker: Box::new(lean::Offline),
         }
     }
 
@@ -283,6 +314,18 @@ impl Research {
     /// Asking `source` for the literature: a script, in tests.
     pub fn with_literature(mut self, source: Box<dyn literature::Source>) -> Research {
         self.literature = source;
+        self
+    }
+
+    /// Checking proofs with `checker`: a script, in tests.
+    pub fn with_checker(mut self, checker: Box<dyn lean::Checker>) -> Research {
+        self.checker = checker;
+        self
+    }
+
+    /// With `lean` as the machine's Lean: one made in a test's folder.
+    pub fn with_lean(mut self, lean: Arc<Mutex<LeanEnv>>) -> Research {
+        self.lean = lean;
         self
     }
 
@@ -308,6 +351,7 @@ impl Research {
         }
         events.extend(self.round_event(now));
         events.extend(self.lab_event(true));
+        events.extend(self.lean_event(true));
         self.reap();
         events.extend(self.runs_event());
         events
@@ -337,6 +381,32 @@ impl Research {
     pub fn lab_do(&mut self, act: impl FnOnce(&mut Lab) -> Result<(), String>) -> Vec<Event> {
         let done = act(&mut self.lab.lock().unwrap_or_else(|e| e.into_inner()));
         let mut events = self.lab_event(true);
+        if let Err(why) = done {
+            events.push(notice(why, NoticeLevel::Warn));
+        }
+        events
+    }
+
+    /// Lean, looked at — its marker read, nothing started — the first time a
+    /// window shows it; drawn when it has changed since this window last
+    /// drew it, or `always`.
+    fn lean_event(&mut self, always: bool) -> Vec<Event> {
+        let mut lean = self.lean.lock().unwrap_or_else(|e| e.into_inner());
+        let stale = always && matches!(lean.state(), LeanState::Unknown | LeanState::Missing { .. });
+        if stale && !lean.busy() {
+            lean.check();
+        }
+        if !always && lean.version() == self.lean_seen {
+            return Vec::new();
+        }
+        self.lean_seen = lean.version();
+        vec![Event::LeanEnv { env: lean.state().clone() }]
+    }
+
+    /// Do something to Lean, and draw it.
+    pub fn lean_do(&mut self, act: impl FnOnce(&mut LeanEnv) -> Result<(), String>) -> Vec<Event> {
+        let done = act(&mut self.lean.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut events = self.lean_event(true);
         if let Err(why) = done {
             events.push(notice(why, NoticeLevel::Warn));
         }
@@ -664,7 +734,7 @@ impl Research {
             if self.driver(&slug).is_none() {
                 continue;
             }
-            let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
+            let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), lean: self.checker.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
             let Some(driver) = self.drivers.get_mut(&slug) else { continue };
             let moved = driver.run_finished(&mut kit, &summary, now);
             events.extend(self.moved(&slug, moved, now));
@@ -1477,7 +1547,7 @@ impl Research {
         if self.driver(&slug).is_none() {
             return vec![notice(format!("research/{slug} could not be read."), NoticeLevel::Error)];
         }
-        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
+        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), lean: self.checker.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
         let Some(driver) = self.drivers.get_mut(&slug) else { return Vec::new() };
         match driver.start(&mut kit, now) {
             Ok(moved) => self.moved(&slug, moved, now),
@@ -1509,7 +1579,7 @@ impl Research {
         if self.driver(&slug).is_none() {
             return Vec::new();
         }
-        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
+        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), lean: self.checker.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
         let Some(driver) = self.drivers.get_mut(&slug) else { return Vec::new() };
         match driver.resume(&mut kit, now) {
             Ok(moved) => self.moved(&slug, moved, now),
@@ -1538,10 +1608,12 @@ impl Research {
         // said, and each draws it when it has changed.
         self.lab.lock().unwrap_or_else(|e| e.into_inner()).poll();
         let mut lab = self.lab_event(false);
+        self.lean.lock().unwrap_or_else(|e| e.into_inner()).poll();
+        lab.extend(self.lean_event(false));
         lab.extend(self.poll_runs(now));
         lab.extend(self.poll_literature(now));
         let mut all = Vec::new();
-        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
+        let mut kit = Kit { agents: self.factory.as_mut(), literature: self.literature.as_mut(), lean: self.checker.as_mut(), resting: &self.resting, mcp: self.mcp.as_deref() };
         for (slug, driver) in self.drivers.iter_mut() {
             if driver.busy() || driver.fetching() {
                 all.push((slug.clone(), driver.poll(&mut kit, now)));
@@ -1558,7 +1630,7 @@ impl Research {
     /// Whether a round has calls out, or the Lab is working, for a host
     /// deciding how often to look.
     pub fn is_busy(&self) -> bool {
-        self.has_work() || self.lab.lock().map(|lab| lab.busy()).unwrap_or(false)
+        self.has_work() || self.lab.lock().map(|lab| lab.busy()).unwrap_or(false) || self.lean.lock().map(|lean| lean.busy()).unwrap_or(false)
     }
 
     /// Whether a round has calls out or a run is going: what moving the
@@ -1614,8 +1686,10 @@ mod tests {
         let mut research = Research::with_factory(&dir, Box::new(Engines::default()), "test");
         let events = research.sync();
         assert!(matches!(events.first(), Some(Event::ResearchList { investigations, open: None, folder }) if investigations.is_empty() && folder == "research/"));
-        // A Lab of its own, with no conda to call: the machine's is not touched.
-        assert!(matches!(events.last(), Some(Event::LabEnv { env: EnvState::NoPython })), "{events:?}");
+        // A Lab of its own, with no conda to call, and a Lean of its own that
+        // is never made: the machine's are not touched.
+        assert!(events.iter().any(|e| matches!(e, Event::LabEnv { env: EnvState::NoPython })), "{events:?}");
+        assert!(events.iter().any(|e| matches!(e, Event::LeanEnv { env: LeanState::Missing { home, .. } } if home.ends_with(".proton-lean"))), "{events:?}");
 
         let events = research.create("Why is the sky blue?", "Explain the colour.", Discipline::Physics, false);
         let Some(Event::ResearchList { investigations, open, .. }) = events.first() else { panic!("{events:?}") };

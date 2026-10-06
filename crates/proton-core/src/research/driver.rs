@@ -9,6 +9,10 @@
 //! closed mid-round loses only the calls in flight, and the round comes
 //! back paused: spending the scientist's limits is theirs to start.
 //!
+//! A proof a call answers with is checked by Lean before it means anything
+//! ([`super::lean`]): the call's conversation stays open meanwhile, and
+//! what Lean says goes back to it, or ends it.
+//!
 //! Time is passed in, never read here, so a round can be played in a test
 //! with a clock that jumps.
 
@@ -16,6 +20,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use proton_claude::chat::{Answer, Settings};
 use proton_claude::engine::{Engine, McpServer, Unattended};
@@ -24,23 +29,27 @@ use proton_claude::{Activity, Conversation};
 use proton_literature::fetch::{Fetch, Job, Reply};
 use proton_research::classify::{classify, Failure};
 use proton_research::lock::{self, Lock};
-use proton_research::model::{LiteratureSource, Paper, Seat};
+use proton_research::model::{LeanFacts, LiteratureSource, Paper, Seat};
 use proton_research::schema::Phase;
 use proton_research::store::{atomic_write, Folder};
 use proton_research::supervisor::{
-    Answered, Dispatch, Effect, LiteratureRow, RoundState, RoundStatus, RunSummary, Snapshot, Supervisor, TaskRow, TaskState, STATE_VERSION,
+    Answered, Dispatch, Effect, LeanRun, LiteratureRow, ProofCheck, RoundState, RoundStatus, RunSummary, Snapshot, Supervisor, TaskRow, TaskState,
+    STATE_VERSION,
 };
 use proton_research::view::SeatRow;
 use serde_json::{json, Value};
 
 use super::factory::{engine_of, AgentFactory};
+use super::lean::{Checker, Checking, Job as LeanJob, NotYet};
 use super::literature::{self, Source};
 
 /// What a round is driven with: the engines its calls run on, what asks
-/// the literature, and the sources that said they were out of calls, until when.
+/// the literature and what checks its proofs, and the sources that said
+/// they were out of calls, until when.
 pub struct Kit<'a> {
     pub agents: &'a mut dyn AgentFactory,
     pub literature: &'a mut dyn Source,
+    pub lean: &'a mut dyn Checker,
     pub resting: &'a BTreeMap<LiteratureSource, u64>,
     /// Proton's `proton-mcp`, to give Claude Code and Codex the papers' full
     /// text through; without it, everyone is given passages instead.
@@ -81,6 +90,14 @@ struct Live {
     refused: HashSet<String>,
     /// Its record in `tasks/`, kept up as it goes.
     record: Value,
+    /// The proof it answered with, while Lean has it.
+    proving: Option<Proving>,
+}
+
+/// A call's proof with Lean: waiting for the machine's one check, or being checked.
+enum Proving {
+    Waiting { job: LeanJob, attempt: u32 },
+    Running { check: Box<dyn Checking>, attempt: u32 },
 }
 
 /// What a step of the round came to.
@@ -130,6 +147,20 @@ pub struct Driver {
     downloads: Vec<(Fetch, Vec<String>)>,
     /// A worker reading the papers' PDFs into the text cache, while it runs.
     warming: Arc<AtomicBool>,
+    /// The machine's Lean as last asked: what the round plans with.
+    facts: Option<LeanFacts>,
+}
+
+/// Checks a Proton gone mid-round left running: stopped, if still going in
+/// their folders, and their records closed.
+fn reap_checks(folder: &Folder) {
+    let Ok(hypotheses) = std::fs::read_dir(folder.dir().join("proofs")) else { return };
+    for hypothesis in hypotheses.flatten().filter(|e| e.path().is_dir()) {
+        let Ok(attempts) = std::fs::read_dir(hypothesis.path()) else { continue };
+        for attempt in attempts.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("attempt-")) {
+            let _ = proton_lab::lean::check::reap(&attempt.path());
+        }
+    }
 }
 
 /// The highest round the folder has a report of.
@@ -192,6 +223,7 @@ impl Driver {
             Some(state) => Supervisor::restore(state),
             None => Supervisor::new(last_round(&folder), next_task(&folder), seed),
         };
+        reap_checks(&folder);
         Driver {
             folder,
             supervisor,
@@ -206,6 +238,17 @@ impl Driver {
             fresh: Vec::new(),
             downloads: Vec::new(),
             warming: Arc::default(),
+            facts: None,
+        }
+    }
+
+    /// Ask what the machine's Lean is now; the investigation is read again
+    /// if that changed what a round can do.
+    fn sense(&mut self, lean: &mut dyn Checker) {
+        let facts = lean.facts();
+        if facts != self.facts {
+            self.facts = facts;
+            self.snap = None;
         }
     }
 
@@ -366,7 +409,7 @@ impl Driver {
             paper_stems: f.paper_stems(),
             unavailable: self.unavailable.clone(),
             models,
-            lean: None,
+            lean: self.facts.clone(),
             proof_files: proofs.iter().filter_map(|p| Some((p.hypothesis.clone(), f.proof_file(&p.hypothesis)?))).collect(),
             proofs,
         };
@@ -402,6 +445,7 @@ impl Driver {
     pub fn start(&mut self, kit: &mut Kit, now: u64) -> Result<Moved, String> {
         self.take_lock(now)?;
         self.preflight(kit.agents);
+        self.sense(kit.lean);
         self.snap = None;
         let snap = self.snapshot(now);
         let effects = match self.supervisor.start_round(&snap, now) {
@@ -432,6 +476,7 @@ impl Driver {
         }
         self.take_lock(now)?;
         self.preflight(kit.agents);
+        self.sense(kit.lean);
         self.snap = None;
         self.supervisor.resume();
         let mut moved = Moved { moved: true, ..Moved::default() };
@@ -470,6 +515,7 @@ impl Driver {
     /// sandbox log: a seat of another model family is to review it — now,
     /// if a round is running, or in the next.
     pub fn run_finished(&mut self, kit: &mut Kit, run: &RunSummary, now: u64) -> Moved {
+        self.sense(kit.lean);
         self.snap = None;
         let snap = self.snapshot(now);
         let effects = self.supervisor.run_finished(run, &snap, now);
@@ -511,9 +557,10 @@ impl Driver {
                 None => {}
             }
         }
+        self.sense(kit.lean);
         let ids: Vec<String> = self.live.keys().cloned().collect();
         for id in ids {
-            moved.and(self.watch(&id, now));
+            moved.and(self.watch(&id, kit.lean, now));
         }
         if matches!(self.status(), RoundStatus::Running) && self.lock.is_some() {
             moved.and(self.pump(kit, now));
@@ -753,8 +800,13 @@ impl Driver {
         moved
     }
 
-    /// One call: what it has done since last looked at.
-    fn watch(&mut self, id: &str, now: u64) -> Moved {
+    /// One call: what it has done since last looked at. While Lean checks
+    /// its proof, only the check is looked at: the answer it came from is
+    /// never read twice.
+    fn watch(&mut self, id: &str, lean: &mut dyn Checker, now: u64) -> Moved {
+        if self.live.get(id).is_some_and(|live| live.proving.is_some()) {
+            return self.watch_check(id, lean, now);
+        }
         let mut moved = Moved::default();
         let Some(live) = self.live.get_mut(id) else { return moved };
         live.conversation.poll();
@@ -839,14 +891,7 @@ impl Driver {
                         }
                         moved.and(self.apply(effects));
                     }
-                    // Lean comes with the machine's Lean: until then the
-                    // snapshot never says it is made, and no proof is asked for.
-                    Answered::Check(_) => {
-                        if let Some(live) = self.live.remove(id) {
-                            self.close(id, live, now, "failed");
-                        }
-                        moved.and(self.failed(id, Failure::Unparseable { why: "Proton cannot check Lean proofs here yet.".into() }, now));
-                    }
+                    Answered::Check(check) => moved.and(self.begin_check(id, check, now)),
                 }
             }
             None => {
@@ -862,6 +907,91 @@ impl Driver {
                 }
                 moved.and(self.failed(id, failure, now));
             }
+        }
+        moved
+    }
+
+    /// A proof to check: its attempt's folder made, and the check started
+    /// at the next look — or once the machine's one check is free.
+    fn begin_check(&mut self, id: &str, check: ProofCheck, now: u64) -> Moved {
+        match self.folder.next_attempt(&check.hypothesis) {
+            Ok((attempt, dir)) => {
+                let about = json!({ "hypothesis": check.hypothesis, "attempt": attempt, "task": id, "round": self.round() });
+                let job = LeanJob { dir, source: check.assembled.text, timeout: Duration::from_secs(u64::from(check.timeout_s.max(1))), about };
+                if let Some(live) = self.live.get_mut(id) {
+                    live.proving = Some(Proving::Waiting { job, attempt });
+                }
+                Moved { moved: true, ..Moved::default() }
+            }
+            Err(why) => {
+                if let Some(live) = self.live.remove(id) {
+                    self.close(id, live, now, "failed");
+                }
+                self.failed(id, Failure::Crashed { why }, now)
+            }
+        }
+    }
+
+    /// A call's proof with Lean: started when the machine is free, and once
+    /// checked, what Lean said goes back to the round.
+    fn watch_check(&mut self, id: &str, lean: &mut dyn Checker, now: u64) -> Moved {
+        let mut moved = Moved::default();
+        let Some(live) = self.live.get_mut(id) else { return moved };
+        let (done, attempt) = match live.proving.take() {
+            Some(Proving::Waiting { job, attempt }) => match lean.start(&job) {
+                Ok(check) => {
+                    live.proving = Some(Proving::Running { check, attempt });
+                    moved.moved = true;
+                    return moved;
+                }
+                Err(NotYet::Busy) => {
+                    live.proving = Some(Proving::Waiting { job, attempt });
+                    return moved;
+                }
+                Err(NotYet::Failed(why)) => {
+                    if let Some(live) = self.live.remove(id) {
+                        self.close(id, live, now, "failed");
+                    }
+                    return self.failed(id, Failure::Crashed { why: format!("Lean could not check the proof: {why}") }, now);
+                }
+            },
+            Some(Proving::Running { mut check, attempt }) => match check.poll() {
+                Some(done) => (done, attempt),
+                None => {
+                    live.proving = Some(Proving::Running { check, attempt });
+                    return moved;
+                }
+            },
+            None => return moved,
+        };
+        let entry = json!({ "attempt": attempt, "ended": format!("{:?}", done.ended), "seconds": (done.seconds * 100.0).round() / 100.0, "at": now });
+        match live.record["checks"].as_array_mut() {
+            Some(checks) => checks.push(entry),
+            None => live.record["checks"] = json!([entry]),
+        }
+        moved.moved = true;
+        moved.wrote = true;
+        let run = LeanRun { lines: done.lines, ended: done.ended, err: done.err, attempt };
+        let snap = self.snapshot(now);
+        match self.supervisor.lean_checked(id, &run, &snap, now) {
+            Answered::Repair(told) => {
+                let Some(live) = self.live.get_mut(id) else { return moved };
+                // What Lean said is new to mend: the call's whole time again.
+                live.deadline = now + TIMEOUT;
+                if let Err(e) = live.conversation.send(&told, &[]) {
+                    if let Some(live) = self.live.remove(id) {
+                        self.close(id, live, now, "failed");
+                    }
+                    moved.and(self.failed(id, Failure::Crashed { why: e }, now));
+                }
+            }
+            Answered::Effects(effects) => {
+                if let Some(live) = self.live.remove(id) {
+                    self.close(id, live, now, "");
+                }
+                moved.and(self.apply(effects));
+            }
+            Answered::Check(check) => moved.and(self.begin_check(id, check, now)),
         }
         moved
     }
@@ -924,12 +1054,19 @@ impl Driver {
             mode: "default".into(),
             effort: config.as_ref().and_then(|c| c.effort.clone()),
         };
+        // A prover may read Mathlib's sources: Codex's sandbox reads the
+        // whole disk already; Claude Code is given the folder.
+        let read = match (d.phase, self.facts.as_ref().and_then(|f| f.sources.as_ref())) {
+            (Phase::Prove, Some(sources)) => vec![PathBuf::from(sources)],
+            _ => Vec::new(),
+        };
         let how = Unattended {
             instructions: d.instructions.clone(),
             schema: Some(d.schema.clone()),
             web: web(d.phase),
             max_turns: Some(turns(d.phase)),
             mcp,
+            read,
         };
         let attempt = self.supervisor.task(&d.task).map(|t| t.attempts).unwrap_or(0);
         let record = json!({
@@ -949,7 +1086,7 @@ impl Driver {
             .and_then(|mut conversation| conversation.send(&d.prompt, &[]).map(|()| conversation));
         match started {
             Ok(conversation) => {
-                self.live.insert(d.task.clone(), Live { conversation, deadline: now + TIMEOUT, told: false, refused: HashSet::new(), record });
+                self.live.insert(d.task.clone(), Live { conversation, deadline: now + TIMEOUT, told: false, refused: HashSet::new(), record, proving: None });
                 Moved::default()
             }
             Err(why) => {

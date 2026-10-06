@@ -33,6 +33,7 @@ import type { LabRunDetail } from "./LabRunDetail";
 import type { LabSandbox } from "./LabSandbox";
 import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
+import type { LeanEnv } from "./LeanEnv";
 import type { LibrarySource } from "./LibrarySource";
 import type { LiteratureRow } from "./LiteratureRow";
 import type { LiteratureSourceRow } from "./LiteratureSourceRow";
@@ -204,7 +205,7 @@ check: boolean,
 /**
  * Whether this Proton asks anybody at all.
  */
-live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
 /**
  * The round's search of the literature, if it has one.
  */

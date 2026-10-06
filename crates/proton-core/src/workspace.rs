@@ -1434,6 +1434,13 @@ impl Workspace {
                 Ok(())
             }),
             Command::LabRemove => self.research().lab_do(|lab| lab.remove()),
+            Command::LeanPlan => self.research().lean_do(|lean| lean.plan()),
+            Command::LeanCreate => self.research().lean_do(|lean| lean.create()),
+            Command::LeanCancel => self.research().lean_do(|lean| {
+                lean.cancel();
+                Ok(())
+            }),
+            Command::LeanRemove => self.research().lean_do(|lean| lean.remove()),
             Command::ClaudeSend { text, images } => self.claude.send(&text, &images),
             Command::ClaudeStop => self.claude.interrupt(),
             Command::ClaudeAnswer { request, answer } => self.claude.answer(&request, answer),

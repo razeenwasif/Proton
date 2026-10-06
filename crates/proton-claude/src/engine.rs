@@ -144,6 +144,8 @@ pub struct Unattended {
     /// MCP servers it may use — Proton's own, never the person's — and
     /// only the tools of theirs named, each allowed up front.
     pub mcp: Vec<McpServer>,
+    /// Folders besides its own it may read: Mathlib's sources, for a prover.
+    pub read: Vec<PathBuf>,
 }
 
 /// An MCP server a call is given: Proton's `proton-mcp`, serving one

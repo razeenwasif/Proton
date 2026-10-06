@@ -1063,6 +1063,7 @@ mod tests {
             web: true,
             max_turns: None,
             mcp: Vec::new(),
+            read: Vec::new(),
         }
     }
 

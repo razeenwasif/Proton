@@ -537,6 +537,9 @@ impl Session {
         if let Some(research) = &self.research {
             research.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
         }
+        // The machine's Lean, if it is being made: here, not in Research's
+        // shutdown, which also runs when the investigations' folder moves.
+        crate::research::quit_lean();
     }
 
     /// Where a file a Lab run left is, in the workspace on screen.

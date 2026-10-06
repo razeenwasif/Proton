@@ -26,6 +26,15 @@ pub trait Fetch: Send + Sync {
     fn get(&self, url: &str) -> Result<(u16, String), String>;
 }
 
+/// Nobody: what a Lean that must never reach the network asks, in tests.
+pub struct Offline;
+
+impl Fetch for Offline {
+    fn get(&self, _: &str) -> Result<(u16, String), String> {
+        Err("GitHub is not asked here".into())
+    }
+}
+
 /// The network, as the literature reaches it: rustls with the platform's
 /// certificates, https only, a name that says who is asking.
 pub struct Live {

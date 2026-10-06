@@ -448,6 +448,15 @@ pub enum Command {
     LabCancel,
     /// Take the Lab's Python away.
     LabRemove,
+    /// The scientist's first say-so for Lean: GitHub is asked which Lean
+    /// Mathlib has tagged, and what making it would download and keep.
+    LeanPlan,
+    /// The second: make exactly what was planned, in `~/.proton/lean`.
+    LeanCreate,
+    /// Stop making Lean — nothing it made is kept — or put a plan aside.
+    LeanCancel,
+    /// Take Lean and Mathlib away.
+    LeanRemove,
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1228,6 +1237,11 @@ pub enum Event {
     /// project is open.
     LabEnv {
         env: proton_lab::EnvState,
+    },
+    /// Where Lean and Mathlib stand: one for the machine, whichever project
+    /// is open.
+    LeanEnv {
+        env: proton_lab::LeanState,
     },
     /// What one task said, drawn as Chat draws a conversation: live while
     /// it runs.

@@ -139,6 +139,9 @@ impl Chat {
             chat.extra.extend(["--mcp-config".to_string(), serde_json::json!({ "mcpServers": servers }).to_string()]);
             chat.extra.extend(["--allowedTools".to_string(), how.mcp.iter().flat_map(|s| s.allowed()).collect::<Vec<_>>().join(",")]);
         }
+        for dir in &how.read {
+            chat.extra.extend(["--add-dir".to_string(), dir.display().to_string()]);
+        }
         if let Some(turns) = how.max_turns {
             chat.extra.extend(["--max-turns".to_string(), turns.to_string()]);
         }
@@ -486,6 +489,7 @@ mod tests {
             web: true,
             max_turns: Some(8),
             mcp: Vec::new(),
+            read: vec![PathBuf::from("/h/.proton/lean/project/.lake/packages/mathlib")],
         };
         let args = Chat::unattended(PathBuf::from("/tmp/r"), Settings::default(), &how).spawn().args();
         let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
@@ -493,8 +497,9 @@ mod tests {
         assert!(args.contains(&"--safe-mode".to_string()) && args.contains(&"--strict-mcp-config".to_string()), "{args:?}");
         assert!(has(["--tools", "Read,Grep,Glob,WebSearch,WebFetch"]) && has(["--max-turns", "8"]), "{args:?}");
         assert!(has(["--json-schema", "{\"type\":\"object\"}"]) && has(["--append-system-prompt", "You are the Principal Investigator."]), "{args:?}");
+        assert!(has(["--add-dir", "/h/.proton/lean/project/.lake/packages/mathlib"]), "a folder it may read: {args:?}");
 
-        let offline = Unattended { web: false, schema: None, max_turns: None, ..how };
+        let offline = Unattended { web: false, schema: None, max_turns: None, read: Vec::new(), ..how };
         let args = Chat::unattended(PathBuf::from("/tmp/r"), Settings::default(), &offline).spawn().args();
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1] == "Read,Grep,Glob"), "{args:?}");
         assert!(!args.contains(&"--json-schema".to_string()) && !args.contains(&"--max-turns".to_string()));
