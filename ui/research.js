@@ -82,7 +82,7 @@ const VERDICTS = /** @type {Record<Verdict, string>} */ ({
 });
 
 const KINDS = /** @type {Record<string, string>} */ ({
-  review: "Review", verification: "Verification", simulation: "Simulation review",
+  review: "Review", verification: "Verification", simulation: "Simulation review", formal: "Formal proof",
 });
 
 /** What a task's state is called. */

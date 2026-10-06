@@ -258,6 +258,25 @@ impl LiteraturePolicy {
     }
 }
 
+/// What Lean does on its own in a mathematics investigation, once the
+/// machine has it: the leading hypothesis stated and proved — or its
+/// negation — each round, and the checks run without asking, sandboxed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LeanPolicy {
+    pub enabled: bool,
+    /// The calls a round's proving may take, repairs included.
+    pub calls: u32,
+    /// The longest one check may take, in seconds.
+    pub timeout_s: u32,
+}
+
+impl Default for LeanPolicy {
+    fn default() -> LeanPolicy {
+        LeanPolicy { enabled: true, calls: 3, timeout_s: 300 }
+    }
+}
+
 /// `investigation.json`: how an investigation is set up.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Investigation {
@@ -273,6 +292,9 @@ pub struct Investigation {
     pub lab: LabPolicy,
     #[serde(default = "LiteraturePolicy::off")]
     pub literature: LiteraturePolicy,
+    /// On for one made before there was Lean too: nothing leaves the machine.
+    #[serde(default)]
+    pub lean: LeanPolicy,
 }
 
 /// The format version of `investigation.json`.
@@ -295,6 +317,7 @@ impl Investigation {
             budget: Budget::default(),
             lab: LabPolicy::default(),
             literature: LiteraturePolicy::default(),
+            lean: LeanPolicy::default(),
         }
     }
 
@@ -352,6 +375,8 @@ pub enum ReviewKind {
     Verification,
     /// What a run in the Lab says about it.
     Simulation,
+    /// What Lean said of a proof of it, or of its negation.
+    Formal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -401,6 +426,86 @@ pub struct Match {
     pub task: Option<String>,
     /// Seconds since the epoch.
     pub at: u64,
+}
+
+/// What a prover says its Lean file is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "lowercase")]
+pub enum ProofKind {
+    /// The hypothesis, stated and proved.
+    Proof,
+    /// Its negation, stated and proved.
+    Disproof,
+    /// Neither: it has no faithful statement in Lean with Mathlib.
+    #[serde(rename = "none")]
+    Unstatable,
+}
+
+/// Where a hypothesis stands with Lean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "lowercase")]
+pub enum FormalOutcome {
+    /// Stated, and proved on Lean's standard axioms alone.
+    Proved,
+    /// Stated, and the statement accepted; the proof is still open.
+    Open,
+    /// Its negation, proved.
+    Disproved,
+    /// The prover found no faithful statement of it.
+    Unformalized,
+}
+
+/// One thing Lean said about a file, where it said it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+pub struct LeanMessage {
+    /// `error`, `warning` or `information`.
+    pub severity: String,
+    pub line: u32,
+    pub column: u32,
+    pub text: String,
+}
+
+/// What proving a hypothesis came to: `proofs/H004.json`, beside the file
+/// Lean checked, `proofs/H004.lean`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct ProofRecord {
+    pub hypothesis: String,
+    pub outcome: FormalOutcome,
+    pub kind: ProofKind,
+    /// The theorem as Lean prints it: what was proved, whatever was meant.
+    pub statement: Option<String>,
+    /// The axioms it rests on, as Lean lists them.
+    pub axioms: Vec<String>,
+    /// The prover's case that the statement is the hypothesis's.
+    pub notes: String,
+    pub prover: Author,
+    pub round: u32,
+    pub task: Option<String>,
+    /// The checks the round made, and which of them this file had.
+    pub attempts: u32,
+    pub attempt: u32,
+    /// The Lean and the Mathlib it was checked with.
+    pub lean: String,
+    pub mathlib: String,
+    /// What Lean said of it, when that was not a proof.
+    pub messages: Vec<LeanMessage>,
+    /// Seconds since the epoch.
+    #[ts(type = "number")]
+    pub at: u64,
+}
+
+/// The machine's Lean, as a round knows it: ready, at these versions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeanFacts {
+    pub lean: String,
+    pub mathlib: String,
+    /// Where Mathlib's sources are, for a prover to read.
+    pub sources: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

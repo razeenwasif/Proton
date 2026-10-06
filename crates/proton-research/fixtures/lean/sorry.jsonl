@@ -1,0 +1,3 @@
+{"severity": "warning", "pos": {"line": 3, "column": 8}, "endPos": {"line": 3, "column": 13}, "keepFullRange": false, "isSilent": false, "fileName": "Proof.lean", "data": "declaration uses 'sorry'", "caption": "", "kind": "hasSorry"}
+{"severity": "information", "pos": {"line": 7, "column": 0}, "endPos": {"line": 7, "column": 5}, "keepFullRange": false, "isSilent": false, "fileName": "Proof.lean", "data": "@H004 : ∀ (n : ℕ), Even (n * (n + 1))", "caption": "", "kind": "[anonymous]"}
+{"severity": "information", "pos": {"line": 8, "column": 0}, "endPos": {"line": 8, "column": 5}, "keepFullRange": false, "isSilent": false, "fileName": "Proof.lean", "data": "'H004' depends on axioms: [sorryAx]", "caption": "", "kind": "[anonymous]"}

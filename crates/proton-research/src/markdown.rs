@@ -233,6 +233,7 @@ pub fn render_review(r: &Review) -> String {
         ReviewKind::Review => "Review",
         ReviewKind::Verification => "Verification",
         ReviewKind::Simulation => "Simulation review",
+        ReviewKind::Formal => "Formal proof",
     }, r.hypothesis));
     section(&mut out, "Summary", &r.summary);
     section(&mut out, "Critique", &r.critique);

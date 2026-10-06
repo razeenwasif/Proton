@@ -23,6 +23,7 @@
 pub mod cite;
 pub mod classify;
 pub mod elo;
+pub mod lean;
 pub mod literature;
 pub mod lock;
 pub mod markdown;

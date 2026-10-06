@@ -1,0 +1,2 @@
+{"severity": "information", "pos": {"line": 8, "column": 0}, "endPos": {"line": 8, "column": 5}, "keepFullRange": false, "isSilent": false, "fileName": "Proof.lean", "data": "@H004 : 5 = 0", "caption": "", "kind": "[anonymous]"}
+{"severity": "information", "pos": {"line": 9, "column": 0}, "endPos": {"line": 9, "column": 5}, "keepFullRange": false, "isSilent": false, "fileName": "Proof.lean", "data": "'H004' depends on axioms: [cheat]", "caption": "", "kind": "[anonymous]"}

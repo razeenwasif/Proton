@@ -1,0 +1,3 @@
+{"severity": "error", "pos": {"line": 3, "column": 42}, "endPos": {"line": 3, "column": 47}, "keepFullRange": false, "isSilent": false, "fileName": "Proof.lean", "data": "unknown identifier 'Nat.add_comm_swapped'", "caption": "", "kind": "[anonymous]"}
+{"severity": "information", "pos": {"line": 6, "column": 0}, "endPos": {"line": 6, "column": 5}, "keepFullRange": false, "isSilent": false, "fileName": "Proof.lean", "data": "@H004 : ∀ (a b : ℕ), a + b = b + a", "caption": "", "kind": "[anonymous]"}
+{"severity": "information", "pos": {"line": 7, "column": 0}, "endPos": {"line": 7, "column": 5}, "keepFullRange": false, "isSilent": false, "fileName": "Proof.lean", "data": "'H004' depends on axioms: [sorryAx]", "caption": "", "kind": "[anonymous]"}

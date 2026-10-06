@@ -16,6 +16,8 @@
 //! literature/P003.md   a paper the team found or the scientist added, and
 //!                      P003.pdf beside it when an open copy was kept (not committed)
 //! runs/R005/           what running an experiment gave
+//! proofs/H004.lean     the leading hypothesis in Lean, as last checked, and
+//! proofs/H004.json     what that came to; proofs/H004/attempt-2/ each check
 //! rounds/round-002.md  what each round did
 //! tasks/T0031.json     every agent call, for provenance
 //! .investigation/      machine state: the lock, caches (not committed)
@@ -24,7 +26,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::markdown;
-use crate::model::{next_id, Discipline, Experiment, Hypothesis, Investigation, Match, Paper, Review};
+use crate::model::{next_id, Discipline, Experiment, Hypothesis, Investigation, Match, Paper, ProofRecord, Review};
 
 /// What an investigation keeps out of Git: its machine state, what runs
 /// write, and papers' PDFs — megabytes each, and other people's copyright.
@@ -377,6 +379,52 @@ impl Folder {
         atomic_write(&dir.join("proposal.md"), markdown::render_experiment(e).as_bytes())
     }
 
+    /// Where a hypothesis's proof is kept: only for an id that is a
+    /// hypothesis's, so a name from elsewhere cannot point outside the folder.
+    fn proofs_of(&self, hypothesis: &str) -> Result<PathBuf, String> {
+        let digits = hypothesis.strip_prefix('H').unwrap_or("");
+        if digits.len() < 3 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!("{hypothesis}: not a hypothesis"));
+        }
+        Ok(self.dir.join("proofs"))
+    }
+
+    /// What proving each hypothesis came to, in name order.
+    pub fn proofs(&self) -> Vec<ProofRecord> {
+        let Ok(entries) = std::fs::read_dir(self.dir.join("proofs")) else { return Vec::new() };
+        let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+        paths.sort();
+        paths.iter().filter_map(|p| serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()).collect()
+    }
+
+    pub fn proof(&self, hypothesis: &str) -> Option<ProofRecord> {
+        let path = self.proofs_of(hypothesis).ok()?.join(format!("{hypothesis}.json"));
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+    }
+
+    /// The file Lean checked for a hypothesis, as last kept.
+    pub fn proof_file(&self, hypothesis: &str) -> Option<String> {
+        std::fs::read_to_string(self.proofs_of(hypothesis).ok()?.join(format!("{hypothesis}.lean"))).ok()
+    }
+
+    /// Keep what proving a hypothesis came to: its file, then its record.
+    pub fn write_proof(&self, record: &ProofRecord, lean: &str) -> Result<(), String> {
+        let dir = self.proofs_of(&record.hypothesis)?;
+        atomic_write(&dir.join(format!("{}.lean", record.hypothesis)), lean.as_bytes())?;
+        let text = serde_json::to_string_pretty(record).map_err(|e| e.to_string())? + "\n";
+        atomic_write(&dir.join(format!("{}.json", record.hypothesis)), text.as_bytes())
+    }
+
+    /// Where the next check of a hypothesis's proof goes, and its number:
+    /// `proofs/H004/attempt-3/`, after every attempt kept so far.
+    pub fn next_attempt(&self, hypothesis: &str) -> Result<(u32, PathBuf), String> {
+        let dir = self.proofs_of(hypothesis)?.join(hypothesis);
+        let highest = std::fs::read_dir(&dir)
+            .map(|entries| entries.flatten().filter_map(|e| e.file_name().to_str()?.strip_prefix("attempt-")?.parse::<u32>().ok()).max().unwrap_or(0))
+            .unwrap_or(0);
+        Ok((highest + 1, dir.join(format!("attempt-{}", highest + 1))))
+    }
+
     pub fn add_match(&self, m: &Match) -> Result<(), String> {
         append(&self.dir.join("tournament.jsonl"), &(serde_json::to_string(m).map_err(|e| e.to_string())? + "\n"))
     }
@@ -538,6 +586,43 @@ mod tests {
         folder.ensure_ignored("literature/*.pdf").unwrap();
         folder.ensure_ignored("literature/*.pdf").unwrap();
         assert_eq!(std::fs::read_to_string(folder.dir().join(".gitignore")).unwrap(), ".investigation/\nruns/*/out/\nnotes/private\nliterature/*.pdf\n");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_proof_is_kept_beside_its_record_and_its_attempts_numbered_on() {
+        use crate::model::{FormalOutcome, ProofKind};
+        let dir = root("proofs");
+        let folder = Store::new(&dir).create("Primes", "", Discipline::Mathematics, 1).unwrap();
+        assert!(folder.proofs().is_empty() && folder.proof("H001").is_none());
+        let (n, at) = folder.next_attempt("H001").unwrap();
+        assert!(n == 1 && at.ends_with("proofs/H001/attempt-1"));
+        std::fs::create_dir_all(&at).unwrap();
+        std::fs::create_dir_all(at.with_file_name("attempt-7")).unwrap();
+        assert_eq!(folder.next_attempt("H001").unwrap().0, 8, "after the highest kept");
+        let record = ProofRecord {
+            hypothesis: "H001".into(),
+            outcome: FormalOutcome::Proved,
+            kind: ProofKind::Proof,
+            statement: Some("∀ (n : ℕ), n + 0 = n".into()),
+            axioms: vec!["propext".into()],
+            notes: "The statement is the hypothesis's.".into(),
+            prover: Author::new(Seat::Codex, "gpt-6"),
+            round: 1,
+            task: Some("T0007".into()),
+            attempts: 2,
+            attempt: 2,
+            lean: "v4.34.1".into(),
+            mathlib: "v4.34.1".into(),
+            messages: Vec::new(),
+            at: 9,
+        };
+        folder.write_proof(&record, "import Mathlib\n").unwrap();
+        assert_eq!((folder.proofs(), folder.proof("H001")), (vec![record.clone()], Some(record)));
+        assert_eq!(folder.proof_file("H001").as_deref(), Some("import Mathlib\n"));
+        for bad in ["../x", "H1", "P001", ""] {
+            assert!(folder.next_attempt(bad).is_err() && folder.proof(bad).is_none(), "{bad}");
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
