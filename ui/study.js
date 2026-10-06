@@ -11,6 +11,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
+import { createChat } from "./study-chat.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
 
 /** @typedef {import("./bindings/StudySummary").StudySummary} Summary */
@@ -22,7 +23,7 @@ import { createPicker, KIND_ICON, size } from "./study-kb.js";
 /** @typedef {{notebooks: Summary[], open: string | null, folder: string | null}} ListEvent */
 /** @typedef {{id: string, title: string, kind: string, at: Place | null, said: string | null, view: View}} SourceEvent */
 /** @typedef {{id: string, title: string, body: string, updated: number, source: string | null}} NoteEvent */
-/** @typedef {{kind: "overview"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}} Shown */
+/** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}} Shown */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
  *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
 
@@ -72,10 +73,14 @@ export function createStudy(host) {
     studio: q("[data-study-studio-body]"),
   };
   const picker = createPicker({ root: host.root, dispatch: host.dispatch, ws });
+  const chat = createChat({
+    dispatch: host.dispatch, ws, readOnly: () => readOnly(),
+    show: (id, at) => host.dispatch({ type: "studyShow", id, at }),
+  });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: boolean, removing: string | null,
-   *   getting: string[] | null, shown: Shown}} */
+   *   getting: string[] | null, shown: Shown, back: "chat" | "overview"}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -89,8 +94,10 @@ export function createStudy(host) {
     // whose taking out is being confirmed; sources whose download from
     // iCloud is being confirmed.
     editing: false, pasting: false, removing: null, getting: null,
-    // What the middle shows: the notebook, a source in the reader, a note.
-    shown: { kind: "overview" },
+    // What the middle shows: the chat, the sources, a source in the
+    // reader, a note — and what Back returns to.
+    shown: { kind: "chat" },
+    back: "chat",
   };
 
   const readOnly = () => Boolean(state.notebook?.readOnly);
@@ -269,10 +276,7 @@ export function createStudy(host) {
     const held = nb.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nb.readOnly)} has this notebook open: it is read only here.</div>` : "";
     if (state.editing) return held + detailsHtml();
     if (state.pasting) return held + pasteHtml();
-    const facts = [nb.course, nb.exam ? `exam on ${nb.exam}` : ""].filter(Boolean).join(" · ");
-    const head = `<div class="st-nb-head"><div><h1>${esc(nb.title)}</h1>` +
-      `<span class="st-faint">${esc(facts || "No course or exam day yet")}</span></div>` +
-      (readOnly() ? "" : `<button class="cc-quiet" data-study-details>Edit</button>`) + `</div>`;
+    const head = headHtml();
     if (!nb.sources.length) {
       return `${held}${head}<div class="st-card st-empty">
           <h2>Add sources to begin</h2>
@@ -298,6 +302,20 @@ export function createStudy(host) {
     const actions = readOnly() ? "" : `<div class="rs-actions st-nb-actions"><button class="cc-quiet" data-study-paste>Paste text</button>
         <button class="cc-quiet" data-study-pick>${icon("plus")}Add sources</button></div>`;
     return `${held}${head}${cloud}<div class="st-groups">${groups}</div>${actions}`;
+  }
+
+  /** The notebook's name, and Chat and Sources to move between. */
+  function headHtml() {
+    const nb = /** @type {NotebookEvent} */ (state.notebook);
+    const facts = [nb.course, nb.exam ? `exam on ${nb.exam}` : ""].filter(Boolean).join(" · ");
+    const on = (/** @type {string} */ kind) => (state.shown.kind === kind ? " on" : "");
+    const usable = nb.sources.filter(hasWords).length;
+    const tabs = `<div class="rs-tabs st-tabs" role="tablist" aria-label="Notebook">` +
+      `<button class="rs-tab${on("chat")}" role="tab" aria-selected="${state.shown.kind === "chat"}" data-study-view="chat">Chat</button>` +
+      `<button class="rs-tab${on("overview")}" role="tab" aria-selected="${state.shown.kind === "overview"}" data-study-view="overview">Sources<span class="rs-count">${usable || ""}</span></button></div>`;
+    return `<div class="st-nb-head"><div><h1>${esc(nb.title)}</h1>` +
+      `<span class="st-faint">${esc(facts || "No course or exam day yet")}</span></div>${tabs}` +
+      (readOnly() ? "" : `<button class="cc-quiet" data-study-details>Edit</button>`) + `</div>`;
   }
 
   /** A source, as its words were kept. @param {SourceEvent} src */
@@ -376,6 +394,23 @@ export function createStudy(host) {
     // A form being typed into is left alone while its notebook is redrawn.
     if ((state.editing || state.pasting) && els.stage.querySelector("form")) return;
     const shown = state.shown;
+    if (shown.kind === "chat" && !state.editing && !state.pasting) {
+      const nbox = /** @type {NotebookEvent} */ (nb);
+      const held = nbox.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nbox.readOnly)} has this notebook open: it is read only here.</div>` : "";
+      // The head is drawn again; the chat below keeps what is being typed.
+      let box = /** @type {HTMLElement | null} */ (els.stage.querySelector("[data-study-chat-box]"));
+      if (!box) {
+        els.stage.innerHTML = `<div data-study-nb-head></div><div class="st-chat-box" data-study-chat-box></div>`;
+        box = /** @type {HTMLElement} */ (els.stage.querySelector("[data-study-chat-box]"));
+      }
+      /** @type {HTMLElement} */ (els.stage.querySelector("[data-study-nb-head]")).innerHTML = held + headHtml();
+      if (!nbox.sources.length && !chat.has()) {
+        box.innerHTML = "";
+        return;
+      }
+      chat.render(box, els.stage);
+      return;
+    }
     if (shown.kind === "source") {
       els.stage.innerHTML = readerHtml(shown.source);
       reach(shown.source);
@@ -415,6 +450,10 @@ export function createStudy(host) {
   ws.addEventListener("click", (e) => {
     const t = /** @type {HTMLElement} */ (e.target);
     if (t.closest("[data-study-picker]")) return;
+    if (t.closest(".st-chat") || t.closest("[data-study-cite]")) {
+      chat.click(t);
+      return;
+    }
     const at = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
     const open = at("[data-study-open]");
     if (open) {
@@ -441,7 +480,15 @@ export function createStudy(host) {
     const showNote = at("[data-study-show-note]");
     if (showNote) return host.dispatch({ type: "studyShowNote", id: showNote.dataset.studyShowNote });
     if (at("[data-study-back]")) {
-      state.shown = { kind: "overview" };
+      state.shown = { kind: state.back };
+      els.stage.innerHTML = "";
+      return render();
+    }
+    const view = at("[data-study-view]");
+    if (view) {
+      state.shown = { kind: view.dataset.studyView === "overview" ? "overview" : "chat" };
+      state.back = state.shown.kind === "overview" ? "overview" : "chat";
+      els.stage.innerHTML = "";
       return render();
     }
     if (at("[data-study-new-note]")) {
@@ -464,7 +511,8 @@ export function createStudy(host) {
     if (at("[data-study-note-source]") && noteId()) return host.dispatch({ type: "studyNoteSource", id: noteId() });
     if (at("[data-study-note-delete]") && noteId()) {
       host.dispatch({ type: "studyNoteDelete", id: noteId() });
-      state.shown = { kind: "overview" };
+      state.shown = { kind: state.back };
+      els.stage.innerHTML = "";
       return render();
     }
     if (at("[data-study-details]")) {
@@ -530,6 +578,7 @@ export function createStudy(host) {
   ws.addEventListener("change", (e) => {
     const t = /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target);
     if (t.closest("[data-study-picker]")) return;
+    if (chat.change(t)) return;
     const nb = state.notebook;
     if (!nb) return;
     const tick = t.dataset.studyTick;
@@ -546,9 +595,14 @@ export function createStudy(host) {
     if (role !== undefined) host.dispatch({ type: "studyRole", id: role, role: t.value });
   });
 
+  ws.addEventListener("keydown", (e) => {
+    chat.key(e);
+  });
+
   ws.addEventListener("submit", (e) => {
     const form = /** @type {HTMLFormElement} */ (e.target);
     if (form.closest("[data-study-picker]")) return;
+    if (chat.submit(/** @type {SubmitEvent} */ (e))) return;
     e.preventDefault();
     const data = new FormData(form);
     const field = (/** @type {string} */ name) => String(data.get(name) ?? "").trim();
@@ -613,12 +667,24 @@ export function createStudy(host) {
       state.pasting = false;
       state.removing = null;
       state.getting = null;
-      state.shown = { kind: "overview" };
+      state.shown = { kind: "chat" };
+      state.back = "chat";
     }
     state.notebook = event;
     state.open = event.slug;
     state.creating = false;
     render();
+  }
+
+  /** The open chat, whole. @param {import("./study-chat.js").ChatEvent} event */
+  function chatEvent(event) {
+    chat.chat(event);
+    if (state.shown.kind === "chat") renderStage();
+  }
+
+  /** The answer coming. @param {{id: string, live: any}} event */
+  function chatLive(event) {
+    if (chat.live(event) && state.shown.kind === "chat") chat.renderLive();
   }
 
   /** A source, in the reader. @param {SourceEvent} event */
@@ -648,5 +714,6 @@ export function createStudy(host) {
 
   render();
 
-  return { list, notebook, closed, source, note, kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
+  return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities,
+    kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
 }

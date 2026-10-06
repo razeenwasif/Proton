@@ -154,8 +154,11 @@ Codex, Gemini or Antigravity that answers from them and cites them, and a
 studio that makes study guides, flashcards, quizzes and exams of them. So far:
 notebooks, each a folder in `~/Github/Notebooks`; sources chosen from your
 folders in a picker — browsed, searched by name and by word, with what is left
-out and why — and read once, their words kept in the notebook; a reader; and
-notes. Your folders are named in your own settings,
+out and why — and read once, their words kept in the notebook; a reader; notes;
+and the tutor, which searches the sources you tick through Proton's own MCP
+server and cites them — each citation a number whose passage shows over it and
+opens at its place — as a plain tutor, a learning guide, or a role you write,
+in any language. Your folders are named in your own settings,
 `{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,

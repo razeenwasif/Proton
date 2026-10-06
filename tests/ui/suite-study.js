@@ -72,6 +72,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(ask?.textContent.includes('4.9 MB'), `the size is not said: ${ask?.textContent}`);
     ask.querySelector('[data-study-get-yes]').click(); await settle();
     assert(JSON.stringify(sent(asked, 'studyDownload')[0]?.paths) === '["Courses/COMP3670/S03.pdf"]', 'not downloaded by its path');
+    ws().querySelector('[data-study-view="overview"]').click(); await settle();
     const read = ws().querySelector('[data-study-role="S01"]');
     read.value = 'pastPaper'; read.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
     assert(sent(asked, 'studyRole')[0]?.role === 'pastPaper', 'its role was not changed');
@@ -163,6 +164,82 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     ws().querySelector('[data-study-note-source]').click(); await settle();
     assert(sent(made, 'studyNoteSource')[0]?.id === 'N001', 'it was not made a source');
     ws().querySelector('[data-study-back]').click(); await settle();
+  });
+
+  const turn = (asked, answer, citations) => ({asked, answer, citations, at: 1, engine: 'claude', model: 'claude-sonnet-5-5', error: null});
+  const cite = (n, raw, resolved = true) => ({n, raw, source: raw.split(' ')[0], title: 'Exam.pdf', units: 'pages', place: resolved ? {from: 3, to: 3} : {from: 99, to: 99},
+    quote: resolved ? '## Question 3\nShow that UCS is optimal when each step costs at least $\\varepsilon$.' : '', resolved});
+  const chatEvent = (more = {}) => ({type: 'studyChat', id: 'C001', title: 'Why is UCS optimal?', settings: {engine: 'claude', model: '', style: 'default', custom: '', length: 'default', language: ''},
+    turns: [turn('Why is UCS optimal?', 'It orders by cost [[S01 p. 3]], unlike [[S01 p. 99]].', [cite(1, 'S01 p. 3'), cite(2, 'S01 p. 99', false)])],
+    live: null, busy: false, error: null, grounding: 'tools', chats: [{id: 'C001', title: 'Why is UCS optimal?', updated: 1, turns: 1}], ...more});
+
+  await test('The tutor\'s answers draw their citations as chips: over one, its passage; clicked, the source at that place', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), chatEvent()]); await settle();
+    ws().querySelector('[data-study-view="chat"]')?.click(); await settle();
+    const chips = [...ws().querySelectorAll('.st-answer .st-cite')];
+    assert(chips.length === 2 && chips[0].textContent === '1', `wrong chips: ${chips.map((c) => c.textContent)}`);
+    assert(chips[1].classList.contains('bad'), 'a citation of nothing is not marked');
+    assert(!ws().querySelector('.st-answer').textContent.includes('[['), 'the brackets show');
+    chips[0].dispatchEvent(new win.MouseEvent('mouseover', {bubbles: true})); await settle();
+    const tip = ws().querySelector('.st-tip');
+    assert(!tip.hidden && tip.textContent.includes('Exam.pdf') && tip.textContent.includes('page 3'), `no passage: ${tip.textContent}`);
+    assert(!tip.querySelector('h2'), 'a heading in a quote is drawn as a heading');
+    const before = win.commands.length;
+    chips[0].click(); await settle();
+    const shown = sent(before, 'studyShow')[0];
+    assert(shown?.id === 'S01' && shown.at?.from === 3, `wrong place: ${JSON.stringify(shown)}`);
+    const nothing = win.commands.length;
+    chips[1].click(); await settle();
+    assert(sent(nothing, 'studyShow').length === 0, 'a citation of nothing opened something');
+    await win.pushEvents([chatEvent()]); await settle();
+  });
+
+  await test('Asking sends the question, draws the answer as it comes, and Stop stops it', async () => {
+    ws().querySelector('[data-study-view="chat"]')?.click(); await settle();
+    const box = ws().querySelector('[data-study-ask-form] textarea');
+    box.value = 'And A*?';
+    const before = win.commands.length;
+    box.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Enter', bubbles: true})); await settle();
+    assert(sent(before, 'studyAsk')[0]?.text === 'And A*?', 'not asked');
+    assert(box.value === '', 'the question stayed in the box');
+    await win.pushEvents([chatEvent({busy: true})]); await settle();
+    box.value = 'half a next question';
+    await win.pushEvents([{type: 'studyChatLive', id: 'C001', live: {asked: 'And A*?', steps: [{kind: 'search', text: 'Searched for “A star”', done: true}],
+      answer: 'A* adds a heuristic [[S01 p. 3]]', citations: [cite(1, 'S01 p. 3')], thinking: false}}]); await settle();
+    const live = ws().querySelector('[data-study-live]');
+    assert(live.textContent.includes('Searched for') && live.querySelector('.st-cite'), 'the answer coming is not drawn');
+    assert(ws().querySelector('[data-study-ask-form] textarea').value === 'half a next question', 'what was being typed was lost');
+    const stop = ws().querySelector('[data-study-stop]');
+    assert(!stop.hidden, 'no Stop while it answers');
+    const stopped = win.commands.length;
+    stop.click(); await settle();
+    assert(sent(stopped, 'studyStopAnswer').length === 1, 'Stop asked nothing');
+    await win.pushEvents([chatEvent()]); await settle();
+    ws().querySelector('[data-study-ask-form] textarea').value = '';
+  });
+
+  await test('Who answers, and how, is chosen in the tutor\'s menu; an answer can be kept as a note', async () => {
+    await win.pushEvents([{type: 'claudeCapabilities', capabilities: {engine: 'codex', models: [{value: 'gpt-6.1-sol', resolved: '', name: 'GPT-6.1 Sol', description: '', efforts: []}],
+      modes: [], commands: [], plan: '', email: '', missing: null}}]); await settle();
+    ws().querySelector('[data-study-menu="tutor"]').click(); await settle();
+    const form = ws().querySelector('[data-study-tutor-form]');
+    assert(form, 'no menu');
+    const codex = form.querySelector('input[name="engine"][value="codex"]');
+    codex.checked = true; codex.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const fresh = ws().querySelector('[data-study-tutor-form]');
+    assert(fresh.querySelector('select[name="model"] option[value="gpt-6.1-sol"]'), 'the engine\'s models are not offered');
+    fresh.querySelector('select[name="model"]').value = 'gpt-6.1-sol';
+    fresh.querySelector('input[name="style"][value="guide"]').checked = true;
+    fresh.querySelector('input[name="language"]').value = 'French';
+    const before = win.commands.length;
+    fresh.requestSubmit(); await settle();
+    const set = sent(before, 'studyTutor')[0]?.settings;
+    assert(set?.engine === 'codex' && set.model === 'gpt-6.1-sol' && set.style === 'guide' && set.language === 'French', `wrong settings: ${JSON.stringify(set)}`);
+    const kept = win.commands.length;
+    ws().querySelector('[data-study-keep="0"]').click(); await settle();
+    assert(sent(kept, 'studySaveAnswer')[0]?.turn === 0, 'the answer was not kept');
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
   await test('A notebook another Proton has open is read only here', async () => {

@@ -39,6 +39,7 @@
     "lab.js",
     "lab3d.js",
     "study.js",
-    "study-kb.js"
+    "study-kb.js",
+    "study-chat.js"
   ]
 }

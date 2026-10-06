@@ -54,6 +54,19 @@ export function createStudyPreview(deliver) {
     /** @type {Record<string, {id: string, title: string, body: string, updated: number, source: string | null}[]>} */
     notes: { "comp3670-exam": [{ id: "N001", title: "What the exam asks", body: "Two questions on search every year: **optimality** and **heuristics**.\n\n- $h(n) \\le h^*(n)$", updated: now - 3600, source: null }] },
     paused: false,
+    /** The open chat, as the core would keep it. */
+    chat: { id: "C001", title: "Why is uniform-cost search optimal?", settings: { engine: "claude", model: "", style: "default", custom: "", length: "default", language: "" },
+      turns: [{ asked: "Why is uniform-cost search optimal?",
+        answer: "Uniform-cost search expands nodes in order of their path cost $g(n)$ [[S02 § Search › Uniform cost L40-58]], so the first time it expands a goal, no cheaper path to it can remain on the frontier — provided every step costs at least some $\\varepsilon > 0$ [[S01 p. 3]]. The 2020 exam asks exactly this in Question 1 [[S01 p. 1]], and an old note of yours cites a page that is not there [[S01 p. 99]].",
+        citations: [
+          { n: 1, raw: "S02 § Search › Uniform cost L40-58", source: "S02", title: "Search.md", units: "lines", place: { from: 40, to: 58 }, quote: "## Uniform cost Expands the node with the lowest path cost $g(n)$ first. With positive step costs it is complete and optimal.", resolved: true },
+          { n: 2, raw: "S01 p. 3", source: "S01", title: "Exam_2020.pdf", units: "pages", place: { from: 3, to: 3 }, quote: "Assume each action costs at least ε > 0. Show that UCS returns an optimal solution.", resolved: true },
+          { n: 3, raw: "S01 p. 1", source: "S01", title: "Exam_2020.pdf", units: "pages", place: { from: 1, to: 1 }, quote: "Question 1 (10 marks). Explain why uniform-cost search is optimal.", resolved: true },
+          { n: 4, raw: "S01 p. 99", source: "S01", title: "Exam_2020.pdf", units: "pages", place: { from: 99, to: 99 }, quote: "", resolved: false },
+        ],
+        at: now - 600, engine: "claude", model: "claude-sonnet-5-5", error: null }],
+      busy: false, error: null, grounding: "tools",
+      chats: [{ id: "C001", title: "Why is uniform-cost search optimal?", updated: now - 600, turns: 1 }] },
   };
 
   const added = () => Object.fromEntries((state.sources[state.open ?? ""] ?? []).filter((s) => s.origin.from === "file").map((s) => [`${s.origin.root}/${s.origin.rel}`, s.id]));
@@ -156,8 +169,27 @@ export function createStudyPreview(deliver) {
     return [notebookEvent(), listEvent()];
   }
 
+  const chatEvent = () => ({ type: "studyChat", live: null, ...state.chat });
+
+  /** Answer as a tutor would: steps, then the answer in pieces. @param {string} asked */
+  function answer(asked) {
+    const steps = [{ kind: "list", text: "Looked at the notebook's sources", done: true }, { kind: "search", text: `Searched for “${asked.slice(0, 40)}”`, done: true }];
+    const text = "A heuristic is admissible when it never overestimates the cost to reach the goal [[S02 § Search › Uniform cost L40-58]]: $h(n) \\le h^*(n)$.";
+    const cites = [state.chat.turns[0].citations[0]];
+    const id = state.chat.id;
+    const live = (/** @type {any} */ l) => deliver({ type: "studyChatLive", id, live: { asked, steps: [], answer: "", citations: [], thinking: false, ...l } });
+    setTimeout(() => live({ steps: steps.slice(0, 1), thinking: true }), 300);
+    setTimeout(() => live({ steps }), 800);
+    setTimeout(() => live({ steps, answer: text.slice(0, 60), citations: [] }), 1300);
+    setTimeout(() => {
+      state.chat.turns.push({ asked, answer: text, citations: cites, at: Math.floor(Date.now() / 1000), engine: state.chat.settings.engine || "claude", model: "claude-sonnet-5-5", error: null });
+      state.chat.busy = false;
+      deliver(chatEvent());
+    }, 1900);
+  }
+
   return {
-    sync: () => [listEvent(), kbEvent(), notebookEvent()],
+    sync: () => [listEvent(), kbEvent(), notebookEvent(), chatEvent()],
     /** @param {any} command */
     command(command) {
       switch (command.type) {
@@ -252,6 +284,18 @@ export function createStudyPreview(deliver) {
           note.source = id;
           return [notebookEvent(), listEvent(), { type: "studyNote", ...note }];
         }
+        case "studyAsk":
+          state.chat.busy = true;
+          answer(command.text);
+          return [chatEvent()];
+        case "studyTutor":
+          state.chat.settings = command.settings;
+          return [chatEvent()];
+        case "studyChatNew":
+          state.chat = { ...state.chat, id: "C002", title: "New chat", turns: [], chats: [...state.chat.chats] };
+          return [chatEvent()];
+        case "studySaveAnswer":
+          return [notebookEvent()];
         case "studyRole":
           for (const s of state.sources[state.open ?? ""] ?? []) if (s.id === command.id) s.role = command.role;
           return [notebookEvent()];

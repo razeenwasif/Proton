@@ -1095,6 +1095,24 @@ read only, under the same lock an investigation has. The reader shows a
 source's words as kept — Markdown cut at its headings, pages, cues — or a PDF
 whose file is here in the document viewer, at a citation's place.
 
+**The tutor** answers from the sources ticked, on Claude Code, Codex, Gemini or
+Antigravity, as the notebook has it set (`proton-core::study::tutor`). The
+first three reach the sources through `proton-mcp --notebook`, which serves
+only those ticked, from the words the notebook kept — `notebook_sources`,
+`search_sources`, `read_source`, `view_pages`, `notebook_status` — and have
+nothing else: Claude Code with no built-in tools (`--tools ""`), Codex in a
+read-only sandbox that never asks, Gemini with no extensions and only Proton's
+server allowed, none with the person's own servers. Antigravity, which takes
+no server, is given the passages found for each question, as any engine is
+when the server cannot be found. The tutor is told to follow every claim with
+its citation, copied from the tools, and to say plainly what the sources do
+not cover; Default, Learning Guide and a role of one's own set how it answers.
+Each citation is resolved as the answer streams (`proton-study::cite`): drawn as
+a numbered chip whose passage shows over it and whose click opens the reader
+there, or struck through when it names nothing in the notebook. A chat is kept
+as `chats/C001.json`, its citations as resolved when given; picked up again, or
+when its engine changes, a new conversation is told what was said.
+
 ### Trace
 
 Code Visualizer, sidecar first and native second — [`CODE-VISUALIZER.md`](CODE-VISUALIZER.md)

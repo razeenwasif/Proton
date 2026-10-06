@@ -4826,6 +4826,7 @@ function renderEvent(event) {
 
     case "claudeCapabilities":
       claude?.capabilities(event.capabilities);
+      study?.capabilities(event.capabilities);
       break;
 
     case "artifacts":
@@ -4899,6 +4900,14 @@ function renderEvent(event) {
 
     case "studyNote":
       study?.note(event);
+      break;
+
+    case "studyChat":
+      study?.chat(event);
+      break;
+
+    case "studyChatLive":
+      study?.chatLive(event);
       break;
 
     case "leanEnv":

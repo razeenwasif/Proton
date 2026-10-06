@@ -139,9 +139,11 @@ fn start(body: &Body) -> String {
     }
 }
 
-/// At most [`QUOTE`] characters, cut at a word, whitespace tidied.
+/// At most [`QUOTE`] characters, cut at a word: spaces tidied within each
+/// line, the lines kept — a heading is still a line of its own.
 fn cut(text: &str) -> String {
-    let tidy = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lines: Vec<String> = text.lines().map(|l| l.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|l| !l.is_empty()).collect();
+    let tidy = lines.join("\n");
     if tidy.chars().count() <= QUOTE {
         return tidy;
     }
@@ -203,7 +205,7 @@ mod tests {
         let answer = "BFS is complete [[S01 § Search L1-2]]. UCS is optimal [[S02 p. 1]], and the frontier is a queue [[S03 @ 3:10-3:21]]. Again [[S01 § Search L1-2]].";
         let cites = resolve(&book, answer);
         assert_eq!(cites.iter().map(|c| (c.n, c.source.as_str(), c.resolved)).collect::<Vec<_>>(), [(1, "S01", true), (2, "S02", true), (3, "S03", true)]);
-        assert_eq!(cites[0].quote, "# Search BFS is complete.");
+        assert_eq!(cites[0].quote, "# Search\nBFS is complete.");
         assert_eq!(cites[0].place, Some(StudyPlace { from: 1, to: 2 }));
         assert_eq!(cites[1].quote, "Question 1: why is UCS optimal?");
         assert_eq!(cites[2].quote, "the frontier is a priority queue");
