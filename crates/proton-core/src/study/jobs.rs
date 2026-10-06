@@ -8,6 +8,11 @@
 //! An answer that will not read is sent back once, saying what is wrong.
 //! Every call is kept as `tasks/J0001.json` — what it was told and asked,
 //! and how it ended — so what made a thing can be read.
+//!
+//! A call can also mark a written answer to a quiz's question ([`Marking`]):
+//! told the rubric, the model answer and what the sources the question cites
+//! say, its mark is held to the rubric and to the words of the answer, and
+//! written to the quiz's attempts — or, when it cannot be made, why not.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -17,6 +22,7 @@ use proton_claude::chat::Settings;
 use proton_claude::engine::{McpServer, Unattended};
 use proton_claude::fold::Item;
 use proton_claude::{Conversation, Engine};
+use proton_study::quiz::{self, Given, Line, StudyGrade};
 use proton_study::studio::{self, Make, Options, StudyMadeBody};
 use proton_study::{snapshot, Book};
 use serde::{Deserialize, Serialize};
@@ -52,6 +58,16 @@ pub struct StudyJob {
     pub started: u64,
 }
 
+/// A written answer to mark.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Marking {
+    pub quiz: String,
+    pub attempt: u32,
+    pub question: String,
+    /// Marked again, after a dispute.
+    pub second: bool,
+}
+
 /// A call asked for.
 struct Asked {
     id: String,
@@ -62,6 +78,13 @@ struct Asked {
     model: String,
     title: String,
     started: u64,
+    marking: Option<Marking>,
+}
+
+/// What a call came to, read.
+enum Read {
+    Made(StudyMadeBody),
+    Mark(StudyGrade),
 }
 
 /// A call under way.
@@ -115,8 +138,20 @@ impl Jobs {
             (_, "") => make.title().to_string(),
             (_, focus) => format!("{}: {focus}", make.title()),
         };
-        let asked = Asked { id: id.clone(), dir: book.dir().to_path_buf(), make, options, engine, model: settings.model.clone(), title: title.clone(), started: proton_study::now() };
+        let asked = Asked { id: id.clone(), dir: book.dir().to_path_buf(), make, options, engine, model: settings.model.clone(), title: title.clone(), started: proton_study::now(), marking: None };
         self.rows.push((book.dir().to_path_buf(), StudyJob { id: id.clone(), kind: make, title, state: "waiting".into(), why: None, made: None, engine: engine.key().into(), started: asked.started }));
+        self.waiting.push_back(asked);
+        id
+    }
+
+    /// Ask for a written answer to be marked, on the engine and model given.
+    pub fn mark(&mut self, book: &Book, marking: Marking, engine: Engine, model: String) -> String {
+        let id = self.next_id(book);
+        let quiz = book.quiz(&marking.quiz).map(|q| q.title).unwrap_or_else(|| marking.quiz.clone());
+        let n = marking.question.trim_start_matches('q').trim_start_matches('0');
+        let title = format!("{} question {n} of {quiz}", if marking.second { "Marking again" } else { "Marking" });
+        let asked = Asked { id: id.clone(), dir: book.dir().to_path_buf(), make: Make::Marking, options: Options::default(), engine, model, title: title.clone(), started: proton_study::now(), marking: Some(marking) };
+        self.rows.push((book.dir().to_path_buf(), StudyJob { id: id.clone(), kind: Make::Marking, title, state: "waiting".into(), why: None, made: None, engine: engine.key().into(), started: asked.started }));
         self.waiting.push_back(asked);
         id
     }
@@ -131,13 +166,24 @@ impl Jobs {
 
     /// Stop a call of a notebook, or take it off the queue.
     pub fn cancel(&mut self, dir: &std::path::Path, id: &str) {
-        self.waiting.retain(|a| !(a.id == id && a.dir == dir));
+        if let Some(at) = self.waiting.iter().position(|a| a.id == id && a.dir == dir) {
+            if let Some(asked) = self.waiting.remove(at) {
+                unmarked(&asked, "Cancelled.");
+            }
+        }
         if let Some(at) = self.running.iter().position(|r| r.asked.id == id && r.asked.dir == dir) {
             let mut running = self.running.remove(at);
             running.conversation.stop();
             record(&running.asked, json!({ "state": "failed", "why": "Cancelled." }));
+            unmarked(&running.asked, "Cancelled.");
         }
         self.set(dir, id, "failed", Some("Cancelled.".into()), None);
+    }
+
+    /// Whether a quiz's question is being marked, or waits to be.
+    pub fn marking(&self, dir: &std::path::Path, quiz: &str, attempt: u32, question: &str) -> bool {
+        let of = |a: &Asked| a.dir == dir && a.marking.as_ref().is_some_and(|m| m.quiz == quiz && m.attempt == attempt && m.question == question);
+        self.waiting.iter().any(of) || self.running.iter().any(|r| of(&r.asked))
     }
 
     pub fn stop_all(&mut self) {
@@ -170,7 +216,8 @@ impl Jobs {
             }
             changed = true;
             let (id, dir) = (asked.id.clone(), asked.dir.clone());
-            match start(asked, tutors, roots) {
+            let failed = |asked: &Asked, why: &str| unmarked(asked, why);
+            match start(asked, tutors, roots, failed) {
                 Ok(running) => {
                     self.running.push(running);
                     self.set(&dir, &id, "running", None, None);
@@ -199,8 +246,12 @@ impl Jobs {
                 ended.push((at, Err(proton_research::classify::classify(&error).describe())));
                 continue;
             }
-            match studio::read(running.asked.make, &answer, structured) {
-                Ok(body) => ended.push((at, keep(&running.asked, &body, running.conversation.as_ref()))),
+            let read = match &running.asked.marking {
+                Some(marking) => read_mark(&running.asked, marking, &answer, structured, !running.repaired, running.conversation.as_ref()).map(Read::Mark),
+                None => studio::read(running.asked.make, &answer, structured).map(Read::Made),
+            };
+            match read {
+                Ok(read) => ended.push((at, keep(&running.asked, read, running.conversation.as_ref()))),
                 Err(why) if !running.repaired => {
                     running.repaired = true;
                     running.from = running.conversation.fold().items().len();
@@ -229,6 +280,9 @@ impl Jobs {
                 Ok(made) => json!({ "state": "done", "made": made }),
                 Err(why) => json!({ "state": "failed", "why": why }),
             });
+            if let Err(why) = &outcome {
+                unmarked(&running.asked, why);
+            }
             match outcome {
                 Ok(made) => self.set(&dir, &id, "done", None, Some(made)),
                 Err(why) => self.set(&dir, &id, "failed", Some(why), None),
@@ -240,13 +294,27 @@ impl Jobs {
 }
 
 /// Start a call: the notebook read now, its words given whole or through
-/// the server, the call recorded.
-fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)]) -> Result<Running, String> {
-    if let Some(why) = tutors.missing(asked.engine) {
-        return Err(why);
-    }
-    let book = Book::read(&asked.dir)?;
-    let asking = asking(&book, &asked, tutors, roots)?;
+/// the server, the call recorded. A call that cannot start says why to
+/// `failed` too, for a mark to say it could not be made.
+fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)], failed: impl Fn(&Asked, &str)) -> Result<Running, String> {
+    let mut ready = || -> Result<(Book, Asking), String> {
+        if let Some(why) = tutors.missing(asked.engine) {
+            return Err(why);
+        }
+        let book = Book::read(&asked.dir)?;
+        let asking = match &asked.marking {
+            Some(marking) => marking_asked(&book, marking)?,
+            None => asking(&book, &asked, tutors, roots)?,
+        };
+        Ok((book, asking))
+    };
+    let (book, asking) = match ready() {
+        Ok(ready) => ready,
+        Err(why) => {
+            failed(&asked, &why);
+            return Err(why);
+        }
+    };
     let how = Unattended {
         instructions: asking.instructions.clone(),
         schema: studio::schema(asked.make),
@@ -291,6 +359,62 @@ fn asking(book: &Book, asked: &Asked, tutors: &mut dyn Tutors, roots: &[(String,
     Ok(Asking { instructions: studio::rules(false), prompt, mcp })
 }
 
+/// What a marker is told and asked: the rubric, the model answer, what the
+/// sources the question cites say, and the answer — given whole; it needs
+/// no server.
+fn marking_asked(book: &Book, marking: &Marking) -> Result<Asking, String> {
+    let quiz = book.quiz(&marking.quiz).ok_or_else(|| format!("{}: no such quiz", marking.quiz))?;
+    let question = quiz.question(&marking.question).ok_or_else(|| format!("{}: no such question", marking.question))?;
+    let attempt = quiz::attempts(&book.quiz_lines(&marking.quiz)).into_iter().find(|a| a.n == marking.attempt).ok_or("no such attempt")?;
+    let answered = attempt.answer(&marking.question).ok_or("the question was not answered")?;
+    let Given::Text { text } = &answered.given else { return Err("only a written answer is marked".into()) };
+    let cites: String = question.cites.iter().map(|c| format!("[[{c}]]")).collect();
+    let sources: String = proton_study::cite::resolve(book, &cites)
+        .iter()
+        .filter(|c| c.resolved && !c.quote.is_empty())
+        .map(|c| format!("[[{}]] {}\n\n", c.raw, c.quote))
+        .collect();
+    let dispute = match (marking.second, &answered.disputed, &answered.grade) {
+        (true, Some(why), Some(first)) => Some((why.as_str(), first)),
+        _ => None,
+    };
+    Ok(Asking { instructions: quiz::marking_rules(), prompt: quiz::marking(question, text, &sources, dispute), mcp: Vec::new() })
+}
+
+/// A marker's answer, read and held to the question's rubric and to the
+/// words of the answer.
+fn read_mark(asked: &Asked, marking: &Marking, answer: &str, structured: Option<serde_json::Value>, strict: bool, conversation: &dyn Conversation) -> Result<StudyGrade, String> {
+    let book = Book::read(&asked.dir)?;
+    let quiz = book.quiz(&marking.quiz).ok_or("the quiz is gone")?;
+    let question = quiz.question(&marking.question).ok_or("the question is gone")?;
+    let attempt = quiz::attempts(&book.quiz_lines(&marking.quiz)).into_iter().find(|a| a.n == marking.attempt).ok_or("the attempt is gone")?;
+    let Some(Given::Text { text }) = attempt.answer(&marking.question).map(|a| a.given.clone()) else { return Err("the answer is gone".into()) };
+    let mut value = match structured {
+        Some(value) => value,
+        None => serde_json::from_str(strip_fence(answer)).map_err(|e| format!("it is not JSON: {e}"))?,
+    };
+    proton_study::tex::mend_json(&mut value);
+    let model = conversation.fold().status().model.clone();
+    let by = [asked.engine.name().to_string(), model].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+    quiz::read_mark(question, &text, &value, &by, strict)
+}
+
+/// An answer wrapped in a code fence, unwrapped.
+fn strip_fence(text: &str) -> &str {
+    let trimmed = text.trim();
+    let Some(rest) = trimmed.strip_prefix("```") else { return trimmed };
+    let rest = rest.split_once('\n').map_or("", |(_, body)| body);
+    rest.strip_suffix("```").unwrap_or(rest).trim()
+}
+
+/// A mark that could not be made, written to its quiz's attempts, so the
+/// answer says so rather than waiting for ever.
+fn unmarked(asked: &Asked, why: &str) {
+    let (Some(marking), Ok(book)) = (&asked.marking, Book::read(&asked.dir)) else { return };
+    let line = Line::Unmarked { attempt: marking.attempt, question: marking.question.clone(), why: why.to_string(), second: marking.second, at: proton_study::now() as i64 };
+    let _ = book.log_quiz(&marking.quiz, &line);
+}
+
 /// What the turn came to, once it has ended: its prose after its last tool,
 /// what it gave structured, and why it failed if it did.
 fn turn(running: &Running) -> Option<(String, Option<serde_json::Value>, Option<String>)> {
@@ -318,9 +442,19 @@ fn turn(running: &Running) -> Option<(String, Option<serde_json::Value>, Option<
     Some((answer, outcome.and_then(|o| o.structured.clone()), error.filter(|e| !e.is_empty())))
 }
 
-/// Keep what was made, in its notebook.
-fn keep(asked: &Asked, body: &StudyMadeBody, conversation: &dyn Conversation) -> Result<String, String> {
+/// Keep what was made, in its notebook; or a mark, in its quiz's attempts.
+fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<String, String> {
     let book = Book::read(&asked.dir)?;
+    let body = match read {
+        Read::Mark(grade) => {
+            let marking = asked.marking.as_ref().ok_or("a mark with no answer")?;
+            let line = Line::Marked { attempt: marking.attempt, question: marking.question.clone(), grade, second: marking.second, at: proton_study::now() as i64 };
+            book.log_quiz(&marking.quiz, &line)?;
+            return Ok(marking.quiz.clone());
+        }
+        Read::Made(body) => body,
+    };
+    let body = &body;
     // A document's own title, when it gave one.
     let title = match body {
         StudyMadeBody::Prose { markdown } => markdown.lines().find_map(|l| l.strip_prefix("# ")).map(|t| t.trim().to_string()).unwrap_or_else(|| asked.title.clone()),
@@ -333,9 +467,24 @@ fn keep(asked: &Asked, body: &StudyMadeBody, conversation: &dyn Conversation) ->
             _ => Ok(deck.to_string()),
         };
     }
+    // Questions are of the level asked for.
+    let leveled;
+    let body = match body {
+        StudyMadeBody::Questions { questions } => {
+            leveled = StudyMadeBody::Questions { questions: questions.iter().cloned().map(|q| quiz::StudyQuestion { level: asked.options.level, ..q }).collect() };
+            &leveled
+        }
+        body => body,
+    };
     let model = conversation.fold().status().model.clone();
     let by = [asked.engine.name().to_string(), model].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
-    book.keep_made(asked.make, &title, &by, &asked.id, body).map(|made| made.id)
+    let made = book.keep_made(asked.make, &title, &by, &asked.id, body)?;
+    // A quiz remembers what set it, so another family marks it.
+    if let Some(mut quiz) = book.quiz(&made.id) {
+        quiz.engine = asked.engine.key().to_string();
+        book.save_quiz(&made.id, &quiz)?;
+    }
+    Ok(made.id)
 }
 
 /// Write down a call: once when it starts, again when it ends.

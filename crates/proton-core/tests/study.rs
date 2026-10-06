@@ -831,3 +831,143 @@ fn flashcards_are_made_reviewed_and_their_log_is_their_schedule() {
     assert!(book.join(".notebook/bin/D001.log.jsonl").is_file() && !book.join("studio/decks/D001.json").exists());
     session.shutdown();
 }
+
+/// A quiz as its event has it: its questions, its attempts, the answers
+/// being marked, and how the latest attempt went.
+type Drawn = (Vec<proton_study::quiz::StudyQuestion>, Vec<proton_study::quiz::StudyAttempt>, Vec<String>, Vec<proton_study::quiz::StudyResult>);
+
+fn quiz_of(events: &[Event]) -> Option<Drawn> {
+    events.iter().rev().find_map(|e| match e {
+        Event::StudyQuiz { questions, attempts, marking, results, .. } => Some((questions.clone(), attempts.clone(), marking.clone(), results.clone())),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_quiz_is_marked_by_rule_and_by_another_family_and_a_dispute_by_a_third() {
+    use proton_claude::Engine;
+    use proton_study::quiz::Given;
+    use proton_study::studio::{Make, Options};
+    let scratch = Scratch::new("quiz");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into(), "Courses/COMP3670/Exam_2020.pdf".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 2 && sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(()),
+        _ => None,
+    });
+    log.lock().unwrap().answers.push_back(
+        r#"{"title": "Search", "questions": [
+            {"kind": "choice", "prompt": "Which search is complete when the branching factor is finite?", "options": ["Depth-first", "Breadth-first", "Greedy best-first", "Hill climbing"], "correct": [1],
+             "rationales": ["It can descend for ever.", "It goes layer by layer.", "It can loop.", "It stops at a local best."], "blanks": [], "number": null, "tolerance": 0, "unit": "", "rubric": [], "modelAnswer": "",
+             "hint": "Layers.", "explanation": "BFS reaches every depth in turn.", "topic": "Search", "objectives": [], "cites": ["S01 § Search L1-2"]},
+            {"kind": "blanks", "prompt": "Uniform-cost search orders its frontier by ___.", "options": [], "correct": [], "rationales": [], "blanks": [["path cost", "g(n)"]], "number": null, "tolerance": 0, "unit": "",
+             "rubric": [], "modelAnswer": "", "hint": "", "explanation": "", "topic": "Search", "objectives": [], "cites": []},
+            {"kind": "short", "prompt": "Why is uniform-cost search optimal?", "options": [], "correct": [], "rationales": [], "blanks": [], "number": null, "tolerance": 0, "unit": "",
+             "rubric": [{"id": "a", "text": "says it expands in order of path cost", "points": 2}, {"id": "b", "text": "needs step costs above zero", "points": 1}],
+             "modelAnswer": "It expands nodes in order of g(n); with every step costing at least some ε > 0, the first goal expanded is the cheapest.", "hint": "", "explanation": "", "topic": "Search", "objectives": [], "cites": ["S02 p. 1"]}
+        ]}"#
+        .into(),
+    );
+    session.apply(Command::StudyMake { kind: Make::Quiz, options: Options::default() });
+    let made = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        _ => None,
+    });
+    assert_eq!((made[0].id.as_str(), made[0].kind), ("Q001", Make::Quiz));
+    assert!(log.lock().unwrap().sent[0].contains("a quiz of about 10 questions"));
+    let book = scratch.root.join("Notebooks/search");
+    let kept: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(book.join("studio/quizzes/Q001.json")).unwrap()).unwrap();
+    assert_eq!(kept["engine"], "claude", "a quiz remembers what set it");
+
+    // Begun, and answered: what can be checked, marked at once.
+    let (questions, attempts, _, _) = quiz_of(&session.apply(Command::StudyShowMade { id: "Q001".into() })).expect("the quiz");
+    assert_eq!((questions.len(), attempts.len()), (3, 0));
+    let (_, attempts, _, _) = quiz_of(&session.apply(Command::StudyQuizStart { quiz: "Q001".into(), missed: false })).unwrap();
+    assert_eq!(attempts[0].n, 1);
+    let right = questions[0].correct[0];
+    assert_eq!(questions[0].options[right], "Breadth-first");
+    session.apply(Command::StudyQuizAnswer { quiz: "Q001".into(), attempt: 1, question: "q01".into(), given: Given::Choice { index: right }, hinted: true });
+    let (_, attempts, _, _) = quiz_of(&session.apply(Command::StudyQuizAnswer { quiz: "Q001".into(), attempt: 1, question: "q02".into(), given: Given::Blanks { words: vec!["depth".into()] }, hinted: false })).unwrap();
+    assert_eq!((attempts[0].score, attempts[0].of), (1.0, 2.0));
+    assert!(attempts[0].answer("q01").unwrap().hinted);
+
+    // Written: marked by Codex, not Claude, which set it — its first mark
+    // quoting words that were never written is sent back.
+    {
+        let mut log = log.lock().unwrap();
+        log.answers.push_back(r#"{"criteria": [{"id": "c1", "points": 2, "evidence": ["it expands the cheapest path first"], "why": "Path cost."}, {"id": "c2", "points": 1, "evidence": ["costs are positive"], "why": "Says so."}], "feedback": "Good."}"#.into());
+        log.answers.push_back(r#"{"criteria": [{"id": "c1", "points": 2, "evidence": ["it expands the cheapest path first"], "why": "Path cost."}, {"id": "c2", "points": 0, "evidence": [], "why": "Positive step costs are not mentioned."}], "feedback": "Say why step costs must be above zero."}"#.into());
+    }
+    let answer = "Because it expands the cheapest path first, so the goal it reaches is the cheapest.";
+    let (_, _, marking, _) = quiz_of(&session.apply(Command::StudyQuizAnswer { quiz: "Q001".into(), attempt: 1, question: "q03".into(), given: Given::Text { text: answer.into() }, hinted: false })).unwrap();
+    assert_eq!(marking, ["1/q03"], "it is being marked");
+    let attempts = until(&mut session, |e| match e {
+        Event::StudyQuiz { attempts, .. } if attempts[0].answer("q03").is_some_and(|a| a.grade.is_some()) => Some(attempts.clone()),
+        _ => None,
+    });
+    let grade = attempts[0].answer("q03").unwrap().grade.clone().unwrap();
+    assert_eq!((grade.score, grade.of), (2.0, 3.0));
+    assert!(grade.by.starts_with("Codex"), "marked by {}", grade.by);
+    {
+        let log = log.lock().unwrap();
+        let (engine, _, how, _) = log.started.last().unwrap();
+        assert_eq!(*engine, Engine::Codex);
+        assert!(how.schema.is_some() && how.mcp.is_empty() && how.instructions.contains("You mark a student's written answer"));
+        let asked = log.sent.iter().find(|s| s.contains("The rubric, out of 3")).expect("the marker was asked");
+        assert!(asked.contains(answer) && asked.contains("What the sources say") && asked.contains("[[S02 p. 1]]"), "{asked}");
+        assert!(log.sent.iter().any(|s| s.contains("quotes words that are not in the answer")), "the invented quote was not sent back");
+    }
+
+    // Disputed: marked again by Antigravity, neither Claude nor Codex. Two
+    // points apart, the lower counts.
+    log.lock().unwrap().answers.push_back(r#"{"criteria": [{"id": "c1", "points": 2, "evidence": ["expands the cheapest path first"], "why": ""}, {"id": "c2", "points": 1, "evidence": ["so the goal it reaches is the cheapest"], "why": ""}], "feedback": ""}"#.into());
+    let refused = session.apply(Command::StudyQuizDispute { quiz: "Q001".into(), attempt: 1, question: "q01".into(), why: "It was right".into() });
+    assert!(said(&refused).iter().any(|s| s.contains("Only a mark a model made")));
+    session.apply(Command::StudyQuizDispute { quiz: "Q001".into(), attempt: 1, question: "q03".into(), why: "I did say why it is the cheapest".into() });
+    let attempts = until(&mut session, |e| match e {
+        Event::StudyQuiz { attempts, .. } if attempts[0].answer("q03").is_some_and(|a| a.second.is_some()) => Some(attempts.clone()),
+        _ => None,
+    });
+    assert_eq!(log.lock().unwrap().started.last().unwrap().0, Engine::Antigravity);
+    assert!(log.lock().unwrap().sent.last().unwrap().contains("The student disputes the mark it was given, 2 of 3"));
+    let q03 = attempts[0].answer("q03").unwrap();
+    assert_eq!((q03.second.as_ref().unwrap().score, q03.counted().unwrap().score), (3.0, 3.0), "a point apart: the second mark");
+
+    // Finished: how it went, and another go at what was missed.
+    let (_, attempts, _, results) = quiz_of(&session.apply(Command::StudyQuizFinish { quiz: "Q001".into(), attempt: 1 })).unwrap();
+    assert!(attempts[0].finished.is_some());
+    assert_eq!((attempts[0].score, attempts[0].of), (4.0, 5.0));
+    assert_eq!(results.iter().map(|r| (r.text.as_str(), r.of)).collect::<Vec<_>>(), [("Search", 3.0)], "by topic, where there are no objectives");
+    let (_, attempts, _, _) = quiz_of(&session.apply(Command::StudyQuizStart { quiz: "Q001".into(), missed: true })).unwrap();
+    assert_eq!(attempts[1].questions, ["q02"]);
+
+    // A mark that cannot be made says so, and can be asked for again.
+    {
+        let mut log = log.lock().unwrap();
+        log.answers.push_back("not JSON".into());
+        log.answers.push_back("still not JSON".into());
+    }
+    session.apply(Command::StudyQuizStart { quiz: "Q001".into(), missed: false });
+    session.apply(Command::StudyQuizAnswer { quiz: "Q001".into(), attempt: 3, question: "q03".into(), given: Given::Text { text: "By g.".into() }, hinted: false });
+    let why = until(&mut session, |e| match e {
+        Event::StudyQuiz { attempts, .. } => attempts.iter().find(|a| a.n == 3).and_then(|a| a.answer("q03")).and_then(|a| a.unmarked.clone()),
+        _ => None,
+    });
+    assert!(why.contains("could not be read"), "{why}");
+    log.lock().unwrap().answers.push_back(r#"{"criteria": [{"id": "c1", "points": 1, "evidence": ["By g."], "why": ""}, {"id": "c2", "points": 0, "evidence": [], "why": ""}], "feedback": ""}"#.into());
+    session.apply(Command::StudyQuizMarkAgain { quiz: "Q001".into(), attempt: 3, question: "q03".into() });
+    let score = until(&mut session, |e| match e {
+        Event::StudyQuiz { attempts, .. } => attempts.iter().find(|a| a.n == 3).and_then(|a| a.answer("q03")).and_then(|a| a.grade.as_ref()).map(|g| g.score),
+        _ => None,
+    });
+    assert_eq!(score, 1.0);
+    let refused = session.apply(Command::StudyMake { kind: Make::Marking, options: Options::default() });
+    assert!(said(&refused).iter().any(|s| s.contains("asked for by answering")));
+    session.shutdown();
+}

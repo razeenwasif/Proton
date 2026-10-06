@@ -10,6 +10,7 @@
 //! studio/maps/M001.json     a mind map: nodes, each with its parent
 //! studio/tables/T001.json   a table of the columns asked for, and T001.csv
 //! studio/decks/D001.json    flashcards, and D001.log.jsonl, their reviews ([`crate::deck`])
+//! studio/quizzes/Q001.json  a quiz or practice problems, and Q001.attempts.jsonl ([`crate::quiz`])
 //! objectives.json           what a student must be able to do, O001…
 //! tasks/J0001.json          each call: what it was asked, by whom, and how it ended
 //! ```
@@ -24,6 +25,7 @@ use serde_json::{json, Value};
 use ts_rs::TS;
 
 use crate::deck::{self, StudyCard};
+use crate::quiz::{self, StudyQuestion};
 use crate::store::Book;
 
 /// What the studio can make.
@@ -42,6 +44,12 @@ pub enum Make {
     Table,
     Objectives,
     Flashcards,
+    Quiz,
+    /// Problems worked through, with hints and worked solutions.
+    Practice,
+    /// A written answer marked: a call of the studio's, but not a thing it
+    /// makes for the list.
+    Marking,
 }
 
 /// What a kind of thing made is, on the disk.
@@ -54,6 +62,10 @@ pub enum Shape {
     Objectives,
     /// Cards, in `studio/decks/`.
     Deck,
+    /// Questions, in `studio/quizzes/`.
+    Questions,
+    /// A mark, in its quiz's attempts.
+    Mark,
 }
 
 impl Make {
@@ -69,6 +81,9 @@ impl Make {
             Make::Table => "Table",
             Make::Objectives => "Learning objectives",
             Make::Flashcards => "Flashcards",
+            Make::Quiz => "Quiz",
+            Make::Practice => "Practice problems",
+            Make::Marking => "Marking",
         }
     }
 
@@ -78,6 +93,8 @@ impl Make {
             Make::Table => Shape::Table,
             Make::Objectives => Shape::Objectives,
             Make::Flashcards => Shape::Deck,
+            Make::Quiz | Make::Practice => Shape::Questions,
+            Make::Marking => Shape::Mark,
             _ => Shape::Prose,
         }
     }
@@ -94,11 +111,14 @@ impl Make {
             Make::Table => "table",
             Make::Objectives => "objectives",
             Make::Flashcards => "flashcards",
+            Make::Quiz => "quiz",
+            Make::Practice => "practice",
+            Make::Marking => "marking",
         }
     }
 
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -127,6 +147,9 @@ pub struct Options {
     /// The deck cards are to be added to, rather than a new one.
     #[serde(default)]
     pub deck: Option<String>,
+    /// Learning objectives to centre it on: those a student is weak in.
+    #[serde(default)]
+    pub objectives: Vec<String>,
 }
 
 /// How many cards or questions to make.
@@ -147,6 +170,24 @@ impl Amount {
             Amount::Fewer => 10,
             Amount::Standard => 20,
             Amount::More => 40,
+        }
+    }
+
+    /// About how many questions in a quiz.
+    pub fn questions(self) -> usize {
+        match self {
+            Amount::Fewer => 5,
+            Amount::Standard => 10,
+            Amount::More => 20,
+        }
+    }
+
+    /// About how many practice problems.
+    pub fn problems(self) -> usize {
+        match self {
+            Amount::Fewer => 3,
+            Amount::Standard => 5,
+            Amount::More => 8,
         }
     }
 }
@@ -189,9 +230,10 @@ pub fn rules(inline: bool) -> String {
 
 /// What one call is asked to make.
 pub fn prompt(make: Make, options: &Options, course: &str) -> String {
-    let focus = match options.focus.trim() {
-        "" => String::new(),
-        focus => format!(" Centre it on: {focus}."),
+    let focus = match (options.focus.trim(), options.objectives.is_empty()) {
+        ("", true) => String::new(),
+        ("", false) => format!(" Centre it on the learning objectives {}, which the student is weak in.", options.objectives.join(", ")),
+        (focus, _) => format!(" Centre it on: {focus}."),
     };
     let course = match course.trim() {
         "" => "the course".to_string(),
@@ -213,6 +255,28 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
             "Make a table of these sources with the columns {}: a row for each thing the sources describe that the columns fit, each cell from the sources, and each row's citations.{focus}",
             options.columns.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ")
         ),
+        Make::Quiz => format!(
+            "Write a quiz of about {} questions on these sources, for a student of {course} preparing for the exam. {} Mix the kinds: \
+             mostly `choice` — four options, one right, the wrong ones the mistakes students make, each option with its rationale; some \
+             `choices`, every right option to be picked; `blanks` — a sentence with ___ for each blank, and the words each accepts; \
+             `number` where the sources compute something — the number, a tolerance, its unit; and one or two `short`, answered in a \
+             sentence or two, with a rubric of criteria and points and a model answer. Every question has a hint that helps without \
+             giving the answer away, an explanation of the answer, its topic and its citations. Test understanding, not the sources' \
+             wording, and never ask the same thing twice. Leave unused fields empty.{focus}",
+            options.amount.questions(),
+            options.level.says()
+        ),
+        Make::Practice => format!(
+            "Write about {} practice problems on these sources, for a student of {course} preparing for the exam, like the exercises \
+             and past papers among them. {} Each is a `long` problem — a calculation, a derivation, a proof, an explanation, in parts \
+             (a), (b) if it has them — with a rubric of criteria and points, five to ten in all, a full worked solution as its model \
+             answer and its explanation, a hint that helps without giving it away, its topic and its citations. Where a problem's \
+             answer is one number, make it a `number` question instead, with its tolerance and unit, and its working as the \
+             explanation. Leave unused fields empty.{focus}",
+            options.amount.problems(),
+            options.level.says()
+        ),
+        Make::Marking => String::new(),
         Make::Flashcards => format!(
             "Make about {} flashcards of these sources, for a student of {course} learning them for the exam. {} Each card tests one idea — \
              a definition, a result and when it holds, a step of a method, a distinction, a formula, a mistake students make — and is \
@@ -262,6 +326,8 @@ pub fn schema(make: Make) -> Option<Value> {
     let cites = json!({ "type": "array", "items": { "type": "string" }, "description": "Citations, as written between the brackets: S07 p. 12" });
     Some(match make.shape() {
         Shape::Prose => return None,
+        Shape::Questions => quiz::schema(),
+        Shape::Mark => quiz::marking_schema(),
         Shape::Map => json!({
             "type": "object", "additionalProperties": false, "required": ["title", "nodes"],
             "properties": {
@@ -349,6 +415,7 @@ pub enum StudyMadeBody {
     Table { columns: Vec<String>, rows: Vec<StudyTableRow> },
     Objectives { objectives: Vec<StudyObjective> },
     Cards { cards: Vec<StudyCard> },
+    Questions { questions: Vec<StudyQuestion> },
 }
 
 /// Something made, as the studio lists it and keeps its header.
@@ -407,6 +474,8 @@ pub fn read(make: Make, answer: &str, structured: Option<Value>) -> Result<Study
             Ok(StudyMadeBody::Table { columns, rows })
         }
         Shape::Deck => Ok(StudyMadeBody::Cards { cards: deck::read_cards(&value)? }),
+        Shape::Questions => Ok(StudyMadeBody::Questions { questions: quiz::read_questions(&value)? }),
+        Shape::Mark => Err("a mark is read with its question".into()),
         Shape::Objectives => {
             #[derive(Deserialize)]
             struct Said {
@@ -453,6 +522,7 @@ impl Book {
             Shape::Map => self.dir().join("studio/maps"),
             Shape::Table => self.dir().join("studio/tables"),
             Shape::Deck => self.dir().join("studio/decks"),
+            Shape::Questions | Shape::Mark => self.dir().join("studio/quizzes"),
             Shape::Objectives => self.dir().to_path_buf(),
         }
     }
@@ -468,11 +538,18 @@ impl Book {
             self.save_deck(&id, &deck)?;
             return Ok(StudyMade { id, kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() });
         }
+        if let StudyMadeBody::Questions { questions } = body {
+            let id = self.new_quiz_id();
+            let quiz = quiz::Quiz { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string(), engine: String::new(), questions: questions.clone() };
+            self.save_quiz(&id, &quiz)?;
+            return Ok(StudyMade { id, kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() });
+        }
         let (letter, ext) = match kind.shape() {
             Shape::Prose => ('R', "md"),
             Shape::Map => ('M', "json"),
             Shape::Table => ('T', "json"),
             Shape::Deck => ('D', "json"),
+            Shape::Questions | Shape::Mark => ('Q', "json"),
             Shape::Objectives => ('O', "json"),
         };
         let header = Header { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() };
@@ -515,7 +592,7 @@ impl Book {
     /// Everything made, the latest first.
     pub fn made(&self) -> Vec<StudyMade> {
         let mut out: Vec<StudyMade> = Vec::new();
-        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json")] {
+        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json")] {
             for entry in std::fs::read_dir(self.studio(shape)).into_iter().flat_map(|e| e.flatten()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let Some(id) = name.strip_suffix(&format!(".{ext}")) else { continue };
@@ -540,6 +617,7 @@ impl Book {
                 "M" => (self.studio(Shape::Map).join(format!("{id}.json")), false),
                 "T" => (self.studio(Shape::Table).join(format!("{id}.json")), false),
                 "D" => (self.studio(Shape::Deck).join(format!("{id}.json")), false),
+                "Q" => (self.studio(Shape::Questions).join(format!("{id}.json")), false),
                 _ => return None,
             },
             _ => return None,
@@ -559,7 +637,8 @@ impl Book {
             Shape::Table => StudyMadeBody::Table { columns: serde_json::from_value(value["columns"].clone()).ok()?, rows: serde_json::from_value(value["rows"].clone()).ok()? },
             Shape::Objectives => StudyMadeBody::Objectives { objectives: serde_json::from_value(value["objectives"].clone()).ok()? },
             Shape::Deck => StudyMadeBody::Cards { cards: serde_json::from_value(value["cards"].clone()).ok()? },
-            Shape::Prose => return None,
+            Shape::Questions => StudyMadeBody::Questions { questions: serde_json::from_value(value["questions"].clone()).ok()? },
+            Shape::Prose | Shape::Mark => return None,
         };
         Some((made_of(id, header), body))
     }

@@ -14,6 +14,7 @@ import type { PickerKind } from "./PickerKind";
 import type { ResearchDiscipline } from "./ResearchDiscipline";
 import type { ResearchSeat } from "./ResearchSeat";
 import type { StudyCardKind } from "./StudyCardKind";
+import type { StudyGiven } from "./StudyGiven";
 import type { StudyMakeKind } from "./StudyMakeKind";
 import type { StudyMakeOptions } from "./StudyMakeOptions";
 import type { StudyPlace } from "./StudyPlace";
@@ -35,7 +36,11 @@ took: bigint, } | { "type": "studyReviewUndo" } | { "type": "studyReviewEnd" } |
 /**
  * `None` to add one.
  */
-card: string | null, kind: StudyCardKind, front: string, back: string, topic: string, } | { "type": "studyCardDelete", deck: string, card: string, } | { "type": "studyDeckExport", deck: string, anki: boolean, } | { "type": "openWorkspace", path: string, } | { "type": "focusWorkspace", index: number, } | { "type": "closeWorkspace", index: number, } | { "type": "cycleWorkspace", by: bigint, } | { "type": "openWorkspacePicker" } | { "type": "toggleBreakpoint", 
+card: string | null, kind: StudyCardKind, front: string, back: string, topic: string, } | { "type": "studyCardDelete", deck: string, card: string, } | { "type": "studyDeckExport", deck: string, anki: boolean, } | { "type": "studyQuizStart", quiz: string, missed: boolean, } | { "type": "studyQuizAnswer", quiz: string, attempt: number, question: string, given: StudyGiven, 
+/**
+ * Whether its hint was looked at first.
+ */
+hinted: boolean, } | { "type": "studyQuizDispute", quiz: string, attempt: number, question: string, why: string, } | { "type": "studyQuizMarkAgain", quiz: string, attempt: number, question: string, } | { "type": "studyQuizFinish", quiz: string, attempt: number, } | { "type": "openWorkspace", path: string, } | { "type": "focusWorkspace", index: number, } | { "type": "closeWorkspace", index: number, } | { "type": "cycleWorkspace", by: bigint, } | { "type": "openWorkspacePicker" } | { "type": "toggleBreakpoint", 
 /**
  * The line the cursor is on when absent.
  */

@@ -246,7 +246,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 10, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 12, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -397,6 +397,109 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.pushEvents([{type: 'studyReviewing', review: null}, deckEvent]); await settle();
     assert(ws().querySelector('.st-deck-view') && !ws().querySelector('.st-review'), 'not back to the deck');
     ws().querySelector('[data-study-back]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  const quizMade = {id: 'Q001', kind: 'quiz', title: 'Quiz: search', made: 1, by: 'Claude Code', task: 'J0005'};
+  const ask = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {Partial<any>} */ more) => ({id, kind, prompt: '', options: [], correct: [], rationales: [], blanks: [], number: null,
+    tolerance: 0, unit: '', rubric: [], modelAnswer: '', hint: '', explanation: '', topic: 'Search', objectives: ['O001'], level: 'medium', cites: [], ...more});
+  const questions = [
+    ask('q01', 'choice', {prompt: 'Which is complete?', options: ['DFS', 'BFS', 'Greedy'], correct: [1], rationales: ['Can descend for ever.', 'Layer by layer.', 'Can loop.'], hint: 'Layers.', explanation: 'BFS goes layer by layer [[S01 p. 3]].', cites: ['S01 p. 3']}),
+    ask('q02', 'blanks', {prompt: 'A heuristic is ___ when it never overestimates.', blanks: [['admissible']]}),
+    ask('q03', 'short', {prompt: 'Why is UCS optimal?', rubric: [{id: 'c1', text: 'orders by $g(n)$', points: 2}, {id: 'c2', text: 'costs above zero', points: 1}], modelAnswer: 'By $g(n)$, costs ≥ ε.'}),
+  ];
+  const quizEvent = (/** @type {any[]} */ attempts, /** @type {Partial<any>} */ more = {}) => ({type: 'studyQuiz', made: quizMade, questions, attempts, marking: [], results: [],
+    mastery: [], citations: [cite(1, 'S01 p. 3')], ...more});
+  const attempt = (/** @type {any[]} */ answers, /** @type {Partial<any>} */ more = {}) => ({n: 1, questions: ['q01', 'q02', 'q03'], answers, started: 1, finished: null, score: 0, of: 0, ...more});
+  const answered = (/** @type {string} */ question, /** @type {any} */ given, /** @type {any} */ grade, /** @type {Partial<any>} */ more = {}) =>
+    ({question, given, hinted: false, grade, disputed: null, second: null, unmarked: null, at: 1, ...more});
+
+  await test('A quiz opens when asked for, begins, and checks a choice at once, with why each option is right or wrong', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: [quizMade]}]); await settle();
+    // Sent unasked — a mark coming back — it is not shown.
+    await win.pushEvents([quizEvent([])]); await settle();
+    assert(!ws().querySelector('.st-quiz-view'), 'a quiz no one asked for took the middle');
+    const studio = ws().querySelector('[data-study-studio-body]');
+    const open = win.commands.length;
+    studio.querySelector('[data-study-made="Q001"]').click(); await settle();
+    assert(sent(open, 'studyShowMade')[0]?.id === 'Q001', 'the quiz was not asked for');
+    await win.pushEvents([quizEvent([])]); await settle();
+    assert(ws().querySelector('.st-quiz-intro')?.textContent.includes('3 questions'), 'the quiz is not drawn');
+    const begin = win.commands.length;
+    ws().querySelector('[data-study-quiz-start="all"]').click(); await settle();
+    assert(sent(begin, 'studyQuizStart')[0]?.missed === false, 'not begun');
+    await win.pushEvents([quizEvent([attempt([])])]); await settle();
+    assert(ws().querySelector('.st-quiz-progress')?.textContent.includes('Question 1 of 3'), 'the first question is not shown');
+    ws().querySelector('[data-study-hint]').click(); await settle();
+    assert(ws().querySelector('.st-hint')?.textContent.includes('Layers'), 'the hint is not shown');
+    ws().querySelectorAll('.st-option input')[1].checked = true;
+    const check = win.commands.length;
+    ws().querySelector('[data-study-answer-form]').requestSubmit(); await settle();
+    const answer = sent(check, 'studyQuizAnswer')[0];
+    assert(answer?.question === 'q01' && answer.given.kind === 'choice' && answer.given.index === 1 && answer.hinted === true, `wrong answer sent: ${JSON.stringify(answer)}`);
+    await win.pushEvents([quizEvent([attempt([answered('q01', {kind: 'choice', index: 1}, {score: 1, of: 1, by: 'rule', criteria: [], feedback: 'Layer by layer.'})], {score: 1, of: 1})])]); await settle();
+    assert(ws().querySelector('.st-mark.right') && ws().querySelector('.st-option.correct.chosen'), 'the right answer is not marked right');
+    assert(ws().querySelector('.st-explain')?.textContent.includes('layer by layer') && ws().querySelector('.st-explain .st-cite'), 'why is not shown, with its citation');
+    assert(ws().querySelector('.st-dot-step.right'), 'the step is not marked');
+  });
+
+  await test('Blanks are typed in place; a written answer waits on its mark, which shows its criteria and can be disputed', async () => {
+    ws().querySelector('[data-study-quiz-go="1"]').click(); await settle();
+    const blank = ws().querySelector('.st-question .st-blank');
+    assert(blank, 'the blank is not an input');
+    blank.value = 'Admissible';
+    const check = win.commands.length;
+    ws().querySelector('[data-study-answer-form]').requestSubmit(); await settle();
+    assert(JSON.stringify(sent(check, 'studyQuizAnswer')[0]?.given) === JSON.stringify({kind: 'blanks', words: ['Admissible']}), 'the blank was not sent');
+    const one = answered('q01', {kind: 'choice', index: 1}, {score: 1, of: 1, by: 'rule', criteria: [], feedback: ''});
+    const two = answered('q02', {kind: 'blanks', words: ['Admissible']}, {score: 1, of: 1, by: 'rule', criteria: [], feedback: ''});
+    await win.pushEvents([quizEvent([attempt([one, two])])]); await settle();
+    ws().querySelector('[data-study-quiz-go="2"]').click(); await settle();
+    ws().querySelector('[data-study-answer-form] textarea').value = 'It orders the frontier by g(n). So the first goal is cheapest.';
+    const write = win.commands.length;
+    ws().querySelector('[data-study-answer-form]').requestSubmit(); await settle();
+    assert(sent(write, 'studyQuizAnswer')[0]?.given.kind === 'text', 'the written answer was not sent');
+    const three = answered('q03', {kind: 'text', text: 'It orders the frontier by g(n). So the first goal is cheapest.'}, null);
+    await win.pushEvents([quizEvent([attempt([one, two, three])], {marking: ['1/q03']})]); await settle();
+    assert(ws().querySelector('.st-marking')?.textContent.includes('Being marked'), 'nothing says it is being marked');
+    const grade = {score: 2, of: 3, by: 'Codex · gpt', feedback: 'Say why costs must be positive.', criteria: [
+      {id: 'c1', points: 2, evidence: ['It orders the frontier by g(n)'], why: 'Names g.'}, {id: 'c2', points: 0, evidence: [], why: 'Not said.'}]};
+    await win.pushEvents([quizEvent([attempt([one, two, {...three, grade}])])]); await settle();
+    const mark = ws().querySelector('.st-mark.part');
+    assert(mark && mark.textContent.includes('2 / 3') && mark.textContent.includes('marked by Codex'), 'the mark is not shown');
+    assert(mark.querySelector('.st-criteria q')?.textContent === 'It orders the frontier by g(n)', 'the words that earned it are not quoted');
+    assert(ws().querySelector('.st-explain')?.textContent.includes('model answer'), 'the model answer is not offered');
+    mark.querySelector('[data-study-dispute]').click(); await settle();
+    const form = ws().querySelector('[data-study-dispute-form="q03"]');
+    form.querySelector('textarea').value = 'My second line says why.';
+    const dispute = win.commands.length;
+    form.requestSubmit(); await settle();
+    const disputed = sent(dispute, 'studyQuizDispute')[0];
+    assert(disputed?.question === 'q03' && disputed.why === 'My second line says why.' && disputed.attempt === 1, `not disputed: ${JSON.stringify(disputed)}`);
+  });
+
+  await test('A finished quiz says how it went, by objective, and offers the missed, the weak areas and the tutor', async () => {
+    const finish = win.commands.length;
+    ws().querySelector('[data-study-quiz-finish]').click(); await settle();
+    assert(sent(finish, 'studyQuizFinish')[0]?.attempt === 1, 'not finished');
+    const done = attempt([answered('q01', {kind: 'choice', index: 0}, {score: 0, of: 1, by: 'rule', criteria: [], feedback: ''})], {finished: 2, score: 0, of: 1});
+    await win.pushEvents([quizEvent([done], {results: [{objective: 'O001', text: 'Explain why UCS is optimal', topic: 'Search', score: 0, of: 1, questions: ['q01']}],
+      mastery: [{objective: 'O001', text: 'Explain why UCS is optimal', topic: 'Search', level: 0.3, evidence: 2, state: 'focus'}]})]); await settle();
+    assert(ws().querySelector('.st-quiz-score h2')?.textContent === '0%', 'the score is not shown');
+    assert(ws().querySelector('.st-result')?.textContent.includes('Explain why UCS is optimal') && ws().querySelector('.st-stand.focus'), 'how it went by objective is not shown');
+    const again = win.commands.length;
+    ws().querySelector('[data-study-quiz-start="missed"]').click(); await settle();
+    assert(sent(again, 'studyQuizStart')[0]?.missed === true, 'the missed were not tried again');
+    await win.pushEvents([quizEvent([done], {results: [{objective: 'O001', text: 'Explain why UCS is optimal', topic: 'Search', score: 0, of: 1, questions: ['q01']}],
+      mastery: [{objective: 'O001', text: 'Explain why UCS is optimal', topic: 'Search', level: 0.3, evidence: 2, state: 'focus'}]})]); await settle();
+    const weak = win.commands.length;
+    ws().querySelector('[data-study-quiz-weak]').click(); await settle();
+    const make = sent(weak, 'studyMake')[0];
+    assert(make?.kind === 'quiz' && JSON.stringify(make.options.objectives) === '["O001"]', `the weak areas were not asked for: ${JSON.stringify(make)}`);
+    const tutor = win.commands.length;
+    ws().querySelector('[data-study-quiz-results-ask]').click(); await settle();
+    assert(sent(tutor, 'studyAsk')[0]?.text.includes('Here is how my attempt at "Quiz: search" went'), 'the tutor was not asked');
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 

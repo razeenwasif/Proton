@@ -1059,7 +1059,7 @@ Gemini Notebook, for studying from one's own files: notebooks of sources drawn
 from a knowledge base, a tutor that answers from them and cites them, and a
 studio that makes guides, cards, quizzes and exams of them. It is being built in
 milestones; what is here is the knowledge base, notebooks, sources, the reader,
-notes, the tutor, the studio and flashcards.
+notes, the tutor, the studio, flashcards, and quizzes with their marking.
 
 **The knowledge base** is the folders the person names (`study.roots` in their
 own settings), less what `study.exclude` leaves out — `.gitignore` lines with
@@ -1142,6 +1142,29 @@ after the notebook's exam begins, and in the fortnight before it a retention of
 whole, or gone over for the cards missed in the last week, each card rated 1–4
 with when it would come back; it goes out as CSV, or as a file Anki imports with
 its TeX as MathJax.
+
+**Quizzes and practice problems** are `studio/quizzes/Q001.json`, with every
+attempt at one appended to `Q001.attempts.jsonl` — each answer, each mark, a
+dispute, a finish — and replayed from it (`proton-study::quiz`). A question is
+a choice, choices, blanks (`___`), a number, or a written answer, short or
+worked; it carries a hint, an explanation, its objectives and citations, and a
+written one a rubric of criteria and points and a model answer. Options are
+shuffled when read, since a model puts the right one second more often than
+chance. What can be checked is marked by rule: choices earn each right option
+less each wrong one, blanks are compared normalised, a number within its
+tolerance and in its unit. A written answer is marked by a call of the studio's
+to another family of model than the one that set the quiz — Codex, Claude Code,
+Antigravity, the first of them installed — told the rubric, the model answer and
+what the question's citations say. Its mark must give every criterion at most
+its points and quote the words of the answer that earn them; a quote that is
+not in the answer is sent back once, and the second time the points it was to
+show are not given. A mark disputed is marked again by a third family, if there
+is one; when the two differ by more than a point, the lower counts. An attempt
+says how it went objective by objective (or topic by topic), and can be tried
+again for what it missed; `proton-study::mastery` weighs every answer and card
+review tagged with an objective — a model's mark 0.7, an answer after its hint
+half, the older the less — into where it stands: not started, a focus,
+developing, or a strength.
 
 ### Trace
 

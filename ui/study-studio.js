@@ -25,6 +25,8 @@ import { answerHtml } from "./study-chat.js";
 export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["studyGuide", "Study guide", "book", "Each topic's key ideas, worked examples and practice questions"],
   ["flashcards", "Flashcards", "cards", "Cards to learn by, each brought back as it is about to be forgotten"],
+  ["quiz", "Quiz", "check", "Questions of every kind, each marked as you answer it"],
+  ["practice", "Practice problems", "bulb", "Problems to work through, with hints and worked solutions"],
   ["objectives", "Learning objectives", "target", "What you must be able to do in the exam"],
   ["faq", "FAQ", "chat", "The questions a student asks, answered"],
   ["glossary", "Glossary", "text", "Every term, as the sources define it"],
@@ -34,7 +36,14 @@ export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["timeline", "Timeline", "clock", "What happens, in order"],
   ["report", "Your own", "pen", "A document of your asking"],
 ]);
-const TILE = Object.fromEntries(TILES.map(([kind, name]) => [kind, name]));
+const TILE = /** @type {Record<string, string>} */ ({ ...Object.fromEntries(TILES.map(([kind, name]) => [kind, name])), marking: "Marking" });
+
+/** How many of a thing can be asked for, by kind. */
+const AMOUNTS = /** @type {Record<string, [string, string][]>} */ ({
+  flashcards: [["fewer", "Fewer — about 10"], ["standard", "About 20"], ["more", "More — about 40"]],
+  quiz: [["fewer", "Fewer — about 5"], ["standard", "About 10"], ["more", "More — about 20"]],
+  practice: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
+});
 
 const STATES = /** @type {Record<string, string>} */ ({ waiting: "Waiting its turn", running: "Being made", repairing: "Being mended", done: "Made", failed: "Not made" });
 
@@ -90,6 +99,9 @@ export function madeHtml(e, readOnly) {
     // A deck opens as a deck (study-cards.js); this is only its cards, read.
     content = `<ol class="st-cards" data-turn="made">${body.cards.map((c) => `<li class="st-card-row"><div class="st-card-sides">` +
       `<div class="st-card-front md">${answerHtml(c.front, citations)}</div><div class="st-card-back md">${answerHtml(c.back, citations)}</div></div></li>`).join("")}</ol>`;
+  } else if (body.shape === "questions") {
+    // A quiz opens as a quiz (study-quiz.js); this is only its questions, read.
+    content = `<ol class="st-cards" data-turn="made">${body.questions.map((q) => `<li class="st-card-row"><div class="md">${answerHtml(q.prompt, citations)}</div></li>`).join("")}</ol>`;
   } else {
     const topics = [...new Set(body.objectives.map((o) => o.topic))];
     content = `<div class="st-objectives" data-turn="made">${topics.map((t) => `<section><h3>${esc(t)}</h3><ol>${body.objectives.filter((o) => o.topic === t)
@@ -117,8 +129,8 @@ export function createStudio(host) {
       ? `<input name="columns" placeholder="Columns, by commas: Algorithm, Complete?, Optimal?, Time" autocomplete="off" required>`
       : kind === "report"
         ? `<textarea name="ask" rows="3" placeholder="What it should be: “A one-page cheat sheet of every search algorithm’s complexity.”" required></textarea>`
-        : kind === "flashcards"
-          ? `<div class="st-card-form-row"><select name="amount" aria-label="How many"><option value="fewer">Fewer — about 10</option><option value="standard" selected>About 20</option><option value="more">More — about 40</option></select>` +
+        : kind in AMOUNTS
+          ? `<div class="st-card-form-row"><select name="amount" aria-label="How many">${AMOUNTS[kind].map(([value, said]) => `<option value="${value}"${value === "standard" ? " selected" : ""}>${said}</option>`).join("")}</select>` +
             `<select name="level" aria-label="How hard"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></div>${focus}`
           : focus;
     return `<form class="st-make-form" data-study-make-form="${kind}" novalidate>${field}
@@ -202,6 +214,7 @@ export function createStudio(host) {
       amount: String(data.get("amount") ?? "standard"),
       level: String(data.get("level") ?? "medium"),
       deck: null,
+      objectives: [],
     };
     if ((kind === "table" && !options.columns.length) || (kind === "report" && !options.ask)) {
       /** @type {HTMLElement | null} */ (form.querySelector("input, textarea"))?.focus();

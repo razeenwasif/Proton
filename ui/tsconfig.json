@@ -42,6 +42,7 @@
     "study-kb.js",
     "study-chat.js",
     "study-studio.js",
-    "study-cards.js"
+    "study-cards.js",
+    "study-quiz.js"
   ]
 }

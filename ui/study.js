@@ -14,6 +14,7 @@ import { markdown } from "./markdown.js";
 import { createCards } from "./study-cards.js";
 import { createChat } from "./study-chat.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
+import { createQuiz } from "./study-quiz.js";
 import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 
 /** @typedef {import("./bindings/StudySummary").StudySummary} Summary */
@@ -28,7 +29,7 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {import("./study-studio.js").MadeEvent} MadeEvent */
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
 /** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
- *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"}} Shown */
+ *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}} Shown */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
  *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
 
@@ -86,25 +87,25 @@ export function createStudy(host) {
       if (key !== "made") return [];
       const shown = state.shown;
       if (shown.kind === "made") return shown.made.citations;
+      if (shown.kind === "quiz") return quizzes.citations();
       return shown.kind === "deck" || shown.kind === "review" ? cards.citations(shown.kind) : [];
     },
   });
   const studio = createStudio({ box: els.studio, dispatch: host.dispatch, readOnly: () => readOnly() });
-  const cards = createCards({
-    dispatch: host.dispatch, readOnly: () => readOnly(),
-    // A card explained: asked in the chat, from its sources.
-    explain: (text) => {
-      state.shown = { kind: "chat" };
-      state.back = "chat";
-      els.stage.innerHTML = "";
-      render();
-      host.dispatch({ type: "studyAsk", text });
-    },
-  });
+  /** Ask the tutor, in the chat: a card explained, a question, how a quiz went. @param {string} text */
+  const askTutor = (text) => {
+    state.shown = { kind: "chat" };
+    state.back = "chat";
+    els.stage.innerHTML = "";
+    render();
+    host.dispatch({ type: "studyAsk", text });
+  };
+  const cards = createCards({ dispatch: host.dispatch, readOnly: () => readOnly(), explain: askTutor });
+  const quizzes = createQuiz({ dispatch: host.dispatch, readOnly: () => readOnly(), ask: askTutor });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: boolean, removing: string | null,
-   *   getting: string[] | null, shown: Shown, back: "chat" | "overview"}} */
+   *   getting: string[] | null, shown: Shown, back: "chat" | "overview", want: string | null}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -122,6 +123,8 @@ export function createStudy(host) {
     // reader, a note — and what Back returns to.
     shown: { kind: "chat" },
     back: "chat",
+    // Something made that was clicked, to be shown when the core sends it.
+    want: null,
   };
 
   const readOnly = () => Boolean(state.notebook?.readOnly);
@@ -462,6 +465,10 @@ export function createStudy(host) {
       cards.render(els.stage, shown.kind);
       return;
     }
+    if (shown.kind === "quiz") {
+      quizzes.render(els.stage);
+      return;
+    }
     els.stage.innerHTML = notebookHtml();
   }
 
@@ -496,8 +503,11 @@ export function createStudy(host) {
       chat.click(t);
       return;
     }
+    const opened = /** @type {HTMLElement | null} */ (t.closest("[data-study-made]"));
+    if (opened) state.want = opened.dataset.studyMade ?? null;
     if (studio.click(t)) return;
     if (els.stage.contains(t) && cards.click(t, () => renderStage())) return;
+    if (els.stage.contains(t) && quizzes.click(t, () => renderStage())) return;
     const at_ = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
     if (at_("[data-study-resume]")) {
       state.shown = { kind: "review" };
@@ -672,6 +682,7 @@ export function createStudy(host) {
 
   ws.addEventListener("keydown", (e) => {
     if (state.shown.kind === "review" && cards.key(e, () => renderStage())) return;
+    if (state.shown.kind === "quiz" && quizzes.key(e, () => renderStage())) return;
     chat.key(e);
   });
 
@@ -684,7 +695,7 @@ export function createStudy(host) {
       studio.submit(form);
       return;
     }
-    if (els.stage.contains(form) && cards.submit(form)) {
+    if (els.stage.contains(form) && (cards.submit(form) || quizzes.submit(form))) {
       e.preventDefault();
       return;
     }
@@ -801,6 +812,20 @@ export function createStudy(host) {
     if (state.shown.kind === "deck") renderStage();
   }
 
+  /** A quiz: drawn again where it is shown, or opened when it was asked for.
+   *  @param {import("./study-quiz.js").QuizEvent} event */
+  function quizEvent(event) {
+    const showing = state.shown.kind === "quiz" && quizzes.open() === event.made.id;
+    quizzes.quiz(event);
+    if (showing) return renderStage();
+    if (state.want === event.made.id) {
+      state.want = null;
+      state.shown = { kind: "quiz" };
+      els.stage.innerHTML = "";
+      render();
+    }
+  }
+
   /** The session of review, as it stands. @param {{review: import("./bindings/StudyReview").StudyReview | null}} event */
   function reviewingEvent(event) {
     if (cards.reviewing(event)) {
@@ -841,6 +866,7 @@ export function createStudy(host) {
     state.notebook = null;
     state.open = null;
     cards.clear();
+    quizzes.clear();
     picker.close();
     render();
   }
@@ -848,6 +874,6 @@ export function createStudy(host) {
   render();
 
   return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
-    deck: deckEvent, reviewing: reviewingEvent,
+    deck: deckEvent, reviewing: reviewingEvent, quiz: quizEvent,
     kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
 }

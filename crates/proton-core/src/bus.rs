@@ -646,6 +646,41 @@ pub enum Command {
         deck: String,
         anki: bool,
     },
+    /// Begin an attempt at a quiz: of every question, or of those the last
+    /// attempt did not get whole.
+    StudyQuizStart {
+        quiz: String,
+        missed: bool,
+    },
+    /// Answer a question of an attempt. Answered again, the earlier answer,
+    /// and its mark, go.
+    StudyQuizAnswer {
+        quiz: String,
+        attempt: u32,
+        question: String,
+        given: proton_study::quiz::Given,
+        /// Whether its hint was looked at first.
+        hinted: bool,
+    },
+    /// Dispute a written answer's mark, saying why: it is marked again, by
+    /// another hand.
+    StudyQuizDispute {
+        quiz: String,
+        attempt: u32,
+        question: String,
+        why: String,
+    },
+    /// Mark a written answer again, its mark having not been made.
+    StudyQuizMarkAgain {
+        quiz: String,
+        attempt: u32,
+        question: String,
+    },
+    /// Finish an attempt.
+    StudyQuizFinish {
+        quiz: String,
+        attempt: u32,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1530,6 +1565,19 @@ pub enum Event {
     /// The session of review, as it stands; `None` once it has ended.
     StudyReviewing {
         review: Option<proton_study::view::StudyReview>,
+    },
+    /// A quiz: its questions, every attempt at it and how each answer was
+    /// marked, how the latest went objective by objective, where those
+    /// objectives stand, and its questions' citations resolved.
+    StudyQuiz {
+        made: proton_study::studio::StudyMade,
+        questions: Vec<proton_study::quiz::StudyQuestion>,
+        attempts: Vec<proton_study::quiz::StudyAttempt>,
+        /// Answers being marked now: `2/q03`, the attempt and the question.
+        marking: Vec<String>,
+        results: Vec<proton_study::quiz::StudyResult>,
+        mastery: Vec<proton_study::mastery::StudyMastery>,
+        citations: Vec<proton_study::cite::StudyCitation>,
     },
     /// What a call of the studio's was told and asked, and how it ended.
     StudyTask {

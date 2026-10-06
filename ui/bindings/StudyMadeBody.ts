@@ -2,9 +2,10 @@
 import type { StudyCard } from "./StudyCard";
 import type { StudyMapNode } from "./StudyMapNode";
 import type { StudyObjective } from "./StudyObjective";
+import type { StudyQuestion } from "./StudyQuestion";
 import type { StudyTableRow } from "./StudyTableRow";
 
 /**
  * Something made, whole, as it is kept.
  */
-export type StudyMadeBody = { "shape": "prose", markdown: string, } | { "shape": "map", nodes: Array<StudyMapNode>, } | { "shape": "table", columns: Array<string>, rows: Array<StudyTableRow>, } | { "shape": "objectives", objectives: Array<StudyObjective>, } | { "shape": "cards", cards: Array<StudyCard>, };
+export type StudyMadeBody = { "shape": "prose", markdown: string, } | { "shape": "map", nodes: Array<StudyMapNode>, } | { "shape": "table", columns: Array<string>, rows: Array<StudyTableRow>, } | { "shape": "objectives", objectives: Array<StudyObjective>, } | { "shape": "cards", cards: Array<StudyCard>, } | { "shape": "questions", questions: Array<StudyQuestion>, };

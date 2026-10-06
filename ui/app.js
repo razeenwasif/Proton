@@ -4930,6 +4930,10 @@ function renderEvent(event) {
       study?.reviewing(event);
       break;
 
+    case "studyQuiz":
+      study?.quiz(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

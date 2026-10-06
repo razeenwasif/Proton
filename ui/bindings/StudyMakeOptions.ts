@@ -29,4 +29,8 @@ level: StudyLevel,
 /**
  * The deck cards are to be added to, rather than a new one.
  */
-deck: string | null, };
+deck: string | null, 
+/**
+ * Learning objectives to centre it on: those a student is weak in.
+ */
+objectives: Array<string>, };

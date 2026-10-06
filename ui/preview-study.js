@@ -177,7 +177,43 @@ export function createStudyPreview(deliver) {
     jobs: /** @type {any[]} */ ([]),
     made: [{ id: "M001", kind: "mindMap", title: "Search", made: now - 5000, by: "Claude Code · claude-opus-5-5", task: "J0001" },
       { id: "R001", kind: "studyGuide", title: "COMP3670 — Search, a study guide", made: now - 4000, by: "Codex · gpt-6.1-sol", task: "J0002" },
-      { id: "D001", kind: "flashcards", title: "Flashcards: search", made: now - 3000, by: "Claude Code · claude-opus-5-5", task: "J0003" }],
+      { id: "D001", kind: "flashcards", title: "Flashcards: search", made: now - 3000, by: "Claude Code · claude-opus-5-5", task: "J0003" },
+      { id: "Q001", kind: "quiz", title: "Quiz: search", made: now - 2000, by: "Claude Code · claude-opus-5-5", task: "J0004" }],
+  };
+  /** A quiz, and a stand-in for its marking: the real one is by rule, or by a model of another family, in the core. */
+  const question = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {Record<string, any>} */ more) => ({ id, kind, prompt: "", options: [], correct: [], rationales: [], blanks: [],
+    number: null, tolerance: 0, unit: "", rubric: [], modelAnswer: "", hint: "", explanation: "", topic: "Search", objectives: ["O001"], level: "medium", cites: [], ...more });
+  const quiz = {
+    questions: [
+      question("q01", "choice", { prompt: "Which search is complete when the branching factor is finite?", options: ["Depth-first", "Breadth-first", "Greedy best-first", "Hill climbing"], correct: [1],
+        rationales: ["It can go down one branch for ever.", "It reaches every depth in turn.", "It can loop.", "It stops at a local best."], hint: "Think in layers.", explanation: "BFS expands every node at depth $d$ before any at $d + 1$ [[S02 § Search › Uniform cost L40-58]].", cites: ["S02 § Search › Uniform cost L40-58"] }),
+      question("q02", "blanks", { prompt: "A heuristic is ___ when $h(n) \\le h^*(n)$ for every $n$.", blanks: [["admissible"]], explanation: "It never overestimates." }),
+      question("q03", "number", { prompt: "The 2020 exam's step cost below which UCS can loop?", number: 0.25, tolerance: 0.001, explanation: "Below 0.25 the lecturer's counterexample loops [[S01 p. 3]].", cites: ["S01 p. 3"] }),
+      question("q04", "short", { prompt: "Why is uniform-cost search optimal?", rubric: [{ id: "c1", text: "It expands in order of path cost $g(n)$", points: 2 }, { id: "c2", text: "Step costs are at least some $\\varepsilon > 0$", points: 1 }],
+        modelAnswer: "It expands nodes in order of $g(n)$; with every step costing at least $\\varepsilon > 0$, the first goal it expands is the cheapest.", cites: ["S01 p. 3"] }),
+    ],
+    /** @type {any[]} */
+    attempts: [],
+    /** @type {string[]} */
+    marking: [],
+  };
+  const quizEvent = () => ({ type: "studyQuiz", made: studio.made.find((m) => m.id === "Q001"), questions: quiz.questions, attempts: quiz.attempts, marking: quiz.marking,
+    results: quiz.attempts.length ? [{ objective: "O001", text: "Explain why uniform-cost search is optimal", topic: "Search",
+      score: quiz.attempts.at(-1).answers.reduce((/** @type {number} */ n, /** @type {any} */ a) => { const g = a.second ?? a.grade; return n + (g ? g.score / g.of : 0); }, 0),
+      of: Math.max(1, quiz.attempts.at(-1).answers.length), questions: [] }] : [],
+    mastery: [{ objective: "O001", text: "Explain why uniform-cost search is optimal", topic: "Search", level: 0.55, evidence: 3, state: "focus" }], citations: cites });
+  /** A mark by rule, or none for a written answer. @param {any} q @param {any} given */
+  const rule = (q, given) => {
+    const grade = (/** @type {number} */ score, /** @type {number} */ of, /** @type {string} */ feedback) => ({ score, of, by: "rule", criteria: [], feedback });
+    if (q.kind === "choice") return grade(q.correct.includes(given.index) ? 1 : 0, 1, q.rationales[given.index] ?? "");
+    if (q.kind === "blanks") return grade(given.words.filter((w, i) => (q.blanks[i] ?? []).includes(String(w).trim().toLowerCase())).length, q.blanks.length, "");
+    if (q.kind === "number") return grade(Math.abs(Number(given.text) - q.number) <= q.tolerance ? 1 : 0, 1, `The answer is ${q.number}.`);
+    return null;
+  };
+  const tally = (/** @type {any} */ attempt) => {
+    const marks = attempt.answers.map((/** @type {any} */ a) => a.second ?? a.grade).filter(Boolean);
+    attempt.score = marks.reduce((/** @type {number} */ n, /** @type {any} */ g) => n + g.score, 0);
+    attempt.of = marks.reduce((/** @type {number} */ n, /** @type {any} */ g) => n + g.of, 0);
   };
   /** A deck, and a stand-in for its schedule: the real one is FSRS, replayed from a log in the core. */
   const card = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {string} */ front, /** @type {string} */ back, /** @type {string[]} */ cites) =>
@@ -361,6 +397,7 @@ export function createStudyPreview(deliver) {
         }
         case "studyShowMade": {
           if (command.id === "D001") return [deckEvent()];
+          if (command.id === "Q001") return [quizEvent()];
           const made = studio.made.find((m) => m.id === command.id);
           return made ? [{ type: "studyMadeOpen", made, body: BODIES[command.id], citations: cites }] : [];
         }
@@ -410,6 +447,54 @@ export function createStudyPreview(deliver) {
         case "studyCardDelete":
           deck.cards = deck.cards.filter((r) => r.card.id !== command.card);
           return [deckEvent()];
+        case "studyQuizStart": {
+          const last = quiz.attempts.at(-1);
+          const ids = command.missed && last ? last.questions.filter((/** @type {string} */ id) => { const a = last.answers.find((/** @type {any} */ x) => x.question === id); const g = a && (a.second ?? a.grade); return !g || g.score < g.of; })
+            : quiz.questions.map((q) => q.id);
+          quiz.attempts.push({ n: quiz.attempts.length + 1, questions: ids, answers: [], started: Math.floor(Date.now() / 1000), finished: null, score: 0, of: 0 });
+          return [quizEvent()];
+        }
+        case "studyQuizAnswer": {
+          const attempt = quiz.attempts.find((a) => a.n === command.attempt);
+          const q = quiz.questions.find((x) => x.id === command.question);
+          if (!attempt || !q) return [];
+          const answer = { question: q.id, given: command.given, hinted: command.hinted, grade: rule(q, command.given), disputed: null, second: null, unmarked: null, at: Math.floor(Date.now() / 1000) };
+          attempt.answers = attempt.answers.filter((/** @type {any} */ a) => a.question !== q.id).concat([answer]);
+          tally(attempt);
+          if (!answer.grade) {
+            const key = `${attempt.n}/${q.id}`;
+            quiz.marking.push(key);
+            setTimeout(() => {
+              quiz.marking = quiz.marking.filter((k) => k !== key);
+              answer.grade = { score: 2, of: 3, by: "Codex · gpt-6.1-sol", feedback: "Say why the step costs must be above zero.",
+                criteria: [{ id: "c1", points: 2, evidence: [String(command.given.text).split(/[.,;]/)[0]], why: "It names the order." }, { id: "c2", points: 0, evidence: [], why: "Step costs are not mentioned." }] };
+              tally(attempt);
+              deliver(quizEvent());
+            }, 1200);
+          }
+          return [quizEvent()];
+        }
+        case "studyQuizDispute": {
+          const answer = quiz.attempts.find((a) => a.n === command.attempt)?.answers.find((/** @type {any} */ a) => a.question === command.question);
+          if (!answer) return [];
+          answer.disputed = command.why;
+          const key = `${command.attempt}/${command.question}`;
+          quiz.marking.push(key);
+          setTimeout(() => {
+            quiz.marking = quiz.marking.filter((k) => k !== key);
+            answer.second = { ...answer.grade, score: 3, by: "Antigravity · gemini-3.8-pro", feedback: "The second line does say why." };
+            tally(quiz.attempts.find((a) => a.n === command.attempt));
+            deliver(quizEvent());
+          }, 1200);
+          return [quizEvent()];
+        }
+        case "studyQuizMarkAgain":
+          return [quizEvent()];
+        case "studyQuizFinish": {
+          const attempt = quiz.attempts.find((a) => a.n === command.attempt);
+          if (attempt) attempt.finished = Math.floor(Date.now() / 1000);
+          return [quizEvent()];
+        }
         case "studyDeckExport":
           return [{ type: "notice", level: "info", text: `${deck.cards.length} cards written to ~/Github/Notebooks/comp3670-exam/exports/D001-flashcards-search.${command.anki ? "anki.txt. In Anki: File › Import, and choose it." : "csv."}` }];
         case "studyShowTask":
