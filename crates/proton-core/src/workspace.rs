@@ -1450,7 +1450,12 @@ impl Workspace {
             | Command::StudyExamSit { .. }
             | Command::StudyExamExport { .. }
             | Command::StudyProgress
-            | Command::StudyLesson { .. } => vec![notice("Notebook is the window's, not a project's.".into(), NoticeLevel::Warn)],
+            | Command::StudyLesson { .. }
+            | Command::StudyVoiceSetup { .. }
+            | Command::StudyVoiceFind { .. }
+            | Command::StudyVoiceSample { .. }
+            | Command::StudyVoiceKey
+            | Command::StudyAudioVoice { .. } => vec![notice("Notebook is the window's, not a project's.".into(), NoticeLevel::Warn)],
             Command::ResearchNew { title, goal, discipline, literature } => self.research().create(&title, &goal, discipline, literature),
             Command::ResearchOpen { slug } => self.research().open(&slug),
             Command::ResearchShow { hypothesis } => self.research().show(hypothesis),

@@ -246,7 +246,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 15, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 16, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -643,6 +643,94 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     view.querySelector('.st-ov-end [data-study-made="Q005"]').click(); await settle();
     assert(sent(quiz, 'studyShowMade')[0]?.id === 'Q005', 'the quiz it ends in was not asked for');
     ws().querySelector('[data-study-back]')?.click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  const audioMade = {id: 'A001', kind: 'audio', title: 'Search, talked through', made: 1, by: 'Claude Code', task: 'J0008'};
+  const said = [
+    {speaker: 0, text: 'Today: search.', display: 'Today: search.', cites: []},
+    {speaker: 1, text: 'It goes layer by layer.', display: 'BFS goes layer by layer [[S01 p. 3]].', cites: ['S01 p. 3']},
+    {speaker: 0, text: 'And UCS orders by cost.', display: 'UCS orders by $g(n)$.', cites: []},
+  ];
+  const audioEvent = (/** @type {Partial<any>} */ more) => ({type: 'studyAudio', made: audioMade, format: 'deepDive', segments: said, chapters: [{title: 'Opening', segment: 0}, {title: 'Cost', segment: 2}],
+    timings: [], duration: 0, state: 'waiting', why: null, done: 0, of: 0, url: null, citations: [cite(1, 'S01 p. 3')], voice: {key: true, consented: null, hosts: []}, ...more});
+
+  await test('An audio overview is asked for by format, length and language, and nothing is spoken before Fish\'s terms are agreed to', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: [audioMade]}]); await settle();
+    const studio = ws().querySelector('[data-study-studio-body]');
+    studio.querySelector('[data-study-tile="audio"]').click(); await settle();
+    const form = studio.querySelector('[data-study-make-form="audio"]');
+    form.querySelector('[name="format"]').value = 'debate';
+    form.querySelector('[name="amount"]').value = 'fewer';
+    form.querySelector('[name="language"]').value = 'French';
+    const make = win.commands.length;
+    form.requestSubmit(); await settle();
+    const asked = sent(make, 'studyMake')[0];
+    assert(asked?.kind === 'audio' && asked.options.format === 'debate' && asked.options.amount === 'fewer' && asked.options.language === 'French', `wrong: ${JSON.stringify(asked)}`);
+    studio.querySelector('[data-study-made="A001"]').click(); await settle();
+    await win.pushEvents([audioEvent({why: "Waiting for you to agree to Fish Audio's terms."})]); await settle();
+    const consent = ws().querySelector('.st-voice-consent');
+    assert(consent?.textContent.includes('may use what it is sent to improve its models') && consent.textContent.includes('30 November 2026'), 'the terms are not said');
+    assert(ws().querySelectorAll('.st-line-said').length === 3, 'the transcript is not shown before it is spoken');
+    const agree = win.commands.length;
+    consent.querySelector('[data-study-voice-agree]').click(); await settle();
+    assert(sent(agree, 'studyVoiceSetup')[0]?.consent === true, 'not agreed');
+  });
+
+  await test('Two voices are found, listened to and chosen; a missing key is said, and a voicing can be stopped', async () => {
+    await win.pushEvents([audioEvent({voice: {key: false, consented: '2026-10-06', hosts: []}})]); await settle();
+    assert(ws().querySelector('.st-audio-view')?.textContent.includes('FISH_API_KEY'), 'a missing key is not said');
+    const look = win.commands.length;
+    ws().querySelector('[data-study-voice-key]').click(); await settle();
+    assert(sent(look, 'studyVoiceKey').length === 1, 'not looked for again');
+    await win.pushEvents([audioEvent({voice: {key: true, consented: '2026-10-06', hosts: []}})]); await settle();
+    const find = ws().querySelector('[data-study-voice-find]');
+    find.querySelector('[name="query"]').value = 'narrator';
+    const finding = win.commands.length;
+    find.requestSubmit(); await settle();
+    assert(JSON.stringify(sent(finding, 'studyVoiceFind')[0]) === JSON.stringify({type: 'studyVoiceFind', query: 'narrator', language: 'en'}), 'not found');
+    await win.pushEvents([{type: 'studyVoices', query: 'narrator', total: 2, error: null, voices: [
+      {id: 'v1', title: 'Warm Narrator', description: '', languages: ['en'], sample: true, sampleText: '', author: 'fish', uses: 10},
+      {id: 'v2', title: 'Bright Host', description: '', languages: ['en'], sample: false, sampleText: '', author: '', uses: 5}]}]); await settle();
+    assert(ws().querySelectorAll('.st-voice').length === 2, 'the voices are not listed');
+    const listen = win.commands.length;
+    ws().querySelector('[data-study-voice-listen="v1"]').click(); await settle();
+    assert(sent(listen, 'studyVoiceSample')[0]?.id === 'v1', 'not listened to');
+    await win.pushEvents([{type: 'studyVoiceSample', id: 'v1', url: '_voices/v1.mp3', error: null}]); await settle();
+    assert(/^(study:\/\/localhost|http:\/\/study\.localhost)\/_voices\/v1\.mp3$/.test(ws().querySelector('.st-sample')?.getAttribute('src') ?? ''), `the sample's sound: ${ws().querySelector('.st-sample')?.getAttribute('src')}`);
+    ws().querySelector('[data-study-voice-pick="v1"]').click(); await settle();
+    ws().querySelector('[data-study-voice-pick="v2"]').click(); await settle();
+    const use = win.commands.length;
+    ws().querySelector('[data-study-voice-use]').click(); await settle();
+    const setup = sent(use, 'studyVoiceSetup')[0];
+    assert(setup?.consent === true && setup.hosts.map((/** @type {any} */ h) => h.id).join() === 'v1,v2', `not chosen: ${JSON.stringify(setup)}`);
+    await win.pushEvents([audioEvent({state: 'voicing', done: 3, of: 12, voice: {key: true, consented: '2026-10-06', hosts: [{id: 'v1', title: 'Warm Narrator'}, {id: 'v2', title: 'Bright Host'}]}})]); await settle();
+    assert(ws().querySelector('.st-voicing')?.textContent.includes('3 of 12'), 'how far it is spoken is not said');
+    const stop = win.commands.length;
+    ws().querySelector('[data-study-voice-stop]').click(); await settle();
+    assert(sent(stop, 'studyCancelJob')[0]?.id === 'A001', 'not stopped');
+  });
+
+  await test('A spoken overview plays from study://, its transcript follows the voice, and a chapter, a turn or a speed is chosen', async () => {
+    const hosts = [{id: 'v1', title: 'Warm Narrator'}, {id: 'v2', title: 'Bright Host'}];
+    await win.pushEvents([audioEvent({state: 'ready', url: 'search/A001.mp3', duration: 30, timings: [[0, 10], [10, 20], [20, 30]], voice: {key: true, consented: '2026-10-06', hosts}})]); await settle();
+    const sound = ws().querySelector('[data-study-sound]');
+    assert(/^(study:\/\/localhost|http:\/\/study\.localhost)\/search\/A001\.mp3$/.test(sound?.getAttribute('src') ?? ''), `the sound: ${sound?.getAttribute('src')}`);
+    assert(ws().querySelector('.st-line-said.speaker1 b')?.textContent === 'Bright Host', 'a turn does not say whose voice it is');
+    assert(ws().querySelector('.st-line-said .st-cite'), 'a turn\'s citation is not a chip');
+    ws().querySelector('[data-study-segment="1"]').click(); await settle();
+    assert(Math.abs(sound.currentTime - 10) < 0.01 && ws().querySelector('.st-line-said.now')?.getAttribute('data-study-segment') === '1', 'a turn clicked is not where it plays from');
+    ws().querySelector('[data-study-chapter="2"]').click(); await settle();
+    assert(Math.abs(sound.currentTime - 20) < 0.01 && ws().querySelector('.st-line-said.now')?.getAttribute('data-study-segment') === '2', 'a chapter is not jumped to');
+    const speed = ws().querySelector('[data-study-speed]');
+    speed.value = '1.5';
+    speed.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(sound.playbackRate === 1.5, 'the speed is not set');
+    // Drawn again while it plays, the same sound is kept.
+    await win.pushEvents([audioEvent({state: 'ready', url: 'search/A001.mp3', duration: 30, timings: [[0, 10], [10, 20], [20, 30]], voice: {key: true, consented: '2026-10-06', hosts}})]); await settle();
+    assert(ws().querySelector('[data-study-sound]') === sound, 'the sound was drawn over');
+    ws().querySelector('[data-study-back]').click(); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 

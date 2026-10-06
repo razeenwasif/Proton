@@ -249,7 +249,7 @@ impl Jobs {
             }
             let read = match &running.asked.marking {
                 Some(marking) => read_mark(&running.asked, marking, &answer, structured, !running.repaired, running.conversation.as_ref()).map(Read::Mark),
-                None => studio::read(running.asked.make, &answer, structured).and_then(|body| novel(&running.asked, body, !running.repaired)).map(Read::Made),
+                None => studio::read(running.asked.make, &running.asked.options, &answer, structured).and_then(|body| novel(&running.asked, body, !running.repaired)).map(Read::Made),
             };
             match read {
                 Ok(read) => ended.push((at, keep(&running.asked, read, running.conversation.as_ref()))),
@@ -529,6 +529,11 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
     let model = conversation.fold().status().model.clone();
     let by = [asked.engine.name().to_string(), model].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
     let made = book.keep_made(asked.make, &title, &by, &asked.id, body)?;
+    // An audio overview is in the language asked for.
+    if let Some(mut kept) = book.audio(&made.id) {
+        kept.language = asked.options.language.clone();
+        book.save_audio(&made.id, &kept)?;
+    }
     // A quiz remembers what set it, so another family marks it; a past
     // paper, which paper it is.
     if let Some(mut quiz) = book.quiz(&made.id) {

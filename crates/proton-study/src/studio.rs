@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ts_rs::TS;
 
+use crate::audio::{self, AudioFormat, StudyChapter, StudySegment};
 use crate::deck::{self, StudyCard};
 use crate::exam;
 use crate::overview::{self, StudyOverviewTopic};
@@ -59,6 +60,8 @@ pub enum Make {
     /// The course topic by topic: a summary, a map, cards and a check each,
     /// ending in a quiz.
     Overview,
+    /// Two hosts talking the sources through, spoken by Fish Audio.
+    Audio,
     /// A written answer marked: a call of the studio's, but not a thing it
     /// makes for the list.
     Marking,
@@ -80,6 +83,8 @@ pub enum Shape {
     Paper,
     /// A Learning Overview, in `studio/overviews/`.
     Overview,
+    /// An audio overview's script, in `studio/audio/`.
+    Audio,
     /// A mark, in its quiz's attempts.
     Mark,
 }
@@ -103,6 +108,7 @@ impl Make {
             Make::PastPaper => "Past paper",
             Make::Diagnostic => "Diagnostic quiz",
             Make::Overview => "Learning overview",
+            Make::Audio => "Audio overview",
             Make::Marking => "Marking",
         }
     }
@@ -115,6 +121,7 @@ impl Make {
             Make::Flashcards => Shape::Deck,
             Make::Quiz | Make::Practice | Make::Diagnostic => Shape::Questions,
             Make::Overview => Shape::Overview,
+            Make::Audio => Shape::Audio,
             Make::Exam | Make::PastPaper => Shape::Paper,
             Make::Marking => Shape::Mark,
             _ => Shape::Prose,
@@ -139,12 +146,13 @@ impl Make {
             Make::PastPaper => "pastPaper",
             Make::Diagnostic => "diagnostic",
             Make::Overview => "overview",
+            Make::Audio => "audio",
             Make::Marking => "marking",
         }
     }
 
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -182,6 +190,12 @@ pub struct Options {
     /// Exactly how many questions, when it is not the amount's.
     #[serde(default)]
     pub count: Option<u32>,
+    /// What an audio overview is.
+    #[serde(default)]
+    pub format: Option<AudioFormat>,
+    /// The language it is in; empty for the sources'.
+    #[serde(default)]
+    pub language: String,
 }
 
 /// How many cards or questions to make.
@@ -309,6 +323,7 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
             options.level.says()
         ),
         Make::Overview => overview::prompt(&course, &options.focus),
+        Make::Audio => audio::prompt(options.format.unwrap_or_default(), options.amount, &options.language, &options.focus, &course),
         // An exam's asking needs the notebook: [`prompt_for`].
         Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking => String::new(),
         Make::Flashcards => format!(
@@ -396,6 +411,7 @@ pub fn schema(make: Make) -> Option<Value> {
         Shape::Questions => quiz::schema(),
         Shape::Paper => exam::schema(),
         Shape::Overview => overview::schema(),
+        Shape::Audio => audio::schema(),
         Shape::Mark => quiz::marking_schema(),
         Shape::Map => json!({
             "type": "object", "additionalProperties": false, "required": ["title", "nodes"],
@@ -486,6 +502,7 @@ pub enum StudyMadeBody {
     Cards { cards: Vec<StudyCard> },
     Questions { questions: Vec<StudyQuestion> },
     Paper { title: String, minutes: Option<u32>, blueprint: String, sections: Vec<StudyPaperSection>, questions: Vec<StudyQuestion> },
+    Audio { title: String, format: AudioFormat, segments: Vec<StudySegment>, chapters: Vec<StudyChapter> },
     /// The deck and the quiz it was kept with, once it is kept.
     Overview {
         topics: Vec<StudyOverviewTopic>,
@@ -516,7 +533,7 @@ pub struct StudyMade {
 
 /// What a structured answer is, read: mended of TeX JSON ate, and held to
 /// what it must be. `Err` says what is wrong, for the call to try again.
-pub fn read(make: Make, answer: &str, structured: Option<Value>) -> Result<StudyMadeBody, String> {
+pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Value>) -> Result<StudyMadeBody, String> {
     if make.shape() == Shape::Prose {
         let text = strip_fence(answer).trim().to_string();
         if text.len() < 40 {
@@ -554,6 +571,11 @@ pub fn read(make: Make, answer: &str, structured: Option<Value>) -> Result<Study
         }
         Shape::Deck => Ok(StudyMadeBody::Cards { cards: deck::read_cards(&value)? }),
         Shape::Questions => Ok(StudyMadeBody::Questions { questions: quiz::read_questions(&value)? }),
+        Shape::Audio => {
+            let format = options.format.unwrap_or_default();
+            let (title, segments, chapters) = audio::read(&value, format)?;
+            Ok(StudyMadeBody::Audio { title, format, segments, chapters })
+        }
         Shape::Overview => {
             let (topics, quiz) = overview::read(&value)?;
             Ok(StudyMadeBody::Overview { topics, quiz, deck_id: None, quiz_id: None })
@@ -611,6 +633,7 @@ impl Book {
             Shape::Deck => self.dir().join("studio/decks"),
             Shape::Questions | Shape::Paper | Shape::Mark => self.dir().join("studio/quizzes"),
             Shape::Overview => self.dir().join("studio/overviews"),
+            Shape::Audio => self.dir().join("studio/audio"),
             Shape::Objectives => self.dir().to_path_buf(),
         }
     }
@@ -624,6 +647,29 @@ impl Book {
             let cards: Vec<StudyCard> = cards.iter().cloned().map(|c| StudyCard { task: task.to_string(), ..c }).collect();
             let deck = deck::Deck { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string(), next: cards.len() as u32 + 1, cards };
             self.save_deck(&id, &deck)?;
+            return Ok(StudyMade { id, kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() });
+        }
+        if let StudyMadeBody::Audio { format, segments, chapters, .. } = body {
+            let id = self.new_audio_id();
+            let kept = audio::Audio {
+                kind,
+                title: title.to_string(),
+                made,
+                by: by.to_string(),
+                task: task.to_string(),
+                format: *format,
+                language: String::new(),
+                segments: segments.clone(),
+                chapters: chapters.clone(),
+                voices: Vec::new(),
+                timings: Vec::new(),
+                duration: 0.0,
+                state: "waiting".into(),
+                why: None,
+                done: 0,
+                of: 0,
+            };
+            self.save_audio(&id, &kept)?;
             return Ok(StudyMade { id, kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() });
         }
         if let StudyMadeBody::Overview { topics, quiz, .. } = body {
@@ -659,6 +705,7 @@ impl Book {
             Shape::Deck => ('D', "json"),
             Shape::Questions | Shape::Paper | Shape::Mark => ('Q', "json"),
             Shape::Overview => ('L', "json"),
+            Shape::Audio => ('A', "json"),
             Shape::Objectives => ('O', "json"),
         };
         let header = Header { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() };
@@ -701,7 +748,7 @@ impl Book {
     /// Everything made, the latest first.
     pub fn made(&self) -> Vec<StudyMade> {
         let mut out: Vec<StudyMade> = Vec::new();
-        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json")] {
+        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json"), (Shape::Audio, "json")] {
             for entry in std::fs::read_dir(self.studio(shape)).into_iter().flat_map(|e| e.flatten()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let Some(id) = name.strip_suffix(&format!(".{ext}")) else { continue };
@@ -728,6 +775,7 @@ impl Book {
                 "D" => (self.studio(Shape::Deck).join(format!("{id}.json")), false),
                 "Q" => (self.studio(Shape::Questions).join(format!("{id}.json")), false),
                 "L" => (self.studio(Shape::Overview).join(format!("{id}.json")), false),
+                "A" => (self.studio(Shape::Audio).join(format!("{id}.json")), false),
                 _ => return None,
             },
             _ => return None,
@@ -760,6 +808,12 @@ impl Book {
                 quiz: Vec::new(),
                 deck_id: value["deck"].as_str().map(str::to_string),
                 quiz_id: value["quiz"].as_str().map(str::to_string),
+            },
+            Shape::Audio => StudyMadeBody::Audio {
+                title: header.title.clone(),
+                format: serde_json::from_value(value["format"].clone()).unwrap_or_default(),
+                segments: serde_json::from_value(value["segments"].clone()).ok()?,
+                chapters: serde_json::from_value(value["chapters"].clone()).unwrap_or_default(),
             },
             Shape::Prose | Shape::Mark => return None,
         };
@@ -837,15 +891,15 @@ mod tests {
 
     #[test]
     fn a_structured_answer_is_read_mended_and_held_to_its_shape() {
-        let map = read(Make::MindMap, "```json\n{\"title\": \"Search\", \"nodes\": [{\"id\": \"a\", \"parent\": null, \"label\": \"Search\", \"cites\": []}, {\"id\": \"b\", \"parent\": \"a\", \"label\": \"$\\frac{1}{2}$\", \"cites\": [\"S01 p. 1\"]}]}\n```", None).unwrap();
+        let map = read(Make::MindMap, &Options::default(), "```json\n{\"title\": \"Search\", \"nodes\": [{\"id\": \"a\", \"parent\": null, \"label\": \"Search\", \"cites\": []}, {\"id\": \"b\", \"parent\": \"a\", \"label\": \"$\\frac{1}{2}$\", \"cites\": [\"S01 p. 1\"]}]}\n```", None).unwrap();
         let StudyMadeBody::Map { nodes } = map else { panic!() };
         assert_eq!(nodes[1].label, "$\\frac{1}{2}$", "JSON ate the backslash; it is put back");
-        assert!(read(Make::MindMap, "{\"title\": \"x\", \"nodes\": [{\"id\": \"b\", \"parent\": \"z\", \"label\": \"x\", \"cites\": []}]}", None).unwrap_err().contains("parent"));
-        assert!(read(Make::Table, "{\"title\": \"t\", \"columns\": [\"a\", \"b\"], \"rows\": [{\"cells\": [\"1\"], \"cites\": []}]}", None).unwrap_err().contains("1 cells for 2"));
-        assert!(read(Make::Objectives, "not json", None).unwrap_err().contains("not JSON"));
-        let objectives = read(Make::Objectives, "", Some(json!({ "objectives": [{ "text": "Explain why UCS is optimal", "topic": "Search", "cites": ["S01 p. 1"] }] }))).unwrap();
+        assert!(read(Make::MindMap, &Options::default(), "{\"title\": \"x\", \"nodes\": [{\"id\": \"b\", \"parent\": \"z\", \"label\": \"x\", \"cites\": []}]}", None).unwrap_err().contains("parent"));
+        assert!(read(Make::Table, &Options::default(), "{\"title\": \"t\", \"columns\": [\"a\", \"b\"], \"rows\": [{\"cells\": [\"1\"], \"cites\": []}]}", None).unwrap_err().contains("1 cells for 2"));
+        assert!(read(Make::Objectives, &Options::default(), "not json", None).unwrap_err().contains("not JSON"));
+        let objectives = read(Make::Objectives, &Options::default(), "", Some(json!({ "objectives": [{ "text": "Explain why UCS is optimal", "topic": "Search", "cites": ["S01 p. 1"] }] }))).unwrap();
         assert!(matches!(objectives, StudyMadeBody::Objectives { objectives } if objectives[0].id == "O001"));
-        assert!(read(Make::Faq, "  ", None).is_err());
+        assert!(read(Make::Faq, &Options::default(), "  ", None).is_err());
     }
 
     #[test]
@@ -871,7 +925,7 @@ mod tests {
     fn a_deck_is_kept_with_its_reviews_and_binned_with_them() {
         let book = book();
         let answer = r#"{"title": "Search", "cards": [{"kind": "basic", "front": "Is BFS complete?", "back": "Yes, if $b$ is finite.", "topic": "Search", "objectives": ["O001"], "cites": ["S01 p. 2"]}]}"#;
-        let body = read(Make::Flashcards, answer, None).unwrap();
+        let body = read(Make::Flashcards, &Options::default(), answer, None).unwrap();
         let d = book.keep_made(Make::Flashcards, "Flashcards", "claude · m", "J0003", &body).unwrap();
         assert_eq!(d.id, "D001");
         let deck = book.deck("D001").unwrap();

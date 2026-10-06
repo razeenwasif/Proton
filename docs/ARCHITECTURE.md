@@ -1059,8 +1059,8 @@ Gemini Notebook, for studying from one's own files: notebooks of sources drawn
 from a knowledge base, a tutor that answers from them and cites them, and a
 studio that makes guides, cards, quizzes and exams of them. It is being built in
 milestones; what is here is the knowledge base, notebooks, sources, the reader,
-notes, the tutor, the studio, flashcards, quizzes with their marking, exams, and
-progress by learning objective.
+notes, the tutor, the studio, flashcards, quizzes with their marking, exams,
+progress by learning objective, and audio overviews.
 
 **The knowledge base** is the folders the person names (`study.roots` in their
 own settings), less what `study.exclude` leaves out — `.gitignore` lines with
@@ -1196,6 +1196,27 @@ summary, its ideas mapped, a few flashcards turned over in place and a check of
 a question or two marked at once — and ends in a quiz; its cards are kept as a
 deck and its quiz as a quiz of their own, so they are scheduled and marked like
 any others.
+
+**Audio overviews** are two hosts talking the sources through — a deep dive, a
+brief, a critique, a debate — or one lecturing (`proton-study::audio`). One call
+writes the script: turns of who says what, with mathematics said in words, the
+same in TeX for the transcript, and each turn's citations; chapters at turns.
+Fish Audio speaks it (`proton-voice`): `POST /v1/tts` with the model
+`s2.1-pro-free` as a header and the turns tagged `<|speaker:i|>`, two thousand
+characters or eight turns at a time, each piece streamed through a part file;
+ffmpeg joins the pieces, and each turn's place in the sound is its share of its
+piece's length. Nothing is sent to Fish until the person has agreed to its free
+tier's terms — what it is sent may be used to improve its models — and chosen
+the voices, from Fish's library, listened to first; its key is read from
+`FISH_API_KEY` in Proton's environment or the login shell's, held in memory
+only, printed nowhere, and the page is told only whether it was found. A piece
+spoken is kept until the whole is joined, so a voicing stopped part way goes on
+where it stopped rather than paying twice. The sound is kept out of Git, in
+`.notebook/audio/A001.mp3`, and played through `study://localhost/` — a scheme
+that serves a notebook's audio and a voice's sample and nothing else, answering
+a player's seek with the range it asked for (`proton-core::study::media`); the
+window's policy allows media from it alone. The transcript follows the voice,
+and a turn or a chapter clicked is where it plays from.
 
 ### Trace
 

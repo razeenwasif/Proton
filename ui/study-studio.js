@@ -9,6 +9,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
+import { FORMATS } from "./study-audio.js";
 import { answerHtml } from "./study-chat.js";
 
 /** @typedef {import("./bindings/StudyMakeKind").StudyMakeKind} Kind */
@@ -28,6 +29,7 @@ export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["quiz", "Quiz", "check", "Questions of every kind, each marked as you answer it"],
   ["practice", "Practice problems", "bulb", "Problems to work through, with hints and worked solutions"],
   ["overview", "Learning overview", "layers", "The course topic by topic: taught, mapped, carded and checked"],
+  ["audio", "Audio overview", "audio", "Two hosts talking the sources through, spoken by Fish Audio"],
   ["exam", "Practice exam", "files", "A new paper like the past papers, to sit against the clock"],
   ["pastPaper", "Past paper", "file", "A past paper itself, to sit again, marked by its solutions"],
   ["objectives", "Learning objectives", "target", "What you must be able to do in the exam"],
@@ -102,6 +104,9 @@ export function madeHtml(e, readOnly) {
     // A deck opens as a deck (study-cards.js); this is only its cards, read.
     content = `<ol class="st-cards" data-turn="made">${body.cards.map((c) => `<li class="st-card-row"><div class="st-card-sides">` +
       `<div class="st-card-front md">${answerHtml(c.front, citations)}</div><div class="st-card-back md">${answerHtml(c.back, citations)}</div></div></li>`).join("")}</ol>`;
+  } else if (body.shape === "audio") {
+    // An audio overview opens as one (study-audio.js); this is only its words.
+    content = `<div class="st-transcript" data-turn="made">${body.segments.map((s) => `<p>${answerHtml(s.display, citations)}</p>`).join("")}</div>`;
   } else if (body.shape === "overview") {
     // An overview opens as one (study-overview.js); this is only its topics.
     content = `<div class="st-answer st-doc md" data-turn="made">${body.topics.map((t) => `<h2>${esc(t.title)}</h2>${answerHtml(t.summary, citations)}`).join("")}</div>`;
@@ -135,6 +140,10 @@ export function createStudio(host) {
       ? `<input name="columns" placeholder="Columns, by commas: Algorithm, Complete?, Optimal?, Time" autocomplete="off" required>`
       : kind === "report"
         ? `<textarea name="ask" rows="3" placeholder="What it should be: “A one-page cheat sheet of every search algorithm’s complexity.”" required></textarea>`
+        : kind === "audio"
+          ? `<div class="st-card-form-row"><select name="format" aria-label="What it is">${FORMATS.map(([k, name, note]) => `<option value="${k}" title="${esc(note)}">${esc(name)}</option>`).join("")}</select>` +
+            `<select name="amount" aria-label="How long"><option value="fewer">Shorter</option><option value="standard" selected>The usual length</option><option value="more">Longer</option></select></div>` +
+            `<input name="language" placeholder="In a language other than the sources'? — “French”" autocomplete="off">${focus}`
         : kind === "exam"
           ? `<div class="st-card-form-row"><select name="level" aria-label="How hard"><option value="easy">A little easier than the past papers</option>` +
             `<option value="medium" selected>As hard as the past papers</option><option value="hard">A little harder</option></select></div>` +
@@ -231,6 +240,8 @@ export function createStudio(host) {
       objectives: [],
       source: data.get("source") ? String(data.get("source")) : null,
       count: null,
+      format: data.get("format") ? String(data.get("format")) : null,
+      language: String(data.get("language") ?? "").trim(),
     };
     if (kind === "pastPaper" && !options.source) return true;
     if ((kind === "table" && !options.columns.length) || (kind === "report" && !options.ask)) {

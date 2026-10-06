@@ -4363,6 +4363,7 @@ dependencies = [
  "proton-trace",
  "proton-vcs",
  "proton-video",
+ "proton-voice",
  "serde",
  "serde_json",
  "ts-rs",

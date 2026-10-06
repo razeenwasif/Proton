@@ -63,7 +63,9 @@ import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
 import type { StudyAttempt } from "./StudyAttempt";
+import type { StudyAudioFormat } from "./StudyAudioFormat";
 import type { StudyCardRow } from "./StudyCardRow";
+import type { StudyChapter } from "./StudyChapter";
 import type { StudyChatSummary } from "./StudyChatSummary";
 import type { StudyCitation } from "./StudyCitation";
 import type { StudyCounts } from "./StudyCounts";
@@ -87,11 +89,14 @@ import type { StudyQuizRow } from "./StudyQuizRow";
 import type { StudyResult } from "./StudyResult";
 import type { StudyReview } from "./StudyReview";
 import type { StudyRoot } from "./StudyRoot";
+import type { StudySegment } from "./StudySegment";
 import type { StudySourceRow } from "./StudySourceRow";
 import type { StudySummary } from "./StudySummary";
 import type { StudyTurn } from "./StudyTurn";
 import type { StudyTutorSettings } from "./StudyTutorSettings";
 import type { StudyView } from "./StudyView";
+import type { StudyVoice } from "./StudyVoice";
+import type { StudyVoiceState } from "./StudyVoiceState";
 import type { Summary } from "./Summary";
 import type { Task } from "./Task";
 import type { TermRun } from "./TermRun";
@@ -256,7 +261,15 @@ grounding: string | null, chats: Array<StudyChatSummary>,
 /**
  * The objective the chat is a lesson on, if it is one.
  */
-lesson: StudyObjective | null, } | { "type": "studyProgress", objectives: Array<StudyMastery>, due: number, quizzes: Array<StudyQuizRow>, } | { "type": "studyOverview", made: StudyMade, topics: Array<StudyOverviewTopic>, deck: string | null, quiz: string | null, citations: Array<StudyCitation>, } | { "type": "studyStudio", jobs: Array<StudyJob>, made: Array<StudyMade>, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyDeck", made: StudyMade, cards: Array<StudyCardRow>, counts: StudyCounts, citations: Array<StudyCitation>, } | { "type": "studyReviewing", review: StudyReview | null, } | { "type": "studyQuiz", made: StudyMade, questions: Array<StudyQuestion>, attempts: Array<StudyAttempt>, 
+lesson: StudyObjective | null, } | { "type": "studyAudio", made: StudyMade, format: StudyAudioFormat, segments: Array<StudySegment>, chapters: Array<StudyChapter>, timings: Array<[number, number]>, duration: number, 
+/**
+ * `waiting`, `voicing`, `ready` or `failed`.
+ */
+state: string, why: string | null, done: number, of: number, 
+/**
+ * Its sound, as `study://localhost/` names it: `search/A001.mp3`.
+ */
+url: string | null, citations: Array<StudyCitation>, voice: StudyVoiceState, } | { "type": "studyVoiceState", voice: StudyVoiceState, } | { "type": "studyVoices", query: string, voices: Array<StudyVoice>, total: number, error: string | null, } | { "type": "studyVoiceSample", id: string, url: string | null, error: string | null, } | { "type": "studyProgress", objectives: Array<StudyMastery>, due: number, quizzes: Array<StudyQuizRow>, } | { "type": "studyOverview", made: StudyMade, topics: Array<StudyOverviewTopic>, deck: string | null, quiz: string | null, citations: Array<StudyCitation>, } | { "type": "studyStudio", jobs: Array<StudyJob>, made: Array<StudyMade>, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyDeck", made: StudyMade, cards: Array<StudyCardRow>, counts: StudyCounts, citations: Array<StudyCitation>, } | { "type": "studyReviewing", review: StudyReview | null, } | { "type": "studyQuiz", made: StudyMade, questions: Array<StudyQuestion>, attempts: Array<StudyAttempt>, 
 /**
  * Answers being marked now: `2/q03`, the attempt and the question.
  */

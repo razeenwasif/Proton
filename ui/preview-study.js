@@ -180,7 +180,9 @@ export function createStudyPreview(deliver) {
       { id: "D001", kind: "flashcards", title: "Flashcards: search", made: now - 3000, by: "Claude Code · claude-opus-5-5", task: "J0003" },
       { id: "Q001", kind: "quiz", title: "Quiz: search", made: now - 2000, by: "Claude Code · claude-opus-5-5", task: "J0004" },
       { id: "Q002", kind: "exam", title: "COMP3670 practice final", made: now - 1000, by: "Codex · gpt-6.1-sol", task: "J0005" },
-      { id: "L001", kind: "overview", title: "Search, an overview", made: now - 500, by: "Claude Code · claude-opus-5-5", task: "J0006" }],
+      { id: "L001", kind: "overview", title: "Search, an overview", made: now - 500, by: "Claude Code · claude-opus-5-5", task: "J0006" },
+      { id: "A001", kind: "audio", title: "Search, talked through", made: now - 300, by: "Claude Code · claude-opus-5-5", task: "J0007" },
+      { id: "A002", kind: "audio", title: "Heuristics, a debate", made: now - 200, by: "Codex · gpt-6.1-sol", task: "J0008" }],
   };
   /** A quiz, and a stand-in for its marking: the real one is by rule, or by a model of another family, in the core. */
   const question = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {Record<string, any>} */ more) => ({ id, kind, prompt: "", options: [], correct: [], rationales: [], blanks: [],
@@ -199,6 +201,37 @@ export function createStudyPreview(deliver) {
     /** @type {string[]} */
     marking: [],
   };
+  /** Seconds of silence as a WAV, for the preview's player: the real sound
+   *  is study://, which only the app serves. @param {number} seconds */
+  function silence(seconds) {
+    const rate = 8000, n = rate * seconds;
+    const bytes = new Uint8Array(44 + n);
+    const view = new DataView(bytes.buffer);
+    const text = (/** @type {number} */ at, /** @type {string} */ word) => [...word].forEach((c, i) => { bytes[at + i] = c.charCodeAt(0); });
+    text(0, "RIFF"); view.setUint32(4, 36 + n, true); text(8, "WAVE"); text(12, "fmt ");
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, rate, true);
+    view.setUint32(28, rate, true); view.setUint16(32, 1, true); view.setUint16(34, 8, true); text(36, "data"); view.setUint32(40, n, true);
+    bytes.fill(128, 44);
+    let binary = "";
+    for (const b of bytes) binary += String.fromCharCode(b);
+    return `data:audio/wav;base64,${btoa(binary)}`;
+  }
+  /** The audio overviews, and where Fish stands. */
+  const voice = { key: true, consented: /** @type {string | null} */ (null), hosts: /** @type {{id: string, title: string}[]} */ ([]) };
+  const segments = [
+    { speaker: 0, text: "", display: "Today: search — how a computer finds its way through a space of states.", cites: [] },
+    { speaker: 1, text: "", display: "Breadth-first search goes layer by layer, so it is complete when the branching factor $b$ is finite.", cites: ["S02 § Search › Uniform cost L40-58"] },
+    { speaker: 0, text: "", display: "And uniform-cost search orders the frontier by path cost $g(n)$ instead.", cites: ["S01 p. 3"] },
+    { speaker: 1, text: "", display: "Which is why, with every step costing at least $\\varepsilon > 0$, the first goal it expands is the cheapest.", cites: ["S01 p. 3"] },
+  ];
+  const audios = /** @type {Record<string, any>} */ ({
+    A001: { format: "deepDive", state: "ready", why: null, done: 1, of: 1, duration: 10, url: silence(10), timings: [[0, 2], [2, 5], [5, 7.5], [7.5, 10]],
+      chapters: [{ title: "Uninformed search", segment: 0 }, { title: "Why it is optimal", segment: 2 }] },
+    A002: { format: "debate", state: "waiting", why: "Waiting for you to agree to Fish Audio's terms.", done: 0, of: 0, duration: 0, url: null, timings: [], chapters: [] },
+  });
+  const audioEvent = (/** @type {string} */ id) => ({ type: "studyAudio", made: studio.made.find((m) => m.id === id), segments, citations: cites,
+    voice: { ...voice, hosts: id === "A001" ? [{ id: "v1", title: "Warm Narrator" }, { id: "v2", title: "Bright Host" }] : voice.hosts }, ...audios[id] });
+
   /** An exam paper, and its sittings: drafts until handed in. */
   const paper = {
     questions: [
@@ -425,6 +458,7 @@ export function createStudyPreview(deliver) {
           if (command.id === "D001") return [deckEvent()];
           if (command.id === "Q001") return [quizEvent()];
           if (command.id === "Q002") return [paperEvent()];
+          if (command.id === "A001" || command.id === "A002") return [audioEvent(command.id)];
           if (command.id === "L001") return [{ type: "studyOverview", made: studio.made.find((m) => m.id === "L001"), deck: "D001", quiz: "Q001", citations: cites, topics: [
             { title: "Uninformed search", summary: "Breadth-first search expands every node at depth $d$ before any at $d + 1$, so it is complete when the branching factor is finite [[S02 § Search › Uniform cost L40-58]].\n\nUniform-cost search orders the frontier by path cost $g(n)$ instead [[S01 p. 3]].",
               map: [{ id: "1", parent: null, label: "Uninformed", cites: [] }, { id: "2", parent: "1", label: "BFS", cites: [] }, { id: "3", parent: "1", label: "UCS: by $g(n)$", cites: ["S01 p. 3"] }],
@@ -490,6 +524,33 @@ export function createStudyPreview(deliver) {
         }
         case "studyExamExport":
           return [{ type: "notice", level: "info", text: `Written to ~/Github/Notebooks/comp3670-exam/exports/Q002-comp3670-practice-final${command.scheme ? "-scheme" : ""}.${command.html ? "html. Open it in a browser to print it." : "md."}` }];
+        case "studyVoiceSetup":
+          voice.consented = command.consent ? "2026-10-06" : null;
+          voice.hosts = command.hosts;
+          if (voice.consented && voice.hosts.length >= 2) {
+            Object.assign(audios.A002, { state: "voicing", why: null, done: 0, of: 3 });
+            [1, 2, 3].forEach((k) => setTimeout(() => {
+              Object.assign(audios.A002, k < 3 ? { done: k } : { state: "ready", done: 3, duration: 10, url: silence(10), timings: [[0, 2], [2, 5], [5, 7.5], [7.5, 10]] });
+              deliver(audioEvent("A002"));
+            }, 900 * k));
+          } else {
+            audios.A002.why = voice.consented ? "Waiting for you to choose two voices." : audios.A002.why;
+          }
+          return [audioEvent("A002"), { type: "studyVoiceState", voice }];
+        case "studyVoiceFind":
+          setTimeout(() => deliver({ type: "studyVoices", query: command.query, total: 3, error: null, voices: [
+            { id: "v1", title: "Warm Narrator", description: "Calm and clear, for long listening.", languages: ["en"], sample: true, sampleText: "Hello.", author: "fish", uses: 182000 },
+            { id: "v2", title: "Bright Host", description: "An upbeat podcast voice.", languages: ["en"], sample: true, sampleText: "Hi!", author: "studio", uses: 96000 },
+            { id: "v3", title: "British Lecturer", description: "", languages: ["en"], sample: false, sampleText: "", author: "", uses: 1200 },
+          ] }), 400);
+          return [];
+        case "studyVoiceSample":
+          setTimeout(() => deliver({ type: "studyVoiceSample", id: command.id, url: silence(2), error: null }), 400);
+          return [];
+        case "studyVoiceKey":
+          return [{ type: "studyVoiceState", voice }];
+        case "studyAudioVoice":
+          return [audioEvent(command.id)];
         case "studyProgress":
           return [{ type: "studyProgress", due: 3, objectives: [
             { objective: "O002", text: "Explain why uniform-cost search is optimal", topic: "Search", level: 0.35, evidence: 3, state: "focus" },

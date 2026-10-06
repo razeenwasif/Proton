@@ -1192,3 +1192,207 @@ fn progress_is_by_objective_a_diagnostic_finds_it_a_lesson_teaches_a_gap_and_an_
     }
     session.shutdown();
 }
+
+mod voices {
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+
+    use proton_core::study::voice::{Media, Speaker, VoiceKit};
+    use proton_voice::{FishError, Speech, Voice, VoiceQuery};
+
+    /// What a scripted Fish was asked, and how it is to answer.
+    #[derive(Default)]
+    pub struct Said {
+        pub speeches: Vec<Speech>,
+        /// Fail the speech asked for at this count, once.
+        pub fail_at: Option<usize>,
+        pub no_key: bool,
+    }
+
+    pub struct Script(pub Arc<Mutex<Said>>);
+
+    impl Speaker for Script {
+        fn speak(&self, speech: &Speech, out: &Path, _: &AtomicBool) -> Result<u64, FishError> {
+            let mut said = self.0.lock().unwrap();
+            said.speeches.push(speech.clone());
+            if said.fail_at == Some(said.speeches.len()) {
+                said.fail_at = None;
+                return Err(FishError::NoCredit);
+            }
+            std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+            std::fs::write(out, speech.text.as_bytes()).unwrap();
+            Ok(speech.text.len() as u64)
+        }
+        fn voices(&self, query: &VoiceQuery, _: &AtomicBool) -> Result<(u64, Vec<Voice>), FishError> {
+            let voice = |id: &str, title: &str| Voice {
+                id: id.into(),
+                title: title.into(),
+                description: String::new(),
+                languages: vec!["en".into()],
+                sample: Some(format!("https://public-platform.r2.fish.audio/{id}.mp3")),
+                sample_text: "Hello.".into(),
+                author: "fish".into(),
+                uses: 10,
+            };
+            assert_eq!(query.language, "en");
+            Ok((2, vec![voice("v1", "Warm Narrator"), voice("v2", "Bright Host")]))
+        }
+        fn sample(&self, _: &str, out: &Path, _: &AtomicBool) -> Result<u64, FishError> {
+            std::fs::write(out, b"sample").unwrap();
+            Ok(6)
+        }
+    }
+
+    /// Sound one byte a hundredth of a second; joined, one after another.
+    pub struct Bytes;
+
+    impl Media for Bytes {
+        fn duration(&self, file: &Path) -> Result<f64, String> {
+            Ok(std::fs::metadata(file).map_err(|e| e.to_string())?.len() as f64 / 100.0)
+        }
+        fn join(&self, parts: &[PathBuf], out: &Path) -> Result<(), String> {
+            let joined: Vec<u8> = parts.iter().flat_map(|p| std::fs::read(p).unwrap()).collect();
+            std::fs::write(out, joined).map_err(|e| e.to_string())
+        }
+    }
+
+    pub struct Kit(pub Arc<Mutex<Said>>);
+
+    impl VoiceKit for Kit {
+        fn speaker(&mut self) -> Result<Arc<dyn Speaker>, String> {
+            match self.0.lock().unwrap().no_key {
+                true => Err("Fish Audio's key is not set: export FISH_API_KEY in your shell.".into()),
+                false => Ok(Arc::new(Script(Arc::clone(&self.0)))),
+            }
+        }
+        fn media(&self) -> Arc<dyn Media> {
+            Arc::new(Bytes)
+        }
+    }
+}
+
+/// An overview as its event has it: its state, why, each turn's timing,
+/// where its sound is, and how many turns it has.
+type Heard = (String, Option<String>, Vec<[f64; 2]>, Option<String>, usize);
+
+fn audio_of(events: &[Event]) -> Option<Heard> {
+    events.iter().rev().find_map(|e| match e {
+        Event::StudyAudio { state, why, timings, url, segments, .. } => Some((state.clone(), why.clone(), timings.clone(), url.clone(), segments.len())),
+        _ => None,
+    })
+}
+
+#[test]
+fn an_audio_overview_is_written_then_spoken_only_once_agreed_and_voiced_and_goes_on_where_it_stopped() {
+    use proton_study::audio::AudioFormat;
+    use proton_study::studio::{Amount, Make, Options};
+    use proton_study::view::StudyHost;
+    let scratch = Scratch::new("audio");
+    let settings = scratch.knowledge_base();
+    std::env::set_var("PROTON_VOICE_CACHE", scratch.root.join("voices"));
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let said = std::sync::Arc::new(std::sync::Mutex::new(voices::Said::default()));
+    let script = tutor::Script { log: std::sync::Arc::clone(&log), server: None, answer: "unused".into() };
+    let mut session = Session::new(scratch.root.join("project")).with_person_settings(settings.to_path_buf()).with_study(
+        Study::new().with_person_settings(&settings).flags_with(in_cloud).with_tutors(Box::new(script)).with_voice(Box::new(voices::Kit(std::sync::Arc::clone(&said)))),
+    );
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+    let turns: Vec<serde_json::Value> = (0..12)
+        .map(|i| serde_json::json!({ "speaker": i % 2, "text": format!("Turn {i}: breadth-first search goes layer by layer, and that is why it is complete. {}", "More. ".repeat(40)), "display": format!("Turn {i}: $b$ finite."), "cites": ["S01 § Search L1-2"] }))
+        .collect();
+    let script = serde_json::json!({ "title": "Search, talked through", "chapters": [{ "title": "Uninformed", "segment": 0 }, { "title": "Why", "segment": 6 }], "segments": turns });
+    log.lock().unwrap().answers.push_back(script.to_string());
+    session.apply(Command::StudyMake { kind: Make::Audio, options: Options { format: Some(AudioFormat::DeepDive), amount: Amount::Fewer, language: "English".into(), ..Options::default() } });
+    let job = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.kind == Make::Audio && j.id.starts_with('J') && matches!(j.state.as_str(), "done" | "failed")).cloned(),
+        _ => None,
+    });
+    assert_eq!((job.state.as_str(), job.made.as_deref()), ("done", Some("A001")));
+    assert!(log.lock().unwrap().sent[0].contains("a deep dive") && log.lock().unwrap().sent[0].contains("spoken in English"));
+    // Written, but nothing is sent to Fish until its terms are agreed to and the voices chosen.
+    let (state, why, ..) = audio_of(&session.apply(Command::StudyShowMade { id: "A001".into() })).expect("the overview");
+    assert_eq!(state, "waiting");
+    assert!(why.unwrap_or_default().contains("agree to Fish Audio's terms"));
+    assert!(said.lock().unwrap().speeches.is_empty(), "Fish was asked before it was agreed to");
+    let host = |id: &str| StudyHost { id: id.into(), title: format!("Voice {id}") };
+    let events = session.apply(Command::StudyVoiceSetup { consent: true, hosts: vec![host("v1")] });
+    assert!(audio_of(&events).unwrap().1.unwrap_or_default().contains("choose two voices"));
+    let kept: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert!(kept["study"]["voice"]["consent"].as_str().is_some_and(|d| d.len() == 10), "the day it was agreed is kept: {kept}");
+    session.apply(Command::StudyVoiceSetup { consent: true, hosts: vec![host("v1"), host("v2")] });
+    let (state, _, timings, url, segments) = until(&mut session, |e| match e {
+        Event::StudyAudio { state, .. } if state == "ready" => audio_of(std::slice::from_ref(e)),
+        _ => None,
+    });
+    assert_eq!((state.as_str(), segments, timings.len()), ("ready", 12, 12));
+    assert_eq!(url.as_deref(), Some("search/A001.mp3"));
+    assert!(timings.windows(2).all(|w| (w[0][1] - w[1][0]).abs() < 1e-9), "each turn begins where the last ended");
+    {
+        let said = said.lock().unwrap();
+        assert!(said.speeches.len() >= 2, "spoken in pieces: {}", said.speeches.len());
+        assert!(said.speeches.iter().all(|s| s.voices == ["v1", "v2"] && s.text.starts_with("<|speaker:")));
+        assert!(said.speeches.iter().all(|s| !s.text.contains("[[") && !s.text.contains('$')), "citations or TeX were said");
+    }
+    let book = scratch.root.join("Notebooks/search");
+    assert!(book.join(".notebook/audio/A001.mp3").is_file() && !book.join(".notebook/audio/A001").exists(), "joined, its pieces gone");
+    let served = proton_core::study::media::serve(Some(&scratch.root.join("Notebooks")), None, "/search/A001.mp3", Some("bytes=0-99"));
+    assert_eq!((served.status, served.body.len()), (206, 100));
+
+    // A second, stopped by Fish part way: it goes on where it stopped, not paid for twice.
+    let pieces_before = said.lock().unwrap().speeches.len();
+    said.lock().unwrap().fail_at = Some(pieces_before + 2);
+    log.lock().unwrap().answers.push_back(script.to_string());
+    session.apply(Command::StudyMake { kind: Make::Audio, options: Options { format: Some(AudioFormat::DeepDive), ..Options::default() } });
+    let failed = until(&mut session, |e| match e {
+        Event::StudyStudio { made, .. } if made.iter().any(|m| m.id == "A002") => {
+            let kept: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(book.join("studio/audio/A002.json")).ok()?).ok()?;
+            (kept["state"] == "failed").then(|| kept["why"].as_str().unwrap_or_default().to_string())
+        }
+        _ => None,
+    });
+    assert!(failed.contains("no credit"), "{failed}");
+    let spoken_first = said.lock().unwrap().speeches.len() - pieces_before - 1;
+    session.apply(Command::StudyAudioVoice { id: "A002".into() });
+    until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } => (std::fs::read_to_string(book.join("studio/audio/A002.json")).ok()?.contains("\"ready\"") && jobs.iter().all(|j| j.id != "A002")).then_some(()),
+        _ => None,
+    });
+    let pieces = said.lock().unwrap().speeches.len() - pieces_before;
+    let total = proton_study::audio::chunks(&proton_study::Book::read(&book).unwrap().audio("A002").unwrap().segments, 2).len();
+    assert_eq!(pieces, total + 1, "the {spoken_first} spoken before the stop were not asked for again; the one that failed was");
+
+    // No key: said so, and nothing is sent.
+    said.lock().unwrap().no_key = true;
+    let events = session.apply(Command::StudyVoiceKey);
+    let state = events.iter().find_map(|e| match e {
+        Event::StudyVoiceState { voice } => Some(voice.clone()),
+        _ => None,
+    });
+    assert_eq!(state.map(|v| (v.key, v.hosts.len())), Some((false, 2)));
+    said.lock().unwrap().no_key = false;
+
+    // Voices found, and a sample fetched to listen to.
+    session.apply(Command::StudyVoiceFind { query: "narrator".into(), language: "en".into() });
+    let found = until(&mut session, |e| match e {
+        Event::StudyVoices { voices, error: None, .. } => Some(voices.clone()),
+        _ => None,
+    });
+    assert_eq!(found.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(), ["v1", "v2"]);
+    session.apply(Command::StudyVoiceSample { id: "v1".into() });
+    let url = until(&mut session, |e| match e {
+        Event::StudyVoiceSample { id, url, .. } if id == "v1" => url.clone(),
+        _ => None,
+    });
+    assert_eq!(url, "_voices/v1.mp3");
+    assert_eq!(proton_core::study::media::serve(None, Some(&scratch.root.join("voices")), "/_voices/v1.mp3", None).status, 200);
+    session.shutdown();
+}

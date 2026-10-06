@@ -23,6 +23,7 @@ proton-dap = { workspace = true }
 proton-index = { workspace = true }
 proton-library = { workspace = true }
 proton-study = { workspace = true }
+proton-voice = { workspace = true }
 proton-lsp = { workspace = true }
 proton-mesh = { workspace = true }
 proton-plugin = { workspace = true }

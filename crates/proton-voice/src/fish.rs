@@ -420,10 +420,13 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// An answer: its status, headers and body.
+    type Answer = (u16, Vec<(String, String)>, Vec<u8>);
+
     /// Answers in turn, as Fish would; and what it was asked.
     #[derive(Default)]
     struct Script {
-        answers: Mutex<Vec<(u16, Vec<(String, String)>, Vec<u8>)>>,
+        answers: Mutex<Vec<Answer>>,
         asked: Mutex<Vec<Request>>,
     }
 

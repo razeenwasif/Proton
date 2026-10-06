@@ -19,6 +19,7 @@ pub mod media;
 mod quizzes;
 mod review;
 pub mod tutor;
+pub mod voice;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -100,6 +101,11 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyExamExport { .. }
             | Command::StudyProgress
             | Command::StudyLesson { .. }
+            | Command::StudyVoiceSetup { .. }
+            | Command::StudyVoiceFind { .. }
+            | Command::StudyVoiceSample { .. }
+            | Command::StudyVoiceKey
+            | Command::StudyAudioVoice { .. }
     )
 }
 
@@ -171,6 +177,16 @@ pub struct Study {
     sitting: Option<(String, u32, i64)>,
     /// What the time is, in seconds since the epoch: a test's, or the clock's.
     clock: fn() -> i64,
+    /// What speaks audio overviews and joins their pieces.
+    voice: Box<dyn voice::VoiceKit>,
+    /// Overviews being spoken.
+    voicing: Vec<voice::Voicing>,
+    /// Errands to Fish under way: voices found, samples fetched.
+    errands: Vec<voice::Errand>,
+    /// The voices last found, for their samples.
+    found_voices: Vec<proton_voice::Voice>,
+    /// The audio overview last looked at: drawn again as it is spoken.
+    audio: Option<String>,
 }
 
 impl std::fmt::Debug for Study {
@@ -199,6 +215,11 @@ impl Default for Study {
             quiz: None,
             sitting: None,
             clock: || proton_study::now() as i64,
+            voice: Box::new(voice::LiveVoices::default()),
+            voicing: Vec::new(),
+            errands: Vec::new(),
+            found_voices: Vec::new(),
+            audio: None,
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -278,6 +299,12 @@ impl Study {
     }
 
     /// Make tutors with this rather than the engines: for a test.
+    /// Speak and join by `kit`: for a test, which must not ask Fish.
+    pub fn with_voice(mut self, kit: Box<dyn voice::VoiceKit>) -> Study {
+        self.voice = kit;
+        self
+    }
+
     /// Tell the time by `clock`: for a test of a sitting against it.
     pub fn with_clock(mut self, clock: fn() -> i64) -> Study {
         self.clock = clock;
@@ -361,7 +388,10 @@ impl Study {
             if let Some(quiz) = self.quiz.clone() {
                 events.extend(self.quiz_event(&quiz));
             }
+            // A script written: spoken, if it may be.
+            events.extend(self.voice_waiting());
         }
+        events.extend(self.poll_voices());
         events.extend(self.poll_review());
         events.extend(self.poll_sitting());
         if let Some(open) = &mut self.open {
@@ -391,6 +421,10 @@ impl Study {
         }
         self.tutor = None;
         self.jobs.stop_all();
+        for voicing in &self.voicing {
+            voicing.cancel();
+        }
+        self.voicing.clear();
         for batch in &self.batches {
             batch.stop.store(true, Ordering::Relaxed);
         }
@@ -458,11 +492,17 @@ impl Study {
             Command::StudySaveAnswer { turn } => self.save_answer(turn),
             Command::StudyMake { kind, options } => self.make(kind, options),
             Command::StudyCancelJob { id } => {
-                if let Some(open) = &self.open {
-                    let dir = open.book.dir().to_path_buf();
-                    self.jobs.cancel(&dir, &id);
+                if !self.cancel_voicing(&id) {
+                    if let Some(open) = &self.open {
+                        let dir = open.book.dir().to_path_buf();
+                        self.jobs.cancel(&dir, &id);
+                    }
                 }
-                self.studio_event().into_iter().collect()
+                let mut events: Vec<Event> = self.studio_event().into_iter().collect();
+                if self.audio.as_deref() == Some(id.as_str()) {
+                    events.extend(self.audio_shown(&id));
+                }
+                events
             }
             Command::StudyShowMade { id } => self.show_made(&id),
             Command::StudyBinMade { id } => {
@@ -487,6 +527,17 @@ impl Study {
             Command::StudyExamSit { quiz, minutes } => self.sit(&quiz, minutes),
             Command::StudyExamExport { quiz, html, scheme } => self.export_exam(&quiz, html, scheme),
             Command::StudyProgress => self.progress(),
+            Command::StudyVoiceSetup { consent, hosts } => self.voice_setup(consent, hosts),
+            Command::StudyVoiceFind { query, language } => self.find_voices(&query, &language),
+            Command::StudyVoiceSample { id } => self.fetch_sample(&id),
+            Command::StudyVoiceKey => {
+                self.voice.forget();
+                let mut events = self.voice_waiting();
+                let voice = self.voice_state();
+                events.push(Event::StudyVoiceState { voice });
+                events
+            }
+            Command::StudyAudioVoice { id } => self.voice_audio(&id),
             Command::StudyLesson { objective } => self.lesson(&objective),
             _ => Vec::new(),
         }
@@ -650,6 +701,7 @@ impl Study {
         self.review = None;
         self.quiz = None;
         self.sitting = None;
+        self.audio = None;
         self.open = Some(Open { book, lock, holder, beat: now });
         Ok(())
     }
@@ -1011,6 +1063,7 @@ impl Study {
         self.review = None;
         self.quiz = None;
         self.sitting = None;
+        self.audio = None;
         self.open = None;
     }
 
@@ -1138,7 +1191,9 @@ impl Study {
     /// The open notebook's studio: its calls, and what they made.
     fn studio_event(&self) -> Option<Event> {
         let open = self.open.as_ref()?;
-        Some(Event::StudyStudio { jobs: self.jobs.rows(open.book.dir()), made: open.book.made() })
+        let mut jobs = self.voicing_rows(open.book.dir());
+        jobs.extend(self.jobs.rows(open.book.dir()));
+        Some(Event::StudyStudio { jobs, made: open.book.made() })
     }
 
     fn make(&mut self, kind: proton_study::studio::Make, options: proton_study::studio::Options) -> Vec<Event> {
@@ -1182,6 +1237,9 @@ impl Study {
         if id.starts_with('L') {
             return self.show_overview(id);
         }
+        if id.starts_with('A') {
+            return self.audio_shown(id);
+        }
         if id.starts_with('D') {
             return match self.deck_event(id) {
                 Some(event) => vec![event],
@@ -1201,6 +1259,7 @@ impl Study {
             StudyMadeBody::Cards { cards } => cards.iter().flat_map(|c| c.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Questions { questions } | StudyMadeBody::Paper { questions, .. } => questions.iter().flat_map(|q| q.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Overview { topics, .. } => topics.iter().map(|t| t.summary.clone()).collect::<Vec<_>>().join("\n"),
+            StudyMadeBody::Audio { segments, .. } => segments.iter().flat_map(|s| s.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
         };
         let citations = proton_study::cite::resolve(&open.book, &text);
         vec![Event::StudyMadeOpen { made, body, citations }]

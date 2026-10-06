@@ -21,6 +21,7 @@
 //! Ids are never reused: a removed source's citations never come to mean
 //! another.
 
+pub mod audio;
 pub mod cite;
 pub mod clock;
 pub mod deck;

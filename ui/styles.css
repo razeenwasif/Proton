@@ -4738,3 +4738,42 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .st-ov-check .rs-actions .cc-quiet { padding: 4px 11px; font-size: var(--z-2xs); }
 .st-check-said { font: var(--z-xs)/1.45 var(--cc-font); color: var(--cc-text); }
 .st-ov-end { margin-top: 10px; }
+
+/* ── audio overviews ── */
+.st-audio-view h3 { margin: 16px 0 6px; font: 600 var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.st-player { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 12px;
+  border: 1px solid var(--cc-line-2); border-radius: 12px; background: var(--bg); box-shadow: 0 6px 18px rgb(0 0 0 / .18); }
+.st-play { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: var(--cc-accent); color: var(--cc-on-accent); cursor: pointer; }
+.st-play .i { width: 15px; height: 15px; }
+.st-time { font: 500 var(--z-2xs)/1 var(--zed); color: var(--cc-muted); font-variant-numeric: tabular-nums; }
+.st-seek { flex: 1 1 120px; min-width: 80px; accent-color: var(--cc-accent); }
+.st-player select { padding: 3px 6px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: var(--bg); color: var(--cc-text); font: var(--z-2xs)/1.3 var(--cc-font); }
+.st-chapters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.st-chapters .st-chip-btn .st-faint { margin-left: 6px; font-family: var(--zed); }
+.st-voices-said { margin: 8px 0 0; font: var(--z-2xs)/1.3 var(--cc-font); }
+.st-transcript { display: grid; gap: 4px; }
+.st-transcript h3 { margin: 12px 0 2px; }
+.st-line-said { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer;
+  font: var(--z-xs)/1.6 var(--cc-font); color: var(--cc-text); }
+.st-line-said:hover { background: var(--row-hover); }
+.st-line-said.now { background: color-mix(in srgb, var(--cc-accent) 13%, transparent); }
+.st-line-said > b { font: 600 var(--z-2xs)/1.9 var(--cc-font); color: var(--cc-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-line-said.speaker1 > b { color: var(--cc-accent); }
+.st-line-said .md p { margin: 0; }
+.st-voicing { display: flex; align-items: center; gap: 12px; grid-template-columns: none; }
+.st-voicing > div { flex: 1 1 auto; display: grid; gap: 2px; font: var(--z-xs)/1.4 var(--cc-font); color: var(--cc-text); }
+.st-voicing .lab-spin { width: 14px; height: 14px; }
+.st-voicing .cc-quiet { padding: 4px 11px; font-size: var(--z-2xs); }
+.st-voice-consent p, .st-voice-chooser > p { line-height: 1.65; }
+.st-voice-find { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-voice-find input { flex: 1 1 160px; padding: 6px 9px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: var(--bg); color: var(--cc-text); font: var(--z-xs)/1.4 var(--cc-font); outline: none; }
+.st-voice-find input[name="language"] { flex: 0 0 4.5em; }
+.st-voice-find input:focus { border-color: var(--cc-accent); }
+.st-voice-find .cc-quiet, .st-voice .cc-quiet, .st-voice-chooser .rs-actions .cc-primary { padding: 5px 11px; font-size: var(--z-2xs); }
+.st-voices { display: grid; gap: 4px; }
+.st-voice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 10px; border: 1px solid var(--cc-line); border-radius: 8px; }
+.st-voice > div { flex: 1 1 12em; display: grid; gap: 2px; min-width: 0; font: var(--z-xs)/1.4 var(--cc-font); color: var(--cc-text); }
+.st-voice .st-faint { font-size: var(--z-2xs); }
+.st-sample { height: 30px; max-width: 220px; }
+.st-picked { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-picked .st-x .i { width: 10px; height: 10px; }

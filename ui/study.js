@@ -11,6 +11,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
+import { createAudio } from "./study-audio.js";
 import { createCards } from "./study-cards.js";
 import { createChat } from "./study-chat.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
@@ -32,7 +33,7 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
 /** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "progress"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
  *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}
- *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent}} Shown */
+ *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent} | {kind: "audio"}} Shown */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
  *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
 
@@ -92,6 +93,7 @@ export function createStudy(host) {
       if (shown.kind === "made") return shown.made.citations;
       if (shown.kind === "quiz") return quizzes.citations();
       if (shown.kind === "learning") return shown.learning.citations;
+      if (shown.kind === "audio") return sounds.citations();
       return shown.kind === "deck" || shown.kind === "review" ? cards.citations(shown.kind) : [];
     },
   });
@@ -107,6 +109,7 @@ export function createStudy(host) {
   };
   const cards = createCards({ dispatch: host.dispatch, readOnly: () => readOnly(), explain: askTutor });
   const quizzes = createQuiz({ dispatch: host.dispatch, readOnly: () => readOnly(), ask: askTutor });
+  const sounds = createAudio({ dispatch: host.dispatch, readOnly: () => readOnly() });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: boolean, removing: string | null,
@@ -482,6 +485,10 @@ export function createStudy(host) {
       els.stage.innerHTML = learningHtml(shown.learning, readOnly());
       return;
     }
+    if (shown.kind === "audio") {
+      sounds.render(els.stage);
+      return;
+    }
     if (shown.kind === "progress") {
       const nbox = /** @type {NotebookEvent} */ (nb);
       const held = nbox.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nbox.readOnly)} has this notebook open: it is read only here.</div>` : "";
@@ -528,6 +535,7 @@ export function createStudy(host) {
     if (els.stage.contains(t) && cards.click(t, () => renderStage())) return;
     if (els.stage.contains(t) && quizzes.click(t, () => renderStage())) return;
     if (els.stage.contains(t) && state.shown.kind === "learning" && overviewClick(t, state.shown.learning)) return;
+    if (els.stage.contains(t) && state.shown.kind === "audio" && sounds.click(t, els.stage, () => { els.stage.innerHTML = ""; renderStage(); })) return;
     if (els.stage.contains(t) && progressClick(t, host.dispatch)) return;
     const at_ = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
     // Something made, opened from the middle: a deck or a quiz an overview
@@ -695,6 +703,7 @@ export function createStudy(host) {
     if (chat.change(t)) return;
     if (t instanceof HTMLInputElement && cards.change(t)) return;
     if (state.shown.kind === "quiz" && quizzes.input(t)) return;
+    if (state.shown.kind === "audio" && sounds.change(t, els.stage)) return;
     const nb = state.notebook;
     if (!nb) return;
     const tick = t.dataset.studyTick;
@@ -731,7 +740,7 @@ export function createStudy(host) {
       studio.submit(form);
       return;
     }
-    if (els.stage.contains(form) && (cards.submit(form) || quizzes.submit(form))) {
+    if (els.stage.contains(form) && (cards.submit(form) || quizzes.submit(form) || sounds.submit(form))) {
       e.preventDefault();
       return;
     }
@@ -854,6 +863,38 @@ export function createStudy(host) {
     if (state.shown.kind === "progress") renderStage();
   }
 
+  /** An audio overview: drawn again where it is shown, or opened when it
+   *  was asked for. @param {import("./study-audio.js").AudioEvent} event */
+  function audioEvent(event) {
+    const showing = state.shown.kind === "audio" && sounds.open() === event.made.id;
+    sounds.audio(event);
+    if (showing) return renderStage();
+    if (state.want === event.made.id) {
+      state.want = null;
+      state.shown = { kind: "audio" };
+      els.stage.innerHTML = "";
+      render();
+    }
+  }
+
+  /** Whether Fish's key is set, its terms agreed, the voices chosen. @param {{voice: import("./bindings/StudyVoiceState").StudyVoiceState}} event */
+  function voiceStateEvent(event) {
+    sounds.voiceState(event.voice);
+    if (state.shown.kind === "audio") renderStage();
+  }
+
+  /** Voices found. @param {any} event */
+  function voicesEvent(event) {
+    sounds.voices(event);
+    if (state.shown.kind === "audio") renderStage();
+  }
+
+  /** A voice's sample, to listen to. @param {any} event */
+  function sampleEvent(event) {
+    sounds.sample(event);
+    if (state.shown.kind === "audio") renderStage();
+  }
+
   /** A Learning Overview, opened. @param {import("./study-overview.js").OverviewEvent} event */
   function learningEvent(event) {
     state.shown = { kind: "learning", learning: event };
@@ -916,6 +957,7 @@ export function createStudy(host) {
     state.open = null;
     cards.clear();
     quizzes.clear();
+    sounds.clear();
     picker.close();
     render();
   }
@@ -924,5 +966,6 @@ export function createStudy(host) {
 
   return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
     deck: deckEvent, reviewing: reviewingEvent, quiz: quizEvent, progress: progressEvent, learning: learningEvent,
+    audio: audioEvent, voiceState: voiceStateEvent, voices: voicesEvent, voiceSample: sampleEvent,
     kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
 }

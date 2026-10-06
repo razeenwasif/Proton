@@ -387,3 +387,42 @@ pub struct StudyReview {
     /// Whether a review can be taken back.
     pub undo: bool,
 }
+
+/// A voice chosen to speak a host's turns.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyHost {
+    /// Fish's reference id.
+    pub id: String,
+    pub title: String,
+}
+
+/// Where audio overviews stand: whether Fish's key is in the shell, whether
+/// its free tier's terms were agreed to, and the voices chosen.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyVoiceState {
+    pub key: bool,
+    /// When the terms were agreed to, if they were: `2026-10-06`.
+    pub consented: Option<String>,
+    pub hosts: Vec<StudyHost>,
+}
+
+/// A voice of Fish's, as the voice browser lists it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyVoice {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub languages: Vec<String>,
+    /// Whether it has a sample to listen to.
+    pub sample: bool,
+    pub sample_text: String,
+    pub author: String,
+    #[ts(type = "number")]
+    pub uses: u64,
+}

@@ -4942,6 +4942,22 @@ function renderEvent(event) {
       study?.learning(event);
       break;
 
+    case "studyAudio":
+      study?.audio(event);
+      break;
+
+    case "studyVoiceState":
+      study?.voiceState(event);
+      break;
+
+    case "studyVoices":
+      study?.voices(event);
+      break;
+
+    case "studyVoiceSample":
+      study?.voiceSample(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

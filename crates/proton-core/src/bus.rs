@@ -697,6 +697,27 @@ pub enum Command {
     },
     /// Where the student stands, objective by objective.
     StudyProgress,
+    /// Agree to Fish Audio's terms, or not, and choose the voices that speak
+    /// audio overviews: kept in the person's settings.
+    StudyVoiceSetup {
+        consent: bool,
+        hosts: Vec<proton_study::view::StudyHost>,
+    },
+    /// Find Fish's voices by name and language.
+    StudyVoiceFind {
+        query: String,
+        language: String,
+    },
+    /// Fetch a voice's sample, to listen to.
+    StudyVoiceSample {
+        id: String,
+    },
+    /// Look for Fish's key in the shell again.
+    StudyVoiceKey,
+    /// Speak an audio overview: again, after it stopped or failed.
+    StudyAudioVoice {
+        id: String,
+    },
     /// A lesson on a learning objective: a new chat with the tutor as a
     /// learning guide, begun on the objective and the passages it cites.
     StudyLesson {
@@ -1565,6 +1586,43 @@ pub enum Event {
         chats: Vec<proton_study::tutor::StudyChatSummary>,
         /// The objective the chat is a lesson on, if it is one.
         lesson: Option<proton_study::studio::StudyObjective>,
+    },
+    /// An audio overview: its script, chapters, each turn's place in the
+    /// sound, how far it is spoken, and where its sound is once it is.
+    StudyAudio {
+        made: proton_study::studio::StudyMade,
+        format: proton_study::audio::AudioFormat,
+        segments: Vec<proton_study::audio::StudySegment>,
+        chapters: Vec<proton_study::audio::StudyChapter>,
+        timings: Vec<[f64; 2]>,
+        duration: f64,
+        /// `waiting`, `voicing`, `ready` or `failed`.
+        state: String,
+        why: Option<String>,
+        done: usize,
+        of: usize,
+        /// Its sound, as `study://localhost/` names it: `search/A001.mp3`.
+        url: Option<String>,
+        citations: Vec<proton_study::cite::StudyCitation>,
+        voice: proton_study::view::StudyVoiceState,
+    },
+    /// Whether Fish's key is set, its terms agreed to, and the voices chosen.
+    StudyVoiceState {
+        voice: proton_study::view::StudyVoiceState,
+    },
+    /// Fish's voices, as found.
+    StudyVoices {
+        query: String,
+        voices: Vec<proton_study::view::StudyVoice>,
+        #[ts(type = "number")]
+        total: u64,
+        error: Option<String>,
+    },
+    /// A voice's sample, fetched: `_voices/<id>.mp3` under `study://localhost/`.
+    StudyVoiceSample {
+        id: String,
+        url: Option<String>,
+        error: Option<String>,
     },
     /// Where the student stands: each learning objective, the weakest
     /// first; the flashcards due; how each quiz and exam went.

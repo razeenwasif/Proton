@@ -170,7 +170,9 @@ of theirs reworded, or a past paper itself marked by its solutions — sat again
 the clock with every answer saved as you write it, and printed; and your
 progress by learning objective, with a diagnostic quiz, a lesson on any gap
 with the tutor as a guide, and a Learning Overview that takes the course topic by
-topic. Your folders are named in your own settings,
+topic; and audio overviews — a deep dive, a brief, a critique, a debate or a
+lecture — spoken by Fish Audio in voices you choose, with a transcript that
+follows along. Your folders are named in your own settings,
 `{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,
