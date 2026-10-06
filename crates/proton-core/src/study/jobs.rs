@@ -62,6 +62,8 @@ pub struct StudyJob {
     pub engine: String,
     #[ts(type = "number")]
     pub started: u64,
+    /// The source it is of: a source's guide, or its pages made readable.
+    pub about: Option<String>,
 }
 
 /// A written answer to mark.
@@ -110,6 +112,9 @@ pub struct Jobs {
     waiting: VecDeque<Asked>,
     /// Every call of this session, with the notebook it is for.
     rows: Vec<(PathBuf, StudyJob)>,
+    /// What has been made since it was last asked: for what the notebook
+    /// shows of it to be drawn again.
+    done: Vec<(PathBuf, Make, Options)>,
 }
 
 /// How a call was asked: what it was told, and the words it was given.
@@ -132,6 +137,12 @@ impl Jobs {
         !self.running.is_empty() || !self.waiting.is_empty()
     }
 
+    /// What has been made since this was last asked: its notebook, its
+    /// kind, and how it was asked for.
+    pub fn take_done(&mut self) -> Vec<(PathBuf, Make, Options)> {
+        std::mem::take(&mut self.done)
+    }
+
     /// Ask for something to be made, in the open notebook, by the engine and
     /// model its tutor is set to.
     pub fn ask(&mut self, book: &Book, make: Make, options: Options) -> String {
@@ -148,11 +159,13 @@ impl Jobs {
             (Make::Report, _) => options.ask.trim().chars().take(60).collect::<String>(),
             (Make::Slides, _) if options.slide.is_some() => format!("Revising slide {} of {}", options.slide.as_deref().unwrap_or_default().trim_start_matches('s'), options.slides.as_deref().unwrap_or_default()),
             (Make::Flashcards, _) if options.deck.is_some() => format!("More cards for {}", options.deck.as_deref().and_then(|d| book.deck(d)).map_or_else(String::new, |d| d.title)),
+            (Make::SourceGuide, _) => format!("Guide to {}", options.source.as_deref().and_then(|s| book.sources.get(s)).map_or("a source", |s| s.title.as_str())),
             (_, "") => make.title().to_string(),
             (_, focus) => format!("{}: {focus}", make.title()),
         };
+        let about = options.source.clone();
         let asked = Asked { id: id.clone(), dir: book.dir().to_path_buf(), make, options, engine, model, title: title.clone(), started: proton_study::now(), marking: None };
-        self.rows.push((book.dir().to_path_buf(), StudyJob { id: id.clone(), kind: make, title, state: "waiting".into(), why: None, made: None, engine: engine.key().into(), started: asked.started }));
+        self.rows.push((book.dir().to_path_buf(), StudyJob { id: id.clone(), kind: make, title, state: "waiting".into(), why: None, made: None, engine: engine.key().into(), started: asked.started, about }));
         self.waiting.push_back(asked);
         id
     }
@@ -164,7 +177,7 @@ impl Jobs {
         let n = marking.question.trim_start_matches('q').trim_start_matches('0');
         let title = format!("{} question {n} of {quiz}", if marking.second { "Marking again" } else { "Marking" });
         let asked = Asked { id: id.clone(), dir: book.dir().to_path_buf(), make: Make::Marking, options: Options::default(), engine, model, title: title.clone(), started: proton_study::now(), marking: Some(marking) };
-        self.rows.push((book.dir().to_path_buf(), StudyJob { id: id.clone(), kind: Make::Marking, title, state: "waiting".into(), why: None, made: None, engine: engine.key().into(), started: asked.started }));
+        self.rows.push((book.dir().to_path_buf(), StudyJob { id: id.clone(), kind: Make::Marking, title, state: "waiting".into(), why: None, made: None, engine: engine.key().into(), started: asked.started, about: None }));
         self.waiting.push_back(asked);
         id
     }
@@ -297,6 +310,9 @@ impl Jobs {
             if let Err(why) = &outcome {
                 unmarked(&running.asked, why);
             }
+            if outcome.is_ok() {
+                self.done.push((dir.clone(), running.asked.make, running.asked.options.clone()));
+            }
             match outcome {
                 Ok(made) => self.set(&dir, &id, "done", None, Some(made)),
                 Err(why) => self.set(&dir, &id, "failed", Some(why), None),
@@ -319,6 +335,7 @@ fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)], fai
         let asking = match &asked.marking {
             Some(marking) => marking_asked(&book, marking)?,
             None if asked.make.web() => Asking { instructions: proton_study::found::rules(), prompt: studio::prompt_for(&book, asked.make, &asked.options)?, mcp: Vec::new() },
+            None if asked.make.self_contained() => Asking { instructions: studio::rules(true), prompt: studio::prompt_for(&book, asked.make, &asked.options)?, mcp: Vec::new() },
             None => asking(&book, &asked, tutors, roots)?,
         };
         Ok((book, asking))
@@ -513,6 +530,23 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
         }
         Read::Made(body) => body,
     };
+    let model = conversation.fold().status().model.clone();
+    let by = [asked.engine.name().to_string(), model].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+    // A source's guide is kept beside it; labels, beside them all.
+    let body = match body {
+        StudyMadeBody::Guide { summary, topics, questions } => {
+            let id = asked.options.source.as_deref().ok_or("a guide to no source")?;
+            let guide = proton_study::guide::StudySourceGuide { summary, topics, questions, made: proton_study::now(), by, task: asked.id.clone() };
+            book.save_guide(id, &guide)?;
+            return Ok(id.to_string());
+        }
+        StudyMadeBody::Labels { labels } => {
+            let labels = labels.into_iter().filter(|(id, _)| book.sources.get(id).is_some()).collect();
+            book.save_labels(&labels)?;
+            return Ok("labels".into());
+        }
+        body => body,
+    };
     let body = &body;
     // A document's own title, when it gave one.
     let title = match body {
@@ -555,8 +589,6 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
         }
         body => body,
     };
-    let model = conversation.fold().status().model.clone();
-    let by = [asked.engine.name().to_string(), model].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
     let made = book.keep_made(asked.make, &title, &by, &asked.id, body)?;
     // An audio overview is in the language asked for.
     if let Some(mut kept) = book.audio(&made.id) {

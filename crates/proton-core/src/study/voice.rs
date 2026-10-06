@@ -446,6 +446,7 @@ impl Study {
                 made: None,
                 engine: "fish".into(),
                 started: v.started,
+                about: None,
             })
             .collect()
     }

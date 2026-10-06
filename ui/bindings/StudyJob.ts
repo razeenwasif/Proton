@@ -16,4 +16,8 @@ state: string, why: string | null,
 /**
  * What it made, once it has: `R003`.
  */
-made: string | null, engine: string, started: number, };
+made: string | null, engine: string, started: number, 
+/**
+ * The source it is of: a source's guide, or its pages made readable.
+ */
+about: string | null, };

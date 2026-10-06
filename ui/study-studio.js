@@ -154,6 +154,9 @@ export function madeHtml(e, readOnly, found = { have: new Map(), unpicked: new S
   } else if (body.shape === "questions" || body.shape === "paper") {
     // A quiz opens as a quiz (study-quiz.js); this is only its questions, read.
     content = `<ol class="st-cards" data-turn="made">${body.questions.map((q) => `<li class="st-card-row"><div class="md">${answerHtml(q.prompt, citations)}</div></li>`).join("")}</ol>`;
+  } else if (body.shape === "guide" || body.shape === "labels") {
+    // Kept with the sources, and shown with them.
+    content = "";
   } else {
     const topics = [...new Set(body.objectives.map((o) => o.topic))];
     content = `<div class="st-objectives" data-turn="made">${topics.map((t) => `<section><h3>${esc(t)}</h3><ol>${body.objectives.filter((o) => o.topic === t)
@@ -309,5 +312,5 @@ export function createStudio(host) {
     render();
   }
 
-  return { studio, render, click, submit, clear: () => { state.studio = null; state.asking = null; render(); } };
+  return { studio, render, click, submit, jobs: () => state.studio?.jobs ?? [], clear: () => { state.studio = null; state.asking = null; render(); } };
 }

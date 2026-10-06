@@ -962,6 +962,73 @@ fn discover_and_deep_research_search_the_web_through_claude_code_alone_and_keep_
 }
 
 #[test]
+fn a_source_is_given_a_guide_and_every_source_its_topics_each_kept_beside_them() {
+    use proton_study::studio::{Make, Options};
+    let scratch = Scratch::new("guide");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+    let refused = session.apply(Command::StudyMake { kind: Make::Labels, options: Options::default() });
+    assert!(said(&refused).iter().any(|s| s.contains("once two of them")), "{:?}", said(&refused));
+    let refused = session.apply(Command::StudyMake { kind: Make::SourceGuide, options: Options { source: Some("S09".into()), ..Default::default() } });
+    assert!(said(&refused).iter().any(|s| s.contains("Choose a source")));
+
+    // A guide: written from the source alone, kept beside it, shown with it.
+    log.lock().unwrap().answers.push_back(
+        serde_json::json!({ "summary": "Breadth-first search is complete, and optimal when every step costs the same [[S01 § Search L1-2]].",
+            "topics": ["Breadth-first search", "Optimality"], "questions": ["When is BFS optimal?"] })
+        .to_string(),
+    );
+    let events = session.apply(Command::StudyMake { kind: Make::SourceGuide, options: Options { source: Some("S01".into()), ..Default::default() } });
+    let (jobs, _) = studio(&events).unwrap();
+    assert_eq!((jobs[0].title.as_str(), jobs[0].about.as_deref()), ("Guide to notes.md", Some("S01")));
+    until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(()),
+        _ => None,
+    });
+    {
+        let log = log.lock().unwrap();
+        let (_, _, how, _) = &log.started[0];
+        assert!(!how.web && how.mcp.is_empty() && how.schema.is_some());
+        assert!(log.sent[0].contains("guide to the source S01 — notes.md") && log.sent[0].contains("[[S01 § Search L1-2]]"), "{}", log.sent[0]);
+    }
+    assert!(scratch.root.join("Notebooks/search/.notebook/guides/S01.json").is_file());
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    let Some(Event::StudySource { guide: Some(guide), citations, .. }) = events.first() else { panic!("{events:?}") };
+    assert_eq!(guide.topics, ["Breadth-first search", "Optimality"]);
+    assert_eq!(citations.iter().map(|c| (c.source.as_str(), c.resolved)).collect::<Vec<_>>(), [("S01", true)]);
+
+    // Labels: one call over every source's beginning, one vocabulary.
+    session.apply(Command::StudyPaste { title: "Heuristics".into(), text: "An admissible heuristic never overestimates.".into() });
+    log.lock().unwrap().answers.push_back(
+        serde_json::json!({ "topics": ["Uninformed search", "Heuristics"], "sources": [
+            { "source": "S01", "labels": ["Uninformed search"] }, { "source": "S02", "labels": ["heuristics"] }, { "source": "S07", "labels": ["Heuristics"] }
+        ]})
+        .to_string(),
+    );
+    session.apply(Command::StudyMake { kind: Make::Labels, options: Options::default() });
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.iter().any(|s| !s.labels.is_empty()) => Some(sources.clone()),
+        _ => None,
+    });
+    let labels: Vec<(&str, Vec<String>)> = rows.iter().map(|r| (r.id.as_str(), r.labels.clone())).collect();
+    assert_eq!(labels, [("S01", vec!["Uninformed search".to_string()]), ("S02", vec!["Heuristics".to_string()])]);
+    assert!(log.lock().unwrap().sent.iter().any(|s| s.contains("## S01 — notes.md") && s.contains("## S02 — Heuristics")));
+    let kept = std::fs::read_to_string(scratch.root.join("Notebooks/search/sources.json")).unwrap();
+    assert!(!kept.contains("Uninformed search"), "labels are kept beside the sources, not in them");
+    session.shutdown();
+}
+
+#[test]
 fn the_studio_runs_three_calls_at_once_and_two_on_an_engine() {
     use proton_study::studio::{Make, Options};
     let scratch = Scratch::new("studio-many");

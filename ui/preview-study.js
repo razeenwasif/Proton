@@ -330,6 +330,9 @@ export function createStudyPreview(deliver) {
     ] },
   });
 
+  /** Sources' guides, by id, once asked for. @type {Record<string, any>} */
+  const guides = {};
+
   /** What the web gave, as Discover or Deep Research would. @param {boolean} research */
   function foundBody(research) {
     const found = [
@@ -460,7 +463,8 @@ export function createStudyPreview(deliver) {
               : { shape: "sections", sections: [{ from: 1, to: 6, text: "# Search\n\nBreadth-first search is complete, and optimal when every step costs the same: $O(b^d)$ time and space." },
                 { from: 7, to: 14, text: "## Uniform cost\n\nExpands the node with the lowest $g(n)$ first.\n\n```python\nfrontier = [(0, start)]\n```" }] };
           return [{ type: "studySource", id: source.id, title: source.title, kind: source.kind, at: command.at ?? { from: 7, to: 9 },
-            said: source.origin.root === "ANU" ? "Its file is in iCloud: these are its words as they were read." : null, view }];
+            said: source.origin.root === "ANU" ? "Its file is in iCloud: these are its words as they were read." : null, view,
+            guide: guides[source.id] ?? null, citations: guides[source.id] ? [cites[0]] : [] }];
         }
         case "studyShowNote": {
           const note = (state.notes[state.open ?? ""] ?? []).find((x) => x.id === command.id);
@@ -505,11 +509,22 @@ export function createStudyPreview(deliver) {
         case "studyMake": {
           const id = `J${String(3 + studio.jobs.length).padStart(4, "0")}`;
           const title = command.options.focus ? `${command.kind}: ${command.options.focus}` : command.kind;
-          studio.jobs.unshift({ id, kind: command.kind, title, state: "running", why: null, made: null, engine: "claude", started: Math.floor(Date.now() / 1000) });
+          studio.jobs.unshift({ id, kind: command.kind, title, state: "running", why: null, made: null, engine: "claude", started: Math.floor(Date.now() / 1000), about: command.options.source ?? null });
           const web = command.kind === "discover" || command.kind === "deepResearch";
           setTimeout(() => {
             const job = studio.jobs.find((j) => j.id === id);
-            if (job) Object.assign(job, { state: "done", made: "R001" });
+            if (job) Object.assign(job, { state: "done", made: command.kind === "sourceGuide" ? command.options.source : "R001" });
+            if (command.kind === "sourceGuide") {
+              guides[command.options.source] = { summary: "It sets out uninformed search — breadth-first, depth-first and uniform-cost — and shows when each is complete and optimal [[S02 § Search › Uniform cost L40-58]].",
+                topics: ["Breadth-first search", "Uniform-cost search", "Optimality"], questions: ["When is breadth-first search optimal?", "Why does uniform-cost search order by g(n)?"],
+                made: Math.floor(Date.now() / 1000), by: "Claude Code · claude-haiku-4-5", task: id };
+              deliver(studioEvent());
+            }
+            if (command.kind === "labels") {
+              const topics = ["Uninformed search", "Heuristics", "Exams"];
+              (state.sources[state.open ?? ""] ?? []).forEach((src, i) => { src.labels = [topics[i % topics.length]]; });
+              deliver(notebookEvent());
+            }
             studio.jobs = studio.jobs.filter((j) => j.id !== id);
             if (web) {
               const made = `W${String(studio.made.filter((m) => m.id.startsWith("W")).length + 1).padStart(3, "0")}`;

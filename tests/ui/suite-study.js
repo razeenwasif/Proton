@@ -323,6 +323,47 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('Sources are labelled by topic and ticked by label; a source is given its guide on asking, whose topics ask the tutor', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    const search = (/** @type {string[]} */ labels) => row('S01', {kind: 'markdown', units: 'lines', title: 'Search.md', labels});
+    const exam = (/** @type {string[]} */ labels) => row('S02', {title: 'Exam_2020.pdf', labels});
+    const job = (/** @type {any} */ more) => ({type: 'studyStudio', made: [], jobs: [{id: 'J0010', kind: 'labels', title: 'Topic labels', state: 'running', why: null, made: null, engine: 'claude', started: 1, about: null, ...more}]});
+    await win.pushEvents([notebook([search([]), exam([])]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
+    const before = win.commands.length;
+    ws().querySelector('[data-study-label-all]').click(); await settle();
+    assert(sent(before, 'studyMake')[0]?.kind === 'labels', 'labelling was not asked for');
+    await win.pushEvents([job({})]); await settle();
+    assert(ws().querySelector('.st-sources-head')?.textContent.includes('Labelling'), 'it is not said to be labelling');
+    await win.pushEvents([notebook([search(['Search']), exam(['Exams', 'Search'])]), job({state: 'done', made: 'labels'})]); await settle();
+    const chips = [...ws().querySelectorAll('[data-study-label-pick]')].map((c) => c.textContent);
+    assert(JSON.stringify(chips) === '["Exams","Search"]', `the labels are not offered to tick by: ${JSON.stringify(chips)}`);
+    assert(ws().querySelector('.st-source[data-study-source="S02"] .st-labels')?.textContent === 'ExamsSearch', 'a source does not show its labels');
+    const tick = win.commands.length;
+    ws().querySelector('[data-study-label-pick="Exams"]').click(); await settle();
+    assert(JSON.stringify(sent(tick, 'studySelect')[0]?.ids) === '["S02"]', `not ticked by label: ${JSON.stringify(sent(tick, 'studySelect'))}`);
+
+    const view = {shape: 'sections', sections: [{from: 1, to: 4, text: '# Search\n\nBFS is complete.'}]};
+    await win.pushEvents([{type: 'studySource', id: 'S01', title: 'Search.md', kind: 'markdown', at: null, said: null, guide: null, citations: [], view}]); await settle();
+    const ask = win.commands.length;
+    ws().querySelector('[data-study-guide="S01"]').click(); await settle();
+    const made = sent(ask, 'studyMake')[0];
+    assert(made?.kind === 'sourceGuide' && made.options.source === 'S01', `the guide was not asked for: ${JSON.stringify(made)}`);
+    const guiding = (/** @type {string} */ state) => ({type: 'studyStudio', made: [], jobs: [{id: 'J0011', kind: 'sourceGuide', title: 'Guide to Search.md', state, why: null,
+      made: state === 'done' ? 'S01' : null, engine: 'claude', started: 2, about: 'S01'}]});
+    await win.pushEvents([guiding('running')]); await settle();
+    assert(ws().querySelector('.st-reader')?.textContent.includes('Writing its guide'), 'it is not said to be writing it');
+    const shown = win.commands.length;
+    await win.pushEvents([guiding('done')]); await settle();
+    assert(sent(shown, 'studyShow')[0]?.id === 'S01', 'the source was not asked for again once its guide was written');
+    await win.pushEvents([{type: 'studySource', id: 'S01', title: 'Search.md', kind: 'markdown', at: null, said: null, view, citations: [cite(1, 'S01 § Search L1-2')],
+      guide: {summary: 'It shows breadth-first search is complete [[S01 § Search L1-2]].', topics: ['Breadth-first search'], questions: ['Is BFS optimal?'], made: 1, by: 'Claude Code', task: 'J0011'}}]); await settle();
+    const guide = ws().querySelector('.st-guide');
+    assert(guide?.querySelector('.st-cite') && guide.textContent.includes('Breadth-first search'), 'the guide is not shown, cited');
+    const asked = win.commands.length;
+    guide.querySelector('[data-study-ask-topic]').click(); await settle();
+    assert(sent(asked, 'studyAsk')[0]?.text === 'What does Search.md (S01) say about Breadth-first search?', `the topic was not asked: ${JSON.stringify(sent(asked, 'studyAsk'))}`);
+  });
+
   await test('The studio makes from the sources: a tile asks for its options, and a table its columns', async () => {
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();

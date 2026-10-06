@@ -30,6 +30,7 @@ use crate::audio::{self, AudioFormat, StudyChapter, StudySegment};
 use crate::deck::{self, StudyCard};
 use crate::exam;
 use crate::found::{self, StudyFound};
+use crate::guide;
 use crate::infographic::{self, StudyBlock};
 use crate::slides::{self, StudySlide};
 use crate::overview::{self, StudyOverviewTopic};
@@ -74,6 +75,10 @@ pub enum Make {
     Discover,
     /// A report on a topic from what was read on the web, and what it read.
     DeepResearch,
+    /// A source's guide: what it covers, its key topics, questions to ask.
+    SourceGuide,
+    /// Every source's topics, as labels.
+    Labels,
     /// A written answer marked: a call of the studio's, but not a thing it
     /// makes for the list.
     Marking,
@@ -103,6 +108,10 @@ pub enum Shape {
     Graphic,
     /// What was found on the web, in `studio/found/`.
     Found,
+    /// A source's guide, in `.notebook/guides/`.
+    Guide,
+    /// The sources' labels, in `.notebook/labels.json`.
+    Labels,
     /// A mark, in its quiz's attempts.
     Mark,
 }
@@ -131,6 +140,8 @@ impl Make {
             Make::Infographic => "Infographic",
             Make::Discover => "Sources from the web",
             Make::DeepResearch => "Deep Research",
+            Make::SourceGuide => "Source guide",
+            Make::Labels => "Topic labels",
             Make::Marking => "Marking",
         }
     }
@@ -147,6 +158,8 @@ impl Make {
             Make::Slides => Shape::Slides,
             Make::Infographic => Shape::Graphic,
             Make::Discover | Make::DeepResearch => Shape::Found,
+            Make::SourceGuide => Shape::Guide,
+            Make::Labels => Shape::Labels,
             Make::Exam | Make::PastPaper => Shape::Paper,
             Make::Marking => Shape::Mark,
             _ => Shape::Prose,
@@ -176,8 +189,17 @@ impl Make {
             Make::Infographic => "infographic",
             Make::Discover => "discover",
             Make::DeepResearch => "deepResearch",
+            Make::SourceGuide => "sourceGuide",
+            Make::Labels => "labels",
             Make::Marking => "marking",
         }
+    }
+
+    /// Whether its call is given everything it needs in its asking — the
+    /// web's, a source's words, the sources' beginnings — rather than the
+    /// sources ticked.
+    pub fn self_contained(self) -> bool {
+        self.web() || matches!(self, Make::SourceGuide | Make::Labels)
     }
 
     /// Whether it searches the web — and nothing else: no files, no notebook.
@@ -186,7 +208,7 @@ impl Make {
     }
 
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch, Make::SourceGuide, Make::Labels]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -367,7 +389,7 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
         Make::Infographic => infographic::prompt(&options.focus, &course),
         // An exam's asking needs the notebook, and so does the web's, to
         // find what it has not: [`prompt_for`].
-        Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking | Make::Discover | Make::DeepResearch => String::new(),
+        Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking | Make::Discover | Make::DeepResearch | Make::SourceGuide | Make::Labels => String::new(),
         Make::Flashcards => format!(
             "Make about {} flashcards of these sources, for a student of {course} learning them for the exam. {} Each card tests one idea — \
              a definition, a result and when it holds, a step of a method, a distinction, a formula, a mistake students make — and is \
@@ -420,6 +442,33 @@ pub fn prompt_for(book: &Book, make: Make, options: &Options) -> Result<String, 
                  make; a `short` question where an objective is to explain or derive, with its rubric and model answer. No hints. Each \
                  question has its explanation, topic and citations. Leave unused fields empty.\n\nThe objectives:\n{listed}{shape}"
             ))
+        }
+        Make::SourceGuide => {
+            let id = options.source.as_deref().ok_or("say which source to guide")?;
+            let source = book.sources.get(id).filter(|s| s.status.has_words()).ok_or_else(|| format!("{id} has no words to guide"))?;
+            // Its words, each passage after its citation, as a call cites them.
+            let library = crate::snapshot::library(book);
+            let passages: Vec<proton_library::Hit> = library.all().into_iter().filter(|h| h.doc == id).collect();
+            if passages.is_empty() {
+                return Err(format!("{id} has no words to guide"));
+            }
+            Ok(guide::prompt(source, &proton_library::quote(&passages)))
+        }
+        Make::Labels => {
+            let sources: Vec<(String, String, String)> = book
+                .sources
+                .sources
+                .iter()
+                .filter(|s| s.status.has_words())
+                .filter_map(|s| {
+                    let body = crate::snapshot::words(book, &s.id, s.units)?;
+                    Some((s.id.clone(), s.title.clone(), crate::snapshot::plain(&body).chars().take(1500).collect()))
+                })
+                .collect();
+            if sources.len() < 2 {
+                return Err("sources are labelled once two have words".into());
+            }
+            Ok(guide::labels_prompt(&sources))
         }
         Make::Discover | Make::DeepResearch => {
             // What it is about: as asked, or what the notebook is about.
@@ -498,6 +547,8 @@ pub fn schema(make: Make, options: &Options) -> Option<Value> {
         Shape::Slides => slides::schema(options.slide.is_some()),
         Shape::Graphic => infographic::schema(),
         Shape::Found => found::schema(),
+        Shape::Guide => guide::schema(),
+        Shape::Labels => guide::labels_schema(),
         Shape::Mark => quiz::marking_schema(),
         Shape::Map => json!({
             "type": "object", "additionalProperties": false, "required": ["title", "nodes"],
@@ -596,6 +647,10 @@ pub enum StudyMadeBody {
     /// What was found on the web: a report of it, for Deep Research, and
     /// the sources.
     Found { title: String, report: String, found: Vec<StudyFound> },
+    /// A source's guide, before it is kept beside it.
+    Guide { summary: String, topics: Vec<String>, questions: Vec<String> },
+    /// Each source's topics, by its id.
+    Labels { labels: std::collections::BTreeMap<String, Vec<String>> },
     /// The deck and the quiz it was kept with, once it is kept.
     Overview {
         topics: Vec<StudyOverviewTopic>,
@@ -679,6 +734,11 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
             let (title, report, found) = found::read(&value, make == Make::DeepResearch)?;
             Ok(StudyMadeBody::Found { title, report, found })
         }
+        Shape::Guide => {
+            let (summary, topics, questions) = guide::read(&value)?;
+            Ok(StudyMadeBody::Guide { summary, topics, questions })
+        }
+        Shape::Labels => Ok(StudyMadeBody::Labels { labels: guide::read_labels(&value, None)? }),
         Shape::Audio => {
             let format = options.format.unwrap_or_default();
             let (title, segments, chapters) = audio::read(&value, format)?;
@@ -745,6 +805,7 @@ impl Book {
             Shape::Slides => self.dir().join("studio/slides"),
             Shape::Graphic => self.dir().join("studio/graphics"),
             Shape::Found => self.dir().join("studio/found"),
+            Shape::Guide | Shape::Labels => self.dir().join(".notebook"),
             Shape::Objectives => self.dir().to_path_buf(),
         }
     }
@@ -773,6 +834,9 @@ impl Book {
         }
         if let StudyMadeBody::Slide { .. } = body {
             return Err("a slide is kept in its deck".into());
+        }
+        if let StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } = body {
+            return Err("a guide, or labels, are kept beside the sources".into());
         }
         if let StudyMadeBody::Audio { format, segments, chapters, .. } = body {
             let id = self.new_audio_id();
@@ -835,6 +899,7 @@ impl Book {
             Shape::Graphic => ('G', "json"),
             Shape::Found => ('W', "json"),
             Shape::Objectives => ('O', "json"),
+            Shape::Guide | Shape::Labels => return Err("kept beside the sources".into()),
         };
         let header = Header { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() };
         let id = match kind.shape() {
@@ -959,7 +1024,7 @@ impl Book {
                 report: value["report"].as_str().unwrap_or_default().to_string(),
                 found: serde_json::from_value(value["found"].clone()).ok()?,
             },
-            Shape::Prose | Shape::Mark => return None,
+            Shape::Prose | Shape::Mark | Shape::Guide | Shape::Labels => return None,
         };
         Some((made_of(id, header), body))
     }

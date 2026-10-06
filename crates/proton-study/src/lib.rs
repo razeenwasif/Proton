@@ -30,6 +30,7 @@ pub mod exam;
 pub mod infographic;
 pub mod found;
 pub mod fsrs;
+pub mod guide;
 pub mod lock;
 pub mod mastery;
 pub mod model;

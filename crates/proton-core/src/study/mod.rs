@@ -429,6 +429,12 @@ impl Study {
             }
             // A script written: spoken, if it may be.
             events.extend(self.voice_waiting());
+            // Sources labelled: the notebook says so.
+            let open = self.open.as_ref().map(|o| o.book.dir().to_path_buf());
+            let done = self.jobs.take_done();
+            if done.iter().any(|(dir, make, _)| Some(dir) == open.as_ref() && *make == proton_study::studio::Make::Labels) {
+                events.extend(self.notebook_event());
+            }
         }
         events.extend(self.poll_voices());
         events.extend(self.poll_review());
@@ -686,6 +692,7 @@ impl Study {
         let open = self.open.as_ref()?;
         let book = &open.book;
         let selected = book.selection();
+        let labels = book.labels();
         Some(Event::StudyNotebook {
             slug: book.slug().to_string(),
             title: book.notebook.title.clone(),
@@ -695,7 +702,12 @@ impl Study {
                 true => format!("another Proton (pid {})", h.pid),
                 false => format!("another Proton on {} (pid {})", h.host, h.pid),
             }),
-            sources: book.sources.sources.iter().map(|s| StudySourceRow::of(s, selected.contains(&s.id))).collect(),
+            sources: book
+                .sources
+                .sources
+                .iter()
+                .map(|s| StudySourceRow { labels: labels.get(&s.id).cloned().unwrap_or_default(), ..StudySourceRow::of(s, selected.contains(&s.id)) })
+                .collect(),
             notes: book.notes().iter().map(StudyNoteRow::of).collect(),
         })
     }
@@ -1450,6 +1462,16 @@ impl Study {
         if kind == proton_study::studio::Make::Marking {
             return vec![notice("A mark is asked for by answering.".into(), NoticeLevel::Warn)];
         }
+        let read = |o: &Open| o.book.sources.sources.iter().filter(|s| s.status.has_words()).count();
+        if kind == proton_study::studio::Make::SourceGuide {
+            let source = options.source.as_deref().and_then(|id| self.open.as_ref()?.book.sources.get(id));
+            if !source.is_some_and(|s| s.status.has_words()) {
+                return vec![notice("Choose a source that has been read.".into(), NoticeLevel::Warn)];
+            }
+        }
+        if kind == proton_study::studio::Make::Labels && self.open.as_ref().map_or(0, read) < 2 {
+            return vec![notice("Sources are labelled once two of them have been read.".into(), NoticeLevel::Info)];
+        }
         if kind == proton_study::studio::Make::DeepResearch && options.focus.trim().is_empty() {
             return vec![notice("Say what to research.".into(), NoticeLevel::Warn)];
         }
@@ -1526,8 +1548,9 @@ impl Study {
             StudyMadeBody::Slides { slides, .. } => slides.iter().flat_map(|s| s.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Slide { slide } => slide.cites.iter().map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Graphic { blocks, .. } => blocks.iter().flat_map(|b| b.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
-            // What the web gave cites the web, by number, not the notebook.
-            StudyMadeBody::Found { .. } => String::new(),
+            // What the web gave cites the web, by number, not the notebook;
+            // a guide and labels are shown with their sources.
+            StudyMadeBody::Found { .. } | StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } => String::new(),
         };
         let citations = proton_study::cite::resolve(&open.book, &text);
         vec![Event::StudyMadeOpen { made, body, citations }]
@@ -1603,7 +1626,9 @@ impl Study {
             Body::Pages(pages) => StudyView::Pages { pages },
             Body::Cues(cues) => StudyView::Cues { cues: cues.into_iter().map(|c| StudyCue { start: c.start, end: c.end, text: c.text }).collect() },
         };
-        vec![Event::StudySource { id: id.to_string(), title: source.title.clone(), kind: source.kind.clone(), at, said, view }]
+        let guide = open.book.guide(id);
+        let citations = guide.as_ref().map(|g| proton_study::cite::resolve(&open.book, &g.summary)).unwrap_or_default();
+        vec![Event::StudySource { id: id.to_string(), title: source.title.clone(), kind: source.kind.clone(), at, said, view, guide, citations }]
     }
 
     /* ── notes ──────────────────────────────────────────────────────── */

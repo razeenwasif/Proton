@@ -14,7 +14,7 @@ import { markdown } from "./markdown.js";
 import { createAudio } from "./study-audio.js";
 import { createCards } from "./study-cards.js";
 import { graphicHtml, mapSvg, pictureOf } from "./study-graphic.js";
-import { createChat } from "./study-chat.js";
+import { answerHtml, createChat } from "./study-chat.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
 import { overviewClick, overviewHtml as learningHtml } from "./study-overview.js";
 import { progressClick, progressHtml } from "./study-progress.js";
@@ -29,7 +29,9 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {import("./bindings/StudyView").StudyView} View */
 /** @typedef {import("./bindings/StudyPlace").StudyPlace} Place */
 /** @typedef {{notebooks: Summary[], open: string | null, folder: string | null}} ListEvent */
-/** @typedef {{id: string, title: string, kind: string, at: Place | null, said: string | null, view: View}} SourceEvent */
+/** @typedef {import("./bindings/StudySourceGuide").StudySourceGuide} Guide */
+/** @typedef {{id: string, title: string, kind: string, at: Place | null, said: string | null, view: View, guide: Guide | null,
+ *   citations: import("./bindings/StudyCitation").StudyCitation[]}} SourceEvent */
 /** @typedef {{id: string, title: string, body: string, updated: number, source: string | null}} NoteEvent */
 /** @typedef {import("./study-studio.js").MadeEvent} MadeEvent */
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
@@ -110,6 +112,7 @@ export function createStudy(host) {
       if (shown.kind === "audio") return sounds.citations();
       if (shown.kind === "slides") return decks.citations();
       if (shown.kind === "graphic") return shown.graphic.citations;
+      if (shown.kind === "source") return shown.source.citations ?? [];
       return shown.kind === "deck" || shown.kind === "review" ? cards.citations(shown.kind) : [];
     },
   });
@@ -210,11 +213,12 @@ export function createStudy(host) {
       ? `<span class="st-confirm">Take out? <button class="st-link" data-study-remove-yes="${esc(s.id)}">Yes</button> <button class="st-link" data-study-remove-no>No</button></span>`
       : "";
     const thin = s.thin ? ` · ${s.thin} thin` : "";
+    const labels = s.labels.length ? `<span class="st-labels">${s.labels.map((l) => `<span class="st-label">${esc(l)}</span>`).join("")}</span>` : "";
     return `<div class="st-source${s.selected ? " on" : ""}" data-study-source="${esc(s.id)}" title="${esc(`${s.id} · ${origin}`)}">` +
       `<input type="checkbox" data-study-tick="${esc(s.id)}"${s.selected ? " checked" : ""}${hasWords(s) && !readOnly() ? "" : " disabled"} aria-label="Use ${esc(s.title)}">` +
       `${icon(KIND_ICON[s.kind] ?? "file")}` +
       `<span class="st-source-text"><button class="st-source-name" data-study-show="${esc(s.id)}" title="Read it">${esc(s.title)}</button>` +
-      `<span class="st-faint">${esc(s.id)}${extent(s) ? ` · ${esc(extent(s))}${esc(thin)}` : ""}</span></span>` +
+      `<span class="st-faint">${esc(s.id)}${extent(s) ? ` · ${esc(extent(s))}${esc(thin)}` : ""}</span>${labels}</span>` +
       (confirm || statusHtml(s) +
         (readOnly() ? "" : `<button class="st-x" data-study-remove="${esc(s.id)}" title="Take it out of this notebook" aria-label="Take it out">${icon("close")}</button>`)) +
       `</div>`;
@@ -236,8 +240,16 @@ export function createStudy(host) {
     const usable = nb.sources.filter(hasWords);
     const ticked = usable.filter((s) => s.selected).length;
     const all = usable.length > 0 && ticked === usable.length;
-    const head = `<header class="st-sources-head"><b>Sources</b><span class="st-faint">${ticked} of ${usable.length} used</span><span class="grow"></span>` +
+    const labelling = studio.jobs().some((j) => j.kind === "labels" && (j.state === "running" || j.state === "waiting" || j.state === "repairing"));
+    const label = readOnly() || usable.length < 2 ? ""
+      : labelling ? `<span class="st-faint"><span class="lab-spin"></span> Labelling</span>`
+        : `<button class="cc-quiet" data-study-label-all title="Label every source with its topics, in one call, to tick them by topic">Label</button>`;
+    const head = `<header class="st-sources-head"><b>Sources</b><span class="st-faint">${ticked} of ${usable.length} used</span><span class="grow"></span>${label}` +
       (readOnly() ? "" : `<button class="cc-quiet" data-study-pick title="Add sources from your folders">${icon("plus")}Add</button>`) + `</header>`;
+    // Every topic a source is labelled with: each ticks the sources about it.
+    const topics = [...new Set(usable.flatMap((s) => s.labels))].sort((a, b) => a.localeCompare(b));
+    const labelBar = topics.length && !readOnly()
+      ? `<div class="st-label-bar">${topics.map((t) => `<button class="st-chip" data-study-label-pick="${esc(t)}" title="Use only the sources about ${esc(t)}">${esc(t)}</button>`).join("")}</div>` : "";
     const tickAll = usable.length > 1 && !readOnly()
       ? `<label class="st-all"><input type="checkbox" data-study-all${all ? " checked" : ""}> Use every source</label>` : "";
     const rows = nb.sources.length
@@ -250,7 +262,7 @@ export function createStudy(host) {
     }).join("");
     const notesHead = `<header class="st-sources-head st-notes-head"><b>Notes</b><span class="st-faint">${nb.notes.length || ""}</span><span class="grow"></span>` +
       (readOnly() ? "" : `<button class="cc-quiet" data-study-new-note title="Write a note">${icon("plus")}Note</button>`) + `</header>`;
-    els.sources.innerHTML = `${head}${confirmHtml()}${tickAll}<div class="scroll st-source-list">${rows}${notesHead}` +
+    els.sources.innerHTML = `${head}${confirmHtml()}${labelBar}${tickAll}<div class="scroll st-source-list">${rows}${notesHead}` +
       `${notes || `<p class="st-faint st-pad">No notes yet.</p>`}</div>`;
   }
 
@@ -432,13 +444,26 @@ export function createStudy(host) {
       body = v.cues.map((c) => `<div class="st-cue" data-start="${c.start}" data-end="${c.end}"><time>${clock(c.start)}</time><span>${esc(c.text)}</span></div>`).join("");
     }
     const said = src.said ? `<div class="st-banner">${icon("clock")} ${esc(src.said)}</div>` : "";
-    const origin = state.notebook?.sources.find((s) => s.id === src.id)?.origin;
+    const row = state.notebook?.sources.find((s) => s.id === src.id);
+    const origin = row?.origin;
+    // Its guide, or the asking for one.
+    const g = src.guide;
+    const guiding = studio.jobs().some((j) => j.kind === "sourceGuide" && j.about === src.id && j.state !== "done" && j.state !== "failed");
+    const guide = g
+      ? `<section class="st-guide" data-turn="made"><header><b>Source guide</b><span class="st-faint">${esc(g.by)}</span></header>` +
+        `<div class="md">${answerHtml(g.summary, src.citations ?? [])}</div>` +
+        `<div class="st-guide-topics">${g.topics.map((t) => `<button class="st-chip" data-study-ask-topic="${esc(t)}" title="Ask the tutor what it says of this">${esc(t)}</button>`).join("")}</div>` +
+        (g.questions.length ? `<ul class="st-guide-questions">${g.questions.map((q) => `<li><button class="st-link" data-study-ask-question="${esc(q)}">${esc(q)}</button></li>`).join("")}</ul>` : "") +
+        `</section>`
+      : guiding ? `<div class="st-banner"><span class="lab-spin"></span> Writing its guide…</div>` : "";
+    const ask = !g && !guiding && !readOnly() && row && hasWords(row)
+      ? `<button class="cc-quiet" data-study-guide="${esc(src.id)}" title="What it covers, its key topics, and questions to ask of it">${icon("spark")}Guide</button>` : "";
     const web = origin?.from === "web" ? origin : null;
     const fetched = web?.fetched ? ` · fetched ${new Date(web.fetched * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : "";
     const page = web ? `<button class="cc-quiet" data-study-page="${esc(web.url)}" title="${esc(web.url)}">${icon("ext")}Open the page</button>` +
       (readOnly() ? "" : `<button class="cc-quiet" data-study-refresh="${esc(src.id)}" title="Fetch it again, and keep it as it is now">Fetch again</button>`) : "";
     return `<div class="st-reader"><div class="st-reader-head"><button class="cc-quiet" data-study-back title="Back to the notebook">← Back</button>` +
-      `<div><h1>${esc(src.title)}</h1><span class="st-faint">${esc(src.id)} · ${esc(src.kind)}${esc(fetched)}</span></div>${page}</div>${said}<div class="st-read">${body}</div></div>`;
+      `<div><h1>${esc(src.title)}</h1><span class="st-faint">${esc(src.id)} · ${esc(src.kind)}${esc(fetched)}</span></div>${ask}${page}</div>${said}${guide}<div class="st-read">${body}</div></div>`;
   }
 
   /** Mark and scroll to where a source was opened. @param {SourceEvent} src */
@@ -752,6 +777,30 @@ export function createStudy(host) {
     }
     const page = at("[data-study-page]");
     if (page) return host.dispatch({ type: "openLink", url: page.dataset.studyPage });
+    // A source's guide asked for; its topics and questions asked of the tutor.
+    const guide = at("[data-study-guide]");
+    if (guide) {
+      host.dispatch({ type: "studyMake", kind: "sourceGuide", options: { focus: "", ask: "", columns: [], amount: "standard", level: "medium", deck: null,
+        objectives: [], source: guide.dataset.studyGuide, count: null, format: null, language: "", slides: null, slide: null } });
+      return;
+    }
+    const topic = at("[data-study-ask-topic]");
+    if (topic && state.shown.kind === "source") {
+      const { id, title } = state.shown.source;
+      return askTutor(`What does ${title} (${id}) say about ${topic.dataset.studyAskTopic}?`);
+    }
+    const question = at("[data-study-ask-question]");
+    if (question) return askTutor(question.dataset.studyAskQuestion ?? "");
+    if (at("[data-study-label-all]")) {
+      host.dispatch({ type: "studyMake", kind: "labels", options: { focus: "", ask: "", columns: [], amount: "standard", level: "medium", deck: null,
+        objectives: [], source: null, count: null, format: null, language: "", slides: null, slide: null } });
+      return;
+    }
+    const pick = at("[data-study-label-pick]");
+    if (pick && state.notebook) {
+      const label = pick.dataset.studyLabelPick ?? "";
+      return host.dispatch({ type: "studySelect", ids: state.notebook.sources.filter((s) => hasWords(s) && s.labels.includes(label)).map((s) => s.id) });
+    }
     if (at("[data-study-paste-cancel]")) {
       state.pasting = false;
       return renderStage();
@@ -961,6 +1010,8 @@ export function createStudy(host) {
 
   /** Calls seen done, so a deck open is asked for again only when one adds to it. */
   const ended = new Set();
+  /** The guides and labelling under way, as last drawn. */
+  let underway = "";
 
   /** The studio's calls, and what they made. @param {import("./study-studio.js").StudioEvent} event */
   function studioEvent(event) {
@@ -970,6 +1021,18 @@ export function createStudy(host) {
       ended.add(job.id);
       // More cards for the deck being looked at: drawn with them.
       if (state.shown.kind === "deck" && job.made && job.made === cards.openDeck()) host.dispatch({ type: "studyShowMade", id: job.made });
+      // The guide of the source being read: shown with it.
+      if (job.kind === "sourceGuide" && state.shown.kind === "source" && state.shown.source.id === job.about) {
+        host.dispatch({ type: "studyShow", id: job.about, at: state.shown.source.at });
+      }
+    }
+    // A guide or labels under way show where they will be: drawn again
+    // only when one of them changes, which keeps the reader where it is.
+    const now = event.jobs.filter((j) => j.kind === "sourceGuide" || j.kind === "labels").map((j) => `${j.id}:${j.state}`).join(",");
+    if (now !== underway) {
+      underway = now;
+      if (state.shown.kind === "source") renderStage();
+      renderSources();
     }
   }
 

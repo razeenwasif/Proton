@@ -1599,6 +1599,9 @@ pub enum Event {
         /// Why its words are shown rather than its file, when they are.
         said: Option<String>,
         view: proton_study::view::StudyView,
+        /// Its guide, if it has one, and its summary's citations.
+        guide: Option<proton_study::guide::StudySourceGuide>,
+        citations: Vec<proton_study::cite::StudyCitation>,
     },
     /// The open notebook's chat with the tutor, whole: its turns, each
     /// answer's citations resolved, the answer coming if one is, and the

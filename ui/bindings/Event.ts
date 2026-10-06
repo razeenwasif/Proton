@@ -93,6 +93,7 @@ import type { StudyReview } from "./StudyReview";
 import type { StudyRoot } from "./StudyRoot";
 import type { StudySegment } from "./StudySegment";
 import type { StudySlide } from "./StudySlide";
+import type { StudySourceGuide } from "./StudySourceGuide";
 import type { StudySourceRow } from "./StudySourceRow";
 import type { StudySummary } from "./StudySummary";
 import type { StudyTurn } from "./StudyTurn";
@@ -260,7 +261,11 @@ discovered: boolean, } | { "type": "studySource", id: string, title: string, kin
 /**
  * Why its words are shown rather than its file, when they are.
  */
-said: string | null, view: StudyView, } | { "type": "studyChat", id: string, title: string, settings: StudyTutorSettings, turns: Array<StudyTurn>, live: StudyLive | null, busy: boolean, error: string | null, 
+said: string | null, view: StudyView, 
+/**
+ * Its guide, if it has one, and its summary's citations.
+ */
+guide: StudySourceGuide | null, citations: Array<StudyCitation>, } | { "type": "studyChat", id: string, title: string, settings: StudyTutorSettings, turns: Array<StudyTurn>, live: StudyLive | null, busy: boolean, error: string | null, 
 /**
  * How the tutor reaches the sources, once it has started: `tools`
  * or `passages`.

@@ -1124,7 +1124,14 @@ guessed from its path and corrected by hand. `proton-core::study` is one for
 the session, whichever project is open; a notebook another Proton holds open is
 read only, under the same lock an investigation has. The reader shows a
 source's words as kept — Markdown cut at its headings, pages, cues — or a PDF
-whose file is here in the document viewer, at a citation's place.
+whose file is here in the document viewer, at a citation's place. A source
+is given its **guide** when the person asks — what it covers, citing it, its
+key topics, and questions to ask of it, each a button that asks the tutor —
+written by one call from that source alone and kept in `.notebook/guides/`;
+and the sources are **labelled** by topic in one call over each one's
+beginning, from a vocabulary the call chooses, kept in `.notebook/labels.json`
+apart from `sources.json`, which only the notebook writes; a label ticks the
+sources about it (`proton-study::guide`).
 
 **The tutor** answers from the sources ticked, on Claude Code, Codex, Gemini or
 Antigravity, as the notebook has it set (`proton-core::study::tutor`). The
