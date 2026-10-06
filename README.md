@@ -158,7 +158,10 @@ out and why — and read once, their words kept in the notebook; a reader; notes
 and the tutor, which searches the sources you tick through Proton's own MCP
 server and cites them — each citation a number whose passage shows over it and
 opens at its place — as a plain tutor, a learning guide, or a role you write,
-in any language. Your folders are named in your own settings,
+in any language; a studio that makes study guides, briefings, FAQs, glossaries,
+timelines, mind maps, tables and learning objectives of the sources ticked,
+each citing them; and flashcards, scheduled by FSRS so they are remembered by
+the exam, reviewed with the keys 1–4, and exported for Anki. Your folders are named in your own settings,
 `{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,

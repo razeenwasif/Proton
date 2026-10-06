@@ -111,6 +111,7 @@ impl Jobs {
         let engine = Engine::parse(&settings.engine).unwrap_or(Engine::Claude);
         let title = match (make, options.focus.trim()) {
             (Make::Report, _) => options.ask.trim().chars().take(60).collect::<String>(),
+            (Make::Flashcards, _) if options.deck.is_some() => format!("More cards for {}", options.deck.as_deref().and_then(|d| book.deck(d)).map_or_else(String::new, |d| d.title)),
             (_, "") => make.title().to_string(),
             (_, focus) => format!("{}: {focus}", make.title()),
         };
@@ -271,7 +272,7 @@ fn asking(book: &Book, asked: &Asked, tutors: &mut dyn Tutors, roots: &[(String,
     let library = snapshot::library(book);
     let whole: Vec<proton_library::Hit> = library.all().into_iter().filter(|h| ticked.contains(&h.doc)).collect();
     let size: usize = whole.iter().map(|h| h.passage.text.len() + h.cite.len()).sum();
-    let prompt = studio::prompt(asked.make, &asked.options, &book.notebook.course);
+    let prompt = format!("{}{}", studio::prompt(asked.make, &asked.options, &book.notebook.course), studio::known(book, asked.make, &asked.options));
     if size <= WHOLE {
         return Ok(Asking { instructions: studio::rules(true), prompt: format!("{prompt}\n\n---\n\nThe sources:\n\n{}", proton_library::quote(&whole)), mcp: Vec::new() });
     }
@@ -325,6 +326,13 @@ fn keep(asked: &Asked, body: &StudyMadeBody, conversation: &dyn Conversation) ->
         StudyMadeBody::Prose { markdown } => markdown.lines().find_map(|l| l.strip_prefix("# ")).map(|t| t.trim().to_string()).unwrap_or_else(|| asked.title.clone()),
         _ => asked.title.clone(),
     };
+    // Cards asked for a deck there is go into it.
+    if let (Some(deck), StudyMadeBody::Cards { cards }) = (asked.options.deck.as_deref(), body) {
+        return match book.add_cards(deck, cards.clone(), &asked.id)? {
+            0 => Err("Every card it made asks what one of the deck does already.".into()),
+            _ => Ok(deck.to_string()),
+        };
+    }
     let model = conversation.fold().status().model.clone();
     let by = [asked.engine.name().to_string(), model].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
     book.keep_made(asked.make, &title, &by, &asked.id, body).map(|made| made.id)

@@ -4922,6 +4922,14 @@ function renderEvent(event) {
       study?.task(event);
       break;
 
+    case "studyDeck":
+      study?.deck(event);
+      break;
+
+    case "studyReviewing":
+      study?.reviewing(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

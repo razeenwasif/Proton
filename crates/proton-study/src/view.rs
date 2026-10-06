@@ -6,6 +6,9 @@ use proton_library::Hit;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::cite::StudyCitation;
+use crate::deck::{Mode, StudyCard, StudyCounts};
+use crate::fsrs::{Memory, State};
 use crate::model::{Note, Notebook, Origin, Role, Source, SourceStatus, Units};
 
 /// A notebook, as the list shows it.
@@ -21,10 +24,12 @@ pub struct StudySummary {
     #[ts(type = "number")]
     pub opened: u64,
     pub archived: bool,
+    /// Flashcards due today.
+    pub due: usize,
 }
 
 impl StudySummary {
-    pub fn of(slug: &str, notebook: &Notebook, sources: usize) -> StudySummary {
+    pub fn of(slug: &str, notebook: &Notebook, sources: usize, due: usize) -> StudySummary {
         StudySummary {
             slug: slug.to_string(),
             title: notebook.title.clone(),
@@ -33,6 +38,7 @@ impl StudySummary {
             sources,
             opened: notebook.opened.max(notebook.created),
             archived: notebook.archived,
+            due,
         }
     }
 }
@@ -308,4 +314,76 @@ mod reader {
         assert!(cut[1].text.contains("# a comment"));
         assert!(!cut.iter().any(|s| s.text.contains("tags:")), "front matter is not shown");
     }
+}
+
+/// Where a card is in being learnt, in a word: `new`, `learning`, `review`
+/// or `relearning`.
+pub fn card_state(memory: &Memory) -> String {
+    match (memory.reviews, memory.state) {
+        (0, _) => "new",
+        (_, State::Learning) => "learning",
+        (_, State::Review) => "review",
+        (_, State::Relearning) => "relearning",
+    }
+    .to_string()
+}
+
+/// A card, as its deck's list shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyCardRow {
+    pub card: StudyCard,
+    /// `new`, `learning`, `review` or `relearning`.
+    pub state: String,
+    /// When it is next due; `None` while it is new.
+    #[ts(type = "number | null")]
+    pub due: Option<i64>,
+    /// The chance it is remembered now, once it has been learnt.
+    pub recall: Option<f64>,
+    pub reviews: u32,
+    /// How many times it was missed.
+    pub missed: u32,
+}
+
+/// The card being reviewed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyReviewCard {
+    pub deck: String,
+    pub deck_title: String,
+    pub card: StudyCard,
+    /// `new`, `learning`, `review` or `relearning`.
+    pub state: String,
+    /// Seconds until it would be due again, rated Again, Hard, Good, Easy.
+    #[ts(type = "Array<number>")]
+    pub intervals: Vec<i64>,
+}
+
+/// A session of review, as it stands.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyReview {
+    /// The deck, or `None` for every deck of the notebook.
+    pub deck: Option<String>,
+    pub title: String,
+    pub mode: Mode,
+    pub shuffle: bool,
+    /// The card to answer now, if any is left.
+    pub card: Option<StudyReviewCard>,
+    /// The card's citations, resolved.
+    pub citations: Vec<StudyCitation>,
+    /// What is due still, of what the session is of.
+    pub left: StudyCounts,
+    /// Cards still to go, cramming or going over the missed.
+    pub remaining: usize,
+    pub done: usize,
+    pub again: usize,
+    /// When the next card being learnt comes due, while the session waits.
+    #[ts(type = "number | null")]
+    pub wait: Option<i64>,
+    /// Whether a review can be taken back.
+    pub undo: bool,
 }

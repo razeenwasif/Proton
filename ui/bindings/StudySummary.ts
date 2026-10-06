@@ -3,4 +3,8 @@
 /**
  * A notebook, as the list shows it.
  */
-export type StudySummary = { slug: string, title: string, course: string, exam: string | null, sources: number, opened: number, archived: boolean, };
+export type StudySummary = { slug: string, title: string, course: string, exam: string | null, sources: number, opened: number, archived: boolean, 
+/**
+ * Flashcards due today.
+ */
+due: number, };

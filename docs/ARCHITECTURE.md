@@ -1058,8 +1058,8 @@ stand-in home, in the sandbox; a real Lean is the scientist's to make.
 Gemini Notebook, for studying from one's own files: notebooks of sources drawn
 from a knowledge base, a tutor that answers from them and cites them, and a
 studio that makes guides, cards, quizzes and exams of them. It is being built in
-milestones; what is here is the knowledge base, notebooks, sources, the reader
-and notes.
+milestones; what is here is the knowledge base, notebooks, sources, the reader,
+notes, the tutor, the studio and flashcards.
 
 **The knowledge base** is the folders the person names (`study.roots` in their
 own settings), less what `study.exclude` leaves out — `.gitignore` lines with
@@ -1112,6 +1112,36 @@ a numbered chip whose passage shows over it and whose click opens the reader
 there, or struck through when it names nothing in the notebook. A chat is kept
 as `chats/C001.json`, its citations as resolved when given; picked up again, or
 when its engine changes, a new conversation is told what was said.
+
+**The studio** makes things of the sources ticked, each by one unattended call
+to the engine the tutor is set to (`proton-core::study::jobs`): study guides,
+briefings, FAQs, glossaries, timelines and reports of one's own asking, as
+Markdown; mind maps, tables of the columns asked for, the course's learning
+objectives and flashcards, as JSON held to a schema. A notebook of up to 120,000
+characters is given to the call whole, each passage after its citation; a larger
+one is reached through `proton-mcp`. Three calls run at once, two on any one
+engine; a call runs fifteen minutes at most; an answer that will not read is
+sent back once, saying why. TeX that JSON ate — `\frac` arriving as a form
+feed and `rac` — is mended (`proton-study::tex`). What was made is kept under
+`studio/`, and every call as `tasks/J0001.json`: what it was told and asked.
+
+**Flashcards** are decks in `studio/decks/` — basic cards and clozes
+(`{{c1::…}}`), each with its topic, objectives and citations — made about ten,
+twenty or forty at a time, easy, medium or hard, with repeats of a deck's cards
+left out (`proton-study::deck`). Every card is scheduled by FSRS-6
+(`proton-study::fsrs`: py-fsrs's scheduler, formula for formula, tested against
+its own numbers, its fuzz seeded so that it replays). The deck's
+`D001.log.jsonl` is the schedule: each rating is appended to it, an undo is a
+line of its own, and every card's memory is replayed from it. A day of study
+begins at four in the morning and holds twenty new cards and two hundred
+reviews unless `study.srs` says otherwise — cards being learnt first, then the
+reviews least likely to be remembered, then new cards; a card being learnt is
+shown up to twenty minutes early when nothing else is left. No card is due
+after the notebook's exam begins, and in the fortnight before it a retention of
+0.95 is asked for rather than 0.9. A deck is reviewed for what is due, crammed
+whole, or gone over for the cards missed in the last week, each card rated 1–4
+with when it would come back; it goes out as CSV, or as a file Anki imports with
+its TeX as MathJax.
 
 ### Trace
 

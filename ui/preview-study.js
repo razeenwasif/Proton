@@ -75,7 +75,8 @@ export function createStudyPreview(deliver) {
   function listEvent() {
     return {
       type: "studyList", folder: state.folder, open: state.open,
-      notebooks: state.notebooks.map((n) => ({ slug: n.slug, title: n.title, course: n.course, exam: n.exam, sources: (state.sources[n.slug] ?? []).length, opened: n.created, archived: n.archived })),
+      notebooks: state.notebooks.map((n) => ({ slug: n.slug, title: n.title, course: n.course, exam: n.exam, sources: (state.sources[n.slug] ?? []).length, opened: n.created, archived: n.archived,
+        due: n.slug === "comp3670-exam" ? deck.cards.filter((r) => r.state === "new" || (r.due ?? 0) <= Math.floor(Date.now() / 1000)).length : 0 })),
     };
   }
 
@@ -175,7 +176,39 @@ export function createStudyPreview(deliver) {
   const studio = {
     jobs: /** @type {any[]} */ ([]),
     made: [{ id: "M001", kind: "mindMap", title: "Search", made: now - 5000, by: "Claude Code · claude-opus-5-5", task: "J0001" },
-      { id: "R001", kind: "studyGuide", title: "COMP3670 — Search, a study guide", made: now - 4000, by: "Codex · gpt-6.1-sol", task: "J0002" }],
+      { id: "R001", kind: "studyGuide", title: "COMP3670 — Search, a study guide", made: now - 4000, by: "Codex · gpt-6.1-sol", task: "J0002" },
+      { id: "D001", kind: "flashcards", title: "Flashcards: search", made: now - 3000, by: "Claude Code · claude-opus-5-5", task: "J0003" }],
+  };
+  /** A deck, and a stand-in for its schedule: the real one is FSRS, replayed from a log in the core. */
+  const card = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {string} */ front, /** @type {string} */ back, /** @type {string[]} */ cites) =>
+    ({ id, kind, front, back, topic: "Search", objectives: [], cites, task: "J0003", added: now - 3000, edited: null });
+  const deck = {
+    cards: [
+      { card: card("C001", "basic", "Why is uniform-cost search optimal?", "It expands nodes in order of path cost $g(n)$, so the first goal expanded is the cheapest [[S02 § Search › Uniform cost L40-58]].", ["S02 § Search › Uniform cost L40-58"]),
+        state: "review", due: now - 600, recall: 0.86, reviews: 4, missed: 1 },
+      { card: card("C002", "cloze", "A heuristic is {{c1::admissible}} when it never overestimates: {{c2::$h(n) \\le h^*(n)$::an inequality}}.", "", ["S01 p. 3"]),
+        state: "new", due: null, recall: null, reviews: 0, missed: 0 },
+      { card: card("C003", "basic", "What does A* order its frontier by?", "$f(n) = g(n) + h(n)$ [[S01 p. 1]]", ["S01 p. 1"]), state: "new", due: null, recall: null, reviews: 0, missed: 0 },
+    ],
+    next: 4,
+  };
+  const deckEvent = () => {
+    const counts = { new: deck.cards.filter((r) => r.state === "new").length, learning: 0, review: deck.cards.filter((r) => r.state === "review" && (r.due ?? 0) <= Math.floor(Date.now() / 1000)).length,
+      missed: deck.cards.filter((r) => r.missed).length, total: deck.cards.length };
+    return { type: "studyDeck", made: studio.made.find((m) => m.id === "D001"), cards: deck.cards, counts, citations: cites };
+  };
+  /** @type {{mode: string, deck: string | null, queue: string[], done: number, again: number, history: string[]} | null} */
+  let session = null;
+  const reviewEvent = () => {
+    if (!session) return { type: "studyReviewing", review: null };
+    const id = session.queue[0];
+    const row = deck.cards.find((r) => r.card.id === id);
+    const left = { new: deck.cards.filter((r) => r.state === "new" && session?.queue.includes(r.card.id)).length, learning: 0,
+      review: deck.cards.filter((r) => r.state !== "new" && session?.queue.includes(r.card.id)).length, missed: deck.cards.filter((r) => r.missed).length, total: deck.cards.length };
+    return { type: "studyReviewing", review: {
+      deck: session.deck, title: session.deck ? "Flashcards: search" : "COMP3670 — the final exam", mode: session.mode, shuffle: false,
+      card: row ? { deck: "D001", deckTitle: "Flashcards: search", card: row.card, state: row.state, intervals: row.state === "new" ? [60, 330, 600, 4 * 86400] : [600, 3 * 86400, 9 * 86400, 21 * 86400] } : null,
+      citations: cites, left, remaining: session.mode === "due" ? 0 : session.queue.length, done: session.done, again: session.again, wait: null, undo: session.history.length > 0 } };
   };
   const studioEvent = () => ({ type: "studyStudio", ...studio });
   const cites = state.chat.turns[0].citations;
@@ -327,9 +360,58 @@ export function createStudyPreview(deliver) {
           return [studioEvent()];
         }
         case "studyShowMade": {
+          if (command.id === "D001") return [deckEvent()];
           const made = studio.made.find((m) => m.id === command.id);
           return made ? [{ type: "studyMadeOpen", made, body: BODIES[command.id], citations: cites }] : [];
         }
+        case "studyReview": {
+          const all = deck.cards.map((r) => r.card.id);
+          const queue = command.mode === "due" ? deck.cards.filter((r) => r.state === "new" || (r.due ?? 0) <= Math.floor(Date.now() / 1000)).map((r) => r.card.id)
+            : command.mode === "missed" ? deck.cards.filter((r) => r.missed).map((r) => r.card.id) : all;
+          session = { mode: command.mode, deck: command.deck, queue, done: 0, again: 0, history: [] };
+          return [reviewEvent()];
+        }
+        case "studyRate": {
+          if (!session?.queue.length) return [];
+          const id = /** @type {string} */ (session.queue.shift());
+          const row = deck.cards.find((r) => r.card.id === id);
+          session.done += 1;
+          session.history.push(id);
+          if (command.rating === "again") {
+            session.again += 1;
+            session.queue.splice(Math.min(2, session.queue.length), 0, id);
+            if (row) row.missed += 1;
+          }
+          if (row) Object.assign(row, { state: command.rating === "again" ? "learning" : "review", reviews: row.reviews + 1, due: Math.floor(Date.now() / 1000) + 86400, recall: 0.9 });
+          return [reviewEvent()];
+        }
+        case "studyReviewUndo": {
+          const id = session?.history.pop();
+          if (!session || !id) return [];
+          session.done -= 1;
+          session.queue.unshift(id);
+          return [reviewEvent()];
+        }
+        case "studyReviewEnd": {
+          const scoped = session?.deck;
+          session = null;
+          return [{ type: "studyReviewing", review: null }, listEvent(), ...(scoped ? [deckEvent()] : [])];
+        }
+        case "studyCard": {
+          if (command.card) {
+            const row = deck.cards.find((r) => r.card.id === command.card);
+            if (row) Object.assign(row.card, { kind: command.kind, front: command.front, back: command.back, topic: command.topic, edited: Math.floor(Date.now() / 1000) });
+          } else {
+            const id = `C${String(deck.next++).padStart(3, "0")}`;
+            deck.cards.push({ card: { ...card(id, command.kind, command.front, command.back, []), topic: command.topic, task: "" }, state: "new", due: null, recall: null, reviews: 0, missed: 0 });
+          }
+          return [deckEvent()];
+        }
+        case "studyCardDelete":
+          deck.cards = deck.cards.filter((r) => r.card.id !== command.card);
+          return [deckEvent()];
+        case "studyDeckExport":
+          return [{ type: "notice", level: "info", text: `${deck.cards.length} cards written to ~/Github/Notebooks/comp3670-exam/exports/D001-flashcards-search.${command.anki ? "anki.txt. In Anki: File › Import, and choose it." : "csv."}` }];
         case "studyShowTask":
           return [{ type: "studyTask", id: command.id, title: "Search", engine: "claude", model: "claude-opus-5-5", state: "done", why: null,
             instructions: "The notebook's sources are given to you below, every passage beginning with its citation in double brackets…", prompt: "Map the ideas of these sources…\n\n---\n\nThe sources:\n\n[[S01 p. 1]]\nQuestion 1 …" }];

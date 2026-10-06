@@ -22,6 +22,9 @@
 //! another.
 
 pub mod cite;
+pub mod clock;
+pub mod deck;
+pub mod fsrs;
 pub mod lock;
 pub mod model;
 pub mod role;

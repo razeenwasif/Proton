@@ -11,6 +11,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
+import { createCards } from "./study-cards.js";
 import { createChat } from "./study-chat.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
 import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
@@ -27,7 +28,7 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {import("./study-studio.js").MadeEvent} MadeEvent */
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
 /** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
- *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent}} Shown */
+ *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"}} Shown */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
  *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
 
@@ -80,10 +81,26 @@ export function createStudy(host) {
   const chat = createChat({
     dispatch: host.dispatch, ws, readOnly: () => readOnly(),
     show: (id, at) => host.dispatch({ type: "studyShow", id, at }),
-    // The citations of something made, for its chips.
-    lookup: (key) => (key === "made" && state.shown.kind === "made" ? state.shown.made.citations : []),
+    // The citations of something made, a deck or a card, for their chips.
+    lookup: (key) => {
+      if (key !== "made") return [];
+      const shown = state.shown;
+      if (shown.kind === "made") return shown.made.citations;
+      return shown.kind === "deck" || shown.kind === "review" ? cards.citations(shown.kind) : [];
+    },
   });
   const studio = createStudio({ box: els.studio, dispatch: host.dispatch, readOnly: () => readOnly() });
+  const cards = createCards({
+    dispatch: host.dispatch, readOnly: () => readOnly(),
+    // A card explained: asked in the chat, from its sources.
+    explain: (text) => {
+      state.shown = { kind: "chat" };
+      state.back = "chat";
+      els.stage.innerHTML = "";
+      render();
+      host.dispatch({ type: "studyAsk", text });
+    },
+  });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: boolean, removing: string | null,
@@ -120,8 +137,9 @@ export function createStudy(host) {
     els.list.innerHTML = shown.map((n) => {
       const on = n.slug === state.open && !state.creating;
       const sub = [n.course, count(n.sources, "source", "sources")].filter(Boolean).join(" · ");
+      const due = n.due ? `<span class="st-due" title="${esc(count(n.due, "card", "cards"))} due today">${n.due}</span>` : "";
       return `<button class="cc-session st-item${on ? " on" : ""}" data-study-open="${esc(n.slug)}"${on ? ' aria-current="true"' : ""}>` +
-        `<span class="cc-session-name">${esc(n.title)}</span><span class="cc-session-where">${esc(sub)}</span></button>`;
+        `<span class="cc-session-name">${esc(n.title)}</span><span class="cc-session-where">${esc(sub)}</span>${due}</button>`;
     }).join("");
   }
 
@@ -253,7 +271,7 @@ export function createStudy(host) {
     const shown = state.list.filter((n) => !n.archived);
     if (!shown.length || state.creating) return newFormHtml();
     const cards = shown.map((n) => `<button class="st-card st-book" data-study-open="${esc(n.slug)}">` +
-      `<b>${esc(n.title)}</b><span class="st-faint">${esc([n.course, count(n.sources, "source", "sources"), n.exam ? `exam ${n.exam}` : ""].filter(Boolean).join(" · "))}</span></button>`).join("");
+      `<b>${esc(n.title)}</b><span class="st-faint">${esc([n.course, count(n.sources, "source", "sources"), n.exam ? `exam ${n.exam}` : "", n.due ? `${count(n.due, "card", "cards")} due` : ""].filter(Boolean).join(" · "))}</span></button>`).join("");
     return `<div class="st-home"><div class="st-books">${cards}</div></div>`;
   }
 
@@ -320,8 +338,12 @@ export function createStudy(host) {
     const tabs = `<div class="rs-tabs st-tabs" role="tablist" aria-label="Notebook">` +
       `<button class="rs-tab${on("chat")}" role="tab" aria-selected="${state.shown.kind === "chat"}" data-study-view="chat">Chat</button>` +
       `<button class="rs-tab${on("overview")}" role="tab" aria-selected="${state.shown.kind === "overview"}" data-study-view="overview">Sources<span class="rs-count">${usable || ""}</span></button></div>`;
+    const due = state.list.find((n) => n.slug === nb.slug)?.due ?? 0;
+    const review = readOnly() ? ""
+      : cards.active() ? `<button class="cc-primary" data-study-resume title="The session of flashcards under way">${icon("cards")}Back to review</button>`
+        : due ? `<button class="cc-primary" data-study-review="due" title="Every deck's cards due today">${icon("cards")}Review ${due}</button>` : "";
     return `<div class="st-nb-head"><div><h1>${esc(nb.title)}</h1>` +
-      `<span class="st-faint">${esc(facts || "No course or exam day yet")}</span></div>${tabs}` +
+      `<span class="st-faint">${esc(facts || "No course or exam day yet")}</span></div>${tabs}${review}` +
       (readOnly() ? "" : `<button class="cc-quiet" data-study-details>Edit</button>`) + `</div>`;
   }
 
@@ -436,6 +458,10 @@ export function createStudy(host) {
       els.stage.innerHTML = taskHtml(shown.task);
       return;
     }
+    if (shown.kind === "deck" || shown.kind === "review") {
+      cards.render(els.stage, shown.kind);
+      return;
+    }
     els.stage.innerHTML = notebookHtml();
   }
 
@@ -471,7 +497,13 @@ export function createStudy(host) {
       return;
     }
     if (studio.click(t)) return;
+    if (els.stage.contains(t) && cards.click(t, () => renderStage())) return;
     const at_ = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
+    if (at_("[data-study-resume]")) {
+      state.shown = { kind: "review" };
+      els.stage.innerHTML = "";
+      return render();
+    }
     const task = at_("[data-study-task]");
     if (task) return host.dispatch({ type: "studyShowTask", id: task.dataset.studyTask });
     const bin = at_("[data-study-bin-made]");
@@ -621,6 +653,7 @@ export function createStudy(host) {
     const t = /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target);
     if (t.closest("[data-study-picker]")) return;
     if (chat.change(t)) return;
+    if (t instanceof HTMLInputElement && cards.change(t)) return;
     const nb = state.notebook;
     if (!nb) return;
     const tick = t.dataset.studyTick;
@@ -638,6 +671,7 @@ export function createStudy(host) {
   });
 
   ws.addEventListener("keydown", (e) => {
+    if (state.shown.kind === "review" && cards.key(e, () => renderStage())) return;
     chat.key(e);
   });
 
@@ -648,6 +682,10 @@ export function createStudy(host) {
     if (form.matches("[data-study-make-form]")) {
       e.preventDefault();
       studio.submit(form);
+      return;
+    }
+    if (els.stage.contains(form) && cards.submit(form)) {
+      e.preventDefault();
       return;
     }
     e.preventDefault();
@@ -734,15 +772,43 @@ export function createStudy(host) {
     if (chat.live(event) && state.shown.kind === "chat") chat.renderLive();
   }
 
+  /** Calls seen done, so a deck open is asked for again only when one adds to it. */
+  const ended = new Set();
+
   /** The studio's calls, and what they made. @param {import("./study-studio.js").StudioEvent} event */
   function studioEvent(event) {
     studio.studio(event);
+    for (const job of event.jobs) {
+      if (job.state !== "done" || ended.has(job.id)) continue;
+      ended.add(job.id);
+      // More cards for the deck being looked at: drawn with them.
+      if (state.shown.kind === "deck" && job.made && job.made === cards.openDeck()) host.dispatch({ type: "studyShowMade", id: job.made });
+    }
   }
 
   /** Something made, opened in the middle. @param {MadeEvent} event */
   function made(event) {
     state.shown = { kind: "made", made: event };
     els.stage.innerHTML = "";
+    render();
+  }
+
+  /** A deck of flashcards, opened in the middle. @param {import("./study-cards.js").DeckEvent} event */
+  function deckEvent(event) {
+    cards.deck(event);
+    // Drawn again where it is; opened, unless a session is being shown.
+    if (state.shown.kind !== "review") state.shown = { kind: "deck" };
+    if (state.shown.kind === "deck") renderStage();
+  }
+
+  /** The session of review, as it stands. @param {{review: import("./bindings/StudyReview").StudyReview | null}} event */
+  function reviewingEvent(event) {
+    if (cards.reviewing(event)) {
+      state.shown = { kind: "review" };
+    } else if (state.shown.kind === "review") {
+      state.shown = { kind: state.back };
+      els.stage.innerHTML = "";
+    }
     render();
   }
 
@@ -774,6 +840,7 @@ export function createStudy(host) {
   function closed() {
     state.notebook = null;
     state.open = null;
+    cards.clear();
     picker.close();
     render();
   }
@@ -781,5 +848,6 @@ export function createStudy(host) {
   render();
 
   return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
+    deck: deckEvent, reviewing: reviewingEvent,
     kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
 }

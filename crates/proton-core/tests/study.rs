@@ -701,3 +701,133 @@ fn the_studio_runs_three_calls_at_once_and_two_on_an_engine() {
     assert!(seen.iter().any(|jobs| jobs.iter().any(|j| j.state == "waiting")), "the rest waited their turn");
     session.shutdown();
 }
+
+fn reviewing(events: &[Event]) -> Option<Option<proton_study::view::StudyReview>> {
+    events.iter().rev().find_map(|e| match e {
+        Event::StudyReviewing { review } => Some(review.clone()),
+        _ => None,
+    })
+}
+
+fn deck_of(events: &[Event]) -> Option<(Vec<proton_study::view::StudyCardRow>, proton_study::deck::StudyCounts)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::StudyDeck { cards, counts, .. } => Some((cards.clone(), counts.clone())),
+        _ => None,
+    })
+}
+
+#[test]
+fn flashcards_are_made_reviewed_and_their_log_is_their_schedule() {
+    use proton_study::deck::{CardKind, Mode};
+    use proton_study::fsrs::Rating;
+    use proton_study::studio::{Make, Options};
+    let scratch = Scratch::new("cards");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into(), "Courses/COMP3670/Exam_2020.pdf".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 2 && sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(()),
+        _ => None,
+    });
+    log.lock().unwrap().answers.push_back(
+        r#"{"title": "Search", "cards": [
+            {"kind": "basic", "front": "Is breadth-first search complete?", "back": "Yes, when $b$ is finite.", "topic": "Search", "objectives": [], "cites": ["S01 § Search L1-2"]},
+            {"kind": "basic", "front": "Is breadth first search complete?", "back": "Yes.", "topic": "Search", "objectives": [], "cites": []},
+            {"kind": "cloze", "front": "Uniform-cost search expands the node of least {{c1::path cost $g$}}.", "back": "", "topic": "Search", "objectives": [], "cites": ["S02 p. 1"]}
+        ]}"#
+        .into(),
+    );
+
+    // Made: the repeat left out, held to its schema.
+    session.apply(Command::StudyMake { kind: Make::Flashcards, options: Options::default() });
+    let made = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        _ => None,
+    });
+    assert_eq!((made[0].id.as_str(), made[0].kind), ("D001", Make::Flashcards));
+    assert!(log.lock().unwrap().started[0].2.schema.is_some());
+    assert!(log.lock().unwrap().sent[0].contains("about 20 flashcards"));
+    let (cards, counts) = deck_of(&session.apply(Command::StudyShowMade { id: "D001".into() })).expect("the deck");
+    assert_eq!(cards.len(), 2);
+    assert_eq!((counts.new, counts.learning, counts.review), (2, 0, 0));
+    assert!(cards.iter().all(|c| c.state == "new" && c.due.is_none()));
+
+    // Reviewed: each rating written down as it is made.
+    let review = reviewing(&session.apply(Command::StudyReview { deck: Some("D001".into()), mode: Mode::Due, shuffle: false })).flatten().expect("a session");
+    let first = review.card.expect("a card");
+    assert_eq!((first.card.id.as_str(), first.state.as_str()), ("C001", "new"));
+    assert_eq!(first.intervals[..3], [60, 330, 600], "a minute; between the steps; ten minutes");
+    assert!(first.intervals[3] >= 86_400, "Easy graduates");
+    assert!(review.citations.iter().any(|c| c.source == "S01" && c.resolved));
+    let review = reviewing(&session.apply(Command::StudyRate { rating: Rating::Good, took: 1500 })).flatten().unwrap();
+    assert_eq!(review.card.as_ref().map(|c| c.card.id.as_str()), Some("C002"), "the new card while the first waits its ten minutes");
+    assert_eq!(review.card.as_ref().map(|c| c.card.kind), Some(CardKind::Cloze));
+    let review = reviewing(&session.apply(Command::StudyRate { rating: Rating::Easy, took: 900 })).flatten().unwrap();
+    assert_eq!(review.card.as_ref().map(|c| (c.card.id.as_str(), c.state.as_str())), Some(("C001", "learning")), "shown up to twenty minutes early");
+    assert_eq!((review.done, review.undo), (2, true));
+    // Taken back: the cloze again, the undo a line of its own.
+    let review = reviewing(&session.apply(Command::StudyReviewUndo)).flatten().unwrap();
+    assert_eq!(review.card.as_ref().map(|c| (c.card.id.as_str(), c.state.as_str())), Some(("C002", "new")));
+    let book = scratch.root.join("Notebooks/search");
+    let lines = std::fs::read_to_string(book.join("studio/decks/D001.log.jsonl")).unwrap();
+    assert_eq!(lines.lines().count(), 3, "{lines}");
+    assert!(lines.lines().last().unwrap().contains("\"undo\":\"C002\""));
+    session.apply(Command::StudyRate { rating: Rating::Again, took: 400 });
+    let events = session.apply(Command::StudyReviewEnd);
+    assert_eq!(reviewing(&events), Some(None));
+    let listed = events.iter().find_map(|e| match e {
+        Event::StudyList { notebooks, .. } => notebooks.iter().find(|n| n.slug == "search").map(|n| n.due),
+        _ => None,
+    });
+    assert_eq!(listed, Some(2), "both cards are being learnt, due today");
+    let (cards, counts) = deck_of(&events).expect("back to the deck");
+    assert_eq!((counts.learning, counts.missed), (2, 1));
+    assert_eq!(cards.iter().map(|c| (c.state.as_str(), c.missed)).collect::<Vec<_>>(), [("learning", 0), ("learning", 1)]);
+
+    // Cards by hand: one added, a cloze hiding nothing refused.
+    let refused = session.apply(Command::StudyCard { deck: "D001".into(), card: None, kind: CardKind::Cloze, front: "Nothing hidden".into(), back: String::new(), topic: String::new() });
+    assert!(said(&refused).iter().any(|s| s.contains("{{c1::")));
+    let (cards, _) = deck_of(&session.apply(Command::StudyCard { deck: "D001".into(), card: None, kind: CardKind::Basic, front: "What is $h^*$?".into(), back: "The true cost to the nearest goal.".into(), topic: "Heuristics".into() })).unwrap();
+    assert_eq!(cards.last().map(|c| c.card.id.as_str()), Some("C003"));
+    let (cards, _) = deck_of(&session.apply(Command::StudyCard { deck: "D001".into(), card: Some("C003".into()), kind: CardKind::Basic, front: "What is $h^*(n)$?".into(), back: "The true cost from $n$ to the nearest goal.".into(), topic: "Heuristics".into() })).unwrap();
+    assert!(cards[2].card.edited.is_some() && cards[2].card.front.contains("h^*(n)"));
+
+    // More cards for the deck: told what it has, a repeat left out.
+    log.lock().unwrap().answers.push_back(
+        r#"{"title": "More", "cards": [
+            {"kind": "basic", "front": "Is breadth-first search complete?", "back": "Yes.", "topic": "Search", "objectives": [], "cites": []},
+            {"kind": "basic", "front": "When is A* optimal?", "back": "When its heuristic is admissible.", "topic": "Heuristics", "objectives": [], "cites": ["S02 p. 1"]}
+        ]}"#
+        .into(),
+    );
+    session.apply(Command::StudyMake { kind: Make::Flashcards, options: Options { deck: Some("D001".into()), amount: proton_study::studio::Amount::Fewer, ..Default::default() } });
+    let job = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.id == "J0002" && j.state == "done").cloned(),
+        _ => None,
+    });
+    assert_eq!(job.made.as_deref(), Some("D001"));
+    assert!(log.lock().unwrap().sent[1].contains("The deck has these cards already") && log.lock().unwrap().sent[1].contains("about 10 flashcards"));
+    let (cards, _) = deck_of(&session.apply(Command::StudyShowMade { id: "D001".into() })).unwrap();
+    assert_eq!(cards.iter().map(|c| c.card.id.as_str()).collect::<Vec<_>>(), ["C001", "C002", "C003", "C004"]);
+
+    // Cramming goes through every card, due or not.
+    let review = reviewing(&session.apply(Command::StudyReview { deck: None, mode: Mode::Cram, shuffle: true })).flatten().unwrap();
+    assert_eq!((review.remaining, review.mode), (4, Mode::Cram));
+    session.apply(Command::StudyReviewEnd);
+
+    // Out, for Anki.
+    let events = session.apply(Command::StudyDeckExport { deck: "D001".into(), anki: true });
+    assert!(said(&events).iter().any(|s| s.contains("4 cards written") && s.contains("File › Import")), "{:?}", said(&events));
+    let exported = std::fs::read_to_string(book.join("exports/D001-flashcards.anki.txt")).unwrap();
+    assert!(exported.starts_with("#separator:tab") && exported.contains("Cloze\tProton::Search::Flashcards\t"), "{exported}");
+
+    // Binned, a deck's reviews go with it.
+    session.apply(Command::StudyBinMade { id: "D001".into() });
+    assert!(book.join(".notebook/bin/D001.log.jsonl").is_file() && !book.join("studio/decks/D001.json").exists());
+    session.shutdown();
+}

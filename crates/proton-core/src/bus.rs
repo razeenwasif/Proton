@@ -607,6 +607,45 @@ pub enum Command {
     StudyShowTask {
         id: String,
     },
+    /// Start a session of flashcards: what is due today, every card
+    /// (cramming), or those missed lately — of a deck, or of every deck of
+    /// the notebook.
+    StudyReview {
+        deck: Option<String>,
+        mode: proton_study::deck::Mode,
+        shuffle: bool,
+    },
+    /// Rate the card being reviewed.
+    StudyRate {
+        rating: proton_study::fsrs::Rating,
+        /// How long it was looked at before it was rated, in milliseconds.
+        took: u64,
+    },
+    /// Take back the session's last review.
+    StudyReviewUndo,
+    /// End the session of review.
+    StudyReviewEnd,
+    /// Add a card to a deck, or change one of its cards.
+    StudyCard {
+        deck: String,
+        /// `None` to add one.
+        card: Option<String>,
+        kind: proton_study::deck::CardKind,
+        front: String,
+        back: String,
+        topic: String,
+    },
+    /// Take a card out of its deck.
+    StudyCardDelete {
+        deck: String,
+        card: String,
+    },
+    /// Write a deck out into the notebook's `exports/`: for Anki to import,
+    /// or as CSV.
+    StudyDeckExport {
+        deck: String,
+        anki: bool,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1479,6 +1518,18 @@ pub enum Event {
         made: proton_study::studio::StudyMade,
         body: proton_study::studio::StudyMadeBody,
         citations: Vec<proton_study::cite::StudyCitation>,
+    },
+    /// A deck of flashcards: its cards, each with where it is in being
+    /// learnt, what of it is due, and its cards' citations resolved.
+    StudyDeck {
+        made: proton_study::studio::StudyMade,
+        cards: Vec<proton_study::view::StudyCardRow>,
+        counts: proton_study::deck::StudyCounts,
+        citations: Vec<proton_study::cite::StudyCitation>,
+    },
+    /// The session of review, as it stands; `None` once it has ended.
+    StudyReviewing {
+        review: Option<proton_study::view::StudyReview>,
     },
     /// What a call of the studio's was told and asked, and how it ended.
     StudyTask {

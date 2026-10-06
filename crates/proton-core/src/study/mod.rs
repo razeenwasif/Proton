@@ -14,6 +14,7 @@
 
 pub mod jobs;
 mod kb;
+mod review;
 pub mod tutor;
 
 use std::collections::HashMap;
@@ -80,6 +81,13 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyShowMade { .. }
             | Command::StudyBinMade { .. }
             | Command::StudyShowTask { .. }
+            | Command::StudyReview { .. }
+            | Command::StudyRate { .. }
+            | Command::StudyReviewUndo
+            | Command::StudyReviewEnd
+            | Command::StudyCard { .. }
+            | Command::StudyCardDelete { .. }
+            | Command::StudyDeckExport { .. }
     )
 }
 
@@ -142,6 +150,8 @@ pub struct Study {
     tutors: Box<dyn Tutors>,
     /// The studio's calls.
     jobs: jobs::Jobs,
+    /// The open notebook's session of flashcards, while there is one.
+    review: Option<proton_study::deck::Session>,
 }
 
 impl std::fmt::Debug for Study {
@@ -166,6 +176,7 @@ impl Default for Study {
             tutor: None,
             tutors: Box::new(tutor::Live),
             jobs: jobs::Jobs::default(),
+            review: None,
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -316,7 +327,10 @@ impl Study {
         let roots = self.kb.labelled_roots();
         if self.jobs.poll(self.tutors.as_mut(), &roots) {
             events.extend(self.studio_event());
+            // A deck made is cards due: the list says how many.
+            events.push(self.list_event());
         }
+        events.extend(self.poll_review());
         if let Some(open) = &mut self.open {
             let now = proton_study::now();
             if now.saturating_sub(open.beat) >= BEAT {
@@ -425,6 +439,13 @@ impl Study {
                 events
             }
             Command::StudyShowTask { id } => self.show_task(&id),
+            Command::StudyReview { deck, mode, shuffle } => self.start_review(deck, mode, shuffle),
+            Command::StudyRate { rating, took } => self.rate(rating, took),
+            Command::StudyReviewUndo => self.undo_review(),
+            Command::StudyReviewEnd => self.end_review(),
+            Command::StudyCard { deck, card, kind, front, back, topic } => self.save_card(&deck, card, kind, &front, &back, &topic),
+            Command::StudyCardDelete { deck, card } => self.delete_card(&deck, &card),
+            Command::StudyDeckExport { deck, anki } => self.export_deck(&deck, anki),
             _ => Vec::new(),
         }
     }
@@ -510,11 +531,11 @@ impl Study {
                     .list()
                     .into_iter()
                     .map(|(slug, notebook)| {
-                        let count = match &self.open {
-                            Some(open) if open.book.slug() == slug => open.book.sources.sources.len(),
-                            _ => Book::read(&folder.root().join(&slug)).map(|b| b.sources.sources.len()).unwrap_or(0),
+                        let (count, due) = match &self.open {
+                            Some(open) if open.book.slug() == slug => (open.book.sources.sources.len(), self.due_today(&open.book)),
+                            _ => Book::read(&folder.root().join(&slug)).map(|b| (b.sources.sources.len(), self.due_today(&b))).unwrap_or((0, 0)),
                         };
-                        StudySummary::of(&slug, &notebook, count)
+                        StudySummary::of(&slug, &notebook, count, due)
                     })
                     .collect();
                 (notebooks, Some(typed.clone()))
@@ -584,6 +605,7 @@ impl Study {
             Some(chat) => Tutor::of(chat),
             None => Tutor::new(&book),
         });
+        self.review = None;
         self.open = Some(Open { book, lock, holder, beat: now });
         Ok(())
     }
@@ -942,6 +964,7 @@ impl Study {
             tutor.stop();
         }
         self.tutor = None;
+        self.review = None;
         self.open = None;
     }
 
@@ -1078,6 +1101,11 @@ impl Study {
         if kind == proton_study::studio::Make::Report && options.ask.trim().is_empty() {
             return vec![notice("Say what the report is to be.".into(), NoticeLevel::Warn)];
         }
+        if let Some(deck) = options.deck.as_deref() {
+            if kind != proton_study::studio::Make::Flashcards || self.open.as_ref().and_then(|o| o.book.deck(deck)).is_none() {
+                return vec![notice(format!("{deck}: no such deck to add cards to"), NoticeLevel::Warn)];
+            }
+        }
         let book = match self.writable() {
             Ok(book) => book.clone(),
             Err(events) => return events,
@@ -1089,6 +1117,12 @@ impl Study {
     }
 
     fn show_made(&self, id: &str) -> Vec<Event> {
+        if id.starts_with('D') {
+            return match self.deck_event(id) {
+                Some(event) => vec![event],
+                None => vec![notice(format!("{id}: nothing made has that id"), NoticeLevel::Warn)],
+            };
+        }
         let Some(open) = &self.open else { return Vec::new() };
         let Some((made, body)) = open.book.made_one(id) else {
             return vec![notice(format!("{id}: nothing made has that id"), NoticeLevel::Warn)];
@@ -1099,6 +1133,7 @@ impl Study {
             StudyMadeBody::Map { nodes } => nodes.iter().flat_map(|n| n.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Table { rows, .. } => rows.iter().flat_map(|r| r.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Objectives { objectives } => objectives.iter().flat_map(|o| o.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            StudyMadeBody::Cards { cards } => cards.iter().flat_map(|c| c.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
         };
         let citations = proton_study::cite::resolve(&open.book, &text);
         vec![Event::StudyMadeOpen { made, body, citations }]

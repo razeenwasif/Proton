@@ -18,5 +18,9 @@ sha2 = "0.10"
 # Notes open with TOML front matter, as Research's hypotheses do.
 toml = "0.9"
 
+# Where today begins, here: the local time's offset.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 proton-library = { workspace = true, features = ["fixture"] }

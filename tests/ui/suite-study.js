@@ -246,7 +246,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 9, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 10, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -294,6 +294,108 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.pushEvents([{type: 'studyTask', id: 'J0001', title: 'Search', engine: 'claude', model: 'm', state: 'done', why: null,
       instructions: 'Rules: cite everything.', prompt: 'Map the ideas of these sources.'}]); await settle();
     assert(ws().querySelector('.st-task-view')?.textContent.includes('Map the ideas'), 'the prompt is not shown');
+    ws().querySelector('[data-study-back]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  const deckMade = {id: 'D001', kind: 'flashcards', title: 'Flashcards: search', made: 1, by: 'Claude Code', task: 'J0004'};
+  const flash = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {string} */ front, /** @type {string} */ back) =>
+    ({id, kind, front, back, topic: 'Search', objectives: [], cites: ['S01 p. 3'], task: 'J0004', added: 1, edited: null});
+  const deckEvent = {type: 'studyDeck', made: deckMade, citations: [cite(1, 'S01 p. 3')],
+    counts: {new: 1, learning: 0, review: 1, missed: 1, total: 2},
+    cards: [{card: flash('C001', 'basic', 'Why is UCS optimal?', 'It expands by path cost [[S01 p. 3]].'), state: 'review', due: 1, recall: 0.84, reviews: 3, missed: 1},
+      {card: flash('C002', 'cloze', 'A heuristic is {{c1::admissible::a word}} when $h(n) \\le h^*(n)$.', ''), state: 'new', due: null, recall: null, reviews: 0, missed: 0}]};
+  const reviewing = (/** @type {any} */ card, /** @type {Partial<any>} */ more = {}) => ({type: 'studyReviewing', review: {deck: 'D001', title: 'Flashcards: search', mode: 'due',
+    shuffle: false, card: card && {deck: 'D001', deckTitle: 'Flashcards: search', card, state: 'new', intervals: [60, 330, 600, 345600]},
+    citations: [cite(1, 'S01 p. 3')], left: {new: 1, learning: 0, review: 1, missed: 1, total: 2}, remaining: 0, done: 0, again: 0, wait: null, undo: false, ...more}});
+
+  await test('Flashcards are asked for by how many and how hard; a deck opens with what is due, and cards are written by hand', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: [deckMade]}]); await settle();
+    const studio = ws().querySelector('[data-study-studio-body]');
+    studio.querySelector('[data-study-tile="flashcards"]').click(); await settle();
+    const form = studio.querySelector('[data-study-make-form="flashcards"]');
+    form.querySelector('[name="amount"]').value = 'more';
+    form.querySelector('[name="level"]').value = 'hard';
+    const before = win.commands.length;
+    form.requestSubmit(); await settle();
+    const made = sent(before, 'studyMake')[0];
+    assert(made?.kind === 'flashcards' && made.options.amount === 'more' && made.options.level === 'hard' && made.options.deck === null, `wrong make: ${JSON.stringify(made)}`);
+    const open = win.commands.length;
+    studio.querySelector('[data-study-made="D001"]').click(); await settle();
+    assert(sent(open, 'studyShowMade')[0]?.id === 'D001', 'the deck was not asked for');
+    await win.pushEvents([deckEvent]); await settle();
+    const view = ws().querySelector('.st-deck-view');
+    assert(view && view.querySelectorAll('.st-card-row').length === 2, 'the deck is not drawn');
+    assert(view.querySelector('[data-study-review="due"]')?.textContent.includes('Study 2'), 'what is due is not offered');
+    assert(view.querySelector('.st-card-row .st-cloze.shown')?.textContent.includes('admissible'), 'a cloze is not shown whole in the list');
+    assert(view.querySelector('.st-card-row .st-cite'), 'a card\'s citation is not a chip');
+    assert(view.querySelector('.st-card-row .st-state.review') && view.textContent.includes('84% remembered'), 'where a card is in being learnt is not said');
+    // Added by hand.
+    view.querySelector('[data-study-card-add]').click(); await settle();
+    const card = ws().querySelector('[data-study-card-form="new"]');
+    card.querySelector('[name="front"]').value = 'What is $h^*$?';
+    card.querySelector('[name="back"]').value = 'The true cost to the goal.';
+    const add = win.commands.length;
+    card.requestSubmit(); await settle();
+    const asked = sent(add, 'studyCard')[0];
+    assert(asked?.deck === 'D001' && asked.card === null && asked.kind === 'basic' && asked.front === 'What is $h^*$?', `wrong card: ${JSON.stringify(asked)}`);
+    // Edited, and taken out once asked.
+    await win.pushEvents([deckEvent]); await settle();
+    ws().querySelector('[data-study-card-edit="C001"]').click(); await settle();
+    assert(ws().querySelector('[data-study-card-form="C001"] [name="front"]')?.value === 'Why is UCS optimal?', 'the card is not up to be edited');
+    ws().querySelector('[data-study-card-cancel]').click(); await settle();
+    ws().querySelector('[data-study-card-delete="C002"]').click(); await settle();
+    const gone = win.commands.length;
+    ws().querySelector('[data-study-card-delete-yes="C002"]').click(); await settle();
+    assert(sent(gone, 'studyCardDelete')[0]?.card === 'C002', 'not taken out');
+    // More cards for this deck, and out for Anki.
+    await win.pushEvents([deckEvent]); await settle();
+    ws().querySelector('[data-study-more-cards]').click(); await settle();
+    const more = win.commands.length;
+    ws().querySelector('[data-study-more-form]').requestSubmit(); await settle();
+    assert(sent(more, 'studyMake')[0]?.options.deck === 'D001', 'more cards were not asked for this deck');
+    const out = win.commands.length;
+    ws().querySelector('[data-study-export="anki"]').click(); await settle();
+    assert(sent(out, 'studyDeckExport')[0]?.anki === true, 'not written out for Anki');
+  });
+
+  await test('Review turns a card over with Space and rates it 1–4, each rating saying when it comes back; Z undoes, Esc ends', async () => {
+    const start = win.commands.length;
+    ws().querySelector('[data-study-review="due"]').click(); await settle();
+    assert(JSON.stringify(sent(start, 'studyReview')[0]) === JSON.stringify({type: 'studyReview', deck: 'D001', mode: 'due', shuffle: false}), 'no session asked for');
+    await win.pushEvents([reviewing(deckEvent.cards[1].card)]); await settle();
+    const flash = () => ws().querySelector('.st-flash');
+    assert(flash()?.querySelector('.st-cloze:not(.shown)')?.textContent === 'a word', 'the cloze is not hidden behind its hint');
+    assert(!ws().querySelector('[data-study-rate]') && ws().querySelector('[data-study-flip]'), 'it can be rated before it is turned over');
+    assert(ws().contains(doc.activeElement), 'the session does not have the keys');
+    key(' '); await settle();
+    assert(flash()?.querySelector('.st-cloze.shown')?.textContent.includes('admissible'), 'Space did not turn it over');
+    const rates = [...ws().querySelectorAll('[data-study-rate]')].map((b) => b.textContent);
+    assert(rates.length === 4 && rates[0].includes('Missed it') && rates[0].includes('1 min') && rates[1].includes('6 min') && rates[2].includes('Got it') && rates[3].includes('4 d'), `the ratings: ${rates}`);
+    const rated = win.commands.length;
+    key('3'); await settle();
+    const rate = sent(rated, 'studyRate')[0];
+    assert(rate?.rating === 'good' && typeof rate.took === 'number', `not rated: ${JSON.stringify(rate)}`);
+    await win.pushEvents([reviewing(deckEvent.cards[0].card, {done: 1, undo: true})]); await settle();
+    assert(ws().querySelector('[data-study-flip]') && flash()?.textContent.includes('Why is UCS optimal?'), 'the next card is not shown, front first');
+    const undo = win.commands.length;
+    key('z'); await settle();
+    assert(sent(undo, 'studyReviewUndo').length === 1, 'Z did not take it back');
+    // Explained in the chat; the session waits.
+    const explain = win.commands.length;
+    ws().querySelector('[data-study-explain]').click(); await settle();
+    assert(sent(explain, 'studyAsk')[0]?.text.includes('Explain this flashcard') && sent(explain, 'studyAsk')[0]?.text.includes('[[S01 p. 3]]'), 'not explained');
+    assert(!ws().querySelector('.st-flash') && ws().querySelector('[data-study-resume]'), 'the chat does not offer the session back');
+    ws().querySelector('[data-study-resume]').click(); await settle();
+    assert(ws().querySelector('.st-flash'), 'not back to the card');
+    await win.pushEvents([reviewing(null, {done: 3, again: 1, wait: Math.floor(Date.now() / 1000) + 300, left: {new: 0, learning: 1, review: 0, missed: 1, total: 2}})]); await settle();
+    assert(ws().querySelector('.st-review-done')?.textContent.includes('3 cards reviewed, 1 missed') && ws().textContent.includes('comes back at'), 'the end of the session is not said');
+    const end = win.commands.length;
+    key('Escape'); await settle();
+    assert(sent(end, 'studyReviewEnd').length === 1, 'Esc did not end it');
+    await win.pushEvents([{type: 'studyReviewing', review: null}, deckEvent]); await settle();
+    assert(ws().querySelector('.st-deck-view') && !ws().querySelector('.st-review'), 'not back to the deck');
     ws().querySelector('[data-study-back]').click(); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });

@@ -24,6 +24,7 @@ import { answerHtml } from "./study-chat.js";
 /** What can be made, in the order offered: its kind, name, icon and what it asks for. */
 export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["studyGuide", "Study guide", "book", "Each topic's key ideas, worked examples and practice questions"],
+  ["flashcards", "Flashcards", "cards", "Cards to learn by, each brought back as it is about to be forgotten"],
   ["objectives", "Learning objectives", "target", "What you must be able to do in the exam"],
   ["faq", "FAQ", "chat", "The questions a student asks, answered"],
   ["glossary", "Glossary", "text", "Every term, as the sources define it"],
@@ -85,6 +86,10 @@ export function madeHtml(e, readOnly) {
     content = `<div class="st-table-box" data-turn="made"><table class="st-table"><thead><tr>${body.columns.map((c) => `<th>${esc(c)}</th>`).join("")}<th></th></tr></thead>` +
       `<tbody>${body.rows.map((r) => `<tr>${r.cells.map((cell) => `<td>${markdown(cell).replace(/^<p>|<\/p>\s*$/g, "")}</td>`).join("")}<td>${chips(r.cites)}</td></tr>`).join("")}</tbody></table>` +
       `<p class="st-faint">Kept beside it as a CSV: studio/tables/${esc(made.id)}.csv</p></div>`;
+  } else if (body.shape === "cards") {
+    // A deck opens as a deck (study-cards.js); this is only its cards, read.
+    content = `<ol class="st-cards" data-turn="made">${body.cards.map((c) => `<li class="st-card-row"><div class="st-card-sides">` +
+      `<div class="st-card-front md">${answerHtml(c.front, citations)}</div><div class="st-card-back md">${answerHtml(c.back, citations)}</div></div></li>`).join("")}</ol>`;
   } else {
     const topics = [...new Set(body.objectives.map((o) => o.topic))];
     content = `<div class="st-objectives" data-turn="made">${topics.map((t) => `<section><h3>${esc(t)}</h3><ol>${body.objectives.filter((o) => o.topic === t)
@@ -107,11 +112,15 @@ export function createStudio(host) {
   const state = { studio: null, asking: null };
 
   function optionsHtml(/** @type {Kind} */ kind) {
+    const focus = `<input name="focus" placeholder="A topic to centre it on — or leave it to cover everything ticked" autocomplete="off">`;
     const field = kind === "table"
       ? `<input name="columns" placeholder="Columns, by commas: Algorithm, Complete?, Optimal?, Time" autocomplete="off" required>`
       : kind === "report"
         ? `<textarea name="ask" rows="3" placeholder="What it should be: “A one-page cheat sheet of every search algorithm’s complexity.”" required></textarea>`
-        : `<input name="focus" placeholder="A topic to centre it on — or leave it to cover everything ticked" autocomplete="off">`;
+        : kind === "flashcards"
+          ? `<div class="st-card-form-row"><select name="amount" aria-label="How many"><option value="fewer">Fewer — about 10</option><option value="standard" selected>About 20</option><option value="more">More — about 40</option></select>` +
+            `<select name="level" aria-label="How hard"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></div>${focus}`
+          : focus;
     return `<form class="st-make-form" data-study-make-form="${kind}" novalidate>${field}
         <div class="rs-actions"><button type="button" class="cc-quiet" data-study-make-cancel>Cancel</button><button type="submit" class="cc-primary">Make</button></div></form>`;
   }
@@ -190,6 +199,9 @@ export function createStudio(host) {
       focus: String(data.get("focus") ?? "").trim(),
       ask: String(data.get("ask") ?? "").trim(),
       columns: String(data.get("columns") ?? "").split(",").map((c) => c.trim()).filter(Boolean),
+      amount: String(data.get("amount") ?? "standard"),
+      level: String(data.get("level") ?? "medium"),
+      deck: null,
     };
     if ((kind === "table" && !options.columns.length) || (kind === "report" && !options.ask)) {
       /** @type {HTMLElement | null} */ (form.querySelector("input, textarea"))?.focus();

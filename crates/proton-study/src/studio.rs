@@ -9,6 +9,7 @@
 //! studio/reports/R001.md    a study guide, a briefing, an FAQ, a glossary…
 //! studio/maps/M001.json     a mind map: nodes, each with its parent
 //! studio/tables/T001.json   a table of the columns asked for, and T001.csv
+//! studio/decks/D001.json    flashcards, and D001.log.jsonl, their reviews ([`crate::deck`])
 //! objectives.json           what a student must be able to do, O001…
 //! tasks/J0001.json          each call: what it was asked, by whom, and how it ended
 //! ```
@@ -22,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ts_rs::TS;
 
+use crate::deck::{self, StudyCard};
 use crate::store::Book;
 
 /// What the studio can make.
@@ -39,6 +41,7 @@ pub enum Make {
     MindMap,
     Table,
     Objectives,
+    Flashcards,
 }
 
 /// What a kind of thing made is, on the disk.
@@ -49,6 +52,8 @@ pub enum Shape {
     Map,
     Table,
     Objectives,
+    /// Cards, in `studio/decks/`.
+    Deck,
 }
 
 impl Make {
@@ -63,6 +68,7 @@ impl Make {
             Make::MindMap => "Mind map",
             Make::Table => "Table",
             Make::Objectives => "Learning objectives",
+            Make::Flashcards => "Flashcards",
         }
     }
 
@@ -71,6 +77,7 @@ impl Make {
             Make::MindMap => Shape::Map,
             Make::Table => Shape::Table,
             Make::Objectives => Shape::Objectives,
+            Make::Flashcards => Shape::Deck,
             _ => Shape::Prose,
         }
     }
@@ -86,11 +93,12 @@ impl Make {
             Make::MindMap => "mindMap",
             Make::Table => "table",
             Make::Objectives => "objectives",
+            Make::Flashcards => "flashcards",
         }
     }
 
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -110,6 +118,58 @@ pub struct Options {
     /// A table's columns.
     #[serde(default)]
     pub columns: Vec<String>,
+    /// How many cards or questions: fewer, the usual, or more.
+    #[serde(default)]
+    pub amount: Amount,
+    /// How hard they are to be.
+    #[serde(default)]
+    pub level: Level,
+    /// The deck cards are to be added to, rather than a new one.
+    #[serde(default)]
+    pub deck: Option<String>,
+}
+
+/// How many cards or questions to make.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "StudyAmount")]
+#[serde(rename_all = "camelCase")]
+pub enum Amount {
+    Fewer,
+    #[default]
+    Standard,
+    More,
+}
+
+impl Amount {
+    /// About how many cards.
+    pub fn cards(self) -> usize {
+        match self {
+            Amount::Fewer => 10,
+            Amount::Standard => 20,
+            Amount::More => 40,
+        }
+    }
+}
+
+/// How hard cards or questions are to be.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "StudyLevel")]
+#[serde(rename_all = "camelCase")]
+pub enum Level {
+    Easy,
+    #[default]
+    Medium,
+    Hard,
+}
+
+impl Level {
+    fn says(self) -> &'static str {
+        match self {
+            Level::Easy => "Keep them easy: definitions, facts and notation, recalled.",
+            Level::Medium => "Make them test understanding: why things are so, when a method applies, how one idea differs from the next.",
+            Level::Hard => "Make them hard: applying a method to a new case, the distinctions students get wrong, results derived in a step or two.",
+        }
+    }
 }
 
 /// The rules every call works by.
@@ -153,6 +213,16 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
             "Make a table of these sources with the columns {}: a row for each thing the sources describe that the columns fit, each cell from the sources, and each row's citations.{focus}",
             options.columns.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ")
         ),
+        Make::Flashcards => format!(
+            "Make about {} flashcards of these sources, for a student of {course} learning them for the exam. {} Each card tests one idea — \
+             a definition, a result and when it holds, a step of a method, a distinction, a formula, a mistake students make — and is \
+             answered by the sources. A basic card asks on its front and answers on its back, in a sentence or a formula. A cloze card \
+             hides what is to be remembered in its front as {{{{c1::…}}}} — {{{{c2::…}}}} for a second — and its back says anything more; \
+             use one where a blank tests better than a question, as for a definition or a formula. Never two cards that ask the same thing. \
+             Give each its topic and citations.{focus}",
+            options.amount.cards(),
+            options.level.says()
+        ),
         Make::Objectives => format!(
             "List the learning objectives of {course} these sources set: what a student must be able to do in the exam, each beginning with a \
              verb — explain, derive, apply, compare, prove — and specific enough to test. Past exam papers show what is asked; weigh them. Give \
@@ -163,6 +233,28 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
         Shape::Prose => format!("{ask}\n\nWrite it in Markdown, starting with a # title. Answer with the document alone."),
         _ => format!("{ask}\n\nAnswer with JSON alone, as the schema says."),
     }
+}
+
+/// What else a call is told of its notebook: for cards, the learning
+/// objectives they can be tagged with, and the cards a deck already has.
+pub fn known(book: &Book, make: Make, options: &Options) -> String {
+    if make != Make::Flashcards {
+        return String::new();
+    }
+    let mut out = String::new();
+    if let Some((_, StudyMadeBody::Objectives { objectives })) = book.made_one("objectives") {
+        out.push_str("\n\nThe notebook's learning objectives — tag each card with the ids of those it tests:\n");
+        for o in &objectives {
+            out.push_str(&format!("- {} ({}): {}\n", o.id, o.topic, o.text));
+        }
+    }
+    if let Some(deck) = options.deck.as_deref().and_then(|id| book.deck(id)) {
+        out.push_str("\n\nThe deck has these cards already; make none that ask what they ask:\n");
+        for card in &deck.cards {
+            out.push_str(&format!("- {}\n", card.front.lines().next().unwrap_or_default()));
+        }
+    }
+    out
 }
 
 /// The JSON a structured thing must be.
@@ -188,6 +280,23 @@ pub fn schema(make: Make) -> Option<Value> {
                 "rows": { "type": "array", "items": {
                     "type": "object", "additionalProperties": false, "required": ["cells", "cites"],
                     "properties": { "cells": { "type": "array", "items": { "type": "string" } }, "cites": cites }
+                }}
+            }
+        }),
+        Shape::Deck => json!({
+            "type": "object", "additionalProperties": false, "required": ["title", "cards"],
+            "properties": {
+                "title": { "type": "string" },
+                "cards": { "type": "array", "maxItems": 60, "items": {
+                    "type": "object", "additionalProperties": false, "required": ["kind", "front", "back", "topic", "objectives", "cites"],
+                    "properties": {
+                        "kind": { "type": "string", "enum": ["basic", "cloze"] },
+                        "front": { "type": "string" },
+                        "back": { "type": "string" },
+                        "topic": { "type": "string" },
+                        "objectives": { "type": "array", "items": { "type": "string" }, "description": "The ids of the learning objectives it tests, if the notebook has them: O003" },
+                        "cites": cites
+                    }
                 }}
             }
         }),
@@ -239,6 +348,7 @@ pub enum StudyMadeBody {
     Map { nodes: Vec<StudyMapNode> },
     Table { columns: Vec<String>, rows: Vec<StudyTableRow> },
     Objectives { objectives: Vec<StudyObjective> },
+    Cards { cards: Vec<StudyCard> },
 }
 
 /// Something made, as the studio lists it and keeps its header.
@@ -296,6 +406,7 @@ pub fn read(make: Make, answer: &str, structured: Option<Value>) -> Result<Study
             }
             Ok(StudyMadeBody::Table { columns, rows })
         }
+        Shape::Deck => Ok(StudyMadeBody::Cards { cards: deck::read_cards(&value)? }),
         Shape::Objectives => {
             #[derive(Deserialize)]
             struct Said {
@@ -341,19 +452,27 @@ impl Book {
             Shape::Prose => self.dir().join("studio/reports"),
             Shape::Map => self.dir().join("studio/maps"),
             Shape::Table => self.dir().join("studio/tables"),
+            Shape::Deck => self.dir().join("studio/decks"),
             Shape::Objectives => self.dir().to_path_buf(),
         }
     }
 
-    /// Keep something made: a new file for a report, a map or a table; the
-    /// notebook's objectives replaced, its ids kept stable for what has a
-    /// text it had before.
+    /// Keep something made: a new file for a report, a map, a table or a
+    /// deck; the notebook's objectives replaced.
     pub fn keep_made(&self, kind: Make, title: &str, by: &str, task: &str, body: &StudyMadeBody) -> Result<StudyMade, String> {
         let made = crate::now();
+        if let StudyMadeBody::Cards { cards } = body {
+            let id = self.new_deck_id();
+            let cards: Vec<StudyCard> = cards.iter().cloned().map(|c| StudyCard { task: task.to_string(), ..c }).collect();
+            let deck = deck::Deck { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string(), next: cards.len() as u32 + 1, cards };
+            self.save_deck(&id, &deck)?;
+            return Ok(StudyMade { id, kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() });
+        }
         let (letter, ext) = match kind.shape() {
             Shape::Prose => ('R', "md"),
             Shape::Map => ('M', "json"),
             Shape::Table => ('T', "json"),
+            Shape::Deck => ('D', "json"),
             Shape::Objectives => ('O', "json"),
         };
         let header = Header { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() };
@@ -396,7 +515,7 @@ impl Book {
     /// Everything made, the latest first.
     pub fn made(&self) -> Vec<StudyMade> {
         let mut out: Vec<StudyMade> = Vec::new();
-        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json")] {
+        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json")] {
             for entry in std::fs::read_dir(self.studio(shape)).into_iter().flat_map(|e| e.flatten()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let Some(id) = name.strip_suffix(&format!(".{ext}")) else { continue };
@@ -420,6 +539,7 @@ impl Book {
                 "R" => (self.studio(Shape::Prose).join(format!("{id}.md")), true),
                 "M" => (self.studio(Shape::Map).join(format!("{id}.json")), false),
                 "T" => (self.studio(Shape::Table).join(format!("{id}.json")), false),
+                "D" => (self.studio(Shape::Deck).join(format!("{id}.json")), false),
                 _ => return None,
             },
             _ => return None,
@@ -438,27 +558,33 @@ impl Book {
             Shape::Map => StudyMadeBody::Map { nodes: serde_json::from_value(value["nodes"].clone()).ok()? },
             Shape::Table => StudyMadeBody::Table { columns: serde_json::from_value(value["columns"].clone()).ok()?, rows: serde_json::from_value(value["rows"].clone()).ok()? },
             Shape::Objectives => StudyMadeBody::Objectives { objectives: serde_json::from_value(value["objectives"].clone()).ok()? },
+            Shape::Deck => StudyMadeBody::Cards { cards: serde_json::from_value(value["cards"].clone()).ok()? },
             Shape::Prose => return None,
         };
         Some((made_of(id, header), body))
     }
 
-    /// Put something made in the notebook's bin.
+    /// Put something made in the notebook's bin, with what is kept beside
+    /// it: a table's CSV, a deck's reviews.
     pub fn bin_made(&self, id: &str) -> Result<(), String> {
-        let found = std::fs::read_dir(self.dir().join("studio")).into_iter().flat_map(|e| e.flatten()).flat_map(|dir| std::fs::read_dir(dir.path()).into_iter().flat_map(|e| e.flatten())).find(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            name.split('.').next() == Some(id)
-        });
-        let path = match id {
-            "objectives" => self.dir().join("objectives.json"),
-            _ => found.map(|e| e.path()).ok_or_else(|| format!("{id}: nothing made has that id"))?,
+        let ours = |e: &std::fs::DirEntry| e.file_name().to_string_lossy().split('.').next() == Some(id);
+        let paths: Vec<PathBuf> = match id {
+            "objectives" => vec![self.dir().join("objectives.json")],
+            _ => std::fs::read_dir(self.dir().join("studio"))
+                .into_iter()
+                .flat_map(|e| e.flatten())
+                .flat_map(|dir| std::fs::read_dir(dir.path()).into_iter().flat_map(|e| e.flatten()))
+                .filter(ours)
+                .map(|e| e.path())
+                .collect(),
         };
+        if paths.is_empty() {
+            return Err(format!("{id}: nothing made has that id"));
+        }
         let bin = self.dir().join(".notebook/bin");
         std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
-        std::fs::rename(&path, bin.join(path.file_name().unwrap_or_default())).map_err(|e| e.to_string())?;
-        let csv = path.with_extension("csv");
-        if csv.is_file() {
-            let _ = std::fs::rename(&csv, bin.join(csv.file_name().unwrap_or_default()));
+        for path in paths {
+            std::fs::rename(&path, bin.join(path.file_name().unwrap_or_default())).map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -537,5 +663,38 @@ mod tests {
         book.bin_made("R001").unwrap();
         assert!(book.made_one("R001").is_none() && book.dir().join(".notebook/bin/R001.md").is_file());
         assert_eq!(new_task_id(&book), "J0001");
+    }
+
+    #[test]
+    fn a_deck_is_kept_with_its_reviews_and_binned_with_them() {
+        let book = book();
+        let answer = r#"{"title": "Search", "cards": [{"kind": "basic", "front": "Is BFS complete?", "back": "Yes, if $b$ is finite.", "topic": "Search", "objectives": ["O001"], "cites": ["S01 p. 2"]}]}"#;
+        let body = read(Make::Flashcards, answer, None).unwrap();
+        let d = book.keep_made(Make::Flashcards, "Flashcards", "claude · m", "J0003", &body).unwrap();
+        assert_eq!(d.id, "D001");
+        let deck = book.deck("D001").unwrap();
+        assert_eq!((deck.next, deck.cards[0].id.as_str(), deck.cards[0].task.as_str()), (2, "C001", "J0003"));
+        assert!(matches!(book.made_one("D001"), Some((_, StudyMadeBody::Cards { cards })) if cards.len() == 1));
+        assert!(book.made().iter().any(|m| m.id == "D001" && m.kind == Make::Flashcards));
+        // Adding: a repeat is left out, a new card numbered on.
+        let more = deck::read_cards(&json!({ "cards": [
+            { "kind": "basic", "front": "Is BFS complete?", "back": "Yes." },
+            { "kind": "basic", "front": "What does UCS expand first?", "back": "The node of least path cost." }
+        ]})).unwrap();
+        assert_eq!(book.add_cards("D001", more, "J0004").unwrap(), 1);
+        assert_eq!(book.deck("D001").unwrap().cards.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["C001", "C002"]);
+        // What a call for more is told: the objectives, and the cards there are.
+        let objectives = StudyMadeBody::Objectives { objectives: vec![StudyObjective { id: "O001".into(), text: "Explain completeness".into(), topic: "Search".into(), cites: vec![] }] };
+        book.keep_made(Make::Objectives, "Learning objectives", "", "", &objectives).unwrap();
+        let told = known(&book, Make::Flashcards, &Options { deck: Some("D001".into()), ..Default::default() });
+        assert!(told.contains("O001 (Search): Explain completeness") && told.contains("- What does UCS expand first?"), "{told}");
+        assert!(known(&book, Make::Faq, &Options::default()).is_empty());
+        let asked = prompt(Make::Flashcards, &Options { amount: Amount::More, level: Level::Hard, ..Default::default() }, "COMP3670");
+        assert!(asked.contains("about 40 flashcards") && asked.contains("Make them hard") && asked.contains("{{c1::…}}"), "{asked}");
+        // Binned, its reviews go with it.
+        book.log_review("D001", &deck::Logged { card: "C001".into(), rating: crate::fsrs::Rating::Good, at: 1, took: 0, mode: "due".into() }).unwrap();
+        book.bin_made("D001").unwrap();
+        assert!(book.deck("D001").is_none());
+        assert!(book.dir().join(".notebook/bin/D001.json").is_file() && book.dir().join(".notebook/bin/D001.log.jsonl").is_file());
     }
 }
