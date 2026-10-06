@@ -179,10 +179,10 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(form && doc.activeElement === form.querySelector('input'), 'no address to type');
     const before = win.commands.length;
     form.requestSubmit(); await settle();
-    assert(sent(before, 'studyAddUrl').length === 0, 'an empty address was sent');
+    assert(sent(before, 'studyAddUrls').length === 0, 'an empty address was sent');
     form.querySelector('input').value = 'en.wikipedia.org/wiki/Uniform-cost_search';
     form.requestSubmit(); await settle();
-    assert(sent(before, 'studyAddUrl')[0]?.url === 'en.wikipedia.org/wiki/Uniform-cost_search', `not sent: ${JSON.stringify(sent(before, 'studyAddUrl'))}`);
+    assert(JSON.stringify(sent(before, 'studyAddUrls')[0]?.urls) === '["en.wikipedia.org/wiki/Uniform-cost_search"]', `not sent: ${JSON.stringify(sent(before, 'studyAddUrls'))}`);
     assert(!ws().querySelector('[data-study-web-form]'), 'the form stayed up');
     const url = 'https://en.wikipedia.org/wiki/Uniform-cost_search';
     await win.pushEvents([notebook([row('S01'), row('S02', {kind: 'web', units: 'lines', count: 42, title: 'Uniform-cost search', origin: {from: 'web', url, fetched: 1_790_000_000}}),
@@ -303,7 +303,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 18, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 20, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -353,6 +353,47 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(ws().querySelector('.st-task-view')?.textContent.includes('Map the ideas'), 'the prompt is not shown');
     ws().querySelector('[data-study-back]').click(); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('Deep Research asks what to research; what it found is ticked to add, its report can be a source, and a page opens in the browser', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    const url = (/** @type {string} */ path) => `https://example.edu/${path}`;
+    await win.pushEvents([notebook([row('S01'), row('S05', {kind: 'web', units: 'lines', title: 'UCS', origin: {from: 'web', url: url('ucs'), fetched: 1}})]),
+      {type: 'studyStudio', jobs: [], made: []}]); await settle();
+    const studio = ws().querySelector('[data-study-studio-body]');
+    studio.querySelector('[data-study-tile="deepResearch"]').click(); await settle();
+    const form = studio.querySelector('[data-study-make-form="deepResearch"]');
+    assert(form?.textContent.includes('through Claude Code'), 'it does not say the web is searched through Claude Code');
+    const before = win.commands.length;
+    form.requestSubmit(); await settle();
+    assert(sent(before, 'studyMake').length === 0, 'it was asked to research nothing');
+    form.querySelector('[name="focus"]').value = 'uniform-cost search';
+    form.requestSubmit(); await settle();
+    const asked = sent(before, 'studyMake')[0];
+    assert(asked?.kind === 'deepResearch' && asked.options.focus === 'uniform-cost search', `wrong asking: ${JSON.stringify(asked)}`);
+    const made = {id: 'W001', kind: 'deepResearch', title: 'Uniform-cost search', made: 1, by: 'Claude Code · claude-opus-5-5', task: 'J0009'};
+    await win.pushEvents([{type: 'studyMadeOpen', made, citations: [], body: {shape: 'found', title: 'Uniform-cost search',
+      report: '# Uniform-cost search\n\nIt expands the cheapest node first [1], and is optimal when steps cost something [2].',
+      found: [{title: 'UCS', url: url('ucs'), why: 'The definition.', kind: 'page'}, {title: 'Notes', url: url('notes.pdf'), why: 'Lecture notes.', kind: 'pdf'},
+        {title: 'A lecture', url: url('lecture'), why: 'Worked by hand.', kind: 'video'}]}}]); await settle();
+    const view = ws().querySelector('.st-made-view');
+    assert(view.querySelector('.st-doc')?.textContent.includes('cheapest node first [1]'), 'the report is not shown');
+    const rows = [...view.querySelectorAll('.st-found-row')];
+    assert(rows[0].classList.contains('added') && rows[0].textContent.includes('added as S05') && rows[0].querySelector('input').disabled, 'a source already is not said to be');
+    const add = () => ws().querySelector('[data-study-found-add]');
+    assert(add().textContent === 'Add 2 as sources', `the rest are not ticked: ${add().textContent}`);
+    const untick = ws().querySelector(`[data-study-found-pick="${url('notes.pdf')}"]`);
+    untick.checked = false; untick.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(add().textContent === 'Add 1 as a source', `unticking does not count: ${add().textContent}`);
+    const adding = win.commands.length;
+    add().click(); await settle();
+    assert(JSON.stringify(sent(adding, 'studyAddUrls')[0]?.urls) === JSON.stringify([url('lecture')]), `wrong sources added: ${JSON.stringify(sent(adding, 'studyAddUrls'))}`);
+    ws().querySelector('[data-study-found-report]').click(); await settle();
+    const pasted = sent(adding, 'studyPaste')[0];
+    assert(pasted?.title === 'Uniform-cost search' && pasted.text.includes('## Sources') && pasted.text.includes(`2. Notes — ${url('notes.pdf')}`), `the report was not kept: ${JSON.stringify(pasted)}`);
+    ws().querySelectorAll('.st-found-row [data-study-page]')[2].click(); await settle();
+    assert(sent(adding, 'openLink')[0]?.url === url('lecture'), 'the page did not open in the browser');
+    ws().querySelector('[data-study-back]').click(); await settle();
   });
 
   const deckMade = {id: 'D001', kind: 'flashcards', title: 'Flashcards: search', made: 1, by: 'Claude Code', task: 'J0004'};

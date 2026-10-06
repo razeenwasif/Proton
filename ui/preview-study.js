@@ -328,6 +328,23 @@ export function createStudyPreview(deliver) {
     ] },
   });
 
+  /** What the web gave, as Discover or Deep Research would. @param {boolean} research */
+  function foundBody(research) {
+    const found = [
+      { title: "Uniform-cost search — Wikipedia", url: "https://en.wikipedia.org/wiki/Uniform-cost_search", why: "The definition, the algorithm in pseudocode, and why it is optimal.", kind: "page" },
+      { title: "Informed search — lecture notes", url: "https://example.edu/cs/search/informed.pdf", why: "Greedy best-first and A*, admissibility and consistency, with worked examples.", kind: "pdf" },
+      { title: "A* search, explained", url: "https://www.youtube.com/watch?v=ySN5Wnu88nE", why: "A twenty-minute lecture that runs A* on a grid by hand.", kind: "video" },
+      { title: "Admissible heuristics, a survey", url: "https://arxiv.org/abs/2301.00001", why: "Where good heuristics come from: relaxed problems and pattern databases.", kind: "page" },
+    ];
+    const report = research
+      ? "# How A* search is made optimal\n\nA* orders its frontier by $f(n) = g(n) + h(n)$, the cost so far plus a guess of what remains [1]. " +
+        "It returns an optimal path when $h$ never overestimates — when it is *admissible* [2].\n\n## Admissible and consistent heuristics\n\n" +
+        "A heuristic is consistent when $h(n) \\le c(n, n') + h(n')$ for every step; consistency implies admissibility [2][4].\n\n" +
+        "## The mistakes students make\n\nTaking a heuristic that is only *usually* low for one that is admissible [3]."
+      : "";
+    return { shape: "found", title: "", report, found };
+  }
+
   /** Answer as a tutor would: steps, then the answer in pieces. @param {string} asked */
   function answer(asked) {
     const steps = [{ kind: "list", text: "Looked at the notebook's sources", done: true }, { kind: "search", text: `Searched for “${asked.slice(0, 40)}”`, done: true }];
@@ -397,19 +414,24 @@ export function createStudyPreview(deliver) {
             status: { state: "ready" }, units: "lines", count: command.text.split("\n").length, size: command.text.length, thin: 0, selected: true, labels: [] });
           return [notebookEvent(), listEvent()];
         }
-        case "studyAddUrl": {
+        case "studyAddUrls": {
           const slug = state.open ?? "";
-          const url = /^https?:\/\//.test(command.url) ? command.url : `https://${command.url}`;
-          const id = `S${String(state.next[slug]++).padStart(2, "0")}`;
-          const video = /youtu\.?be/.test(url);
-          const source = { id, title: url.replace(/^https?:\/\//, ""), kind: video ? "captions" : "web", role: video ? "recording" : "reading",
-            origin: { from: "web", url, fetched: 0 }, status: { state: "reading" }, units: video ? "seconds" : "lines", count: 0, size: 0, thin: 0, selected: true, labels: [] };
-          state.sources[slug].push(source);
-          setTimeout(() => {
-            Object.assign(source, { title: video ? "Lecture 3: Uniform cost search" : "Uniform-cost search — Wikipedia", status: { state: "ready" },
-              count: video ? 600 : 42, size: 48000, origin: { from: "web", url, fetched: Math.floor(Date.now() / 1000) } });
-            deliver(notebookEvent());
-          }, 600);
+          const have = new Set((state.sources[slug] ?? []).map((s) => (s.origin.from === "web" ? s.origin.url : "")));
+          for (const typed of command.urls) {
+            const url = /^https?:\/\//.test(typed) ? typed : `https://${typed}`;
+            if (have.has(url)) continue;
+            const id = `S${String(state.next[slug]++).padStart(2, "0")}`;
+            const video = /youtu\.?be/.test(url);
+            const source = { id, title: url.replace(/^https?:\/\//, ""), kind: video ? "captions" : "web", role: video ? "recording" : "reading",
+              origin: { from: "web", url, fetched: 0 }, status: { state: "reading" }, units: video ? "seconds" : "lines", count: 0, size: 0, thin: 0, selected: true, labels: [] };
+            state.sources[slug].push(source);
+            setTimeout(() => {
+              const named = /wikipedia/.test(url) ? "Uniform-cost search — Wikipedia" : url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
+              Object.assign(source, { title: video ? "Lecture 3: Uniform cost search" : named, status: { state: "ready" },
+                count: video ? 600 : 42, size: 48000, origin: { from: "web", url, fetched: Math.floor(Date.now() / 1000) } });
+              deliver(notebookEvent());
+            }, 600);
+          }
           return [notebookEvent(), listEvent()];
         }
         case "studyRemove":
@@ -474,10 +496,18 @@ export function createStudyPreview(deliver) {
           const id = `J${String(3 + studio.jobs.length).padStart(4, "0")}`;
           const title = command.options.focus ? `${command.kind}: ${command.options.focus}` : command.kind;
           studio.jobs.unshift({ id, kind: command.kind, title, state: "running", why: null, made: null, engine: "claude", started: Math.floor(Date.now() / 1000) });
+          const web = command.kind === "discover" || command.kind === "deepResearch";
           setTimeout(() => {
             const job = studio.jobs.find((j) => j.id === id);
             if (job) Object.assign(job, { state: "done", made: "R001" });
             studio.jobs = studio.jobs.filter((j) => j.id !== id);
+            if (web) {
+              const made = `W${String(studio.made.filter((m) => m.id.startsWith("W")).length + 1).padStart(3, "0")}`;
+              const research = command.kind === "deepResearch";
+              studio.made.unshift({ id: made, kind: command.kind, title: research ? "How A* search is made optimal" : "Sources on informed search",
+                made: Math.floor(Date.now() / 1000), by: "Claude Code · claude-opus-5-5", task: id });
+              BODIES[made] = foundBody(research);
+            }
             deliver(studioEvent());
           }, 1500);
           return [studioEvent()];

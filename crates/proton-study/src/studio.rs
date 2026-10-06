@@ -12,6 +12,7 @@
 //! studio/decks/D001.json    flashcards, and D001.log.jsonl, their reviews ([`crate::deck`])
 //! studio/quizzes/Q001.json  a quiz or practice problems, and Q001.attempts.jsonl ([`crate::quiz`])
 //! studio/overviews/L001.json  a Learning Overview ([`crate::overview`])
+//! studio/found/W001.json    what was found on the web, and a report of it ([`crate::found`])
 //! objectives.json           what a student must be able to do, O001…
 //! tasks/J0001.json          each call: what it was asked, by whom, and how it ended
 //! ```
@@ -28,6 +29,7 @@ use ts_rs::TS;
 use crate::audio::{self, AudioFormat, StudyChapter, StudySegment};
 use crate::deck::{self, StudyCard};
 use crate::exam;
+use crate::found::{self, StudyFound};
 use crate::infographic::{self, StudyBlock};
 use crate::slides::{self, StudySlide};
 use crate::overview::{self, StudyOverviewTopic};
@@ -68,6 +70,10 @@ pub enum Make {
     Slides,
     /// A page of what the sources say, at a glance.
     Infographic,
+    /// Sources on a topic, found on the web.
+    Discover,
+    /// A report on a topic from what was read on the web, and what it read.
+    DeepResearch,
     /// A written answer marked: a call of the studio's, but not a thing it
     /// makes for the list.
     Marking,
@@ -95,6 +101,8 @@ pub enum Shape {
     Slides,
     /// An infographic, in `studio/graphics/`.
     Graphic,
+    /// What was found on the web, in `studio/found/`.
+    Found,
     /// A mark, in its quiz's attempts.
     Mark,
 }
@@ -121,6 +129,8 @@ impl Make {
             Make::Audio => "Audio overview",
             Make::Slides => "Slide deck",
             Make::Infographic => "Infographic",
+            Make::Discover => "Sources from the web",
+            Make::DeepResearch => "Deep Research",
             Make::Marking => "Marking",
         }
     }
@@ -136,6 +146,7 @@ impl Make {
             Make::Audio => Shape::Audio,
             Make::Slides => Shape::Slides,
             Make::Infographic => Shape::Graphic,
+            Make::Discover | Make::DeepResearch => Shape::Found,
             Make::Exam | Make::PastPaper => Shape::Paper,
             Make::Marking => Shape::Mark,
             _ => Shape::Prose,
@@ -163,12 +174,19 @@ impl Make {
             Make::Audio => "audio",
             Make::Slides => "slides",
             Make::Infographic => "infographic",
+            Make::Discover => "discover",
+            Make::DeepResearch => "deepResearch",
             Make::Marking => "marking",
         }
     }
 
+    /// Whether it searches the web — and nothing else: no files, no notebook.
+    pub fn web(self) -> bool {
+        matches!(self, Make::Discover | Make::DeepResearch)
+    }
+
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -347,8 +365,9 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
         Make::Audio => audio::prompt(options.format.unwrap_or_default(), options.amount, &options.language, &options.focus, &course),
         Make::Slides => slides::prompt(options.amount, &options.focus, &options.language, &course),
         Make::Infographic => infographic::prompt(&options.focus, &course),
-        // An exam's asking needs the notebook: [`prompt_for`].
-        Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking => String::new(),
+        // An exam's asking needs the notebook, and so does the web's, to
+        // find what it has not: [`prompt_for`].
+        Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking | Make::Discover | Make::DeepResearch => String::new(),
         Make::Flashcards => format!(
             "Make about {} flashcards of these sources, for a student of {course} learning them for the exam. {} Each card tests one idea — \
              a definition, a result and when it holds, a step of a method, a distinction, a formula, a mistake students make — and is \
@@ -402,6 +421,42 @@ pub fn prompt_for(book: &Book, make: Make, options: &Options) -> Result<String, 
                  question has its explanation, topic and citations. Leave unused fields empty.\n\nThe objectives:\n{listed}{shape}"
             ))
         }
+        Make::Discover | Make::DeepResearch => {
+            // What it is about: as asked, or what the notebook is about.
+            let topic = match options.focus.trim() {
+                "" if make == Make::Discover => {
+                    let texts: Vec<String> = book
+                        .sources
+                        .sources
+                        .iter()
+                        .filter(|s| s.status.has_words())
+                        .filter_map(|s| crate::snapshot::words(book, &s.id, s.units))
+                        .map(|body| crate::snapshot::plain(&body))
+                        .collect();
+                    let words = crate::discover::about(&texts, 8);
+                    if words.is_empty() {
+                        return Err("say what to look for: the notebook has no sources to go by".into());
+                    }
+                    format!("what these words say the notebook is about — {}", words.join(", "))
+                }
+                "" => return Err("say what to research".into()),
+                topic => topic.to_string(),
+            };
+            let have: Vec<String> = book
+                .sources
+                .sources
+                .iter()
+                .map(|s| match &s.origin {
+                    crate::model::Origin::Web { url, .. } => url.clone(),
+                    _ => s.title.clone(),
+                })
+                .take(60)
+                .collect();
+            Ok(match make {
+                Make::Discover => found::prompt_discover(&topic, course, &have),
+                _ => found::prompt_research(&topic, course, &have),
+            })
+        }
         make => Ok(format!("{}{}", prompt(make, options, course), known(book, make, options))),
     }
 }
@@ -442,6 +497,7 @@ pub fn schema(make: Make, options: &Options) -> Option<Value> {
         Shape::Audio => audio::schema(),
         Shape::Slides => slides::schema(options.slide.is_some()),
         Shape::Graphic => infographic::schema(),
+        Shape::Found => found::schema(),
         Shape::Mark => quiz::marking_schema(),
         Shape::Map => json!({
             "type": "object", "additionalProperties": false, "required": ["title", "nodes"],
@@ -537,6 +593,9 @@ pub enum StudyMadeBody {
     /// One slide, revised, for the deck it is of.
     Slide { slide: StudySlide },
     Graphic { title: String, style: infographic::Style, subtitle: String, blocks: Vec<StudyBlock>, takeaway: String },
+    /// What was found on the web: a report of it, for Deep Research, and
+    /// the sources.
+    Found { title: String, report: String, found: Vec<StudyFound> },
     /// The deck and the quiz it was kept with, once it is kept.
     Overview {
         topics: Vec<StudyOverviewTopic>,
@@ -616,6 +675,10 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
             let (title, style, subtitle, blocks, takeaway) = infographic::read(&value)?;
             Ok(StudyMadeBody::Graphic { title, style, subtitle, blocks, takeaway })
         }
+        Shape::Found => {
+            let (title, report, found) = found::read(&value, make == Make::DeepResearch)?;
+            Ok(StudyMadeBody::Found { title, report, found })
+        }
         Shape::Audio => {
             let format = options.format.unwrap_or_default();
             let (title, segments, chapters) = audio::read(&value, format)?;
@@ -681,6 +744,7 @@ impl Book {
             Shape::Audio => self.dir().join("studio/audio"),
             Shape::Slides => self.dir().join("studio/slides"),
             Shape::Graphic => self.dir().join("studio/graphics"),
+            Shape::Found => self.dir().join("studio/found"),
             Shape::Objectives => self.dir().to_path_buf(),
         }
     }
@@ -769,6 +833,7 @@ impl Book {
             Shape::Audio => ('A', "json"),
             Shape::Slides => ('P', "json"),
             Shape::Graphic => ('G', "json"),
+            Shape::Found => ('W', "json"),
             Shape::Objectives => ('O', "json"),
         };
         let header = Header { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() };
@@ -811,7 +876,7 @@ impl Book {
     /// Everything made, the latest first.
     pub fn made(&self) -> Vec<StudyMade> {
         let mut out: Vec<StudyMade> = Vec::new();
-        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json"), (Shape::Audio, "json"), (Shape::Slides, "json"), (Shape::Graphic, "json")] {
+        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json"), (Shape::Audio, "json"), (Shape::Slides, "json"), (Shape::Graphic, "json"), (Shape::Found, "json")] {
             for entry in std::fs::read_dir(self.studio(shape)).into_iter().flat_map(|e| e.flatten()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let Some(id) = name.strip_suffix(&format!(".{ext}")) else { continue };
@@ -841,6 +906,7 @@ impl Book {
                 "A" => (self.studio(Shape::Audio).join(format!("{id}.json")), false),
                 "P" => (self.studio(Shape::Slides).join(format!("{id}.json")), false),
                 "G" => (self.studio(Shape::Graphic).join(format!("{id}.json")), false),
+                "W" => (self.studio(Shape::Found).join(format!("{id}.json")), false),
                 _ => return None,
             },
             _ => return None,
@@ -887,6 +953,11 @@ impl Book {
                 subtitle: value["subtitle"].as_str().unwrap_or_default().to_string(),
                 blocks: serde_json::from_value(value["blocks"].clone()).ok()?,
                 takeaway: value["takeaway"].as_str().unwrap_or_default().to_string(),
+            },
+            Shape::Found => StudyMadeBody::Found {
+                title: header.title.clone(),
+                report: value["report"].as_str().unwrap_or_default().to_string(),
+                found: serde_json::from_value(value["found"].clone()).ok()?,
             },
             Shape::Prose | Shape::Mark => return None,
         };

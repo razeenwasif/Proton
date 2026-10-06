@@ -127,20 +127,26 @@ impl Chat {
             true => Vec::new(),
             false => vec!["Read", "Grep", "Glob"],
         };
+        // Each tool that would ask is allowed up front, since `dontAsk`
+        // refuses what was not: the web's, and Proton's own servers'.
+        let mut allowed: Vec<String> = Vec::new();
         if how.web {
             tools.extend(["WebSearch", "WebFetch"]);
+            allowed.extend(["WebSearch".to_string(), "WebFetch".to_string()]);
         }
         chat.extra = vec!["--safe-mode".into(), "--strict-mcp-config".into(), "--tools".into(), tools.join(",")];
         // Proton's own servers, and nobody else's: `--strict-mcp-config`
-        // keeps the person's out, and each tool is allowed up front, since
-        // `dontAsk` refuses what was not.
+        // keeps the person's out.
         if !how.mcp.is_empty() {
             chat.extra = vec!["--restricted".into(), "--strict-mcp-config".into(), "--disable-slash-commands".into(), "--tools".into(), tools.join(",")];
             chat.env = vec![("CLAUDE_CODE_DISABLE_CLAUDE_MDS".into(), "1".into()), ("CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(), "1".into())];
             let servers: serde_json::Map<String, Value> =
                 how.mcp.iter().map(|s| (s.name.clone(), serde_json::json!({ "command": s.command, "args": s.args }))).collect();
             chat.extra.extend(["--mcp-config".to_string(), serde_json::json!({ "mcpServers": servers }).to_string()]);
-            chat.extra.extend(["--allowedTools".to_string(), how.mcp.iter().flat_map(|s| s.allowed()).collect::<Vec<_>>().join(",")]);
+            allowed.extend(how.mcp.iter().flat_map(|s| s.allowed()));
+        }
+        if !allowed.is_empty() {
+            chat.extra.extend(["--allowedTools".to_string(), allowed.join(",")]);
         }
         for dir in &how.read {
             chat.extra.extend(["--add-dir".to_string(), dir.display().to_string()]);
@@ -500,12 +506,14 @@ mod tests {
         assert!(has(["--permission-mode", "dontAsk"]), "{args:?}");
         assert!(args.contains(&"--safe-mode".to_string()) && args.contains(&"--strict-mcp-config".to_string()), "{args:?}");
         assert!(has(["--tools", "Read,Grep,Glob,WebSearch,WebFetch"]) && has(["--max-turns", "8"]), "{args:?}");
+        assert!(has(["--allowedTools", "WebSearch,WebFetch"]), "the web's tools ask, and dontAsk refuses what asks: {args:?}");
         assert!(has(["--json-schema", "{\"type\":\"object\"}"]) && has(["--append-system-prompt", "You are the Principal Investigator."]), "{args:?}");
         assert!(has(["--add-dir", "/h/.proton/lean/project/.lake/packages/mathlib"]), "a folder it may read: {args:?}");
 
         let offline = Unattended { web: false, schema: None, max_turns: None, read: Vec::new(), ..how };
         let args = Chat::unattended(PathBuf::from("/tmp/r"), Settings::default(), &offline).spawn().args();
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1] == "Read,Grep,Glob"), "{args:?}");
+        assert!(!args.contains(&"--allowedTools".to_string()), "nothing to allow: {args:?}");
         assert!(!args.contains(&"--json-schema".to_string()) && !args.contains(&"--max-turns".to_string()));
         assert!(!args.contains(&"--mcp-config".to_string()), "a server nobody asked for");
     }
@@ -522,6 +530,11 @@ mod tests {
         let args = Chat::unattended(PathBuf::from("/n/comp3670"), Settings::default(), &how).spawn().args();
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()), "built-in tools given: {args:?}");
         assert!(args.windows(2).any(|w| w[0] == "--allowedTools" && w[1] == "mcp__proton-notebook__search_sources,mcp__proton-notebook__read_source"), "{args:?}");
+        // A call that searches the web, and does nothing else.
+        let web = Unattended { instructions: "Find.".into(), web: true, no_tools: true, ..Unattended::default() };
+        let args = Chat::unattended(PathBuf::from("/n/comp3670"), Settings::default(), &web).spawn().args();
+        let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+        assert!(has(["--tools", "WebSearch,WebFetch"]) && has(["--allowedTools", "WebSearch,WebFetch"]), "{args:?}");
     }
 
     #[test]

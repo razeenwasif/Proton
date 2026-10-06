@@ -124,6 +124,16 @@ pub fn forget(book: &Book, id: &str) {
     }
 }
 
+/// A source's words as one text: its lines, its pages one after another, or
+/// what was said.
+pub fn plain(body: &Body) -> String {
+    match body {
+        Body::Lines(text) => text.clone(),
+        Body::Pages(pages) => pages.join("\n"),
+        Body::Cues(cues) => cues.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join("\n"),
+    }
+}
+
 /// A source's words, as kept.
 pub fn words(book: &Book, id: &str, units: Units) -> Option<Body> {
     let text = std::fs::read_to_string(file(&book.snapshots(), id)).ok()?;

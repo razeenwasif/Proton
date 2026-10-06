@@ -432,11 +432,11 @@ fn a_page_of_the_web_is_fetched_once_kept_as_its_article_and_fetched_again_when_
 
     // A bare address is given https; a page is titled by what it calls
     // itself once it is read.
-    let events = session.apply(Command::StudyAddUrl { url: "example.com/ucs".into() });
+    let events = session.apply(Command::StudyAddUrls { urls: vec!["example.com/ucs".into()] });
     let rows = sources(&events).unwrap();
     assert_eq!((rows[0].title.as_str(), rows[0].status.clone()), ("example.com/ucs", SourceStatus::Reading));
-    session.apply(Command::StudyAddUrl { url: "https://example.com/files/Week%203%20notes.pdf".into() });
-    session.apply(Command::StudyAddUrl { url: "https://example.com/gone".into() });
+    session.apply(Command::StudyAddUrls { urls: vec!["https://example.com/files/Week%203%20notes.pdf".into()] });
+    session.apply(Command::StudyAddUrls { urls: vec!["https://example.com/gone".into()] });
     let rows = until(&mut session, |e| match e {
         Event::StudyNotebook { sources, .. } if sources.len() == 3 && sources.iter().all(|s| !matches!(s.status, SourceStatus::Reading)) => Some(sources.clone()),
         _ => None,
@@ -449,9 +449,9 @@ fn a_page_of_the_web_is_fetched_once_kept_as_its_article_and_fetched_again_when_
 
     // Asked for again, it is the same source; and what is not an address
     // says so.
-    let said_again = said(&session.apply(Command::StudyAddUrl { url: "https://example.com/ucs".into() }));
+    let said_again = said(&session.apply(Command::StudyAddUrls { urls: vec!["https://example.com/ucs".into()] }));
     assert!(said_again.iter().any(|s| s.contains("is already S01")), "{said_again:?}");
-    let said_not = said(&session.apply(Command::StudyAddUrl { url: "breadth first".into() }));
+    let said_not = said(&session.apply(Command::StudyAddUrls { urls: vec!["breadth first".into()] }));
     assert!(said_not.iter().any(|s| s.contains("not a web address")), "{said_not:?}");
 
     // The page as its article, its navigation and footer left behind.
@@ -874,6 +874,90 @@ fn the_studio_makes_from_the_sources_mends_what_will_not_read_and_keeps_every_ca
     // A table needs its columns; a report, its asking.
     let refused = session.apply(Command::StudyMake { kind: Make::Table, options: Options::default() });
     assert!(said(&refused).iter().any(|s| s.contains("columns")));
+    session.shutdown();
+}
+
+#[test]
+fn discover_and_deep_research_search_the_web_through_claude_code_alone_and_keep_what_they_found() {
+    use proton_study::studio::{Make, Options, StudyMadeBody};
+    let scratch = Scratch::new("found");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    // Research needs saying what to research, and Discover something to go
+    // by.
+    let refused = said(&session.apply(Command::StudyMake { kind: Make::DeepResearch, options: Options::default() }));
+    assert!(refused.iter().any(|s| s.contains("Say what to research")), "{refused:?}");
+    let refused = said(&session.apply(Command::StudyMake { kind: Make::Discover, options: Options::default() }));
+    assert!(refused.iter().any(|s| s.contains("Say what to look for")), "{refused:?}");
+
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+    // The tutor on Codex: the web is searched through Claude Code anyway.
+    let tutor = proton_study::tutor::TutorSettings { engine: "codex".into(), model: "gpt-6.1-sol".into(), ..Default::default() };
+    session.apply(Command::StudyTutor { settings: tutor });
+    {
+        let mut log = log.lock().unwrap();
+        log.answers.push_back(
+            serde_json::json!({ "title": "", "report": "", "sources": [
+                { "title": "Uniform-cost search", "url": "https://en.wikipedia.org/wiki/Uniform-cost_search", "why": "The definition.", "kind": "page" },
+                { "title": "Notes", "url": "file:///etc/hosts", "why": "", "kind": "page" },
+                { "title": "Lecture 3", "url": "https://example.edu/lecture3.pdf", "why": "Informed search.", "kind": "pdf" }
+            ]})
+            .to_string(),
+        );
+    }
+    session.apply(Command::StudyMake { kind: Make::Discover, options: Options::default() });
+    let made = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.id == "J0001" && j.state == "failed") => panic!("{jobs:?}"),
+        _ => None,
+    });
+    assert_eq!((made[0].id.as_str(), made[0].kind), ("W001", Make::Discover));
+    {
+        let log = log.lock().unwrap();
+        let (engine, _, how, model) = &log.started[0];
+        assert_eq!((*engine, model.as_deref()), (Engine::Claude, None), "Claude Code, on its own model");
+        assert!(how.web && how.no_tools && how.mcp.is_empty(), "the web, and nothing else");
+        assert!(how.instructions.contains("never list a page you have not opened"), "{}", how.instructions);
+        assert!(log.sent[0].contains("what these words say the notebook is about") && log.sent[0].contains("search"), "{}", log.sent[0]);
+    }
+    let events = session.apply(Command::StudyShowMade { id: "W001".into() });
+    let Some(Event::StudyMadeOpen { body: StudyMadeBody::Found { report, found, .. }, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(report.is_empty());
+    assert_eq!(found.iter().map(|f| f.url.as_str()).collect::<Vec<_>>(), ["https://en.wikipedia.org/wiki/Uniform-cost_search", "https://example.edu/lecture3.pdf"], "only the web's addresses");
+
+    // Deep Research: a report from what it read, citing it by number.
+    let report = format!("# Uniform-cost search\n\nIt expands the cheapest node first [1], and is optimal when every step costs something [2]. {}", "It goes on. ".repeat(40));
+    log.lock().unwrap().answers.push_back(
+        serde_json::json!({ "title": "", "report": report, "sources": [
+            { "title": "A", "url": "https://a.example.edu/ucs", "why": "a", "kind": "page" },
+            { "title": "B", "url": "https://b.example.edu/ucs.pdf", "why": "b", "kind": "pdf" }
+        ]})
+        .to_string(),
+    );
+    session.apply(Command::StudyMake { kind: Make::DeepResearch, options: Options { focus: "uniform-cost search".into(), ..Default::default() } });
+    let made = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0002" && j.state == "done") => Some(made.clone()),
+        _ => None,
+    });
+    assert_eq!((made[0].id.as_str(), made[0].title.as_str()), ("W002", "Uniform-cost search"), "titled by its report's heading");
+    {
+        let log = log.lock().unwrap();
+        assert!(log.sent.iter().any(|s| s.contains("Research this on the web") && s.contains("uniform-cost search") && s.contains("find others:\n- notes.md\n\nAnswer")), "it is told what the notebook has: {:?}", log.sent);
+    }
+    let book = scratch.root.join("Notebooks/search");
+    assert!(book.join("studio/found/W002.json").is_file());
+    let events = session.apply(Command::StudyShowMade { id: "W002".into() });
+    let Some(Event::StudyMadeOpen { body: StudyMadeBody::Found { report, found, .. }, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(report.contains("[2]") && found.len() == 2);
     session.shutdown();
 }
 

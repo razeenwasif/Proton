@@ -530,9 +530,9 @@ pub enum Command {
         title: String,
         text: String,
     },
-    /// Add a page of the web as a source: fetched once, and kept.
-    StudyAddUrl {
-        url: String,
+    /// Add pages of the web as sources: each fetched once, and kept.
+    StudyAddUrls {
+        urls: Vec<String>,
     },
     /// Take a source out of the open notebook. Its id is not given again.
     StudyRemove {

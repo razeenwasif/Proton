@@ -28,6 +28,7 @@ pub mod deck;
 pub mod discover;
 pub mod exam;
 pub mod infographic;
+pub mod found;
 pub mod fsrs;
 pub mod lock;
 pub mod mastery;

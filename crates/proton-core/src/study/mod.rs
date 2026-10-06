@@ -68,7 +68,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyAdd { .. }
             | Command::StudyDownload { .. }
             | Command::StudyPaste { .. }
-            | Command::StudyAddUrl { .. }
+            | Command::StudyAddUrls { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }
@@ -489,7 +489,7 @@ impl Study {
             Command::StudyAdd { paths } => self.add(paths, false),
             Command::StudyDownload { paths } => self.add(paths, true),
             Command::StudyPaste { title, text } => self.paste(&title, &text),
-            Command::StudyAddUrl { url } => self.add_url(&url),
+            Command::StudyAddUrls { urls } => self.add_urls(&urls),
             Command::StudyRemove { id } => self.remove(&id),
             Command::StudySelect { ids } => self.select(&ids),
             Command::StudyRefresh { id } => self.refresh(&id),
@@ -698,11 +698,7 @@ impl Study {
                     .iter()
                     .filter(|s| s.status.has_words())
                     .filter_map(|s| snapshot::words(&open.book, &s.id, s.units))
-                    .map(|body| match body {
-                        Body::Lines(text) => text,
-                        Body::Pages(pages) => pages.join("\n"),
-                        Body::Cues(cues) => cues.into_iter().map(|c| c.text).collect::<Vec<_>>().join("\n"),
-                    })
+                    .map(|body| snapshot::plain(&body))
                     .collect();
                 let mut words = proton_study::discover::about(&texts, 8);
                 let course = open.book.notebook.course.trim().to_lowercase();
@@ -1076,41 +1072,57 @@ impl Study {
         events
     }
 
-    /// Add a page of the web as a source, fetched on a worker: a page as its
+    /// Add pages of the web as sources, fetched on a worker: a page as its
     /// article, a PDF whole, a YouTube video as its captions.
-    fn add_url(&mut self, typed: &str) -> Vec<Event> {
-        let Some(url) = web::address(typed) else {
-            return vec![notice("That is not a web address: it would begin https://".into(), NoticeLevel::Info)];
-        };
+    fn add_urls(&mut self, typed: &[String]) -> Vec<Event> {
         let book = match self.writable() {
             Ok(book) => book,
             Err(events) => return events,
         };
-        if let Some(source) = book.sources.sources.iter().find(|s| matches!(&s.origin, Origin::Web { url: u, .. } if *u == url)) {
-            return vec![notice(format!("{} is already {}", source.title, source.id), NoticeLevel::Info)];
+        let mut said = Vec::new();
+        let mut fetches = Vec::new();
+        for typed in typed {
+            let Some(url) = web::address(typed) else {
+                said.push(format!("{}: not a web address — it would begin https://", typed.trim()));
+                continue;
+            };
+            if let Some(source) = book.sources.sources.iter().find(|s| matches!(&s.origin, Origin::Web { url: u, .. } if *u == url)) {
+                said.push(format!("{} is already {}", source.title, source.id));
+                continue;
+            }
+            let video = proton_library::formats::web::youtube(&url).is_some();
+            let id = book.sources.take_id();
+            book.sources.sources.push(Source {
+                id: id.clone(),
+                title: web::provisional(&url),
+                kind: if video { Kind::Captions } else { Kind::Web }.name().to_string(),
+                origin: Origin::Web { url: url.clone(), fetched: 0 },
+                role: if video { Role::Recording } else { Role::Reading },
+                size: 0,
+                mtime: 0,
+                sha256: String::new(),
+                units: if video { Units::Seconds } else { Units::Lines },
+                count: 0,
+                thin: Vec::new(),
+                status: SourceStatus::Reading,
+                added: proton_study::now(),
+                labels: Vec::new(),
+            });
+            let _ = book.tick(&id);
+            fetches.push(web::Fetch { id, url });
         }
-        let video = proton_library::formats::web::youtube(&url).is_some();
-        let id = book.sources.take_id();
-        book.sources.sources.push(Source {
-            id: id.clone(),
-            title: web::provisional(&url),
-            kind: if video { Kind::Captions } else { Kind::Web }.name().to_string(),
-            origin: Origin::Web { url: url.clone(), fetched: 0 },
-            role: if video { Role::Recording } else { Role::Reading },
-            size: 0,
-            mtime: 0,
-            sha256: String::new(),
-            units: if video { Units::Seconds } else { Units::Lines },
-            count: 0,
-            thin: Vec::new(),
-            status: SourceStatus::Reading,
-            added: proton_study::now(),
-            labels: Vec::new(),
-        });
-        let _ = book.tick(&id);
-        self.start_fetching(vec![web::Fetch { id, url }]);
-        let mut events = self.saved();
-        events.insert(0, self.list_event());
+        if !fetches.is_empty() {
+            self.start_fetching(fetches);
+        }
+        let mut events = match said.len() == typed.len() {
+            true => Vec::new(),
+            false => {
+                let mut events = self.saved();
+                events.insert(0, self.list_event());
+                events
+            }
+        };
+        events.extend(said.into_iter().map(|s| notice(s, NoticeLevel::Info)));
         events
     }
 
@@ -1349,6 +1361,13 @@ impl Study {
         if kind == proton_study::studio::Make::Marking {
             return vec![notice("A mark is asked for by answering.".into(), NoticeLevel::Warn)];
         }
+        if kind == proton_study::studio::Make::DeepResearch && options.focus.trim().is_empty() {
+            return vec![notice("Say what to research.".into(), NoticeLevel::Warn)];
+        }
+        let words = |o: &Open| o.book.sources.sources.iter().any(|s| s.status.has_words());
+        if kind == proton_study::studio::Make::Discover && options.focus.trim().is_empty() && !self.open.as_ref().is_some_and(words) {
+            return vec![notice("Say what to look for: the notebook has no sources to go by yet.".into(), NoticeLevel::Warn)];
+        }
         if kind == proton_study::studio::Make::Slides && options.slide.is_some() {
             let deck = options.slides.as_deref().and_then(|d| self.open.as_ref()?.book.slides(d));
             if !deck.is_some_and(|d| d.slides.iter().any(|s| Some(&s.id) == options.slide.as_ref())) || options.ask.trim().is_empty() {
@@ -1418,6 +1437,8 @@ impl Study {
             StudyMadeBody::Slides { slides, .. } => slides.iter().flat_map(|s| s.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Slide { slide } => slide.cites.iter().map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Graphic { blocks, .. } => blocks.iter().flat_map(|b| b.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            // What the web gave cites the web, by number, not the notebook.
+            StudyMadeBody::Found { .. } => String::new(),
         };
         let citations = proton_study::cite::resolve(&open.book, &text);
         vec![Event::StudyMadeOpen { made, body, citations }]

@@ -1106,7 +1106,13 @@ video as its English captions, read by yt-dlp without the video
 in the knowledge base what is like a notebook and not in it yet: the words its
 sources share — scored by how many of them use each — and its course are
 searched for, and each file is offered with the passage most like it
-(`proton-study::discover`). A source's role (a past paper, a solution, slides, one's own work) is
+(`proton-study::discover`). On the web, the studio's **Discover** finds pages,
+papers and videos on a topic — or on what the notebook's sources are about —
+and **Deep Research** reads widely and writes a report citing what it read by
+number; both are calls of Claude Code's with WebSearch and WebFetch alone, no
+files and no notebook server, whatever engine the tutor is set to, and both
+are kept as `studio/found/W001.json`, from which the person ticks what to add
+as sources, and may keep the report as one (`proton-study::found`). A source's role (a past paper, a solution, slides, one's own work) is
 guessed from its path and corrected by hand. `proton-core::study` is one for
 the session, whichever project is open; a notebook another Proton holds open is
 read only, under the same lock an investigation has. The reader shows a

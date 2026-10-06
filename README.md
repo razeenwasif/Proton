@@ -154,7 +154,8 @@ Codex, Gemini or Antigravity that answers from them and cites them, and a
 studio that makes study guides, flashcards, quizzes and exams of them. So far:
 notebooks, each a folder in `~/Github/Notebooks`; sources chosen from your
 folders in a picker — browsed, searched by name and by word, with what is left
-out and why, or found for you as what is like the notebook — and read once,
+out and why, or found for you as what is like the notebook, or found on the
+web by Discover or Deep Research, which writes a report of what it read — and read once,
 their words kept in the notebook: notes, PDFs, notebooks, LaTeX, captions, Word
 documents and EPUBs (with pandoc), PowerPoints, pictures' words (with
 tesseract), pages of the web kept as their articles, and YouTube videos'

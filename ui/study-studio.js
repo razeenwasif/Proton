@@ -42,6 +42,8 @@ export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["briefing", "Briefing", "file-doc", "The main themes and what follows from them"],
   ["timeline", "Timeline", "clock", "What happens, in order"],
   ["report", "Your own", "pen", "A document of your asking"],
+  ["discover", "Discover", "globe", "Pages, papers and videos on a topic, found on the web, to add as sources"],
+  ["deepResearch", "Deep Research", "search", "A report on a topic from what it reads on the web, and its sources"],
 ]);
 const TILE = /** @type {Record<string, string>} */ ({ ...Object.fromEntries(TILES.map(([kind, name]) => [kind, name])), marking: "Marking" });
 
@@ -83,8 +85,39 @@ export function mapHtml(nodes, citations) {
   return `<div class="st-map" data-turn="made">${branch(null, 0)}</div>`;
 }
 
-/** Something made, whole, for the middle. @param {MadeEvent} e @param {boolean} readOnly */
-export function madeHtml(e, readOnly) {
+/** A web address's host, as it is shown. @param {string} url */
+function hostOf(url) {
+  try {
+    return new URL(url).host.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+/** What was found on the web: the report, for Deep Research, and the
+ *  sources, each ticked to be added unless it is a source already.
+ *  @param {Extract<Body, {shape: "found"}>} body @param {boolean} readOnly @param {{have: Map<string, string>, unpicked: Set<string>}} found */
+function foundHtml(body, readOnly, found) {
+  const report = body.report ? `<div class="st-answer st-doc md" data-turn="made">${markdown(body.report.replace(/^#\s+.*\n+/, ""))}</div>` : "";
+  const picked = body.found.filter((f) => !found.have.has(f.url) && !found.unpicked.has(f.url)).length;
+  const rows = body.found.map((f, i) => {
+    const id = found.have.get(f.url);
+    const tick = id ? " checked disabled" : `${found.unpicked.has(f.url) ? "" : " checked"}${readOnly ? " disabled" : ""}`;
+    return `<div class="st-found-row${id ? " added" : ""}"><input type="checkbox" data-study-found-pick="${esc(f.url)}"${tick} aria-label="Add ${esc(f.title)}">` +
+      `<span class="st-found-n">${i + 1}</span>${icon(f.kind === "video" ? "film" : f.kind === "pdf" ? "file-doc" : "globe")}` +
+      `<div class="st-found-text"><b>${esc(f.title)}</b><span class="st-faint">${esc(hostOf(f.url))}${id ? ` · added as ${esc(id)}` : ""}</span>` +
+      (f.why ? `<span>${esc(f.why)}</span>` : "") + `</div>` +
+      `<button class="st-link" data-study-page="${esc(f.url)}" title="${esc(f.url)}">Open</button></div>`;
+  }).join("");
+  const tools = readOnly ? "" : `<div class="st-deck-tools">` +
+    (body.report ? `<button class="cc-quiet" data-study-found-report title="The report, and the list of what it read, kept as a source">Add the report as a source</button>` : "") +
+    `<span class="grow"></span><button class="cc-primary" data-study-found-add${picked ? "" : " disabled"}>Add ${picked} as ${picked === 1 ? "a source" : "sources"}</button></div>`;
+  return `${report}<h3 class="st-found-head">${body.report ? "What it read" : "What was found"}</h3>${tools}<div class="st-found-list" data-turn="made">${rows}</div>`;
+}
+
+/** Something made, whole, for the middle. @param {MadeEvent} e @param {boolean} readOnly
+ *  @param {{have: Map<string, string>, unpicked: Set<string>}} [found] what of the web the notebook has, and what is not to be added */
+export function madeHtml(e, readOnly, found = { have: new Map(), unpicked: new Set() }) {
   const { made, body, citations } = e;
   const head = `<div class="st-reader-head"><button class="cc-quiet" data-study-back>← Back</button>` +
     `<div><h1>${esc(made.title)}</h1><span class="st-faint">${esc(TILE[made.kind] ?? made.kind)} · ${esc(made.by)} · ${esc(ago(made.made))}</span></div>` +
@@ -116,6 +149,8 @@ export function madeHtml(e, readOnly) {
   } else if (body.shape === "overview") {
     // An overview opens as one (study-overview.js); this is only its topics.
     content = `<div class="st-answer st-doc md" data-turn="made">${body.topics.map((t) => `<h2>${esc(t.title)}</h2>${answerHtml(t.summary, citations)}`).join("")}</div>`;
+  } else if (body.shape === "found") {
+    content = foundHtml(body, readOnly, found);
   } else if (body.shape === "questions" || body.shape === "paper") {
     // A quiz opens as a quiz (study-quiz.js); this is only its questions, read.
     content = `<ol class="st-cards" data-turn="made">${body.questions.map((q) => `<li class="st-card-row"><div class="md">${answerHtml(q.prompt, citations)}</div></li>`).join("")}</ol>`;
@@ -142,7 +177,12 @@ export function createStudio(host) {
 
   function optionsHtml(/** @type {Kind} */ kind) {
     const focus = `<input name="focus" placeholder="A topic to centre it on — or leave it to cover everything ticked" autocomplete="off">`;
-    const field = kind === "table"
+    const web = `<p class="st-faint">Searched on the web through Claude Code, whichever model the tutor is set to; nothing is added until you choose.</p>`;
+    const field = kind === "discover"
+      ? `<input name="focus" placeholder="A topic — or leave it to find what is like the sources" autocomplete="off">${web}`
+      : kind === "deepResearch"
+        ? `<input name="focus" placeholder="What to research — “how A* search is made optimal”" autocomplete="off" required>${web}`
+      : kind === "table"
       ? `<input name="columns" placeholder="Columns, by commas: Algorithm, Complete?, Optimal?, Time" autocomplete="off" required>`
       : kind === "report"
         ? `<textarea name="ask" rows="3" placeholder="What it should be: “A one-page cheat sheet of every search algorithm’s complexity.”" required></textarea>`
@@ -252,7 +292,7 @@ export function createStudio(host) {
       slide: null,
     };
     if (kind === "pastPaper" && !options.source) return true;
-    if ((kind === "table" && !options.columns.length) || (kind === "report" && !options.ask)) {
+    if ((kind === "table" && !options.columns.length) || (kind === "report" && !options.ask) || (kind === "deepResearch" && !options.focus)) {
       /** @type {HTMLElement | null} */ (form.querySelector("input, textarea"))?.focus();
       return true;
     }

@@ -6,6 +6,10 @@
 //! tutor reaches it. At most three calls run at once, two on any one engine;
 //! the rest wait their turn. A call that runs past fifteen minutes is stopped.
 //! An answer that will not read is sent back once, saying what is wrong.
+//!
+//! What searches the web — Discover's sources, Deep Research — is a call of
+//! Claude Code's with the web's two tools and nothing else: no files, no
+//! notebook server, no sources needed. It may run for twenty-five minutes.
 //! Every call is kept as `tasks/J0001.json` — what it was told and asked,
 //! and how it ended — so what made a thing can be read.
 //!
@@ -35,8 +39,9 @@ use super::tutor::{Tutors, TOOLS};
 /// The most calls at once, and on one engine.
 const ALL: usize = 3;
 const EACH: usize = 2;
-/// How long a call may run.
+/// How long a call may run; one that reads the web, longer.
 const LONGEST: Duration = Duration::from_secs(15 * 60);
+const LONGEST_WEB: Duration = Duration::from_secs(25 * 60);
 /// The most of a notebook's words given to a call whole.
 const WHOLE: usize = 120_000;
 
@@ -133,6 +138,12 @@ impl Jobs {
         let id = self.next_id(book);
         let settings = &book.notebook.tutor;
         let engine = Engine::parse(&settings.engine).unwrap_or(Engine::Claude);
+        // The web is searched through Claude Code, whose web tools can be
+        // given alone; on the model the tutor is set to, if it is Claude's.
+        let (engine, model) = match make.web() {
+            true if engine != Engine::Claude => (Engine::Claude, String::new()),
+            _ => (engine, settings.model.clone()),
+        };
         let title = match (make, options.focus.trim()) {
             (Make::Report, _) => options.ask.trim().chars().take(60).collect::<String>(),
             (Make::Slides, _) if options.slide.is_some() => format!("Revising slide {} of {}", options.slide.as_deref().unwrap_or_default().trim_start_matches('s'), options.slides.as_deref().unwrap_or_default()),
@@ -140,7 +151,7 @@ impl Jobs {
             (_, "") => make.title().to_string(),
             (_, focus) => format!("{}: {focus}", make.title()),
         };
-        let asked = Asked { id: id.clone(), dir: book.dir().to_path_buf(), make, options, engine, model: settings.model.clone(), title: title.clone(), started: proton_study::now(), marking: None };
+        let asked = Asked { id: id.clone(), dir: book.dir().to_path_buf(), make, options, engine, model, title: title.clone(), started: proton_study::now(), marking: None };
         self.rows.push((book.dir().to_path_buf(), StudyJob { id: id.clone(), kind: make, title, state: "waiting".into(), why: None, made: None, engine: engine.key().into(), started: asked.started }));
         self.waiting.push_back(asked);
         id
@@ -233,7 +244,8 @@ impl Jobs {
         let mut ended: Vec<(usize, Result<String, String>)> = Vec::new();
         let mut repaired: Vec<(PathBuf, String)> = Vec::new();
         for (at, running) in self.running.iter_mut().enumerate() {
-            if running.since.elapsed() > LONGEST {
+            let longest = if running.asked.make.web() { LONGEST_WEB } else { LONGEST };
+            if running.since.elapsed() > longest {
                 running.conversation.stop();
                 ended.push((at, Err("It ran out of time.".into())));
                 continue;
@@ -306,6 +318,7 @@ fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)], fai
         let book = Book::read(&asked.dir)?;
         let asking = match &asked.marking {
             Some(marking) => marking_asked(&book, marking)?,
+            None if asked.make.web() => Asking { instructions: proton_study::found::rules(), prompt: studio::prompt_for(&book, asked.make, &asked.options)?, mcp: Vec::new() },
             None => asking(&book, &asked, tutors, roots)?,
         };
         Ok((book, asking))
@@ -322,7 +335,8 @@ fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)], fai
         schema: studio::schema(asked.make, &asked.options),
         mcp: asking.mcp,
         no_tools: true,
-        max_turns: Some(60),
+        web: asked.make.web(),
+        max_turns: Some(if asked.make.web() { 80 } else { 60 }),
         ..Unattended::default()
     };
     let model = Some(asked.model.clone()).filter(|m| !m.is_empty());
@@ -503,7 +517,13 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
     // A document's own title, when it gave one.
     let title = match body {
         StudyMadeBody::Prose { markdown } => markdown.lines().find_map(|l| l.strip_prefix("# ")).map(|t| t.trim().to_string()).unwrap_or_else(|| asked.title.clone()),
-        StudyMadeBody::Paper { title, .. } | StudyMadeBody::Slides { title, .. } | StudyMadeBody::Graphic { title, .. } | StudyMadeBody::Audio { title, .. } if !title.trim().is_empty() => {
+        StudyMadeBody::Paper { title, .. }
+        | StudyMadeBody::Slides { title, .. }
+        | StudyMadeBody::Graphic { title, .. }
+        | StudyMadeBody::Audio { title, .. }
+        | StudyMadeBody::Found { title, .. }
+            if !title.trim().is_empty() =>
+        {
             title.trim().to_string()
         }
         _ => asked.title.clone(),

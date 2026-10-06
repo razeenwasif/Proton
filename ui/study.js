@@ -120,7 +120,7 @@ export function createStudy(host) {
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web", removing: string | null,
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
-   *   progress: import("./study-progress.js").ProgressEvent | null}} */
+   *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -131,9 +131,8 @@ export function createStudy(host) {
     // The folder being typed to keep notebooks in, once asked for.
     moving: null,
     // The notebook's details being edited; text, or a web address, being
-    // given; a source
-    // whose taking out is being confirmed; sources whose download from
-    // iCloud is being confirmed.
+    // given; a source whose taking out is being confirmed; sources whose
+    // download from iCloud is being confirmed.
     editing: false, pasting: false, removing: null, getting: null,
     // What the middle shows: the chat, the sources, a source in the
     // reader, a note — and what Back returns to.
@@ -143,7 +142,12 @@ export function createStudy(host) {
     want: null,
     // Where the student stands, as the core last said.
     progress: null,
+    // What was found on the web that is not to be added, of what is shown.
+    unpicked: new Set(),
   };
+
+  /** The notebook's pages of the web, by address: what was found that it has. */
+  const webSources = () => new Map((state.notebook?.sources ?? []).flatMap((s) => (s.origin.from === "web" ? [[s.origin.url, s.id]] : [])));
 
   const readOnly = () => Boolean(state.notebook?.readOnly);
 
@@ -493,7 +497,7 @@ export function createStudy(host) {
       return;
     }
     if (shown.kind === "made") {
-      els.stage.innerHTML = madeHtml(shown.made, readOnly());
+      els.stage.innerHTML = madeHtml(shown.made, readOnly(), { have: webSources(), unpicked: state.unpicked });
       return;
     }
     if (shown.kind === "task") {
@@ -601,6 +605,19 @@ export function createStudy(host) {
     }
     const task = at_("[data-study-task]");
     if (task) return host.dispatch({ type: "studyShowTask", id: task.dataset.studyTask });
+    // What was found on the web, added: the sources ticked, or the report.
+    if (at_("[data-study-found-add]") && state.shown.kind === "made" && state.shown.made.body.shape === "found") {
+      const have = webSources();
+      const urls = state.shown.made.body.found.map((f) => f.url).filter((url) => !have.has(url) && !state.unpicked.has(url));
+      if (urls.length) host.dispatch({ type: "studyAddUrls", urls });
+      return;
+    }
+    if (at_("[data-study-found-report]") && state.shown.kind === "made" && state.shown.made.body.shape === "found") {
+      const { made, body } = state.shown.made;
+      const read = body.found.map((f, i) => `${i + 1}. ${f.title} — ${f.url}`).join("\n");
+      host.dispatch({ type: "studyPaste", title: made.title, text: `${body.report}\n\n## Sources\n\n${read}\n` });
+      return;
+    }
     const bin = at_("[data-study-bin-made]");
     if (bin) {
       host.dispatch({ type: "studyBinMade", id: bin.dataset.studyBinMade });
@@ -757,6 +774,12 @@ export function createStudy(host) {
   ws.addEventListener("change", (e) => {
     const t = /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target);
     if (t.closest("[data-study-picker]")) return;
+    const pick = t.dataset.studyFoundPick;
+    if (pick !== undefined && t instanceof HTMLInputElement) {
+      if (t.checked) state.unpicked.delete(pick);
+      else state.unpicked.add(pick);
+      return renderStage();
+    }
     if (chat.change(t)) return;
     if (t instanceof HTMLInputElement && cards.change(t)) return;
     if (state.shown.kind === "quiz" && quizzes.input(t)) return;
@@ -839,7 +862,7 @@ export function createStudy(host) {
     if (form.matches("[data-study-web-form]")) {
       const url = field("url");
       if (!url) return /** @type {HTMLInputElement | null} */ (form.querySelector("input"))?.focus();
-      host.dispatch({ type: "studyAddUrl", url });
+      host.dispatch({ type: "studyAddUrls", urls: [url] });
       state.pasting = false;
       renderStage();
     }
@@ -909,6 +932,7 @@ export function createStudy(host) {
 
   /** Something made, opened in the middle. @param {MadeEvent} event */
   function made(event) {
+    if (state.shown.kind !== "made" || state.shown.made.made.id !== event.made.id) state.unpicked = new Set();
     state.shown = { kind: "made", made: event };
     els.stage.innerHTML = "";
     render();
