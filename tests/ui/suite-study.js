@@ -242,6 +242,62 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('The studio makes from the sources: a tile asks for its options, and a table its columns', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
+    const studio = ws().querySelector('[data-study-studio-body]');
+    assert(studio.querySelectorAll('.st-tile').length === 9, 'the tiles are not all there');
+    studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
+    const form = studio.querySelector('[data-study-make-form="mindMap"]');
+    form.querySelector('input').value = 'informed search';
+    const before = win.commands.length;
+    form.requestSubmit(); await settle();
+    const made = sent(before, 'studyMake')[0];
+    assert(made?.kind === 'mindMap' && made.options.focus === 'informed search', `wrong make: ${JSON.stringify(made)}`);
+    studio.querySelector('[data-study-tile="table"]').click(); await settle();
+    const table = studio.querySelector('[data-study-make-form="table"]');
+    const none = win.commands.length;
+    table.requestSubmit(); await settle();
+    assert(sent(none, 'studyMake').length === 0, 'a table was asked for with no columns');
+    table.querySelector('input').value = 'Algorithm, Complete?';
+    table.requestSubmit(); await settle();
+    assert(JSON.stringify(sent(none, 'studyMake')[0]?.options.columns) === '["Algorithm","Complete?"]', 'the columns were not sent');
+  });
+
+  await test('What is being made, what failed and what was made are listed; a map opens, folds, and shows what made it', async () => {
+    const studio = ws().querySelector('[data-study-studio-body]');
+    await win.pushEvents([{type: 'studyStudio', jobs: [
+      {id: 'J0003', kind: 'faq', title: 'FAQ', state: 'running', why: null, made: null, engine: 'claude', started: 3},
+      {id: 'J0002', kind: 'table', title: 'Table', state: 'failed', why: 'Its answer could not be read', made: null, engine: 'claude', started: 2}],
+      made: [{id: 'M001', kind: 'mindMap', title: 'Search', made: 1, by: 'Claude Code', task: 'J0001'}]}]); await settle();
+    const jobs = [...studio.querySelectorAll('.st-job')];
+    assert(jobs.length === 2 && jobs[0].querySelector('.lab-spin') && jobs[1].textContent.includes('could not be read'), 'the calls are not drawn');
+    const stop = win.commands.length;
+    jobs[0].querySelector('[data-study-cancel]').click(); await settle();
+    assert(sent(stop, 'studyCancelJob')[0]?.id === 'J0003', 'not cancelled');
+    const before = win.commands.length;
+    studio.querySelector('[data-study-made="M001"]').click(); await settle();
+    assert(sent(before, 'studyShowMade')[0]?.id === 'M001', 'not opened');
+    await win.pushEvents([{type: 'studyMadeOpen', made: {id: 'M001', kind: 'mindMap', title: 'Search', made: 1, by: 'Claude Code', task: 'J0001'},
+      body: {shape: 'map', nodes: [{id: '1', parent: null, label: 'Search', cites: []}, {id: '2', parent: '1', label: 'Informed', cites: []},
+        {id: '3', parent: '2', label: 'A*', cites: ['S01 p. 3']}, {id: '4', parent: '3', label: 'Admissible $h$', cites: []}]},
+      citations: [cite(1, 'S01 p. 3')]}]); await settle();
+    assert(ws().querySelectorAll('.st-map-node').length === 4, 'the map is not drawn');
+    assert(ws().querySelector('.st-map .st-cite'), 'a node\'s citation is not a chip');
+    const deep = [...ws().querySelectorAll('.st-map-node')].find((n) => n.querySelector(':scope > .st-map-label')?.textContent.startsWith('A*'));
+    assert(deep?.hasAttribute('data-folded'), 'a deep branch is not folded at first');
+    deep.querySelector('[data-study-fold]').click(); await settle();
+    assert(!deep.hasAttribute('data-folded'), 'it did not unfold');
+    const prompt = win.commands.length;
+    ws().querySelector('[data-study-task="J0001"]').click(); await settle();
+    assert(sent(prompt, 'studyShowTask')[0]?.id === 'J0001', 'the prompt was not asked for');
+    await win.pushEvents([{type: 'studyTask', id: 'J0001', title: 'Search', engine: 'claude', model: 'm', state: 'done', why: null,
+      instructions: 'Rules: cite everything.', prompt: 'Map the ideas of these sources.'}]); await settle();
+    assert(ws().querySelector('.st-task-view')?.textContent.includes('Map the ideas'), 'the prompt is not shown');
+    ws().querySelector('[data-study-back]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('A notebook another Proton has open is read only here', async () => {
     await win.pushEvents([notebook([row('S01')], 'another Proton (pid 4242)')]); await settle();
     assert(ws().querySelector('.st-banner')?.textContent.includes('read only'), 'nothing says it is read only');

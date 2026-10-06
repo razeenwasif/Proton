@@ -171,6 +171,24 @@ export function createStudyPreview(deliver) {
 
   const chatEvent = () => ({ type: "studyChat", live: null, ...state.chat });
 
+  /** The studio: one thing made, and anything being made. */
+  const studio = {
+    jobs: /** @type {any[]} */ ([]),
+    made: [{ id: "M001", kind: "mindMap", title: "Search", made: now - 5000, by: "Claude Code · claude-opus-5-5", task: "J0001" },
+      { id: "R001", kind: "studyGuide", title: "COMP3670 — Search, a study guide", made: now - 4000, by: "Codex · gpt-6.1-sol", task: "J0002" }],
+  };
+  const studioEvent = () => ({ type: "studyStudio", ...studio });
+  const cites = state.chat.turns[0].citations;
+  const BODIES = /** @type {Record<string, any>} */ ({
+    R001: { shape: "prose", markdown: "# COMP3670 — Search, a study guide\n\n## Uninformed search\n\nBreadth-first search is complete and, with unit costs, optimal [[S02 § Search › Uniform cost L40-58]].\n\n## Informed search\n\nA* orders the frontier by $f(n) = g(n) + h(n)$ [[S01 p. 3]].\n\n## Practice questions\n\n1. Why is uniform-cost search optimal? [[S01 p. 1]]" },
+    M001: { shape: "map", nodes: [
+      { id: "1", parent: null, label: "Search", cites: [] },
+      { id: "2", parent: "1", label: "Uninformed", cites: [] }, { id: "3", parent: "1", label: "Informed", cites: [] },
+      { id: "4", parent: "2", label: "Breadth-first", cites: ["S02 § Search › Uniform cost L40-58"] }, { id: "5", parent: "2", label: "Uniform cost: order by $g(n)$", cites: ["S01 p. 3"] },
+      { id: "6", parent: "3", label: "A*: $f = g + h$", cites: ["S01 p. 1"] }, { id: "7", parent: "6", label: "Admissible $h$", cites: [] },
+    ] },
+  });
+
   /** Answer as a tutor would: steps, then the answer in pieces. @param {string} asked */
   function answer(asked) {
     const steps = [{ kind: "list", text: "Looked at the notebook's sources", done: true }, { kind: "search", text: `Searched for “${asked.slice(0, 40)}”`, done: true }];
@@ -189,7 +207,7 @@ export function createStudyPreview(deliver) {
   }
 
   return {
-    sync: () => [listEvent(), kbEvent(), notebookEvent(), chatEvent()],
+    sync: () => [listEvent(), kbEvent(), notebookEvent(), chatEvent(), studioEvent()],
     /** @param {any} command */
     command(command) {
       switch (command.type) {
@@ -296,6 +314,25 @@ export function createStudyPreview(deliver) {
           return [chatEvent()];
         case "studySaveAnswer":
           return [notebookEvent()];
+        case "studyMake": {
+          const id = `J${String(3 + studio.jobs.length).padStart(4, "0")}`;
+          const title = command.options.focus ? `${command.kind}: ${command.options.focus}` : command.kind;
+          studio.jobs.unshift({ id, kind: command.kind, title, state: "running", why: null, made: null, engine: "claude", started: Math.floor(Date.now() / 1000) });
+          setTimeout(() => {
+            const job = studio.jobs.find((j) => j.id === id);
+            if (job) Object.assign(job, { state: "done", made: "R001" });
+            studio.jobs = studio.jobs.filter((j) => j.id !== id);
+            deliver(studioEvent());
+          }, 1500);
+          return [studioEvent()];
+        }
+        case "studyShowMade": {
+          const made = studio.made.find((m) => m.id === command.id);
+          return made ? [{ type: "studyMadeOpen", made, body: BODIES[command.id], citations: cites }] : [];
+        }
+        case "studyShowTask":
+          return [{ type: "studyTask", id: command.id, title: "Search", engine: "claude", model: "claude-opus-5-5", state: "done", why: null,
+            instructions: "The notebook's sources are given to you below, every passage beginning with its citation in double brackets…", prompt: "Map the ideas of these sources…\n\n---\n\nThe sources:\n\n[[S01 p. 1]]\nQuestion 1 …" }];
         case "studyRole":
           for (const s of state.sources[state.open ?? ""] ?? []) if (s.id === command.id) s.role = command.role;
           return [notebookEvent()];

@@ -66,7 +66,7 @@ export function answerHtml(text, citations) {
 
 /**
  * @param {{dispatch: (command: any) => unknown, ws: HTMLElement, readOnly: () => boolean,
- *   show: (id: string, at: {from: number, to: number} | null) => void}} host
+ *   show: (id: string, at: {from: number, to: number} | null) => void, lookup?: (key: string) => Citation[]}} host
  */
 export function createChat(host) {
   /** @type {{chat: ChatEvent | null, live: Live | null, caps: Map<string, Capabilities>, menu: string | null, draft: Settings | null}} */
@@ -86,7 +86,8 @@ export function createChat(host) {
   /** Every citation shown, by number — finished turns' and the live one's, keyed by turn. */
   function citationsOf(/** @type {string} */ key) {
     if (key === "live") return state.live?.citations ?? [];
-    return state.chat?.turns[Number(key)]?.citations ?? [];
+    if (/^\d+$/.test(key)) return state.chat?.turns[Number(key)]?.citations ?? [];
+    return host.lookup?.(key) ?? [];
   }
 
   /* ── drawing ───────────────────────────────────────────────────── */

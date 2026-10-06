@@ -220,7 +220,7 @@ impl Jobs {
             self.set(&dir, &id, "repairing", None, None);
         }
         // Remove from the end, so the places stay true.
-        ended.sort_by(|a, b| b.0.cmp(&a.0));
+        ended.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
         for (at, outcome) in ended {
             let running = self.running.remove(at);
             let (id, dir) = (running.asked.id.clone(), running.asked.dir.clone());

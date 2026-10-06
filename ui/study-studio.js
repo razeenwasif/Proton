@@ -1,0 +1,212 @@
+/* The studio: what can be made of a notebook's ticked sources, what is
+ * being made, and what has been — drawn in the notebook's right column, each
+ * made thing opened in the middle.
+ *
+ * Every thing is made by one call to the engine the notebook's tutor is set
+ * to, and cites the sources as the tutor does: its citations are chips here
+ * as there. The core runs the calls, holds each answer to its shape, and
+ * keeps what they made in the notebook; this draws it. */
+
+import { escapeHtml as esc, icon } from "./html.js";
+import { markdown } from "./markdown.js";
+import { answerHtml } from "./study-chat.js";
+
+/** @typedef {import("./bindings/StudyMakeKind").StudyMakeKind} Kind */
+/** @typedef {import("./bindings/StudyJob").StudyJob} Job */
+/** @typedef {import("./bindings/StudyMade").StudyMade} Made */
+/** @typedef {import("./bindings/StudyMadeBody").StudyMadeBody} Body */
+/** @typedef {import("./bindings/StudyCitation").StudyCitation} Citation */
+/** @typedef {import("./bindings/StudyMapNode").StudyMapNode} Node */
+/** @typedef {{jobs: Job[], made: Made[]}} StudioEvent */
+/** @typedef {{made: Made, body: Body, citations: Citation[]}} MadeEvent */
+/** @typedef {{id: string, title: string, engine: string, model: string, state: string, why: string | null, instructions: string, prompt: string}} TaskEvent */
+
+/** What can be made, in the order offered: its kind, name, icon and what it asks for. */
+export const TILES = /** @type {[Kind, string, string, string][]} */ ([
+  ["studyGuide", "Study guide", "book", "Each topic's key ideas, worked examples and practice questions"],
+  ["objectives", "Learning objectives", "target", "What you must be able to do in the exam"],
+  ["faq", "FAQ", "chat", "The questions a student asks, answered"],
+  ["glossary", "Glossary", "text", "Every term, as the sources define it"],
+  ["mindMap", "Mind map", "node", "The ideas, and how they branch"],
+  ["table", "Table", "table", "A row for each thing, the columns you name"],
+  ["briefing", "Briefing", "file-doc", "The main themes and what follows from them"],
+  ["timeline", "Timeline", "clock", "What happens, in order"],
+  ["report", "Your own", "pen", "A document of your asking"],
+]);
+const TILE = Object.fromEntries(TILES.map(([kind, name]) => [kind, name]));
+
+const STATES = /** @type {Record<string, string>} */ ({ waiting: "Waiting its turn", running: "Being made", repairing: "Being mended", done: "Made", failed: "Not made" });
+
+/** A time, said as long ago as it was. @param {number} s */
+function ago(s) {
+  const d = Math.floor(Date.now() / 1000) - s;
+  if (d < 60) return "just now";
+  if (d < 3600) return `${Math.floor(d / 60)} min ago`;
+  if (d < 86400) return `${Math.floor(d / 3600)} h ago`;
+  return new Date(s * 1000).toLocaleDateString();
+}
+
+/** A mind map, drawn as a tree whose branches fold. @param {Node[]} nodes @param {Citation[]} citations */
+function mapHtml(nodes, citations) {
+  /** @param {string | null} parent @param {number} depth @returns {string} */
+  const branch = (parent, depth) => {
+    const children = nodes.filter((n) => n.parent === parent);
+    if (!children.length) return "";
+    return `<ul class="st-map-level">${children.map((n) => {
+      const below = branch(n.id, depth + 1);
+      const chips = n.cites.map((c) => citations.find((x) => x.raw === c)).filter(Boolean)
+        .map((c) => `<button class="st-cite${/** @type {Citation} */ (c).resolved ? "" : " bad"}" data-study-cite="${/** @type {Citation} */ (c).n}">${/** @type {Citation} */ (c).n}</button>`).join("");
+      const label = markdown(n.label).replace(/^<p>|<\/p>\s*$/g, "");
+      return `<li class="st-map-node${below ? " has" : ""}"${depth >= 2 && below ? ' data-folded=""' : ""}>` +
+        `<div class="st-map-label">${below ? `<button class="st-map-fold" data-study-fold aria-label="Fold">${icon("chev")}</button>` : ""}` +
+        `<span>${label}</span>${chips}<button class="st-map-ask" data-study-ask-about="${esc(n.label)}" title="Ask the tutor about this">${icon("chat")}</button></div>${below}</li>`;
+    }).join("")}</ul>`;
+  };
+  return `<div class="st-map" data-turn="made">${branch(null, 0)}</div>`;
+}
+
+/** Something made, whole, for the middle. @param {MadeEvent} e @param {boolean} readOnly */
+export function madeHtml(e, readOnly) {
+  const { made, body, citations } = e;
+  const head = `<div class="st-reader-head"><button class="cc-quiet" data-study-back>← Back</button>` +
+    `<div><h1>${esc(made.title)}</h1><span class="st-faint">${esc(TILE[made.kind] ?? made.kind)} · ${esc(made.by)} · ${esc(ago(made.made))}</span></div>` +
+    `<button class="cc-quiet" data-study-task="${esc(made.task)}" title="What the call was told and asked">Prompt</button>` +
+    (readOnly ? "" : `<button class="cc-quiet" data-study-bin-made="${esc(made.id)}" title="Put it in the notebook's bin">Bin</button>`) + `</div>`;
+  /** @param {string[]} cites */
+  const chips = (cites) => cites.map((c) => citations.find((x) => x.raw === c)).filter(Boolean)
+    .map((c) => `<button class="st-cite${/** @type {Citation} */ (c).resolved ? "" : " bad"}" data-study-cite="${/** @type {Citation} */ (c).n}">${/** @type {Citation} */ (c).n}</button>`).join("");
+  let content = "";
+  if (body.shape === "prose") {
+    // Its own title is the head's.
+    content = `<div class="st-answer st-doc md" data-turn="made">${answerHtml(body.markdown.replace(/^#\s+.*\n+/, ""), citations)}</div>`;
+  } else if (body.shape === "map") {
+    content = mapHtml(body.nodes, citations);
+  } else if (body.shape === "table") {
+    content = `<div class="st-table-box" data-turn="made"><table class="st-table"><thead><tr>${body.columns.map((c) => `<th>${esc(c)}</th>`).join("")}<th></th></tr></thead>` +
+      `<tbody>${body.rows.map((r) => `<tr>${r.cells.map((cell) => `<td>${markdown(cell).replace(/^<p>|<\/p>\s*$/g, "")}</td>`).join("")}<td>${chips(r.cites)}</td></tr>`).join("")}</tbody></table>` +
+      `<p class="st-faint">Kept beside it as a CSV: studio/tables/${esc(made.id)}.csv</p></div>`;
+  } else {
+    const topics = [...new Set(body.objectives.map((o) => o.topic))];
+    content = `<div class="st-objectives" data-turn="made">${topics.map((t) => `<section><h3>${esc(t)}</h3><ol>${body.objectives.filter((o) => o.topic === t)
+      .map((o) => `<li><span class="st-faint">${esc(o.id)}</span> ${markdown(o.text).replace(/^<p>|<\/p>\s*$/g, "")} ${chips(o.cites)}</li>`).join("")}</ol></section>`).join("")}</div>`;
+  }
+  return `<div class="st-reader st-made-view">${head}${content}</div>`;
+}
+
+/** What a call was told and asked. @param {TaskEvent} t */
+export function taskHtml(t) {
+  const how = [t.engine, t.model].filter(Boolean).join(" · ");
+  return `<div class="st-reader st-task-view"><div class="st-reader-head"><button class="cc-quiet" data-study-back>← Back</button>` +
+    `<div><h1>${esc(t.title)}</h1><span class="st-faint">${esc(t.id)} · ${esc(how)} · ${esc(STATES[t.state] ?? t.state)}${t.why ? ` — ${esc(t.why)}` : ""}</span></div></div>` +
+    `<h3>What it was told</h3><pre class="st-prompt">${esc(t.instructions)}</pre><h3>What it was asked</h3><pre class="st-prompt">${esc(t.prompt)}</pre></div>`;
+}
+
+/** @param {{box: HTMLElement, dispatch: (command: any) => unknown, readOnly: () => boolean}} host */
+export function createStudio(host) {
+  /** @type {{studio: StudioEvent | null, asking: Kind | null}} */
+  const state = { studio: null, asking: null };
+
+  function optionsHtml(/** @type {Kind} */ kind) {
+    const field = kind === "table"
+      ? `<input name="columns" placeholder="Columns, by commas: Algorithm, Complete?, Optimal?, Time" autocomplete="off" required>`
+      : kind === "report"
+        ? `<textarea name="ask" rows="3" placeholder="What it should be: “A one-page cheat sheet of every search algorithm’s complexity.”" required></textarea>`
+        : `<input name="focus" placeholder="A topic to centre it on — or leave it to cover everything ticked" autocomplete="off">`;
+    return `<form class="st-make-form" data-study-make-form="${kind}" novalidate>${field}
+        <div class="rs-actions"><button type="button" class="cc-quiet" data-study-make-cancel>Cancel</button><button type="submit" class="cc-primary">Make</button></div></form>`;
+  }
+
+  function render() {
+    const studio = state.studio;
+    if (!studio) {
+      host.box.innerHTML = "";
+      return;
+    }
+    const ro = host.readOnly();
+    const tiles = TILES.map(([kind, name, ic, note]) => `<button class="st-tile${state.asking === kind ? " on" : ""}" data-study-tile="${kind}" title="${esc(note)}"${ro ? " disabled" : ""}>` +
+      `${icon(ic)}<span>${esc(name)}</span></button>`).join("");
+    const asking = state.asking ? optionsHtml(state.asking) : "";
+    const live = studio.jobs.filter((j) => j.state !== "done");
+    const jobs = live.map((j) => `<div class="st-job ${esc(j.state)}">` +
+      (j.state === "failed" ? icon("d-error") : '<span class="lab-spin"></span>') +
+      `<div><b>${esc(j.title)}</b><span class="st-faint">${esc(STATES[j.state] ?? j.state)}${j.why ? ` — ${esc(j.why)}` : ""}</span></div>` +
+      (j.state === "failed" ? `<button class="st-link" data-study-task="${esc(j.id)}">Prompt</button>` : `<button class="st-x" data-study-cancel="${esc(j.id)}" title="Stop it">${icon("close")}</button>`) + `</div>`).join("");
+    const made = studio.made.map((m) => `<button class="st-made" data-study-made="${esc(m.id)}">` +
+      `${icon(TILES.find(([k]) => k === m.kind)?.[2] ?? "file")}<span><b>${esc(m.title)}</b><span class="st-faint">${esc(TILE[m.kind] ?? m.kind)} · ${esc(ago(m.made))}</span></span></button>`).join("");
+    // The form being typed into is kept.
+    const typing = host.box.querySelector("[data-study-make-form]");
+    if (typing && state.asking && typing.getAttribute("data-study-make-form") === state.asking) {
+      const list = host.box.querySelector("[data-study-studio-list]");
+      if (list) list.innerHTML = `${jobs}${made || (live.length ? "" : `<p class="st-faint st-pad">Nothing made yet. Each thing is made from the sources ticked, and cites them.</p>`)}`;
+      return;
+    }
+    host.box.innerHTML = `<div class="st-tiles">${tiles}</div>${asking}<div class="st-studio-list" data-study-studio-list>${jobs}` +
+      `${made || (live.length ? "" : `<p class="st-faint st-pad">Nothing made yet. Each thing is made from the sources ticked, and cites them.</p>`)}</div>`;
+    /** @type {HTMLElement | null} */ (host.box.querySelector("[data-study-make-form] input, [data-study-make-form] textarea"))?.focus({ preventScroll: true });
+  }
+
+  /** A click in the studio; `true` if it was the studio's. @param {HTMLElement} t */
+  function click(t) {
+    if (!host.box.contains(t)) return false;
+    const at = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
+    const tile = at("[data-study-tile]");
+    if (tile) {
+      const kind = /** @type {Kind} */ (tile.dataset.studyTile);
+      state.asking = state.asking === kind ? null : kind;
+      host.box.querySelector("[data-study-make-form]")?.remove();
+      render();
+      return true;
+    }
+    if (at("[data-study-make-cancel]")) {
+      state.asking = null;
+      host.box.querySelector("[data-study-make-form]")?.remove();
+      render();
+      return true;
+    }
+    const cancel = at("[data-study-cancel]");
+    if (cancel) {
+      host.dispatch({ type: "studyCancelJob", id: cancel.dataset.studyCancel });
+      return true;
+    }
+    const made = at("[data-study-made]");
+    if (made) {
+      host.dispatch({ type: "studyShowMade", id: made.dataset.studyMade });
+      return true;
+    }
+    const task = at("[data-study-task]");
+    if (task) {
+      host.dispatch({ type: "studyShowTask", id: task.dataset.studyTask });
+      return true;
+    }
+    return true;
+  }
+
+  /** @param {HTMLFormElement} form */
+  function submit(form) {
+    if (!form.matches("[data-study-make-form]") || !host.box.contains(form)) return false;
+    const kind = /** @type {Kind} */ (form.dataset.studyMakeForm);
+    const data = new FormData(form);
+    const options = {
+      focus: String(data.get("focus") ?? "").trim(),
+      ask: String(data.get("ask") ?? "").trim(),
+      columns: String(data.get("columns") ?? "").split(",").map((c) => c.trim()).filter(Boolean),
+    };
+    if ((kind === "table" && !options.columns.length) || (kind === "report" && !options.ask)) {
+      /** @type {HTMLElement | null} */ (form.querySelector("input, textarea"))?.focus();
+      return true;
+    }
+    host.dispatch({ type: "studyMake", kind, options });
+    state.asking = null;
+    form.remove();
+    render();
+    return true;
+  }
+
+  /** @param {StudioEvent} event */
+  function studio(event) {
+    state.studio = event;
+    render();
+  }
+
+  return { studio, render, click, submit, clear: () => { state.studio = null; state.asking = null; render(); } };
+}

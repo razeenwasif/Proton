@@ -4910,6 +4910,18 @@ function renderEvent(event) {
       study?.chatLive(event);
       break;
 
+    case "studyStudio":
+      study?.studio(event);
+      break;
+
+    case "studyMadeOpen":
+      study?.made(event);
+      break;
+
+    case "studyTask":
+      study?.task(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

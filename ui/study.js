@@ -13,6 +13,7 @@ import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
 import { createChat } from "./study-chat.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
+import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 
 /** @typedef {import("./bindings/StudySummary").StudySummary} Summary */
 /** @typedef {import("./bindings/StudySourceRow").StudySourceRow} SourceRow */
@@ -23,7 +24,10 @@ import { createPicker, KIND_ICON, size } from "./study-kb.js";
 /** @typedef {{notebooks: Summary[], open: string | null, folder: string | null}} ListEvent */
 /** @typedef {{id: string, title: string, kind: string, at: Place | null, said: string | null, view: View}} SourceEvent */
 /** @typedef {{id: string, title: string, body: string, updated: number, source: string | null}} NoteEvent */
-/** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}} Shown */
+/** @typedef {import("./study-studio.js").MadeEvent} MadeEvent */
+/** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
+/** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
+ *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent}} Shown */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
  *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
 
@@ -76,7 +80,10 @@ export function createStudy(host) {
   const chat = createChat({
     dispatch: host.dispatch, ws, readOnly: () => readOnly(),
     show: (id, at) => host.dispatch({ type: "studyShow", id, at }),
+    // The citations of something made, for its chips.
+    lookup: (key) => (key === "made" && state.shown.kind === "made" ? state.shown.made.citations : []),
   });
+  const studio = createStudio({ box: els.studio, dispatch: host.dispatch, readOnly: () => readOnly() });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: boolean, removing: string | null,
@@ -421,11 +428,20 @@ export function createStudy(host) {
       els.stage.innerHTML = noteHtml(shown.note, shown.preview);
       return;
     }
+    if (shown.kind === "made") {
+      els.stage.innerHTML = madeHtml(shown.made, readOnly());
+      return;
+    }
+    if (shown.kind === "task") {
+      els.stage.innerHTML = taskHtml(shown.task);
+      return;
+    }
     els.stage.innerHTML = notebookHtml();
   }
 
   function renderStudio() {
-    els.studio.innerHTML = state.notebook ? `<p class="st-faint st-pad">What is made from your sources is kept here.</p>` : "";
+    if (state.notebook) studio.render();
+    else els.studio.innerHTML = "";
   }
 
   function render() {
@@ -452,6 +468,32 @@ export function createStudy(host) {
     if (t.closest("[data-study-picker]")) return;
     if (t.closest(".st-chat") || t.closest("[data-study-cite]")) {
       chat.click(t);
+      return;
+    }
+    if (studio.click(t)) return;
+    const at_ = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
+    const task = at_("[data-study-task]");
+    if (task) return host.dispatch({ type: "studyShowTask", id: task.dataset.studyTask });
+    const bin = at_("[data-study-bin-made]");
+    if (bin) {
+      host.dispatch({ type: "studyBinMade", id: bin.dataset.studyBinMade });
+      state.shown = { kind: state.back };
+      els.stage.innerHTML = "";
+      return render();
+    }
+    const fold = at_("[data-study-fold]");
+    if (fold) {
+      const node = /** @type {HTMLElement} */ (fold.closest(".st-map-node"));
+      node.toggleAttribute("data-folded");
+      return;
+    }
+    const about = at_("[data-study-ask-about]");
+    if (about) {
+      state.shown = { kind: "chat" };
+      state.back = "chat";
+      els.stage.innerHTML = "";
+      render();
+      host.dispatch({ type: "studyAsk", text: `Explain “${about.dataset.studyAskAbout}” from the sources.` });
       return;
     }
     const at = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
@@ -603,6 +645,11 @@ export function createStudy(host) {
     const form = /** @type {HTMLFormElement} */ (e.target);
     if (form.closest("[data-study-picker]")) return;
     if (chat.submit(/** @type {SubmitEvent} */ (e))) return;
+    if (form.matches("[data-study-make-form]")) {
+      e.preventDefault();
+      studio.submit(form);
+      return;
+    }
     e.preventDefault();
     const data = new FormData(form);
     const field = (/** @type {string} */ name) => String(data.get(name) ?? "").trim();
@@ -687,6 +734,25 @@ export function createStudy(host) {
     if (chat.live(event) && state.shown.kind === "chat") chat.renderLive();
   }
 
+  /** The studio's calls, and what they made. @param {import("./study-studio.js").StudioEvent} event */
+  function studioEvent(event) {
+    studio.studio(event);
+  }
+
+  /** Something made, opened in the middle. @param {MadeEvent} event */
+  function made(event) {
+    state.shown = { kind: "made", made: event };
+    els.stage.innerHTML = "";
+    render();
+  }
+
+  /** What a call was told and asked. @param {TaskEvent} event */
+  function task(event) {
+    state.shown = { kind: "task", task: event };
+    els.stage.innerHTML = "";
+    render();
+  }
+
   /** A source, in the reader. @param {SourceEvent} event */
   function source(event) {
     state.shown = { kind: "source", source: event };
@@ -714,6 +780,6 @@ export function createStudy(host) {
 
   render();
 
-  return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities,
+  return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
     kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
 }
