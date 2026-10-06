@@ -22,6 +22,9 @@ pub struct Notebook {
     /// Put away: kept, and not listed unless asked for.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+    /// Who answers its questions, and how.
+    #[serde(default)]
+    pub tutor: crate::tutor::TutorSettings,
 }
 
 /// What a source is to a course: what a quiz makes of it, and what an exam is

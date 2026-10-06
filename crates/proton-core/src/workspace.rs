@@ -1423,7 +1423,13 @@ impl Workspace {
             | Command::StudyShowNote { .. }
             | Command::StudyNote { .. }
             | Command::StudyNoteDelete { .. }
-            | Command::StudyNoteSource { .. } => vec![notice("Notebook is the window's, not a project's.".into(), NoticeLevel::Warn)],
+            | Command::StudyNoteSource { .. }
+            | Command::StudyAsk { .. }
+            | Command::StudyStopAnswer
+            | Command::StudyChatNew
+            | Command::StudyChatOpen { .. }
+            | Command::StudyTutor { .. }
+            | Command::StudySaveAnswer { .. } => vec![notice("Notebook is the window's, not a project's.".into(), NoticeLevel::Warn)],
             Command::ResearchNew { title, goal, discipline, literature } => self.research().create(&title, &goal, discipline, literature),
             Command::ResearchOpen { slug } => self.research().open(&slug),
             Command::ResearchShow { hypothesis } => self.research().show(hypothesis),

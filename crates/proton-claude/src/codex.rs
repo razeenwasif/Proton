@@ -1064,6 +1064,7 @@ mod tests {
             max_turns: None,
             mcp: Vec::new(),
             read: Vec::new(),
+            no_tools: false,
         }
     }
 

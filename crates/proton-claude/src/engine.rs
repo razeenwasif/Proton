@@ -146,6 +146,10 @@ pub struct Unattended {
     pub mcp: Vec<McpServer>,
     /// Folders besides its own it may read: Mathlib's sources, for a prover.
     pub read: Vec<PathBuf>,
+    /// No built-in tools at all — no reading files, no searching them: it
+    /// learns only what its MCP servers tell it. Notebook's tutor, which
+    /// answers from a notebook's sources and nothing else.
+    pub no_tools: bool,
 }
 
 /// An MCP server a call is given: Proton's `proton-mcp`, serving one
@@ -172,7 +176,7 @@ pub fn unattended(engine: Engine, cwd: PathBuf, settings: Settings, how: &Unatte
         Engine::Claude => Box::new(Chat::unattended(cwd, settings, how)),
         Engine::Codex => Box::new(crate::codex::Codex::unattended(cwd, settings, how)),
         Engine::Antigravity => Box::new(crate::agy::Antigravity::unattended(cwd, settings, how)),
-        Engine::Gemini => return Err("The Gemini CLI cannot take part unattended yet.".into()),
+        Engine::Gemini => Box::new(crate::gemini::Gemini::unattended(cwd, settings, how)),
     })
 }
 

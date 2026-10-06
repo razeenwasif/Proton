@@ -27,7 +27,7 @@ use serde_json::{json, Value};
 
 use crate::artifacts::ArtifactRef;
 use crate::chat::{Answer, Image, Settings};
-use crate::engine::{Conversation, Engine};
+use crate::engine::{Conversation, Engine, Unattended};
 use crate::fold::{Ask, AskKind, Capabilities, Changes, Fold, Level, ModelChoice, Task, Tool, ToolState};
 use crate::rpc::{Incoming, Rpc};
 use crate::saved::Record;
@@ -108,6 +108,12 @@ pub struct Gemini {
     /// Whether it has been said that the CLI is asking for a sign-in.
     told_sign_in: bool,
     started: Option<std::time::Instant>,
+    /// Run for a host with nobody to ask: see [`Unattended`]. Its MCP
+    /// servers are Proton's alone, their tools allowed and nothing else.
+    unattended: Option<Unattended>,
+    /// Whether its instructions have been said: they go before the first
+    /// prompt a process is given, since ACP has no place for them.
+    instructed: bool,
 }
 
 impl Gemini {
@@ -133,7 +139,50 @@ impl Gemini {
             replay: false,
             told_sign_in: false,
             started: None,
+            unattended: None,
+            instructed: false,
         }
+    }
+
+    /// A conversation run for a host with nobody to answer its questions:
+    /// none of the person's extensions or MCP servers, Proton's own servers
+    /// given to its session, their tools allowed and every other permission
+    /// refused, and its instructions said before the first prompt.
+    pub fn unattended(cwd: PathBuf, settings: Settings, how: &Unattended) -> Gemini {
+        let mut gemini = Gemini::new(cwd, Settings { mode: "default".into(), ..settings });
+        gemini.unattended = Some(how.clone());
+        gemini
+    }
+
+    /// What `gemini` is started with.
+    fn args(&self) -> Vec<String> {
+        let mut args = vec!["--experimental-acp".to_string()];
+        if let Some(model) = self.settings.model.as_deref().filter(|m| !m.is_empty() && *m != "default") {
+            args.push("--model".into());
+            args.push(model.to_string());
+        }
+        if let Some(how) = &self.unattended {
+            // An extension list naming none loads none; an allowed-servers
+            // list naming only ours keeps the person's servers out.
+            args.extend(["--extensions".to_string(), "none".to_string()]);
+            args.push("--allowed-mcp-server-names".into());
+            match how.mcp.is_empty() {
+                true => args.push("none".into()),
+                false => args.extend(how.mcp.iter().map(|s| s.name.clone())),
+            }
+        }
+        args
+    }
+
+    /// The MCP servers a session is given: Proton's, for an unattended one.
+    fn mcp_servers(&self) -> Value {
+        let servers: Vec<Value> = self
+            .unattended
+            .iter()
+            .flat_map(|how| how.mcp.iter())
+            .map(|s| json!({ "name": s.name, "command": s.command, "args": s.args, "env": [] }))
+            .collect();
+        Value::Array(servers)
     }
 
     pub fn restore(record: Record) -> Gemini {
@@ -189,12 +238,9 @@ impl Gemini {
         }
         self.fold.starting();
         let program = executable()?;
-        let mut args = vec!["--experimental-acp".to_string()];
-        if let Some(model) = self.settings.model.as_deref().filter(|m| !m.is_empty() && *m != "default") {
-            args.push("--model".into());
-            args.push(model.to_string());
-        }
+        let args = self.args();
         self.rpc = Some(Rpc::start(&program, &args, &self.cwd, "Gemini", true)?);
+        self.instructed = false;
         self.session = None;
         self.started = Some(std::time::Instant::now());
         self.told_sign_in = false;
@@ -218,6 +264,10 @@ impl Gemini {
                 prompt.insert(0, json!({ "type": "text", "text": format!("Our conversation so far, for context:\n\n{earlier}\n\n(The newest message follows.)") }));
             }
         }
+        if let Some(how) = self.unattended.as_ref().filter(|_| !self.instructed) {
+            prompt.insert(0, json!({ "type": "text", "text": format!("<instructions>\n{}\n</instructions>", how.instructions) }));
+            self.instructed = true;
+        }
         self.text = None;
         self.thought = None;
         self.prompting = true;
@@ -233,7 +283,8 @@ impl Gemini {
         match (wait, result) {
             (Wait::Initialize, Ok(_)) => {
                 let cwd = self.cwd.clone();
-                if let Err(why) = self.request("session/new", json!({ "cwd": cwd, "mcpServers": [] }), Wait::Session) {
+                let servers = self.mcp_servers();
+                if let Err(why) = self.request("session/new", json!({ "cwd": cwd, "mcpServers": servers }), Wait::Session) {
                     self.fold.failed(&why);
                 }
             }
@@ -378,6 +429,23 @@ impl Gemini {
             .flatten()
             .map(|o| (str_of(o, "kind").to_string(), str_of(o, "optionId").to_string()))
             .collect();
+        // Unattended: a tool of Proton's own servers is allowed, and
+        // nothing else is — there is nobody to ask.
+        if let Some(how) = &self.unattended {
+            let ours = how.mcp.iter().any(|s| {
+                let title = str_of(call, "title");
+                title.contains(&s.name) || s.tools.iter().any(|t| title == t || title.starts_with(&format!("{t} ")) || title.starts_with(&format!("{t}(")))
+            });
+            let kinds: &[&str] = if ours { &["allow_once", "allow_always"] } else { &["reject_once", "reject_always"] };
+            let answer = match pick(&options, kinds) {
+                Some(option) => json!({ "outcome": { "outcome": "selected", "optionId": option } }),
+                None => json!({ "outcome": { "outcome": "cancelled" } }),
+            };
+            if let Some(rpc) = self.rpc.as_mut() {
+                let _ = rpc.reply(&id, answer);
+            }
+            return;
+        }
         // The mode chosen here answers what it covers.
         let kind = str_of(call, "kind");
         let allowed = match self.settings.mode.as_str() {
@@ -652,6 +720,29 @@ impl Conversation for Gemini {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_unattended_gemini_loads_no_extensions_and_only_protons_servers() {
+        let server = crate::engine::McpServer {
+            name: "proton-notebook".into(),
+            command: PathBuf::from("/x/proton-mcp"),
+            args: vec!["--notebook".into(), "/n".into()],
+            tools: vec!["search_sources".into()],
+        };
+        let how = Unattended { instructions: "Teach.".into(), mcp: vec![server], no_tools: true, ..Unattended::default() };
+        let gemini = Gemini::unattended(PathBuf::from("/n"), Settings::default(), &how);
+        let args = gemini.args();
+        let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+        assert!(has(["--extensions", "none"]) && has(["--allowed-mcp-server-names", "proton-notebook"]), "{args:?}");
+        assert_eq!(gemini.mcp_servers(), json!([{ "name": "proton-notebook", "command": "/x/proton-mcp", "args": ["--notebook", "/n"], "env": [] }]));
+        // With no server of ours, none of the person's either.
+        let bare = Gemini::unattended(PathBuf::from("/n"), Settings::default(), &Unattended::default()).args();
+        assert!(bare.windows(2).any(|w| w[0] == "--allowed-mcp-server-names" && w[1] == "none"), "{bare:?}");
+        // The Chat tab's Gemini is untouched.
+        let chat = Gemini::new(PathBuf::from("/n"), Settings::default());
+        assert_eq!(chat.args(), ["--experimental-acp"]);
+        assert_eq!(chat.mcp_servers(), json!([]));
+    }
+
     use super::*;
 
     #[test]

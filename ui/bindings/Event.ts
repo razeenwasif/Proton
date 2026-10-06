@@ -62,15 +62,19 @@ import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
+import type { StudyChatSummary } from "./StudyChatSummary";
 import type { StudyKbFile } from "./StudyKbFile";
 import type { StudyKbFolder } from "./StudyKbFolder";
 import type { StudyKbHit } from "./StudyKbHit";
 import type { StudyKbLeft } from "./StudyKbLeft";
+import type { StudyLive } from "./StudyLive";
 import type { StudyNoteRow } from "./StudyNoteRow";
 import type { StudyPlace } from "./StudyPlace";
 import type { StudyRoot } from "./StudyRoot";
 import type { StudySourceRow } from "./StudySourceRow";
 import type { StudySummary } from "./StudySummary";
+import type { StudyTurn } from "./StudyTurn";
+import type { StudyTutorSettings } from "./StudyTutorSettings";
 import type { StudyView } from "./StudyView";
 import type { Summary } from "./Summary";
 import type { Task } from "./Task";
@@ -227,7 +231,12 @@ ready: boolean, walking: boolean, done: number, total: number, paused: boolean, 
 /**
  * Why its words are shown rather than its file, when they are.
  */
-said: string | null, view: StudyView, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
+said: string | null, view: StudyView, } | { "type": "studyChat", id: string, title: string, settings: StudyTutorSettings, turns: Array<StudyTurn>, live: StudyLive | null, busy: boolean, error: string | null, 
+/**
+ * How the tutor reaches the sources, once it has started: `tools`
+ * or `passages`.
+ */
+grounding: string | null, chats: Array<StudyChatSummary>, } | { "type": "studyChatLive", id: string, live: StudyLive, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
 /**
  * Whether it is a source of the notebook too.
  */

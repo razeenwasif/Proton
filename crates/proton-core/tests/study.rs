@@ -11,6 +11,7 @@ use proton_core::bus::{Command, Event};
 use proton_core::mode::ModeId;
 use proton_core::session::Session;
 use proton_core::study::Study;
+use proton_claude::Engine;
 use proton_study::model::{Role, SourceStatus};
 use proton_study::view::StudySourceRow;
 
@@ -289,5 +290,280 @@ fn a_folder_is_made_only_where_its_parent_is() {
     assert!(said(&events).iter().any(|s| s.contains("no such folder")), "{events:?}");
     let events = session.apply(Command::StudyNew { title: "Anything".into() });
     assert!(said(&events).iter().any(|s| s.contains("Choose where notebooks are kept")));
+    session.shutdown();
+}
+
+/* ── the tutor ────────────────────────────────────────────────────── */
+
+mod tutor {
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    use proton_claude::artifacts::ArtifactRef;
+    use proton_claude::chat::{Answer, Image, Settings};
+    use proton_claude::engine::Unattended;
+    use proton_claude::fold::{Changes, Fold, Tool, ToolState};
+    use proton_claude::{Conversation, Engine};
+    use proton_core::study::tutor::Tutors;
+    use serde_json::json;
+
+    /// What a scripted tutor was started with and told.
+    #[derive(Default)]
+    pub struct Log {
+        pub started: Vec<(Engine, PathBuf, Unattended, Option<String>)>,
+        pub sent: Vec<String>,
+        pub interrupted: bool,
+    }
+
+    /// Tutors that answer as an engine would: a search, then an answer
+    /// citing what it found, over three looks.
+    pub struct Script {
+        pub log: Arc<Mutex<Log>>,
+        pub server: Option<PathBuf>,
+        pub answer: String,
+    }
+
+    impl Tutors for Script {
+        fn start(&mut self, engine: Engine, cwd: PathBuf, settings: Settings, how: &Unattended) -> Result<Box<dyn Conversation>, String> {
+            self.log.lock().unwrap().started.push((engine, cwd.clone(), how.clone(), settings.model.clone()));
+            Ok(Box::new(Scripted { fold: Fold::for_engine("s", engine), engine, cwd, log: Arc::clone(&self.log), stage: None, answer: self.answer.clone(), turn: 0 }))
+        }
+        fn missing(&mut self, _: Engine) -> Option<String> {
+            None
+        }
+        fn server(&mut self) -> Option<PathBuf> {
+            self.server.clone()
+        }
+    }
+
+    struct Scripted {
+        fold: Fold,
+        engine: Engine,
+        cwd: PathBuf,
+        log: Arc<Mutex<Log>>,
+        stage: Option<u32>,
+        answer: String,
+        turn: u32,
+    }
+
+    impl Scripted {
+        /// Where the answer is cut in two as it streams: after its first
+        /// citation, at the dash.
+        fn half(&self) -> usize {
+            self.answer.find(" — ").unwrap_or(self.answer.len() / 2)
+        }
+    }
+
+    impl Conversation for Scripted {
+        fn id(&self) -> &str {
+            "s"
+        }
+        fn engine(&self) -> Engine {
+            self.engine
+        }
+        fn cwd(&self) -> &std::path::Path {
+            &self.cwd
+        }
+        fn fold(&self) -> &Fold {
+            &self.fold
+        }
+        fn running(&self) -> bool {
+            true
+        }
+        fn send(&mut self, text: &str, _: &[Image]) -> Result<(), String> {
+            self.fold.said(text, 0);
+            self.fold.working();
+            self.fold.status_mut().model = "scripted-model".into();
+            self.log.lock().unwrap().sent.push(text.to_string());
+            self.stage = Some(0);
+            self.turn += 1;
+            Ok(())
+        }
+        fn interrupt(&mut self) {
+            self.log.lock().unwrap().interrupted = true;
+            self.stage = None;
+            self.fold.turn_ended(0, true, None);
+        }
+        fn answer(&mut self, _: &str, _: Answer) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_mode(&mut self, _: &str) {}
+        fn set_model(&mut self, _: &str) {}
+        fn set_effort(&mut self, _: Option<&str>) {}
+        fn poll(&mut self) -> bool {
+            let Some(stage) = self.stage else { return false };
+            let tool = |state| Tool {
+                id: format!("search-{}", self.turn),
+                name: "mcp__proton-notebook__search_sources".into(),
+                input: json!({ "query": "uniform cost" }),
+                state,
+                streamed: 0,
+                result: None,
+                detail: serde_json::Value::Null,
+                parent: None,
+                ask: None,
+                artifact: None,
+            };
+            let prose = format!("prose-{}", self.turn);
+            match stage {
+                0 => self.fold.put_tool(tool(ToolState::Running)),
+                1 => {
+                    self.fold.put_tool(tool(ToolState::Done));
+                    let half = self.half();
+                    self.fold.prose(&prose, &self.answer[..half], false);
+                }
+                _ => {
+                    let rest = self.half();
+                    self.fold.prose(&prose, &self.answer[rest..], false);
+                    self.fold.prose_done(&prose, None, false);
+                    self.fold.turn_ended(10, false, None);
+                    self.stage = None;
+                    return true;
+                }
+            }
+            self.stage = Some(stage + 1);
+            true
+        }
+        fn take(&mut self) -> Changes {
+            self.fold.take()
+        }
+        fn stop(&mut self) {}
+        fn published(&mut self, _: &str, _: ArtifactRef) {}
+    }
+}
+
+/// A session over the knowledge base whose tutors are scripted.
+fn tutored(scratch: &Scratch, settings: &Path, server: Option<PathBuf>, log: &std::sync::Arc<std::sync::Mutex<tutor::Log>>) -> Session {
+    let script = tutor::Script { log: std::sync::Arc::clone(log), server, answer: "UCS is optimal [[S01 § Search L1-2]] — it orders by cost [[S02 p. 1]].".into() };
+    Session::new(scratch.root.join("project"))
+        .with_person_settings(settings.to_path_buf())
+        .with_study(Study::new().with_person_settings(settings).flags_with(in_cloud).with_tutors(Box::new(script)))
+}
+
+fn chat(events: &[Event]) -> Option<(String, Vec<proton_study::tutor::StudyTurn>, bool, Option<String>)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::StudyChat { id, turns, busy, error, .. } => Some((id.clone(), turns.clone(), *busy, error.clone())),
+        _ => None,
+    })
+}
+
+#[test]
+fn the_tutor_answers_from_the_sources_cites_them_and_keeps_the_chat() {
+    let scratch = Scratch::new("tutor");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let server = scratch.root.join("bin/proton-mcp");
+    let mut session = tutored(&scratch, &settings, Some(server.clone()), &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    let events = session.apply(Command::StudyNew { title: "Search".into() });
+    let (id, turns, busy, _) = chat(&events).expect("a new chat");
+    assert_eq!((id.as_str(), turns.len(), busy), ("C001", 0, false));
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into(), "Courses/COMP3670/Exam_2020.pdf".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 2 && sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(()),
+        _ => None,
+    });
+
+    // Asked: a conversation on Claude Code, its only tools the notebook's.
+    let events = session.apply(Command::StudyAsk { text: "Why is uniform cost search optimal?".into() });
+    assert!(matches!(chat(&events), Some((_, _, true, None))), "{events:?}");
+    {
+        let log = log.lock().unwrap();
+        let (engine, cwd, how, _) = &log.started[0];
+        assert_eq!(*engine, Engine::Claude);
+        assert!(cwd.ends_with(".notebook/sources"), "{cwd:?}");
+        assert!(how.no_tools && how.mcp.len() == 1 && how.mcp[0].command == server);
+        let args = how.mcp[0].args.join(" ");
+        assert!(args.contains("--notebook") && args.contains("search") && args.contains("--root Vault=") && args.contains("--root Courses="), "{args}");
+        assert!(how.instructions.contains("notebook_sources") && how.instructions.contains("\"Search\""));
+        assert_eq!(log.sent, ["Why is uniform cost search optimal?"]);
+    }
+    // The answer comes, its citations resolved as it does.
+    let live = until(&mut session, |e| match e {
+        Event::StudyChatLive { live, .. } if !live.answer.is_empty() => Some(live.clone()),
+        _ => None,
+    });
+    assert_eq!(live.steps[0].kind, "search");
+    assert!(live.steps[0].text.contains("uniform cost"));
+    assert_eq!(live.citations.first().map(|c| (c.source.as_str(), c.resolved)), Some(("S01", true)));
+    let turns = until(&mut session, |e| match e {
+        Event::StudyChat { turns, busy: false, .. } if turns.len() == 1 => Some(turns.clone()),
+        _ => None,
+    });
+    assert!(turns[0].answer.starts_with("UCS is optimal") && turns[0].answer.ends_with("[[S02 p. 1]]."), "{}", turns[0].answer);
+    assert_eq!(turns[0].citations.iter().map(|c| (c.n, c.source.as_str(), c.resolved)).collect::<Vec<_>>(), [(1, "S01", true), (2, "S02", true)]);
+    assert_eq!((turns[0].engine.as_str(), turns[0].model.as_str()), ("claude", "scripted-model"));
+    let kept = scratch.root.join("Notebooks/search/chats/C001.json");
+    assert!(kept.is_file(), "the chat was not kept");
+
+    // A second question goes to the same conversation, untold.
+    session.apply(Command::StudyAsk { text: "And A*?".into() });
+    until(&mut session, |e| match e {
+        Event::StudyChat { turns, busy: false, .. } if turns.len() == 2 => Some(()),
+        _ => None,
+    });
+    assert_eq!(log.lock().unwrap().started.len(), 1);
+    assert_eq!(log.lock().unwrap().sent[1], "And A*?");
+
+    // An answer kept as a note.
+    let events = session.apply(Command::StudySaveAnswer { turn: 0 });
+    assert!(events.iter().any(|e| matches!(e, Event::StudyNote { body, .. } if body.contains("[[S01 § Search L1-2]]") && body.contains("Asked: Why is"))), "{events:?}");
+
+    // Antigravity, given passages instead of tools: a new conversation for
+    // the chat, told what was said.
+    let mut settings = proton_study::tutor::TutorSettings { engine: "antigravity".into(), model: "gemini-3.8-flash".into(), ..Default::default() };
+    session.apply(Command::StudyTutor { settings: settings.clone() });
+    session.apply(Command::StudyAsk { text: "What is an admissible heuristic?".into() });
+    {
+        let log = log.lock().unwrap();
+        let (engine, _, how, model) = &log.started[1];
+        assert_eq!((*engine, model.as_deref()), (Engine::Antigravity, Some("gemini-3.8-flash")));
+        assert!(how.mcp.is_empty() && how.instructions.contains("passages"), "{}", how.instructions);
+        let sent = &log.sent[2];
+        assert!(sent.starts_with("Our conversation so far"), "the chat so far is told");
+        assert!(sent.contains("Passages from the notebook's sources") && sent.contains("[[S02 § Question 1 p. 1]]"), "{sent}");
+        assert!(sent.ends_with("What is an admissible heuristic?"));
+    }
+    until(&mut session, |e| match e {
+        Event::StudyChat { turns, busy: false, .. } if turns.len() == 3 => Some(()),
+        _ => None,
+    });
+
+    // A new chat, and back to the first.
+    let events = session.apply(Command::StudyChatNew);
+    assert!(matches!(chat(&events), Some((id, turns, _, _)) if id == "C002" && turns.is_empty()));
+    let events = session.apply(Command::StudyChatOpen { id: "C001".into() });
+    assert!(matches!(chat(&events), Some((id, turns, _, _)) if id == "C001" && turns.len() == 3));
+    // Stopping an answer interrupts it.
+    settings.engine = "claude".into();
+    session.apply(Command::StudyTutor { settings });
+    session.apply(Command::StudyAsk { text: "Stop me".into() });
+    session.apply(Command::StudyStopAnswer);
+    assert!(log.lock().unwrap().interrupted);
+    session.shutdown();
+}
+
+#[test]
+fn with_no_server_every_engine_is_given_passages() {
+    let scratch = Scratch::new("tutor-passages");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.iter().all(|s| s.status == SourceStatus::Ready) && !sources.is_empty() => Some(()),
+        _ => None,
+    });
+    session.apply(Command::StudyAsk { text: "breadth first search".into() });
+    let log = log.lock().unwrap();
+    assert!(log.started[0].2.mcp.is_empty());
+    assert!(log.sent[0].contains("[[S01 § Search L1-2]]"), "{}", log.sent[0]);
+    drop(log);
     session.shutdown();
 }

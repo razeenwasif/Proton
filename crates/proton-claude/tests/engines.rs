@@ -243,6 +243,7 @@ fn hypothesis_schema() -> proton_claude::engine::Unattended {
         max_turns: None,
         mcp: Vec::new(),
         read: Vec::new(),
+        no_tools: false,
     }
 }
 

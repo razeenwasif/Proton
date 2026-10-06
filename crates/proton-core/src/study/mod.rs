@@ -13,6 +13,7 @@
 //! for exactly that file, having been told how big it is.
 
 mod kb;
+pub mod tutor;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,7 @@ use crate::settings::Settings;
 use crate::workspace::notice;
 
 pub use kb::Kb;
+use tutor::{Polled, Tutor, Tutors};
 
 /// How often the open notebook's lock is said to be held, in seconds.
 const BEAT: u64 = 30;
@@ -66,6 +68,12 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyNote { .. }
             | Command::StudyNoteDelete { .. }
             | Command::StudyNoteSource { .. }
+            | Command::StudyAsk { .. }
+            | Command::StudyStopAnswer
+            | Command::StudyChatNew
+            | Command::StudyChatOpen { .. }
+            | Command::StudyTutor { .. }
+            | Command::StudySaveAnswer { .. }
     )
 }
 
@@ -122,6 +130,10 @@ pub struct Study {
     /// Sources' PDFs opened in the document viewer: the shell reads only
     /// these, as it reads only what a workspace opened.
     documents: std::collections::HashSet<PathBuf>,
+    /// The open notebook's chat, and the conversation answering it.
+    tutor: Option<Tutor>,
+    /// What makes tutors: the engines, or a test's script.
+    tutors: Box<dyn Tutors>,
 }
 
 impl std::fmt::Debug for Study {
@@ -143,6 +155,8 @@ impl Default for Study {
             open: None,
             batches: Vec::new(),
             documents: Default::default(),
+            tutor: None,
+            tutors: Box::new(tutor::Live),
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -221,6 +235,12 @@ impl Study {
         self
     }
 
+    /// Make tutors with this rather than the engines: for a test.
+    pub fn with_tutors(mut self, tutors: Box<dyn Tutors>) -> Study {
+        self.tutors = tutors;
+        self
+    }
+
     /// Say which files are in iCloud with this, for a test.
     pub fn flags_with(mut self, flags: proton_library::catalog::FlagFn) -> Study {
         self.kb.flags_with(flags);
@@ -272,6 +292,7 @@ impl Study {
         self.check_files();
         let mut events = vec![self.list_event(), self.kb.event()];
         events.extend(self.notebook_event());
+        events.extend(self.chat_event());
         events
     }
 
@@ -281,6 +302,7 @@ impl Study {
             events.push(self.kb.event());
         }
         events.extend(self.take_answers());
+        events.extend(self.poll_tutor());
         if let Some(open) = &mut self.open {
             let now = proton_study::now();
             if now.saturating_sub(open.beat) >= BEAT {
@@ -301,8 +323,12 @@ impl Study {
         events
     }
 
-    /// Let go: stop the workers, release the lock.
+    /// Let go: stop the workers and the tutor, release the lock.
     pub fn shutdown(&mut self) {
+        if let Some(tutor) = &mut self.tutor {
+            tutor.stop();
+        }
+        self.tutor = None;
         for batch in &self.batches {
             batch.stop.store(true, Ordering::Relaxed);
         }
@@ -340,7 +366,7 @@ impl Study {
             Command::StudyNew { title } => self.create(&title),
             Command::StudyOpen { slug } => self.open(&slug),
             Command::StudyClose => {
-                self.open = None;
+                self.close_notebook();
                 vec![self.list_event(), Event::StudyClosed]
             }
             Command::StudyDetails { title, course, exam } => self.details(&title, &course, exam.as_deref()),
@@ -357,6 +383,17 @@ impl Study {
             Command::StudyNote { id, title, body } => self.write_note(id, &title, &body),
             Command::StudyNoteDelete { id } => self.delete_note(&id),
             Command::StudyNoteSource { id } => self.note_source(&id),
+            Command::StudyAsk { text } => self.ask(&text),
+            Command::StudyStopAnswer => {
+                if let Some(tutor) = &mut self.tutor {
+                    tutor.interrupt();
+                }
+                Vec::new()
+            }
+            Command::StudyChatNew => self.new_chat(),
+            Command::StudyChatOpen { id } => self.open_chat(&id),
+            Command::StudyTutor { settings } => self.set_tutor(settings),
+            Command::StudySaveAnswer { turn } => self.save_answer(turn),
             _ => Vec::new(),
         }
     }
@@ -386,7 +423,7 @@ impl Study {
             }
         }
         said.extend(self.save_setting("study.folder", Value::from(typed)));
-        self.open = None;
+        self.close_notebook();
         self.folder = Some((Folder::new(folder::normalise(&path)), typed.to_string()));
         let mut events = vec![self.list_event(), Event::StudyClosed];
         events.extend(said);
@@ -508,6 +545,14 @@ impl Study {
             book.notebook.opened = now;
             let _ = book.save();
         }
+        // Its latest chat, to carry on; or a new one.
+        if let Some(mut was) = self.tutor.take() {
+            was.stop();
+        }
+        self.tutor = Some(match book.chats().first().and_then(|c| book.chat(&c.id)) {
+            Some(chat) => Tutor::of(chat),
+            None => Tutor::new(&book),
+        });
         self.open = Some(Open { book, lock, holder, beat: now });
         Ok(())
     }
@@ -519,6 +564,7 @@ impl Study {
         self.check_files();
         let mut events = vec![self.list_event()];
         events.extend(self.notebook_event());
+        events.extend(self.chat_event());
         events
     }
 
@@ -581,7 +627,7 @@ impl Study {
         }
         let mut events = Vec::new();
         if archived && self.open.as_ref().is_some_and(|o| o.book.slug() == slug) {
-            self.open = None;
+            self.close_notebook();
             events.push(Event::StudyClosed);
         } else if let Some(open) = &mut self.open {
             let _ = open.book.reread();
@@ -855,6 +901,134 @@ impl Study {
             self.start_reading(vec![Item { id: id.to_string(), path, kind, download: false }]);
         }
         self.saved()
+    }
+
+    /* ── the tutor ──────────────────────────────────────────────────── */
+
+    fn close_notebook(&mut self) {
+        if let Some(tutor) = &mut self.tutor {
+            tutor.stop();
+        }
+        self.tutor = None;
+        self.open = None;
+    }
+
+    /// The open chat, whole.
+    fn chat_event(&self) -> Option<Event> {
+        let open = self.open.as_ref()?;
+        let tutor = self.tutor.as_ref()?;
+        Some(Event::StudyChat {
+            id: tutor.chat.id.clone(),
+            title: tutor.chat.title.clone(),
+            settings: tutor.chat.settings.clone(),
+            turns: tutor.chat.turns.clone(),
+            live: None,
+            busy: tutor.busy(),
+            error: tutor.error.clone(),
+            grounding: tutor.grounding().map(str::to_string),
+            chats: open.book.chats(),
+        })
+    }
+
+    fn ask(&mut self, text: &str) -> Vec<Event> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Vec::new();
+        }
+        let roots = self.kb.labelled_roots();
+        let (Some(open), Some(tutor)) = (&self.open, &mut self.tutor) else {
+            return vec![notice("Open a notebook first.".into(), NoticeLevel::Warn)];
+        };
+        if open.lock.is_none() {
+            return vec![notice("Another Proton has this notebook open: it is read only here.".into(), NoticeLevel::Warn)];
+        }
+        if let Err(why) = tutor.ask(&open.book, &roots, self.tutors.as_mut(), text) {
+            tutor.error = Some(why);
+        }
+        self.chat_event().into_iter().collect()
+    }
+
+    fn poll_tutor(&mut self) -> Vec<Event> {
+        let (Some(open), Some(tutor)) = (&self.open, &mut self.tutor) else { return Vec::new() };
+        match tutor.poll(&open.book) {
+            None => Vec::new(),
+            Some(Polled::Live(live)) => vec![Event::StudyChatLive { id: tutor.chat.id.clone(), live }],
+            Some(Polled::Ended(failed)) => {
+                let mut events: Vec<Event> = self.chat_event().into_iter().collect();
+                events.extend(failed.map(|why| notice(format!("The chat could not be kept: {why}"), NoticeLevel::Error)));
+                events
+            }
+        }
+    }
+
+    fn new_chat(&mut self) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        if let Some(mut was) = self.tutor.take() {
+            was.stop();
+        }
+        self.tutor = Some(Tutor::new(&open.book));
+        self.chat_event().into_iter().collect()
+    }
+
+    fn open_chat(&mut self, id: &str) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        let Some(chat) = open.book.chat(id) else {
+            return vec![notice(format!("{id}: no such chat"), NoticeLevel::Warn)];
+        };
+        if let Some(mut was) = self.tutor.take() {
+            was.stop();
+        }
+        self.tutor = Some(Tutor::of(chat));
+        self.chat_event().into_iter().collect()
+    }
+
+    /// Who answers, and how: kept as the notebook's, and the open chat's from
+    /// its next question — a new conversation, told what was said.
+    fn set_tutor(&mut self, settings: proton_study::tutor::TutorSettings) -> Vec<Event> {
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let settings = tutor::changed(&book.notebook.tutor, settings);
+        book.notebook.tutor = settings.clone();
+        let mut events: Vec<Event> = book.save().err().map(|why| notice(why, NoticeLevel::Error)).into_iter().collect();
+        if let Some(tutor) = &mut self.tutor {
+            if tutor.chat.settings != settings {
+                tutor.stop();
+                tutor.chat.settings = settings;
+            }
+        }
+        events.extend(self.chat_event());
+        events
+    }
+
+    /// Keep an answer as a note, its citations as they were written.
+    fn save_answer(&mut self, turn: usize) -> Vec<Event> {
+        let Some(found) = self.tutor.as_ref().and_then(|t| t.chat.turns.get(turn).cloned().map(|turn| (turn, t.chat.id.clone()))) else {
+            return vec![notice("There is no such answer.".into(), NoticeLevel::Warn)];
+        };
+        let (turn, chat) = found;
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let now = proton_study::now();
+        let note = Note {
+            id: book.new_note_id(),
+            title: proton_study::tutor::title(&turn.asked),
+            created: now,
+            updated: now,
+            from: Some(chat),
+            body: format!("{}\n\n> Asked: {}", turn.answer.trim(), turn.asked.trim()),
+        };
+        if let Err(why) = book.write_note(&note) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        let id = note.id.clone();
+        let mut events = self.saved();
+        events.extend(self.note_event(&id));
+        events.push(notice(format!("Kept as {id}."), NoticeLevel::Info));
+        events
     }
 
     /* ── the reader ─────────────────────────────────────────────────── */

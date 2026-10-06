@@ -21,11 +21,13 @@
 //! Ids are never reused: a removed source's citations never come to mean
 //! another.
 
+pub mod cite;
 pub mod lock;
 pub mod model;
 pub mod role;
 pub mod snapshot;
 pub mod store;
+pub mod tutor;
 pub mod view;
 
 pub use model::{Note, Notebook, Origin, Role, Source, SourceStatus, Sources, Units};

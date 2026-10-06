@@ -557,6 +557,7 @@ mod tests {
             max_turns: None,
             mcp: Vec::new(),
             read: Vec::new(),
+            no_tools: false,
         };
         let mut agy = Antigravity::unattended(PathBuf::from("/tmp/r"), Settings::default(), &how);
         let args = args(&agy.settings, None, agy.unattended.as_ref());

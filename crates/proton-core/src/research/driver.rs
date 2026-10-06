@@ -1067,6 +1067,7 @@ impl Driver {
             max_turns: Some(turns(d.phase)),
             mcp,
             read,
+            no_tools: false,
         };
         let attempt = self.supervisor.task(&d.task).map(|t| t.attempts).unwrap_or(0);
         let record = json!({

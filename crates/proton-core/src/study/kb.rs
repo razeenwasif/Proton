@@ -143,6 +143,11 @@ impl Kb {
         Some((catalog.path(entry), entry))
     }
 
+    /// Every root, labelled as citations and rules name it.
+    pub fn labelled_roots(&self) -> Vec<(String, PathBuf)> {
+        Root::labelled(self.roots.clone()).into_iter().map(|r| (r.label, r.path)).collect()
+    }
+
     /// The root a label names, on the disk.
     pub fn root_path(&self, label: &str) -> Option<PathBuf> {
         Root::labelled(self.roots.clone()).into_iter().find(|r| r.label == label).map(|r| r.path)

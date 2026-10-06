@@ -123,7 +123,10 @@ impl Chat {
     /// automatic memory by the variables that turn them off.
     pub fn unattended(cwd: PathBuf, settings: Settings, how: &Unattended) -> Chat {
         let mut chat = Chat::new(cwd, Settings { mode: "dontAsk".into(), ..settings }, Some(how.instructions.clone()));
-        let mut tools = vec!["Read", "Grep", "Glob"];
+        let mut tools = match how.no_tools {
+            true => Vec::new(),
+            false => vec!["Read", "Grep", "Glob"],
+        };
         if how.web {
             tools.extend(["WebSearch", "WebFetch"]);
         }
@@ -490,6 +493,7 @@ mod tests {
             max_turns: Some(8),
             mcp: Vec::new(),
             read: vec![PathBuf::from("/h/.proton/lean/project/.lake/packages/mathlib")],
+            no_tools: false,
         };
         let args = Chat::unattended(PathBuf::from("/tmp/r"), Settings::default(), &how).spawn().args();
         let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
@@ -504,6 +508,20 @@ mod tests {
         assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1] == "Read,Grep,Glob"), "{args:?}");
         assert!(!args.contains(&"--json-schema".to_string()) && !args.contains(&"--max-turns".to_string()));
         assert!(!args.contains(&"--mcp-config".to_string()), "a server nobody asked for");
+    }
+
+    #[test]
+    fn a_tutor_has_no_tools_of_its_own_only_its_notebooks() {
+        let server = crate::engine::McpServer {
+            name: "proton-notebook".into(),
+            command: PathBuf::from("/x/proton-mcp"),
+            args: vec!["--notebook".into(), "/n/comp3670".into()],
+            tools: vec!["search_sources".into(), "read_source".into()],
+        };
+        let how = Unattended { instructions: "Teach.".into(), mcp: vec![server], no_tools: true, ..Unattended::default() };
+        let args = Chat::unattended(PathBuf::from("/n/comp3670"), Settings::default(), &how).spawn().args();
+        assert!(args.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()), "built-in tools given: {args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--allowedTools" && w[1] == "mcp__proton-notebook__search_sources,mcp__proton-notebook__read_source"), "{args:?}");
     }
 
     #[test]

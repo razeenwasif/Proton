@@ -69,7 +69,7 @@ impl Folder {
         let book = Book {
             dir: dir.clone(),
             slug: name,
-            notebook: Notebook { title: title.to_string(), course: String::new(), exam: None, created: now, opened: now, archived: false },
+            notebook: Notebook { title: title.to_string(), course: String::new(), exam: None, created: now, opened: now, archived: false, tutor: Default::default() },
             sources: Sources { next: 1, sources: Vec::new() },
         };
         book.save()?;

@@ -565,6 +565,27 @@ pub enum Command {
     StudyNoteSource {
         id: String,
     },
+    /// Ask the tutor, in the open chat.
+    StudyAsk {
+        text: String,
+    },
+    /// Stop the answer being given.
+    StudyStopAnswer,
+    /// Begin a new chat with the tutor.
+    StudyChatNew,
+    /// Go back to an earlier chat.
+    StudyChatOpen {
+        id: String,
+    },
+    /// Who answers, and how: the notebook's tutor from now on, and the open
+    /// chat's from its next question.
+    StudyTutor {
+        settings: proton_study::tutor::TutorSettings,
+    },
+    /// Keep an answer of the open chat as a note.
+    StudySaveAnswer {
+        turn: usize,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1410,6 +1431,27 @@ pub enum Event {
         /// Why its words are shown rather than its file, when they are.
         said: Option<String>,
         view: proton_study::view::StudyView,
+    },
+    /// The open notebook's chat with the tutor, whole: its turns, each
+    /// answer's citations resolved, the answer coming if one is, and the
+    /// notebook's other chats.
+    StudyChat {
+        id: String,
+        title: String,
+        settings: proton_study::tutor::TutorSettings,
+        turns: Vec<proton_study::tutor::StudyTurn>,
+        live: Option<crate::study::tutor::StudyLive>,
+        busy: bool,
+        error: Option<String>,
+        /// How the tutor reaches the sources, once it has started: `tools`
+        /// or `passages`.
+        grounding: Option<String>,
+        chats: Vec<proton_study::tutor::StudyChatSummary>,
+    },
+    /// The answer coming in the open chat, as far as it has come.
+    StudyChatLive {
+        id: String,
+        live: crate::study::tutor::StudyLive,
     },
     /// A note, to read and edit.
     StudyNote {

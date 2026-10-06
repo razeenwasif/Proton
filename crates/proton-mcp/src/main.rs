@@ -46,6 +46,14 @@
 //! the folder is read. Research hands it to Claude Code and Codex for each
 //! round's calls; `--cache` says where extracted text is kept.
 //!
+//! ## A notebook's sources
+//!
+//! `--notebook <notebook>` serves one Notebook notebook's sources to the tutor
+//! answering from them: only those ticked, from the words the notebook kept,
+//! cited by id — `[[S07 p. 12]]`. `--root Label=/path`, once for each root of
+//! the knowledge base, lets `view_pages` find a PDF's file to draw its pages.
+//! The process refuses to download from iCloud. See `notebook.rs`.
+//!
 //! ## What it does not do
 //!
 //! It does not reach into a running Proton. It reads the same settings and the
@@ -55,6 +63,7 @@
 //! editing tools are deliberately not here. What is here is the part that is
 //! purely a question about what the user has written down.
 
+mod notebook;
 mod rpc;
 
 use std::io::{BufRead, Write};
@@ -111,6 +120,9 @@ enum Ready {
 fn main() {
     if let Some(investigation) = arg("--literature") {
         return literature(PathBuf::from(investigation), arg("--cache").map(PathBuf::from));
+    }
+    if let Some(dir) = arg("--notebook") {
+        return serve_notebook(notebook::Served::open(PathBuf::from(dir), roots()));
     }
     let project = project_from_args();
     let settings = proton_core::settings::Settings::load(&project);
@@ -173,6 +185,62 @@ fn arg(name: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Every `--root Label=/path`.
+fn roots() -> Vec<(String, PathBuf)> {
+    let mut out = Vec::new();
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--root" {
+            if let Some((label, path)) = args.next().as_deref().and_then(|v| v.split_once('=')) {
+                out.push((label.to_string(), PathBuf::from(path)));
+            }
+        }
+    }
+    out
+}
+
+/// A notebook's sources, over stdio, until the client goes.
+fn serve_notebook(mut served: notebook::Served) {
+    // Nothing a model asks for is brought down from iCloud.
+    if let Err(why) = proton_library::dataless::no_downloads_in_this_process() {
+        eprintln!("proton-mcp: downloads could not be refused: {why}");
+    }
+    let stdin = std::io::stdin();
+    let mut out = std::io::stdout();
+    for line in stdin.lock().lines() {
+        let Ok(line) = line else { break };
+        let Some(call) = Call::parse(&line) else { continue };
+        let Some(answer) = handle_notebook(&call, &mut served) else { continue };
+        let _ = writeln!(out, "{answer}");
+        let _ = out.flush();
+    }
+}
+
+fn handle_notebook(call: &Call, served: &mut notebook::Served) -> Option<Value> {
+    if !call.wants_an_answer() {
+        return None;
+    }
+    let id = call.id.clone()?;
+    Some(match call.method.as_str() {
+        "initialize" => rpc::result(
+            &id,
+            json!({
+                "protocolVersion": call.params.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL),
+                "capabilities": { "tools": {} },
+                "serverInfo": { "name": "proton-notebook", "version": env!("CARGO_PKG_VERSION") },
+            }),
+        ),
+        "tools/list" => rpc::result(&id, json!({ "tools": notebook::tools() })),
+        "tools/call" => {
+            let name = call.params.get("name").and_then(Value::as_str).unwrap_or("");
+            let args = call.params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            rpc::result(&id, notebook::call(served, name, &args))
+        }
+        "ping" => rpc::result(&id, json!({})),
+        other => rpc::failure(&id, rpc::METHOD_NOT_FOUND, &format!("no method {other}")),
+    })
 }
 
 /// `--project <path>`, or the working directory.
