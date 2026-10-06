@@ -206,6 +206,46 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     ws().querySelector('[data-study-back]').click(); await settle();
   });
 
+  await test('Your artifacts are listed to add as sources, and one opens as itself, framed as the chat frames one', async () => {
+    await win.pushEvents([notebook([row('S01')])]); await settle();
+    ws().querySelector('[data-study-view="overview"]').click(); await settle();
+    const before = win.commands.length;
+    ws().querySelector('[data-study-artifacts]').click(); await settle();
+    assert(sent(before, 'studyArtifacts').length === 1, 'the artifacts were not asked for');
+    assert(ws().querySelector('[data-study-artifacts-form]')?.textContent.includes('Looking'), 'it does not say it is looking');
+    const id = '4a1f9d2e-77b3-4c41-9e0a-5c2d8f1b6a30';
+    const kept = (/** @type {Partial<any>} */ more) => ({id, title: 'Fleet grid frame times', description: '', icon: 'chart', seq: 2, at: 1_790_000_000_000, file: 'index.html', source: null, ...more});
+    await win.pushEvents([{type: 'studyArtifacts', artifacts: [kept({}), kept({id: '9c3b7e21-4d8a-4f6b-a1e2-7b5c0d9e8f14', title: 'Telemetry glossary', source: 'S01'}),
+      kept({id: '0b7e5a10-1c2d-4e3f-8a9b-0c1d2e3f4a5b', title: 'Published elsewhere', file: ''})]}]); await settle();
+    const picks = [...ws().querySelectorAll('[data-study-artifact-pick]')];
+    assert(picks.length === 3 && !picks[0].disabled && picks[1].disabled && picks[2].disabled, 'a source already, or one with no page, can be ticked');
+    const form = () => ws().querySelector('[data-study-artifacts-form]');
+    assert(form().textContent.includes('already S01') && form().textContent.includes('only its address is kept'), 'why one cannot be added is not said');
+    assert(form().querySelector('[type=submit]').disabled, 'nothing ticked can be added');
+    picks[0].checked = true; picks[0].dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(form().querySelector('[type=submit]').textContent.includes('Add 1 as a source'), 'the ticked are not counted');
+    form().requestSubmit(); await settle();
+    assert(JSON.stringify(sent(before, 'studyAddArtifacts')[0]?.ids) === JSON.stringify([id]), `not added: ${JSON.stringify(sent(before, 'studyAddArtifacts'))}`);
+    assert(!form(), 'the list stayed up');
+
+    await win.pushEvents([notebook([row('S01'), row('S02', {kind: 'artifact', units: 'lines', title: 'Fleet grid frame times', origin: {from: 'artifact', id, seq: 2, file: 'index.html'}})])]); await settle();
+    ws().querySelector('[data-study-view="chat"]').click(); await settle();
+    const source = ws().querySelector('.st-source[data-study-source="S02"]');
+    assert(source?.title.includes('Artifact, version 2') && source.querySelector('use')?.getAttribute('href') === '#i-layers', 'the source is not said to be an artifact');
+    await win.pushEvents([{type: 'studySource', id: 'S02', title: 'Fleet grid frame times', kind: 'artifact', at: null, said: null, guide: null, citations: [],
+      view: {shape: 'sections', sections: [{from: 1, to: 3, text: '# Frame times\n\nBefore and after.'}]}}]); await settle();
+    ws().querySelector('[data-study-artifact-open]').click(); await settle();
+    const frame = ws().querySelector('.st-artifact-frame');
+    assert(/^(artifact:\/\/localhost|http:\/\/artifact\.localhost|\/fixtures\/artifacts)\//.test(frame?.getAttribute('src') ?? '') && frame.getAttribute('src').endsWith(`/${id}/2/index.html`),
+      `framed ${frame?.getAttribute('src')}`);
+    const chat = doc.querySelector('[data-artifact-frame]');
+    assert(frame.getAttribute('sandbox') === chat.getAttribute('sandbox') && frame.getAttribute('allow') === chat.getAttribute('allow'), 'not sandboxed as the chat sandboxes one');
+    assert(frame.hasAttribute('allowfullscreen') && frame.getAttribute('allow').includes('fullscreen'), 'its videos cannot go full screen');
+    ws().querySelector('[data-study-artifact-back]').click(); await settle();
+    assert(ws().querySelector('.st-reader .st-sec')?.textContent.includes('Before and after'), 'Back did not return to its words');
+    ws().querySelector('[data-study-back]').click(); await settle();
+  });
+
   await test('A recording is transcribed only once what is sent to Fish, and what it costs, is said', async () => {
     const lecture = (/** @type {any} */ status) => row('S02', {kind: 'video', units: 'seconds', count: 3120, title: 'Lecture 5.mp4', role: 'recording',
       origin: {from: 'file', root: 'Courses', rel: 'COMP3670/Lecture 5.mp4'}, status});

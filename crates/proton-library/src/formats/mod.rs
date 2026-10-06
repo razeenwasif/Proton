@@ -6,6 +6,7 @@
 
 pub mod captions;
 pub mod ipynb;
+pub mod katex;
 pub mod office;
 pub mod tex;
 pub mod web;

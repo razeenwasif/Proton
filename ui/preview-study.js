@@ -332,6 +332,15 @@ export function createStudyPreview(deliver) {
     ] },
   });
 
+  /** The artifacts Proton keeps: the preview's two, and one kept as its address alone. */
+  const ARTIFACTS = [
+    { id: "4a1f9d2e-77b3-4c41-9e0a-5c2d8f1b6a30", title: "Fleet grid frame times", description: "Before and after", icon: "chart", seq: 1, at: Date.now() - 86400000, file: "index.html" },
+    { id: "9c3b7e21-4d8a-4f6b-a1e2-7b5c0d9e8f14", title: "Telemetry glossary", description: "Terms, defined", icon: "book", seq: 1, at: Date.now() - 3 * 86400000, file: "index.html" },
+    { id: "0b7e5a10-1c2d-4e3f-8a9b-0c1d2e3f4a5b", title: "Published elsewhere", description: "", icon: "", seq: 2, at: Date.now() - 9 * 86400000, file: "" },
+  ];
+  const artifactsEvent = () => ({ type: "studyArtifacts", artifacts: ARTIFACTS.map((a) => ({ ...a,
+    source: (state.sources[state.open ?? ""] ?? []).find((s) => s.origin.from === "artifact" && s.origin.id === a.id)?.id ?? null })) });
+
   /** Sources' guides, by id, once asked for. @type {Record<string, any>} */
   const guides = {};
 
@@ -440,6 +449,20 @@ export function createStudyPreview(deliver) {
             }, 600);
           }
           return [notebookEvent(), listEvent()];
+        }
+        case "studyArtifacts":
+          return [artifactsEvent()];
+        case "studyAddArtifacts": {
+          const slug = state.open ?? "";
+          for (const id of command.ids) {
+            const a = ARTIFACTS.find((x) => x.id === id);
+            if (!a || !a.file || (state.sources[slug] ?? []).some((s) => s.origin.from === "artifact" && s.origin.id === id)) continue;
+            const sid = `S${String(state.next[slug]++).padStart(2, "0")}`;
+            state.sources[slug].push({ id: sid, title: a.title, kind: "artifact", role: "reading", origin: { from: "artifact", id: a.id, seq: a.seq, file: a.file },
+              status: { state: "reading" }, units: "lines", count: 0, size: 24000, thin: 0, selected: true, labels: [] });
+            read(slug, [sid]);
+          }
+          return [notebookEvent(), listEvent(), artifactsEvent()];
         }
         case "studyMakeReadable": {
           const slug = state.open ?? "";

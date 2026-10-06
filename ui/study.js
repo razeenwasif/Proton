@@ -35,7 +35,9 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {{id: string, title: string, body: string, updated: number, source: string | null}} NoteEvent */
 /** @typedef {import("./study-studio.js").MadeEvent} MadeEvent */
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
+/** @typedef {import("./bindings/StudyArtifactRow").StudyArtifactRow} ArtifactRow */
 /** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "progress"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
+ *   | {kind: "artifact", source: SourceEvent, id: string, seq: number, file: string}
  *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}
  *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent} | {kind: "audio"} | {kind: "slides"}
  *   | {kind: "graphic", graphic: import("./study-graphic.js").GraphicEvent}} Shown */
@@ -85,7 +87,7 @@ function extent(s) {
   return count(s.count, "line", "lines");
 }
 
-/** @param {{root: Document, dispatch: (command: any) => unknown}} host */
+/** @param {{root: Document, dispatch: (command: any) => unknown, shell?: boolean}} host */
 export function createStudy(host) {
   const ws = /** @type {HTMLElement | null} */ (host.root.querySelector('.workspace[data-ws="study"]'));
   if (!ws) return null;
@@ -132,9 +134,10 @@ export function createStudy(host) {
   const decks = createSlides({ dispatch: host.dispatch, readOnly: () => readOnly() });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
-   *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web", removing: string | null,
+   *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web" | "artifacts", removing: string | null,
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
-   *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null}} */
+   *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null,
+   *   artifacts: ArtifactRow[] | null, picked: Set<string>}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -163,7 +166,14 @@ export function createStudy(host) {
     // A source whose pages with few words are to be read from their
     // pictures, being asked.
     readable: null,
+    // The artifacts Proton keeps, once asked for, and those ticked to add.
+    artifacts: null,
+    picked: new Set(),
   };
+
+  /** Where an artifact's kept pages are: Proton's own scheme in the app,
+   *  the preview's fixtures without it. */
+  const artifactBase = () => !host.shell ? "/fixtures/artifacts/" : /Win/.test(navigator.platform) ? "http://artifact.localhost/" : "artifact://localhost/";
 
   /** The notebook's pages of the web, by address: what was found that it has. */
   const webSources = () => new Map((state.notebook?.sources ?? []).flatMap((s) => (s.origin.from === "web" ? [[s.origin.url, s.id]] : [])));
@@ -217,7 +227,7 @@ export function createStudy(host) {
   /** @param {SourceRow} s */
   function sourceHtml(s) {
     const origin = s.origin.from === "file" ? `${s.origin.root}/${s.origin.rel}` : s.origin.from === "note" ? `Note ${s.origin.note}`
-      : s.origin.from === "web" ? s.origin.url : "Pasted";
+      : s.origin.from === "web" ? s.origin.url : s.origin.from === "artifact" ? `Artifact, version ${s.origin.seq}` : "Pasted";
     const confirm = state.removing === s.id
       ? `<span class="st-confirm">Take out? <button class="st-link" data-study-remove-yes="${esc(s.id)}">Yes</button> <button class="st-link" data-study-remove-no>No</button></span>`
       : "";
@@ -388,11 +398,33 @@ export function createStudy(host) {
       </form>`;
   }
 
+  /** The artifacts Proton keeps, to tick and add as sources. */
+  function artifactsHtml() {
+    const list = state.artifacts;
+    const rows = !list ? `<p class="st-faint"><span class="lab-spin"></span> Looking…</p>`
+      : !list.length ? `<p class="st-faint">No artifacts are kept yet. What Claude publishes from the Chat tab is kept, and can be imported there from Claude.</p>`
+        : list.map((a) => {
+          const can = !a.source && Boolean(a.file);
+          const when = a.at ? new Date(a.at).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+          const note = a.source ? `already ${esc(a.source)}` : !a.file ? "only its address is kept" : `version ${a.seq}${when ? ` · ${esc(when)}` : ""}`;
+          return `<label class="st-file${can ? "" : " off"}"><input type="checkbox" data-study-artifact-pick="${esc(a.id)}"${can ? (state.picked.has(a.id) ? " checked" : "") : " disabled"}>` +
+            `${icon("layers")}<span class="st-file-name">${esc(a.title)}</span><span class="st-faint st-size">${note}</span></label>`;
+        }).join("");
+    const picked = [...state.picked].filter((id) => list?.some((a) => a.id === id && !a.source && a.file)).length;
+    return `<form class="st-card st-paste st-artifacts" data-study-artifacts-form novalidate>
+        <h2>Add your artifacts</h2>
+        <p class="st-faint">Pages Claude published, as Proton keeps them: each is read as its article, its formulas as TeX, and opens as itself in the reader.</p>
+        <div class="st-artifact-list">${rows}</div>
+        <div class="rs-actions"><button type="button" class="cc-quiet" data-study-paste-cancel>Cancel</button>
+          <button type="submit" class="cc-primary"${picked ? "" : " disabled"}>Add ${picked || ""} as ${picked === 1 ? "a source" : "sources"}</button></div>
+      </form>`;
+  }
+
   function notebookHtml() {
     const nb = /** @type {NotebookEvent} */ (state.notebook);
     const held = nb.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nb.readOnly)} has this notebook open: it is read only here.</div>` : "";
     if (state.editing) return held + detailsHtml();
-    if (state.pasting) return held + (state.pasting === "web" ? webHtml() : pasteHtml());
+    if (state.pasting) return held + (state.pasting === "web" ? webHtml() : state.pasting === "artifacts" ? artifactsHtml() : pasteHtml());
     const head = headHtml();
     if (!nb.sources.length) {
       return `${held}${head}<div class="st-card st-empty">
@@ -401,6 +433,7 @@ export function createStudy(host) {
             and everything the studio makes is drawn from them, and cites them.</p>
           ${readOnly() ? "" : `<div class="rs-actions"><button class="cc-quiet" data-study-paste>Paste text</button>
             <button class="cc-quiet" data-study-web>${icon("globe")}From the web</button>
+            <button class="cc-quiet" data-study-artifacts>${icon("layers")}Your artifacts</button>
             <button class="cc-primary" data-study-pick>${icon("plus")}Add sources</button></div>`}
         </div>`;
     }
@@ -419,6 +452,7 @@ export function createStudy(host) {
           <button class="st-link" data-study-get-all>Download ${waiting.length === 1 ? "it" : "them"}</button></div>` : "";
     const actions = readOnly() ? "" : `<div class="rs-actions st-nb-actions"><button class="cc-quiet" data-study-paste>Paste text</button>
         <button class="cc-quiet" data-study-web>${icon("globe")}From the web</button>
+        <button class="cc-quiet" data-study-artifacts>${icon("layers")}Your artifacts</button>
         <button class="cc-quiet" data-study-pick>${icon("plus")}Add sources</button></div>`;
     return `${held}${head}${cloud}<div class="st-groups">${groups}</div>${actions}`;
   }
@@ -477,7 +511,10 @@ export function createStudy(host) {
     const web = origin?.from === "web" ? origin : null;
     const fetched = web?.fetched ? ` · fetched ${new Date(web.fetched * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : "";
     const page = web ? `<button class="cc-quiet" data-study-page="${esc(web.url)}" title="${esc(web.url)}">${icon("ext")}Open the page</button>` +
-      (readOnly() ? "" : `<button class="cc-quiet" data-study-refresh="${esc(src.id)}" title="Fetch it again, and keep it as it is now">Fetch again</button>`) : "";
+      (readOnly() ? "" : `<button class="cc-quiet" data-study-refresh="${esc(src.id)}" title="Fetch it again, and keep it as it is now">Fetch again</button>`)
+      : origin?.from === "artifact" ? `<button class="cc-quiet" data-study-artifact-open title="The page itself, as Claude published it: its figures, its videos">${icon("layers")}Open the artifact</button>` +
+        (readOnly() ? "" : `<button class="cc-quiet" data-study-refresh="${esc(src.id)}" title="Read its latest version again">Read again</button>`)
+        : "";
     return `<div class="st-reader"><div class="st-reader-head"><button class="cc-quiet" data-study-back title="Back to the notebook">← Back</button>` +
       `<div><h1>${esc(src.title)}</h1><span class="st-faint">${esc(src.id)} · ${esc(src.kind)}${esc(fetched)}</span></div>${ask}${page}</div>${said}${guide}<div class="st-read">${body}</div></div>`;
   }
@@ -557,6 +594,16 @@ export function createStudy(host) {
     if (shown.kind === "source") {
       els.stage.innerHTML = readerHtml(shown.source);
       reach(shown.source);
+      return;
+    }
+    if (shown.kind === "artifact") {
+      // Drawn once: a page playing a video is not loaded again under it.
+      const src = `${artifactBase()}${encodeURIComponent(shown.id)}/${shown.seq}/${shown.file.split("/").map(encodeURIComponent).join("/")}`;
+      if (els.stage.querySelector(".st-artifact-frame")?.getAttribute("src") === src) return;
+      els.stage.innerHTML = `<div class="st-reader st-artifact-view"><div class="st-reader-head"><button class="cc-quiet" data-study-artifact-back title="Back to its words">← Back</button>` +
+        `<div><h1>${esc(shown.source.title)}</h1><span class="st-faint">${esc(shown.source.id)} · artifact, version ${shown.seq}</span></div></div>` +
+        `<iframe class="st-artifact-frame" title="${esc(shown.source.title)}" src="${esc(src)}" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads" ` +
+        `allow="fullscreen; picture-in-picture; autoplay" allowfullscreen referrerpolicy="no-referrer"></iframe></div>`;
       return;
     }
     if (shown.kind === "note") {
@@ -785,6 +832,26 @@ export function createStudy(host) {
       /** @type {HTMLTextAreaElement | null} */ (els.stage.querySelector("textarea"))?.focus();
       return;
     }
+    if (at("[data-study-artifacts]")) {
+      state.pasting = "artifacts";
+      state.artifacts = null;
+      state.picked = new Set();
+      host.dispatch({ type: "studyArtifacts" });
+      return renderStage();
+    }
+    if (at("[data-study-artifact-open]") && state.shown.kind === "source") {
+      const source = state.shown.source;
+      const origin = state.notebook?.sources.find((s) => s.id === source.id)?.origin;
+      if (origin?.from !== "artifact") return;
+      state.shown = { kind: "artifact", source, id: origin.id, seq: origin.seq, file: origin.file };
+      els.stage.innerHTML = "";
+      return renderStage();
+    }
+    if (at("[data-study-artifact-back]") && state.shown.kind === "artifact") {
+      state.shown = { kind: "source", source: state.shown.source };
+      els.stage.innerHTML = "";
+      return renderStage();
+    }
     if (at("[data-study-web]")) {
       state.pasting = "web";
       renderStage();
@@ -899,6 +966,12 @@ export function createStudy(host) {
   ws.addEventListener("change", (e) => {
     const t = /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target);
     if (t.closest("[data-study-picker]")) return;
+    const artifact = t.dataset.studyArtifactPick;
+    if (artifact !== undefined && t instanceof HTMLInputElement) {
+      if (t.checked) state.picked.add(artifact);
+      else state.picked.delete(artifact);
+      return redrawArtifacts();
+    }
     const pick = t.dataset.studyFoundPick;
     if (pick !== undefined && t instanceof HTMLInputElement) {
       if (t.checked) state.unpicked.delete(pick);
@@ -983,6 +1056,14 @@ export function createStudy(host) {
       if (!text) return /** @type {HTMLTextAreaElement | null} */ (form.querySelector("textarea"))?.focus();
       host.dispatch({ type: "studyPaste", title: field("title"), text });
       state.pasting = false;
+    }
+    if (form.matches("[data-study-artifacts-form]")) {
+      const ids = [...state.picked].filter((id) => state.artifacts?.some((a) => a.id === id && !a.source && a.file));
+      if (!ids.length) return;
+      host.dispatch({ type: "studyAddArtifacts", ids });
+      state.pasting = false;
+      state.picked = new Set();
+      renderStage();
     }
     if (form.matches("[data-study-web-form]")) {
       const url = field("url");
@@ -1201,6 +1282,20 @@ export function createStudy(host) {
     render();
   }
 
+  /** The artifacts Proton keeps, for the list being shown. @param {{artifacts: ArtifactRow[]}} event */
+  function artifactsEvent(event) {
+    state.artifacts = event.artifacts;
+    if (state.pasting === "artifacts") redrawArtifacts();
+  }
+
+  /** The list of artifacts drawn again where it is: the stage keeps a form
+   *  up as it is, for what is typed in it, so the list redraws itself. */
+  function redrawArtifacts() {
+    const form = els.stage.querySelector("[data-study-artifacts-form]");
+    if (form) form.outerHTML = artifactsHtml();
+    else renderStage();
+  }
+
   function closed() {
     state.notebook = null;
     state.open = null;
@@ -1217,5 +1312,5 @@ export function createStudy(host) {
   return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
     deck: deckEvent, reviewing: reviewingEvent, quiz: quizEvent, progress: progressEvent, learning: learningEvent,
     audio: audioEvent, voiceState: voiceStateEvent, voices: voicesEvent, voiceSample: sampleEvent, slides: slidesEvent, graphic: graphicEvent,
-    kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
+    kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open, artifacts: artifactsEvent };
 }

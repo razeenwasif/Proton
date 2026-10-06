@@ -869,7 +869,7 @@ const lab = createLab({ root: document, dispatch, readLab });
 const lean = createLean({ root: document, dispatch });
 /* Notebook: notebooks of your own sources, and the knowledge base they are
    chosen from. Drawn from what the core reads of them. */
-const study = createStudy({ root: document, dispatch });
+const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -4892,6 +4892,10 @@ function renderEvent(event) {
 
     case "studyKbResults":
       study?.kbResults(event);
+      break;
+
+    case "studyArtifacts":
+      study?.artifacts(event);
       break;
 
     case "studySource":

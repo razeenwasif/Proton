@@ -40,6 +40,7 @@ const count = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 export const KIND_ICON = /** @type {Record<string, string>} */ ({
   pdf: "file-doc", markdown: "file", text: "file", notebook: "file-code", tex: "file-code", captions: "film",
   table: "table", code: "file-code", document: "file-doc", slides: "file-doc", image: "image", audio: "audio", video: "film", web: "globe",
+  artifact: "layers",
 });
 
 /** @param {{root: Document, dispatch: (command: any) => unknown, ws: HTMLElement, discoverable: () => boolean}} host */

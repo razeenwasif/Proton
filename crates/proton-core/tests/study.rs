@@ -381,6 +381,80 @@ fn discover_finds_what_in_the_knowledge_base_is_like_the_notebook_and_not_in_it_
     session.shutdown();
 }
 
+#[test]
+fn an_artifact_claude_published_is_a_source_read_as_its_article_its_formulas_tex() {
+    let scratch = Scratch::new("artifacts");
+    let settings = scratch.knowledge_base();
+    // A store of the test's own, with an artifact published into it as the
+    // chat keeps one: a page whose formula KaTeX drew, and its clip.
+    let store_dir = scratch.root.join("artifacts");
+    std::env::set_var("PROTON_ARTIFACTS", &store_dir);
+    let made = scratch.root.join("explainer");
+    let katex = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../proton-library/tests/fixtures/katex.html")).unwrap();
+    let formula = katex.split("Case 1: ").nth(1).and_then(|r| r.split(" done.").next()).unwrap().to_string();
+    let page = format!(
+        "<html><head><title>Bowls</title></head><body><nav>Menu</nav><article><h1>Convexity</h1>\
+         <p>A convex function lies under its chords, and {formula} is convex everywhere on the line.</p>\
+         <video controls src=\"media/clip.mp4\"></video></article></body></html>"
+    );
+    std::fs::create_dir_all(made.join("media")).unwrap();
+    std::fs::write(made.join("page.html"), &page).unwrap();
+    std::fs::write(made.join("media/clip.mp4"), b"clip").unwrap();
+    let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    let mut store = proton_claude::artifacts::Store::at(store_dir.clone());
+    let publish = |store: &mut proton_claude::artifacts::Store, seq: u32| {
+        let input = serde_json::json!({ "file_path": "page.html", "files": { "media/clip.mp4": "media/clip.mp4" } });
+        let result = serde_json::json!({ "url": "https://claude.ai/artifact/Bowls", "path": made.join("page.html"), "artifact_id": id, "title": "Bowls & Barriers", "seq": seq });
+        store.record(&input, &result, "", "s").unwrap();
+    };
+    publish(&mut store, 1);
+    assert!(store_dir.join(id).join("1/media/clip.mp4").is_file(), "its clip, kept with it");
+
+    let mut session = session(&scratch, &settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Optimisation".into() });
+    let events = session.apply(Command::StudyArtifacts);
+    let Some(Event::StudyArtifacts { artifacts }) = events.first() else { panic!("{events:?}") };
+    assert_eq!((artifacts[0].title.as_str(), artifacts[0].seq, artifacts[0].file.as_str(), artifacts[0].source.clone()), ("Bowls & Barriers", 1, "page.html", None));
+
+    let events = session.apply(Command::StudyAddArtifacts { ids: vec![id.into()] });
+    assert!(events.iter().any(|e| matches!(e, Event::StudyArtifacts { artifacts } if artifacts[0].source.as_deref() == Some("S01"))), "it is said to be a source now");
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(sources.clone()),
+        Event::StudyNotebook { sources, .. } if sources.iter().any(|s| matches!(s.status, SourceStatus::Failed { .. })) => panic!("{sources:?}"),
+        _ => None,
+    });
+    assert_eq!((rows[0].kind.as_str(), rows[0].title.as_str()), ("artifact", "Bowls & Barriers"));
+    assert!(matches!(&rows[0].origin, proton_study::model::Origin::Artifact { id: a, seq: 1, file } if a == id && file == "page.html"));
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Sections { sections }, .. }) = events.first() else { panic!("{events:?}") };
+    let text: String = sections.iter().map(|s| s.text.as_str()).collect();
+    assert!(text.contains("lies under its chords") && !text.contains("Menu"), "its article: {text}");
+    if here("pandoc", "--version") {
+        assert!(text.contains("$x^{2}$ is convex"), "its formula, TeX again: {text}");
+    }
+    let again = said(&session.apply(Command::StudyAddArtifacts { ids: vec![id.into()] }));
+    assert!(again.iter().any(|s| s.contains("is already S01")), "{again:?}");
+
+    // Published again, it is read again as its latest version.
+    std::fs::write(made.join("page.html"), page.replace("lies under its chords", "lies on or under every chord")).unwrap();
+    publish(&mut store, 2);
+    assert!(store_dir.join(id).join("2/media/clip.mp4").is_file(), "the clip carried into the new version");
+    session.apply(Command::StudyRefresh { id: "S01".into() });
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if matches!(&sources[0].origin, proton_study::model::Origin::Artifact { seq: 2, .. }) && sources[0].status == SourceStatus::Ready => Some(sources.clone()),
+        _ => None,
+    });
+    assert_eq!(rows.len(), 1);
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Sections { sections }, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(sections.iter().any(|s| s.text.contains("on or under every chord")));
+    std::env::remove_var("PROTON_ARTIFACTS");
+    session.shutdown();
+}
+
 /// The web, as a test has it: a page that changes each time it is fetched,
 /// a PDF, and nothing else; and what was asked for.
 #[derive(Default)]

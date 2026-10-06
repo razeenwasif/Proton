@@ -62,6 +62,7 @@ import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
+import type { StudyArtifactRow } from "./StudyArtifactRow";
 import type { StudyAttempt } from "./StudyAttempt";
 import type { StudyAudioFormat } from "./StudyAudioFormat";
 import type { StudyBlock } from "./StudyBlock";
@@ -252,7 +253,7 @@ started: boolean,
 /**
  * Whether its catalogue is in, so the picker can browse.
  */
-ready: boolean, walking: boolean, done: number, total: number, paused: boolean, documents: number, passages: number, } | { "type": "studyKbFolder", root: string, dir: string, folders: Array<StudyKbFolder>, files: Array<StudyKbFile>, left: Array<StudyKbLeft>, } | { "type": "studyKbResults", query: string, files: Array<StudyKbFile>, passages: Array<StudyKbHit>, 
+ready: boolean, walking: boolean, done: number, total: number, paused: boolean, documents: number, passages: number, } | { "type": "studyKbFolder", root: string, dir: string, folders: Array<StudyKbFolder>, files: Array<StudyKbFile>, left: Array<StudyKbLeft>, } | { "type": "studyArtifacts", artifacts: Array<StudyArtifactRow>, } | { "type": "studyKbResults", query: string, files: Array<StudyKbFile>, passages: Array<StudyKbHit>, 
 /**
  * Found for the open notebook, by words it chose: each file one
  * it does not have yet, with the passage most like it.

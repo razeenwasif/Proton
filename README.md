@@ -158,8 +158,9 @@ out and why, or found for you as what is like the notebook, or found on the
 web by Discover or Deep Research, which writes a report of what it read — and read once,
 their words kept in the notebook: notes, PDFs, notebooks, LaTeX, captions, Word
 documents and EPUBs (with pandoc), PowerPoints, pictures' words (with
-tesseract), pages of the web kept as their articles, YouTube videos'
-captions (with yt-dlp), and recordings, transcribed by Fish Audio when you
+tesseract), pages of the web kept as their articles, your artifacts — read as
+their articles, KaTeX's formulas read back as TeX, and opened as themselves —
+YouTube videos' captions (with yt-dlp), and recordings, transcribed by Fish Audio when you
 choose, told what it costs; a reader, with a guide to each source on asking;
 sources labelled by topic, and ticked by label; slides with few words read
 from their pictures; notes;
@@ -300,13 +301,18 @@ shows what that chat had open — or nothing — and switch back to find yours
 as you left it. One a chat publishes while you are in another is waiting open
 when you go back to it, and the list puts the chat's own artifacts first. Proton keeps a copy of every version it publishes in
 `~/Library/Application Support/dev.razeen.proton/artifacts` (`PROTON_ARTIFACTS`
-moves it) and serves them from `artifact://`, sandboxed: a page can load what a
-claude.ai artifact can and reach nothing of the editor's. **Open on claude.ai**
-goes to the published page. **Import from Claude**, in the artifacts list,
-brings in what Claude Code published from this machine before Proton was
-keeping it — found in the desktop app's session records and in every session's
-own file, with the files each page brought along. One whose page has since
-been deleted comes in as its address, and opens on claude.ai.
+moves it) — with the files each page brought along, its clips and pictures
+found where the Artifact tool found them, and carried into each new version as
+claude.ai carries them — and serves them from `artifact://`, sandboxed: a page
+can load what a claude.ai artifact can, play its own videos (answered a range
+of bytes at a time, as a player asks) and go full screen, and reach nothing of
+the editor's. **Open on claude.ai** goes to the published page. **Import from
+Claude**, in the artifacts list, brings in what Claude Code published from this
+machine before Proton was keeping it — found in the desktop app's session
+records and in every session's own file, with the files each page brought
+along — and gives a version kept before without its files the ones it names.
+One whose page has since been deleted comes in as its address, and opens on
+claude.ai. Notebook takes artifacts as sources too.
 
 ## Antigravity agent connection
 

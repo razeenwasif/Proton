@@ -25,6 +25,8 @@ pub enum Kind {
     Code,
     /// A page of the web, kept as Markdown: never a file of the knowledge base.
     Web,
+    /// A page Claude published as an artifact, as Proton keeps it.
+    Artifact,
     Other,
 }
 
@@ -108,6 +110,8 @@ impl Kind {
             // read whole.
             Kind::Audio => 4 << 30,
             Kind::Video => 32 << 30,
+            // A page with its pictures and formulas inlined.
+            Kind::Artifact => 64 << 20,
             _ => 1 << 20,
         }
     }
@@ -134,13 +138,14 @@ impl Kind {
             Kind::Video => "video",
             Kind::Code => "code",
             Kind::Web => "web",
+            Kind::Artifact => "artifact",
             Kind::Other => "other",
         }
     }
 }
 
 /// Every kind, for reading one back by name.
-const ALL: [Kind; 15] = [
+const ALL: [Kind; 16] = [
     Kind::Markdown,
     Kind::Text,
     Kind::Pdf,
@@ -155,6 +160,7 @@ const ALL: [Kind; 15] = [
     Kind::Video,
     Kind::Code,
     Kind::Web,
+    Kind::Artifact,
     Kind::Other,
 ];
 

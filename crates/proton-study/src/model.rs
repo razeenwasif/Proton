@@ -74,6 +74,9 @@ pub enum Origin {
         #[ts(type = "number")]
         fetched: u64,
     },
+    /// An artifact Claude published, as Proton keeps it: its id, the
+    /// version read, and its page in that version's folder.
+    Artifact { id: String, seq: u32, file: String },
 }
 
 impl Origin {

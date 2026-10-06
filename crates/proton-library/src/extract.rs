@@ -91,6 +91,12 @@ pub fn read(path: &Path, kind: Kind, pdfs: &Pdfs) -> Result<Body, Unread> {
         Kind::Document => Body::Lines(crate::formats::office::document(path).map_err(Unread::Failed)?),
         Kind::Slides => Body::Pages(crate::formats::office::slides(path).map_err(Unread::Failed)?),
         Kind::Image => Body::Lines(crate::formats::office::picture(path).map_err(Unread::Failed)?),
+        // An artifact is its page's article, its formulas TeX; one written
+        // in Markdown is that.
+        Kind::Artifact => match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+            Some("md" | "markdown") => Body::Lines(text(path)?),
+            _ => Body::Lines(crate::formats::web::page(&text(path)?).markdown),
+        },
         other => return Err(Unread::NotReadable(other)),
     };
     match body.letters() {

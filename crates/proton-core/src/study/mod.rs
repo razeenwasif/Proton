@@ -71,6 +71,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyAddUrls { .. }
             | Command::StudyTranscribe { .. }
             | Command::StudyMakeReadable { .. }
+            | Command::StudyArtifacts
+            | Command::StudyAddArtifacts { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }
@@ -540,6 +542,8 @@ impl Study {
             Command::StudyAddUrls { urls } => self.add_urls(&urls),
             Command::StudyTranscribe { id } => self.transcribe(&id),
             Command::StudyMakeReadable { id } => self.make_readable(&id),
+            Command::StudyArtifacts => vec![self.artifacts_event()],
+            Command::StudyAddArtifacts { ids } => self.add_artifacts(&ids),
             Command::StudyRemove { id } => self.remove(&id),
             Command::StudySelect { ids } => self.select(&ids),
             Command::StudyRefresh { id } => self.refresh(&id),
@@ -1318,6 +1322,91 @@ impl Study {
         events
     }
 
+    /// The artifacts Proton keeps, each with the source it already is here.
+    fn artifacts_event(&self) -> Event {
+        let store = proton_claude::artifacts::Store::open();
+        let have: HashMap<String, String> = self
+            .open
+            .as_ref()
+            .map(|o| o.book.sources.sources.iter().filter_map(|s| match &s.origin {
+                Origin::Artifact { id, .. } => Some((id.clone(), s.id.clone())),
+                _ => None,
+            }).collect())
+            .unwrap_or_default();
+        let artifacts = store
+            .list()
+            .iter()
+            .map(|a| {
+                let latest = a.versions.iter().rev().find(|v| !v.file.is_empty()).or(a.versions.last());
+                proton_study::view::StudyArtifactRow {
+                    id: a.id.clone(),
+                    title: a.title.clone(),
+                    description: a.description.clone(),
+                    icon: a.icon.clone(),
+                    seq: latest.map_or(0, |v| v.seq),
+                    at: latest.map_or(0, |v| v.at),
+                    file: latest.map(|v| v.file.clone()).unwrap_or_default(),
+                    source: have.get(&a.id).cloned(),
+                }
+            })
+            .collect();
+        Event::StudyArtifacts { artifacts }
+    }
+
+    /// Add artifacts as sources: each the latest version of it Proton keeps,
+    /// read as its page's article, on a worker.
+    fn add_artifacts(&mut self, ids: &[String]) -> Vec<Event> {
+        let store = proton_claude::artifacts::Store::open();
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let mut said = Vec::new();
+        let mut items = Vec::new();
+        for id in ids {
+            let Some(artifact) = store.list().iter().find(|a| &a.id == id) else {
+                said.push(format!("{id}: no such artifact is kept here"));
+                continue;
+            };
+            if let Some(source) = book.sources.sources.iter().find(|s| matches!(&s.origin, Origin::Artifact { id: a, .. } if a == id)) {
+                said.push(format!("{} is already {}", source.title, source.id));
+                continue;
+            }
+            let Some(version) = artifact.versions.iter().rev().find(|v| !v.file.is_empty()) else {
+                said.push(format!("{}: only its address is kept here, so there is nothing to read", artifact.title));
+                continue;
+            };
+            let path = store.root().join(&artifact.id).join(version.seq.to_string()).join(&version.file);
+            let source = book.sources.take_id();
+            book.sources.sources.push(Source {
+                id: source.clone(),
+                title: artifact.title.clone(),
+                kind: Kind::Artifact.name().to_string(),
+                origin: Origin::Artifact { id: artifact.id.clone(), seq: version.seq, file: version.file.clone() },
+                role: Role::Reading,
+                size: 0,
+                mtime: version.at / 1000,
+                sha256: String::new(),
+                units: Units::Lines,
+                count: 0,
+                thin: Vec::new(),
+                status: SourceStatus::Reading,
+                added: proton_study::now(),
+                labels: Vec::new(),
+            });
+            let _ = book.tick(&source);
+            items.push(Item { id: source, path, kind: Kind::Artifact, download: false });
+        }
+        if !items.is_empty() {
+            self.start_reading(items);
+        }
+        let mut events = self.saved();
+        events.insert(0, self.list_event());
+        events.push(self.artifacts_event());
+        events.extend(said.into_iter().map(|s| notice(s, NoticeLevel::Info)));
+        events
+    }
+
     fn remove(&mut self, id: &str) -> Vec<Event> {
         let book = match self.writable() {
             Ok(book) => book,
@@ -1368,6 +1457,25 @@ impl Study {
             };
             match &source.origin {
                 Origin::File { root, rel } => self.kb.file(root, rel).map(|path| (path, Kind::from_name(&source.kind))),
+                Origin::Artifact { id: artifact, .. } => {
+                    let store = proton_claude::artifacts::Store::open();
+                    let latest = store.list().iter().find(|a| &a.id == artifact).and_then(|a| a.versions.iter().rev().find(|v| !v.file.is_empty()).cloned());
+                    let Some(version) = latest else {
+                        return vec![notice(format!("{} is no longer kept here.", source.title), NoticeLevel::Warn)];
+                    };
+                    let path = store.root().join(artifact).join(version.seq.to_string()).join(&version.file);
+                    let artifact = artifact.clone();
+                    let book = match self.writable() {
+                        Ok(book) => book,
+                        Err(events) => return events,
+                    };
+                    if let Some(source) = book.sources.get_mut(id) {
+                        source.origin = Origin::Artifact { id: artifact, seq: version.seq, file: version.file.clone() };
+                        source.status = SourceStatus::Reading;
+                    }
+                    self.start_reading(vec![Item { id: id.to_string(), path, kind: Kind::Artifact, download: false }]);
+                    return self.saved();
+                }
                 Origin::Web { url, .. } => {
                     let fetch = web::Fetch { id: id.to_string(), url: url.clone() };
                     let book = match self.writable() {
@@ -1711,7 +1819,7 @@ impl Study {
         };
         let view = match body {
             Body::Lines(text) => match Kind::from_name(&source.kind) {
-                Kind::Markdown | Kind::Notebook | Kind::Document | Kind::Web => StudyView::Sections { sections: proton_study::view::sections(&text) },
+                Kind::Markdown | Kind::Notebook | Kind::Document | Kind::Web | Kind::Artifact => StudyView::Sections { sections: proton_study::view::sections(&text) },
                 _ => StudyView::Lines { text },
             },
             Body::Pages(pages) => StudyView::Pages { pages },

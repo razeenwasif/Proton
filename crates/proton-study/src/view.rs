@@ -156,6 +156,26 @@ impl StudyKbFile {
     }
 }
 
+/// An artifact Proton keeps, as Notebook offers it to be a source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyArtifactRow {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub icon: String,
+    /// Its latest version, and when it was published, in milliseconds.
+    pub seq: u32,
+    #[ts(type = "number")]
+    pub at: u64,
+    /// Its page; empty when only its address is kept, which leaves nothing
+    /// to read.
+    pub file: String,
+    /// The source it is already in the open notebook.
+    pub source: Option<String>,
+}
+
 /// A folder inside the one the picker shows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]

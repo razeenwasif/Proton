@@ -117,6 +117,9 @@ fn plain_tex(tex: &str) -> String {
 pub fn page(html: &str) -> Page {
     let doc = Document::from(html);
     let title = title_of(&doc);
+    // KaTeX's formulas first, while what it drew is there to read: the
+    // drawing is hidden from screen readers, and would go with the chrome.
+    super::katex::untypeset(&doc);
     doc.select(CHROME).remove();
     for annotation in doc.select("annotation[encoding='application/x-tex']").nodes() {
         let tex = plain_tex(&annotation.text());

@@ -543,6 +543,12 @@ pub enum Command {
     StudyMakeReadable {
         id: String,
     },
+    /// The artifacts Proton keeps, to choose sources from.
+    StudyArtifacts,
+    /// Add artifacts as sources, each as its latest version reads.
+    StudyAddArtifacts {
+        ids: Vec<String>,
+    },
     /// Take a source out of the open notebook. Its id is not given again.
     StudyRemove {
         id: String,
@@ -1584,6 +1590,11 @@ pub enum Event {
         folders: Vec<proton_study::view::StudyKbFolder>,
         files: Vec<proton_study::view::StudyKbFile>,
         left: Vec<proton_study::view::StudyKbLeft>,
+    },
+    /// The artifacts Proton keeps, newest first, each with the source it
+    /// already is in the open notebook.
+    StudyArtifacts {
+        artifacts: Vec<proton_study::view::StudyArtifactRow>,
     },
     /// What a search of the knowledge base found.
     StudyKbResults {

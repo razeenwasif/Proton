@@ -1102,7 +1102,14 @@ pictures or links' addresses — made Markdown by pandoc with MathML and MathJax
 `\(…\)` kept as TeX, or by dom_query without pandoc; a PDF kept whole in
 `.notebook/web/`, which the document viewer and `view_pages` open; a YouTube
 video as its English captions, read by yt-dlp without the video
-(`proton-library::formats::web`, `proton-core::study::web`). A recording —
+(`proton-library::formats::web`, `proton-core::study::web`). An **artifact**
+Claude published, as Proton keeps it, is a source too: the latest version's
+page read as its article, and opened as itself — sandboxed as the chat frames
+one — from the reader. A page KaTeX drew keeps no TeX, so its formulas are read
+back from the drawing: the glyphs in order, a script by whether it sits above
+or below, a fraction's parts by which is above, a root, a sum's limits, a
+table's cells by column and row, and the glyphs TeX names by their names
+(`proton-library::formats::katex`). A recording —
 audio or video — is added untranscribed, measured by ffprobe on the reading
 worker (never while its file is in iCloud), and said to have captions beside
 it when it has; it is transcribed only when the person asks, having been told
