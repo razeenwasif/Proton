@@ -224,6 +224,9 @@ pub struct Session {
     /// How a Research over a folder of its own is made: over the engines and
     /// the machine's Lab — or, in tests, over a Lab of its own.
     make_research: fn(&Path) -> crate::research::Research,
+    /// Notebook: the person's notebooks and the knowledge base they draw
+    /// from, one for every project here.
+    study: crate::study::Study,
 }
 
 impl Session {
@@ -247,6 +250,7 @@ impl Session {
             research: None,
             person: None,
             make_research: crate::research::Research::kept_in,
+            study: crate::study::Study::new(),
         }
     }
 
@@ -287,6 +291,13 @@ impl Session {
         &self.plugins
     }
 
+    /// Notebook's, made otherwise: for a test, one that says which of its
+    /// files are in iCloud.
+    pub fn with_study(mut self, study: crate::study::Study) -> Session {
+        self.study = study;
+        self
+    }
+
     /// Keep the investigations in `folder`, each a folder in it, for every
     /// project here and every one opened later — rather than in each
     /// project's `research/`.
@@ -325,6 +336,7 @@ impl Session {
     /// chosen in the Research tab is written.
     pub fn with_person_settings(mut self, file: PathBuf) -> Session {
         let folder = crate::settings::Settings::at(file.clone()).research_folder();
+        self.study = std::mem::take(&mut self.study).with_person_settings(&file);
         self.person = Some(file);
         match folder {
             Some(folder) => self.with_research_in(&folder),
@@ -537,6 +549,7 @@ impl Session {
         if let Some(research) = &self.research {
             research.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
         }
+        self.study.shutdown();
         // The machine's Lean, if it is being made: here, not in Research's
         // shutdown, which also runs when the investigations' folder moves.
         crate::research::quit_lean();
@@ -611,8 +624,16 @@ impl Session {
             },
             Command::CycleWorkspace { by } => self.cycle(by),
             Command::OpenWorkspacePicker => self.open_picker(),
-            Command::SetMode { mode } => self.set_mode(mode),
+            Command::SetMode { mode } => {
+                let mut events = self.set_mode(mode);
+                if mode == ModeId::Study {
+                    events.extend(self.study.enter());
+                }
+                events
+            }
             Command::ResearchFolder { folder } => self.set_research_folder(&folder),
+            // Notebook's are the session's: a notebook is the person's, not a project's.
+            command if crate::study::handles(&command) => self.study.apply(command),
 
             // While the workspace picker is open it owns the keyboard, exactly
             // as Telescope does inside a workspace — and for the same reason.
@@ -819,6 +840,7 @@ impl Session {
         if let Some(research) = &self.research {
             events.extend(research.lock().unwrap_or_else(|e| e.into_inner()).poll());
         }
+        events.extend(self.study.poll());
         events.extend(self.crossed(side));
         self.claim(events)
     }

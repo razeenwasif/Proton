@@ -89,6 +89,8 @@ pub struct Hit {
     pub score: f32,
     /// The citation, ready to draw.
     pub cite: String,
+    /// The document, named as its citations name it: what a scope selects.
+    pub doc: String,
 }
 
 /// Everything indexed, and the roots it came from.
@@ -210,6 +212,24 @@ impl Library {
     /// Read one document of any kind whose words are already read.
     pub fn add_body(&mut self, path: &Path, kind: Kind, body: &extract::Body) {
         self.take(path, extract::passages(path, kind, body));
+    }
+
+    /// Read one document under a name of its own, which its citations start
+    /// with and a scope selects it by: a notebook's source, `S07`, is cited
+    /// `S07 § Search L4-12` wherever its file is.
+    pub fn add_named(&mut self, name: &str, path: &Path, kind: Kind, body: &extract::Body) {
+        let passages = extract::passages(path, kind, body);
+        if passages.is_empty() {
+            return;
+        }
+        let doc = self.docs.len();
+        self.docs.push(name.to_string());
+        for passage in passages {
+            self.index.add(&passage.text, &passage.title);
+            self.cites.push(passage.cite_as(name));
+            self.passages.push(passage);
+            self.doc_of.push(doc);
+        }
     }
 
     /// Read one PDF, already extracted to a string per page.
@@ -361,6 +381,7 @@ impl Library {
                 passage: self.passages[i].clone(),
                 score,
                 cite: self.cites[i].clone(),
+                doc: self.docs[self.doc_of[i]].clone(),
             })
             .collect()
     }
@@ -434,6 +455,7 @@ impl Library {
                 passage: self.passages[i].clone(),
                 score,
                 cite: self.cites[i].clone(),
+                doc: self.docs[self.doc_of[i]].clone(),
             })
             .collect()
     }

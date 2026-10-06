@@ -25,7 +25,14 @@ pub struct Holder {
 /// Who holds an investigation's lock, if anyone alive does: another
 /// instance's, read without taking it.
 pub fn holder(folder: &Path, now: u64) -> Option<Holder> {
-    read(&path(folder)).filter(|holder| now.saturating_sub(holder.heartbeat) < STALE)
+    holder_of(&path(folder), now)
+}
+
+/// Who holds the lock kept in this file, if anyone alive does: for a
+/// folder that keeps its lock elsewhere, as a notebook keeps it in
+/// `.notebook/lock`.
+pub fn holder_of(file: &Path, now: u64) -> Option<Holder> {
+    read(file).filter(|holder| now.saturating_sub(holder.heartbeat) < STALE)
 }
 
 /// The lock, while this instance holds it. Let go of on drop.
@@ -50,7 +57,11 @@ fn host() -> String {
 impl Lock {
     /// Take the lock for `instance`, unless another holds it and is alive.
     pub fn acquire(folder: &Path, instance: &str, now: u64) -> Result<Lock, Holder> {
-        let path = path(folder);
+        Lock::acquire_file(path(folder), instance, now)
+    }
+
+    /// The same, for a lock kept in this file.
+    pub fn acquire_file(path: PathBuf, instance: &str, now: u64) -> Result<Lock, Holder> {
         if let Some(holder) = read(&path) {
             if holder.instance != instance && now.saturating_sub(holder.heartbeat) < STALE {
                 return Err(holder);

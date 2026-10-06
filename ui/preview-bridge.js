@@ -4,12 +4,14 @@
 import {encodeMesh} from './meshbytes.js';
 import {createClaudePreview} from './preview-claude.js';
 import {createResearchPreview} from './preview-research.js';
+import {createStudyPreview} from './preview-study.js';
 
 export function createPreview(deliver, mockLatency) {
   let mockMesh = () => null;
   let send;
   const claude = createClaudePreview(deliver);
   const research = createResearchPreview(deliver);
+  const study = createStudyPreview(deliver);
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
@@ -875,12 +877,14 @@ FCM: NON-DROP FRAME
         chatsEvent(),
         ...claude.sync(),
         ...research.sync(),
+        ...study.sync(),
       ];
     }
     if (command.type.startsWith("claude") || command.type.startsWith("chatFolder") || command.type === "forgetArtifact" || command.type === "openLink") {
       return claude.command(command);
     }
     if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
+    if (command.type.startsWith("study")) return study.command(command);
     if (command.type === "runCell") {
       // The shape of a real run: the cell goes busy, and the answer arrives
       // later on its own — which is what the panel has to survive.

@@ -114,6 +114,9 @@ pub struct Catalog {
 /// `st_flags`; a test says which of its files are in iCloud.
 pub type Flags<'a> = &'a dyn Fn(&Path, &std::fs::Metadata) -> u32;
 
+/// The same, as a plain function: what a shelf can be handed for its walks.
+pub type FlagFn = fn(&Path, &std::fs::Metadata) -> u32;
+
 impl Catalog {
     /// Walk every root.
     pub fn walk(roots: &[Root], rules: &Rules) -> Catalog {

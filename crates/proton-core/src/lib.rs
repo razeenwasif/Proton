@@ -33,6 +33,7 @@ pub mod research;
 pub mod session;
 pub mod settings;
 pub mod split;
+pub mod study;
 pub mod tasks;
 pub mod trace;
 pub mod tree;

@@ -62,6 +62,14 @@ import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
+import type { StudyKbFile } from "./StudyKbFile";
+import type { StudyKbFolder } from "./StudyKbFolder";
+import type { StudyKbHit } from "./StudyKbHit";
+import type { StudyKbLeft } from "./StudyKbLeft";
+import type { StudyNoteRow } from "./StudyNoteRow";
+import type { StudyRoot } from "./StudyRoot";
+import type { StudySourceRow } from "./StudySourceRow";
+import type { StudySummary } from "./StudySummary";
 import type { Summary } from "./Summary";
 import type { Task } from "./Task";
 import type { TermRun } from "./TermRun";
@@ -205,7 +213,15 @@ check: boolean,
 /**
  * Whether this Proton asks anybody at all.
  */
-live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "studyList", notebooks: Array<StudySummary>, open: string | null, folder: string | null, } | { "type": "studyNotebook", slug: string, title: string, course: string, exam: string | null, readOnly: string | null, sources: Array<StudySourceRow>, notes: Array<StudyNoteRow>, } | { "type": "studyClosed" } | { "type": "studyKb", roots: Array<StudyRoot>, rules: Array<string>, 
+/**
+ * Whether it has been begun on: Notebook has been opened.
+ */
+started: boolean, 
+/**
+ * Whether its catalogue is in, so the picker can browse.
+ */
+ready: boolean, walking: boolean, done: number, total: number, paused: boolean, documents: number, passages: number, } | { "type": "studyKbFolder", root: string, dir: string, folders: Array<StudyKbFolder>, files: Array<StudyKbFile>, left: Array<StudyKbLeft>, } | { "type": "studyKbResults", query: string, files: Array<StudyKbFile>, passages: Array<StudyKbHit>, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
 /**
  * The round's search of the literature, if it has one.
  */

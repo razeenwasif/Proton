@@ -31,6 +31,7 @@ import { performanceReview, editorPainted } from "./performance.js";
 import { createTerminalGL, xtermHex } from "./term-gl.js";
 import { createClaude } from "./claude.js";
 import { createResearch } from "./research.js";
+import { createStudy } from "./study.js";
 import { createLab } from "./lab.js";
 import { createLean } from "./lean.js";
 import { markdown } from "./markdown.js";
@@ -866,6 +867,9 @@ const research = createResearch({ root: document, dispatch });
 const lab = createLab({ root: document, dispatch, readLab });
 /* Lean and Mathlib, in which a mathematics investigation's proofs are checked. */
 const lean = createLean({ root: document, dispatch });
+/* Notebook: notebooks of your own sources, and the knowledge base they are
+   chosen from. Drawn from what the core reads of them. */
+const study = createStudy({ root: document, dispatch });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -4863,6 +4867,30 @@ function renderEvent(event) {
 
     case "labEnv":
       lab?.env(event);
+      break;
+
+    case "studyList":
+      study?.list(event);
+      break;
+
+    case "studyNotebook":
+      study?.notebook(event);
+      break;
+
+    case "studyClosed":
+      study?.closed();
+      break;
+
+    case "studyKb":
+      study?.kb(event);
+      break;
+
+    case "studyKbFolder":
+      study?.kbFolder(event);
+      break;
+
+    case "studyKbResults":
+      study?.kbResults(event);
       break;
 
     case "leanEnv":

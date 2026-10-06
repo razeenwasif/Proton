@@ -457,6 +457,90 @@ pub enum Command {
     LeanCancel,
     /// Take Lean and Mathlib away.
     LeanRemove,
+    /* ── notebook ─────────────────────────────────────────────────── */
+    /// Keep notebooks in this folder — typed as a path is, `~` and all.
+    /// Saved in the person's own settings.
+    StudyFolder {
+        folder: String,
+    },
+    /// The folders the knowledge base is drawn from, typed as paths are.
+    StudyRoots {
+        roots: Vec<String>,
+    },
+    /// Leave something out of the knowledge base, or let it back in: a rule
+    /// as `.gitignore` writes one, the root's label first.
+    StudyExclude {
+        rule: String,
+        on: bool,
+    },
+    /// Hold the knowledge base's reading, or let it go on.
+    StudyKbPause {
+        paused: bool,
+    },
+    /// Look at the knowledge base again: files added or edited since.
+    StudyKbRefresh,
+    /// What is in one folder of the knowledge base: a root's label, and a
+    /// folder under it — empty for the root.
+    StudyKbBrowse {
+        root: String,
+        dir: String,
+    },
+    /// Search the knowledge base: files by their names, passages by their words.
+    StudyKbSearch {
+        query: String,
+    },
+    /// Make a notebook, and open it.
+    StudyNew {
+        title: String,
+    },
+    StudyOpen {
+        slug: String,
+    },
+    /// Close the open notebook, back to the list.
+    StudyClose,
+    /// The open notebook's title, course, and the day of its exam.
+    StudyDetails {
+        title: String,
+        course: String,
+        exam: Option<String>,
+    },
+    /// Put a notebook away, or bring it back.
+    StudyArchive {
+        slug: String,
+        archived: bool,
+    },
+    /// Add files of the knowledge base to the open notebook, by their
+    /// labelled paths. A file in iCloud is added and left there.
+    StudyAdd {
+        paths: Vec<String>,
+    },
+    /// Bring files down from iCloud and add them: the person has been told
+    /// how much that is.
+    StudyDownload {
+        paths: Vec<String>,
+    },
+    /// Add pasted text as a source.
+    StudyPaste {
+        title: String,
+        text: String,
+    },
+    /// Take a source out of the open notebook. Its id is not given again.
+    StudyRemove {
+        id: String,
+    },
+    /// Tick these sources for the tutor to use, and only these.
+    StudySelect {
+        ids: Vec<String>,
+    },
+    /// Read a source's file again.
+    StudyRefresh {
+        id: String,
+    },
+    /// Say what a source is to the course.
+    StudyRole {
+        id: String,
+        role: proton_study::Role,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1242,6 +1326,56 @@ pub enum Event {
     /// is open.
     LeanEnv {
         env: proton_lab::LeanState,
+    },
+    /// The notebooks, the last opened first, which is open, and where they
+    /// are kept as the window says it — or `None`, not chosen yet.
+    StudyList {
+        notebooks: Vec<proton_study::view::StudySummary>,
+        open: Option<String>,
+        folder: Option<String>,
+    },
+    /// The open notebook: its details, its sources, its notes — and who
+    /// has it, if another Proton does and it is read only here.
+    #[serde(rename_all = "camelCase")]
+    StudyNotebook {
+        slug: String,
+        title: String,
+        course: String,
+        exam: Option<String>,
+        read_only: Option<String>,
+        sources: Vec<proton_study::view::StudySourceRow>,
+        notes: Vec<proton_study::view::StudyNoteRow>,
+    },
+    /// No notebook is open.
+    StudyClosed,
+    /// The knowledge base: its roots, the rules, and how far it is read.
+    StudyKb {
+        roots: Vec<proton_study::view::StudyRoot>,
+        rules: Vec<String>,
+        /// Whether it has been begun on: Notebook has been opened.
+        started: bool,
+        /// Whether its catalogue is in, so the picker can browse.
+        ready: bool,
+        walking: bool,
+        done: usize,
+        total: usize,
+        paused: bool,
+        documents: usize,
+        passages: usize,
+    },
+    /// One folder of the knowledge base, for the picker.
+    StudyKbFolder {
+        root: String,
+        dir: String,
+        folders: Vec<proton_study::view::StudyKbFolder>,
+        files: Vec<proton_study::view::StudyKbFile>,
+        left: Vec<proton_study::view::StudyKbLeft>,
+    },
+    /// What a search of the knowledge base found.
+    StudyKbResults {
+        query: String,
+        files: Vec<proton_study::view::StudyKbFile>,
+        passages: Vec<proton_study::view::StudyKbHit>,
     },
     /// What one task said, drawn as Chat draws a conversation: live while
     /// it runs.

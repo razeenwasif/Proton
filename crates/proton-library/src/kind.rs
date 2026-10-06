@@ -80,6 +80,11 @@ impl Kind {
         }
     }
 
+    /// The kind a name names: [`name`](Self::name) read back.
+    pub fn from_name(name: &str) -> Kind {
+        ALL.into_iter().find(|kind| kind.name() == name).unwrap_or(Kind::Other)
+    }
+
     /// Its name in a settings file or a view.
     pub fn name(self) -> &'static str {
         match self {
@@ -101,9 +106,35 @@ impl Kind {
     }
 }
 
+/// Every kind, for reading one back by name.
+const ALL: [Kind; 14] = [
+    Kind::Markdown,
+    Kind::Text,
+    Kind::Pdf,
+    Kind::Notebook,
+    Kind::Tex,
+    Kind::Captions,
+    Kind::Table,
+    Kind::Document,
+    Kind::Slides,
+    Kind::Image,
+    Kind::Audio,
+    Kind::Video,
+    Kind::Code,
+    Kind::Other,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kind_reads_back_from_its_name() {
+        for kind in ALL {
+            assert_eq!(Kind::from_name(kind.name()), kind);
+        }
+        assert_eq!(Kind::from_name("hologram"), Kind::Other);
+    }
 
     #[test]
     fn a_file_is_known_by_its_extension_whatever_its_case() {

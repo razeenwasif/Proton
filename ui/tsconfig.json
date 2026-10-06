@@ -37,6 +37,8 @@
     "research.js",
     "literature.js",
     "lab.js",
-    "lab3d.js"
+    "lab3d.js",
+    "study.js",
+    "study-kb.js"
   ]
 }

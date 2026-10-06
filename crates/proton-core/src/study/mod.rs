@@ -1,0 +1,870 @@
+//! Notebook: notebooks of the person's own sources, to study from.
+//!
+//! One for the session, whichever project is open. Notebooks are kept in a
+//! folder of the person's own — `study.folder` in their settings, offered as
+//! `~/Github/Notebooks` — and their sources are drawn from a knowledge base of
+//! folders they name, `study.roots`, less what `study.exclude` leaves out
+//! ([`kb`]). What a notebook is on disk is `proton-study`'s.
+//!
+//! Reading a source can take seconds — a book of a thousand pages — and
+//! bringing one down from iCloud longer, so both happen on a worker: the
+//! source is listed as being read meanwhile, and the answer is taken on the
+//! heartbeat. A file in iCloud is never brought down unless the person asked
+//! for exactly that file, having been told how big it is.
+
+mod kb;
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::Arc;
+
+use proton_library::extract::{Body, Pdfs, Unread};
+use proton_library::{dataless, Kind};
+use proton_study::lock::{self, Holder, Lock};
+use proton_study::model::{Origin, Role, Source, SourceStatus, Units};
+use proton_study::view::{StudyNoteRow, StudySourceRow, StudySummary};
+use proton_study::{role, snapshot, Book, Folder};
+use serde_json::Value;
+
+use crate::bus::{Command, Event, NoticeLevel};
+use crate::folder;
+use crate::settings::Settings;
+use crate::workspace::notice;
+
+pub use kb::Kb;
+
+/// How often the open notebook's lock is said to be held, in seconds.
+const BEAT: u64 = 30;
+
+/// Whether a command is Notebook's.
+pub fn handles(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::StudyFolder { .. }
+            | Command::StudyRoots { .. }
+            | Command::StudyExclude { .. }
+            | Command::StudyKbPause { .. }
+            | Command::StudyKbRefresh
+            | Command::StudyKbBrowse { .. }
+            | Command::StudyKbSearch { .. }
+            | Command::StudyNew { .. }
+            | Command::StudyOpen { .. }
+            | Command::StudyClose
+            | Command::StudyDetails { .. }
+            | Command::StudyArchive { .. }
+            | Command::StudyAdd { .. }
+            | Command::StudyDownload { .. }
+            | Command::StudyPaste { .. }
+            | Command::StudyRemove { .. }
+            | Command::StudySelect { .. }
+            | Command::StudyRefresh { .. }
+            | Command::StudyRole { .. }
+    )
+}
+
+/// The open notebook, and whether this Proton may write it.
+struct Open {
+    book: Book,
+    /// `None` while another Proton holds it: then it is read only.
+    lock: Option<Lock>,
+    holder: Option<Holder>,
+    beat: u64,
+}
+
+/// What a worker says of one source.
+enum Answer {
+    /// It is coming down from iCloud.
+    Downloading,
+    Read(Box<snapshot::Read>),
+    /// Its file turned out to be in iCloud.
+    InCloud,
+    Failed(String),
+}
+
+/// Sources being read, for one notebook, on a worker.
+struct Batch {
+    dir: PathBuf,
+    answers: Receiver<(String, Answer)>,
+    stop: Arc<AtomicBool>,
+}
+
+/// A file of the knowledge base, found: where it is, what the catalogue says
+/// of it, and its root's label.
+type Located = Option<(PathBuf, proton_library::catalog::Entry, String)>;
+
+/// One source for a worker to read: brought down from iCloud first, or not.
+struct Item {
+    id: String,
+    path: PathBuf,
+    kind: Kind,
+    download: bool,
+}
+
+/// Notebook, for the session.
+pub struct Study {
+    /// The person's settings file. `None` in tests that want none.
+    person: Option<PathBuf>,
+    /// Where notebooks are kept, and that folder as it was typed.
+    folder: Option<(Folder, String)>,
+    kb: Kb,
+    open: Option<Open>,
+    batches: Vec<Batch>,
+    instance: String,
+    /// Whether Notebook has been opened yet: nothing is walked until it is.
+    entered: bool,
+}
+
+impl std::fmt::Debug for Study {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Study")
+            .field("folder", &self.folder.as_ref().map(|(_, typed)| typed))
+            .field("open", &self.open.as_ref().map(|o| o.book.slug()))
+            .field("reading", &self.batches.len())
+            .finish()
+    }
+}
+
+impl Default for Study {
+    fn default() -> Study {
+        Study {
+            person: None,
+            folder: None,
+            kb: Kb::default(),
+            open: None,
+            batches: Vec::new(),
+            instance: {
+                // Unique to this Study, so two in one process — a test's —
+                // are two holders of a lock, as two Protons are.
+                static MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                format!("{}-{}-{}", std::process::id(), proton_study::now(), MADE.fetch_add(1, Ordering::Relaxed))
+            },
+            entered: false,
+        }
+    }
+}
+
+fn strings(value: Option<&Value>) -> Vec<String> {
+    value.and_then(Value::as_array).map(|items| items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default()
+}
+
+/// What a source's citations will count, before it is read.
+fn units_of(kind: Kind) -> Units {
+    match kind {
+        Kind::Pdf => Units::Pages,
+        Kind::Captions => Units::Seconds,
+        _ => Units::Lines,
+    }
+}
+
+/// Read a file through once, so that iCloud brings it down.
+fn bring_down(path: &Path) -> Result<(), String> {
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    std::io::copy(&mut file, &mut std::io::sink()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// A worker: each source read — brought down first if asked — and its words
+/// kept in the notebook; each answer sent as it is had.
+fn read_all(items: Vec<Item>, snapshots: PathBuf, pdfs: Pdfs, stop: Arc<AtomicBool>, answers: Sender<(String, Answer)>) {
+    // Nothing is brought down unless an item asks for it.
+    let _no_downloads = dataless::NoDownloads::on_this_thread();
+    for item in items {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        if item.download {
+            let _ = answers.send((item.id.clone(), Answer::Downloading));
+            let fetched = {
+                let _download = dataless::Downloads::on_this_thread();
+                bring_down(&item.path)
+            };
+            if let Err(why) = fetched {
+                let _ = answers.send((item.id, Answer::Failed(format!("it could not be downloaded: {why}"))));
+                continue;
+            }
+        }
+        let answer = match snapshot::read(&item.path, item.kind, &pdfs) {
+            Ok(read) => match snapshot::keep_in(&snapshots, &item.id, &read.body) {
+                Ok(()) => Answer::Read(Box::new(read)),
+                Err(why) => Answer::Failed(why),
+            },
+            Err(Unread::InCloud) => Answer::InCloud,
+            Err(why) => Answer::Failed(why.say()),
+        };
+        if answers.send((item.id, answer)).is_err() {
+            return;
+        }
+    }
+}
+
+impl Study {
+    pub fn new() -> Study {
+        Study::default()
+    }
+
+    /// Read where notebooks are kept, and the knowledge base, from the
+    /// person's own settings file — which is also where changes are written.
+    pub fn with_person_settings(mut self, file: &Path) -> Study {
+        self.person = Some(file.to_path_buf());
+        self.configure();
+        self
+    }
+
+    /// Say which files are in iCloud with this, for a test.
+    pub fn flags_with(mut self, flags: proton_library::catalog::FlagFn) -> Study {
+        self.kb.flags_with(flags);
+        self
+    }
+
+    fn settings(&self) -> Option<Settings> {
+        self.person.as_ref().map(|file| Settings::at(file.clone()))
+    }
+
+    /// Take the settings as they are now.
+    fn configure(&mut self) {
+        let Some(settings) = self.settings() else { return };
+        self.folder = settings
+            .get("study.folder")
+            .and_then(Value::as_str)
+            .and_then(|typed| crate::settings::research_path(typed).map(|path| (Folder::new(path), typed.to_string())));
+        let roots = strings(settings.get("study.roots"));
+        let exclude = strings(settings.get("study.exclude"));
+        let pdfs = settings.get("study.pdfs").and_then(Value::as_bool).unwrap_or(true);
+        let pdftotext = settings.get("study.pdftotext").and_then(Value::as_bool).unwrap_or(false);
+        self.kb.configure(roots, exclude, pdfs, pdftotext);
+    }
+
+    fn save_setting(&self, key: &str, value: Value) -> Option<Event> {
+        let mut settings = self.settings()?;
+        settings.set(key, value).err().map(|why| notice(format!("{key} could not be saved: {why}"), NoticeLevel::Warn))
+    }
+
+    /* ── the heartbeat ──────────────────────────────────────────────── */
+
+    /// Notebook was opened: begin on the knowledge base, open the notebook
+    /// last open, and say where everything stands.
+    pub fn enter(&mut self) -> Vec<Event> {
+        if !self.entered {
+            self.entered = true;
+            self.kb.start();
+            if self.open.is_none() {
+                if let Some((folder, _)) = &self.folder {
+                    if let Some((slug, _)) = folder.list().into_iter().find(|(_, n)| !n.archived) {
+                        let _ = self.open_quietly(&slug);
+                    }
+                }
+            }
+        }
+        if let Some(open) = &mut self.open {
+            let _ = open.book.reread();
+        }
+        self.check_files();
+        let mut events = vec![self.list_event(), self.kb.event()];
+        events.extend(self.notebook_event());
+        events
+    }
+
+    pub fn poll(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        if self.kb.poll() {
+            events.push(self.kb.event());
+        }
+        events.extend(self.take_answers());
+        if let Some(open) = &mut self.open {
+            let now = proton_study::now();
+            if now.saturating_sub(open.beat) >= BEAT {
+                open.beat = now;
+                match &open.lock {
+                    Some(lock) => lock.beat(now),
+                    // Read only: see whether the other Proton has let go.
+                    None => {
+                        if let Ok(lock) = lock::acquire(open.book.dir(), &self.instance, now) {
+                            open.lock = Some(lock);
+                            open.holder = None;
+                            events.extend(self.notebook_event());
+                        }
+                    }
+                }
+            }
+        }
+        events
+    }
+
+    /// Let go: stop the workers, release the lock.
+    pub fn shutdown(&mut self) {
+        for batch in &self.batches {
+            batch.stop.store(true, Ordering::Relaxed);
+        }
+        self.batches.clear();
+        self.open = None;
+    }
+
+    /// Whether anything is being read.
+    pub fn is_busy(&self) -> bool {
+        !self.batches.is_empty()
+    }
+
+    /* ── commands ───────────────────────────────────────────────────── */
+
+    pub fn apply(&mut self, command: Command) -> Vec<Event> {
+        match command {
+            Command::StudyFolder { folder } => self.set_folder(&folder),
+            Command::StudyRoots { roots } => self.set_roots(roots),
+            Command::StudyExclude { rule, on } => self.exclude(&rule, on),
+            Command::StudyKbPause { paused } => {
+                self.kb.pause(paused);
+                vec![self.kb.event()]
+            }
+            Command::StudyKbRefresh => {
+                self.kb.refresh();
+                vec![self.kb.event()]
+            }
+            Command::StudyKbBrowse { root, dir } => vec![self.kb.folder(&root, &dir, &self.sources_by_path())],
+            Command::StudyKbSearch { query } => vec![self.kb.search(&query, &self.sources_by_path())],
+            Command::StudyNew { title } => self.create(&title),
+            Command::StudyOpen { slug } => self.open(&slug),
+            Command::StudyClose => {
+                self.open = None;
+                vec![self.list_event(), Event::StudyClosed]
+            }
+            Command::StudyDetails { title, course, exam } => self.details(&title, &course, exam.as_deref()),
+            Command::StudyArchive { slug, archived } => self.archive(&slug, archived),
+            Command::StudyAdd { paths } => self.add(paths, false),
+            Command::StudyDownload { paths } => self.add(paths, true),
+            Command::StudyPaste { title, text } => self.paste(&title, &text),
+            Command::StudyRemove { id } => self.remove(&id),
+            Command::StudySelect { ids } => self.select(&ids),
+            Command::StudyRefresh { id } => self.refresh(&id),
+            Command::StudyRole { id, role } => self.set_role(&id, role),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Keep notebooks in the folder somebody typed. A folder that is not
+    /// there is made only when its parent is, so a slip of the keyboard
+    /// cannot make a tree of them.
+    fn set_folder(&mut self, typed: &str) -> Vec<Event> {
+        let typed = typed.trim().trim_end_matches(['/', '\\']);
+        let Some(path) = crate::settings::research_path(typed) else {
+            return vec![notice("Say where notebooks are to be kept.".into(), NoticeLevel::Warn)];
+        };
+        let mut said = Vec::new();
+        if path.exists() && !path.is_dir() {
+            return vec![notice(format!("{}: not a folder", folder::tilde(&path)), NoticeLevel::Error)];
+        }
+        if !path.exists() {
+            match path.parent().filter(|parent| parent.is_dir()) {
+                Some(_) => match std::fs::create_dir(&path) {
+                    Ok(()) => said.push(notice(format!("Made {}.", folder::tilde(&path)), NoticeLevel::Info)),
+                    Err(e) => return vec![notice(format!("{}: {e}", folder::tilde(&path)), NoticeLevel::Error)],
+                },
+                None => {
+                    let parent = path.parent().unwrap_or(&path);
+                    return vec![notice(format!("{}: no such folder", folder::tilde(parent)), NoticeLevel::Error)];
+                }
+            }
+        }
+        said.extend(self.save_setting("study.folder", Value::from(typed)));
+        self.open = None;
+        self.folder = Some((Folder::new(folder::normalise(&path)), typed.to_string()));
+        let mut events = vec![self.list_event(), Event::StudyClosed];
+        events.extend(said);
+        events
+    }
+
+    fn set_roots(&mut self, roots: Vec<String>) -> Vec<Event> {
+        let roots: Vec<String> = roots.into_iter().map(|r| r.trim().trim_end_matches(['/', '\\']).to_string()).filter(|r| !r.is_empty()).collect();
+        let mut events: Vec<Event> = roots
+            .iter()
+            .filter(|typed| !crate::settings::research_path(typed).is_some_and(|p| p.is_dir()))
+            .map(|typed| notice(format!("{typed}: no such folder"), NoticeLevel::Warn))
+            .collect();
+        events.extend(self.save_setting("study.roots", Value::from(roots.clone())));
+        let rules = self.kb.rules().written().to_vec();
+        self.kb.configure(roots, rules, self.kb_pdfs(), self.kb_pdftotext());
+        events.push(self.kb.event());
+        events
+    }
+
+    fn kb_pdfs(&self) -> bool {
+        self.settings().and_then(|s| s.get("study.pdfs").and_then(Value::as_bool)).unwrap_or(true)
+    }
+
+    fn kb_pdftotext(&self) -> bool {
+        self.settings().and_then(|s| s.get("study.pdftotext").and_then(Value::as_bool)).unwrap_or(false)
+    }
+
+    /// Leave something out of the knowledge base, or let it back in.
+    fn exclude(&mut self, rule: &str, on: bool) -> Vec<Event> {
+        let rule = rule.trim().to_string();
+        if rule.is_empty() {
+            return Vec::new();
+        }
+        let mut rules = self.kb.rules().written().to_vec();
+        rules.retain(|r| *r != rule);
+        if on {
+            rules.push(rule);
+        }
+        let mut events: Vec<Event> = self.save_setting("study.exclude", Value::from(rules.clone())).into_iter().collect();
+        let roots = self.kb.typed().to_vec();
+        self.kb.configure(roots, rules, self.kb_pdfs(), self.kb_pdftotext());
+        events.push(self.kb.event());
+        events
+    }
+
+    /* ── notebooks ──────────────────────────────────────────────────── */
+
+    fn list_event(&self) -> Event {
+        let (notebooks, folder) = match &self.folder {
+            Some((folder, typed)) => {
+                let notebooks = folder
+                    .list()
+                    .into_iter()
+                    .map(|(slug, notebook)| {
+                        let count = match &self.open {
+                            Some(open) if open.book.slug() == slug => open.book.sources.sources.len(),
+                            _ => Book::read(&folder.root().join(&slug)).map(|b| b.sources.sources.len()).unwrap_or(0),
+                        };
+                        StudySummary::of(&slug, &notebook, count)
+                    })
+                    .collect();
+                (notebooks, Some(typed.clone()))
+            }
+            None => (Vec::new(), None),
+        };
+        Event::StudyList { notebooks, open: self.open.as_ref().map(|o| o.book.slug().to_string()), folder }
+    }
+
+    fn notebook_event(&self) -> Option<Event> {
+        let open = self.open.as_ref()?;
+        let book = &open.book;
+        let selected = book.selection();
+        Some(Event::StudyNotebook {
+            slug: book.slug().to_string(),
+            title: book.notebook.title.clone(),
+            course: book.notebook.course.clone(),
+            exam: book.notebook.exam.clone(),
+            read_only: open.holder.as_ref().map(|h| match h.host.is_empty() {
+                true => format!("another Proton (pid {})", h.pid),
+                false => format!("another Proton on {} (pid {})", h.host, h.pid),
+            }),
+            sources: book.sources.sources.iter().map(|s| StudySourceRow::of(s, selected.contains(&s.id))).collect(),
+            notes: book.notes().iter().map(StudyNoteRow::of).collect(),
+        })
+    }
+
+    /// Which files are sources of the open notebook: labelled path → id.
+    fn sources_by_path(&self) -> HashMap<String, String> {
+        let Some(open) = &self.open else { return HashMap::new() };
+        open.book.sources.sources.iter().filter_map(|s| Some((s.origin.labelled()?, s.id.clone()))).collect()
+    }
+
+    fn no_folder() -> Vec<Event> {
+        vec![notice("Choose where notebooks are kept first.".into(), NoticeLevel::Warn)]
+    }
+
+    fn create(&mut self, title: &str) -> Vec<Event> {
+        let Some((folder, _)) = &self.folder else { return Study::no_folder() };
+        match folder.create(title, proton_study::now()) {
+            Ok(book) => {
+                let slug = book.slug().to_string();
+                self.open(&slug)
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    /// Open a notebook, taking its lock if no other Proton holds it.
+    fn open_quietly(&mut self, slug: &str) -> Result<(), String> {
+        let (folder, _) = self.folder.as_ref().ok_or("no folder")?;
+        let mut book = folder.open(slug)?;
+        let now = proton_study::now();
+        let (lock, holder) = match lock::acquire(book.dir(), &self.instance, now) {
+            Ok(lock) => (Some(lock), None),
+            Err(holder) => (None, Some(holder)),
+        };
+        if lock.is_some() {
+            book.notebook.opened = now;
+            let _ = book.save();
+        }
+        self.open = Some(Open { book, lock, holder, beat: now });
+        Ok(())
+    }
+
+    fn open(&mut self, slug: &str) -> Vec<Event> {
+        if let Err(why) = self.open_quietly(slug) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        self.check_files();
+        let mut events = vec![self.list_event()];
+        events.extend(self.notebook_event());
+        events
+    }
+
+    /// The open notebook, if this Proton may write it.
+    fn writable(&mut self) -> Result<&mut Book, Vec<Event>> {
+        match &mut self.open {
+            None => Err(vec![notice("Open a notebook first.".into(), NoticeLevel::Warn)]),
+            Some(Open { lock: None, .. }) => Err(vec![notice("Another Proton has this notebook open: it is read only here.".into(), NoticeLevel::Warn)]),
+            Some(open) => Ok(&mut open.book),
+        }
+    }
+
+    /// Say what changed in the open notebook, having saved it.
+    fn saved(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        if let Some(open) = &self.open {
+            if let Err(why) = open.book.save().and_then(|()| open.book.save_sources()) {
+                events.push(notice(why, NoticeLevel::Error));
+            }
+        }
+        events.extend(self.notebook_event());
+        events
+    }
+
+    fn details(&mut self, title: &str, course: &str, exam: Option<&str>) -> Vec<Event> {
+        let exam = exam.map(str::trim).filter(|e| !e.is_empty());
+        if let Some(day) = exam {
+            let ok = day.len() == 10 && day.as_bytes()[4] == b'-' && day.as_bytes()[7] == b'-' && day.split('-').all(|p| p.bytes().all(|b| b.is_ascii_digit()));
+            if !ok {
+                return vec![notice(format!("{day}: an exam's day is written YYYY-MM-DD"), NoticeLevel::Warn)];
+            }
+        }
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let title = title.trim();
+        if !title.is_empty() {
+            book.notebook.title = title.to_string();
+        }
+        book.notebook.course = course.trim().to_string();
+        book.notebook.exam = exam.map(str::to_string);
+        let mut events = self.saved();
+        events.insert(0, self.list_event());
+        events
+    }
+
+    fn archive(&mut self, slug: &str, archived: bool) -> Vec<Event> {
+        let Some((folder, _)) = &self.folder else { return Study::no_folder() };
+        let mut book = match folder.open(slug) {
+            Ok(book) => book,
+            Err(why) => return vec![notice(why, NoticeLevel::Error)],
+        };
+        if lock::holder(book.dir(), proton_study::now()).is_some_and(|holder| holder.instance != self.instance) {
+            return vec![notice("Another Proton has that notebook open.".into(), NoticeLevel::Warn)];
+        }
+        book.notebook.archived = archived;
+        if let Err(why) = book.save() {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        let mut events = Vec::new();
+        if archived && self.open.as_ref().is_some_and(|o| o.book.slug() == slug) {
+            self.open = None;
+            events.push(Event::StudyClosed);
+        } else if let Some(open) = &mut self.open {
+            let _ = open.book.reread();
+        }
+        events.insert(0, self.list_event());
+        events
+    }
+
+    /* ── sources ────────────────────────────────────────────────────── */
+
+    /// Add files of the knowledge base, by their labelled paths. A file in
+    /// iCloud is listed and left there unless `download` says to bring it
+    /// down; one already a source is said to be.
+    fn add(&mut self, paths: Vec<String>, download: bool) -> Vec<Event> {
+        if self.kb.catalog().is_none() {
+            return vec![notice("The knowledge base is still being listed.".into(), NoticeLevel::Info)];
+        }
+        // What each path is, asked of the catalogue before the notebook is
+        // borrowed to be written.
+        let found: Vec<(String, Located)> = paths
+            .into_iter()
+            .map(|path| {
+                let at = self.kb.locate(&path).map(|(file, entry)| {
+                    let root = self.kb.catalog().map(|c| c.roots()[entry.root].label.clone()).unwrap_or_default();
+                    (file, entry.clone(), root)
+                });
+                (path, at)
+            })
+            .collect();
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let mut said = Vec::new();
+        let mut items = Vec::new();
+        let now = proton_study::now();
+        for (path, at) in found {
+            let Some((file, entry, root)) = at else {
+                said.push(format!("{path}: not in the knowledge base"));
+                continue;
+            };
+            // Already a source: brought down if it is waiting in iCloud and
+            // that was asked; said otherwise.
+            if let Some(source) = book.sources.sources.iter_mut().find(|s| s.origin.labelled().as_deref() == Some(path.as_str())) {
+                if download && source.status == SourceStatus::InCloud {
+                    source.status = SourceStatus::Downloading;
+                    items.push(Item { id: source.id.clone(), path: file, kind: entry.kind, download: true });
+                } else {
+                    said.push(format!("{} is already {}", source.title, source.id));
+                }
+                continue;
+            }
+            if !entry.kind.readable() {
+                said.push(format!("{path}: a {} file is not read yet", entry.kind.name()));
+                continue;
+            }
+            let id = book.sources.take_id();
+            let status = match (entry.dataless, download) {
+                (true, false) => SourceStatus::InCloud,
+                (true, true) => SourceStatus::Downloading,
+                (false, _) => SourceStatus::Reading,
+            };
+            if status != SourceStatus::InCloud {
+                items.push(Item { id: id.clone(), path: file, kind: entry.kind, download: entry.dataless });
+            }
+            book.sources.sources.push(Source {
+                id: id.clone(),
+                title: entry.rel.rsplit('/').next().unwrap_or(&entry.rel).to_string(),
+                kind: entry.kind.name().to_string(),
+                origin: Origin::File { root, rel: entry.rel.clone() },
+                role: role::guess(&entry.rel, entry.kind),
+                size: entry.size,
+                mtime: entry.mtime,
+                sha256: String::new(),
+                units: units_of(entry.kind),
+                count: 0,
+                thin: Vec::new(),
+                status,
+                added: now,
+                labels: Vec::new(),
+            });
+            let _ = book.tick(&id);
+        }
+        if !items.is_empty() {
+            self.start_reading(items);
+        }
+        let mut events = self.saved();
+        events.insert(0, self.list_event());
+        events.extend(said.into_iter().map(|s| notice(s, NoticeLevel::Info)));
+        events
+    }
+
+    fn start_reading(&mut self, items: Vec<Item>) {
+        let Some(open) = &self.open else { return };
+        let (send, answers) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let snapshots = open.book.snapshots();
+        let pdfs = Pdfs { extractor: proton_library::pdf::Extractor::default(), cache: proton_library::pdf::cache_dir() };
+        let halt = Arc::clone(&stop);
+        let _ = std::thread::Builder::new().name("proton-study-read".into()).spawn(move || read_all(items, snapshots, pdfs, halt, send));
+        self.batches.push(Batch { dir: open.book.dir().to_path_buf(), answers, stop });
+    }
+
+    /// What the workers have read, written into their notebooks.
+    fn take_answers(&mut self) -> Vec<Event> {
+        let mut answered: Vec<(PathBuf, String, Answer)> = Vec::new();
+        self.batches.retain(|batch| loop {
+            match batch.answers.try_recv() {
+                Ok((id, answer)) => answered.push((batch.dir.clone(), id, answer)),
+                Err(TryRecvError::Empty) => break true,
+                Err(TryRecvError::Disconnected) => break false,
+            }
+        });
+        if answered.is_empty() {
+            return Vec::new();
+        }
+        let mut said = Vec::new();
+        let mut touched = false;
+        for (dir, id, answer) in answered {
+            // The open notebook is written in memory; another, from its files.
+            let mut other = None;
+            let book = match &mut self.open {
+                Some(open) if open.book.dir() == dir => &mut open.book,
+                _ => match Book::read(&dir) {
+                    Ok(book) => other.insert(book),
+                    Err(_) => continue,
+                },
+            };
+            let duplicate = match &answer {
+                Answer::Read(read) => book.sources.sources.iter().find(|s| s.id != id && s.sha256 == read.sha256 && s.status.has_words()).map(|s| s.id.clone()),
+                _ => None,
+            };
+            if let Some(first) = duplicate {
+                let title = book.sources.get(&id).map(|s| s.title.clone()).unwrap_or_default();
+                book.sources.sources.retain(|s| s.id != id);
+                snapshot::forget(book, &id);
+                said.push(notice(format!("{title} is the same file as {first}, which is kept."), NoticeLevel::Info));
+            } else if let Some(source) = book.sources.get_mut(&id) {
+                match answer {
+                    Answer::Downloading => source.status = SourceStatus::Downloading,
+                    Answer::InCloud => source.status = SourceStatus::InCloud,
+                    Answer::Failed(why) => source.status = SourceStatus::Failed { why },
+                    Answer::Read(read) => {
+                        source.size = read.size;
+                        source.mtime = read.mtime;
+                        source.sha256 = read.sha256.clone();
+                        source.units = read.units();
+                        source.count = read.count();
+                        source.thin = read.thin();
+                        source.status = SourceStatus::Ready;
+                    }
+                }
+            }
+            if let Err(why) = book.save_sources() {
+                said.push(notice(why, NoticeLevel::Error));
+            }
+            touched |= other.is_none();
+        }
+        if touched {
+            said.extend(self.notebook_event());
+        }
+        said
+    }
+
+    fn paste(&mut self, title: &str, text: &str) -> Vec<Event> {
+        let text = text.trim();
+        if text.is_empty() {
+            return vec![notice("There is nothing to add.".into(), NoticeLevel::Info)];
+        }
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let id = book.sources.take_id();
+        let body = Body::Lines(format!("{text}\n"));
+        if let Err(why) = snapshot::keep(book, &id, &body) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        let sha256 = snapshot::digest_text(text);
+        let title = match title.trim() {
+            "" => text.lines().next().unwrap_or("Pasted text").chars().take(60).collect(),
+            title => title.to_string(),
+        };
+        book.sources.sources.push(Source {
+            id: id.clone(),
+            title,
+            kind: Kind::Markdown.name().into(),
+            origin: Origin::Pasted,
+            role: Role::Notes,
+            size: text.len() as u64,
+            mtime: proton_study::now(),
+            sha256,
+            units: Units::Lines,
+            count: text.lines().count(),
+            thin: Vec::new(),
+            status: SourceStatus::Ready,
+            added: proton_study::now(),
+            labels: Vec::new(),
+        });
+        let _ = book.tick(&id);
+        let mut events = self.saved();
+        events.insert(0, self.list_event());
+        events
+    }
+
+    fn remove(&mut self, id: &str) -> Vec<Event> {
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let before = book.sources.sources.len();
+        book.sources.sources.retain(|s| s.id != id);
+        if book.sources.sources.len() == before {
+            return vec![notice(format!("{id}: no such source"), NoticeLevel::Warn)];
+        }
+        snapshot::forget(book, id);
+        let ticked: Vec<String> = book.selection().into_iter().filter(|s| s != id).collect();
+        let _ = book.select(&ticked);
+        let mut events = self.saved();
+        events.insert(0, self.list_event());
+        events
+    }
+
+    fn select(&mut self, ids: &[String]) -> Vec<Event> {
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        if let Err(why) = book.select(ids) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        self.notebook_event().into_iter().collect()
+    }
+
+    fn set_role(&mut self, id: &str, role: Role) -> Vec<Event> {
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        match book.sources.get_mut(id) {
+            Some(source) => source.role = role,
+            None => return vec![notice(format!("{id}: no such source"), NoticeLevel::Warn)],
+        }
+        self.saved()
+    }
+
+    /// Read a source's file again — after it was edited, or came back.
+    fn refresh(&mut self, id: &str) -> Vec<Event> {
+        let file = {
+            let Some(open) = &self.open else { return Vec::new() };
+            let Some(source) = open.book.sources.get(id) else {
+                return vec![notice(format!("{id}: no such source"), NoticeLevel::Warn)];
+            };
+            match &source.origin {
+                Origin::File { root, rel } => self.kb.file(root, rel).map(|path| (path, Kind::from_name(&source.kind))),
+                _ => return vec![notice(format!("{} has no file to read again.", source.title), NoticeLevel::Info)],
+            }
+        };
+        let Some((path, kind)) = file else {
+            return vec![notice("Its folder is no longer in the knowledge base.".into(), NoticeLevel::Warn)];
+        };
+        let in_cloud = std::fs::symlink_metadata(&path).is_ok_and(|m| dataless::is_dataless(&m));
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        if let Some(source) = book.sources.get_mut(id) {
+            source.status = if in_cloud { SourceStatus::InCloud } else { SourceStatus::Reading };
+        }
+        if !in_cloud {
+            self.start_reading(vec![Item { id: id.to_string(), path, kind, download: false }]);
+        }
+        self.saved()
+    }
+
+    /// Note the open notebook's sources whose files have gone or changed
+    /// since they were read, by their stamps alone.
+    fn check_files(&mut self) {
+        let Some(open) = &mut self.open else { return };
+        let mut changed = false;
+        for source in &mut open.book.sources.sources {
+            let Origin::File { root, rel } = &source.origin else { continue };
+            if !source.status.has_words() {
+                continue;
+            }
+            let now = match self.kb.file(root, rel).and_then(|p| std::fs::symlink_metadata(p).ok()) {
+                None => SourceStatus::Missing,
+                Some(meta) => {
+                    let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+                    match (meta.len(), mtime) == (source.size, source.mtime) {
+                        true => SourceStatus::Ready,
+                        false => SourceStatus::Changed,
+                    }
+                }
+            };
+            if now != source.status {
+                source.status = now;
+                changed = true;
+            }
+        }
+        if changed && open.lock.is_some() {
+            let _ = open.book.save_sources();
+        }
+    }
+}

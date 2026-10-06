@@ -1398,6 +1398,27 @@ impl Workspace {
             Command::ResearchFolder { .. } => {
                 vec![notice("Where investigations are kept is set for the whole window.".into(), NoticeLevel::Warn)]
             }
+            // Notebook is the window's, whichever project is open: the
+            // session answers its commands before a workspace sees them.
+            Command::StudyFolder { .. }
+            | Command::StudyRoots { .. }
+            | Command::StudyExclude { .. }
+            | Command::StudyKbPause { .. }
+            | Command::StudyKbRefresh
+            | Command::StudyKbBrowse { .. }
+            | Command::StudyKbSearch { .. }
+            | Command::StudyNew { .. }
+            | Command::StudyOpen { .. }
+            | Command::StudyClose
+            | Command::StudyDetails { .. }
+            | Command::StudyArchive { .. }
+            | Command::StudyAdd { .. }
+            | Command::StudyDownload { .. }
+            | Command::StudyPaste { .. }
+            | Command::StudyRemove { .. }
+            | Command::StudySelect { .. }
+            | Command::StudyRefresh { .. }
+            | Command::StudyRole { .. } => vec![notice("Notebook is the window's, not a project's.".into(), NoticeLevel::Warn)],
             Command::ResearchNew { title, goal, discipline, literature } => self.research().create(&title, &goal, discipline, literature),
             Command::ResearchOpen { slug } => self.research().open(&slug),
             Command::ResearchShow { hypothesis } => self.research().show(hypothesis),

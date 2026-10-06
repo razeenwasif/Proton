@@ -192,6 +192,8 @@ pub struct Shelf {
     paused: Arc<AtomicBool>,
     /// Set to end the walk in flight: the roots changed, or the shelf went.
     stop: Arc<AtomicBool>,
+    /// What says which files are in iCloud, when not their own flags: a test's.
+    flags: Option<crate::catalog::FlagFn>,
 }
 
 impl Drop for Shelf {
@@ -375,6 +377,12 @@ impl Shelf {
         &self.notes
     }
 
+    /// Say which files are in iCloud with this rather than their flags: for a
+    /// test, which has no iCloud. Catalog mode only.
+    pub fn flags_with(&mut self, flags: crate::catalog::FlagFn) {
+        self.flags = Some(flags);
+    }
+
     /// Hold the walk between one document and the next, or let it go on.
     pub fn pause(&self, on: bool) {
         self.paused.store(on, Ordering::Relaxed);
@@ -457,6 +465,7 @@ impl Shelf {
         let gitignore = !self.read_ignored;
         let cite_from = self.cite_from.clone();
         let rules = self.rules.clone();
+        let flags = self.flags;
         let (paused, stop) = (Arc::clone(&self.paused), Arc::clone(&self.stop));
         // Detached, like the picker's walk: it holds nothing the editor needs,
         // and if the window closes first the send fails and the thread ends.
@@ -471,6 +480,7 @@ impl Shelf {
                         gitignore,
                         cite_from: cite_from.as_deref(),
                         rules: rules.as_ref(),
+                        flags,
                         extract,
                         paused: &paused,
                         stop: &stop,
@@ -675,6 +685,7 @@ struct Reading<'a> {
     gitignore: bool,
     cite_from: Option<&'a Path>,
     rules: Option<&'a Rules>,
+    flags: Option<crate::catalog::FlagFn>,
     extract: Pdfs,
     paused: &'a AtomicBool,
     stop: &'a AtomicBool,
@@ -724,7 +735,11 @@ fn read(
     // already read and then never picked up.
     let stamp = match reading.rules {
         Some(rules) => {
-            let walked = Catalog::walk(&Root::labelled(roots.to_vec()), rules);
+            let roots = Root::labelled(roots.to_vec());
+            let walked = match reading.flags {
+                Some(flags) => Catalog::walk_with(&roots, rules, &flags),
+                None => Catalog::walk(&roots, rules),
+            };
             for root in walked.roots() {
                 if root.path.is_dir() {
                     library.add_labelled_root(&root.path, &root.label);

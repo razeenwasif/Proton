@@ -24,4 +24,117 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(win.commands.slice(before6).some((c) => c.type === 'setMode' && c.mode === 'design'), '⌃6 did not ask for Design');
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
+
+  const ws = () => $('.workspace[data-ws="study"]');
+  const sent = (/** @type {number} */ from, /** @type {string} */ type) => win.commands.slice(from).filter((/** @type {any} */ c) => c.type === type);
+  const row = (/** @type {string} */ id, /** @type {Partial<any>} */ more = {}) => ({id, title: `${id}.pdf`, kind: 'pdf', role: 'reading',
+    origin: {from: 'file', root: 'Courses', rel: `COMP3670/${id}.pdf`}, status: {state: 'ready'}, units: 'pages', count: 3, size: 2_400_000,
+    thin: 0, selected: true, labels: [], ...more});
+  const notebook = (/** @type {any[]} */ sources, readOnly = null) => ({type: 'studyNotebook', slug: 'exam', title: 'COMP3670 exam', course: 'COMP3670',
+    exam: '2026-11-12', readOnly, sources, notes: []});
+  const kb = {type: 'studyKb', roots: [{label: 'Courses', path: '~/Courses', files: 3, readable: 2, inCloud: 0, missing: false},
+    {label: 'ANU', path: '~/Library/Mobile Documents/com~apple~CloudDocs/ANU', files: 2, readable: 2, inCloud: 2, missing: false}],
+    rules: ['Courses/Private/'], started: true, ready: true, walking: false, done: 5, total: 5, paused: false, documents: 2, passages: 9};
+
+  await test('Notebook asks where notebooks are kept first, offering ~/Github/Notebooks', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([{type: 'studyList', notebooks: [], open: null, folder: null}, {type: 'studyClosed'}]); await settle();
+    const form = ws().querySelector('[data-study-folder-form]');
+    assert(form, 'no folder card');
+    assert(form.querySelector('input').value === '~/Github/Notebooks', `it offers ${form.querySelector('input').value}`);
+    const before = win.commands.length;
+    form.querySelector('button[type="submit"]').click(); await settle();
+    assert(sent(before, 'studyFolder')[0]?.folder === '~/Github/Notebooks', 'the folder was not asked for');
+    await win.pushEvents([{type: 'studyList', notebooks: [], open: null, folder: '~/Github/Notebooks'}]); await settle();
+    const title = ws().querySelector('[data-study-new-form] [name="title"]');
+    assert(title, 'with no notebooks, the form for one');
+    title.value = 'COMP3670 exam';
+    const made = win.commands.length;
+    ws().querySelector('[data-study-new-form]').requestSubmit(); await settle();
+    assert(sent(made, 'studyNew')[0]?.title === 'COMP3670 exam', 'no notebook asked for');
+  });
+
+  await test('A notebook\'s sources are ticked for the tutor, and one in iCloud is downloaded only once its size is said', async () => {
+    await win.pushEvents([{type: 'studyList', notebooks: [{slug: 'exam', title: 'COMP3670 exam', course: 'COMP3670', exam: '2026-11-12', sources: 3, opened: 1, archived: false}],
+      open: 'exam', folder: '~/Github/Notebooks'},
+      notebook([row('S01'), row('S02', {status: {state: 'reading'}, selected: false}), row('S03', {status: {state: 'inCloud'}, selected: false, size: 5_100_000})])]); await settle();
+    const rows = [...ws().querySelectorAll('.st-source')];
+    assert(rows.length === 3, `${rows.length} rows`);
+    assert(rows[1].textContent.includes('Reading') && rows[1].querySelector('input').disabled, 'a source being read can be ticked');
+    const before = win.commands.length;
+    const tick = rows[0].querySelector('input');
+    tick.checked = false; tick.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(JSON.stringify(sent(before, 'studySelect')[0]?.ids) === '[]', `wrong selection: ${JSON.stringify(sent(before, 'studySelect'))}`);
+    const asked = win.commands.length;
+    rows[2].querySelector('[data-study-get]').click(); await settle();
+    assert(sent(asked, 'studyDownload').length === 0, 'it downloaded before saying how much');
+    const ask = ws().querySelector('.st-ask');
+    assert(ask?.textContent.includes('4.9 MB'), `the size is not said: ${ask?.textContent}`);
+    ask.querySelector('[data-study-get-yes]').click(); await settle();
+    assert(JSON.stringify(sent(asked, 'studyDownload')[0]?.paths) === '["Courses/COMP3670/S03.pdf"]', 'not downloaded by its path');
+    const read = ws().querySelector('[data-study-role="S01"]');
+    read.value = 'pastPaper'; read.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(sent(asked, 'studyRole')[0]?.role === 'pastPaper', 'its role was not changed');
+  });
+
+  await test('The picker browses the knowledge base, says what is left out and why, and asks before bringing files down from iCloud', async () => {
+    const before = win.commands.length;
+    ws().querySelector('[data-study-pick]').click(); await settle();
+    const picker = ws().querySelector('[data-study-picker]');
+    assert(!picker.hidden, 'the picker did not open');
+    await win.pushEvents([kb]); await settle();
+    const browse = sent(before, 'studyKbBrowse').at(-1);
+    assert(browse?.root === 'Courses', `it did not browse the first root: ${JSON.stringify(browse)}`);
+    await win.pushEvents([{type: 'studyKbFolder', root: 'Courses', dir: '', folders: [{name: 'COMP3670', path: 'Courses/COMP3670', files: 2, readable: 2, inCloud: 0}],
+      files: [{name: 'notes.md', path: 'Courses/notes.md', kind: 'markdown', size: 4000, mtime: 1, inCloud: false, readable: true, source: null},
+        {name: 'S01.pdf', path: 'Courses/S01.pdf', kind: 'pdf', size: 4000, mtime: 1, inCloud: false, readable: true, source: 'S01'}],
+      left: [{name: 'Private', path: 'Courses/Private', dir: true, why: 'left out by your rule Courses/Private/', rule: 'Courses/Private/'}]}]); await settle();
+    assert(picker.querySelector('[data-study-choose="Courses/S01.pdf"]').disabled, 'a file already a source can be added again');
+    const left = picker.querySelector('.st-left');
+    assert(left?.textContent.includes('your rule'), 'what is left out is not said');
+    const back = win.commands.length;
+    left.querySelector('[data-study-let]').click(); await settle();
+    assert(sent(back, 'studyExclude')[0]?.on === false && sent(back, 'studyExclude')[0]?.rule === 'Courses/Private/', 'the rule was not taken back');
+    const choose = picker.querySelector('[data-study-choose="Courses/notes.md"]');
+    choose.checked = true; choose.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    picker.querySelector('[data-study-root="ANU"]').click(); await settle();
+    await win.pushEvents([{type: 'studyKbFolder', root: 'ANU', dir: '', folders: [], left: [],
+      files: [{name: 'Exam 2022.pdf', path: 'ANU/Exam 2022.pdf', kind: 'pdf', size: 1_800_000, mtime: 1, inCloud: true, readable: true, source: null}]}]); await settle();
+    assert(picker.querySelector('.st-cloud'), 'a file in iCloud has no cloud');
+    const cloudy = picker.querySelector('[data-study-choose="ANU/Exam 2022.pdf"]');
+    cloudy.checked = true; cloudy.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const foot = picker.querySelector('[data-study-foot]');
+    assert(foot.textContent.includes('1 in iCloud (1.7 MB)'), `the footer does not say what is in iCloud: ${foot.textContent}`);
+    const down = win.commands.length;
+    foot.querySelector('[data-study-download]').click(); await settle();
+    assert(sent(down, 'studyDownload').length === 0, 'it downloaded before asking');
+    assert(foot.textContent.includes('Download 1 file from iCloud — 1.7 MB'), `it did not ask: ${foot.textContent}`);
+    foot.querySelector('[data-study-confirm="yes"]').click(); await settle();
+    assert(JSON.stringify(sent(down, 'studyDownload')[0]?.paths) === '["Courses/notes.md","ANU/Exam 2022.pdf"]', `wrong paths: ${JSON.stringify(sent(down, 'studyDownload'))}`);
+    assert(picker.hidden, 'the picker stayed open');
+  });
+
+  await test('The picker searches names and words, and Escape puts it away', async () => {
+    ws().querySelector('[data-study-pick]').click(); await settle();
+    const picker = ws().querySelector('[data-study-picker]');
+    const search = picker.querySelector('[data-study-search]');
+    const before = win.commands.length;
+    search.value = 'uniform cost'; search.dispatchEvent(new win.Event('input', {bubbles: true}));
+    await new Promise((done) => setTimeout(done, 300));
+    assert(sent(before, 'studyKbSearch')[0]?.query === 'uniform cost', 'no search');
+    await win.pushEvents([{type: 'studyKbResults', query: 'uniform cost', files: [],
+      passages: [{path: 'Courses/notes.md', cite: 'Courses/notes.md § Search L4-9', title: 'Search', text: 'Uniform-cost search orders the frontier by g(n).'}]}]); await settle();
+    assert(picker.querySelector('.st-hit')?.textContent.includes('§ Search L4-9'), 'the passage is not shown with where it is');
+    search.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true})); await settle();
+    assert(picker.hidden, 'Escape did not put it away');
+  });
+
+  await test('A notebook another Proton has open is read only here', async () => {
+    await win.pushEvents([notebook([row('S01')], 'another Proton (pid 4242)')]); await settle();
+    assert(ws().querySelector('.st-banner')?.textContent.includes('read only'), 'nothing says it is read only');
+    assert(!ws().querySelector('[data-study-pick]') && !ws().querySelector('[data-study-remove]'), 'it can still be changed');
+    assert(ws().querySelector('[data-study-tick="S01"]').disabled, 'its sources can still be ticked');
+    await win.pushEvents([notebook([row('S01')])]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
 }

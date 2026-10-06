@@ -4356,6 +4356,7 @@ dependencies = [
  "proton-plugin",
  "proton-research",
  "proton-scene",
+ "proton-study",
  "proton-syntax",
  "proton-term",
  "proton-text",
@@ -4525,6 +4526,19 @@ dependencies = [
  "tauri",
  "tauri-build",
  "window-vibrancy 0.8.0",
+]
+
+[[package]]
+name = "proton-study"
+version = "0.0.1"
+dependencies = [
+ "proton-library",
+ "proton-research",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml 0.9.12+spec-1.1.0",
+ "ts-rs",
 ]
 
 [[package]]
