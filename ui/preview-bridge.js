@@ -657,12 +657,33 @@ FCM: NON-DROP FRAME
     selected: component.selected ?? -1,
   });
 
-  const notebookEvent = () => ({
-    type: "notebook",
-    path: notebook.path,
-    cells: notebook.cells,
-    problem: notebook.problem,
-  });
+  /* What the agent has proposed to the notebook, as the core keeps it: by
+     the cell each is about. One rewrite and one new cell, so the preview
+     shows both shapes. */
+  let proposals = [
+    { id: 1, action: "replace", place: "on", kind: "", key: 2, said: "rewrite cell 1",
+      source: 'import pandas as pd\ndf = pd.read_parquet("telemetry.parquet")\ndf.groupby("sat_id").battery.agg(["mean", "min"]).head()' },
+    { id: 2, action: "insert", place: "below", kind: "markdown", key: 2, said: "add a cell at 2",
+      source: "Satellites below 40% are flagged for the next pass." },
+  ];
+  let modified = false;
+  const keyed = () => notebook.cells.forEach((cell, i) => { cell.key ??= i + 1; });
+  const placed = () => {
+    keyed();
+    return proposals.map((p) => ({ ...p, cell: Math.max(0, notebook.cells.findIndex((c) => c.key === p.key)) }));
+  };
+  const notebookEvent = () => {
+    const all = placed();
+    return {
+      type: "notebook",
+      path: notebook.path,
+      cells: notebook.cells.map((cell, i) => ({ ...cell, proposals: all.filter((p) => p.cell === i) })),
+      problem: notebook.problem,
+      language: "python",
+      modified,
+      proposals: all,
+    };
+  };
 
   // A canned pair of plugins, so the settings panel and the theme strip can
   // be designed against. The real ones are wasm components loaded by
@@ -1159,7 +1180,26 @@ FCM: NON-DROP FRAME
     }
     if (command.type === "setCell") {
       const cell = notebook.cells[command.index];
+      if (cell && cell.source !== command.source) modified = true;
       if (cell) cell.source = command.source;
+      return [notebookEvent()];
+    }
+    if (command.type === "answerProposal") {
+      const p = proposals.find((it) => it.id === command.id);
+      proposals = proposals.filter((it) => it.id !== command.id);
+      if (p && command.accept) {
+        const at = notebook.cells.findIndex((c) => c.key === p.key);
+        if (p.action === "replace" && at >= 0) notebook.cells[at].source = p.source;
+        if (p.action === "insert") {
+          notebook.cells.splice(at + 1, 0, { kind: p.kind || "code", source: p.source, outputs: [],
+            executionCount: null, running: false, selected: false, key: 100 + p.id });
+        }
+        modified = true;
+      }
+      return [notebookEvent()];
+    }
+    if (command.type === "saveNotebook") {
+      modified = false;
       return [notebookEvent()];
     }
     if (command.type === "addCell") {

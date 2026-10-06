@@ -46,6 +46,53 @@ pub struct CellView {
     /// The cell the modal engine is on. A notebook has a cursor the way a
     /// buffer does; it just moves a cell at a time.
     pub selected: bool,
+    /// Which cell this is, as long as the notebook is open, wherever cells
+    /// added or deleted around it move it to.
+    #[ts(type = "number")]
+    pub key: u64,
+    /// What the agent proposes to do to this cell, or beside it.
+    pub proposals: Vec<ProposalView>,
+}
+
+/// A change the agent proposed to the open notebook, waiting for the person
+/// to accept or reject it — drawn on the cell it is about.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalView {
+    #[ts(type = "number")]
+    pub id: u64,
+    /// `replace`, `insert` or `delete`.
+    pub action: String,
+    /// Where it goes against the cell it is drawn with: `on` it, `below` it,
+    /// or `above` it, for a new first cell.
+    pub place: String,
+    /// The kind of cell an insert would add: `code` or `markdown`.
+    pub kind: String,
+    /// The text proposed: a cell's new source, or the new cell's.
+    pub source: String,
+    /// What the agent said it was doing.
+    pub said: String,
+    /// The cell it is drawn with, as the notebook stands now.
+    pub cell: usize,
+}
+
+/// What the agent proposed to do.
+#[derive(Debug, Clone, PartialEq)]
+enum Change {
+    /// Rewrite a cell's source.
+    Replace { key: u64, source: String },
+    /// A new cell after `after`, or first.
+    Insert { after: Option<u64>, kind: CellKind, source: String },
+    /// Take a cell out.
+    Delete { key: u64 },
+}
+
+#[derive(Debug, Clone)]
+struct Proposal {
+    id: u64,
+    change: Change,
+    said: String,
 }
 
 /// One output, already reduced to the thing worth drawing.
@@ -156,10 +203,21 @@ pub struct Data {
     notebook: Option<Notebook>,
     path: Option<PathBuf>,
     kernel: Option<Kernel>,
-    /// Which cell each in-flight request belongs to. See the module note.
-    running: HashMap<String, usize>,
+    /// Which cell each in-flight request belongs to, by key. See the module
+    /// note — and by key rather than position, or a cell added or deleted
+    /// above one that is running sends its output to a neighbour.
+    running: HashMap<String, u64>,
     /// Output collected for a cell since it started, in arrival order.
-    collected: HashMap<usize, Vec<Output>>,
+    collected: HashMap<u64, Vec<Output>>,
+    /// A key for each cell, in order, kept in step as cells are added,
+    /// deleted and pasted: what a run, its output and a proposal are about.
+    keys: Vec<u64>,
+    next_key: u64,
+    /// Whether the notebook has changes the file does not.
+    modified: bool,
+    /// What the agent proposed and nobody has answered yet.
+    proposals: Vec<Proposal>,
+    next_proposal: u64,
     /// What the kernel said when it failed to start, so the panel can say so
     /// rather than showing a notebook that silently never runs.
     problem: Option<String>,
@@ -226,12 +284,36 @@ impl Data {
     /// case and starting a Python process to do it would be rude.
     pub fn open(&mut self, path: &Path) -> Result<(), String> {
         let notebook = Notebook::read(path)?;
+        let count = notebook.len();
         self.notebook = Some(notebook);
         self.path = Some(path.to_path_buf());
         self.running.clear();
         self.collected.clear();
+        self.keys = (0..count).map(|_| self.fresh_key()).collect();
+        self.modified = false;
+        self.proposals.clear();
         self.problem = None;
         Ok(())
+    }
+
+    /// Whether the notebook has changes its file does not.
+    pub fn is_modified(&self) -> bool {
+        self.modified
+    }
+
+    fn fresh_key(&mut self) -> u64 {
+        self.next_key += 1;
+        self.next_key
+    }
+
+    /// The key of the cell at `index`.
+    pub fn key_at(&self, index: usize) -> Option<u64> {
+        self.keys.get(index).copied()
+    }
+
+    /// Where the cell with this key is now.
+    pub fn index_of(&self, key: u64) -> Option<usize> {
+        self.keys.iter().position(|k| *k == key)
     }
 
     pub fn close(&mut self) {
@@ -251,18 +333,20 @@ impl Data {
         let Some(notebook) = &self.notebook else {
             return Vec::new();
         };
-        let waiting: std::collections::HashSet<usize> = self.running.values().copied().collect();
+        let waiting: std::collections::HashSet<u64> = self.running.values().copied().collect();
+        let proposals = self.proposals();
 
         notebook
             .cells()
             .iter()
             .enumerate()
             .map(|(index, cell)| {
+                let key = self.keys.get(index).copied().unwrap_or_default();
                 // While a cell is running, what it has produced *so far* is
                 // shown rather than what it produced last time. Otherwise a
                 // long cell shows the previous run's answer until it finishes,
                 // which reads as if it had already finished.
-                let outputs = match self.collected.get(&index) {
+                let outputs = match self.collected.get(&key) {
                     Some(live) => live.iter().map(OutputView::of).collect(),
                     None => cell.outputs.iter().map(OutputView::of).collect(),
                 };
@@ -276,11 +360,119 @@ impl Data {
                     source: cell.source.clone(),
                     outputs,
                     execution_count: cell.execution_count,
-                    running: waiting.contains(&index),
+                    running: waiting.contains(&key),
                     selected: index == self.selected,
+                    key,
+                    proposals: proposals.iter().filter(|p| p.cell == index).cloned().collect(),
                 }
             })
             .collect()
+    }
+
+    /// Everything proposed and not yet answered, each placed against the cell
+    /// it is drawn with.
+    pub fn proposals(&self) -> Vec<ProposalView> {
+        let kind_name = |kind: &CellKind| match kind {
+            CellKind::Code => "code",
+            CellKind::Markdown => "markdown",
+            CellKind::Raw => "raw",
+        };
+        self.proposals
+            .iter()
+            .filter_map(|p| {
+                let (action, place, kind, source, cell) = match &p.change {
+                    Change::Replace { key, source } => ("replace", "on", "", source.clone(), self.index_of(*key)?),
+                    Change::Delete { key } => ("delete", "on", "", String::new(), self.index_of(*key)?),
+                    Change::Insert { after: Some(key), kind, source } => ("insert", "below", kind_name(kind), source.clone(), self.index_of(*key)?),
+                    Change::Insert { after: None, kind, source } => ("insert", "above", kind_name(kind), source.clone(), 0),
+                };
+                Some(ProposalView {
+                    id: p.id,
+                    action: action.into(),
+                    place: place.into(),
+                    kind: kind.into(),
+                    source,
+                    said: p.said.clone(),
+                    cell,
+                })
+            })
+            .collect()
+    }
+
+    /// The agent proposes a change to cell `index`: `replace` its source,
+    /// `insert` a new cell there, or `delete` it. Nothing changes until the
+    /// person accepts it; a second proposal for the same cell takes the
+    /// first one's place. Answers what was proposed, in words for the agent.
+    pub fn propose(&mut self, action: &str, index: usize, kind: CellKind, source: &str) -> Result<String, String> {
+        let notebook = self.notebook.as_ref().ok_or("no notebook is open")?;
+        let cells = notebook.cells();
+        let (change, said) = match action {
+            "replace" => {
+                let key = self.key_at(index).ok_or_else(|| format!("there is no cell {index}"))?;
+                if cells[index].source == source {
+                    return Ok("that is already what the cell says".into());
+                }
+                (Change::Replace { key, source: source.to_string() }, format!("rewrite cell {index}"))
+            }
+            "delete" => {
+                let key = self.key_at(index).ok_or_else(|| format!("there is no cell {index}"))?;
+                (Change::Delete { key }, format!("delete cell {index}"))
+            }
+            "insert" => {
+                let at = index.min(cells.len());
+                let after = at.checked_sub(1).and_then(|before| self.key_at(before));
+                (Change::Insert { after, kind, source: source.to_string() }, format!("add a cell at {at}"))
+            }
+            other => return Err(format!("edit_cell: unknown action {other:?}")),
+        };
+        // One proposal per cell for a rewrite or a deletion: the latest is the
+        // one the agent means.
+        if let Change::Replace { key, .. } | Change::Delete { key } = &change {
+            let key = *key;
+            self.proposals.retain(|p| !matches!(&p.change, Change::Replace { key: k, .. } | Change::Delete { key: k } if *k == key));
+        }
+        self.next_proposal += 1;
+        self.proposals.push(Proposal { id: self.next_proposal, change, said: said.clone() });
+        Ok(said)
+    }
+
+    /// Do what a proposal says, and forget it. Answers what was done.
+    pub fn accept(&mut self, id: u64) -> Result<String, String> {
+        let at = self.proposals.iter().position(|p| p.id == id).ok_or("that proposal has already been answered")?;
+        let proposal = self.proposals.remove(at);
+        match proposal.change {
+            Change::Replace { key, source } => {
+                let index = self.index_of(key).ok_or("the cell it was for is gone")?;
+                self.set_source(index, &source);
+                Ok(format!("rewrote cell {index}"))
+            }
+            Change::Delete { key } => {
+                let index = self.index_of(key).ok_or("the cell it was for is gone")?;
+                self.remove_cell(index);
+                self.selected = self.selected.min(self.len().saturating_sub(1));
+                Ok(format!("deleted cell {index}"))
+            }
+            Change::Insert { after, kind, source } => {
+                let at = match after {
+                    Some(key) => self.index_of(key).ok_or("the cell it was to follow is gone")? + 1,
+                    None => 0,
+                };
+                let notebook = self.notebook.as_mut().ok_or("no notebook is open")?;
+                let at = notebook.insert(at, kind, &source);
+                let key = self.fresh_key();
+                self.keys.insert(at, key);
+                self.modified = true;
+                self.selected = at;
+                Ok(format!("added cell {at}"))
+            }
+        }
+    }
+
+    /// Forget a proposal without doing it.
+    pub fn reject(&mut self, id: u64) -> bool {
+        let before = self.proposals.len();
+        self.proposals.retain(|p| p.id != id);
+        self.proposals.len() != before
     }
 
     pub fn len(&self) -> usize {
@@ -428,9 +620,15 @@ impl Data {
         let Some(notebook) = self.notebook.as_mut() else {
             return false;
         };
+        let mut placed = Vec::new();
         for n in 0..count {
-            notebook.insert(at + n, kind, &source);
+            placed.push(notebook.insert(at + n, kind, &source));
         }
+        for index in placed {
+            let key = self.fresh_key();
+            self.keys.insert(index, key);
+        }
+        self.modified = true;
         // On the first of what was pasted, which is where you want to be if
         // you are about to run it.
         self.selected = at.min(self.len().saturating_sub(1));
@@ -441,15 +639,22 @@ impl Data {
         let Some(notebook) = self.notebook.as_mut() else {
             return false;
         };
-        notebook.insert(at, CellKind::Code, "");
+        let at = notebook.insert(at, CellKind::Code, "");
+        let key = self.fresh_key();
+        self.keys.insert(at, key);
+        self.modified = true;
         self.selected = at;
         true
     }
 
     pub fn set_source(&mut self, index: usize, source: &str) -> bool {
-        self.notebook
-            .as_mut()
-            .is_some_and(|nb| nb.set_source(index, source))
+        let Some(notebook) = self.notebook.as_mut() else {
+            return false;
+        };
+        let same = notebook.cells().get(index).is_some_and(|cell| cell.source == source);
+        let set = notebook.set_source(index, source);
+        self.modified |= set && !same;
+        set
     }
 
     pub fn add_cell(&mut self, code: bool) -> Option<usize> {
@@ -457,18 +662,51 @@ impl Data {
             true => CellKind::Code,
             false => CellKind::Markdown,
         };
-        self.notebook.as_mut().map(|nb| nb.push(kind, ""))
+        let at = self.notebook.as_mut().map(|nb| nb.push(kind, ""))?;
+        let key = self.fresh_key();
+        self.keys.insert(at, key);
+        self.modified = true;
+        Some(at)
     }
 
+    /// Take a cell out, and with it what the agent proposed for it; a new
+    /// cell it was to follow follows the one before it instead.
     pub fn remove_cell(&mut self, index: usize) -> bool {
-        self.notebook.as_mut().is_some_and(|nb| nb.remove(index))
+        if !self.notebook.as_mut().is_some_and(|nb| nb.remove(index)) {
+            return false;
+        }
+        let key = self.keys.remove(index);
+        let before = index.checked_sub(1).and_then(|i| self.key_at(i));
+        self.proposals.retain(|p| !matches!(&p.change, Change::Replace { key: k, .. } | Change::Delete { key: k } if *k == key));
+        for proposal in &mut self.proposals {
+            if let Change::Insert { after, .. } = &mut proposal.change {
+                if *after == Some(key) {
+                    *after = before;
+                }
+            }
+        }
+        self.collected.remove(&key);
+        self.modified = true;
+        true
     }
 
-    pub fn save(&self) -> Result<(), String> {
+    /// Write the notebook to its file, whole or not at all.
+    pub fn save(&mut self) -> Result<(), String> {
         let (Some(notebook), Some(path)) = (&self.notebook, &self.path) else {
             return Err("no notebook is open".into());
         };
-        notebook.write(path)
+        notebook.write(path)?;
+        self.modified = false;
+        Ok(())
+    }
+
+    /// Save the notebook if it has changes its file does not. Answers
+    /// whether it wrote anything.
+    pub fn save_if_modified(&mut self) -> Result<bool, String> {
+        if !self.modified || self.notebook.is_none() {
+            return Ok(false);
+        }
+        self.save().map(|()| true)
     }
 
     /// Run one cell. Answers once it has been *sent*, not once it is done.
@@ -485,13 +723,19 @@ impl Data {
         }
         let source = cell.source.clone();
 
+        let key = self.key_at(index).ok_or_else(|| format!("there is no cell {index}"))?;
         self.start(cwd)?;
         let kernel = self.kernel.as_mut().expect("just started");
         let id = kernel.execute(&source)?;
-        self.running.insert(id, index);
+        self.running.insert(id, key);
         // Cleared rather than left: the old output belongs to the old run.
-        self.collected.insert(index, Vec::new());
+        self.collected.insert(key, Vec::new());
         Ok(())
+    }
+
+    /// Whether the cell with this key is still running.
+    pub fn is_running(&self, key: u64) -> bool {
+        self.running.values().any(|k| *k == key)
     }
 
     /// The kernel is gone. Say why, and stop the cells that were waiting.
@@ -579,7 +823,7 @@ impl Data {
         }
 
         let mut changed = false;
-        let mut finished: Vec<(usize, Option<i64>)> = Vec::new();
+        let mut finished: Vec<(u64, Option<i64>)> = Vec::new();
         for message in messages {
             let Some(parent) = message.parent_id() else {
                 continue;
@@ -636,11 +880,13 @@ impl Data {
 
         // Written into the document only once the cell is done. A notebook
         // saved mid-run would hold half an answer beside a number implying a
-        // whole one.
-        for (index, count) in finished {
-            let outputs = self.collected.remove(&index).unwrap_or_default();
+        // whole one. Into wherever the cell is now — or nowhere, if it was
+        // deleted while it ran.
+        for (key, count) in finished {
+            let outputs = self.collected.remove(&key).unwrap_or_default();
+            let Some(index) = self.index_of(key) else { continue };
             if let Some(notebook) = self.notebook.as_mut() {
-                notebook.set_outputs(index, &outputs, count);
+                self.modified |= notebook.set_outputs(index, &outputs, count);
             }
         }
         changed
@@ -649,7 +895,7 @@ impl Data {
     /// Stream output arrives in pieces, and a line can be split across two of
     /// them. Joining as it comes keeps `print` looking like `print` rather
     /// than like one output per flush.
-    fn append_stream(&mut self, index: usize, name: &str, text: &str) {
+    fn append_stream(&mut self, index: u64, name: &str, text: &str) {
         let into = self.collected.entry(index).or_default();
         if let Some(Output::Stream {
             name: last,
@@ -896,6 +1142,56 @@ mod tests {
         std::fs::create_dir_all(&at).unwrap();
         let spec = serde_json::json!({"argv": argv, "display_name": name, "language": "python"});
         std::fs::write(at.join("kernel.json"), spec.to_string()).unwrap();
+    }
+
+    #[test]
+    fn proposals_are_about_cells_wherever_those_cells_go() {
+        let dir = scratch("proposals");
+        let path = dir.join("n.ipynb");
+        let mut notebook = Notebook::blank();
+        for source in ["a = 1", "b = 2", "c = 3"] {
+            notebook.push(CellKind::Code, source);
+        }
+        notebook.write(&path).unwrap();
+        let mut data = Data::default();
+        data.open(&path).unwrap();
+        assert!(!data.is_modified());
+
+        // A rewrite of the last cell, and a new cell after the first.
+        data.propose("replace", 2, CellKind::Code, "c = 30").unwrap();
+        data.propose("insert", 1, CellKind::Markdown, "# Note").unwrap();
+        assert_eq!(data.cells()[2].proposals.len(), 1);
+        assert_eq!(data.cells()[0].proposals[0].place, "below");
+        assert!(!data.is_modified(), "nothing changes until it is accepted");
+
+        // The first cell deleted: the new cell now goes first, and the
+        // rewrite is still about the cell it was about, now cell 1.
+        assert!(data.remove_cell(0));
+        let proposals = data.proposals();
+        let insert = proposals.iter().find(|p| p.action == "insert").unwrap().clone();
+        let rewrite = proposals.iter().find(|p| p.action == "replace").unwrap().clone();
+        assert_eq!((insert.place.as_str(), rewrite.cell), ("above", 1));
+        data.accept(rewrite.id).unwrap();
+        assert_eq!(data.cells()[1].source, "c = 30");
+        data.accept(insert.id).unwrap();
+        assert_eq!((data.cells()[0].source.as_str(), data.cells()[0].kind.as_str()), ("# Note", "markdown"));
+        assert!(data.is_modified());
+        assert!(data.accept(insert.id).is_err(), "answered once");
+
+        // A second rewrite of a cell takes the first one's place; a rejected
+        // one is forgotten.
+        data.propose("replace", 1, CellKind::Code, "x").unwrap();
+        data.propose("replace", 1, CellKind::Code, "y").unwrap();
+        let proposals = data.proposals();
+        assert_eq!((proposals.len(), proposals[0].source.as_str()), (1, "y"));
+        assert!(data.reject(proposals[0].id) && data.proposals().is_empty());
+
+        // Saved whole, by a rename, and clean after.
+        data.save().unwrap();
+        assert!(!data.is_modified());
+        assert!(!dir.join("n.ipynb.proton-saving").exists());
+        assert_eq!(Notebook::read(&path).unwrap().cells()[0].source, "# Note");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

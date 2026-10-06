@@ -253,8 +253,23 @@ impl Notebook {
         text
     }
 
+    /// Write the notebook to `path`, whole or not at all: into a file beside
+    /// it, then over it by a rename, so a write cut short — a full disk, a
+    /// crash, a quit — leaves the notebook as it was rather than half of it.
     pub fn write(&self, path: &Path) -> Result<(), String> {
-        std::fs::write(path, self.to_text()).map_err(|err| format!("{}: {err}", path.display()))
+        let said = |err: std::io::Error| format!("{}: {err}", path.display());
+        let mut part = path.as_os_str().to_owned();
+        part.push(".proton-saving");
+        let part = std::path::PathBuf::from(part);
+        std::fs::write(&part, self.to_text()).map_err(said)?;
+        // The file's own permissions, not the default a new file gets.
+        if let Ok(meta) = std::fs::metadata(path) {
+            let _ = std::fs::set_permissions(&part, meta.permissions());
+        }
+        std::fs::rename(&part, path).map_err(|err| {
+            let _ = std::fs::remove_file(&part);
+            said(err)
+        })
     }
 
     fn raw_cells(&self) -> &[Value] {

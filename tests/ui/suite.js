@@ -1425,6 +1425,33 @@ await test('A notebook colours its code cells as they are typed, and its prose d
     'a link in a notebook was followed in the window');
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('What the agent proposes for a notebook is drawn on its cells and answered there or from its panel', async () => {
+  await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
+  const rewrite = {id: 7, action: 'replace', place: 'on', kind: '', source: 'x = 2', said: 'rewrite cell 0', cell: 0};
+  const added = {id: 8, action: 'insert', place: 'below', kind: 'markdown', source: '# Why', said: 'add a cell at 1', cell: 0};
+  const cell = {kind: 'code', source: 'x = 1', outputs: [], executionCount: null, running: false, selected: true, key: 1, proposals: [rewrite, added]};
+  await win.pushEvents([{type: 'notebook', path: '/fixture/p.ipynb', problem: '', language: 'python', cells: [cell],
+    modified: true, proposals: [rewrite, added]}]);
+  await settle();
+  const drawn = $('.workspace[data-ws="data"] [data-cell="0"]');
+  assert(drawn?.querySelectorAll('.proposal').length === 2 && drawn.querySelector('.proposal-new'), 'the proposals are not drawn on the cell');
+  assert($('[data-nb-save]').classList.contains('dirty'), 'unsaved changes are not shown on Save');
+  let sent = win.commands.length;
+  drawn.querySelector('[data-proposal="7"][data-accept="1"]').click(); await settle();
+  const answered = win.commands.slice(sent).find((c) => c.type === 'answerProposal');
+  assert(answered?.id === 7 && answered.accept === true, 'accepting on the cell did not answer it');
+
+  // The panel: the agent's own tab beside the table, listing what waits.
+  $('[data-data-panel="agent"]').click(); await settle();
+  assert(!$('.data-agent').hidden && $('[data-df-dock]').hidden, 'the agent tab did not take the panel');
+  assert($('[data-proposals]').textContent.includes('2 changes proposed'), 'the panel does not list the proposals');
+  sent = win.commands.length;
+  $('[data-proposals-all="0"]').click(); await settle();
+  assert(win.commands.slice(sent).filter((c) => c.type === 'answerProposal' && c.accept === false).length === 2, 'reject all did not answer both');
+  $('[data-data-panel="table"]').click(); await settle();
+  assert($('.data-agent').hidden && !$('[data-df-dock]').hidden, 'the table did not come back');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('In a notebook, i puts the caret in the selected cell', async () => {
   await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
   const cell = (kind, source, selected = false) => ({kind, source, outputs: [], executionCount: null, running: false, selected});

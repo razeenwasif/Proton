@@ -219,7 +219,10 @@ pub enum ToolOutcome {
 struct Waiting {
     /// The tool call to answer when the cell stops running.
     id: String,
+    /// The cell, as the agent named it, and by the key that follows it if
+    /// cells are added or deleted around it while it runs.
     cell: usize,
+    key: u64,
     /// Heartbeats spent waiting.
     ///
     /// Beats rather than seconds, because the core has no clock. The heartbeat
@@ -1026,6 +1029,20 @@ impl Workspace {
             Command::RemoveCell { index } => {
                 self.data.remove_cell(index);
                 vec![self.notebook_event()]
+            }
+
+            Command::AnswerProposal { id, accept } => {
+                let answered = match accept {
+                    true => self.data.accept(id),
+                    false => match self.data.reject(id) {
+                        true => Ok(String::new()),
+                        false => Err("that proposal has already been answered".into()),
+                    },
+                };
+                match answered {
+                    Ok(_) => vec![self.notebook_event()],
+                    Err(why) => vec![notice(why, NoticeLevel::Warn), self.notebook_event()],
+                }
             }
 
             Command::SaveNotebook => match self.data.save() {
@@ -2734,7 +2751,7 @@ impl Workspace {
         // as much as a file open — the cells belong on the stage, and the
         // editor has nothing useful to do with a page of JSON.
         if resolved.extension().is_some_and(|e| e == "ipynb") {
-            return match self.data.open(&resolved) {
+            return match self.open_notebook(&resolved) {
                 Ok(()) => {
                     let mut events = self.set_mode(ModeId::Data);
                     events.push(self.notebook_event());
@@ -3497,6 +3514,11 @@ impl Workspace {
     /// are stopped and its calls let go — the project's own, that is; the
     /// session stops one it shares.
     pub fn shutdown(&mut self) {
+        // A notebook with changes is saved rather than lost: Jupyter saves as
+        // it goes, and quitting is the last chance to.
+        if let Err(why) = self.data.save_if_modified() {
+            eprintln!("proton: the notebook could not be saved: {why}");
+        }
         self.data.shutdown();
         if !self.research_shared {
             self.research().shutdown();
@@ -4302,10 +4324,11 @@ impl Workspace {
             return ToolOutcome::Answered(self.run_tool(name, input));
         }
         match self.start_cell(input) {
-            Ok(cell) => {
+            Ok((cell, key)) => {
                 self.waiting.push(Waiting {
                     id: id.to_string(),
                     cell,
+                    key,
                     beats: 0,
                 });
                 ToolOutcome::Deferred
@@ -4410,7 +4433,7 @@ impl Workspace {
     /// Opens the notebook in Data mode if it is not the one open: a cell
     /// running in a notebook nobody can see is a side effect with no window
     /// onto it, and the outputs have to land somewhere the user can look.
-    fn start_cell(&mut self, input: &serde_json::Value) -> Result<usize, String> {
+    fn start_cell(&mut self, input: &serde_json::Value) -> Result<(usize, u64), String> {
         let path = input
             .get("path")
             .and_then(|v| v.as_str())
@@ -4421,13 +4444,25 @@ impl Workspace {
             .ok_or("run_cell: `cell` is required")? as usize;
 
         let full = self.pickers.resolve(path);
-        if self.data.path() != Some(full.as_path()) {
-            self.data.open(&full)?;
-        }
+        self.open_notebook(&full)?;
 
         let cwd = self.pickers.root().to_path_buf();
         self.data.run(cell, &cwd)?;
-        Ok(cell)
+        let key = self.data.key_at(cell).ok_or_else(|| format!("there is no cell {cell}"))?;
+        Ok((cell, key))
+    }
+
+    /// Open a notebook in Data, keeping the one already open if it is that
+    /// one, and saving the one open first if it has changes — opening another
+    /// would otherwise lose them. Refused if that save fails.
+    fn open_notebook(&mut self, path: &Path) -> Result<(), String> {
+        if self.data.path() == Some(path) {
+            return Ok(());
+        }
+        self.data
+            .save_if_modified()
+            .map_err(|why| format!("the notebook open has changes that could not be saved: {why}"))?;
+        self.data.open(path)
     }
 
     /// Answer every `run_cell` whose cell has stopped running.
@@ -4440,7 +4475,7 @@ impl Workspace {
         let problem = self.data.problem().map(str::to_string);
         let mut done: Vec<(String, Result<String, String>)> = Vec::new();
         self.waiting.retain_mut(|waiting| {
-            let Some(view) = cells.get(waiting.cell) else {
+            let Some(view) = cells.iter().find(|cell| cell.key == waiting.key) else {
                 // Deleted while it ran. Saying so beats waiting forever for a
                 // cell that is not there.
                 done.push((
@@ -4480,6 +4515,9 @@ impl Workspace {
             true
         });
 
+        if done.is_empty() {
+            return Vec::new();
+        }
         for (id, answer) in done {
             self.agent.answer(&id, answer);
         }
@@ -4743,6 +4781,15 @@ impl Workspace {
                     }
                     out.push('\n');
                 }
+                // What it proposed is not in the cells until it is accepted.
+                if self.data.path() == Some(path.as_path()) {
+                    for proposal in self.data.proposals() {
+                        out.push_str(&format!(
+                            "# proposed, waiting for the user: {} (cell {})\n",
+                            proposal.said, proposal.cell
+                        ));
+                    }
+                }
                 Ok(out)
             }
 
@@ -4756,6 +4803,31 @@ impl Workspace {
                     .get("action")
                     .and_then(|v| v.as_str())
                     .unwrap_or("replace");
+
+                // The notebook open in Data: proposed on the cell itself,
+                // where it is accepted into the notebook being looked at. A
+                // diff of the file's JSON, accepted into a buffer Data never
+                // reads, was overwritten by Data's next save.
+                if self.data.path() == Some(path.as_path()) {
+                    let kind = match input.get("kind").and_then(|v| v.as_str()) {
+                        Some("markdown") => proton_data::notebook::CellKind::Markdown,
+                        _ => proton_data::notebook::CellKind::Code,
+                    };
+                    let source = match action {
+                        "delete" => String::new(),
+                        _ => text("source")?,
+                    };
+                    let said = self.data.propose(action, index, kind, &source)?;
+                    if said == "that is already what the cell says" {
+                        return Ok(said);
+                    }
+                    return Ok(format!(
+                        "proposed to {said} in {} — shown on the cell for the user to accept or \
+                         reject; nothing changes until they do, and cell numbers stay as they \
+                         are until then",
+                        path.display()
+                    ));
+                }
 
                 // Staged on top of anything already staged for this file, the
                 // way `edit_file` does: several cell edits in one turn is the
@@ -5692,6 +5764,8 @@ impl Workspace {
             cells: self.data.cells(),
             problem: self.data.problem().unwrap_or_default().to_string(),
             language: self.data.language(),
+            modified: self.data.is_modified(),
+            proposals: self.data.proposals(),
         }
     }
 
@@ -6884,6 +6958,36 @@ mod tests {
         // after it with one more, both halves of it.
         press(&mut ws, "I\x08\x08\x1b");
         assert_eq!(contents(&ws), "int a() {\r\n    return 0;\r\n}\r\n");
+    }
+
+    #[test]
+    fn the_agents_edits_to_the_open_notebook_are_proposed_on_its_cells_and_kept() {
+        use proton_data::notebook::{CellKind, Notebook};
+        let project = Project::new("proposals");
+        let mut one = Notebook::blank();
+        one.push(CellKind::Code, "a = 1");
+        one.write(&project.folder().join("one.ipynb")).unwrap();
+        Notebook::blank().write(&project.folder().join("two.ipynb")).unwrap();
+        let mut ws = Workspace::rooted(project.real());
+        ws.apply(Command::OpenBuffer { path: "one.ipynb".into() });
+
+        let said = ws
+            .run_tool("edit_cell", &serde_json::json!({"path": "one.ipynb", "cell": 0, "source": "a = 2"}))
+            .unwrap();
+        assert!(said.contains("proposed"), "{said}");
+        assert!(ws.review.is_empty(), "no diff of the file's JSON staged: {:?}", ws.review);
+        let id = ws.data.proposals()[0].id;
+        let events = ws.apply(Command::AnswerProposal { id, accept: true });
+        assert!(events.iter().any(|e| matches!(e, Event::Notebook { modified: true, .. })), "{events:?}");
+        assert_eq!(ws.data.cells()[0].source, "a = 2");
+
+        // Opening another notebook saves this one first rather than losing it.
+        ws.apply(Command::OpenBuffer { path: "two.ipynb".into() });
+        assert_eq!(Notebook::read(&project.folder().join("one.ipynb")).unwrap().cells()[0].source, "a = 2");
+        // And quitting saves the one open.
+        ws.data.add_cell(true);
+        ws.shutdown();
+        assert_eq!(Notebook::read(&project.folder().join("two.ipynb")).unwrap().len(), 1);
     }
 
     /// Call `edit_file` the way the agent's tool runner does.

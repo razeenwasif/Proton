@@ -48,6 +48,7 @@ import type { PaperRow } from "./PaperRow";
 import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
 import type { PluginView } from "./PluginView";
+import type { ProposalView } from "./ProposalView";
 import type { Rate } from "./Rate";
 import type { RepoFile } from "./RepoFile";
 import type { ResearchDiscipline } from "./ResearchDiscipline";
@@ -229,7 +230,16 @@ problem: string,
  * The language its code cells are in, to colour them by: what the
  * notebook says, else Python.
  */
-language: string, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
+language: string, 
+/**
+ * Whether it has changes its file does not.
+ */
+modified: boolean, 
+/**
+ * What the agent proposed and nobody has answered yet — also drawn
+ * on each cell, and listed here for the agent's panel.
+ */
+proposals: Array<ProposalView>, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
 /**
  * The folders conversations are grouped into, each with what it
  * holds; what is in a folder is not in `sessions` as well.

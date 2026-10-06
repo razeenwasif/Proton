@@ -1013,7 +1013,9 @@ impl Session {
         }
 
         let mode = self.active().mode();
-        self.workspaces.remove(index);
+        // Shut down rather than dropped: its notebook, if it has changes, is
+        // saved, and its kernel stopped with what it started.
+        self.workspaces.remove(index).shutdown();
         self.listed.remove(index);
         // Everything after it shifted down by one.
         let shifted = |i: usize| if i > index { i - 1 } else { i };

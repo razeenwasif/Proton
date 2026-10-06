@@ -220,6 +220,33 @@ fn a_cells_pip_is_the_kernels_own() {
 
 #[test]
 #[ignore = "starts a Jupyter kernel"]
+fn output_stays_with_its_cell_when_a_cell_is_added_above_it_mid_run() {
+    // Output is tied to the cell by what was run, not by where the cell was:
+    // a cell added above a running one must not get its output.
+    let Some((mut space, _root)) = ready("keys") else {
+        println!("skipping: PROTON_TEST_KERNEL not set");
+        return;
+    };
+    space.apply(Command::SetCell {
+        index: 1,
+        source: "import time\ntime.sleep(2)\nprint('mine')".into(),
+    });
+    space.apply(Command::RunCell { index: 1 });
+    space.apply(Command::SelectCell { index: 1 });
+    space.apply(Command::Key { key: proton_core::Key::char('O') });
+    space.apply(Command::Key { key: proton_core::Key::named("Escape") });
+
+    let cells = until(&mut space, |cells| cells.len() == 3 && !cells[2].running && !cells[2].outputs.is_empty());
+    assert!(cells[1].outputs.is_empty() && cells[1].source.is_empty(), "{:?}", cells[1]);
+    assert!(
+        cells[2].outputs.iter().any(|o| matches!(o, OutputView::Stream { text, .. } if text.contains("mine"))),
+        "{:?}",
+        cells[2].outputs
+    );
+}
+
+#[test]
+#[ignore = "starts a Jupyter kernel"]
 fn a_cell_runs_and_its_output_comes_back() {
     let Some((mut space, _root)) = ready("run") else {
         println!("skipping: PROTON_TEST_KERNEL not set");

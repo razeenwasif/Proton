@@ -962,13 +962,41 @@
       </main>
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
-      <aside class="pane">
-        <header>Table <span class="grow"></span><span class="chip" data-df-shape hidden></span></header>
+      <aside class="pane data-side" data-showing="table">
+        <!-- Two panels in one place: the table under the cell you are on, and
+             the agent, which works in this notebook — reads it, runs its cells
+             in your kernel, and proposes changes you accept on the cells. -->
+        <header class="data-side-head">
+          <button class="dock-tab on" data-data-panel="table">Table</button>
+          <button class="dock-tab" data-data-panel="agent">Agent <span class="dot" data-data-agent-dot hidden></span></button>
+          <span class="grow"></span><span class="chip" data-df-shape hidden></span>
+        </header>
         <!-- Slot::Table. The dataframe of whichever cell the focused pane is
              on, drawn from that cell's own output rather than from anything
              this panel works out for itself. What used to be here was a
              profile of a column in a database nobody had opened. -->
-        <div class="scroll" data-df-dock></div>
+        <div class="scroll" data-df-dock data-data-body="table"></div>
+        <div class="data-agent" data-data-body="agent" hidden>
+          <div class="scroll" data-agent-thread></div>
+          <!-- What the agent proposed to this notebook, also drawn on each
+               cell. Pinned above the composer for the same reason the
+               Codex dock pins its staged changes. -->
+          <div class="staged" data-proposals hidden></div>
+          <div class="composer">
+            <div class="box">
+              <div class="txt" contenteditable="plaintext-only" role="textbox"
+                   aria-label="Ask about this notebook" data-agent-input
+                   data-placeholder="Ask about this notebook, @dataframe to include the table"></div>
+              <div class="foot">
+                <span class="select" data-mention="@dataframe" title="Send the selected cell's table with the question">@dataframe</span>
+                <span class="grow"></span>
+                <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
+                <span class="send" data-agent-send role="button" tabindex="0"
+                      aria-label="Send"><svg class="i"><use href="#i-send"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
       </aside>
     </section>
 

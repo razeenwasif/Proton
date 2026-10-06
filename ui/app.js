@@ -1405,7 +1405,31 @@ function notebookLanguage() {
   return lastNotebook?.language || "python";
 }
 
+/** What the agent proposed for a cell, drawn on it with its two answers.
+ * @param {import('./bindings/ProposalView').ProposalView} p */
+function proposalHtml(p) {
+  const answers =
+    `<span class="grow"></span>` +
+    `<button data-proposal="${p.id}" data-accept="0" title="Leave the notebook as it is">Reject</button>` +
+    `<button class="go" data-proposal="${p.id}" data-accept="1" title="Make the change">Accept</button>`;
+  if (p.action === "delete") {
+    return `<div class="proposal delete"><header>The agent proposes deleting this cell${answers}</header></div>`;
+  }
+  const code = p.action === "insert" && p.kind === "markdown"
+    ? escapeHtml(p.source)
+    : highlightCode(p.source, notebookLanguage());
+  const what = p.action === "insert"
+    ? `The agent proposes a new ${escapeHtml(p.kind || "code")} cell ${p.place === "above" ? "first" : "below"}`
+    : "The agent proposes rewriting this cell";
+  const body = `<div class="proposal"><header>${what}${answers}</header><pre>${code}</pre></div>`;
+  return p.action === "insert" ? `<div class="proposal-new">${body}</div>` : body;
+}
+
 function cellHtml(cell, index) {
+  const proposals = cell.proposals ?? [];
+  const above = proposals.filter((p) => p.place === "above").map(proposalHtml).join("");
+  const on = proposals.filter((p) => p.place === "on").map(proposalHtml).join("");
+  const below = proposals.filter((p) => p.place === "below").map(proposalHtml).join("");
   const number = cell.running
     ? `<span class="spin"></span>`
     : `[${cell.executionCount ?? " "}]`;
@@ -1417,6 +1441,7 @@ function cellHtml(cell, index) {
 
   return (
     `<div class="cell${cell.running ? " running" : ""}${cell.selected ? " on" : ""}" data-cell="${index}">` +
+    above +
     `<header>${number} ${escapeHtml(cell.kind)}<span class="grow"></span>${run}` +
     `<button class="hbtn" data-drop-cell="${index}" title="Remove this cell"><svg class="i"><use href="#i-close"/></svg></button>` +
     `</header>` +
@@ -1429,7 +1454,9 @@ function cellHtml(cell, index) {
         ? `<div class="cell-code"><pre class="cell-hl" aria-hidden="true">${highlightCode(cell.source, notebookLanguage())}</pre>` +
           `<pre class="cell-src" contenteditable="plaintext-only" spellcheck="false" data-src="${index}">${escapeHtml(cell.source)}</pre></div>`
         : `<pre class="cell-src" contenteditable="plaintext-only" spellcheck="false" data-src="${index}">${escapeHtml(cell.source)}</pre>`) +
+    on +
     (outputs ? `<div class="out-wrap">${outputs}</div>` : "") +
+    below +
     `</div>`
   );
 }
@@ -1579,10 +1606,39 @@ function renderNotebook(event) {
     kernel.textContent = event.problem;
   }
 
+  const save = $("[data-nb-save]");
+  if (save) {
+    save.classList.toggle("dirty", Boolean(event.modified));
+    save.title = event.modified ? "Unsaved changes — write the notebook back" : "Write the notebook back";
+  }
+  renderProposals(event.proposals ?? []);
+
   const boxes = $$("[data-cells]");
   if (!boxes.length) return;
   for (const box of boxes) paintCells(box, event);
   renderTableDock(event);
+}
+
+/** The agent's proposals, listed above its composer in Data. Each is also
+ * drawn on its cell; this is where they are found without scrolling.
+ * @param {import('./bindings/ProposalView').ProposalView[]} proposals */
+function renderProposals(proposals) {
+  const box = $("[data-proposals]");
+  if (!box) return;
+  box.hidden = !proposals.length;
+  if (!proposals.length) {
+    box.innerHTML = "";
+    return;
+  }
+  const n = proposals.length;
+  box.innerHTML =
+    `<div class="head">${n} change${n === 1 ? "" : "s"} proposed<span class="acts">` +
+    `<button data-proposals-all="0">Reject all</button><button class="go" data-proposals-all="1">Accept all</button></span></div>` +
+    proposals.map((p) =>
+      `<div class="file"><span>${escapeHtml(p.said)}</span><span class="grow"></span>` +
+      `<button class="hbtn" data-proposal="${p.id}" data-accept="0" title="Reject">✕</button>` +
+      `<button class="hbtn" data-proposal="${p.id}" data-accept="1" title="Accept">✓</button></div>`,
+    ).join("");
 }
 
 /* ── Design mode's artboard ───────────────────────────────────────────
@@ -3872,6 +3928,26 @@ document.addEventListener("click", (e) => {
   }
   if (e.target.closest("[data-nb-save]")) {
     dispatch({ type: "saveNotebook" });
+    return;
+  }
+  const answer = e.target.closest("[data-proposal]");
+  if (answer) {
+    dispatch({ type: "answerProposal", id: Number(answer.dataset.proposal), accept: answer.dataset.accept === "1" });
+    return;
+  }
+  const every = e.target.closest("[data-proposals-all]");
+  if (every) {
+    const accept = every.dataset.proposalsAll === "1";
+    // Last first: accepting a new cell moves the ones after it, and the core
+    // places each by the cell it was about rather than by number anyway.
+    for (const p of [...(lastNotebook?.proposals ?? [])].reverse()) {
+      dispatch({ type: "answerProposal", id: p.id, accept });
+    }
+    return;
+  }
+  const side = e.target.closest("[data-data-panel]");
+  if (side) {
+    showDataPanel(side.dataset.dataPanel);
     return;
   }
   if (e.target.closest("[data-nb-runall]")) {
@@ -6244,8 +6320,31 @@ document.addEventListener("click", (e) => {
   }
 });
 
+/** Data's side shows the table or the agent. @param {string} which */
+function showDataPanel(which) {
+  const side = $(".data-side");
+  if (!side) return;
+  side.dataset.showing = which;
+  for (const tab of $$("[data-data-panel]")) tab.classList.toggle("on", tab.dataset.dataPanel === which);
+  for (const body of $$("[data-data-body]")) body.hidden = body.dataset.dataBody !== which;
+  const shape = $("[data-df-shape]");
+  if (shape && which !== "table") shape.hidden = true;
+  if (which === "agent") {
+    $("[data-data-agent-dot]")?.setAttribute("hidden", "");
+    const thread = $(".data-agent [data-agent-thread]");
+    if (thread) thread.scrollTop = thread.scrollHeight;
+    /** @type {HTMLElement | null} */ ($(".data-agent [data-agent-input]"))?.focus();
+  } else {
+    dockPainted = null;
+    if (lastNotebook) renderTableDock(lastNotebook);
+  }
+}
+
 function renderAgent(event) {
   answeringModel = event.model ?? "";
+  // Working where it cannot be seen: a dot on Data's Agent tab says so.
+  const dot = $("[data-data-agent-dot]");
+  if (dot && $(".data-side")?.dataset.showing !== "agent") dot.hidden = event.activity === "idle";
   // Every thread: Codex's dock and Chat's stage show the same conversation,
   // and one of them is always off screen. Painting only the visible one would
   // leave the other showing whatever it had when it was last looked at.

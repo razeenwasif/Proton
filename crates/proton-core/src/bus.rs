@@ -1078,6 +1078,12 @@ pub enum Command {
     },
     /// Write the notebook back.
     SaveNotebook,
+    /// Accept or reject what the agent proposed to do to the notebook.
+    AnswerProposal {
+        #[ts(type = "number")]
+        id: u64,
+        accept: bool,
+    },
     /// Open a place in another mode: the cross-mode jump.
     ///
     /// One command rather than "switch, then open, then move", because those
@@ -1430,6 +1436,11 @@ pub enum Event {
         /// The language its code cells are in, to colour them by: what the
         /// notebook says, else Python.
         language: String,
+        /// Whether it has changes its file does not.
+        modified: bool,
+        /// What the agent proposed and nobody has answered yet — also drawn
+        /// on each cell, and listed here for the agent's panel.
+        proposals: Vec<crate::data::ProposalView>,
     },
     /// The project's conversations, newest first — Claude Code's sessions
     /// and the other engines' — then the desktop app's from other folders;
