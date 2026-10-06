@@ -10,6 +10,7 @@
 //! so and everything it names is still there; nothing is started to find
 //! out.
 
+pub mod check;
 pub mod github;
 
 use std::path::{Path, PathBuf};

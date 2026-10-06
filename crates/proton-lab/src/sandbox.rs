@@ -2,7 +2,10 @@
 //!
 //! Nothing on the network; nothing written outside its own folder;
 //! nothing of the person's home folder read except that folder and the
-//! Lab's Python. On macOS that is a Seatbelt profile through
+//! Lab's Python, or Proton's Lean — though the folders on the way to them
+//! may be looked at, not into: macOS's realpath(3) asks each for its
+//! attributes, and Lean finds itself with it. On macOS that is a Seatbelt
+//! profile through
 //! `sandbox-exec`; on Linux, bubblewrap. Each is tried on this machine
 //! before it is trusted — a probe that must be refused — and a machine
 //! with neither runs code only when the scientist says so knowing that.
@@ -51,15 +54,35 @@ fn quoted(path: &Path) -> String {
     format!("\"{text}\"")
 }
 
-/// The Seatbelt profile for a run in `run`, with the Lab's Python in `env`,
-/// for a person whose home is `home`.
+/// The folders strictly between `home` and `path`, when `path` is in it.
+fn between(home: &Path, path: &Path) -> Vec<PathBuf> {
+    let Ok(rest) = path.strip_prefix(home) else { return Vec::new() };
+    let parts: Vec<_> = rest.components().collect();
+    let mut at = home.to_path_buf();
+    parts[..parts.len().saturating_sub(1)].iter().map(|part| {
+        at.push(part);
+        at.clone()
+    }).collect()
+}
+
+/// The Seatbelt profile for a run in `run`, with the Lab's Python (or
+/// Proton's Lean) in `env`, for a person whose home is `home`.
 pub fn seatbelt(run: &Path, env: &Path, home: &Path) -> String {
-    let (run, env, home) = (quoted(&real(run)), quoted(&real(env)), quoted(&real(home)));
+    let (run, env, home) = (real(run), real(env), real(home));
+    let mut ways: Vec<PathBuf> = between(&home, &run).into_iter().chain(between(&home, &env)).collect();
+    ways.sort();
+    ways.dedup();
+    let look = if ways.is_empty() {
+        String::new()
+    } else {
+        format!("(allow file-read-metadata {})\n", ways.iter().map(|p| format!("(literal {})", quoted(p))).collect::<Vec<_>>().join(" "))
+    };
+    let (run, env, home) = (quoted(&run), quoted(&env), quoted(&home));
     format!(
         "(version 1)\n(allow default)\n(deny network*)\n(deny file-write*)\n\
          (allow file-write* (subpath {run}) (literal \"/dev/null\") (literal \"/dev/dtracehelper\") (regex #\"^/dev/tty\"))\n\
          (deny file-read* (subpath {home}))\n\
-         (allow file-read* (subpath {run}) (subpath {env}) (literal {home}))\n"
+         (allow file-read* (subpath {run}) (subpath {env}) (literal {home}))\n{look}"
     )
 }
 
@@ -150,6 +173,11 @@ mod tests {
         assert!(p.contains("(deny file-read* (subpath \"/h\"))"));
         assert!(p.contains("(allow file-read* (subpath \"/w/proj/research/x/runs/R001\") (subpath \"/h/.proton/lab/envs/lab\") (literal \"/h\"))"));
         assert!(seatbelt(Path::new("/a\"b"), Path::new("/e"), Path::new("/h")).contains("\"/a\\\"b\""), "a quote in a path ends the string");
+        // The folders on the way to what it reads, each looked at only.
+        assert!(p.contains("(allow file-read-metadata (literal \"/h/.proton\") (literal \"/h/.proton/lab\") (literal \"/h/.proton/lab/envs\"))\n"), "{p}");
+        let lean = seatbelt(Path::new("/h/Research/sky/proofs/H004/attempt-1"), Path::new("/h/.proton/lean"), Path::new("/h"));
+        assert!(lean.contains("(literal \"/h/.proton\") (literal \"/h/Research\") (literal \"/h/Research/sky\") (literal \"/h/Research/sky/proofs\") (literal \"/h/Research/sky/proofs/H004\"))"), "{lean}");
+        assert!(!seatbelt(Path::new("/tmp/r"), Path::new("/opt/env"), Path::new("/h")).contains("file-read-metadata"), "nothing in the home folder, nothing to look at");
         let b = bubblewrap(Path::new("/h/p/run"), Path::new("/h/.proton/env"), Path::new("/h"));
         let at = |flag: &str, value: &str| b.windows(2).any(|w| w[0] == flag && w[1] == value);
         assert!(b.contains(&"--unshare-net".to_string()) && at("--tmpfs", "/h"), "{b:?}");

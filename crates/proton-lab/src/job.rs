@@ -166,10 +166,8 @@ impl Job {
 
     /// Stop it now — and, with a group of its own, everything it started.
     pub fn kill(&mut self) {
-        #[cfg(unix)]
         if let (Some(group), false) = (self.group, self.exited) {
-            // SAFETY: killpg only sends a signal, to a group this job made.
-            unsafe { libc::killpg(group as libc::pid_t, libc::SIGKILL) };
+            crate::run::signal_group(group, true);
         }
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();

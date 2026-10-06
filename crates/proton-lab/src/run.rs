@@ -95,7 +95,7 @@ impl std::fmt::Debug for Run {
     }
 }
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
@@ -104,7 +104,7 @@ pub fn digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn write(path: &Path, text: &str) -> Result<(), String> {
+pub(crate) fn write(path: &Path, text: &str) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -243,20 +243,8 @@ impl Run {
 
     /// Send its whole group a signal.
     fn signal(&self, kill: bool) {
-        let Some(child) = &self.child else { return };
-        #[cfg(unix)]
-        {
-            let signal = if kill { libc::SIGKILL } else { libc::SIGTERM };
-            // SAFETY: killpg only sends a signal; the group is the child's
-            // own, made for it with process_group(0) when it was started.
-            unsafe {
-                libc::killpg(child.id() as libc::pid_t, signal);
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = kill;
-            let _ = child;
+        if let Some(child) = &self.child {
+            signal_group(child.id(), kill);
         }
     }
 
@@ -336,6 +324,22 @@ impl Drop for Run {
             self.finish();
         }
     }
+}
+
+/// Send a process group made with `process_group(0)` a signal: SIGKILL if
+/// `kill`, else SIGTERM.
+pub(crate) fn signal_group(group: u32, kill: bool) {
+    #[cfg(unix)]
+    {
+        let signal = if kill { libc::SIGKILL } else { libc::SIGTERM };
+        // SAFETY: killpg only sends a signal, to a group this crate made for
+        // a process it started.
+        unsafe {
+            libc::killpg(group as libc::pid_t, signal);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (group, kill);
 }
 
 /// A run in the Lab's list, from its record.
@@ -430,7 +434,17 @@ fn cwd_of(pid: u32) -> Option<PathBuf> {
 /// Its state, if it needed settling.
 pub fn reap(dir: &Path) -> Option<State> {
     let path = dir.join("run.json");
-    let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    let mut record = settle(&path, dir)?;
+    record["outputs"] = json!(outputs(dir));
+    let _ = write(&path, &(serde_json::to_string_pretty(&record).unwrap_or_default() + "\n"));
+    Some(State::Stopped)
+}
+
+/// The record at `path`, of a process started in `dir`, settled if it says
+/// it is running: the process stopped if it is still that one, and the
+/// record marked stopped — for the caller to finish and write.
+pub(crate) fn settle(path: &Path, dir: &Path) -> Option<Value> {
+    let mut record: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
     if record["state"] != json!(State::Running) {
         return None;
     }
@@ -450,9 +464,7 @@ pub fn reap(dir: &Path) -> Option<State> {
     record["state"] = json!(State::Stopped);
     record["ended"] = json!(now());
     record["note"] = json!("It was running when Proton closed, and did not finish.");
-    record["outputs"] = json!(outputs(dir));
-    let _ = write(&path, &(serde_json::to_string_pretty(&record).unwrap_or_default() + "\n"));
-    Some(State::Stopped)
+    Some(record)
 }
 
 /// The last `lines` lines of a file a run wrote, and whether there were more.
