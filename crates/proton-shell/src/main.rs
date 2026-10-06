@@ -7,6 +7,7 @@ mod backdrop;
 mod transport;
 mod window;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -340,6 +341,76 @@ fn poll_once(app: &tauri::AppHandle) -> Option<EventBatch> {
 }
 
 
+/// Set once quitting is settled — nothing to lose, or the person said to go
+/// on — so it is not asked about again.
+static QUITTING: AtomicBool = AtomicBool::new(false);
+
+/// The menu's Quit, which asks first: see `menu_that_asks`.
+const QUIT: &str = "proton-quit";
+
+/// Whether to stop and ask before quitting. When quitting would lose unsaved
+/// changes, the page is told which files, and the quit waits for its answer.
+fn asks_first(app: &tauri::AppHandle) -> bool {
+    if QUITTING.load(Ordering::SeqCst) {
+        return false;
+    }
+    let Some(state) = app.try_state::<Mutex<BridgeSession>>() else {
+        return false;
+    };
+    let batch = match state.lock() {
+        Ok(mut it) => it.apply(Command::AskToQuit),
+        Err(poisoned) => poisoned.into_inner().apply(Command::AskToQuit),
+    };
+    if batch.events.is_empty() {
+        return false;
+    }
+    let _ = app.emit(PUSHED, batch);
+    true
+}
+
+/// Quit — having saved every file with unsaved changes, when asked to; and
+/// not at all, saying which could not be saved and why, when one could not.
+#[tauri::command]
+fn quit(save: bool, app: tauri::AppHandle, session: State<'_, Mutex<BridgeSession>>) -> Result<(), String> {
+    if save {
+        let failed = match session.lock() {
+            Ok(mut it) => it.session.save_unsaved(),
+            Err(poisoned) => poisoned.into_inner().session.save_unsaved(),
+        };
+        if !failed.is_empty() {
+            return Err(failed.join("\n"));
+        }
+    }
+    QUITTING.store(true, Ordering::SeqCst);
+    app.exit(0);
+    Ok(())
+}
+
+/// The default menu, with a Quit that asks first.
+///
+/// The menu's own Quit ends the app before anything can ask: tao answers
+/// macOS's `applicationWillTerminate` but not `applicationShouldTerminate`,
+/// the one that can say no. So ⌘Q is given to an item of ours instead.
+#[cfg(target_os = "macos")]
+fn menu_that_asks(app: &tauri::AppHandle) -> Option<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind};
+    let menu = Menu::default(app).ok()?;
+    for item in menu.items().ok()? {
+        let MenuItemKind::Submenu(submenu) = item else { continue };
+        for (at, entry) in submenu.items().ok()?.into_iter().enumerate() {
+            let MenuItemKind::Predefined(predefined) = &entry else { continue };
+            if !predefined.text().is_ok_and(|text| text.starts_with("Quit")) {
+                continue;
+            }
+            let quit = MenuItem::with_id(app, QUIT, "Quit Proton", true, Some("CmdOrCtrl+Q")).ok()?;
+            submenu.remove(predefined).ok()?;
+            submenu.insert(&quit, at).ok()?;
+            return Some(menu);
+        }
+    }
+    None
+}
+
 /// The window and taskbar icon.
 ///
 /// Pinned to the 256px raster explicitly rather than left to the bundle list:
@@ -428,7 +499,8 @@ fn main() {
             set_opaque,
             read_document,
             read_geometry,
-            read_lab
+            read_lab,
+            quit
         ])
         .setup(|app| {
             let Some(window) = app.get_webview_window("main") else {
@@ -456,11 +528,37 @@ fn main() {
 
             spawn_poll(app.handle().clone());
 
+            // Quitting with unsaved changes asks first — from the window's
+            // close, which the page draws, and from ⌘Q.
+            #[cfg(target_os = "macos")]
+            if let Some(menu) = menu_that_asks(app.handle()) {
+                let _ = app.set_menu(menu);
+            }
+            app.on_menu_event(|app, event| {
+                if event.id() == QUIT && !asks_first(app) {
+                    QUITTING.store(true, Ordering::SeqCst);
+                    app.exit(0);
+                }
+            });
+            let asking = window.clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if asks_first(asking.app_handle()) {
+                        api.prevent_close();
+                    }
+                }
+            });
+
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("Proton failed to start")
         .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                if asks_first(app) {
+                    api.prevent_exit();
+                }
+            }
             if matches!(event, tauri::RunEvent::Exit) {
                 if let Some(state) = app.try_state::<Mutex<BridgeSession>>() {
                     let mut session = match state.lock() {

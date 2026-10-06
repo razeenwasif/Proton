@@ -15,7 +15,7 @@
 import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
 import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, readGeometry, readLab, sendKey, setBackdrop, setOpaque,
-  setMode as coreSetMode, sync, wireWindowChrome } from "./bridge.js";
+  setMode as coreSetMode, sync, wireWindowChrome, quitApp } from "./bridge.js";
 import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, zoomDocument } from "./document.js";
 import { decodeMesh } from "./meshbytes.js";
 import { createOverlays } from "./overlays.js";
@@ -4857,6 +4857,10 @@ function renderEvent(event) {
       renderStatus(`insert ${JSON.stringify(event.text)}`);
       break;
 
+    case "unsaved":
+      askBeforeQuitting(event.files);
+      break;
+
     case "viewport":
     case "cursor": {
       editorState.update(event);
@@ -6102,7 +6106,8 @@ function renderReview(event) {
               `${escapeHtml(file.path)} · L${hunk.line}` +
               (file.creates ? ` <span class="new">new file</span>` : "") +
               `<span class="acts">` +
-              `<button data-refer="${i}" data-path="${escapeHtml(file.path)}">Refer</button>` +
+              `<button data-refer="${hunk.line}" data-path="${escapeHtml(file.path)}" title="Go to it in the file">Refer</button>` +
+              `<button data-reject="${i}" data-path="${escapeHtml(file.path)}" title="Leave the file as it is">Reject</button>` +
               `<button class="go" data-apply="${i}" data-path="${escapeHtml(file.path)}">Apply</button>` +
               `</span></header><pre>${hunk.lines.map(diffLineHtml).join("")}</pre></div>`,
           )
@@ -6128,9 +6133,15 @@ document.addEventListener("click", (e) => {
     dispatch({ type: "applyHunk", path: apply.dataset.path, hunk: Number(apply.dataset.apply) });
     return;
   }
+  // Refer goes to the change in its file — it does not answer it.
   const refer = e.target.closest("[data-refer]");
   if (refer) {
-    dispatch({ type: "rejectHunk", path: refer.dataset.path, hunk: Number(refer.dataset.refer) });
+    dispatch({ type: "jumpTo", mode: "codex", path: refer.dataset.path, line: Math.max(0, Number(refer.dataset.refer) - 1), column: 0 });
+    return;
+  }
+  const reject = e.target.closest("[data-reject]");
+  if (reject) {
+    dispatch({ type: "rejectHunk", path: reject.dataset.path, hunk: Number(reject.dataset.reject) });
     return;
   }
   if (e.target.closest("[data-staged-apply]")) dispatch({ type: "applyStaged", path: null });
@@ -6617,4 +6628,63 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
   e.stopPropagation();
   dispatch({ type: "traceStep", by: e.shiftKey ? by * 10 : by });
+}, true);
+
+/* ── quitting with unsaved changes ───────────────────────────────────
+   The shell stops the quit and asks here: save them all, lose them, or
+   stay. Saving that fails — a file changed on disk since it was read, one
+   with no file — says why and does not quit. */
+
+/** @param {string[]} files */
+function askBeforeQuitting(files) {
+  let box = /** @type {HTMLElement | null} */ ($("[data-quit-ask]"));
+  if (!box) {
+    box = document.createElement("div");
+    box.className = "quit-ask";
+    box.dataset.quitAsk = "";
+    document.body.appendChild(box);
+  }
+  const n = files.length;
+  box.innerHTML =
+    `<div class="quit-card" role="alertdialog" aria-modal="true" aria-label="Unsaved changes">` +
+    `<h2>Save your changes before quitting?</h2>` +
+    `<p>${n === 1 ? "This file has" : `These ${n} files have`} changes that are not saved:</p>` +
+    `<ul>${files.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>` +
+    `<p class="quit-why" data-quit-why hidden></p>` +
+    `<div class="quit-acts"><button data-quit="stay">Cancel</button><span class="grow"></span>` +
+    `<button data-quit="lose">Quit without saving</button>` +
+    `<button class="go" data-quit="save">Save all and quit</button></div></div>`;
+  box.hidden = false;
+  /** @type {HTMLElement | null} */ (box.querySelector('[data-quit="save"]'))?.focus();
+}
+
+document.addEventListener("click", async (e) => {
+  const act = /** @type {HTMLElement | null} */ (/** @type {Element} */ (e.target).closest?.("[data-quit]"));
+  if (!act) return;
+  const box = /** @type {HTMLElement | null} */ ($("[data-quit-ask]"));
+  if (!box) return;
+  if (act.dataset.quit === "stay") {
+    box.hidden = true;
+    return;
+  }
+  try {
+    await quitApp(act.dataset.quit === "save");
+  } catch (why) {
+    const said = /** @type {HTMLElement | null} */ (box.querySelector("[data-quit-why]"));
+    if (said) {
+      said.hidden = false;
+      said.textContent = `Not quitting — these could not be saved:\n${String(why)}`;
+    }
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  const box = /** @type {HTMLElement | null} */ ($("[data-quit-ask]"));
+  if (!box || box.hidden) return;
+  // The dialog has the keyboard while it is up: nothing reaches the editor.
+  e.stopPropagation();
+  if (e.key === "Escape") {
+    e.preventDefault();
+    box.hidden = true;
+  }
 }, true);

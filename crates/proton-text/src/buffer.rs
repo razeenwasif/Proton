@@ -95,7 +95,7 @@ impl Buffer {
                 "buffer has no path",
             ));
         };
-        std::fs::write(&path, self.text.to_string())?;
+        write_whole(&path, &self.text.to_string())?;
         self.saved_at = self.history.revision();
         self.disk = modified_at(&path);
         // The saved revision must stay immutable. More typing belongs to a
@@ -732,4 +732,36 @@ impl Buffer {
         }
         Some(self.text.slice(start..end).to_string())
     }
+}
+
+/// Write a file whole or not at all: beside it, then over it by a rename, so
+/// a write cut short — a full disk, a crash — leaves the file as it was
+/// rather than truncated. Through a link it is the file the link leads to
+/// that is replaced, and the link stays a link; a file with other hard links,
+/// which a rename would part it from, is written in place.
+fn write_whole(path: &Path, text: &str) -> std::io::Result<()> {
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let meta = std::fs::metadata(&target).ok();
+    #[cfg(unix)]
+    if meta.as_ref().is_some_and(|m| std::os::unix::fs::MetadataExt::nlink(m) > 1) {
+        return std::fs::write(&target, text);
+    }
+    let mut part = target.as_os_str().to_owned();
+    part.push(".proton-saving");
+    let part = PathBuf::from(part);
+    if let Err(err) = std::fs::write(&part, text) {
+        // A folder nothing new may be made in can still hold a file that may
+        // be written: in place, then, as it always was.
+        return match err.kind() {
+            std::io::ErrorKind::PermissionDenied => std::fs::write(&target, text),
+            _ => Err(err),
+        };
+    }
+    // The file's own permissions, not the ones a new file gets.
+    if let Some(meta) = &meta {
+        let _ = std::fs::set_permissions(&part, meta.permissions());
+    }
+    std::fs::rename(&part, &target).inspect_err(|_| {
+        let _ = std::fs::remove_file(&part);
+    })
 }

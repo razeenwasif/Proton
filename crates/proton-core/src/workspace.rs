@@ -522,6 +522,28 @@ impl Workspace {
         self.editor.buffers().iter().any(|b| b.is_modified())
     }
 
+    /// The files with unsaved changes, as the project names them.
+    pub fn unsaved(&self) -> Vec<String> {
+        self.editor
+            .unsaved()
+            .iter()
+            .map(|buffer| match buffer.path() {
+                Some(path) => self.root.shown(path),
+                None => buffer.name(),
+            })
+            .collect()
+    }
+
+    /// Save every file with unsaved changes; the ones that could not be, and
+    /// why.
+    pub fn save_unsaved(&mut self) -> Vec<String> {
+        let failed = self.editor.save_unsaved();
+        if failed.len() != self.editor.unsaved().len() {
+            self.resync();
+        }
+        failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect()
+    }
+
     /// Abandon a half-typed leader sequence.
     ///
     /// The session calls this when it claims a prefix the workspace did not
@@ -1766,6 +1788,15 @@ impl Workspace {
                 "workspaces are the session's, not this workspace's".into(),
                 NoticeLevel::Warn,
             )],
+
+            // The session asks every project; a workspace on its own, itself.
+            Command::AskToQuit => {
+                let files = self.unsaved();
+                match files.is_empty() {
+                    true => Vec::new(),
+                    false => vec![Event::Unsaved { files }],
+                }
+            }
 
             Command::OpenPicker { kind } => self.open_picker(kind),
 
@@ -6945,6 +6976,44 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, Event::Viewport { tab_size: 8, .. })), "{events:?}");
         press(&mut ws, "ggofunc main() {\nx\x1b");
         assert_eq!(contents(&ws), "package main\nfunc main() {\n\tx\n}\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_save_is_whole_and_through_a_link_writes_the_file_it_leads_to() {
+        use std::os::unix::fs::PermissionsExt;
+        let project = Project::new("save");
+        let real = project.folder().join("real.txt");
+        std::fs::write(&real, "one\n").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o640)).unwrap();
+        std::os::unix::fs::symlink(&real, project.folder().join("link.txt")).unwrap();
+        // Only the link is ever opened.
+        let mut ws = Workspace::rooted(project.real());
+        ws.apply(Command::OpenBuffer { path: "link.txt".into() });
+        assert!(ws.editor().buffer().path().is_some_and(|p| p.ends_with("link.txt") || p.ends_with("real.txt")));
+        press(&mut ws, "Atwo\x1b:w\n");
+        let link = std::fs::symlink_metadata(project.folder().join("link.txt")).unwrap();
+        assert!(link.file_type().is_symlink(), "the link was replaced by a file");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "onetwo\n");
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o640);
+        let left: Vec<_> = std::fs::read_dir(project.folder())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains("proton-saving"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+
+        // A writable file in a folder nothing new may be made in is still
+        // saved, in place.
+        let shut = project.folder().join("shut");
+        std::fs::create_dir(&shut).unwrap();
+        std::fs::write(shut.join("a.txt"), "a\n").unwrap();
+        std::fs::set_permissions(&shut, std::fs::Permissions::from_mode(0o555)).unwrap();
+        ws.apply(Command::OpenBuffer { path: "shut/a.txt".into() });
+        press(&mut ws, "Ab\x1b:w\n");
+        let saved = std::fs::read_to_string(shut.join("a.txt"));
+        std::fs::set_permissions(&shut, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(saved.unwrap(), "ab\n");
     }
 
     #[test]

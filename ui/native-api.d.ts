@@ -10,6 +10,7 @@ export interface NativeApi {
     invoke(name: 'backdrop'): Promise<string>;
     invoke(name: 'set_backdrop', args: {material: string}): Promise<string>;
     invoke(name: 'set_opaque', args: {color: string | null}): Promise<void>;
+    invoke(name: 'quit', args: {save: boolean}): Promise<void>;
   };
   event?: {
     listen(name: 'proton://events', listener: (event: {payload: EventBatch}) => unknown): Promise<() => void>;

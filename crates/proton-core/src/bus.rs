@@ -1076,6 +1076,9 @@ pub enum Command {
     OpenCitation {
         cite: String,
     },
+    /// Proton is about to quit: would anything be lost? Answered with
+    /// `Unsaved`, naming the files with unsaved changes, or with nothing.
+    AskToQuit,
     /// Write the notebook back.
     SaveNotebook,
     /// Accept or reject what the agent proposed to do to the notebook.
@@ -1441,6 +1444,11 @@ pub enum Event {
         /// What the agent proposed and nobody has answered yet — also drawn
         /// on each cell, and listed here for the agent's panel.
         proposals: Vec<crate::data::ProposalView>,
+    },
+    /// Quitting now would lose these files' unsaved changes: the quit waits
+    /// for the person to say whether to save them.
+    Unsaved {
+        files: Vec<String>,
     },
     /// The project's conversations, newest first — Claude Code's sessions
     /// and the other engines' — then the desktop app's from other folders;

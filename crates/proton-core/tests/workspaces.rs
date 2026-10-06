@@ -1066,6 +1066,36 @@ fn a_relative_path_in_the_stored_session_is_not_reopened() {
 }
 
 #[test]
+fn quitting_with_unsaved_changes_names_them_and_saving_them_spares_a_file_changed_on_disk() {
+    let scratch = Scratch::new("quit");
+    let root = folder::normalise(&scratch.root.join("alpha"));
+    std::fs::write(root.join("a.txt"), "a\n").unwrap();
+    std::fs::write(root.join("b.txt"), "b\n").unwrap();
+    let mut session = Session::new(&root);
+    assert!(session.apply(Command::AskToQuit).is_empty(), "nothing to lose, nothing to ask");
+    for (file, typed) in [("a.txt", 'x'), ("b.txt", 'y')] {
+        session.apply(Command::OpenBuffer { path: file.into() });
+        for key in [Key::char('A'), Key::char(typed), Key::named("Escape")] {
+            session.apply(Command::Key { key });
+        }
+    }
+    let asked = session.apply(Command::AskToQuit);
+    assert!(
+        matches!(asked.as_slice(), [Event::Unsaved { files }] if files == &["a.txt", "b.txt"]),
+        "{asked:?}"
+    );
+
+    // b.txt is changed by something else after it was read: saving everything
+    // does not write over that, and says so.
+    std::fs::write(root.join("b.txt"), "theirs\n").unwrap();
+    let failed = session.save_unsaved();
+    assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "ax\n");
+    assert_eq!(std::fs::read_to_string(root.join("b.txt")).unwrap(), "theirs\n");
+    assert!(failed.len() == 1 && failed[0].starts_with("b.txt: "), "{failed:?}");
+    assert!(matches!(session.apply(Command::AskToQuit).as_slice(), [Event::Unsaved { files }] if files == &["b.txt"]));
+}
+
+#[test]
 fn a_stored_top_of_the_disk_is_not_reopened() {
     // What a build that took `/` as the working folder wrote on a first launch
     // from the Finder, or what a deliberate `:cd /` leaves behind. Reopened, it

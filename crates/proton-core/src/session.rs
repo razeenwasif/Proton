@@ -552,6 +552,28 @@ impl Session {
         self.active_mut().mesh_bytes(key)
     }
 
+    /// The files with unsaved changes in every open project, named with
+    /// their project when more than one is open.
+    pub fn unsaved(&self) -> Vec<String> {
+        let many = self.workspaces.len() > 1;
+        self.workspaces
+            .iter()
+            .flat_map(|workspace| {
+                let project = folder::name_of(workspace.root());
+                workspace
+                    .unsaved()
+                    .into_iter()
+                    .map(move |file| if many { format!("{project}/{file}") } else { file })
+            })
+            .collect()
+    }
+
+    /// Save every file with unsaved changes in every project; the ones that
+    /// could not be, and why.
+    pub fn save_unsaved(&mut self) -> Vec<String> {
+        self.workspaces.iter_mut().flat_map(|workspace| workspace.save_unsaved()).collect()
+    }
+
     /// Proton is going: what every workspace has running that would outlive
     /// it — a notebook's kernel, Research's runs and calls — is stopped.
     pub fn shutdown(&mut self) {
@@ -630,6 +652,13 @@ impl Session {
                 Some(&index) => self.focus(index),
                 None => vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)],
             },
+            Command::AskToQuit => {
+                let files = self.unsaved();
+                match files.is_empty() {
+                    true => Vec::new(),
+                    false => vec![Event::Unsaved { files }],
+                }
+            }
             Command::CloseWorkspace { index } => match self.listed_on(self.side()).get(index) {
                 Some(&index) => self.close(index),
                 None => vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)],

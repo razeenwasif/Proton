@@ -1452,6 +1452,31 @@ await test('What the agent proposes for a notebook is drawn on its cells and ans
   assert($('.data-agent').hidden && !$('[data-df-dock]').hidden, 'the table did not come back');
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('Refer on a staged hunk goes to it, and Reject answers it', async () => {
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  await win.pushEvents([{type: 'review', files: [{path: 'src/lib.rs', creates: false,
+    hunks: [{line: 12, lines: [{mark: 'removed', text: 'old'}, {mark: 'added', text: 'new'}]}]}]}]);
+  await settle();
+  const staged = $('#codex-dock [data-staged]');
+  let sent = win.commands.length;
+  staged.querySelector('[data-refer]').click(); await settle();
+  const went = win.commands.slice(sent);
+  assert(went.find((c) => c.type === 'jumpTo')?.line === 11 && went.find((c) => c.type === 'jumpTo')?.path === 'src/lib.rs',
+    'Refer did not go to the hunk');
+  assert(!went.some((c) => c.type === 'rejectHunk'), 'Refer threw the hunk away');
+  sent = win.commands.length;
+  staged.querySelector('[data-reject]').click(); await settle();
+  assert(win.commands.slice(sent).find((c) => c.type === 'rejectHunk')?.hunk === 0, 'Reject did not reject the hunk');
+  await win.pushEvents([{type: 'review', files: []}]); await settle();
+});
+await test('Quitting with unsaved changes asks, and Cancel stays', async () => {
+  await win.pushEvents([{type: 'unsaved', files: ['src/main.rs', 'notes.md']}]); await settle();
+  const ask = $('[data-quit-ask]');
+  assert(ask && !ask.hidden && ask.textContent.includes('src/main.rs') && ask.textContent.includes('notes.md'), 'the unsaved files are not named');
+  assert(ask.querySelector('[data-quit="save"]') && ask.querySelector('[data-quit="lose"]'), 'the choices are missing');
+  ask.querySelector('[data-quit="stay"]').click(); await settle();
+  assert(ask.hidden, 'Cancel did not put the question away');
+});
 await test('In a notebook, i puts the caret in the selected cell', async () => {
   await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
   const cell = (kind, source, selected = false) => ({kind, source, outputs: [], executionCount: null, running: false, selected});

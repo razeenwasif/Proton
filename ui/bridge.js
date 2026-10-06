@@ -141,6 +141,14 @@ export async function setBackdrop(material) {
   return applied;
 }
 
+/** Quit: having saved every file with unsaved changes, when `save` — which
+ *  is refused, with which could not be saved and why, if one could not be.
+ *  @param {boolean} save */
+export async function quitApp(save) {
+  if (!tauri) return;
+  await tauri.core.invoke("quit", { save });
+}
+
 /* ── window controls ──────────────────────────────────────────────────── */
 
 /* The window is undecorated because the titlebar is drawn in the page, which

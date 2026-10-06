@@ -99,6 +99,29 @@ impl Editor {
         &self.buffers
     }
 
+    /// The buffers with unsaved changes, by name.
+    pub fn unsaved(&self) -> Vec<&Buffer> {
+        self.buffers.iter().filter(|buffer| buffer.is_modified()).collect()
+    }
+
+    /// Write every buffer with unsaved changes, and answer the ones that were
+    /// not, with why: one with no file, or whose file changed on disk since it
+    /// was read — written over, those changes would be lost without a word.
+    pub fn save_unsaved(&mut self) -> Vec<(String, String)> {
+        let mut failed = Vec::new();
+        for buffer in self.buffers.iter_mut().filter(|buffer| buffer.is_modified()) {
+            let why = match (buffer.path().is_some(), buffer.changed_on_disk()) {
+                (false, _) => Some("it has no file to be saved to".to_string()),
+                (true, true) => Some("its file changed on disk since it was read".to_string()),
+                (true, false) => buffer.save().err().map(|err| err.to_string()),
+            };
+            if let Some(why) = why {
+                failed.push((buffer.name(), why));
+            }
+        }
+        failed
+    }
+
     /// Re-read every buffer whose file changed on disk and that has nothing
     /// unsaved in it, and say which. A buffer with unsaved work is never
     /// overwritten: it keeps its text, and its next `:w` is the one that

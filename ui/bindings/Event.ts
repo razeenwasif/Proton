@@ -239,7 +239,7 @@ modified: boolean,
  * What the agent proposed and nobody has answered yet — also drawn
  * on each cell, and listed here for the agent's panel.
  */
-proposals: Array<ProposalView>, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
+proposals: Array<ProposalView>, } | { "type": "unsaved", files: Array<string>, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
 /**
  * The folders conversations are grouped into, each with what it
  * holds; what is in a folder is not in `sessions` as well.

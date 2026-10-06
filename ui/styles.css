@@ -4874,3 +4874,17 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .staged .file { display: flex; align-items: center; gap: 6px; padding: 3px 2px; font: 12px var(--sans); color: var(--ink-2); }
 .staged .file .grow { flex: 1; }
 [data-proposals] .head .acts button { white-space: nowrap; }
+
+/* ── asking before quitting ───────────────────────────────────────── */
+.quit-ask { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgba(0, 0, 0, 0.42); }
+.quit-ask[hidden] { display: none; }
+.quit-card { width: min(460px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 18px 20px; border-radius: 14px; background: var(--e2); box-shadow: var(--spec), 0 20px 60px rgba(0, 0, 0, 0.45); color: var(--ink); font: 13px/1.5 var(--sans); }
+.quit-card h2 { margin: 0 0 8px; font: 620 15px var(--sans); }
+.quit-card p { margin: 6px 0; color: var(--ink-2); }
+.quit-card ul { margin: 6px 0 10px; padding-left: 18px; font: 12px var(--mono); color: var(--ink-2); }
+.quit-card .quit-why { white-space: pre-wrap; color: var(--err); font: 12px var(--mono); }
+.quit-card .quit-why[hidden] { display: none; }
+.quit-acts { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+.quit-acts .grow { flex: 1; }
+.quit-acts button { border: 0; border-radius: 8px; padding: 6px 12px; cursor: pointer; font: 500 12px var(--sans); background: var(--e3); color: var(--ink); }
+.quit-acts button.go { background: color-mix(in srgb, var(--accent) 70%, var(--e3)); }
