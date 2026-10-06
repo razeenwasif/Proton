@@ -94,7 +94,8 @@ Cells run in a Jupyter kernel, in the first of these that has one:
 the notebook names (`metadata.kernelspec`), as `jupyter kernelspec list`
 shows it; then the first Python on your login shell's PATH that has
 `ipykernel`. A kernel that stops because its Python has no ipykernel says
-how to add it. For a project of its own:
+how to add it. A cell's `!pip` is the kernel's own, so it installs where
+`import` looks (`%pip` works too). For a project of its own:
 
 ```bash
 python3 -m venv .venv && .venv/bin/python -m pip install ipykernel

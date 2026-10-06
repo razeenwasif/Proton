@@ -2351,6 +2351,20 @@ Without them the Visualizer reports which language is unusable and why —
 `GET /api/toolchain` distinguishes "not implemented" from "not usable here",
 and that reason is what the pane shows. Everything else works.
 
+### Where it finds programs
+
+Opened from the Finder or the Dock, the app is given launchd's PATH,
+`/usr/bin:/bin:/usr/sbin:/sbin`, and so is everything it starts by name —
+ffmpeg, pandoc, tesseract, git, a kernel's `!pip`. So the first thing `main`
+does, while it is the only thread, is ask a login shell that reads no rc files
+for its PATH (a fifth of a second here) and add the folders it lacks after its
+own; a PATH a terminal gave already has them and is left as it is
+(`proton_claude::pipe::launch_path`). The interactive login shell's PATH,
+which has conda's and nvm's folders, takes seconds, so it is asked on a thread
+of its own at launch and given to what needs it: the engines, and a notebook's
+kernel, which runs with its own Python's folder ahead of it so that `!pip`
+installs where `import` looks.
+
 ### Which project it opens
 
 `Proton.exe <folder>`, the way every editor takes it.
