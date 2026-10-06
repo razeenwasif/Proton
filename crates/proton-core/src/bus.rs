@@ -489,6 +489,12 @@ pub enum Command {
     StudyKbSearch {
         query: String,
     },
+    /// Every file under a folder of the knowledge base, its subfolders' too,
+    /// that can be added: for the picker to tick them all.
+    StudyKbAll {
+        root: String,
+        dir: String,
+    },
     /// Find in the knowledge base what is like the open notebook, and not
     /// in it yet: by `about`, or, when it is empty, by the words its sources
     /// share.
@@ -728,10 +734,13 @@ pub enum Command {
         consent: bool,
         hosts: Vec<proton_study::view::StudyHost>,
     },
-    /// Find Fish's voices by name and language.
+    /// Find Fish's voices by name and language — or only the account's own;
+    /// or, when `query` is a voice's id or fish.audio address, that voice.
     StudyVoiceFind {
         query: String,
         language: String,
+        #[serde(default)]
+        mine: bool,
     },
     /// Fetch a voice's sample, to listen to.
     StudyVoiceSample {
@@ -1595,6 +1604,14 @@ pub enum Event {
     /// already is in the open notebook.
     StudyArtifacts {
         artifacts: Vec<proton_study::view::StudyArtifactRow>,
+    },
+    /// Every file under a folder that can be added and is not a source yet:
+    /// the first thousand, and how many there are.
+    StudyKbAll {
+        root: String,
+        dir: String,
+        files: Vec<proton_study::view::StudyKbFile>,
+        total: usize,
     },
     /// What a search of the knowledge base found.
     StudyKbResults {

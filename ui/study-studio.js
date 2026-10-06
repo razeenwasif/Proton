@@ -173,7 +173,7 @@ export function taskHtml(t) {
     `<h3>What it was told</h3><pre class="st-prompt">${esc(t.instructions)}</pre><h3>What it was asked</h3><pre class="st-prompt">${esc(t.prompt)}</pre></div>`;
 }
 
-/** @param {{box: HTMLElement, dispatch: (command: any) => unknown, readOnly: () => boolean, pastPapers: () => {id: string, title: string}[]}} host */
+/** @param {{box: HTMLElement, dispatch: (command: any) => unknown, readOnly: () => boolean, pastPapers: () => {id: string, title: string}[], voices: () => void}} host */
 export function createStudio(host) {
   /** @type {{studio: StudioEvent | null, asking: Kind | null}} */
   const state = { studio: null, asking: null };
@@ -192,7 +192,8 @@ export function createStudio(host) {
         : kind === "audio"
           ? `<div class="st-card-form-row"><select name="format" aria-label="What it is">${FORMATS.map(([k, name, note]) => `<option value="${k}" title="${esc(note)}">${esc(name)}</option>`).join("")}</select>` +
             `<select name="amount" aria-label="How long"><option value="fewer">Shorter</option><option value="standard" selected>The usual length</option><option value="more">Longer</option></select></div>` +
-            `<input name="language" placeholder="In a language other than the sources'? — “French”" autocomplete="off">${focus}`
+            `<input name="language" placeholder="In a language other than the sources'? — “French”" autocomplete="off">${focus}` +
+            `<p class="st-faint">Spoken by Fish Audio in voices you choose. <button type="button" class="st-link" data-study-voices>Voices and Fish's key…</button></p>`
         : kind === "exam"
           ? `<div class="st-card-form-row"><select name="level" aria-label="How hard"><option value="easy">A little easier than the past papers</option>` +
             `<option value="medium" selected>As hard as the past papers</option><option value="hard">A little harder</option></select></div>` +
@@ -248,6 +249,10 @@ export function createStudio(host) {
       state.asking = state.asking === kind ? null : kind;
       host.box.querySelector("[data-study-make-form]")?.remove();
       render();
+      return true;
+    }
+    if (at("[data-study-voices]")) {
+      host.voices();
       return true;
     }
     if (at("[data-study-make-cancel]")) {

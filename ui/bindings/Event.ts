@@ -253,7 +253,7 @@ started: boolean,
 /**
  * Whether its catalogue is in, so the picker can browse.
  */
-ready: boolean, walking: boolean, done: number, total: number, paused: boolean, documents: number, passages: number, } | { "type": "studyKbFolder", root: string, dir: string, folders: Array<StudyKbFolder>, files: Array<StudyKbFile>, left: Array<StudyKbLeft>, } | { "type": "studyArtifacts", artifacts: Array<StudyArtifactRow>, } | { "type": "studyKbResults", query: string, files: Array<StudyKbFile>, passages: Array<StudyKbHit>, 
+ready: boolean, walking: boolean, done: number, total: number, paused: boolean, documents: number, passages: number, } | { "type": "studyKbFolder", root: string, dir: string, folders: Array<StudyKbFolder>, files: Array<StudyKbFile>, left: Array<StudyKbLeft>, } | { "type": "studyArtifacts", artifacts: Array<StudyArtifactRow>, } | { "type": "studyKbAll", root: string, dir: string, files: Array<StudyKbFile>, total: number, } | { "type": "studyKbResults", query: string, files: Array<StudyKbFile>, passages: Array<StudyKbHit>, 
 /**
  * Found for the open notebook, by words it chose: each file one
  * it does not have yet, with the passage most like it.

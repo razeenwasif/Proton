@@ -43,6 +43,10 @@ pub trait Speaker: Send + Sync {
     fn speak(&self, speech: &Speech, out: &Path, cancel: &AtomicBool) -> Result<u64, FishError>;
     fn voices(&self, query: &VoiceQuery, cancel: &AtomicBool) -> Result<(u64, Vec<Voice>), FishError>;
     fn sample(&self, url: &str, out: &Path, cancel: &AtomicBool) -> Result<u64, FishError>;
+    /// One voice, by its id.
+    fn voice(&self, _id: &str, _cancel: &AtomicBool) -> Result<Voice, FishError> {
+        Err(FishError::Failed("nothing here looks voices up".into()))
+    }
     /// What a piece of a recording says, and when.
     fn transcribe(&self, _audio: &Path, _cancel: &AtomicBool) -> Result<Heard, FishError> {
         Err(FishError::Failed("nothing here transcribes".into()))
@@ -61,6 +65,9 @@ impl Speaker for Fish {
     }
     fn transcribe(&self, audio: &Path, cancel: &AtomicBool) -> Result<Heard, FishError> {
         Fish::transcribe(self, audio, None, cancel)
+    }
+    fn voice(&self, id: &str, cancel: &AtomicBool) -> Result<Voice, FishError> {
+        Fish::voice(self, id, cancel)
     }
 }
 
@@ -551,15 +558,22 @@ impl Study {
     }
 
     /// Fish's voices, by name and language: found on a worker.
-    pub(super) fn find_voices(&mut self, query: &str, language: &str) -> Vec<Event> {
+    /// Voices found, on a worker: by name, in a language, or only the
+    /// account's own; or the one a voice's id or fish.audio address names.
+    pub(super) fn find_voices(&mut self, query: &str, language: &str, mine: bool) -> Vec<Event> {
         let speaker = match self.voice.speaker() {
             Ok(speaker) => speaker,
             Err(why) => return vec![Event::StudyVoices { query: query.to_string(), voices: Vec::new(), total: 0, error: Some(why) }],
         };
         let (tx, rx) = mpsc::channel();
-        let asked = VoiceQuery { title: query.to_string(), language: language.to_string(), page: 1 };
+        let by_id = fish::voice_id(query);
+        let asked = VoiceQuery { title: query.to_string(), language: language.to_string(), page: 1, mine };
         std::thread::spawn(move || {
-            let _ = tx.send(speaker.voices(&asked, &AtomicBool::new(false)).map_err(|e| e.describe()));
+            let found = match by_id {
+                Some(id) => speaker.voice(&id, &AtomicBool::new(false)).map(|v| (1, vec![v])),
+                None => speaker.voices(&asked, &AtomicBool::new(false)),
+            };
+            let _ = tx.send(found.map_err(|e| e.describe()));
         });
         self.errands.push(Errand::Voices { query: query.to_string(), rx });
         Vec::new()

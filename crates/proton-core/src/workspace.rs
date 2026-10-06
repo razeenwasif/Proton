@@ -1407,6 +1407,7 @@ impl Workspace {
             | Command::StudyKbRefresh
             | Command::StudyKbBrowse { .. }
             | Command::StudyKbSearch { .. }
+            | Command::StudyKbAll { .. }
             | Command::StudyDiscover { .. }
             | Command::StudyNew { .. }
             | Command::StudyOpen { .. }

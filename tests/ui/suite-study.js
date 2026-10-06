@@ -130,6 +130,40 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(picker.hidden, 'Escape did not put it away');
   });
 
+  await test('Select all ticks every file of a folder that can be added, and With its subfolders every one below it', async () => {
+    ws().querySelector('[data-study-pick]').click(); await settle();
+    const picker = ws().querySelector('[data-study-picker]');
+    // The last search put away, for the folder to show.
+    const search = picker.querySelector('[data-study-search]');
+    search.value = ''; search.dispatchEvent(new win.Event('input', {bubbles: true}));
+    await new Promise((done) => setTimeout(done, 300));
+    const file = (/** @type {string} */ name, /** @type {Partial<any>} */ more = {}) => ({name, path: `Courses/COMP3670/${name}`, kind: 'pdf', size: 1000, mtime: 1, inCloud: false, readable: true, source: null, ...more});
+    await win.pushEvents([{type: 'studyKbFolder', root: 'Courses', dir: 'COMP3670', left: [],
+      folders: [{name: 'Week 1', path: 'Courses/COMP3670/Week 1', files: 3, readable: 3, inCloud: 0}],
+      files: [file('Exam_2020.pdf'), file('notes.md', {kind: 'markdown'}), file('S01.pdf', {source: 'S01'}), file('data.zip', {kind: 'other', readable: false})]}]); await settle();
+    const all = () => picker.querySelector('[data-study-choose-all]');
+    assert(picker.querySelector('.st-select-bar')?.textContent.includes('Select all 2 files here'), `not offered: ${picker.querySelector('.st-select-bar')?.textContent}`);
+    all().checked = true; all().dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const foot = picker.querySelector('[data-study-foot]');
+    assert(foot.textContent.includes('2 files ticked'), `not ticked: ${foot.textContent}`);
+    const one = picker.querySelector('[data-study-choose="Courses/COMP3670/notes.md"]');
+    one.checked = false; one.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(all().indeterminate && !all().checked, 'some ticked is not said to be some');
+    all().checked = false; all().dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(foot.textContent.includes('Tick files'), 'unticking all left some');
+    const before = win.commands.length;
+    picker.querySelector('[data-study-choose-deep]').click(); await settle();
+    const asked = sent(before, 'studyKbAll')[0];
+    assert(asked?.root === 'Courses' && asked.dir === 'COMP3670', `not asked for the folder: ${JSON.stringify(asked)}`);
+    await win.pushEvents([{type: 'studyKbAll', root: 'Courses', dir: 'COMP3670', total: 3,
+      files: [file('Exam_2020.pdf'), file('notes.md', {kind: 'markdown'}), file('Week 1/lecture.pdf', {name: 'lecture.pdf'})]}]); await settle();
+    assert(foot.textContent.includes('3 files ticked') && picker.textContent.includes('subfolders too'), `not every one below: ${foot.textContent}`);
+    const add = win.commands.length;
+    foot.querySelector('[data-study-add]').click(); await settle();
+    assert(JSON.stringify(sent(add, 'studyAdd')[0]?.paths) === JSON.stringify(['Courses/COMP3670/Exam_2020.pdf', 'Courses/COMP3670/notes.md', 'Courses/COMP3670/Week 1/lecture.pdf']),
+      `wrong paths: ${JSON.stringify(sent(add, 'studyAdd'))}`);
+  });
+
   await test('Like this notebook finds what in the folders is like it and not in it yet, by words it shows in the box', async () => {
     ws().querySelector('[data-study-pick]').click(); await settle();
     const picker = ws().querySelector('[data-study-picker]');
@@ -911,7 +945,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     find.querySelector('[name="query"]').value = 'narrator';
     const finding = win.commands.length;
     find.requestSubmit(); await settle();
-    assert(JSON.stringify(sent(finding, 'studyVoiceFind')[0]) === JSON.stringify({type: 'studyVoiceFind', query: 'narrator', language: 'en'}), 'not found');
+    assert(JSON.stringify(sent(finding, 'studyVoiceFind')[0]) === JSON.stringify({type: 'studyVoiceFind', query: 'narrator', language: 'en', mine: false}), 'not found');
     await win.pushEvents([{type: 'studyVoices', query: 'narrator', total: 2, error: null, voices: [
       {id: 'v1', title: 'Warm Narrator', description: '', languages: ['en'], sample: true, sampleText: '', author: 'fish', uses: 10},
       {id: 'v2', title: 'Bright Host', description: '', languages: ['en'], sample: false, sampleText: '', author: '', uses: 5}]}]); await settle();
@@ -954,6 +988,41 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(ws().querySelector('[data-study-sound]') === sound, 'the sound was drawn over');
     ws().querySelector('[data-study-back]').click(); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('The voices and Fish\'s key are set from the Audio overview tile, a voice found by its link or among your own', async () => {
+    const studio = ws().querySelector('[data-study-studio-body]');
+    studio.querySelector('[data-study-tile="audio"]').click(); await settle();
+    const before = win.commands.length;
+    studio.querySelector('[data-study-voices]').click(); await settle();
+    assert(sent(before, 'studyVoiceKey').length === 1, 'the key was not looked for');
+    const view = () => ws().querySelector('.st-voices-view');
+    assert(view(), 'the voices are not shown on their own');
+    await win.pushEvents([{type: 'studyVoiceState', voice: {key: false, consented: '2026-10-06', hosts: []}}]); await settle();
+    assert(view().textContent.includes('~/.zshrc') && view().querySelector('[data-study-voice-key]'), 'where the key goes is not said');
+    const host = (/** @type {string} */ id, /** @type {string} */ title) => ({id, title});
+    await win.pushEvents([{type: 'studyVoiceState', voice: {key: true, consented: '2026-10-06', hosts: [host('v1', 'Warm Narrator'), host('v2', 'Bright Host')]}}]); await settle();
+    assert(view().textContent.includes('key is set') && view().textContent.includes('Warm Narrator') && view().textContent.includes('Bright Host'), `the voices are not said: ${view().textContent}`);
+    view().querySelector('[data-study-voice-change]').click(); await settle();
+    const find = view().querySelector('[data-study-voice-find]');
+    const link = 'https://fish.audio/m/802e3bc2b27e49c2995d23ef70e6ac89';
+    find.querySelector('[name="query"]').value = link;
+    find.querySelector('[name="mine"]').checked = true;
+    const finding = win.commands.length;
+    find.requestSubmit(); await settle();
+    const asked = sent(finding, 'studyVoiceFind')[0];
+    assert(asked?.query === link && asked.mine === true, `not found by its link among your own: ${JSON.stringify(asked)}`);
+    const voice = (/** @type {string} */ id, /** @type {string} */ title) => ({id, title, description: '', languages: ['en'], sample: false, sampleText: '', author: 'me', uses: 1});
+    await win.pushEvents([{type: 'studyVoices', query: link, total: 2, error: null, voices: [voice('802e3bc2b27e49c2995d23ef70e6ac89', 'My lecture voice'), voice('v2', 'Bright Host')]}]); await settle();
+    view().querySelector('[data-study-voice-pick="802e3bc2b27e49c2995d23ef70e6ac89"]').click(); await settle();
+    view().querySelector('[data-study-voice-pick="v2"]').click(); await settle();
+    const use = win.commands.length;
+    view().querySelector('[data-study-voice-use]').click(); await settle();
+    const setup = sent(use, 'studyVoiceSetup')[0];
+    assert(setup?.hosts.map((/** @type {any} */ h) => h.title).join() === 'My lecture voice,Bright Host', `not chosen: ${JSON.stringify(setup)}`);
+    view().querySelector('[data-study-back]').click(); await settle();
+    assert(!view(), 'Back did not leave the voices');
+    studio.querySelector('[data-study-make-cancel]')?.click(); await settle();
   });
 
   await test('A deck shows a slide at a time with its notes, moves with the keys, revises a slide, presents, and goes out for PowerPoint', async () => {

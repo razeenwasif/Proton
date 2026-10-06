@@ -153,7 +153,8 @@ sources — a vault, a courses folder, an iCloud archive — a tutor on Claude C
 Codex, Gemini or Antigravity that answers from them and cites them, and a
 studio that makes study guides, flashcards, quizzes and exams of them. So far:
 notebooks, each a folder in `~/Github/Notebooks`; sources chosen from your
-folders in a picker — browsed, searched by name and by word, with what is left
+folders in a picker — browsed, searched by name and by word, a folder's files
+ticked all at once (its subfolders' too, if you like), with what is left
 out and why, or found for you as what is like the notebook, or found on the
 web by Discover or Deep Research, which writes a report of what it read — and read once,
 their words kept in the notebook: notes, PDFs, notebooks, LaTeX, captions, Word
@@ -180,8 +181,9 @@ the clock with every answer saved as you write it, and printed; and your
 progress by learning objective, with a diagnostic quiz, a lesson on any gap
 with the tutor as a guide, and a Learning Overview that takes the course topic by
 topic; and audio overviews — a deep dive, a brief, a critique, a debate or a
-lecture — spoken by Fish Audio in voices you choose, with a transcript that
-follows along; slide decks with speaker notes, revised a slide at a time,
+lecture — spoken by Fish Audio in voices you choose from its library, your own
+clones, or one by its link (with `FISH_API_KEY` exported in your shell, which
+Proton reads and never keeps), with a transcript that follows along; slide decks with speaker notes, revised a slide at a time,
 presented, and written out for PowerPoint; and infographics and mind maps saved
 as pictures. Your folders are named in your own settings,
 `{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,

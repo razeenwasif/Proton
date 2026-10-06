@@ -19,6 +19,7 @@ import { escapeHtml as esc, icon } from "./html.js";
  *   done: number, total: number, paused: boolean, documents: number, passages: number}} KbEvent */
 /** @typedef {{root: string, dir: string, folders: Folder[], files: File[], left: Left[]}} FolderEvent */
 /** @typedef {{query: string, files: File[], passages: Hit[], discovered: boolean}} ResultsEvent */
+/** @typedef {{root: string, dir: string, files: File[], total: number}} AllEvent */
 
 /** A size, as a person reads one. @param {number} bytes */
 export function size(bytes) {
@@ -55,7 +56,8 @@ export function createPicker(host) {
   host.ws.append(box);
 
   /** @type {{kb: KbEvent | null, folder: FolderEvent | null, results: ResultsEvent | null, query: string, root: string, dir: string,
-   *   chosen: Map<string, File>, confirming: boolean, editing: boolean, asked: number, open: boolean, discovering: boolean}} */
+   *   chosen: Map<string, File>, confirming: boolean, editing: boolean, asked: number, open: boolean, discovering: boolean,
+   *   deep: string | null, deepSaid: string | null}} */
   const state = {
     kb: null, folder: null, results: null, query: "", root: "", dir: "",
     // What has been ticked to add, by labelled path, kept across folders.
@@ -66,6 +68,9 @@ export function createPicker(host) {
     asked: 0, open: false,
     // Looking for what is like the open notebook.
     discovering: false,
+    // A folder whose every file, subfolders too, is being ticked; and what
+    // came of the last.
+    deep: null, deepSaid: null,
   };
 
   const browse = (/** @type {string} */ root, /** @type {string} */ dir) => {
@@ -145,7 +150,20 @@ export function createPicker(host) {
         `<span class="st-faint">${esc(count(f.readable, "to read", "to read"))}${esc(cloud)}</span></button>` +
         `<button class="st-hide" data-study-leave="${esc(`${folder.root}/${dir}/`)}" title="Leave this folder out of the knowledge base">Leave out</button></div>`;
     }).join("");
-    const files = folder.files.map(fileHtml).join("");
+    // Every file here that can be added, ticked or unticked at once; and
+    // every one in the subfolders too.
+    const addable = folder.files.filter((f) => f.readable && !f.source);
+    const all = addable.length > 0 && addable.every((f) => state.chosen.has(f.path));
+    const some = addable.some((f) => state.chosen.has(f.path));
+    const below = folder.folders.some((f) => f.files > 0);
+    const where = folder.dir ? `${folder.root}/${folder.dir}` : folder.root;
+    const deep = state.deep === where
+      ? `<span class="st-faint"><span class="lab-spin"></span> Ticking every file below…</span>`
+      : below ? `<button class="st-link" data-study-choose-deep="${esc(folder.dir)}" title="Every file in this folder and the folders inside it that can be added">${addable.length ? "With its subfolders" : "Select everything in its subfolders"}</button>` : "";
+    const bar = addable.length || below
+      ? `<div class="st-select-bar">${addable.length ? `<label><input type="checkbox" data-study-choose-all${all ? " checked" : ""}${some && !all ? " data-some" : ""}> Select all ${esc(count(addable.length, "file", "files"))} here</label>` : ""}` +
+        `${deep}${state.deepSaid ? `<span class="st-faint">${esc(state.deepSaid)}</span>` : ""}</div>` : "";
+    const files = bar + folder.files.map(fileHtml).join("");
     const left = folder.left.map((l) =>
       `<div class="st-left" title="${esc(l.why)}">${icon(l.dir ? "folder" : "file")}<span class="st-file-name">${esc(l.name)}</span>` +
       `<span class="st-faint">${esc(l.why)}</span>` +
@@ -220,6 +238,9 @@ export function createPicker(host) {
     body.innerHTML = editing ? rootsFormHtml() : `<nav class="st-roots">${rootsHtml()}</nav><section class="st-listing">${listingHtml()}</section>`;
     const listing = body.querySelector(".st-listing");
     if (listing) listing.scrollTop = keep;
+    // Some of a folder's files ticked: its "Select all" says so.
+    const partly = /** @type {HTMLInputElement | null} */ (body.querySelector("[data-study-choose-all][data-some]"));
+    if (partly) partly.indeterminate = true;
     /** @type {HTMLElement} */ (box.querySelector("[data-study-progress]")).innerHTML = progressHtml();
     /** @type {HTMLElement} */ (box.querySelector("[data-study-foot]")).innerHTML = editing ? "" : footHtml();
   }
@@ -248,7 +269,18 @@ export function createPicker(host) {
       return render();
     }
     const dir = at("[data-study-dir]");
-    if (dir) return browse(state.root, dir.dataset.studyDir ?? "");
+    if (dir) {
+      state.deepSaid = null;
+      return browse(state.root, dir.dataset.studyDir ?? "");
+    }
+    const deep = at("[data-study-choose-deep]");
+    if (deep && state.folder) {
+      const sub = deep.dataset.studyChooseDeep ?? "";
+      state.deep = sub ? `${state.folder.root}/${sub}` : state.folder.root;
+      state.deepSaid = null;
+      host.dispatch({ type: "studyKbAll", root: state.folder.root, dir: sub });
+      return render();
+    }
     const leave = at("[data-study-leave]");
     if (leave) {
       host.dispatch({ type: "studyExclude", rule: leave.dataset.studyLeave, on: true });
@@ -294,6 +326,14 @@ export function createPicker(host) {
 
   box.addEventListener("change", (e) => {
     const input = /** @type {HTMLInputElement} */ (e.target);
+    if (input.matches("[data-study-choose-all]") && state.folder) {
+      for (const f of state.folder.files.filter((x) => x.readable && !x.source)) {
+        if (input.checked) state.chosen.set(f.path, f);
+        else state.chosen.delete(f.path);
+      }
+      state.confirming = false;
+      return render();
+    }
     const path = input.dataset.studyChoose;
     if (path === undefined) return;
     const file = [...(state.folder?.files ?? []), ...(state.results?.files ?? [])].find((f) => f.path === path)
@@ -360,6 +400,19 @@ export function createPicker(host) {
     render();
   }
 
+  /** Every file under a folder, ticked. @param {AllEvent} event */
+  function all(event) {
+    const where = event.dir ? `${event.root}/${event.dir}` : event.root;
+    if (state.deep !== where) return;
+    state.deep = null;
+    for (const f of event.files) state.chosen.set(f.path, f);
+    state.confirming = false;
+    state.deepSaid = event.total > event.files.length
+      ? `The first ${event.files.length.toLocaleString()} of ${event.total.toLocaleString()} ticked.`
+      : event.total ? `${count(event.total, "file", "files")} ticked, subfolders too.` : "Nothing more in its subfolders can be added.";
+    render();
+  }
+
   /** @param {ResultsEvent} event */
   function results(event) {
     state.results = event;
@@ -393,5 +446,5 @@ export function createPicker(host) {
     render();
   }
 
-  return { kb, folder, results, open, close, isOpen: () => state.open };
+  return { kb, folder, results, all, open, close, isOpen: () => state.open };
 }

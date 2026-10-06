@@ -59,6 +59,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyKbRefresh
             | Command::StudyKbBrowse { .. }
             | Command::StudyKbSearch { .. }
+            | Command::StudyKbAll { .. }
             | Command::StudyDiscover { .. }
             | Command::StudyNew { .. }
             | Command::StudyOpen { .. }
@@ -527,6 +528,7 @@ impl Study {
             }
             Command::StudyKbBrowse { root, dir } => vec![self.kb.folder(&root, &dir, &self.sources_by_path())],
             Command::StudyKbSearch { query } => vec![self.kb.search(&query, &self.sources_by_path())],
+            Command::StudyKbAll { root, dir } => vec![self.kb.all(&root, &dir, &self.sources_by_path())],
             Command::StudyDiscover { about } => self.discover(&about),
             Command::StudyNew { title } => self.create(&title),
             Command::StudyOpen { slug } => self.open(&slug),
@@ -602,7 +604,7 @@ impl Study {
             Command::StudyExamExport { quiz, html, scheme } => self.export_exam(&quiz, html, scheme),
             Command::StudyProgress => self.progress(),
             Command::StudyVoiceSetup { consent, hosts } => self.voice_setup(consent, hosts),
-            Command::StudyVoiceFind { query, language } => self.find_voices(&query, &language),
+            Command::StudyVoiceFind { query, language, mine } => self.find_voices(&query, &language, mine),
             Command::StudyVoiceSample { id } => self.fetch_sample(&id),
             Command::StudyVoiceKey => {
                 self.voice.forget();

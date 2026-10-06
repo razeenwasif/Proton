@@ -4333,6 +4333,10 @@ button.st-badge:hover { color: var(--cc-text); border-color: var(--cc-accent); }
 .st-left .st-file-name { flex: 0 1 auto; }
 .st-left .st-faint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-left .st-link { flex: 0 0 auto; font: var(--z-2xs)/1.3 var(--cc-font); }
+/* Every file of a folder, ticked at once. */
+.st-select-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 8px 8px; border-bottom: 1px solid var(--cc-line); margin-bottom: 4px;
+  font: var(--z-xs)/1.3 var(--cc-font); color: var(--cc-text); }
+.st-select-bar label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .st-found { padding: 0 0 6px; }
 .st-found > p { margin: -2px 8px 0 54px; font: var(--z-2xs)/1.55 var(--cc-font); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .st-hit { padding: 6px 8px 8px; border-radius: 6px; }

@@ -231,12 +231,30 @@ pub struct HeardWord {
     pub end: f64,
 }
 
-/// Voices asked for: by name, in a language.
+/// Voices asked for: by name, in a language — or only the person's own.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VoiceQuery {
     pub title: String,
     pub language: String,
     pub page: u32,
+    /// Only the voices the key's account made: its clones.
+    pub mine: bool,
+}
+
+/// A voice's id, if `text` is one, or a fish.audio address of one: what a
+/// voice's page shows, to be used as it is.
+pub fn voice_id(text: &str) -> Option<String> {
+    let text = text.trim();
+    let is_id = |s: &str| (20..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit());
+    if is_id(text) {
+        return Some(text.to_ascii_lowercase());
+    }
+    let rest = text.strip_prefix("https://").or_else(|| text.strip_prefix("http://"))?;
+    let (host, path) = rest.split_once('/')?;
+    if !(host == "fish.audio" || host.ends_with(".fish.audio")) {
+        return None;
+    }
+    path.split(['/', '?', '#']).find(|part| is_id(part)).map(str::to_ascii_lowercase)
 }
 
 /// Fish Audio, with a key.
@@ -370,6 +388,9 @@ impl Fish {
         if !query.language.trim().is_empty() {
             url.push_str(&format!("&language={}", encode(query.language.trim())));
         }
+        if query.mine {
+            url.push_str("&self=true");
+        }
         let request = Request { method: Method::Get, url, headers: self.authorised(Vec::new()), body: Vec::new(), timeout: Duration::from_secs(30), limit: API_LIMIT };
         let response = self.send(&request, cancel)?;
         let value: Value = serde_json::from_reader(response.body).map_err(|e| FishError::Failed(format!("Fish Audio's list of voices did not read: {e}")))?;
@@ -393,6 +414,15 @@ impl Fish {
         let response = self.send(&request, cancel)?;
         let value: Value = serde_json::from_reader(response.body).map_err(|e| FishError::Failed(format!("Fish Audio's transcript did not read: {e}")))?;
         Ok(heard(&value))
+    }
+
+    /// One voice, by its id: `GET /model/{id}`.
+    pub fn voice(&self, id: &str, cancel: &AtomicBool) -> Result<Voice, FishError> {
+        let id = voice_id(id).ok_or_else(|| FishError::Failed(format!("{id} is not a voice's id")))?;
+        let request = Request { method: Method::Get, url: format!("{}/model/{id}", self.base), headers: self.authorised(Vec::new()), body: Vec::new(), timeout: Duration::from_secs(30), limit: API_LIMIT };
+        let response = self.send(&request, cancel)?;
+        let value: Value = serde_json::from_reader(response.body).map_err(|e| FishError::Failed(format!("Fish Audio's voice did not read: {e}")))?;
+        voice(&value).ok_or_else(|| FishError::Failed("Fish Audio has no voice by that id.".into()))
     }
 
     /// A voice's sample, fetched to `out`: from Fish's own servers only.
@@ -633,6 +663,28 @@ mod tests {
     }
 
     #[test]
+    fn a_voice_is_found_by_its_id_or_its_page_and_ones_own_are_listed() {
+        let id = "802e3bc2b27e49c2995d23ef70e6ac89";
+        assert_eq!(voice_id(id).as_deref(), Some(id));
+        assert_eq!(voice_id(&format!("https://fish.audio/m/{id}/")).as_deref(), Some(id));
+        assert_eq!(voice_id(&format!("https://fish.audio/app/m/{}?x=1", id.to_uppercase())).as_deref(), Some(id));
+        for not in ["narrator", "https://example.com/m/802e3bc2b27e49c2995d23ef70e6ac89", "802e3bc2", "../../etc/passwd"] {
+            assert_eq!(voice_id(not), None, "{not}");
+        }
+        let one = format!(r#"{{"_id": "{id}", "title": "My clone", "languages": ["en"], "samples": [], "author": {{"nickname": "me"}}, "task_count": 3}}"#);
+        let script = Arc::new(Script::default().answer(200, &[], one.as_bytes()).answer(200, &[], br#"{"total": 0, "items": []}"#));
+        let fish = fish(Arc::clone(&script));
+        let voice = fish.voice(&format!("https://fish.audio/m/{id}"), &AtomicBool::new(false)).unwrap();
+        assert_eq!((voice.id.as_str(), voice.title.as_str()), (id, "My clone"));
+        fish.voices(&VoiceQuery { mine: true, page: 1, ..VoiceQuery::default() }, &AtomicBool::new(false)).unwrap();
+        let asked = script.asked.lock().unwrap();
+        assert!(asked[0].url.ends_with(&format!("/model/{id}")), "{}", asked[0].url);
+        assert!(asked[1].url.contains("&self=true"), "{}", asked[1].url);
+        drop(asked);
+        assert!(fish.voice("narrator", &AtomicBool::new(false)).is_err(), "not an id, not asked");
+    }
+
+    #[test]
     fn voices_are_listed_with_their_samples_and_a_sample_comes_only_from_fish() {
         let list = br#"{"total": 2, "items": [
             {"_id": "v1", "title": "Energetic Male", "description": "A podcast voice.", "languages": ["en"], "task_count": 9000,
@@ -641,7 +693,7 @@ mod tests {
         ]}"#;
         let script = Arc::new(Script::default().answer(200, &[], list).answer(200, &[], b"sample-bytes"));
         let fish = fish(Arc::clone(&script));
-        let (total, voices) = fish.voices(&VoiceQuery { title: "male voice".into(), language: "en".into(), page: 1 }, &AtomicBool::new(false)).unwrap();
+        let (total, voices) = fish.voices(&VoiceQuery { title: "male voice".into(), language: "en".into(), page: 1, mine: false }, &AtomicBool::new(false)).unwrap();
         assert_eq!((total, voices.len()), (2, 2));
         assert_eq!((voices[0].id.as_str(), voices[0].uses, voices[0].sample_text.as_str()), ("v1", 9000, "Hello there."));
         assert_eq!(voices[1].sample, None);

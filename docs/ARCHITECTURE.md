@@ -1073,7 +1073,11 @@ with its reason. A shelf in catalog mode then reads what the catalogue says it
 can: Markdown, text, PDFs, Jupyter notebooks read as Markdown, LaTeX cut at its
 sections, CSV by rows, and captions cited by time (`@ 3:12-3:40`). Its
 citations name the root (`Courses/COMP3670/Exam_2020.pdf p. 3`). Nothing is
-walked until Notebook is first opened.
+walked until Notebook is first opened. The picker ticks a folder's files at once,
+or every file below it, which the core finds in the catalogue (`StudyKbAll`, a
+thousand at most) less what cannot be read or is a source already; a file in
+iCloud among them is added and left there, as one ticked by hand is, until the
+person asks for it to be downloaded.
 
 **iCloud** keeps an offloaded file's name and size on the disk and its bytes on
 Apple's servers; reading one downloads it. `proton-library::dataless` reads the
@@ -1257,9 +1261,12 @@ characters or eight turns at a time, each piece streamed through a part file;
 ffmpeg joins the pieces, and each turn's place in the sound is its share of its
 piece's length. Nothing is sent to Fish until the person has agreed to its free
 tier's terms — what it is sent may be used to improve its models — and chosen
-the voices, from Fish's library, listened to first; its key is read from
-`FISH_API_KEY` in Proton's environment or the login shell's, held in memory
-only, printed nowhere, and the page is told only whether it was found. A piece
+the voices, listened to first: from Fish's library, from the person's own
+clones (`GET /model?self=true`), or by a voice's id or fish.audio address
+(`GET /model/{id}`), in a Voices view the Audio overview's form links to. Its
+key is read from `FISH_API_KEY` in Proton's environment or the login shell's,
+held in memory only, printed nowhere, and read again when the person says it
+is set; the page is told only whether it was found. A piece
 spoken is kept until the whole is joined, so a voicing stopped part way goes on
 where it stopped rather than paying twice. The sound is kept out of Git, in
 `.notebook/audio/A001.mp3`, and played through `study://localhost/` — a scheme

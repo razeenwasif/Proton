@@ -398,6 +398,11 @@ export function createStudyPreview(deliver) {
           return [folderEvent(command.root, command.dir)];
         case "studyDiscover":
           return [discoverEvent()];
+        case "studyKbAll": {
+          const prefix = command.dir ? `${command.root}/${command.dir}/` : `${command.root}/`;
+          const files = FILES.filter((f) => f.path.startsWith(prefix) && f.readable).map(withSource).filter((f) => !f.source);
+          return [{ type: "studyKbAll", root: command.root, dir: command.dir, files, total: files.length }];
+        }
         case "studyKbSearch":
           return [resultsEvent(command.query)];
         case "studyNew": {
@@ -674,13 +679,18 @@ export function createStudyPreview(deliver) {
             audios.A002.why = voice.consented ? "Waiting for you to choose two voices." : audios.A002.why;
           }
           return [audioEvent("A002"), { type: "studyVoiceState", voice }];
-        case "studyVoiceFind":
-          setTimeout(() => deliver({ type: "studyVoices", query: command.query, total: 3, error: null, voices: [
+        case "studyVoiceFind": {
+          // One's own clones, or the one a voice's id or fish.audio page names.
+          const own = { id: "802e3bc2b27e49c2995d23ef70e6ac89", title: "My lecture voice", description: "A clone of my own voice.", languages: ["en"], sample: true, sampleText: "Hello.", author: "me", uses: 4 };
+          const byId = /(^|fish\.audio\/.*)[0-9a-f]{20,40}/i.test(command.query);
+          const voices = command.mine || byId ? [own] : [
             { id: "v1", title: "Warm Narrator", description: "Calm and clear, for long listening.", languages: ["en"], sample: true, sampleText: "Hello.", author: "fish", uses: 182000 },
             { id: "v2", title: "Bright Host", description: "An upbeat podcast voice.", languages: ["en"], sample: true, sampleText: "Hi!", author: "studio", uses: 96000 },
             { id: "v3", title: "British Lecturer", description: "", languages: ["en"], sample: false, sampleText: "", author: "", uses: 1200 },
-          ] }), 400);
+          ];
+          setTimeout(() => deliver({ type: "studyVoices", query: command.query, total: voices.length, error: null, voices }), 400);
           return [];
+        }
         case "studyVoiceSample":
           setTimeout(() => deliver({ type: "studyVoiceSample", id: command.id, url: silence(2), error: null }), 400);
           return [];

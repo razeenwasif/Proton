@@ -4898,6 +4898,10 @@ function renderEvent(event) {
       study?.artifacts(event);
       break;
 
+    case "studyKbAll":
+      study?.kbAll(event);
+      break;
+
     case "studySource":
       study?.source(event);
       break;

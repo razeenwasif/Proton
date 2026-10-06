@@ -45,13 +45,13 @@ const clock = (s) => {
 
 /** @param {{dispatch: (command: any) => unknown, readOnly: () => boolean}} host */
 export function createAudio(host) {
-  /** @type {{audio: AudioEvent | null, voice: VoiceState | null, voices: Voice[], query: string, finding: boolean, error: string | null,
+  /** @type {{audio: AudioEvent | null, voice: VoiceState | null, voices: Voice[], query: string, mine: boolean, finding: boolean, error: string | null,
    *   choosing: boolean, samples: Map<string, string>, picked: Host[]}} */
   const state = {
     audio: null, voice: null,
-    // The voice browser: what was found, for what; a sample's sound by voice;
-    // the voices being chosen.
-    voices: [], query: "", finding: false, error: null, choosing: false, samples: new Map(), picked: [],
+    // The voice browser: what was found, for what — and whether only the
+    // account's own; a sample's sound by voice; the voices being chosen.
+    voices: [], query: "", mine: false, finding: false, error: null, choosing: false, samples: new Map(), picked: [],
   };
 
   /** Who a speaker is: their voice's name, or Host A, Host B. @param {number} speaker */
@@ -86,10 +86,44 @@ export function createAudio(host) {
     return `<div class="st-card st-voice-chooser"><h2>${icon("mic")} ${speakers === 1 ? "A voice" : "Two voices"}</h2>
         <p>${speakers === 1 ? "The voice that teaches." : "The two hosts' voices, the first speaking first."} Search Fish's library, listen, and choose.</p>
         ${picked ? `<div class="st-picked">${picked}</div>` : ""}
-        <form class="st-voice-find" data-study-voice-find novalidate><input name="query" value="${esc(state.query)}" placeholder="A voice: “narrator”, “podcast”, “British”" autocomplete="off">
-          <input name="language" value="en" aria-label="Language" size="4"><button type="submit" class="cc-quiet">Find</button></form>
+        <form class="st-voice-find" data-study-voice-find novalidate><input name="query" value="${esc(state.query)}" placeholder="A voice — “narrator”, “British” — or its id or fish.audio link" autocomplete="off">
+          <input name="language" value="en" aria-label="Language" size="4">
+          <label class="st-mine" title="Only the voices your Fish account made: your clones"><input type="checkbox" name="mine"${state.mine ? " checked" : ""}> Mine</label>
+          <button type="submit" class="cc-quiet">Find</button></form>
         <div class="st-voices" data-study-voice-results>${resultsHtml(speakers)}</div>
         ${state.picked.length >= speakers && !host.readOnly() ? `<div class="rs-actions"><button class="cc-primary" data-study-voice-use>Use ${speakers === 1 ? "this voice" : "these voices"}</button></div>` : ""}</div>`;
+  }
+
+  /** The key, Fish's terms and the voices, on their own: what audio
+   *  overviews are spoken with, set before any is made. */
+  function settingsHtml() {
+    const voice = state.voice;
+    const ro = host.readOnly();
+    const head = `<div class="st-reader-head"><button class="cc-quiet" data-study-back>← Back</button>` +
+      `<div><h1>Voices</h1><span class="st-faint">What audio overviews are spoken with: Fish Audio's s2.1-pro-free model, in voices you choose</span></div></div>`;
+    if (!voice) return `<div class="st-reader st-voices-view">${head}<p class="st-faint"><span class="lab-spin"></span> Looking for Fish's key…</p></div>`;
+    const key = voice.key
+      ? `<div class="st-card"><h2>${icon("check")} Fish Audio's key is set</h2><p>Proton found <code>FISH_API_KEY</code> in your shell. It holds it in memory only, and sends it to Fish alone.</p></div>`
+      : `<div class="st-card"><h2>${icon("d-warning")} Fish Audio's key is not set</h2><p>Make a key at fish.audio/app/api-keys, add <code>export FISH_API_KEY=…</code> to your shell's
+          profile (<code>~/.zshrc</code>), and look again — Proton reads it from your shell each time, and never stores it.</p>
+          ${ro ? "" : `<div class="rs-actions"><button class="cc-primary" data-study-voice-key>Look again</button></div>`}</div>`;
+    const hosts = voice.hosts.length
+      ? `<p>Spoken by ${voice.hosts.map((h, i) => `<b>${esc(h.title)}</b>${i === 0 ? " (who also teaches a lecture)" : ""}`).join(" and ")}.</p>`
+      : `<p class="st-faint">No voices chosen yet.</p>`;
+    const chosen = `<div class="st-card"><h2>${icon("mic")} The voices</h2>${hosts}` +
+      (ro || !voice.key || !voice.consented || state.choosing ? "" : `<div class="rs-actions"><button class="cc-quiet" data-study-voice-change>${voice.hosts.length ? "Change the voices" : "Choose the voices"}</button></div>`) + `</div>`;
+    const body = !voice.consented ? consentHtml() : voice.key && (state.choosing || !voice.hosts.length) ? chooserHtml(2) : "";
+    return `<div class="st-reader st-voices-view">${head}${key}${chosen}${body}</div>`;
+  }
+
+  /** The voices, on their own, drawn; a search being typed is kept. @param {HTMLElement} stage */
+  function renderSettings(stage) {
+    const results = stage.querySelector(".st-voices-view [data-study-voice-results]");
+    if (results && stage.querySelector("[data-study-voice-find] input:focus")) {
+      results.innerHTML = resultsHtml(2);
+      return;
+    }
+    stage.innerHTML = settingsHtml();
   }
 
   /** What stands between the script and its sound. @param {AudioEvent} a */
@@ -202,8 +236,11 @@ export function createAudio(host) {
   /** A click in the overview; `true` if it was the overview's. @param {HTMLElement} t @param {HTMLElement} stage @param {() => void} redraw */
   function click(t, stage, redraw) {
     const a = state.audio;
-    if (!a || !t.closest(".st-audio-view")) return false;
+    const settings = Boolean(t.closest(".st-voices-view"));
+    if (!settings && (!a || !t.closest(".st-audio-view"))) return false;
     const at = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
+    // The voices, on their own: only what sets them.
+    if (settings || !a) return voiceClick(at, redraw);
     if (at("[data-study-play]")) {
       const sound = /** @type {HTMLAudioElement | null} */ (stage.querySelector("[data-study-sound]"));
       if (sound) {
@@ -223,8 +260,22 @@ export function createAudio(host) {
       seek(stage, a.timings[Number(line.dataset.studySegment)]?.[0] ?? 0);
       return true;
     }
+    if (at("[data-study-voice-go]")) {
+      host.dispatch({ type: "studyAudioVoice", id: a.made.id });
+      return true;
+    }
+    if (at("[data-study-voice-stop]")) {
+      host.dispatch({ type: "studyCancelJob", id: a.made.id });
+      return true;
+    }
+    return voiceClick(at, redraw);
+  }
+
+  /** A click on what sets the voices: Fish's terms, its key, the voices
+   *  found and chosen. @param {(sel: string) => HTMLElement | null} at @param {() => void} redraw */
+  function voiceClick(at, redraw) {
     if (at("[data-study-voice-agree]")) {
-      host.dispatch({ type: "studyVoiceSetup", consent: true, hosts: a.voice.hosts });
+      host.dispatch({ type: "studyVoiceSetup", consent: true, hosts: state.voice?.hosts ?? [] });
       return true;
     }
     if (at("[data-study-voice-key]")) {
@@ -235,14 +286,6 @@ export function createAudio(host) {
       state.choosing = true;
       state.picked = [];
       redraw();
-      return true;
-    }
-    if (at("[data-study-voice-go]")) {
-      host.dispatch({ type: "studyAudioVoice", id: a.made.id });
-      return true;
-    }
-    if (at("[data-study-voice-stop]")) {
-      host.dispatch({ type: "studyCancelJob", id: a.made.id });
       return true;
     }
     const listen = at("[data-study-voice-listen]");
@@ -292,14 +335,15 @@ export function createAudio(host) {
     if (!form.matches("[data-study-voice-find]")) return false;
     const data = new FormData(form);
     state.query = String(data.get("query") ?? "").trim();
+    state.mine = data.get("mine") === "on";
     state.finding = true;
     state.error = null;
-    host.dispatch({ type: "studyVoiceFind", query: state.query, language: String(data.get("language") ?? "").trim() });
+    host.dispatch({ type: "studyVoiceFind", query: state.query, language: String(data.get("language") ?? "").trim(), mine: state.mine });
     return true;
   }
 
   return {
-    render, click, change, submit,
+    render, renderSettings, click, change, submit,
     /** @param {AudioEvent} event */
     audio(event) {
       state.audio = event;
@@ -310,6 +354,12 @@ export function createAudio(host) {
     voiceState(voice) {
       state.voice = voice;
       if (state.audio) state.audio = { ...state.audio, voice };
+      if (voice.hosts.length && !state.choosing) state.picked = [...voice.hosts];
+    },
+    /** The voices are being looked at on their own, from the start. */
+    settings() {
+      state.choosing = false;
+      state.error = null;
     },
     /** @param {{query: string, voices: Voice[], total: number, error: string | null}} event */
     voices(event) {

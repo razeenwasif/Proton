@@ -344,6 +344,42 @@ fn a_word_document_a_powerpoint_and_a_picture_are_read_when_they_are_made_source
 }
 
 #[test]
+fn every_file_under_a_folder_can_be_ticked_at_once_less_what_is_left_out_or_a_source_already() {
+    let scratch = Scratch::new("all");
+    let settings = scratch.knowledge_base();
+    scratch.write("kb/Courses/COMP3670/Week 1/notes.md", "# Week 1\nbreadth first search\n");
+    scratch.write("kb/Courses/COMP3670/Week 2/lab.ipynb", r#"{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}"#);
+    std::fs::write(scratch.root.join("kb/Courses/COMP3670/Week 2/archive.zip"), b"PK").unwrap();
+    let mut session = session(&scratch, &settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "All".into() });
+    let all = |session: &mut Session, root: &str, dir: &str| {
+        let events = session.apply(Command::StudyKbAll { root: root.into(), dir: dir.into() });
+        let Some(Event::StudyKbAll { files, total, .. }) = events.first() else { panic!("{events:?}") };
+        assert_eq!(*total, files.len());
+        let mut paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+        paths.sort();
+        paths
+    };
+    // Subfolders too; a vendor folder and what cannot be read, left out; a
+    // file in iCloud, in.
+    assert_eq!(all(&mut session, "Courses", "COMP3670"), [
+        "Courses/COMP3670/Exam_2020.pdf",
+        "Courses/COMP3670/Week 1/notes.md",
+        "Courses/COMP3670/Week 2/lab.ipynb",
+        "Courses/COMP3670/cloud.md",
+    ]);
+    assert_eq!(all(&mut session, "Vault", ""), ["Vault/notes.md"], "a folder left out by a rule stays out");
+    // What is a source already is not ticked again.
+    session.apply(Command::StudyAdd { paths: vec!["Courses/COMP3670/Exam_2020.pdf".into()] });
+    assert!(!all(&mut session, "Courses", "COMP3670").contains(&"Courses/COMP3670/Exam_2020.pdf".to_string()));
+    assert_eq!(all(&mut session, "Courses", "COMP3670/Week 1"), ["Courses/COMP3670/Week 1/notes.md"]);
+    session.shutdown();
+}
+
+#[test]
 fn discover_finds_what_in_the_knowledge_base_is_like_the_notebook_and_not_in_it_yet() {
     let scratch = Scratch::new("discover");
     let settings = scratch.knowledge_base();
@@ -1732,12 +1768,18 @@ mod voices {
                 author: "fish".into(),
                 uses: 10,
             };
+            if query.mine {
+                return Ok((1, vec![voice("802e3bc2b27e49c2995d23ef70e6ac89", "My own clone")]));
+            }
             assert_eq!(query.language, "en");
             Ok((2, vec![voice("v1", "Warm Narrator"), voice("v2", "Bright Host")]))
         }
         fn sample(&self, _: &str, out: &Path, _: &AtomicBool) -> Result<u64, FishError> {
             std::fs::write(out, b"sample").unwrap();
             Ok(6)
+        }
+        fn voice(&self, id: &str, _: &AtomicBool) -> Result<Voice, FishError> {
+            Ok(Voice { id: id.into(), title: "My own clone".into(), description: String::new(), languages: vec!["en".into()], sample: None, sample_text: String::new(), author: "me".into(), uses: 0 })
         }
         /// Each piece says two words: which piece it is, a second apart.
         fn transcribe(&self, audio: &Path, _: &AtomicBool) -> Result<Heard, FishError> {
@@ -1973,7 +2015,7 @@ fn an_audio_overview_is_written_then_spoken_only_once_agreed_and_voiced_and_goes
     said.lock().unwrap().no_key = false;
 
     // Voices found, and a sample fetched to listen to.
-    session.apply(Command::StudyVoiceFind { query: "narrator".into(), language: "en".into() });
+    session.apply(Command::StudyVoiceFind { query: "narrator".into(), language: "en".into(), mine: false });
     let found = until(&mut session, |e| match e {
         Event::StudyVoices { voices, error: None, .. } => Some(voices.clone()),
         _ => None,
@@ -1986,6 +2028,22 @@ fn an_audio_overview_is_written_then_spoken_only_once_agreed_and_voiced_and_goes
     });
     assert_eq!(url, "_voices/v1.mp3");
     assert_eq!(proton_core::study::media::serve(None, Some(&scratch.root.join("voices")), "/_voices/v1.mp3", None).status, 200);
+
+    // A voice by its page's address: that voice, looked up by its id; and
+    // only one's own, asked for as such.
+    let id = "802e3bc2b27e49c2995d23ef70e6ac89";
+    session.apply(Command::StudyVoiceFind { query: format!("https://fish.audio/m/{id}"), language: "en".into(), mine: false });
+    let found = until(&mut session, |e| match e {
+        Event::StudyVoices { voices, error: None, .. } if voices.len() == 1 => Some(voices.clone()),
+        _ => None,
+    });
+    assert_eq!((found[0].id.as_str(), found[0].title.as_str()), (id, "My own clone"));
+    session.apply(Command::StudyVoiceFind { query: String::new(), language: String::new(), mine: true });
+    let found = until(&mut session, |e| match e {
+        Event::StudyVoices { voices, error: None, .. } => Some(voices.clone()),
+        _ => None,
+    });
+    assert_eq!(found.iter().map(|v| v.title.as_str()).collect::<Vec<_>>(), ["My own clone"], "only one's own");
     session.shutdown();
 }
 

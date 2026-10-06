@@ -19,6 +19,9 @@ use crate::bus::Event;
 /// How many files Discover suggests.
 const DISCOVERED: usize = 12;
 
+/// The most files a folder's every file, subfolders too, ticks at once.
+pub const ALL_AT_ONCE: usize = 1000;
+
 /// What the knowledge base last said, so it is said again only when it moved.
 #[derive(Debug, Clone, PartialEq)]
 struct Said {
@@ -224,6 +227,31 @@ impl Kb {
                 .collect();
         }
         out
+    }
+
+    /// Every file under a folder, its subfolders' too, that can be added and
+    /// is not a source yet: the first [`ALL_AT_ONCE`], and how many there are.
+    pub fn all(&self, root: &str, dir: &str, sources: &HashMap<String, String>) -> Event {
+        let dir = dir.trim_matches('/').to_string();
+        let mut files = Vec::new();
+        let mut total = 0;
+        if let Some((catalog, at)) = self.catalog().and_then(|c| Some((c, c.root_named(root)?))) {
+            let prefix = match dir.as_str() {
+                "" => String::new(),
+                dir => format!("{dir}/"),
+            };
+            for entry in catalog.entries().iter().filter(|e| e.root == at && e.rel.starts_with(&prefix)) {
+                let row = StudyKbFile::of(catalog, entry, sources.get(&catalog.labelled(entry)).cloned());
+                if !row.readable || row.source.is_some() {
+                    continue;
+                }
+                total += 1;
+                if files.len() < ALL_AT_ONCE {
+                    files.push(row);
+                }
+            }
+        }
+        Event::StudyKbAll { root: root.to_string(), dir, files, total }
     }
 
     /// A search: files by the words of their names, and passages by the

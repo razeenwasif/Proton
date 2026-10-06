@@ -37,7 +37,7 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
 /** @typedef {import("./bindings/StudyArtifactRow").StudyArtifactRow} ArtifactRow */
 /** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "progress"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
- *   | {kind: "artifact", source: SourceEvent, id: string, seq: number, file: string}
+ *   | {kind: "artifact", source: SourceEvent, id: string, seq: number, file: string} | {kind: "voices"}
  *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}
  *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent} | {kind: "audio"} | {kind: "slides"}
  *   | {kind: "graphic", graphic: import("./study-graphic.js").GraphicEvent}} Shown */
@@ -118,7 +118,7 @@ export function createStudy(host) {
       return shown.kind === "deck" || shown.kind === "review" ? cards.citations(shown.kind) : [];
     },
   });
-  const studio = createStudio({ box: els.studio, dispatch: host.dispatch, readOnly: () => readOnly(),
+  const studio = createStudio({ box: els.studio, dispatch: host.dispatch, readOnly: () => readOnly(), voices: () => openVoices(),
     pastPapers: () => (state.notebook?.sources ?? []).filter((s) => s.role === "pastPaper" && hasWords(s)).map((s) => ({ id: s.id, title: s.title })) });
   /** Ask the tutor, in the chat: a card explained, a question, how a quiz went. @param {string} text */
   const askTutor = (text) => {
@@ -635,6 +635,10 @@ export function createStudy(host) {
       sounds.render(els.stage);
       return;
     }
+    if (shown.kind === "voices") {
+      sounds.renderSettings(els.stage);
+      return;
+    }
     if (shown.kind === "slides") {
       decks.render(els.stage);
       return;
@@ -689,7 +693,7 @@ export function createStudy(host) {
     if (els.stage.contains(t) && cards.click(t, () => renderStage())) return;
     if (els.stage.contains(t) && quizzes.click(t, () => renderStage())) return;
     if (els.stage.contains(t) && state.shown.kind === "learning" && overviewClick(t, state.shown.learning)) return;
-    if (els.stage.contains(t) && state.shown.kind === "audio" && sounds.click(t, els.stage, () => { els.stage.innerHTML = ""; renderStage(); })) return;
+    if (els.stage.contains(t) && (state.shown.kind === "audio" || state.shown.kind === "voices") && sounds.click(t, els.stage, () => { els.stage.innerHTML = ""; renderStage(); })) return;
     if (els.stage.contains(t) && state.shown.kind === "slides" && decks.click(t, () => renderStage())) return;
     const picture = /** @type {HTMLElement | null} */ (t.closest("[data-study-picture]"));
     if (picture && els.stage.contains(picture)) {
@@ -1189,19 +1193,29 @@ export function createStudy(host) {
   /** Whether Fish's key is set, its terms agreed, the voices chosen. @param {{voice: import("./bindings/StudyVoiceState").StudyVoiceState}} event */
   function voiceStateEvent(event) {
     sounds.voiceState(event.voice);
-    if (state.shown.kind === "audio") renderStage();
+    if (state.shown.kind === "audio" || state.shown.kind === "voices") renderStage();
+  }
+
+  /** The voices audio overviews are spoken with, and Fish's key, on their
+   *  own: set before any overview is made. */
+  function openVoices() {
+    state.shown = { kind: "voices" };
+    sounds.settings();
+    els.stage.innerHTML = "";
+    render();
+    host.dispatch({ type: "studyVoiceKey" });
   }
 
   /** Voices found. @param {any} event */
   function voicesEvent(event) {
     sounds.voices(event);
-    if (state.shown.kind === "audio") renderStage();
+    if (state.shown.kind === "audio" || state.shown.kind === "voices") renderStage();
   }
 
   /** A voice's sample, to listen to. @param {any} event */
   function sampleEvent(event) {
     sounds.sample(event);
-    if (state.shown.kind === "audio") renderStage();
+    if (state.shown.kind === "audio" || state.shown.kind === "voices") renderStage();
   }
 
   /** A deck of slides: drawn again where it is shown, or opened when asked
@@ -1312,5 +1326,5 @@ export function createStudy(host) {
   return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
     deck: deckEvent, reviewing: reviewingEvent, quiz: quizEvent, progress: progressEvent, learning: learningEvent,
     audio: audioEvent, voiceState: voiceStateEvent, voices: voicesEvent, voiceSample: sampleEvent, slides: slidesEvent, graphic: graphicEvent,
-    kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open, artifacts: artifactsEvent };
+    kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, kbAll: picker.all, pick: picker.open, artifacts: artifactsEvent };
 }
