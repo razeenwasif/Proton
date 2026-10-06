@@ -178,7 +178,8 @@ export function createStudyPreview(deliver) {
     made: [{ id: "M001", kind: "mindMap", title: "Search", made: now - 5000, by: "Claude Code · claude-opus-5-5", task: "J0001" },
       { id: "R001", kind: "studyGuide", title: "COMP3670 — Search, a study guide", made: now - 4000, by: "Codex · gpt-6.1-sol", task: "J0002" },
       { id: "D001", kind: "flashcards", title: "Flashcards: search", made: now - 3000, by: "Claude Code · claude-opus-5-5", task: "J0003" },
-      { id: "Q001", kind: "quiz", title: "Quiz: search", made: now - 2000, by: "Claude Code · claude-opus-5-5", task: "J0004" }],
+      { id: "Q001", kind: "quiz", title: "Quiz: search", made: now - 2000, by: "Claude Code · claude-opus-5-5", task: "J0004" },
+      { id: "Q002", kind: "exam", title: "COMP3670 practice final", made: now - 1000, by: "Codex · gpt-6.1-sol", task: "J0005" }],
   };
   /** A quiz, and a stand-in for its marking: the real one is by rule, or by a model of another family, in the core. */
   const question = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {Record<string, any>} */ more) => ({ id, kind, prompt: "", options: [], correct: [], rationales: [], blanks: [],
@@ -197,7 +198,31 @@ export function createStudyPreview(deliver) {
     /** @type {string[]} */
     marking: [],
   };
+  /** An exam paper, and its sittings: drafts until handed in. */
+  const paper = {
+    questions: [
+      { ...quiz.questions[0], id: "q01", marks: 2, hint: "" },
+      { ...quiz.questions[2], id: "q02", marks: 3 },
+      question("q03", "long", { prompt: "Prove that A* with an admissible heuristic returns an optimal solution.", marks: 8, cites: ["S02 § Search › Uniform cost L40-58"],
+        rubric: [{ id: "c1", text: "Sets up a suboptimal goal $G_2$ on the frontier", points: 3 }, { id: "c2", text: "Uses $f(n) \\le C^*$ for a node on the optimal path", points: 3 }, { id: "c3", text: "Concludes $G_2$ is never expanded first", points: 2 }],
+        modelAnswer: "Suppose a suboptimal goal $G_2$ is on the frontier…" }),
+    ],
+    sections: [{ title: "Section A — Short answers", instructions: "Answer every question.", questions: ["q01", "q02"] }, { title: "Section B — Proof", instructions: "", questions: ["q03"] }],
+    /** @type {any[]} */
+    attempts: [],
+    /** @type {Record<string, any>} */
+    drafts: {},
+    /** @type {string[]} */
+    marking: [],
+  };
+  const paperEvent = () => {
+    const open = paper.attempts.find((a) => a.finished === null);
+    return { type: "studyQuiz", made: studio.made.find((m) => m.id === "Q002"), questions: paper.questions, attempts: paper.attempts, marking: paper.marking, results: [], mastery: [], citations: cites,
+      drafts: open ? Object.entries(paper.drafts).map(([question, given]) => ({ question, given })) : [], sections: paper.sections, minutes: 90,
+      blueprint: "The 2020 and 2021 finals: **90 minutes**, two sections — short answers on search (5 marks), then a proof (8 marks).", source: null };
+  };
   const quizEvent = () => ({ type: "studyQuiz", made: studio.made.find((m) => m.id === "Q001"), questions: quiz.questions, attempts: quiz.attempts, marking: quiz.marking,
+    drafts: [], sections: [], minutes: null, blueprint: "", source: null,
     results: quiz.attempts.length ? [{ objective: "O001", text: "Explain why uniform-cost search is optimal", topic: "Search",
       score: quiz.attempts.at(-1).answers.reduce((/** @type {number} */ n, /** @type {any} */ a) => { const g = a.second ?? a.grade; return n + (g ? g.score / g.of : 0); }, 0),
       of: Math.max(1, quiz.attempts.at(-1).answers.length), questions: [] }] : [],
@@ -398,6 +423,7 @@ export function createStudyPreview(deliver) {
         case "studyShowMade": {
           if (command.id === "D001") return [deckEvent()];
           if (command.id === "Q001") return [quizEvent()];
+          if (command.id === "Q002") return [paperEvent()];
           const made = studio.made.find((m) => m.id === command.id);
           return made ? [{ type: "studyMadeOpen", made, body: BODIES[command.id], citations: cites }] : [];
         }
@@ -447,6 +473,14 @@ export function createStudyPreview(deliver) {
         case "studyCardDelete":
           deck.cards = deck.cards.filter((r) => r.card.id !== command.card);
           return [deckEvent()];
+        case "studyExamSit": {
+          paper.drafts = {};
+          paper.attempts.push({ n: paper.attempts.length + 1, questions: paper.questions.map((q) => q.id), answers: [], started: Math.floor(Date.now() / 1000), finished: null,
+            ends: Math.floor(Date.now() / 1000) + command.minutes * 60, score: 0, of: 0 });
+          return [paperEvent()];
+        }
+        case "studyExamExport":
+          return [{ type: "notice", level: "info", text: `Written to ~/Github/Notebooks/comp3670-exam/exports/Q002-comp3670-practice-final${command.scheme ? "-scheme" : ""}.${command.html ? "html. Open it in a browser to print it." : "md."}` }];
         case "studyQuizStart": {
           const last = quiz.attempts.at(-1);
           const ids = command.missed && last ? last.questions.filter((/** @type {string} */ id) => { const a = last.answers.find((/** @type {any} */ x) => x.question === id); const g = a && (a.second ?? a.grade); return !g || g.score < g.of; })
@@ -455,6 +489,10 @@ export function createStudyPreview(deliver) {
           return [quizEvent()];
         }
         case "studyQuizAnswer": {
+          if (command.quiz === "Q002") {
+            paper.drafts[command.question] = command.given;
+            return [paperEvent()];
+          }
           const attempt = quiz.attempts.find((a) => a.n === command.attempt);
           const q = quiz.questions.find((x) => x.id === command.question);
           if (!attempt || !q) return [];
@@ -491,6 +529,30 @@ export function createStudyPreview(deliver) {
         case "studyQuizMarkAgain":
           return [quizEvent()];
         case "studyQuizFinish": {
+          if (command.quiz === "Q002") {
+            const sat = paper.attempts.find((a) => a.n === command.attempt);
+            if (!sat) return [];
+            sat.finished = Math.floor(Date.now() / 1000);
+            sat.answers = Object.entries(paper.drafts).map(([id, given]) => {
+              const q = paper.questions.find((x) => x.id === id);
+              const g = q && rule(q, given);
+              const grade = g ? { ...g, score: g.score / g.of * (q.marks ?? g.of), of: q.marks ?? g.of } : null;
+              return { question: id, given, hinted: false, grade, disputed: null, second: null, unmarked: null, at: sat.finished };
+            });
+            for (const a of sat.answers.filter((/** @type {any} */ x) => !x.grade)) {
+              const key = `${sat.n}/${a.question}`;
+              paper.marking.push(key);
+              setTimeout(() => {
+                paper.marking = paper.marking.filter((k) => k !== key);
+                a.grade = { score: 5, of: 8, by: "Codex · gpt-6.1-sol", feedback: "The last step needs its inequality.", criteria: [] };
+                tally(sat);
+                deliver(paperEvent());
+              }, 1500);
+            }
+            tally(sat);
+            paper.drafts = {};
+            return [paperEvent()];
+          }
           const attempt = quiz.attempts.find((a) => a.n === command.attempt);
           if (attempt) attempt.finished = Math.floor(Date.now() / 1000);
           return [quizEvent()];

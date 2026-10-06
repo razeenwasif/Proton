@@ -27,6 +27,8 @@ export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["flashcards", "Flashcards", "cards", "Cards to learn by, each brought back as it is about to be forgotten"],
   ["quiz", "Quiz", "check", "Questions of every kind, each marked as you answer it"],
   ["practice", "Practice problems", "bulb", "Problems to work through, with hints and worked solutions"],
+  ["exam", "Practice exam", "files", "A new paper like the past papers, to sit against the clock"],
+  ["pastPaper", "Past paper", "file", "A past paper itself, to sit again, marked by its solutions"],
   ["objectives", "Learning objectives", "target", "What you must be able to do in the exam"],
   ["faq", "FAQ", "chat", "The questions a student asks, answered"],
   ["glossary", "Glossary", "text", "Every term, as the sources define it"],
@@ -99,7 +101,7 @@ export function madeHtml(e, readOnly) {
     // A deck opens as a deck (study-cards.js); this is only its cards, read.
     content = `<ol class="st-cards" data-turn="made">${body.cards.map((c) => `<li class="st-card-row"><div class="st-card-sides">` +
       `<div class="st-card-front md">${answerHtml(c.front, citations)}</div><div class="st-card-back md">${answerHtml(c.back, citations)}</div></div></li>`).join("")}</ol>`;
-  } else if (body.shape === "questions") {
+  } else if (body.shape === "questions" || body.shape === "paper") {
     // A quiz opens as a quiz (study-quiz.js); this is only its questions, read.
     content = `<ol class="st-cards" data-turn="made">${body.questions.map((q) => `<li class="st-card-row"><div class="md">${answerHtml(q.prompt, citations)}</div></li>`).join("")}</ol>`;
   } else {
@@ -118,7 +120,7 @@ export function taskHtml(t) {
     `<h3>What it was told</h3><pre class="st-prompt">${esc(t.instructions)}</pre><h3>What it was asked</h3><pre class="st-prompt">${esc(t.prompt)}</pre></div>`;
 }
 
-/** @param {{box: HTMLElement, dispatch: (command: any) => unknown, readOnly: () => boolean}} host */
+/** @param {{box: HTMLElement, dispatch: (command: any) => unknown, readOnly: () => boolean, pastPapers: () => {id: string, title: string}[]}} host */
 export function createStudio(host) {
   /** @type {{studio: StudioEvent | null, asking: Kind | null}} */
   const state = { studio: null, asking: null };
@@ -129,6 +131,14 @@ export function createStudio(host) {
       ? `<input name="columns" placeholder="Columns, by commas: Algorithm, Complete?, Optimal?, Time" autocomplete="off" required>`
       : kind === "report"
         ? `<textarea name="ask" rows="3" placeholder="What it should be: “A one-page cheat sheet of every search algorithm’s complexity.”" required></textarea>`
+        : kind === "exam"
+          ? `<div class="st-card-form-row"><select name="level" aria-label="How hard"><option value="easy">A little easier than the past papers</option>` +
+            `<option value="medium" selected>As hard as the past papers</option><option value="hard">A little harder</option></select></div>` +
+            `<input name="focus" placeholder="Topics to weigh it toward — or leave it as the past papers weigh them" autocomplete="off">`
+        : kind === "pastPaper"
+          ? (host.pastPapers().length
+            ? `<select name="source" aria-label="Which past paper">${host.pastPapers().map((p) => `<option value="${esc(p.id)}">${esc(p.id)} · ${esc(p.title)}</option>`).join("")}</select>`
+            : `<p class="st-faint">No source is a past paper yet. Add one, or mark one as a past paper in Sources.</p>`)
         : kind in AMOUNTS
           ? `<div class="st-card-form-row"><select name="amount" aria-label="How many">${AMOUNTS[kind].map(([value, said]) => `<option value="${value}"${value === "standard" ? " selected" : ""}>${said}</option>`).join("")}</select>` +
             `<select name="level" aria-label="How hard"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></div>${focus}`
@@ -215,7 +225,9 @@ export function createStudio(host) {
       level: String(data.get("level") ?? "medium"),
       deck: null,
       objectives: [],
+      source: data.get("source") ? String(data.get("source")) : null,
     };
+    if (kind === "pastPaper" && !options.source) return true;
     if ((kind === "table" && !options.columns.length) || (kind === "report" && !options.ask)) {
       /** @type {HTMLElement | null} */ (form.querySelector("input, textarea"))?.focus();
       return true;

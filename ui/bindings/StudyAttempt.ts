@@ -6,6 +6,11 @@ import type { StudyAnswered } from "./StudyAnswered";
  */
 export type StudyAttempt = { n: number, questions: Array<string>, answers: Array<StudyAnswered>, started: number, finished: number | null, 
 /**
+ * When a sitting against the clock ends: it gives no hints, and marks
+ * nothing until it is handed in.
+ */
+ends: number | null, 
+/**
  * What the questions marked so far scored, of what they were out of.
  */
 score: number, of: number, };

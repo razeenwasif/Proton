@@ -67,6 +67,7 @@ import type { StudyCardRow } from "./StudyCardRow";
 import type { StudyChatSummary } from "./StudyChatSummary";
 import type { StudyCitation } from "./StudyCitation";
 import type { StudyCounts } from "./StudyCounts";
+import type { StudyDrafted } from "./StudyDrafted";
 import type { StudyJob } from "./StudyJob";
 import type { StudyKbFile } from "./StudyKbFile";
 import type { StudyKbFolder } from "./StudyKbFolder";
@@ -77,6 +78,7 @@ import type { StudyMade } from "./StudyMade";
 import type { StudyMadeBody } from "./StudyMadeBody";
 import type { StudyMastery } from "./StudyMastery";
 import type { StudyNoteRow } from "./StudyNoteRow";
+import type { StudyPaperSection } from "./StudyPaperSection";
 import type { StudyPlace } from "./StudyPlace";
 import type { StudyQuestion } from "./StudyQuestion";
 import type { StudyResult } from "./StudyResult";
@@ -251,7 +253,16 @@ grounding: string | null, chats: Array<StudyChatSummary>, } | { "type": "studySt
 /**
  * Answers being marked now: `2/q03`, the attempt and the question.
  */
-marking: Array<string>, results: Array<StudyResult>, mastery: Array<StudyMastery>, citations: Array<StudyCitation>, } | { "type": "studyTask", id: string, title: string, engine: string, model: string, state: string, why: string | null, instructions: string, prompt: string, } | { "type": "studyChatLive", id: string, live: StudyLive, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
+marking: Array<string>, results: Array<StudyResult>, mastery: Array<StudyMastery>, citations: Array<StudyCitation>, 
+/**
+ * A sitting's answers so far, not yet handed in.
+ */
+drafts: Array<StudyDrafted>, 
+/**
+ * An exam paper's sections, how long it is sat for, what the past
+ * papers it is like are like, and the past paper it is, if it is one.
+ */
+sections: Array<StudyPaperSection>, minutes: number | null, blueprint: string, source: string | null, } | { "type": "studyTask", id: string, title: string, engine: string, model: string, state: string, why: string | null, instructions: string, prompt: string, } | { "type": "studyChatLive", id: string, live: StudyLive, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
 /**
  * Whether it is a source of the notebook too.
  */

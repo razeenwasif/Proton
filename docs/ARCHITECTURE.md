@@ -1059,7 +1059,7 @@ Gemini Notebook, for studying from one's own files: notebooks of sources drawn
 from a knowledge base, a tutor that answers from them and cites them, and a
 studio that makes guides, cards, quizzes and exams of them. It is being built in
 milestones; what is here is the knowledge base, notebooks, sources, the reader,
-notes, the tutor, the studio, flashcards, and quizzes with their marking.
+notes, the tutor, the studio, flashcards, quizzes with their marking, and exams.
 
 **The knowledge base** is the folders the person names (`study.roots` in their
 own settings), less what `study.exclude` leaves out — `.gitignore` lines with
@@ -1165,6 +1165,22 @@ again for what it missed; `proton-study::mastery` weighs every answer and card
 review tagged with an objective — a model's mark 0.7, an answer after its hint
 half, the older the less — into where it stands: not started, a focus,
 developing, or a strength.
+
+**Exams** are quizzes with sections, marks and minutes (`proton-study::exam`).
+A practice exam is set by one call that reads the notebook's past papers whole
+— given to it whole even when they are not ticked — writes what they are like
+as the paper's blueprint, and sets a new paper with their sections, marks and
+kinds of question. Each question is held against the past papers' paragraphs
+by TF-IDF, as Research tells hypotheses apart: one that is a past paper's
+reworded is sent back once to be set afresh, and is kept marked as like it if it
+still is. A past paper is transcribed as it was set, each question citing its
+page, its marking scheme drawn from the solutions file whose name matches it.
+Either is practised untimed, marked as it is answered, or sat against the
+clock: a sitting's answers are kept as drafts in `.notebook/drafts/` as they
+are written, it gives no hints and marks nothing until it is handed in — by the
+person, or by the heartbeat when the time is up — and then says how it went
+section by section. A paper goes out as Markdown or as a page to print, alone
+or with its marking scheme.
 
 ### Trace
 

@@ -33,4 +33,8 @@ deck: string | null,
 /**
  * Learning objectives to centre it on: those a student is weak in.
  */
-objectives: Array<string>, };
+objectives: Array<string>, 
+/**
+ * The past paper to transcribe: `S03`.
+ */
+source: string | null, };

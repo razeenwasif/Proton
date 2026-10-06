@@ -107,6 +107,12 @@ pub struct StudyQuestion {
     pub level: Level,
     #[serde(default)]
     pub cites: Vec<String>,
+    /// What an exam's question is worth, when it is not what its kind is.
+    #[serde(default)]
+    pub marks: Option<f64>,
+    /// A past paper's question it is close to, if it is: `S03 p. 2`.
+    #[serde(default)]
+    pub like: Option<String>,
 }
 
 impl StudyQuestion {
@@ -114,8 +120,8 @@ impl StudyQuestion {
     pub fn points(&self) -> f64 {
         match self.kind {
             QuestionKind::Short | QuestionKind::Long => self.rubric.iter().map(|c| c.points).sum(),
-            QuestionKind::Blanks => self.blanks.len() as f64,
-            _ => 1.0,
+            QuestionKind::Blanks => self.marks.unwrap_or(self.blanks.len() as f64),
+            _ => self.marks.unwrap_or(1.0),
         }
     }
 
@@ -137,6 +143,30 @@ pub struct Quiz {
     #[serde(default)]
     pub engine: String,
     pub questions: Vec<StudyQuestion>,
+    /// An exam paper's sections, its questions in order.
+    #[serde(default)]
+    pub sections: Vec<StudyPaperSection>,
+    /// How long an exam paper is sat for.
+    #[serde(default)]
+    pub minutes: Option<u32>,
+    /// What the past papers it is modelled on are like.
+    #[serde(default)]
+    pub blueprint: String,
+    /// The past paper it is, when it is one: `S03`.
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// A section of an exam paper.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyPaperSection {
+    pub title: String,
+    #[serde(default)]
+    pub instructions: String,
+    /// Its questions' ids.
+    pub questions: Vec<String>,
 }
 
 impl Quiz {
@@ -259,8 +289,19 @@ fn same_unit(a: &str, b: &str) -> bool {
 }
 
 /// An answer marked by rule, if it can be: a written answer cannot, unless
-/// nothing was written.
+/// nothing was written. An exam's question is marked out of its marks.
 pub fn mark(question: &StudyQuestion, given: &Given) -> Option<StudyGrade> {
+    let mut grade = mark_once(question, given)?;
+    if let (Some(marks), false) = (question.marks, question.written()) {
+        if grade.of > 0.0 {
+            grade.score = grade.score / grade.of * marks;
+        }
+        grade.of = marks;
+    }
+    Some(grade)
+}
+
+fn mark_once(question: &StudyQuestion, given: &Given) -> Option<StudyGrade> {
     let why = |i: usize| question.rationales.get(i).cloned().unwrap_or_default();
     Some(match (question.kind, given) {
         (QuestionKind::Choice, Given::Choice { index }) => match question.correct.contains(index) {
@@ -337,14 +378,25 @@ pub fn blank_count(prompt: &str) -> usize {
 
 /// The JSON a quiz or a set of problems must be.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
     json!({
         "type": "object", "additionalProperties": false, "required": ["title", "questions"],
         "properties": {
             "title": { "type": "string" },
-            "questions": { "type": "array", "maxItems": 40, "items": {
+            "questions": { "type": "array", "maxItems": 40, "items": question_schema(false) }
+        }
+    })
+}
+
+/// The JSON a question must be; an exam's with its marks.
+pub fn question_schema(marks: bool) -> Value {
+    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let mut required = vec!["kind", "prompt", "options", "correct", "rationales", "blanks", "number", "tolerance", "unit", "rubric", "modelAnswer", "hint", "explanation", "topic", "objectives", "cites"];
+    if marks {
+        required.push("marks");
+    }
+    let mut schema = json!({
                 "type": "object", "additionalProperties": false,
-                "required": ["kind", "prompt", "options", "correct", "rationales", "blanks", "number", "tolerance", "unit", "rubric", "modelAnswer", "hint", "explanation", "topic", "objectives", "cites"],
+                "required": required,
                 "properties": {
                     "kind": { "type": "string", "enum": ["choice", "choices", "blanks", "number", "short", "long"] },
                     "prompt": { "type": "string" },
@@ -366,9 +418,11 @@ pub fn schema() -> Value {
                     "objectives": { "type": "array", "items": { "type": "string" }, "description": "The ids of the learning objectives it tests, if the notebook has them: O003" },
                     "cites": { "type": "array", "items": { "type": "string" }, "description": "Citations, as written between the brackets: S07 p. 12" }
                 }
-            }}
-        }
-    })
+    });
+    if marks {
+        schema["properties"]["marks"] = json!({ "type": "number", "description": "What it is worth; a written question's rubric points sum to it" });
+    }
+    schema
 }
 
 /// A list put in an order of a seed's.
@@ -402,92 +456,114 @@ fn shuffled(mut q: StudyQuestion) -> StudyQuestion {
     q
 }
 
+/// A question as a model writes it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Said {
+    kind: QuestionKind,
+    prompt: String,
+    #[serde(default)]
+    options: Vec<String>,
+    #[serde(default)]
+    correct: Vec<i64>,
+    #[serde(default)]
+    rationales: Vec<String>,
+    #[serde(default)]
+    blanks: Vec<Vec<String>>,
+    #[serde(default)]
+    number: Option<f64>,
+    #[serde(default)]
+    tolerance: f64,
+    #[serde(default)]
+    unit: String,
+    #[serde(default)]
+    rubric: Vec<StudyCriterion>,
+    #[serde(default)]
+    model_answer: String,
+    #[serde(default)]
+    hint: String,
+    #[serde(default)]
+    explanation: String,
+    #[serde(default)]
+    topic: String,
+    #[serde(default)]
+    objectives: Vec<String>,
+    #[serde(default)]
+    cites: Vec<String>,
+    #[serde(default)]
+    marks: Option<f64>,
+}
+
+/// A question read: whole for its kind, or why not; its options shuffled.
+fn whole(s: Said) -> Result<StudyQuestion, &'static str> {
+    let correct: Vec<usize> = s.correct.iter().filter_map(|&c| usize::try_from(c).ok()).collect();
+    let mut rubric = s.rubric;
+    for (i, c) in rubric.iter_mut().enumerate() {
+        c.id = format!("c{}", i + 1);
+    }
+    let options = s.options.len();
+    match s.kind {
+        _ if s.prompt.trim().is_empty() => return Err("it asks nothing"),
+        QuestionKind::Choice if options < 2 || correct.len() != 1 || correct[0] >= options => return Err("a choice has two options or more and one right"),
+        QuestionKind::Choices if options < 2 || correct.is_empty() || correct.iter().any(|&c| c >= options) => return Err("choices have options and at least one right"),
+        QuestionKind::Blanks if s.blanks.is_empty() || blank_count(&s.prompt) != s.blanks.len() || s.blanks.iter().any(Vec::is_empty) => return Err("each ___ needs the words it accepts"),
+        QuestionKind::Number if !s.number.is_some_and(f64::is_finite) || s.tolerance < 0.0 => return Err("a number question needs its number"),
+        QuestionKind::Short | QuestionKind::Long if rubric.is_empty() || rubric.iter().any(|c| c.points <= 0.0) || s.model_answer.trim().is_empty() => {
+            return Err("a written question needs a rubric of points and a model answer");
+        }
+        _ => {}
+    }
+    let written = matches!(s.kind, QuestionKind::Short | QuestionKind::Long);
+    // A written question is worth what its rubric is; another, its marks.
+    let marks = match written {
+        true => s.marks.map(|_| rubric.iter().map(|c| c.points).sum()),
+        false => s.marks.filter(|m| m.is_finite() && *m > 0.0),
+    };
+    Ok(shuffled(StudyQuestion {
+        id: String::new(),
+        kind: s.kind,
+        prompt: s.prompt.trim().to_string(),
+        options: s.options,
+        correct,
+        rationales: s.rationales,
+        blanks: s.blanks,
+        number: s.number,
+        tolerance: s.tolerance,
+        unit: s.unit.trim().to_string(),
+        rubric,
+        model_answer: s.model_answer.trim().to_string(),
+        hint: s.hint.trim().to_string(),
+        explanation: s.explanation.trim().to_string(),
+        topic: s.topic.trim().to_string(),
+        objectives: s.objectives,
+        level: Level::default(),
+        cites: s.cites,
+        marks,
+        like: None,
+    }))
+}
+
+/// One question, read from a model's JSON: whole, or why not.
+pub fn read_question(value: &Value) -> Result<StudyQuestion, String> {
+    let said: Said = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+    whole(said).map_err(str::to_string)
+}
+
 /// The questions an answer gave, read: each whole for its kind, its options
 /// shuffled, numbered. `Err` when too few of them were whole.
 pub fn read_questions(value: &Value) -> Result<Vec<StudyQuestion>, String> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Said {
-        kind: QuestionKind,
-        prompt: String,
-        #[serde(default)]
-        options: Vec<String>,
-        #[serde(default)]
-        correct: Vec<i64>,
-        #[serde(default)]
-        rationales: Vec<String>,
-        #[serde(default)]
-        blanks: Vec<Vec<String>>,
-        #[serde(default)]
-        number: Option<f64>,
-        #[serde(default)]
-        tolerance: f64,
-        #[serde(default)]
-        unit: String,
-        #[serde(default)]
-        rubric: Vec<StudyCriterion>,
-        #[serde(default)]
-        model_answer: String,
-        #[serde(default)]
-        hint: String,
-        #[serde(default)]
-        explanation: String,
-        #[serde(default)]
-        topic: String,
-        #[serde(default)]
-        objectives: Vec<String>,
-        #[serde(default)]
-        cites: Vec<String>,
-    }
-    let said: Vec<Said> = serde_json::from_value(value["questions"].clone()).map_err(|e| format!("its questions: {e}"))?;
+    let said: Vec<Value> = serde_json::from_value(value["questions"].clone()).map_err(|e| format!("its questions: {e}"))?;
     if said.is_empty() {
         return Err("there are no questions".into());
     }
     let total = said.len();
     let mut out: Vec<StudyQuestion> = Vec::new();
     let mut wrong: Vec<String> = Vec::new();
-    for (n, s) in said.into_iter().enumerate() {
-        let correct: Vec<usize> = s.correct.iter().filter_map(|&c| usize::try_from(c).ok()).collect();
-        let mut rubric = s.rubric;
-        for (i, c) in rubric.iter_mut().enumerate() {
-            c.id = format!("c{}", i + 1);
+    for (n, s) in said.iter().enumerate() {
+        match read_question(s) {
+            Ok(q) => out.push(q),
+            Err(why) => wrong.push(format!("question {}: {why}", n + 1)),
         }
-        let options = s.options.len();
-        let whole = match s.kind {
-            _ if s.prompt.trim().is_empty() => Err("it asks nothing"),
-            QuestionKind::Choice if options < 2 || correct.len() != 1 || correct[0] >= options => Err("a choice has two options or more and one right"),
-            QuestionKind::Choices if options < 2 || correct.is_empty() || correct.iter().any(|&c| c >= options) => Err("choices have options and at least one right"),
-            QuestionKind::Blanks if s.blanks.is_empty() || blank_count(&s.prompt) != s.blanks.len() || s.blanks.iter().any(Vec::is_empty) => Err("each ___ needs the words it accepts"),
-            QuestionKind::Number if !s.number.is_some_and(f64::is_finite) || s.tolerance < 0.0 => Err("a number question needs its number"),
-            QuestionKind::Short | QuestionKind::Long if rubric.is_empty() || rubric.iter().any(|c| c.points <= 0.0) || s.model_answer.trim().is_empty() => {
-                Err("a written question needs a rubric of points and a model answer")
-            }
-            _ => Ok(()),
-        };
-        if let Err(why) = whole {
-            wrong.push(format!("question {}: {why}", n + 1));
-            continue;
-        }
-        out.push(shuffled(StudyQuestion {
-            id: String::new(),
-            kind: s.kind,
-            prompt: s.prompt.trim().to_string(),
-            options: s.options,
-            correct,
-            rationales: s.rationales,
-            blanks: s.blanks,
-            number: s.number,
-            tolerance: s.tolerance,
-            unit: s.unit.trim().to_string(),
-            rubric,
-            model_answer: s.model_answer.trim().to_string(),
-            hint: s.hint.trim().to_string(),
-            explanation: s.explanation.trim().to_string(),
-            topic: s.topic.trim().to_string(),
-            objectives: s.objectives,
-            level: Level::default(),
-            cites: s.cites,
-        }));
     }
     if out.len() * 2 < total {
         return Err(format!("only {} of its {total} questions are whole — {}", out.len(), wrong.join("; ")));
@@ -504,8 +580,9 @@ pub fn read_questions(value: &Value) -> Result<Vec<StudyQuestion>, String> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "line", rename_all = "camelCase")]
 pub enum Line {
-    /// An attempt begun, of these questions.
-    Started { attempt: u32, questions: Vec<String>, at: i64 },
+    /// An attempt begun, of these questions — sat against the clock, when
+    /// it `ends`.
+    Started { attempt: u32, questions: Vec<String>, at: i64, #[serde(default)] ends: Option<i64> },
     Answered { attempt: u32, question: String, given: Given, #[serde(default)] hinted: bool, at: i64 },
     /// A mark; `second` after a dispute.
     Marked { attempt: u32, question: String, grade: StudyGrade, #[serde(default)] second: bool, at: i64 },
@@ -571,6 +648,38 @@ impl Book {
         let text = serde_json::to_string(line).map_err(|e| e.to_string())?;
         proton_research::store::append(&self.attempts_file(id), &format!("{text}\n"))
     }
+
+    fn drafts_file(&self, id: &str, attempt: u32) -> PathBuf {
+        self.dir().join(".notebook/drafts").join(format!("{id}-{attempt}.json"))
+    }
+
+    /// What a sitting's answers are so far, saved as they are written: kept
+    /// apart from the attempts' log until the paper is handed in.
+    pub fn drafts(&self, id: &str, attempt: u32) -> Vec<StudyDrafted> {
+        let text = std::fs::read_to_string(self.drafts_file(id, attempt)).unwrap_or_default();
+        serde_json::from_str(&text).unwrap_or_default()
+    }
+
+    pub fn save_draft(&self, id: &str, attempt: u32, question: &str, given: &Given) -> Result<(), String> {
+        let mut drafts = self.drafts(id, attempt);
+        drafts.retain(|d| d.question != question);
+        drafts.push(StudyDrafted { question: question.to_string(), given: given.clone() });
+        let text = serde_json::to_string(&drafts).map_err(|e| e.to_string())?;
+        proton_research::store::atomic_write(&self.drafts_file(id, attempt), text.as_bytes())
+    }
+
+    pub fn forget_drafts(&self, id: &str, attempt: u32) {
+        let _ = std::fs::remove_file(self.drafts_file(id, attempt));
+    }
+}
+
+/// An answer written in a sitting, not yet handed in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyDrafted {
+    pub question: String,
+    pub given: Given,
 }
 
 /* ── attempts ───────────────────────────────────────────────────────── */
@@ -624,6 +733,10 @@ pub struct StudyAttempt {
     pub started: i64,
     #[ts(type = "number | null")]
     pub finished: Option<i64>,
+    /// When a sitting against the clock ends: it gives no hints, and marks
+    /// nothing until it is handed in.
+    #[ts(type = "number | null")]
+    pub ends: Option<i64>,
     /// What the questions marked so far scored, of what they were out of.
     pub score: f64,
     pub of: f64,
@@ -647,9 +760,9 @@ pub fn attempts(lines: &[Line]) -> Vec<StudyAttempt> {
             | Line::Disputed { attempt, .. }
             | Line::Finished { attempt, .. } => *attempt,
         };
-        if let Line::Started { questions, at, .. } = line {
+        if let Line::Started { questions, at, ends, .. } = line {
             out.retain(|a| a.n != n);
-            out.push(StudyAttempt { n, questions: questions.clone(), answers: Vec::new(), started: *at, finished: None, score: 0.0, of: 0.0 });
+            out.push(StudyAttempt { n, questions: questions.clone(), answers: Vec::new(), started: *at, finished: None, ends: *ends, score: 0.0, of: 0.0 });
             continue;
         }
         let Some(attempt) = out.iter_mut().find(|a| a.n == n) else { continue };
@@ -884,6 +997,8 @@ mod tests {
             objectives: vec!["O001".into()],
             level: Level::Medium,
             cites: vec!["S01 p. 3".into()],
+            marks: None,
+            like: None,
         }
     }
 
@@ -926,6 +1041,34 @@ mod tests {
         assert!(mark(&short, &Given::Text { text: "It orders by g.".into() }).is_none(), "a model marks it");
         assert_eq!(mark(&short, &Given::Text { text: "  ".into() }).unwrap().of, 3.0, "nothing written is nothing, out of the rubric's points");
         assert_eq!(mark(&choice, &Given::Text { text: "b".into() }).unwrap().score, 0.0);
+    }
+
+    #[test]
+    fn an_exam_question_is_marked_out_of_its_marks() {
+        let choice = StudyQuestion { marks: Some(4.0), ..question(QuestionKind::Choice) };
+        let right = mark(&choice, &Given::Choice { index: 1 }).unwrap();
+        assert_eq!((right.score, right.of, choice.points()), (4.0, 4.0, 4.0));
+        let blanks = StudyQuestion { prompt: "An ___ heuristic never exceeds ___.".into(), marks: Some(3.0), ..question(QuestionKind::Blanks) };
+        let half = mark(&blanks, &Given::Blanks { words: vec!["admissible".into(), "nothing".into()] }).unwrap();
+        assert_eq!((half.score, half.of), (1.5, 3.0));
+        // A written question is worth what its rubric is, whatever its marks said.
+        let written = read_question(&json!({ "kind": "long", "prompt": "Prove it.", "rubric": [{ "id": "a", "text": "x", "points": 4 }, { "id": "b", "text": "y", "points": 2 }], "modelAnswer": "Thus.", "marks": 5 })).unwrap();
+        assert_eq!((written.marks, written.points()), (Some(6.0), 6.0));
+        assert!(read_question(&json!({ "kind": "number", "prompt": "How many?" })).unwrap_err().contains("needs its number"));
+    }
+
+    #[test]
+    fn a_sittings_answers_are_drafts_until_it_is_handed_in() {
+        let book = book();
+        book.save_draft("Q001", 2, "q01", &Given::Text { text: "first".into() }).unwrap();
+        book.save_draft("Q001", 2, "q02", &Given::Choice { index: 1 }).unwrap();
+        book.save_draft("Q001", 2, "q01", &Given::Text { text: "second".into() }).unwrap();
+        let drafts = book.drafts("Q001", 2);
+        assert_eq!(drafts.len(), 2);
+        assert_eq!(drafts.iter().find(|d| d.question == "q01").map(|d| d.given.clone()), Some(Given::Text { text: "second".into() }));
+        assert!(book.drafts("Q001", 1).is_empty());
+        book.forget_drafts("Q001", 2);
+        assert!(book.drafts("Q001", 2).is_empty());
     }
 
     #[test]
@@ -981,10 +1124,22 @@ mod tests {
     #[test]
     fn attempts_replay_from_their_lines_and_a_disputed_mark_counts_the_lower_when_far_apart() {
         let book = book();
-        let quiz = Quiz { kind: Make::Quiz, title: "Search".into(), made: 1, by: "claude".into(), task: "J0001".into(), engine: "claude".into(), questions: vec![question(QuestionKind::Choice), StudyQuestion { id: "q02".into(), ..question(QuestionKind::Short) }] };
+        let quiz = Quiz {
+            kind: Make::Quiz,
+            title: "Search".into(),
+            made: 1,
+            by: "claude".into(),
+            task: "J0001".into(),
+            engine: "claude".into(),
+            questions: vec![question(QuestionKind::Choice), StudyQuestion { id: "q02".into(), ..question(QuestionKind::Short) }],
+            sections: Vec::new(),
+            minutes: None,
+            blueprint: String::new(),
+            source: None,
+        };
         book.save_quiz("Q001", &quiz).unwrap();
         let log = |line: Line| book.log_quiz("Q001", &line).unwrap();
-        log(Line::Started { attempt: 1, questions: vec!["q01".into(), "q02".into()], at: 10 });
+        log(Line::Started { attempt: 1, questions: vec!["q01".into(), "q02".into()], at: 10, ends: None });
         log(Line::Answered { attempt: 1, question: "q01".into(), given: Given::Choice { index: 3 }, hinted: true, at: 11 });
         log(Line::Marked { attempt: 1, question: "q01".into(), grade: mark(&quiz.questions[0], &Given::Choice { index: 3 }).unwrap(), second: false, at: 11 });
         log(Line::Answered { attempt: 1, question: "q02".into(), given: Given::Text { text: "orders by g".into() }, hinted: false, at: 12 });
@@ -1010,7 +1165,7 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!((results[0].objective.as_str(), results[0].of, results[0].questions.len()), ("O001", 2.0, 2));
         // A second attempt, of what was missed.
-        log(Line::Started { attempt: 2, questions: vec!["q01".into()], at: 20 });
+        log(Line::Started { attempt: 2, questions: vec!["q01".into()], at: 20, ends: None });
         assert_eq!(attempts(&book.quiz_lines("Q001")).len(), 2);
     }
 }

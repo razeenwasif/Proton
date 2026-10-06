@@ -46,4 +46,12 @@ explanation: string, topic: string,
 /**
  * The learning objectives it tests: `O003`.
  */
-objectives: Array<string>, level: StudyLevel, cites: Array<string>, };
+objectives: Array<string>, level: StudyLevel, cites: Array<string>, 
+/**
+ * What an exam's question is worth, when it is not what its kind is.
+ */
+marks: number | null, 
+/**
+ * A past paper's question it is close to, if it is: `S03 p. 2`.
+ */
+like: string | null, };

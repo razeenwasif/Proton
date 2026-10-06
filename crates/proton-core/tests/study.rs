@@ -971,3 +971,124 @@ fn a_quiz_is_marked_by_rule_and_by_another_family_and_a_dispute_by_a_third() {
     assert!(said(&refused).iter().any(|s| s.contains("asked for by answering")));
     session.shutdown();
 }
+
+/// The time, for a sitting against the clock: moved by hand.
+static CLOCK: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1_800_000_000);
+
+fn clock() -> i64 {
+    CLOCK.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[test]
+fn an_exam_is_set_like_the_past_papers_sat_against_the_clock_and_marked_when_handed_in() {
+    use proton_study::model::Role;
+    use proton_study::quiz::Given;
+    use proton_study::studio::{Make, Options};
+    let scratch = Scratch::new("exam");
+    let settings = scratch.knowledge_base();
+    scratch.write("kb/Courses/COMP3670/Exam_2020_solutions.md", "# Solutions 2020\n\n1. UCS expands by path cost g(n); with every step cost at least epsilon the first goal expanded is cheapest.\n");
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let script = tutor::Script { log: std::sync::Arc::clone(&log), server: None, answer: "unused".into() };
+    let mut session = Session::new(scratch.root.join("project"))
+        .with_person_settings(settings.to_path_buf())
+        .with_study(Study::new().with_person_settings(&settings).flags_with(in_cloud).with_tutors(Box::new(script)).with_clock(clock));
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into(), "Courses/COMP3670/Exam_2020.pdf".into(), "Courses/COMP3670/Exam_2020_solutions.md".into()] });
+    let sources = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 3 && sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(sources.clone()),
+        _ => None,
+    });
+    assert_eq!(sources.iter().map(|s| s.role).collect::<Vec<_>>(), [Role::Notes, Role::PastPaper, Role::Solution], "roles from the names");
+    // Only the notes are ticked: the past paper is read whole all the same.
+    session.apply(Command::StudySelect { ids: vec!["S01".into()] });
+
+    let paper = |first: &str| {
+        format!(
+            r#"{{"title": "COMP3670 practice final", "minutes": 90, "blueprint": "One paper of 2020: a question on search, explained.", "sections": [
+                {{"title": "Section A", "instructions": "Answer all questions.", "questions": [
+                    {{"kind": "choice", "prompt": "{first}", "options": ["DFS", "BFS", "Greedy"], "correct": [1], "rationales": ["", "", ""], "blanks": [], "number": null, "tolerance": 0, "unit": "",
+                      "rubric": [], "modelAnswer": "", "hint": "", "explanation": "BFS goes layer by layer.", "topic": "Search", "objectives": [], "cites": ["S01 § Search L1-2"], "marks": 2}},
+                    {{"kind": "long", "prompt": "Compare the memory iterative deepening uses with that of breadth-first search on a tree of depth d.", "options": [], "correct": [], "rationales": [], "blanks": [], "number": null,
+                      "tolerance": 0, "unit": "", "rubric": [{{"id": "a", "text": "IDS uses O(bd)", "points": 3}}, {{"id": "b", "text": "BFS uses O(b^d)", "points": 3}}],
+                      "modelAnswer": "IDS keeps one path, O(bd); BFS keeps a whole layer, O(b^d).", "hint": "", "explanation": "", "topic": "Search", "objectives": [], "cites": [], "marks": 6}}
+                ]}}
+            ]}}"#
+        )
+    };
+    {
+        let mut log = log.lock().unwrap();
+        log.answers.push_back(paper("Explain why uniform cost search is optimal."));
+        log.answers.push_back(paper("Which search is complete when the branching factor is finite?"));
+    }
+    session.apply(Command::StudyMake { kind: Make::Exam, options: Options::default() });
+    let made = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        _ => None,
+    });
+    assert_eq!((made[0].id.as_str(), made[0].kind, made[0].title.as_str()), ("Q001", Make::Exam, "COMP3670 practice final"));
+    {
+        let log = log.lock().unwrap();
+        assert!(log.sent[0].contains("The past papers among the sources are S02 (Exam_2020.pdf)") && log.sent[0].contains("explain why uniform cost search is optimal"), "the past paper was not given whole: {}", log.sent[0]);
+        assert!(log.sent[1].contains("a past paper's reworded") && log.sent[1].contains("q01 (like [[S02"), "the near-copy was not sent back: {}", log.sent[1]);
+    }
+
+    // Sat against the clock: answers are drafts, nothing is marked.
+    let events = session.apply(Command::StudyShowMade { id: "Q001".into() });
+    let Some(Event::StudyQuiz { questions, .. }) = events.iter().find(|e| matches!(e, Event::StudyQuiz { .. })) else { panic!("{events:?}") };
+    assert_eq!(questions.iter().map(|q| q.points()).collect::<Vec<_>>(), [2.0, 6.0]);
+    let right = questions[0].correct[0];
+    session.apply(Command::StudyExamSit { quiz: "Q001".into(), minutes: 90 });
+    session.apply(Command::StudyQuizAnswer { quiz: "Q001".into(), attempt: 1, question: "q01".into(), given: Given::Choice { index: right }, hinted: false });
+    let events = session.apply(Command::StudyQuizAnswer { quiz: "Q001".into(), attempt: 1, question: "q02".into(), given: Given::Text { text: "IDS keeps one path, so O(bd); BFS keeps a layer.".into() }, hinted: false });
+    let Some(Event::StudyQuiz { attempts, drafts, .. }) = events.iter().find(|e| matches!(e, Event::StudyQuiz { .. })) else { panic!() };
+    assert_eq!((attempts[0].answers.len(), drafts.len()), (0, 2), "drafts, not answers");
+    assert_eq!(attempts[0].ends, Some(clock() + 90 * 60));
+
+    // The time is up: handed in by the heartbeat, and marked.
+    log.lock().unwrap().answers.push_back(r#"{"criteria": [{"id": "c1", "points": 3, "evidence": ["IDS keeps one path, so O(bd)"], "why": ""}, {"id": "c2", "points": 1, "evidence": ["BFS keeps a layer"], "why": "No bound given."}], "feedback": "Say O(b^d)."}"#.into());
+    CLOCK.fetch_add(91 * 60, std::sync::atomic::Ordering::SeqCst);
+    let attempts = until(&mut session, |e| match e {
+        Event::StudyQuiz { attempts, .. } if attempts[0].answer("q02").is_some_and(|a| a.grade.is_some()) => Some(attempts.clone()),
+        _ => None,
+    });
+    assert!(attempts[0].finished.is_some());
+    assert_eq!((attempts[0].score, attempts[0].of), (6.0, 8.0), "2 for the choice, 4 of 6 for the comparison");
+    let late = session.apply(Command::StudyQuizAnswer { quiz: "Q001".into(), attempt: 1, question: "q01".into(), given: Given::Choice { index: 0 }, hinted: false });
+    assert!(said(&late).iter().any(|s| s.contains("finished")), "{:?}", said(&late));
+    assert!(!scratch.root.join("Notebooks/search/.notebook/drafts/Q001-1.json").exists(), "the drafts are gone once handed in");
+
+    // Out, with its marking scheme, to print.
+    let events = session.apply(Command::StudyExamExport { quiz: "Q001".into(), html: true, scheme: true });
+    assert!(said(&events).iter().any(|s| s.contains("Q001-comp3670-practice-final-scheme.html")), "{:?}", said(&events));
+    let page = std::fs::read_to_string(scratch.root.join("Notebooks/search/exports/Q001-comp3670-practice-final-scheme.html")).unwrap();
+    assert!(page.contains("<h2>Section A</h2>") && page.contains("Answer."), "{page}");
+
+    // The past paper itself, marked by its solutions.
+    log.lock().unwrap().answers.push_back(
+        r#"{"title": "COMP3670 final, 2020", "minutes": 0, "blueprint": "The 2020 final.", "sections": [{"title": "", "instructions": "", "questions": [
+            {"kind": "short", "prompt": "Explain why uniform cost search is optimal.", "options": [], "correct": [], "rationales": [], "blanks": [], "number": null, "tolerance": 0, "unit": "",
+             "rubric": [{"id": "a", "text": "path cost order", "points": 2}, {"id": "b", "text": "positive step costs", "points": 2}], "modelAnswer": "By g(n), with costs at least ε.", "hint": "", "explanation": "",
+             "topic": "Search", "objectives": [], "cites": ["S02 p. 1", "S03 § Solutions 2020 L3"], "marks": 4}
+        ]}]}"#
+            .into(),
+    );
+    let refused = session.apply(Command::StudyMake { kind: Make::PastPaper, options: Options::default() });
+    assert!(said(&refused).iter().any(|s| s.contains("Choose a past paper")));
+    session.apply(Command::StudyMake { kind: Make::PastPaper, options: Options { source: Some("S02".into()), ..Options::default() } });
+    let made = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.kind == Make::PastPaper && j.state == "done") => Some(made.clone()),
+        _ => None,
+    });
+    let past = made.iter().find(|m| m.kind == Make::PastPaper).unwrap();
+    {
+        let log = log.lock().unwrap();
+        let asked = log.sent.iter().rev().find(|s| s.contains("Transcribe the past paper S02")).unwrap();
+        assert!(asked.contains("Its solutions are S03 (Exam_2020_solutions.md)") && asked.contains("first goal expanded is cheapest"), "the solutions were not given: {asked}");
+    }
+    let kept: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(scratch.root.join(format!("Notebooks/search/studio/quizzes/{}.json", past.id))).unwrap()).unwrap();
+    assert_eq!((kept["source"].as_str(), kept["minutes"].is_null()), (Some("S02"), true));
+    session.shutdown();
+}

@@ -165,7 +165,9 @@ exam, reviewed with the keys 1–4, and exported for Anki; and quizzes and
 practice problems — choices, blanks, numbers and written answers — marked as you
 answer, a written answer by another family of model against its rubric, each
 mark quoting the words that earned it and open to dispute, with how you did by
-learning objective. Your folders are named in your own settings,
+learning objective; and exams — a new paper set like your past papers, never one
+of theirs reworded, or a past paper itself marked by its solutions — sat against
+the clock with every answer saved as you write it, and printed. Your folders are named in your own settings,
 `{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,

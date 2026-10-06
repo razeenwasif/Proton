@@ -22,9 +22,10 @@ use proton_claude::chat::Settings;
 use proton_claude::engine::{McpServer, Unattended};
 use proton_claude::fold::Item;
 use proton_claude::{Conversation, Engine};
+use proton_library::Hit;
 use proton_study::quiz::{self, Given, Line, StudyGrade};
 use proton_study::studio::{self, Make, Options, StudyMadeBody};
-use proton_study::{snapshot, Book};
+use proton_study::{exam, snapshot, Book};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use ts_rs::TS;
@@ -248,7 +249,7 @@ impl Jobs {
             }
             let read = match &running.asked.marking {
                 Some(marking) => read_mark(&running.asked, marking, &answer, structured, !running.repaired, running.conversation.as_ref()).map(Read::Mark),
-                None => studio::read(running.asked.make, &answer, structured).map(Read::Made),
+                None => studio::read(running.asked.make, &answer, structured).and_then(|body| novel(&running.asked, body, !running.repaired)).map(Read::Made),
             };
             match read {
                 Ok(read) => ended.push((at, keep(&running.asked, read, running.conversation.as_ref()))),
@@ -334,16 +335,38 @@ fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)], fai
 /// or its server to reach it by.
 fn asking(book: &Book, asked: &Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)]) -> Result<Asking, String> {
     let ticked = book.selection();
-    if ticked.is_empty() {
+    // An exam reads the past papers whole, and a past paper its solutions:
+    // ticked or not.
+    let must: Vec<String> = match (asked.make, asked.options.source.as_deref()) {
+        (Make::Exam, _) => exam::past_papers(book).iter().map(|s| s.id.clone()).collect(),
+        (Make::PastPaper, Some(paper)) => std::iter::once(paper.to_string()).chain(exam::solutions_for(book, paper)).collect(),
+        _ => Vec::new(),
+    };
+    if ticked.is_empty() && must.is_empty() {
         return Err("No sources are ticked to make it from.".into());
     }
     let library = snapshot::library(book);
-    let whole: Vec<proton_library::Hit> = library.all().into_iter().filter(|h| ticked.contains(&h.doc)).collect();
-    let size: usize = whole.iter().map(|h| h.passage.text.len() + h.cite.len()).sum();
-    let prompt = format!("{}{}", studio::prompt(asked.make, &asked.options, &book.notebook.course), studio::known(book, asked.make, &asked.options));
-    if size <= WHOLE {
+    let all = library.all();
+    let size = |hits: &[Hit]| hits.iter().map(|h| h.passage.text.len() + h.cite.len()).sum::<usize>();
+    let whole: Vec<Hit> = all.iter().filter(|h| ticked.contains(&h.doc) || must.contains(&h.doc)).cloned().collect();
+    let prompt = studio::prompt_for(book, asked.make, &asked.options)?;
+    if size(&whole) <= WHOLE {
         return Ok(Asking { instructions: studio::rules(true), prompt: format!("{prompt}\n\n---\n\nThe sources:\n\n{}", proton_library::quote(&whole)), mcp: Vec::new() });
     }
+    // Too much to give whole: what is to be read whole is given, as much
+    // as fits, and the rest is reached through the server.
+    let mut given: Vec<Hit> = Vec::new();
+    for id in &must {
+        let of: Vec<Hit> = all.iter().filter(|h| &h.doc == id).cloned().collect();
+        if size(&given) + size(&of) > WHOLE {
+            break;
+        }
+        given.extend(of);
+    }
+    let prompt = match given.is_empty() {
+        true => prompt,
+        false => format!("{prompt}\n\n---\n\nGiven whole, each passage after its citation:\n\n{}", proton_library::quote(&given)),
+    };
     let server = match asked.engine {
         Engine::Antigravity => None,
         _ => tutors.server(),
@@ -357,6 +380,27 @@ fn asking(book: &Book, asked: &Asked, tutors: &mut dyn Tutors, roots: &[(String,
     }
     let mcp = vec![McpServer { name: "proton-notebook".into(), command, args, tools: TOOLS.iter().map(|t| t.to_string()).collect() }];
     Ok(Asking { instructions: studio::rules(false), prompt, mcp })
+}
+
+/// A paper set like the past papers, held against them: a question that is
+/// one of theirs reworded is sent back, once; after that it is kept, marked
+/// as like the one it is like.
+fn novel(asked: &Asked, body: StudyMadeBody, strict: bool) -> Result<StudyMadeBody, String> {
+    let StudyMadeBody::Paper { title, minutes, blueprint, sections, mut questions } = body else { return Ok(body) };
+    if asked.make == Make::Exam {
+        let book = Book::read(&asked.dir)?;
+        let near = exam::near_copies(&book, &questions);
+        if !near.is_empty() && strict {
+            let said: Vec<String> = near.iter().map(|(q, cite)| format!("{q} (like [[{cite}]])")).collect();
+            return Err(format!("questions {} are a past paper's reworded: set each afresh, a new question on its topic", said.join(", ")));
+        }
+        for (id, cite) in near {
+            if let Some(q) = questions.iter_mut().find(|q| q.id == id) {
+                q.like = Some(cite);
+            }
+        }
+    }
+    Ok(StudyMadeBody::Paper { title, minutes, blueprint, sections, questions })
 }
 
 /// What a marker is told and asked: the rubric, the model answer, what the
@@ -458,6 +502,7 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
     // A document's own title, when it gave one.
     let title = match body {
         StudyMadeBody::Prose { markdown } => markdown.lines().find_map(|l| l.strip_prefix("# ")).map(|t| t.trim().to_string()).unwrap_or_else(|| asked.title.clone()),
+        StudyMadeBody::Paper { title, .. } if !title.trim().is_empty() => title.trim().to_string(),
         _ => asked.title.clone(),
     };
     // Cards asked for a deck there is go into it.
@@ -474,14 +519,23 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
             leveled = StudyMadeBody::Questions { questions: questions.iter().cloned().map(|q| quiz::StudyQuestion { level: asked.options.level, ..q }).collect() };
             &leveled
         }
+        StudyMadeBody::Paper { title, minutes, blueprint, sections, questions } => {
+            let questions = questions.iter().cloned().map(|q| quiz::StudyQuestion { level: asked.options.level, ..q }).collect();
+            leveled = StudyMadeBody::Paper { title: title.clone(), minutes: *minutes, blueprint: blueprint.clone(), sections: sections.clone(), questions };
+            &leveled
+        }
         body => body,
     };
     let model = conversation.fold().status().model.clone();
     let by = [asked.engine.name().to_string(), model].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
     let made = book.keep_made(asked.make, &title, &by, &asked.id, body)?;
-    // A quiz remembers what set it, so another family marks it.
+    // A quiz remembers what set it, so another family marks it; a past
+    // paper, which paper it is.
     if let Some(mut quiz) = book.quiz(&made.id) {
         quiz.engine = asked.engine.key().to_string();
+        if asked.make == Make::PastPaper {
+            quiz.source = asked.options.source.clone();
+        }
         book.save_quiz(&made.id, &quiz)?;
     }
     Ok(made.id)

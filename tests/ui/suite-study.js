@@ -246,7 +246,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 12, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 14, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -409,8 +409,8 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     ask('q03', 'short', {prompt: 'Why is UCS optimal?', rubric: [{id: 'c1', text: 'orders by $g(n)$', points: 2}, {id: 'c2', text: 'costs above zero', points: 1}], modelAnswer: 'By $g(n)$, costs ≥ ε.'}),
   ];
   const quizEvent = (/** @type {any[]} */ attempts, /** @type {Partial<any>} */ more = {}) => ({type: 'studyQuiz', made: quizMade, questions, attempts, marking: [], results: [],
-    mastery: [], citations: [cite(1, 'S01 p. 3')], ...more});
-  const attempt = (/** @type {any[]} */ answers, /** @type {Partial<any>} */ more = {}) => ({n: 1, questions: ['q01', 'q02', 'q03'], answers, started: 1, finished: null, score: 0, of: 0, ...more});
+    mastery: [], citations: [cite(1, 'S01 p. 3')], drafts: [], sections: [], minutes: null, blueprint: '', source: null, ...more});
+  const attempt = (/** @type {any[]} */ answers, /** @type {Partial<any>} */ more = {}) => ({n: 1, questions: ['q01', 'q02', 'q03'], answers, started: 1, finished: null, ends: null, score: 0, of: 0, ...more});
   const answered = (/** @type {string} */ question, /** @type {any} */ given, /** @type {any} */ grade, /** @type {Partial<any>} */ more = {}) =>
     ({question, given, hinted: false, grade, disputed: null, second: null, unmarked: null, at: 1, ...more});
 
@@ -500,6 +500,72 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     const tutor = win.commands.length;
     ws().querySelector('[data-study-quiz-results-ask]').click(); await settle();
     assert(sent(tutor, 'studyAsk')[0]?.text.includes('Here is how my attempt at "Quiz: search" went'), 'the tutor was not asked');
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  const examMade = {id: 'Q002', kind: 'exam', title: 'Practice final', made: 1, by: 'Codex', task: 'J0006'};
+  const paperQuestions = [
+    ask('q01', 'choice', {prompt: 'Which is complete?', options: ['DFS', 'BFS'], correct: [1], marks: 2}),
+    ask('q02', 'long', {prompt: 'Prove A* optimal.', rubric: [{id: 'c1', text: 'sets up $G_2$', points: 4}, {id: 'c2', text: 'concludes', points: 4}], modelAnswer: '…', marks: 8}),
+  ];
+  const sections = [{title: 'Section A', instructions: 'Answer all.', questions: ['q01']}, {title: 'Section B', instructions: '', questions: ['q02']}];
+  const examEvent = (/** @type {any[]} */ attempts, /** @type {Partial<any>} */ more = {}) => ({type: 'studyQuiz', made: examMade, questions: paperQuestions, attempts, marking: [], results: [],
+    mastery: [], citations: [], drafts: [], sections, minutes: 90, blueprint: 'Two sections; **90 minutes**.', source: null, ...more});
+
+  await test('A practice exam says what it is like and is sat against the clock, each answer saved as it is written', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01'), row('S02', {role: 'pastPaper'})]), {type: 'studyStudio', jobs: [], made: [examMade]}]); await settle();
+    // The past paper tile offers the notebook's past papers.
+    const studio = ws().querySelector('[data-study-studio-body]');
+    studio.querySelector('[data-study-tile="pastPaper"]').click(); await settle();
+    const pick = studio.querySelector('[data-study-make-form="pastPaper"] select[name="source"]');
+    assert(pick && [...pick.options].map((o) => o.value).join() === 'S02', 'the past papers are not offered');
+    const past = win.commands.length;
+    studio.querySelector('[data-study-make-form="pastPaper"]').requestSubmit(); await settle();
+    assert(sent(past, 'studyMake')[0]?.options.source === 'S02', 'the past paper was not asked for');
+    studio.querySelector('[data-study-made="Q002"]').click(); await settle();
+    await win.pushEvents([examEvent([])]); await settle();
+    const intro = ws().querySelector('.st-paper-intro');
+    assert(intro?.textContent.includes('90 minutes · 2 questions · 10 marks') && intro.querySelectorAll('.st-paper-sections li').length === 2, 'the paper is not described');
+    const out = win.commands.length;
+    intro.querySelector('[data-study-export-exam="scheme"]').click(); await settle();
+    assert(JSON.stringify(sent(out, 'studyExamExport')[0]) === JSON.stringify({type: 'studyExamExport', quiz: 'Q002', html: true, scheme: true}), 'the marking scheme was not written out');
+    intro.querySelector('[name="minutes"]').value = '45';
+    const sit = win.commands.length;
+    intro.querySelector('[data-study-sit-start]').requestSubmit(); await settle();
+    assert(JSON.stringify(sent(sit, 'studyExamSit')[0]) === JSON.stringify({type: 'studyExamSit', quiz: 'Q002', minutes: 45}), 'not sat');
+    const ends = Math.floor(Date.now() / 1000) + 45 * 60;
+    const sitting = {n: 1, questions: ['q01', 'q02'], answers: [], started: 1, finished: null, ends, score: 0, of: 0};
+    await win.pushEvents([examEvent([sitting])]); await settle();
+    assert(/^4[45]:\d\d$/.test(ws().querySelector('[data-study-timer]')?.textContent ?? ''), `the clock: ${ws().querySelector('[data-study-timer]')?.textContent}`);
+    assert(ws().querySelectorAll('.st-paper-section').length === 2 && ws().querySelectorAll('.st-sitting .st-question').length === 2, 'the paper is not on the page');
+    assert(!ws().querySelector('[data-study-hint]') && !ws().querySelector('[data-study-answer-form]'), 'a sitting offers hints or checking');
+    // Written, and saved once the writing pauses; what is being written stays.
+    const area = ws().querySelector('[data-study-sit-form="q02"] textarea');
+    area.focus();
+    area.value = 'Suppose G2 is a suboptimal goal on the frontier.';
+    area.dispatchEvent(new win.Event('input', {bubbles: true}));
+    assert(ws().querySelector('[data-study-saved="q02"]')?.textContent === 'Saving…', 'nothing says it is being saved');
+    const typed = win.commands.length;
+    await new Promise((r) => setTimeout(r, 900)); await settle();
+    const saved = sent(typed, 'studyQuizAnswer')[0];
+    assert(saved?.attempt === 1 && saved.question === 'q02' && saved.given.text === 'Suppose G2 is a suboptimal goal on the frontier.', `not saved: ${JSON.stringify(saved)}`);
+    area.value += ' Then';
+    await win.pushEvents([examEvent([sitting], {drafts: [{question: 'q02', given: {kind: 'text', text: 'Suppose G2 is a suboptimal goal on the frontier.'}}]})]); await settle();
+    assert(ws().querySelector('[data-study-sit-form="q02"] textarea').value.endsWith(' Then'), 'what was being written was drawn over');
+    // Handed in, once asked.
+    ws().querySelector('.st-sitting-bar [data-study-hand-in]').click(); await settle();
+    const hand = win.commands.length;
+    ws().querySelector('.st-sitting-bar [data-study-hand-in-yes]').click(); await settle();
+    assert(sent(hand, 'studyQuizFinish')[0]?.attempt === 1, 'not handed in');
+    const done = {...sitting, finished: 2, score: 7, of: 10, answers: [
+      answered('q01', {kind: 'choice', index: 1}, {score: 2, of: 2, by: 'rule', criteria: [], feedback: ''}),
+      answered('q02', {kind: 'text', text: 'Suppose…'}, {score: 5, of: 8, by: 'Claude Code', criteria: [], feedback: ''})]};
+    await win.pushEvents([examEvent([done])]); await settle();
+    const bySection = [...ws().querySelectorAll('.st-results .st-result')].map((r) => r.textContent);
+    assert(bySection[0]?.includes('Section A') && bySection[0].includes('2/2') && bySection[1]?.includes('5/8'), `by section: ${bySection}`);
+    assert(ws().querySelector('.st-quiz-score')?.textContent.includes('sat against the clock'), 'the sitting is not said');
+    ws().querySelector('[data-study-back]').click(); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 

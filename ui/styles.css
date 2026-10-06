@@ -4664,3 +4664,26 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .st-attempts li { display: flex; flex-wrap: wrap; gap: 2px 12px; }
 .st-attempts li b { min-width: 6em; }
 .st-quiz-view > .st-link { font: var(--z-2xs)/1.3 var(--cc-font); }
+
+/* ── exams ── */
+.st-paper-intro h2 { font: 600 var(--z-sm)/1.3 var(--cc-font); }
+.st-paper-sections { display: grid; gap: 4px; margin: 0; padding: 0 0 0 18px; font: var(--z-xs)/1.45 var(--cc-font); color: var(--cc-text); }
+.st-paper-sections li span { margin-left: 8px; }
+.st-sit-form { flex-wrap: wrap; align-items: center; }
+.st-sit-form .grow { flex: 1 1 auto; }
+.st-sit-form .cc-primary, .st-sit-form .cc-quiet { padding: 5px 12px; font-size: var(--z-2xs); }
+.st-minutes { display: inline-flex; align-items: center; gap: 6px; font: var(--z-xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.st-minutes input { width: 5em; padding: 4px 6px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: var(--bg); color: var(--cc-text); font: var(--z-xs)/1.3 var(--zed); }
+.st-exports { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font: var(--z-2xs)/1.4 var(--cc-font); }
+.st-sitting { display: grid; gap: 14px; }
+.st-sitting-bar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px;
+  border: 1px solid var(--cc-line-2); border-radius: 10px; background: var(--bg); box-shadow: 0 6px 18px rgb(0 0 0 / .18); font: var(--z-2xs)/1.3 var(--cc-font); }
+.st-sitting-bar .grow, .st-sitting > .st-quiz-nav .grow { flex: 1 1 auto; }
+.st-sitting-bar .cc-primary, .st-sitting-bar .cc-quiet, .st-sitting > .st-quiz-nav .cc-primary, .st-sitting > .st-quiz-nav .cc-quiet { padding: 5px 12px; font-size: var(--z-2xs); }
+.st-timer { font: 600 var(--z-sm)/1 var(--zed); color: var(--cc-text); font-variant-numeric: tabular-nums; }
+.st-timer.low { color: var(--err); }
+.st-paper-section { display: grid; gap: 10px; }
+.st-paper-section h2 { margin: 6px 0 0; font: 600 var(--z-sm)/1.3 var(--cc-font); color: var(--cc-text); }
+.st-paper-section > p { margin: 0; font: var(--z-xs)/1.5 var(--cc-font); }
+.st-question-tags { display: flex; align-items: baseline; gap: 10px; }
+.st-saved { margin-left: auto; color: var(--cc-faint); font-size: var(--z-2xs); }

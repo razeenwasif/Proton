@@ -94,6 +94,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyQuizDispute { .. }
             | Command::StudyQuizMarkAgain { .. }
             | Command::StudyQuizFinish { .. }
+            | Command::StudyExamSit { .. }
+            | Command::StudyExamExport { .. }
     )
 }
 
@@ -160,6 +162,11 @@ pub struct Study {
     review: Option<proton_study::deck::Session>,
     /// The quiz last looked at: drawn again as its answers are marked.
     quiz: Option<String>,
+    /// An exam being sat against the clock: its quiz, its attempt, and when
+    /// its time is up.
+    sitting: Option<(String, u32, i64)>,
+    /// What the time is, in seconds since the epoch: a test's, or the clock's.
+    clock: fn() -> i64,
 }
 
 impl std::fmt::Debug for Study {
@@ -186,6 +193,8 @@ impl Default for Study {
             jobs: jobs::Jobs::default(),
             review: None,
             quiz: None,
+            sitting: None,
+            clock: || proton_study::now() as i64,
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -265,6 +274,12 @@ impl Study {
     }
 
     /// Make tutors with this rather than the engines: for a test.
+    /// Tell the time by `clock`: for a test of a sitting against it.
+    pub fn with_clock(mut self, clock: fn() -> i64) -> Study {
+        self.clock = clock;
+        self
+    }
+
     pub fn with_tutors(mut self, tutors: Box<dyn Tutors>) -> Study {
         self.tutors = tutors;
         self
@@ -344,6 +359,7 @@ impl Study {
             }
         }
         events.extend(self.poll_review());
+        events.extend(self.poll_sitting());
         if let Some(open) = &mut self.open {
             let now = proton_study::now();
             if now.saturating_sub(open.beat) >= BEAT {
@@ -464,6 +480,8 @@ impl Study {
             Command::StudyQuizDispute { quiz, attempt, question, why } => self.dispute(&quiz, attempt, &question, &why),
             Command::StudyQuizMarkAgain { quiz, attempt, question } => self.mark_again(&quiz, attempt, &question),
             Command::StudyQuizFinish { quiz, attempt } => self.finish_quiz(&quiz, attempt),
+            Command::StudyExamSit { quiz, minutes } => self.sit(&quiz, minutes),
+            Command::StudyExamExport { quiz, html, scheme } => self.export_exam(&quiz, html, scheme),
             _ => Vec::new(),
         }
     }
@@ -625,6 +643,7 @@ impl Study {
         });
         self.review = None;
         self.quiz = None;
+        self.sitting = None;
         self.open = Some(Open { book, lock, holder, beat: now });
         Ok(())
     }
@@ -985,6 +1004,7 @@ impl Study {
         self.tutor = None;
         self.review = None;
         self.quiz = None;
+        self.sitting = None;
         self.open = None;
     }
 
@@ -1124,6 +1144,12 @@ impl Study {
         if kind == proton_study::studio::Make::Marking {
             return vec![notice("A mark is asked for by answering.".into(), NoticeLevel::Warn)];
         }
+        if kind == proton_study::studio::Make::PastPaper {
+            let paper = options.source.as_deref().and_then(|id| self.open.as_ref()?.book.sources.get(id));
+            if !paper.is_some_and(|s| s.status.has_words()) {
+                return vec![notice("Choose a past paper among the sources, read.".into(), NoticeLevel::Warn)];
+            }
+        }
         if let Some(deck) = options.deck.as_deref() {
             if kind != proton_study::studio::Make::Flashcards || self.open.as_ref().and_then(|o| o.book.deck(deck)).is_none() {
                 return vec![notice(format!("{deck}: no such deck to add cards to"), NoticeLevel::Warn)];
@@ -1160,7 +1186,7 @@ impl Study {
             StudyMadeBody::Table { rows, .. } => rows.iter().flat_map(|r| r.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Objectives { objectives } => objectives.iter().flat_map(|o| o.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Cards { cards } => cards.iter().flat_map(|c| c.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
-            StudyMadeBody::Questions { questions } => questions.iter().flat_map(|q| q.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            StudyMadeBody::Questions { questions } | StudyMadeBody::Paper { questions, .. } => questions.iter().flat_map(|q| q.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
         };
         let citations = proton_study::cite::resolve(&open.book, &text);
         vec![Event::StudyMadeOpen { made, body, citations }]

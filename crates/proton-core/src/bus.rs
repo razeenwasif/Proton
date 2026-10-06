@@ -681,6 +681,20 @@ pub enum Command {
         quiz: String,
         attempt: u32,
     },
+    /// Sit an exam paper against the clock, for so many minutes: no hints,
+    /// its answers kept as drafts as they are written, nothing marked until
+    /// it is handed in — or the time is up.
+    StudyExamSit {
+        quiz: String,
+        minutes: u32,
+    },
+    /// Write an exam paper out into the notebook's `exports/`: as Markdown
+    /// or as a page to print, alone or with its marking scheme.
+    StudyExamExport {
+        quiz: String,
+        html: bool,
+        scheme: bool,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1578,6 +1592,14 @@ pub enum Event {
         results: Vec<proton_study::quiz::StudyResult>,
         mastery: Vec<proton_study::mastery::StudyMastery>,
         citations: Vec<proton_study::cite::StudyCitation>,
+        /// A sitting's answers so far, not yet handed in.
+        drafts: Vec<proton_study::quiz::StudyDrafted>,
+        /// An exam paper's sections, how long it is sat for, what the past
+        /// papers it is like are like, and the past paper it is, if it is one.
+        sections: Vec<proton_study::quiz::StudyPaperSection>,
+        minutes: Option<u32>,
+        blueprint: String,
+        source: Option<String>,
     },
     /// What a call of the studio's was told and asked, and how it ended.
     StudyTask {

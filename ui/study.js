@@ -91,7 +91,8 @@ export function createStudy(host) {
       return shown.kind === "deck" || shown.kind === "review" ? cards.citations(shown.kind) : [];
     },
   });
-  const studio = createStudio({ box: els.studio, dispatch: host.dispatch, readOnly: () => readOnly() });
+  const studio = createStudio({ box: els.studio, dispatch: host.dispatch, readOnly: () => readOnly(),
+    pastPapers: () => (state.notebook?.sources ?? []).filter((s) => s.role === "pastPaper" && hasWords(s)).map((s) => ({ id: s.id, title: s.title })) });
   /** Ask the tutor, in the chat: a card explained, a question, how a quiz went. @param {string} text */
   const askTutor = (text) => {
     state.shown = { kind: "chat" };
@@ -664,6 +665,7 @@ export function createStudy(host) {
     if (t.closest("[data-study-picker]")) return;
     if (chat.change(t)) return;
     if (t instanceof HTMLInputElement && cards.change(t)) return;
+    if (state.shown.kind === "quiz" && quizzes.input(t)) return;
     const nb = state.notebook;
     if (!nb) return;
     const tick = t.dataset.studyTick;
@@ -678,6 +680,11 @@ export function createStudy(host) {
     }
     const role = t.dataset.studyRole;
     if (role !== undefined) host.dispatch({ type: "studyRole", id: role, role: t.value });
+  });
+
+  // What is written in a sitting is saved as it is written.
+  ws.addEventListener("input", (e) => {
+    if (state.shown.kind === "quiz") quizzes.input(/** @type {HTMLElement} */ (e.target));
   });
 
   ws.addEventListener("keydown", (e) => {

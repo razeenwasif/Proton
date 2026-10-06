@@ -3,4 +3,4 @@
 /**
  * What the studio can make.
  */
-export type StudyMakeKind = "studyGuide" | "briefing" | "faq" | "glossary" | "timeline" | "report" | "mindMap" | "table" | "objectives" | "flashcards" | "quiz" | "practice" | "marking";
+export type StudyMakeKind = "studyGuide" | "briefing" | "faq" | "glossary" | "timeline" | "report" | "mindMap" | "table" | "objectives" | "flashcards" | "quiz" | "practice" | "exam" | "pastPaper" | "marking";

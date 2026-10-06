@@ -100,3 +100,71 @@ fn a_quiz_is_set_from_the_sources_and_a_written_answer_marked_by_another_family(
     assert!(grade.score > 0.0 && grade.criteria.iter().all(|c| c.evidence.iter().all(|e| answer.to_lowercase().contains(&e.to_lowercase().replace('$', "")))));
     session.shutdown();
 }
+
+#[test]
+#[ignore = "asks a real engine to set an exam and transcribe a past paper, which costs a little of its plan"]
+fn an_exam_is_set_like_the_past_paper_and_the_past_paper_transcribed_with_its_solutions() {
+    use proton_study::model::Role;
+    let root = std::env::temp_dir().join(format!("proton-exam-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let kb = root.join("kb/Course");
+    std::fs::create_dir_all(&kb).unwrap();
+    std::fs::write(kb.join("search.md"), "# Search\n\nUniform-cost search expands by path cost g(n). A* orders by f(n) = g(n) + h(n); with an admissible h it is optimal. Iterative deepening uses O(bd) memory.\n").unwrap();
+    std::fs::write(
+        kb.join("Final_2019.md"),
+        "# COMP0000 Final Examination, 2019\n\nTime allowed: 60 minutes. Answer all questions.\n\n## Section A (10 marks)\n\n1. (4 marks) State when uniform-cost search is optimal.\n\n\
+         2. (6 marks) Give the memory iterative deepening uses on a tree of branching factor b and depth d, and say why.\n\n## Section B (10 marks)\n\n\
+         3. (10 marks) Prove that A* with an admissible heuristic is optimal.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        kb.join("Final_2019_solutions.md"),
+        "# Solutions, 2019\n\n1. When every step cost is at least some ε > 0 (4).\n\n2. O(bd): it keeps one path and its siblings (3 for the bound, 3 for why).\n\n\
+         3. Suppose a suboptimal goal G2 is on the frontier and n is on an optimal path: f(n) ≤ C* < f(G2), so n is expanded first (10).\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("Notebooks")).unwrap();
+    let settings = root.join("settings.json");
+    std::fs::write(&settings, serde_json::json!({"study": {"roots": [kb], "folder": root.join("Notebooks")}}).to_string()).unwrap();
+    let mut session = Session::new(&root).with_person_settings(settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    until(&mut session, Duration::from_secs(30), |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(())).expect("the knowledge base");
+    session.apply(Command::StudyNew { title: "Exam, live".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Course/search.md".into(), "Course/Final_2019.md".into(), "Course/Final_2019_solutions.md".into()] });
+    let sources = until(&mut session, Duration::from_secs(30), |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 3 && sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(sources.clone()),
+        _ => None,
+    })
+    .expect("the sources read");
+    let paper = sources.iter().find(|s| s.title.starts_with("Final_2019.")).unwrap().id.clone();
+    if sources.iter().find(|s| s.id == paper).is_some_and(|s| s.role != Role::PastPaper) {
+        session.apply(Command::StudyRole { id: paper.clone(), role: Role::PastPaper });
+    }
+    let engine = std::env::var("PROTON_QUIZ_SETTER").unwrap_or_else(|_| "claude".into());
+    session.apply(Command::StudyTutor { settings: TutorSettings { engine, ..TutorSettings::default() } });
+
+    for (make, options) in [(Make::Exam, Options::default()), (Make::PastPaper, Options { source: Some(paper.clone()), ..Options::default() })] {
+        session.apply(Command::StudyMake { kind: make, options });
+        let job = until(&mut session, Duration::from_secs(16 * 60), |e| match e {
+            Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.kind == make && matches!(j.state.as_str(), "done" | "failed")).cloned(),
+            _ => None,
+        })
+        .expect("a paper within sixteen minutes");
+        let id = job.made.unwrap_or_else(|| panic!("{make:?}: {}", job.why.unwrap_or_default()));
+        let events = session.apply(Command::StudyShowMade { id });
+        let Some(Event::StudyQuiz { questions, sections, minutes, blueprint, citations, .. }) = events.iter().find(|e| matches!(e, Event::StudyQuiz { .. })) else { panic!() };
+        println!("\n{make:?}: {minutes:?} minutes, {} sections\n{blueprint}", sections.len());
+        for q in questions {
+            println!("  [{:?}, {:?} marks{}] {}", q.kind, q.marks, q.like.as_ref().map(|l| format!(", like {l}")).unwrap_or_default(), q.prompt);
+        }
+        assert!(!sections.is_empty() && !blueprint.is_empty(), "{make:?} has no sections or blueprint");
+        assert!(citations.iter().all(|c| c.resolved), "{make:?} citations: {:?}", citations.iter().map(|c| &c.raw).collect::<Vec<_>>());
+        if make == Make::PastPaper {
+            assert!(questions.iter().any(|q| q.prompt.contains("admissible")), "the paper's own words are not there");
+            assert_eq!(*minutes, Some(60));
+        } else {
+            assert!(questions.iter().all(|q| q.like.is_none()), "a question is a past paper's reworded");
+        }
+    }
+    session.shutdown();
+}

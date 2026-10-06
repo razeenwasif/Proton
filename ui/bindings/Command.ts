@@ -40,7 +40,7 @@ card: string | null, kind: StudyCardKind, front: string, back: string, topic: st
 /**
  * Whether its hint was looked at first.
  */
-hinted: boolean, } | { "type": "studyQuizDispute", quiz: string, attempt: number, question: string, why: string, } | { "type": "studyQuizMarkAgain", quiz: string, attempt: number, question: string, } | { "type": "studyQuizFinish", quiz: string, attempt: number, } | { "type": "openWorkspace", path: string, } | { "type": "focusWorkspace", index: number, } | { "type": "closeWorkspace", index: number, } | { "type": "cycleWorkspace", by: bigint, } | { "type": "openWorkspacePicker" } | { "type": "toggleBreakpoint", 
+hinted: boolean, } | { "type": "studyQuizDispute", quiz: string, attempt: number, question: string, why: string, } | { "type": "studyQuizMarkAgain", quiz: string, attempt: number, question: string, } | { "type": "studyQuizFinish", quiz: string, attempt: number, } | { "type": "studyExamSit", quiz: string, minutes: number, } | { "type": "studyExamExport", quiz: string, html: boolean, scheme: boolean, } | { "type": "openWorkspace", path: string, } | { "type": "focusWorkspace", index: number, } | { "type": "closeWorkspace", index: number, } | { "type": "cycleWorkspace", by: bigint, } | { "type": "openWorkspacePicker" } | { "type": "toggleBreakpoint", 
 /**
  * The line the cursor is on when absent.
  */

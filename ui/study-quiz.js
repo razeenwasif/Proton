@@ -21,7 +21,10 @@ import { answerHtml } from "./study-chat.js";
 /** @typedef {import("./bindings/StudyResult").StudyResult} Result */
 /** @typedef {import("./bindings/StudyMastery").StudyMastery} Mastery */
 /** @typedef {import("./bindings/StudyCitation").StudyCitation} Citation */
-/** @typedef {{made: Made, questions: Question[], attempts: Attempt[], marking: string[], results: Result[], mastery: Mastery[], citations: Citation[]}} QuizEvent */
+/** @typedef {import("./bindings/StudyPaperSection").StudyPaperSection} Section */
+/** @typedef {import("./bindings/StudyDrafted").StudyDrafted} Drafted */
+/** @typedef {{made: Made, questions: Question[], attempts: Attempt[], marking: string[], results: Result[], mastery: Mastery[], citations: Citation[],
+ *   drafts: Drafted[], sections: Section[], minutes: number | null, blueprint: string, source: string | null}} QuizEvent */
 
 const KINDS = /** @type {Record<string, string>} */ ({ choice: "One answer", choices: "Every right answer", blanks: "Fill the blanks", number: "A number", short: "A sentence or two", long: "Worked answer" });
 const STANDING = /** @type {Record<string, string>} */ ({ notStarted: "Not started", focus: "Focus", developing: "Developing", strong: "Strength" });
@@ -31,6 +34,27 @@ const inline = (text) => markdown(text).replace(/^<p>|<\/p>\s*$/g, "");
 
 /** A share, in whole per cent. @param {number} score @param {number} of */
 const percent = (score, of) => (of > 0 ? Math.round((score / of) * 100) : 0);
+
+/** Whether an attempt is sat against the clock.
+ *  @param {Attempt} a @returns {a is Attempt & {ends: number}} */
+const timed = (a) => typeof a.ends === "number";
+
+/** What a question is worth. @param {Question} q */
+export const worth = (q) => (q.kind === "short" || q.kind === "long" ? q.rubric.reduce((n, c) => n + c.points, 0) : q.marks ?? (q.kind === "blanks" ? q.blanks.length : 1));
+
+/** How many questions, said. @param {number} n */
+const questionsOf = (n) => `${n} ${n === 1 ? "question" : "questions"}`;
+
+/** A number of marks, said. @param {number} n */
+const marksOf = (n) => `${Math.round(n * 100) / 100} ${n === 1 ? "mark" : "marks"}`;
+
+/** Time left, as a clock reads it. @param {number} seconds */
+export function left(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, r = s % 60;
+  const two = (/** @type {number} */ n) => String(n).padStart(2, "0");
+  return h ? `${h}:${two(m)}:${two(r)}` : `${m}:${two(r)}`;
+}
 
 /** The mark that counts: after a dispute, the second — unless the two
  *  differ by more than a point, when the lower. @param {Answered} a */
@@ -42,15 +66,16 @@ export function counted(a) {
 /** How a mark reads: whole, part, or none. @param {Grade | null} g */
 const verdict = (g) => (!g ? "" : g.score >= g.of - 1e-9 ? "right" : g.score > 0 ? "part" : "wrong");
 
-/** A prompt with its blanks as inputs, or as what was written in them.
- *  @param {Question} q @param {Citation[]} citations @param {string[] | null} given @param {Grade | null} grade */
-function promptHtml(q, citations, given, grade) {
+/** A prompt with its blanks as inputs — holding what a draft has in them —
+ *  or as what was written in them.
+ *  @param {Question} q @param {Citation[]} citations @param {string[] | null} given @param {Grade | null} grade @param {string[]} [draft] */
+function promptHtml(q, citations, given, grade, draft = []) {
   if (q.kind !== "blanks") return answerHtml(q.prompt, citations);
   let n = 0;
   const marked = q.prompt.replace(/_{3,}/g, () => `${n++}`);
   return answerHtml(marked, citations).replace(/(\d+)/g, (_, i) => {
     const k = Number(i);
-    if (!given) return `<input class="st-blank" data-blank="${k}" aria-label="Blank ${k + 1}" autocomplete="off" spellcheck="false">`;
+    if (!given) return `<input class="st-blank" data-blank="${k}" aria-label="Blank ${k + 1}" autocomplete="off" spellcheck="false" value="${esc(draft[k] ?? "")}">`;
     const right = grade ? (q.blanks[k] ?? []).some((w) => w.trim().toLowerCase() === (given[k] ?? "").trim().toLowerCase()) : false;
     return `<span class="st-blank-said ${grade ? (right ? "right" : "wrong") : ""}">${esc(given[k] || "—")}</span>`;
   });
@@ -60,9 +85,13 @@ function promptHtml(q, citations, given, grade) {
  * @param {{dispatch: (command: any) => unknown, readOnly: () => boolean, ask: (text: string) => void}} host
  */
 export function createQuiz(host) {
-  /** @type {{quiz: QuizEvent | null, at: number, hinted: Set<string>, disputing: string | null, reviewing: boolean}} */
+  /** @type {{quiz: QuizEvent | null, at: number, hinted: Set<string>, disputing: string | null, reviewing: boolean,
+   *   handing: boolean, saving: Map<string, number>, handed: string}} */
   const state = {
     quiz: null,
+    // A sitting: the hand-in being confirmed; answers waiting to be saved,
+    // each its timer; the sitting the clock last handed in.
+    handing: false, saving: new Map(), handed: "",
     // Which question of the attempt is shown.
     at: 0,
     // Questions whose hints were looked at, this attempt.
@@ -79,18 +108,95 @@ export function createQuiz(host) {
     return last && last.finished === null ? last : null;
   };
 
-  /** A question's own inputs, before it is answered. @param {Question} q */
-  function inputsHtml(q) {
+  /** A question's own inputs, before it is answered — holding a draft's
+   *  answer, in a sitting. @param {Question} q @param {Given | null} [draft] */
+  function inputsHtml(q, draft = null) {
     if (q.kind === "choice" || q.kind === "choices") {
       const type = q.kind === "choice" ? "radio" : "checkbox";
-      return `<div class="st-options">${q.options.map((o, i) => `<label class="st-option"><input type="${type}" name="option" value="${i}">` +
+      const on = draft?.kind === "choice" ? [draft.index] : draft?.kind === "choices" ? draft.indices : [];
+      return `<div class="st-options">${q.options.map((o, i) => `<label class="st-option"><input type="${type}" name="option" value="${i}"${on.includes(i) ? " checked" : ""}>` +
         `<kbd>${i + 1}</kbd><span>${inline(o)}</span></label>`).join("")}</div>`;
     }
-    if (q.kind === "number") return `<label class="st-number"><input name="number" autocomplete="off" spellcheck="false" placeholder="A number${q.unit ? `, in ${esc(q.unit)}` : ""}">${q.unit ? `<span>${esc(q.unit)}</span>` : ""}</label>`;
+    if (q.kind === "number") {
+      const value = draft?.kind === "number" ? draft.text : "";
+      return `<label class="st-number"><input name="number" autocomplete="off" spellcheck="false" value="${esc(value)}" placeholder="A number${q.unit ? `, in ${esc(q.unit)}` : ""}">${q.unit ? `<span>${esc(q.unit)}</span>` : ""}</label>`;
+    }
     if (q.kind === "short" || q.kind === "long") {
-      return `<textarea name="text" rows="${q.kind === "long" ? 10 : 4}" placeholder="${q.kind === "long" ? "Work it through — TeX in $…$ is drawn when it is marked" : "A sentence or two"}"></textarea>`;
+      const text = draft?.kind === "text" ? draft.text : "";
+      return `<textarea name="text" rows="${q.kind === "long" ? 10 : 4}" placeholder="${q.kind === "long" ? "Work it through — TeX in $…$ is drawn when it is marked" : "A sentence or two"}">${esc(text)}</textarea>`;
     }
     return "";
+  }
+
+  /** A paper's sections; a quiz's questions, as one. @param {QuizEvent} e @returns {Section[]} */
+  const sectionsOf = (e) => (e.sections.length ? e.sections : [{ title: "", instructions: "", questions: e.questions.map((q) => q.id) }]);
+
+  /** Whether it is an exam paper. @param {QuizEvent} e */
+  const paper = (e) => e.made.kind === "exam" || e.made.kind === "pastPaper";
+
+  /** An exam being sat: every question on the page, by section, each saved as
+   *  it is written; the clock; the hand-in. @param {QuizEvent} e @param {Attempt} attempt */
+  function sittingHtml(e, attempt) {
+    const drafts = new Map(e.drafts.map((d) => [d.question, d.given]));
+    const ends = attempt.ends ?? 0;
+    const hand = state.handing
+      ? `<span class="st-confirm">Hand it in now? <button class="cc-primary" data-study-hand-in-yes>Hand it in</button><button class="cc-quiet" data-study-hand-in-no>Not yet</button></span>`
+      : `<button class="cc-primary" data-study-hand-in${host.readOnly() ? " disabled" : ""}>Hand it in</button>`;
+    let n = 0;
+    const sections = sectionsOf(e).map((section) => {
+      const questions = section.questions.map((id) => {
+        const q = e.questions.find((x) => x.id === id);
+        if (!q) return "";
+        n += 1;
+        const draft = drafts.get(q.id) ?? null;
+        const blanks = draft?.kind === "blanks" ? draft.words : [];
+        return `<div class="st-question" data-turn="made" data-question="${esc(q.id)}"><div class="st-question-tags st-faint">Question ${n} · ${marksOf(worth(q))}` +
+          `<span class="st-saved" data-study-saved="${esc(q.id)}">${draft ? "Saved" : ""}</span></div>` +
+          `<div class="st-question-prompt md">${promptHtml(q, e.citations, null, null, blanks)}</div>` +
+          `<form class="st-answer-form" data-study-sit-form="${esc(q.id)}" novalidate>${inputsHtml(q, draft)}</form></div>`;
+      }).join("");
+      return `<section class="st-paper-section">${section.title ? `<h2>${esc(section.title)}</h2>` : ""}` +
+        `${section.instructions ? `<p class="st-faint">${inline(section.instructions)}</p>` : ""}${questions}</section>`;
+    }).join("");
+    return `<div class="st-sitting" data-study-sitting="${esc(e.made.id)}/${attempt.n}">` +
+      `<div class="st-sitting-bar"><span class="st-timer" data-study-timer="${ends}">${left(ends - Date.now() / 1000)}</span>` +
+      `<span class="st-faint">left · each answer is kept as you write it; nothing is marked until it is handed in</span><span class="grow"></span>${hand}</div>` +
+      `${sections}<div class="st-quiz-nav"><span class="grow"></span>${hand}</div></div>`;
+  }
+
+  /** How an attempt did, section by section. @param {QuizEvent} e @param {Attempt} attempt */
+  function sectionsDone(e, attempt) {
+    if (!e.sections.length) return "";
+    return `<h3>By section</h3><div class="st-results">${e.sections.map((section) => {
+      let score = 0, of = 0;
+      for (const id of section.questions) {
+        const q = e.questions.find((x) => x.id === id);
+        const a = attempt.answers.find((x) => x.question === id);
+        const g = a ? counted(a) : null;
+        of += g ? g.of : q ? worth(q) : 0;
+        score += g ? g.score : 0;
+      }
+      return `<div class="st-result"><span>${esc(section.title || "Questions")}</span><span class="st-bar"><i style="width:${percent(score, of)}%"></i></span>` +
+        `<b>${Math.round(score * 100) / 100}/${Math.round(of * 100) / 100}</b></div>`;
+    }).join("")}</div>`;
+  }
+
+  /** An exam paper, before a sitting: what it is, and how to sit it. @param {QuizEvent} e */
+  function paperHtml(e) {
+    const ro = host.readOnly();
+    const total = e.questions.reduce((n, q) => n + worth(q), 0);
+    const minutes = e.minutes ?? 120;
+    const facts = [e.minutes ? `${e.minutes} minutes` : "", questionsOf(e.questions.length), marksOf(total)].filter(Boolean).join(" · ");
+    const sections = e.sections.map((s) => `<li><b>${esc(s.title || "Questions")}</b><span class="st-faint">${questionsOf(s.questions.length)} · ` +
+      `${marksOf(s.questions.reduce((n, id) => { const q = e.questions.find((x) => x.id === id); return n + (q ? worth(q) : 0); }, 0))}</span></li>`).join("");
+    const what = e.made.kind === "pastPaper" ? "The paper as it was set, its questions citing its pages, marked by its solutions."
+      : "A new paper, set like the past papers: the same sections and marks, every question new.";
+    const sit = ro ? "" : `<form class="rs-actions st-sit-form" data-study-sit-start novalidate><label class="st-minutes">Sit it for <input name="minutes" type="number" min="1" max="600" value="${minutes}"> minutes</label>` +
+      `<span class="grow"></span><button type="button" class="cc-quiet" data-study-quiz-start="all" title="With each answer marked as you give it">Practise it, untimed</button><button type="submit" class="cc-primary">Sit it</button></form>`;
+    const out = `<div class="st-exports"><span class="st-faint">Write it out:</span><button class="st-link" data-study-export-exam="md">the paper, as Markdown</button>` +
+      `<button class="st-link" data-study-export-exam="html">the paper, to print</button><button class="st-link" data-study-export-exam="scheme">its marking scheme, to print</button></div>`;
+    return `<div class="st-card st-paper-intro"><h2>${esc(facts)}</h2><p>${what}</p>${sections ? `<ol class="st-paper-sections">${sections}</ol>` : ""}` +
+      `${e.blueprint ? `<details class="st-explain"><summary>${e.made.kind === "pastPaper" ? "What the paper is" : "What the past papers are like"}</summary><div class="md">${answerHtml(e.blueprint, e.citations)}</div></details>` : ""}${sit}${out}</div>`;
   }
 
   /** What an answer was marked, and why. @param {Question} q @param {Answered} a @param {boolean} marking @param {Citation[]} citations */
@@ -177,7 +283,7 @@ export function createQuiz(host) {
     const missed = last ? last.questions.filter((id) => { const a = last.answers.find((x) => x.question === id); const g = a ? counted(a) : null; return !g || g.score < g.of - 1e-9; }) : [];
     const begin = ro ? "" : `<div class="rs-actions st-quiz-begin">` +
       (last && missed.length ? `<button class="cc-quiet" data-study-quiz-start="missed">Try again the ${missed.length} missed</button>` : "") +
-      `<button class="cc-primary" data-study-quiz-start="all">${last ? "Begin again" : "Begin"}</button></div>`;
+      (paper(e) ? "" : `<button class="cc-primary" data-study-quiz-start="all">${last ? "Begin again" : "Begin"}</button>`) + `</div>`;
     if (!last) {
       const kinds = [...new Set(e.questions.map((q) => KINDS[q.kind]))].join(", ");
       return `<div class="st-card st-quiz-intro"><h2>${e.questions.length} questions</h2><p>${esc(kinds)}. Each is marked as you answer it: by rule where it can be checked, ` +
@@ -205,7 +311,10 @@ export function createQuiz(host) {
           `${a ? markHtml(q, a, e.marking.includes(`${last.n}/${id}`), e.citations) : `<p class="st-faint">Not answered.</p>`}</div>`;
       }).join("")
       : "";
-    return `<div class="st-card st-quiz-score"><div><h2>${last.of ? `${percent(last.score, last.of)}%` : "—"}</h2><p>${last.score} of ${last.of} marks, attempt ${last.n}</p></div>${begin}</div>` +
+    const marking = last.answers.some((a) => e.marking.includes(`${last.n}/${a.question}`));
+    return `<div class="st-card st-quiz-score"><div><h2>${last.of ? `${percent(last.score, last.of)}%` : "—"}</h2><p>${Math.round(last.score * 100) / 100} of ${Math.round(last.of * 100) / 100} marks, ` +
+      `${timed(last) ? "sat against the clock" : "attempt"} ${last.n}${marking ? " — still being marked" : ""}</p></div>${begin}</div>` +
+      sectionsDone(e, last) +
       (bars ? `<h3>${e.results.some((r) => r.objective) ? "By objective" : "By topic"}</h3><div class="st-results">${bars}</div>` : "") + standing + next +
       `<h3>Attempts</h3><ol class="st-attempts">${history}</ol>` +
       `<button class="st-link" data-study-quiz-review>${state.reviewing ? "Hide the answers" : "Go over the answers"}</button>${review}`;
@@ -215,18 +324,39 @@ export function createQuiz(host) {
   function html() {
     const e = /** @type {QuizEvent} */ (state.quiz);
     const ro = host.readOnly();
-    const what = e.made.kind === "practice" ? "Practice problems" : "Quiz";
+    const what = /** @type {Record<string, string>} */ ({ practice: "Practice problems", exam: "Practice exam", pastPaper: "Past paper" })[e.made.kind] ?? "Quiz";
     const head = `<div class="st-reader-head"><button class="cc-quiet" data-study-back>← Back</button>` +
       `<div><h1>${esc(e.made.title)}</h1><span class="st-faint">${what} · ${e.questions.length} questions · ${esc(e.made.by)}</span></div>` +
       `<button class="cc-quiet" data-study-task="${esc(e.made.task)}" title="What the call was told and asked">Prompt</button>` +
       (ro ? "" : `<button class="cc-quiet" data-study-bin-made="${esc(e.made.id)}" title="Put it, and its attempts, in the notebook's bin">Bin</button>`) + `</div>`;
     const attempt = current();
-    return `<div class="st-reader st-quiz-view">${head}${attempt ? attemptHtml(e, attempt) : overviewHtml(e)}</div>`;
+    const body = attempt ? (timed(attempt) ? sittingHtml(e, attempt) : attemptHtml(e, attempt))
+      : paper(e) ? `${paperHtml(e)}${e.attempts.length ? overviewHtml(e) : ""}` : overviewHtml(e);
+    return `<div class="st-reader st-quiz-view">${head}${body}</div>`;
   }
 
   /** @param {HTMLElement} stage */
   function render(stage) {
     if (!state.quiz) return;
+    // A sitting is drawn once: what is written in it is the person's, and
+    // only what has been saved is marked as it is.
+    const sitting = current();
+    const drawn = /** @type {HTMLElement | null} */ (stage.querySelector(`[data-study-sitting="${CSS.escape(`${state.quiz.made.id}/${sitting?.n ?? ""}`)}"]`));
+    if (drawn && sitting && timed(sitting)) {
+      for (const d of state.quiz.drafts) {
+        const mark = drawn.querySelector(`[data-study-saved="${CSS.escape(d.question)}"]`);
+        if (mark && !state.saving.has(d.question)) mark.textContent = "Saved";
+      }
+      for (const bar of drawn.querySelectorAll(".st-sitting-bar, .st-sitting > .st-quiz-nav")) {
+        const hand = bar.querySelector("[data-study-hand-in], .st-confirm");
+        if (hand && state.handing !== hand.classList.contains("st-confirm")) {
+          hand.outerHTML = state.handing
+            ? `<span class="st-confirm">Hand it in now? <button class="cc-primary" data-study-hand-in-yes>Hand it in</button><button class="cc-quiet" data-study-hand-in-no>Not yet</button></span>`
+            : `<button class="cc-primary" data-study-hand-in>Hand it in</button>`;
+        }
+      }
+      return;
+    }
     // What is being written is kept while the quiz is drawn again — an
     // answer to the question shown, while it is unanswered, or a dispute.
     const typing = /** @type {HTMLTextAreaElement | HTMLInputElement | null} */ (stage.querySelector(".st-quiz-view textarea:focus, .st-quiz-view input:focus"));
@@ -284,6 +414,27 @@ export function createQuiz(host) {
     if (!e || !t.closest(".st-quiz-view")) return false;
     const at = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
     const attempt = current();
+    if (at("[data-study-hand-in]")) {
+      state.handing = true;
+      redraw();
+      return true;
+    }
+    if (at("[data-study-hand-in-no]")) {
+      state.handing = false;
+      redraw();
+      return true;
+    }
+    if (at("[data-study-hand-in-yes]") && attempt) {
+      flush();
+      host.dispatch({ type: "studyQuizFinish", quiz: e.made.id, attempt: attempt.n });
+      return true;
+    }
+    const out = at("[data-study-export-exam]");
+    if (out) {
+      const how = out.dataset.studyExportExam;
+      host.dispatch({ type: "studyExamExport", quiz: e.made.id, html: how !== "md", scheme: how === "scheme" });
+      return true;
+    }
     const start = at("[data-study-quiz-start]");
     if (start) {
       state.at = 0;
@@ -356,6 +507,19 @@ export function createQuiz(host) {
     const e = state.quiz;
     if (!e || !form.closest(".st-quiz-view")) return false;
     const attempt = current();
+    if (form.matches("[data-study-sit-start]")) {
+      const minutes = Math.round(Number(new FormData(form).get("minutes") ?? 0));
+      if (!(minutes >= 1 && minutes <= 600)) {
+        /** @type {HTMLInputElement | null} */ (form.querySelector("input"))?.focus();
+        return true;
+      }
+      host.dispatch({ type: "studyExamSit", quiz: e.made.id, minutes });
+      return true;
+    }
+    if (form.matches("[data-study-sit-form]")) {
+      save(form.dataset.studySitForm ?? "");
+      return true;
+    }
     if (form.matches("[data-study-answer-form]") && attempt) {
       const q = e.questions.find((x) => x.id === form.dataset.studyAnswerForm);
       const answer = q ? given(q, form) : null;
@@ -385,7 +549,7 @@ export function createQuiz(host) {
   function key(ev, redraw) {
     const e = state.quiz;
     const attempt = current();
-    if (!e || !attempt || ev.metaKey || ev.ctrlKey || ev.altKey) return false;
+    if (!e || !attempt || timed(attempt) || ev.metaKey || ev.ctrlKey || ev.altKey) return false;
     const target = /** @type {HTMLElement} */ (ev.target);
     if (target.closest?.("textarea, input:not([type=radio]):not([type=checkbox]), select")) return false;
     if (ev.key === "ArrowRight" || ev.key === "ArrowLeft") {
@@ -405,6 +569,56 @@ export function createQuiz(host) {
     return false;
   }
 
+  /** Save an answer of a sitting, now. @param {string} id */
+  function save(id) {
+    const e = state.quiz;
+    const attempt = current();
+    clearTimeout(state.saving.get(id));
+    state.saving.delete(id);
+    if (!e || !attempt || !timed(attempt)) return;
+    const q = e.questions.find((x) => x.id === id);
+    const form = /** @type {HTMLFormElement | null} */ (document.querySelector(`[data-study-sit-form="${CSS.escape(id)}"]`));
+    const answer = q && form ? given(q, form) : null;
+    if (!answer) return;
+    host.dispatch({ type: "studyQuizAnswer", quiz: e.made.id, attempt: attempt.n, question: id, given: answer, hinted: false });
+  }
+
+  /** Every answer waiting to be saved, saved. */
+  const flush = () => [...state.saving.keys()].forEach(save);
+
+  /** Something written in a sitting: saved once the writing pauses.
+   *  @param {HTMLElement} t */
+  function input(t) {
+    const attempt = current();
+    if (!state.quiz || !attempt || !timed(attempt)) return false;
+    const holder = /** @type {HTMLElement | null} */ (t.closest("[data-question]"));
+    const id = holder?.dataset.question;
+    if (!holder || !id) return false;
+    clearTimeout(state.saving.get(id));
+    state.saving.set(id, window.setTimeout(() => save(id), 700));
+    const mark = holder.querySelector("[data-study-saved]");
+    if (mark) mark.textContent = "Saving…";
+    return true;
+  }
+
+  // The clock of a sitting, read each second; at its end, what is written is
+  // saved and handed in.
+  window.setInterval(() => {
+    const timer = /** @type {HTMLElement | null} */ (document.querySelector("[data-study-timer]"));
+    const e = state.quiz;
+    const attempt = current();
+    if (!timer || !e || !attempt || !timed(attempt)) return;
+    const remaining = attempt.ends - Date.now() / 1000;
+    timer.textContent = remaining > 0 ? left(remaining) : "Time is up";
+    timer.classList.toggle("low", remaining < 300);
+    const key = `${e.made.id}/${attempt.n}`;
+    if (remaining <= 0 && state.handed !== key && !host.readOnly()) {
+      state.handed = key;
+      flush();
+      host.dispatch({ type: "studyQuizFinish", quiz: e.made.id, attempt: attempt.n });
+    }
+  }, 1000);
+
   /** The quiz, as the core has it now. @param {QuizEvent} event */
   function quiz(event) {
     const changed = event.made.id !== state.quiz?.made.id;
@@ -416,12 +630,14 @@ export function createQuiz(host) {
       state.at = 0;
       state.hinted.clear();
       state.disputing = null;
+      state.handing = false;
       if (changed) state.reviewing = false;
     }
+    if (now?.finished !== null) state.handing = false;
   }
 
   return {
-    render, click, submit, key, quiz,
+    render, click, submit, key, quiz, input,
     /** The quiz shown, if one is. */
     open: () => state.quiz?.made.id ?? null,
     citations: () => state.quiz?.citations ?? [],
