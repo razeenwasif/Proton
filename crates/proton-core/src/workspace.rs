@@ -1418,6 +1418,7 @@ impl Workspace {
             | Command::StudyPaste { .. }
             | Command::StudyAddUrls { .. }
             | Command::StudyTranscribe { .. }
+            | Command::StudyMakeReadable { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }

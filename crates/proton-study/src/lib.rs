@@ -36,6 +36,7 @@ pub mod mastery;
 pub mod model;
 pub mod overview;
 pub mod quiz;
+pub mod readable;
 pub mod role;
 pub mod slides;
 pub mod snapshot;

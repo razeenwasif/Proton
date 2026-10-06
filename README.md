@@ -161,7 +161,8 @@ documents and EPUBs (with pandoc), PowerPoints, pictures' words (with
 tesseract), pages of the web kept as their articles, YouTube videos'
 captions (with yt-dlp), and recordings, transcribed by Fish Audio when you
 choose, told what it costs; a reader, with a guide to each source on asking;
-sources labelled by topic, and ticked by label; notes;
+sources labelled by topic, and ticked by label; slides with few words read
+from their pictures; notes;
 and the tutor, which searches the sources you tick through Proton's own MCP
 server and cites them — each citation a number whose passage shows over it and
 opens at its place — as a plain tutor, a learning guide, or a role you write,

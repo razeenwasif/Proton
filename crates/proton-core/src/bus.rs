@@ -539,6 +539,10 @@ pub enum Command {
     StudyTranscribe {
         id: String,
     },
+    /// Read a source's pages with few words from their pictures.
+    StudyMakeReadable {
+        id: String,
+    },
     /// Take a source out of the open notebook. Its id is not given again.
     StudyRemove {
         id: String,

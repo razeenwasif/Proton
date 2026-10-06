@@ -122,6 +122,9 @@ pub fn forget(book: &Book, id: &str) {
     for path in fetched.filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&format!("{id}.")))) {
         let _ = std::fs::remove_file(path);
     }
+    // Its guide, and its pages drawn to be read.
+    let _ = std::fs::remove_file(book.dir().join(".notebook/guides").join(format!("{id}.json")));
+    let _ = std::fs::remove_dir_all(book.pages_dir(id));
 }
 
 /// A source's words as one text: its lines, its pages one after another, or

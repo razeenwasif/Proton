@@ -31,6 +31,7 @@ use crate::deck::{self, StudyCard};
 use crate::exam;
 use crate::found::{self, StudyFound};
 use crate::guide;
+use crate::readable;
 use crate::infographic::{self, StudyBlock};
 use crate::slides::{self, StudySlide};
 use crate::overview::{self, StudyOverviewTopic};
@@ -79,6 +80,8 @@ pub enum Make {
     SourceGuide,
     /// Every source's topics, as labels.
     Labels,
+    /// Pages with few words, read from their pictures.
+    Readable,
     /// A written answer marked: a call of the studio's, but not a thing it
     /// makes for the list.
     Marking,
@@ -112,6 +115,8 @@ pub enum Shape {
     Guide,
     /// The sources' labels, in `.notebook/labels.json`.
     Labels,
+    /// Pages read, put in their source's words.
+    Pages,
     /// A mark, in its quiz's attempts.
     Mark,
 }
@@ -142,6 +147,7 @@ impl Make {
             Make::DeepResearch => "Deep Research",
             Make::SourceGuide => "Source guide",
             Make::Labels => "Topic labels",
+            Make::Readable => "Pages read",
             Make::Marking => "Marking",
         }
     }
@@ -160,6 +166,7 @@ impl Make {
             Make::Discover | Make::DeepResearch => Shape::Found,
             Make::SourceGuide => Shape::Guide,
             Make::Labels => Shape::Labels,
+            Make::Readable => Shape::Pages,
             Make::Exam | Make::PastPaper => Shape::Paper,
             Make::Marking => Shape::Mark,
             _ => Shape::Prose,
@@ -191,6 +198,7 @@ impl Make {
             Make::DeepResearch => "deepResearch",
             Make::SourceGuide => "sourceGuide",
             Make::Labels => "labels",
+            Make::Readable => "readable",
             Make::Marking => "marking",
         }
     }
@@ -199,7 +207,7 @@ impl Make {
     /// web's, a source's words, the sources' beginnings — rather than the
     /// sources ticked.
     pub fn self_contained(self) -> bool {
-        self.web() || matches!(self, Make::SourceGuide | Make::Labels)
+        self.web() || matches!(self, Make::SourceGuide | Make::Labels | Make::Readable)
     }
 
     /// Whether it searches the web — and nothing else: no files, no notebook.
@@ -208,7 +216,7 @@ impl Make {
     }
 
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch, Make::SourceGuide, Make::Labels]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch, Make::SourceGuide, Make::Labels, Make::Readable]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -257,6 +265,9 @@ pub struct Options {
     pub slides: Option<String>,
     #[serde(default)]
     pub slide: Option<String>,
+    /// The pages of `source` to read from their pictures.
+    #[serde(default)]
+    pub pages: Vec<u32>,
 }
 
 /// How many cards or questions to make.
@@ -389,7 +400,7 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
         Make::Infographic => infographic::prompt(&options.focus, &course),
         // An exam's asking needs the notebook, and so does the web's, to
         // find what it has not: [`prompt_for`].
-        Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking | Make::Discover | Make::DeepResearch | Make::SourceGuide | Make::Labels => String::new(),
+        Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking | Make::Discover | Make::DeepResearch | Make::SourceGuide | Make::Labels | Make::Readable => String::new(),
         Make::Flashcards => format!(
             "Make about {} flashcards of these sources, for a student of {course} learning them for the exam. {} Each card tests one idea — \
              a definition, a result and when it holds, a step of a method, a distinction, a formula, a mistake students make — and is \
@@ -453,6 +464,18 @@ pub fn prompt_for(book: &Book, make: Make, options: &Options) -> Result<String, 
                 return Err(format!("{id} has no words to guide"));
             }
             Ok(guide::prompt(source, &proton_library::quote(&passages)))
+        }
+        Make::Readable => {
+            let id = options.source.as_deref().ok_or("say which source's pages to read")?;
+            let source = book.sources.get(id).ok_or_else(|| format!("{id}: no such source"))?;
+            let Some(proton_library::extract::Body::Pages(pages)) = crate::snapshot::words(book, id, source.units) else {
+                return Err(format!("{id} has no pages"));
+            };
+            let asked: Vec<(usize, String)> = options.pages.iter().map(|&n| (n as usize, pages.get((n as usize).saturating_sub(1)).cloned().unwrap_or_default())).collect();
+            if asked.is_empty() {
+                return Err("say which pages to read".into());
+            }
+            Ok(readable::prompt(source, &asked))
         }
         Make::Labels => {
             let sources: Vec<(String, String, String)> = book
@@ -549,6 +572,7 @@ pub fn schema(make: Make, options: &Options) -> Option<Value> {
         Shape::Found => found::schema(),
         Shape::Guide => guide::schema(),
         Shape::Labels => guide::labels_schema(),
+        Shape::Pages => readable::schema(),
         Shape::Mark => quiz::marking_schema(),
         Shape::Map => json!({
             "type": "object", "additionalProperties": false, "required": ["title", "nodes"],
@@ -651,6 +675,8 @@ pub enum StudyMadeBody {
     Guide { summary: String, topics: Vec<String>, questions: Vec<String> },
     /// Each source's topics, by its id.
     Labels { labels: std::collections::BTreeMap<String, Vec<String>> },
+    /// Pages read from their pictures: each page's number and its words.
+    Pages { pages: Vec<(u32, String)> },
     /// The deck and the quiz it was kept with, once it is kept.
     Overview {
         topics: Vec<StudyOverviewTopic>,
@@ -739,6 +765,10 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
             Ok(StudyMadeBody::Guide { summary, topics, questions })
         }
         Shape::Labels => Ok(StudyMadeBody::Labels { labels: guide::read_labels(&value, None)? }),
+        Shape::Pages => {
+            let asked: Vec<usize> = options.pages.iter().map(|&n| n as usize).collect();
+            Ok(StudyMadeBody::Pages { pages: readable::read(&value, &asked)?.into_iter().map(|(n, text)| (n as u32, text)).collect() })
+        }
         Shape::Audio => {
             let format = options.format.unwrap_or_default();
             let (title, segments, chapters) = audio::read(&value, format)?;
@@ -805,7 +835,7 @@ impl Book {
             Shape::Slides => self.dir().join("studio/slides"),
             Shape::Graphic => self.dir().join("studio/graphics"),
             Shape::Found => self.dir().join("studio/found"),
-            Shape::Guide | Shape::Labels => self.dir().join(".notebook"),
+            Shape::Guide | Shape::Labels | Shape::Pages => self.dir().join(".notebook"),
             Shape::Objectives => self.dir().to_path_buf(),
         }
     }
@@ -835,7 +865,7 @@ impl Book {
         if let StudyMadeBody::Slide { .. } = body {
             return Err("a slide is kept in its deck".into());
         }
-        if let StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } = body {
+        if let StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } | StudyMadeBody::Pages { .. } = body {
             return Err("a guide, or labels, are kept beside the sources".into());
         }
         if let StudyMadeBody::Audio { format, segments, chapters, .. } = body {
@@ -899,7 +929,7 @@ impl Book {
             Shape::Graphic => ('G', "json"),
             Shape::Found => ('W', "json"),
             Shape::Objectives => ('O', "json"),
-            Shape::Guide | Shape::Labels => return Err("kept beside the sources".into()),
+            Shape::Guide | Shape::Labels | Shape::Pages => return Err("kept beside the sources".into()),
         };
         let header = Header { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() };
         let id = match kind.shape() {
@@ -1024,7 +1054,7 @@ impl Book {
                 report: value["report"].as_str().unwrap_or_default().to_string(),
                 found: serde_json::from_value(value["found"].clone()).ok()?,
             },
-            Shape::Prose | Shape::Mark | Shape::Guide | Shape::Labels => return None,
+            Shape::Prose | Shape::Mark | Shape::Guide | Shape::Labels | Shape::Pages => return None,
         };
         Some((made_of(id, header), body))
     }

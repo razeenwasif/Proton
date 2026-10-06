@@ -70,6 +70,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyPaste { .. }
             | Command::StudyAddUrls { .. }
             | Command::StudyTranscribe { .. }
+            | Command::StudyMakeReadable { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }
@@ -202,7 +203,13 @@ pub struct Study {
     /// What fetches pages of the web: a test's script, or, once one is
     /// asked for, the network.
     web: Option<proton_literature::http::Http>,
+    /// Sources' pages being drawn, to be read from their pictures.
+    drawing: Vec<Drawing>,
 }
+
+/// A source's pages being drawn on a worker: the notebook, the source, the
+/// pages, and what the worker says once they are drawn.
+type Drawing = (PathBuf, String, Vec<u32>, Receiver<Result<(), String>>);
 
 impl std::fmt::Debug for Study {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -236,6 +243,7 @@ impl Default for Study {
             found_voices: Vec::new(),
             audio: None,
             web: None,
+            drawing: Vec::new(),
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -429,13 +437,26 @@ impl Study {
             }
             // A script written: spoken, if it may be.
             events.extend(self.voice_waiting());
-            // Sources labelled: the notebook says so.
+            // Sources labelled, or their pages read: the notebook says so.
             let open = self.open.as_ref().map(|o| o.book.dir().to_path_buf());
-            let done = self.jobs.take_done();
-            if done.iter().any(|(dir, make, _)| Some(dir) == open.as_ref() && *make == proton_study::studio::Make::Labels) {
+            let mut said = false;
+            for (dir, make, options) in self.jobs.take_done() {
+                if Some(&dir) != open.as_ref() {
+                    continue;
+                }
+                match make {
+                    proton_study::studio::Make::Labels => said = true,
+                    proton_study::studio::Make::Readable => {
+                        said |= self.thin_again(options.source.as_deref().unwrap_or_default());
+                    }
+                    _ => {}
+                }
+            }
+            if said {
                 events.extend(self.notebook_event());
             }
         }
+        events.extend(self.poll_drawing());
         events.extend(self.poll_voices());
         events.extend(self.poll_review());
         events.extend(self.poll_sitting());
@@ -518,6 +539,7 @@ impl Study {
             Command::StudyPaste { title, text } => self.paste(&title, &text),
             Command::StudyAddUrls { urls } => self.add_urls(&urls),
             Command::StudyTranscribe { id } => self.transcribe(&id),
+            Command::StudyMakeReadable { id } => self.make_readable(&id),
             Command::StudyRemove { id } => self.remove(&id),
             Command::StudySelect { ids } => self.select(&ids),
             Command::StudyRefresh { id } => self.refresh(&id),
@@ -1227,6 +1249,75 @@ impl Study {
         self.saved()
     }
 
+    /// A source's pages with few words, drawn on a worker and then read from
+    /// their pictures, eight to a call: the source's own file, here, never
+    /// one in iCloud.
+    fn make_readable(&mut self, id: &str) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        let Some(source) = open.book.sources.get(id) else {
+            return vec![notice(format!("{id}: no such source"), NoticeLevel::Warn)];
+        };
+        if source.kind != Kind::Pdf.name() || source.thin.is_empty() || !source.status.has_words() {
+            return vec![notice(format!("{} has no pages with few words to read.", source.title), NoticeLevel::Info)];
+        }
+        if self.drawing.iter().any(|(_, s, _, _)| s == id) {
+            return vec![notice(format!("{}'s pages are being drawn.", source.title), NoticeLevel::Info)];
+        }
+        let file = match &source.origin {
+            Origin::File { root, rel } => self.kb.file(root, rel),
+            Origin::Web { .. } => open.book.web_pdf(id),
+            _ => None,
+        };
+        let Some(file) = file.filter(|f| std::fs::symlink_metadata(f).is_ok_and(|m| m.is_file() && !dataless::is_dataless(&m))) else {
+            return vec![notice(format!("{}'s file is not here to draw: in iCloud, or gone.", source.title), NoticeLevel::Info)];
+        };
+        if proton_library::pdf::find_pdftoppm().is_none() {
+            return vec![notice("Pages cannot be drawn here: Poppler is not installed (brew install poppler).".into(), NoticeLevel::Warn)];
+        }
+        let pages: Vec<u32> = source.thin.iter().map(|&p| p as u32).collect();
+        let (dir, into) = (open.book.dir().to_path_buf(), open.book.pages_dir(id));
+        let (send, rx) = mpsc::channel();
+        let drawn: Vec<usize> = source.thin.clone();
+        let _ = std::thread::Builder::new().name("proton-study-draw".into()).spawn(move || {
+            let _ = send.send(proton_library::pdf::draw_pages(&file, &drawn, &into, proton_study::readable::DPI).map(|_| ()));
+        });
+        let said = format!("Drawing {}'s {} pages with few words, to be read from their pictures.", source.title, pages.len());
+        self.drawing.push((dir, id.to_string(), pages, rx));
+        vec![notice(said, NoticeLevel::Info)]
+    }
+
+    /// Pages drawn: read, eight to a call.
+    fn poll_drawing(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        let mut drawn = Vec::new();
+        self.drawing.retain(|(dir, id, pages, rx)| match rx.try_recv() {
+            Ok(outcome) => {
+                drawn.push((dir.clone(), id.clone(), pages.clone(), outcome));
+                false
+            }
+            Err(TryRecvError::Empty) => true,
+            Err(TryRecvError::Disconnected) => {
+                drawn.push((dir.clone(), id.clone(), pages.clone(), Err("the pages could not be drawn".into())));
+                false
+            }
+        });
+        for (dir, id, pages, outcome) in drawn {
+            let Some(book) = self.open.as_ref().filter(|o| o.book.dir() == dir).map(|o| o.book.clone()) else { continue };
+            if let Err(why) = outcome {
+                events.push(notice(format!("{id}'s pages could not be drawn: {why}"), NoticeLevel::Warn));
+                continue;
+            }
+            for batch in pages.chunks(proton_study::readable::BATCH) {
+                let options = proton_study::studio::Options { source: Some(id.clone()), pages: batch.to_vec(), ..Default::default() };
+                self.jobs.ask(&book, proton_study::studio::Make::Readable, options);
+            }
+            let roots = self.kb.labelled_roots();
+            self.jobs.poll(self.tutors.as_mut(), &roots);
+            events.extend(self.studio_event());
+        }
+        events
+    }
+
     fn remove(&mut self, id: &str) -> Vec<Event> {
         let book = match self.writable() {
             Ok(book) => book,
@@ -1550,7 +1641,7 @@ impl Study {
             StudyMadeBody::Graphic { blocks, .. } => blocks.iter().flat_map(|b| b.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             // What the web gave cites the web, by number, not the notebook;
             // a guide and labels are shown with their sources.
-            StudyMadeBody::Found { .. } | StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } => String::new(),
+            StudyMadeBody::Found { .. } | StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } | StudyMadeBody::Pages { .. } => String::new(),
         };
         let citations = proton_study::cite::resolve(&open.book, &text);
         vec![Event::StudyMadeOpen { made, body, citations }]
@@ -1740,6 +1831,18 @@ impl Study {
         events.insert(0, self.list_event());
         events.extend(self.note_event(id));
         events
+    }
+
+    /// A source's pages with few words, counted again once some were read.
+    fn thin_again(&mut self, id: &str) -> bool {
+        let Some(open) = &mut self.open else { return false };
+        let Some(Body::Pages(pages)) = open.book.sources.get(id).and_then(|s| snapshot::words(&open.book, id, s.units)) else { return false };
+        let Some(source) = open.book.sources.get_mut(id) else { return false };
+        source.thin = proton_library::pdf::thin(&pages);
+        if open.lock.is_some() {
+            let _ = open.book.save_sources();
+        }
+        true
     }
 
     /// Note the open notebook's sources whose files have gone or changed

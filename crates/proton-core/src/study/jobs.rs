@@ -117,11 +117,13 @@ pub struct Jobs {
     done: Vec<(PathBuf, Make, Options)>,
 }
 
-/// How a call was asked: what it was told, and the words it was given.
+/// How a call was asked: what it was told, and the words it was given —
+/// and the pictures, for pages to be read.
 struct Asking {
     instructions: String,
     prompt: String,
     mcp: Vec<McpServer>,
+    images: Vec<proton_claude::chat::Image>,
 }
 
 impl Jobs {
@@ -155,11 +157,25 @@ impl Jobs {
             true if engine != Engine::Claude => (Engine::Claude, String::new()),
             _ => (engine, settings.model.clone()),
         };
+        // Pages are read by an engine that can see them: not Antigravity's
+        // print mode, which takes text alone.
+        let (engine, model) = match (make, engine) {
+            (Make::Readable, Engine::Antigravity) => (Engine::Claude, String::new()),
+            _ => (engine, model),
+        };
         let title = match (make, options.focus.trim()) {
             (Make::Report, _) => options.ask.trim().chars().take(60).collect::<String>(),
             (Make::Slides, _) if options.slide.is_some() => format!("Revising slide {} of {}", options.slide.as_deref().unwrap_or_default().trim_start_matches('s'), options.slides.as_deref().unwrap_or_default()),
             (Make::Flashcards, _) if options.deck.is_some() => format!("More cards for {}", options.deck.as_deref().and_then(|d| book.deck(d)).map_or_else(String::new, |d| d.title)),
             (Make::SourceGuide, _) => format!("Guide to {}", options.source.as_deref().and_then(|s| book.sources.get(s)).map_or("a source", |s| s.title.as_str())),
+            (Make::Readable, _) => {
+                let pages = match (options.pages.first(), options.pages.last()) {
+                    (Some(a), Some(b)) if a != b => format!("pages {a}–{b}"),
+                    (Some(a), _) => format!("page {a}"),
+                    _ => "pages".into(),
+                };
+                format!("Reading {pages} of {}", options.source.as_deref().and_then(|s| book.sources.get(s)).map_or("a source", |s| s.title.as_str()))
+            }
             (_, "") => make.title().to_string(),
             (_, focus) => format!("{}: {focus}", make.title()),
         };
@@ -334,8 +350,9 @@ fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)], fai
         let book = Book::read(&asked.dir)?;
         let asking = match &asked.marking {
             Some(marking) => marking_asked(&book, marking)?,
-            None if asked.make.web() => Asking { instructions: proton_study::found::rules(), prompt: studio::prompt_for(&book, asked.make, &asked.options)?, mcp: Vec::new() },
-            None if asked.make.self_contained() => Asking { instructions: studio::rules(true), prompt: studio::prompt_for(&book, asked.make, &asked.options)?, mcp: Vec::new() },
+            None if asked.make.web() => Asking { instructions: proton_study::found::rules(), prompt: studio::prompt_for(&book, asked.make, &asked.options)?, mcp: Vec::new(), images: Vec::new() },
+            None if asked.make == Make::Readable => Asking { instructions: studio::rules(true), prompt: studio::prompt_for(&book, asked.make, &asked.options)?, mcp: Vec::new(), images: pictures(&book, &asked.options)? },
+            None if asked.make.self_contained() => Asking { instructions: studio::rules(true), prompt: studio::prompt_for(&book, asked.make, &asked.options)?, mcp: Vec::new(), images: Vec::new() },
             None => asking(&book, &asked, tutors, roots)?,
         };
         Ok((book, asking))
@@ -359,8 +376,22 @@ fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)], fai
     let model = Some(asked.model.clone()).filter(|m| !m.is_empty());
     let mut conversation = tutors.start(asked.engine, book.snapshots(), Settings { model, mode: "default".into(), effort: None }, &how)?;
     record(&asked, json!({ "state": "running", "instructions": asking.instructions, "prompt": asking.prompt }));
-    conversation.send(&asking.prompt, &[])?;
+    conversation.send(&asking.prompt, &asking.images)?;
     Ok(Running { asked, conversation, since: Instant::now(), repaired: false, from: 0 })
+}
+
+/// The pictures of the pages a call is to read, drawn before it was asked.
+fn pictures(book: &Book, options: &Options) -> Result<Vec<proton_claude::chat::Image>, String> {
+    use base64::Engine as _;
+    let id = options.source.as_deref().ok_or("say which source's pages to read")?;
+    options
+        .pages
+        .iter()
+        .map(|n| {
+            let bytes = std::fs::read(book.pages_dir(id).join(format!("p{n}.png"))).map_err(|_| format!("page {n} of {id} was not drawn"))?;
+            Ok(proton_claude::chat::Image { media: "image/png".into(), data: base64::engine::general_purpose::STANDARD.encode(bytes) })
+        })
+        .collect()
 }
 
 /// What a call is told and asked: the notebook whole if it is small enough,
@@ -383,7 +414,7 @@ fn asking(book: &Book, asked: &Asked, tutors: &mut dyn Tutors, roots: &[(String,
     let whole: Vec<Hit> = all.iter().filter(|h| ticked.contains(&h.doc) || must.contains(&h.doc)).cloned().collect();
     let prompt = studio::prompt_for(book, asked.make, &asked.options)?;
     if size(&whole) <= WHOLE {
-        return Ok(Asking { instructions: studio::rules(true), prompt: format!("{prompt}\n\n---\n\nThe sources:\n\n{}", proton_library::quote(&whole)), mcp: Vec::new() });
+        return Ok(Asking { instructions: studio::rules(true), prompt: format!("{prompt}\n\n---\n\nThe sources:\n\n{}", proton_library::quote(&whole)), mcp: Vec::new(), images: Vec::new() });
     }
     // Too much to give whole: what is to be read whole is given, as much
     // as fits, and the rest is reached through the server.
@@ -411,7 +442,7 @@ fn asking(book: &Book, asked: &Asked, tutors: &mut dyn Tutors, roots: &[(String,
         args.extend(["--root".to_string(), format!("{label}={}", path.display())]);
     }
     let mcp = vec![McpServer { name: "proton-notebook".into(), command, args, tools: TOOLS.iter().map(|t| t.to_string()).collect() }];
-    Ok(Asking { instructions: studio::rules(false), prompt, mcp })
+    Ok(Asking { instructions: studio::rules(false), prompt, mcp, images: Vec::new() })
 }
 
 /// A paper set like the past papers, held against them: a question that is
@@ -454,7 +485,7 @@ fn marking_asked(book: &Book, marking: &Marking) -> Result<Asking, String> {
         (true, Some(why), Some(first)) => Some((why.as_str(), first)),
         _ => None,
     };
-    Ok(Asking { instructions: quiz::marking_rules(), prompt: quiz::marking(question, text, &sources, dispute), mcp: Vec::new() })
+    Ok(Asking { instructions: quiz::marking_rules(), prompt: quiz::marking(question, text, &sources, dispute), mcp: Vec::new(), images: Vec::new() })
 }
 
 /// A marker's answer, read and held to the question's rubric and to the
@@ -544,6 +575,12 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
             let labels = labels.into_iter().filter(|(id, _)| book.sources.get(id).is_some()).collect();
             book.save_labels(&labels)?;
             return Ok("labels".into());
+        }
+        StudyMadeBody::Pages { pages } => {
+            let id = asked.options.source.as_deref().ok_or("pages of no source")?;
+            let read: Vec<(usize, String)> = pages.into_iter().map(|(n, text)| (n as usize, text)).collect();
+            book.read_pages(id, &read)?;
+            return Ok(id.to_string());
         }
         body => body,
     };

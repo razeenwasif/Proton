@@ -230,6 +230,25 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(again?.textContent.includes('Not transcribed') && again.title.includes('no credit'), 'a failed transcription cannot be tried again');
   });
 
+  await test('A deck\'s pages with few words are read from their pictures only once how many calls it takes is said', async () => {
+    const week = (/** @type {number} */ thin) => row('S03', {title: 'Week 3.pdf', thin});
+    await win.pushEvents([notebook([row('S01'), week(12)]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
+    const badge = ws().querySelector('[data-study-readable="S03"]');
+    assert(badge?.textContent === '12 thin pages', `no way to read them: ${badge?.textContent}`);
+    const before = win.commands.length;
+    badge.click(); await settle();
+    const ask = ws().querySelector('.st-ask');
+    assert(ask?.textContent.includes('12 pages with few words') && ask.textContent.includes('2 calls'), `what it takes is not said: ${ask?.textContent}`);
+    assert(sent(before, 'studyMakeReadable').length === 0, 'it was asked before it was said');
+    ask.querySelector('[data-study-readable-yes]').click(); await settle();
+    assert(sent(before, 'studyMakeReadable')[0]?.id === 'S03', 'they were not read when asked');
+    await win.pushEvents([{type: 'studyStudio', made: [], jobs: [{id: 'J0012', kind: 'readable', title: 'Reading pages 2–9 of Week 3.pdf', state: 'running', why: null,
+      made: null, engine: 'claude', started: 3, about: 'S03'}]}]); await settle();
+    assert(ws().querySelector('.st-source[data-study-source="S03"]')?.textContent.includes('Reading pages'), 'it is not said to be reading them');
+    await win.pushEvents([notebook([row('S01'), week(0)]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
+    assert(!ws().querySelector('[data-study-readable="S03"]'), 'read, they are still said to be thin');
+  });
+
   await test('A note is written, saved, and made a source', async () => {
     ws().querySelector('[data-study-new-note]').click(); await settle();
     const form = ws().querySelector('[data-study-note-form]');

@@ -147,6 +147,8 @@ export function createStudyPreview(deliver) {
         const recording = source.kind === "audio" || source.kind === "video";
         source.status = recording && source.status.state !== "transcribing" ? { state: "untranscribed", seconds: 3120 } : { state: "ready" };
         source.count = source.units === "pages" ? 14 : source.units === "seconds" ? 3120 : 180;
+        // Lecture slides have pages with few words.
+        if (source.kind === "pdf" && /week|lecture/i.test(source.title)) source.thin = 9;
       }
       if (state.open === slug) [notebookEvent(), listEvent()].forEach((event) => deliver(event));
     }, 1200);
@@ -438,6 +440,21 @@ export function createStudyPreview(deliver) {
             }, 600);
           }
           return [notebookEvent(), listEvent()];
+        }
+        case "studyMakeReadable": {
+          const slug = state.open ?? "";
+          const source = (state.sources[slug] ?? []).find((x) => x.id === command.id);
+          if (!source) return [];
+          const id = `J${String(3 + studio.jobs.length).padStart(4, "0")}`;
+          studio.jobs.unshift({ id, kind: "readable", title: `Reading pages of ${source.title}`, state: "running", why: null, made: null, engine: "claude",
+            started: Math.floor(Date.now() / 1000), about: source.id });
+          setTimeout(() => {
+            studio.jobs = studio.jobs.filter((j) => j.id !== id);
+            source.thin = 0;
+            deliver(studioEvent());
+            deliver(notebookEvent());
+          }, 1500);
+          return [studioEvent()];
         }
         case "studyTranscribe": {
           const slug = state.open ?? "";

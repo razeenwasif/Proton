@@ -522,6 +522,8 @@ mod tutor {
     pub struct Log {
         pub started: Vec<(Engine, PathBuf, Unattended, Option<String>)>,
         pub sent: Vec<String>,
+        /// The pictures sent with each message, by their media types.
+        pub pictures: Vec<Vec<String>>,
         pub interrupted: bool,
         pub answers: std::collections::VecDeque<String>,
     }
@@ -581,12 +583,13 @@ mod tutor {
         fn running(&self) -> bool {
             true
         }
-        fn send(&mut self, text: &str, _: &[Image]) -> Result<(), String> {
+        fn send(&mut self, text: &str, images: &[Image]) -> Result<(), String> {
             self.fold.said(text, 0);
             self.fold.working();
             self.fold.status_mut().model = "scripted-model".into();
             let mut log = self.log.lock().unwrap();
             log.sent.push(text.to_string());
+            log.pictures.push(images.iter().map(|i| i.media.clone()).collect());
             if let Some(next) = log.answers.pop_front() {
                 self.answer = next;
             }
@@ -1025,6 +1028,63 @@ fn a_source_is_given_a_guide_and_every_source_its_topics_each_kept_beside_them()
     assert!(log.lock().unwrap().sent.iter().any(|s| s.contains("## S01 — notes.md") && s.contains("## S02 — Heuristics")));
     let kept = std::fs::read_to_string(scratch.root.join("Notebooks/search/sources.json")).unwrap();
     assert!(!kept.contains("Uninformed search"), "labels are kept beside the sources, not in them");
+    session.shutdown();
+}
+
+#[test]
+fn a_decks_pages_with_few_words_are_drawn_and_read_from_their_pictures_and_put_in_its_words() {
+    use proton_study::studio::Make;
+    let scratch = Scratch::new("readable");
+    let settings = scratch.knowledge_base();
+    let words = "uniform cost search orders the frontier by the cost of the path so far, which makes it optimal";
+    std::fs::write(scratch.root.join("kb/Courses/COMP3670/Week 3.pdf"), proton_library::pdf::fixture(&["Title", words, "Graph"])).unwrap();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Slides".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Courses/COMP3670/Week 3.pdf".into()] });
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(sources.clone()),
+        _ => None,
+    });
+    assert_eq!(rows[0].thin, 2, "the title and the picture have few words");
+    let events = session.apply(Command::StudyMakeReadable { id: "S01".into() });
+    if proton_library::pdf::find_pdftoppm().is_none() {
+        assert!(said(&events).iter().any(|s| s.contains("Poppler")), "{:?}", said(&events));
+        return session.shutdown();
+    }
+    assert!(said(&events).iter().any(|s| s.contains("Drawing Week 3.pdf's 2 pages")), "{:?}", said(&events));
+    log.lock().unwrap().answers.push_back(
+        serde_json::json!({ "pages": [
+            { "page": 1, "markdown": "# Informed search\n\nCOMP3670, week 3: heuristics, and why $h(n) \\le h^*(n)$ matters." },
+            { "page": 3, "markdown": "A graph of five cities, each road marked with its cost; the cheapest path from A to E costs 7." }
+        ]})
+        .to_string(),
+    );
+    let jobs = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.kind == Make::Readable) => Some(jobs.clone()),
+        _ => None,
+    });
+    assert_eq!((jobs[0].title.as_str(), jobs[0].about.as_deref()), ("Reading pages 1–3 of Week 3.pdf", Some("S01")));
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources[0].thin == 0 => Some(sources.clone()),
+        Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.state == "failed") => panic!("{jobs:?}"),
+        _ => None,
+    });
+    assert_eq!(rows[0].thin, 0, "read, they have words");
+    {
+        let log = log.lock().unwrap();
+        assert!(log.sent[0].contains("- page 1: “Title”") && log.sent[0].contains("- page 3: “Graph”"), "{}", log.sent[0]);
+        assert_eq!(log.pictures[0], ["image/png", "image/png"], "each page's picture, sent with it");
+    }
+    // Its words, as kept: what the PDF opens to is the file itself.
+    let book = proton_study::Book::read(&scratch.root.join("Notebooks/slides")).unwrap();
+    let Some(proton_library::extract::Body::Pages(pages)) = proton_study::snapshot::words(&book, "S01", proton_study::model::Units::Pages) else { panic!() };
+    assert!(pages[0].starts_with("# Informed search") && pages[0].ends_with("(Read from the page's picture.)"), "{}", pages[0]);
+    assert!(pages[1].contains("uniform cost search"), "a page with words is as it was");
+    assert!(!scratch.root.join("Notebooks/slides/.notebook/pages/S01/p1.png").exists(), "a page read is not kept drawn");
     session.shutdown();
 }
 

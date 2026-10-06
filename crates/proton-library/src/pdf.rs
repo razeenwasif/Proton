@@ -139,6 +139,35 @@ pub fn find_pdftotext() -> Option<PathBuf> {
     usual.into_iter().chain(on_path).find(|path| path.is_file())
 }
 
+/// Poppler's `pdftoppm`, where its `pdftotext` is.
+pub fn find_pdftoppm() -> Option<PathBuf> {
+    let exe = if cfg!(windows) { "pdftoppm.exe" } else { "pdftoppm" };
+    find_pdftotext().map(|t| t.with_file_name(exe)).filter(|p| p.is_file())
+}
+
+/// Pages of a PDF drawn as pictures, `dpi` dots an inch, into `dir`:
+/// `p12.png` for page 12, each page drawn by itself.
+pub fn draw_pages(pdf: &Path, pages: &[usize], dir: &Path, dpi: u32) -> Result<Vec<PathBuf>, String> {
+    let exe = find_pdftoppm().ok_or("pages cannot be drawn here: Poppler is not installed (brew install poppler)")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for page in pages {
+        let stem = dir.join(format!("p{page}"));
+        let drawn = std::process::Command::new(&exe)
+            .args(["-f", &page.to_string(), "-l", &page.to_string(), "-png", "-r", &dpi.to_string(), "-singlefile"])
+            .arg(pdf)
+            .arg(&stem)
+            .output()
+            .map_err(|e| e.to_string())?;
+        let png = stem.with_extension("png");
+        if !png.is_file() {
+            return Err(format!("page {page} could not be drawn: {}", String::from_utf8_lossy(&drawn.stderr).trim()));
+        }
+        out.push(png);
+    }
+    Ok(out)
+}
+
 /// Read a PDF's text with the extractor named, from the cache when it is
 /// still good. As [`text`], which is this with `pdf-extract`.
 pub fn text_with(path: &Path, cache: Option<&Path>, extractor: &Extractor) -> Option<Extracted> {
@@ -637,6 +666,20 @@ mod tests {
         std::fs::write(&doc, fixture(&["The second version, about sparsity"])).unwrap();
         let after = text(&doc, Some(&base)).unwrap();
         assert!(after.pages[0].contains("sparsity"), "{:?}", after.pages[0]);
+    }
+
+    #[test]
+    fn pages_are_drawn_one_by_one_when_poppler_is_here() {
+        if find_pdftoppm().is_none() {
+            return;
+        }
+        let base = dir("draw");
+        let doc = base.join("slides.pdf");
+        std::fs::write(&doc, fixture(&["Title", "Second page", "Third page"])).unwrap();
+        let drawn = draw_pages(&doc, &[1, 3], &base.join("pages"), 40).unwrap();
+        assert_eq!(drawn.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect::<Vec<_>>(), ["p1.png", "p3.png"]);
+        assert!(std::fs::read(&drawn[1]).unwrap().starts_with(b"\x89PNG"));
+        assert!(draw_pages(&doc, &[9], &base.join("pages"), 40).is_err(), "a page it does not have");
     }
 
     #[test]

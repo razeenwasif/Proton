@@ -54,4 +54,8 @@ language: string,
 /**
  * A deck of slides, and a slide of it, to revise as `ask` says.
  */
-slides: string | null, slide: string | null, };
+slides: string | null, slide: string | null, 
+/**
+ * The pages of `source` to read from their pictures.
+ */
+pages: Array<number>, };

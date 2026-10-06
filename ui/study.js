@@ -134,7 +134,7 @@ export function createStudy(host) {
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web", removing: string | null,
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
-   *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null}} */
+   *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -160,6 +160,9 @@ export function createStudy(host) {
     unpicked: new Set(),
     // A recording whose transcribing — and what it costs — is being asked.
     hearing: null,
+    // A source whose pages with few words are to be read from their
+    // pictures, being asked.
+    readable: null,
   };
 
   /** The notebook's pages of the web, by address: what was found that it has. */
@@ -189,6 +192,12 @@ export function createStudy(host) {
   /** @param {SourceRow} s */
   function statusHtml(s) {
     const st = s.status;
+    // Pages with few words: read from their pictures, on asking.
+    if (st.state === "ready" && s.kind === "pdf" && s.thin && !readOnly()) {
+      const reading = studio.jobs().some((j) => j.kind === "readable" && j.about === s.id && j.state !== "done" && j.state !== "failed");
+      return reading ? `<span class="st-badge busy"><span class="lab-spin"></span>Reading pages</span>`
+        : `<button class="st-badge" data-study-readable="${esc(s.id)}" title="${esc(count(s.thin, "page has", "pages have"))} few words of its own: read them from their pictures">${esc(count(s.thin, "thin page", "thin pages"))}</button>`;
+    }
     switch (st.state) {
       case "reading": return `<span class="st-badge busy"><span class="lab-spin"></span>Reading</span>`;
       case "downloading": return `<span class="st-badge busy"><span class="lab-spin"></span>Downloading</span>`;
@@ -270,6 +279,13 @@ export function createStudy(host) {
    *  comes down, and how much. So is transcribing a recording: what is sent
    *  to Fish, and what it costs. */
   function confirmHtml() {
+    const thin = (state.notebook?.sources ?? []).find((s) => s.id === state.readable);
+    if (thin) {
+      const calls = Math.ceil(thin.thin / 8);
+      return `<div class="st-ask">${icon("image")}<span>Read <b>${esc(thin.title)}</b>'s ${esc(count(thin.thin, "page", "pages"))} with few words from their pictures? ` +
+        `${thin.thin === 1 ? "It is" : "They are"} drawn here and sent to the tutor's model, eight to a call — ${esc(count(calls, "call", "calls"))}.</span>` +
+        `<span class="rs-actions"><button class="cc-quiet" data-study-readable-no>Cancel</button><button class="cc-primary" data-study-readable-yes>Read them</button></span></div>`;
+    }
     const hearing = (state.notebook?.sources ?? []).find((s) => s.id === state.hearing);
     if (hearing) {
       const seconds = hearing.status.state === "untranscribed" ? hearing.status.seconds : hearing.count;
@@ -815,6 +831,23 @@ export function createStudy(host) {
       return renderSources();
     }
     if (at("[data-study-get-yes]")) return download();
+    const thin = at("[data-study-readable]");
+    if (thin) {
+      state.readable = thin.dataset.studyReadable ?? null;
+      state.hearing = null;
+      state.getting = null;
+      return renderSources();
+    }
+    if (at("[data-study-readable-yes]")) {
+      const id = state.readable;
+      state.readable = null;
+      if (id) host.dispatch({ type: "studyMakeReadable", id });
+      return renderSources();
+    }
+    if (at("[data-study-readable-no]")) {
+      state.readable = null;
+      return renderSources();
+    }
     const hear = at("[data-study-transcribe]");
     if (hear) {
       state.hearing = hear.dataset.studyTranscribe ?? null;
@@ -1028,7 +1061,7 @@ export function createStudy(host) {
     }
     // A guide or labels under way show where they will be: drawn again
     // only when one of them changes, which keeps the reader where it is.
-    const now = event.jobs.filter((j) => j.kind === "sourceGuide" || j.kind === "labels").map((j) => `${j.id}:${j.state}`).join(",");
+    const now = event.jobs.filter((j) => j.kind === "sourceGuide" || j.kind === "labels" || j.kind === "readable").map((j) => `${j.id}:${j.state}`).join(",");
     if (now !== underway) {
       underway = now;
       if (state.shown.kind === "source") renderStage();

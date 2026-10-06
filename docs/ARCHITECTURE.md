@@ -1131,7 +1131,13 @@ written by one call from that source alone and kept in `.notebook/guides/`;
 and the sources are **labelled** by topic in one call over each one's
 beginning, from a vocabulary the call chooses, kept in `.notebook/labels.json`
 apart from `sources.json`, which only the notebook writes; a label ticks the
-sources about it (`proton-study::guide`).
+sources about it (`proton-study::guide`). A PDF's pages with few words of
+their own — slides that are mostly pictures — are **made readable** on asking,
+told how many calls it takes: drawn by pdftoppm on a worker, never from a file
+in iCloud, then read eight to a call by an engine that can see them (Antigravity's
+print mode cannot, so Claude Code reads for it), each page written out as
+Markdown with its TeX and what its diagrams show, and put in place of the few
+words the PDF held, said to be read from the picture (`proton-study::readable`).
 
 **The tutor** answers from the sources ticked, on Claude Code, Codex, Gemini or
 Antigravity, as the notebook has it set (`proton-core::study::tutor`). The
