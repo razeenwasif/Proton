@@ -1627,10 +1627,20 @@ impl Supervisor {
             return effects;
         }
         let round = self.state.round;
+        // What generation has brought this round, and what the last round
+        // evolved: made after that round's reviews, an evolved hypothesis was
+        // otherwise never reviewed at all, and stood in the leaderboard on its
+        // Elo alone.
         let new_this_round: Vec<String> = snap
             .hypotheses
             .iter()
-            .filter(|h| h.round == round && h.parents.is_empty() && h.status != HypothesisStatus::Retired)
+            .filter(|h| h.status != HypothesisStatus::Retired)
+            .filter(|h| {
+                (h.round == round && h.parents.is_empty())
+                    || (h.round < round
+                        && !h.parents.is_empty()
+                        && !snap.reviews.iter().any(|r| r.hypothesis == h.id && r.kind == ReviewKind::Review))
+            })
             .map(|h| h.id.clone())
             .collect();
 

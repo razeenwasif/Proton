@@ -476,6 +476,30 @@ fn a_healthy_round_frames_generates_reviews_ranks_evolves_and_sums_up() {
 }
 
 #[test]
+fn what_a_round_evolves_is_reviewed_the_next_round() {
+    // Evolved after a round's reviews, a hypothesis used to be reviewed by
+    // nobody, ever.
+    let snap = snapshot();
+    let mut sup = Supervisor::new(0, 1, 7);
+    sup.start_round(&snap, 1_000).unwrap();
+    let (first, snap) = play(&mut sup, snap, |_, _| Fate::Answer);
+    let evolved: Vec<String> = hypotheses(&first).iter().filter(|h| !h.parents.is_empty()).map(|h| h.id.clone()).collect();
+    assert!(!evolved.is_empty());
+    let reviewed = |effects: &[Effect]| -> BTreeSet<String> {
+        effects.iter().filter_map(|e| if let Effect::Review(r) = e { (r.kind == ReviewKind::Review).then(|| r.hypothesis.clone()) } else { None }).collect()
+    };
+    assert!(evolved.iter().all(|id| !reviewed(&first).contains(id)), "not in the round that made them");
+
+    sup.start_round(&snap, 50_000).unwrap();
+    let (second, _) = play(&mut sup, snap, |_, _| Fate::Answer);
+    let now = reviewed(&second);
+    let unreviewed: Vec<&String> = evolved.iter().filter(|id| !now.contains(*id)).collect();
+    let unaffordable = second.iter().any(|e| matches!(e, Effect::Notice(n) if n.contains("goes unreviewed")));
+    assert!(unreviewed.is_empty() || unaffordable, "{unreviewed:?} were not reviewed the next round");
+    assert!(unreviewed.len() < evolved.len(), "none of {evolved:?} was reviewed");
+}
+
+#[test]
 fn a_seat_that_is_signed_out_sits_the_round_out_and_the_rest_carry_on() {
     let snap = snapshot();
     let mut sup = Supervisor::new(0, 1, 3);

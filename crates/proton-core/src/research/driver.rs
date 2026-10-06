@@ -192,6 +192,15 @@ fn open_questions(fold: &Fold) -> Vec<String> {
         .collect()
 }
 
+/// Whether a step judges blind: the tournament's judges and the reviewers,
+/// shown each hypothesis without its author. They are given no tools of
+/// their own — what they judge is in what they are asked, and the papers
+/// come through Proton's server — because the investigation's files name
+/// every author and hold every match so far.
+fn blind(phase: Phase) -> bool {
+    matches!(phase, Phase::Rank | Phase::Reflect)
+}
+
 /// Whether a step may search and read the web: finding and checking what
 /// is known is part of proposing, reviewing and framing; judging a match,
 /// checking a derivation or summing up is done from what is in front of it.
@@ -1044,6 +1053,15 @@ impl Driver {
         moved
     }
 
+    /// Where a blind step starts: a folder of the investigation's own outside
+    /// it, with nothing in it.
+    fn blind_folder(&self) -> std::path::PathBuf {
+        let name = self.folder.dir().file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "investigation".into());
+        let folder = std::env::temp_dir().join("proton-blind").join(name);
+        let _ = std::fs::create_dir_all(&folder);
+        folder
+    }
+
     fn launch(&mut self, d: Dispatch, kit: &mut Kit, now: u64) -> Moved {
         let (prompt, mcp) = self.ground(&d, kit, now);
         let d = Dispatch { prompt, ..d };
@@ -1067,7 +1085,7 @@ impl Driver {
             max_turns: Some(turns(d.phase)),
             mcp,
             read,
-            no_tools: false,
+            no_tools: blind(d.phase),
         };
         let attempt = self.supervisor.task(&d.task).map(|t| t.attempts).unwrap_or(0);
         let record = json!({
@@ -1082,8 +1100,13 @@ impl Driver {
             "prompt": d.prompt,
         });
         let _ = self.folder.write_task(&d.task, &record);
+        // A judge or a reviewer starts in a folder with nothing in it, for the
+        // engines whose own tools cannot be taken away: started in the
+        // investigation, it could read who wrote what.
+        let blind_folder = blind(d.phase).then(|| self.blind_folder());
+        let cwd = blind_folder.as_deref().unwrap_or(self.folder.dir());
         let started = factory
-            .create(&d, &how, settings, self.folder.dir())
+            .create(&d, &how, settings, cwd)
             .and_then(|mut conversation| conversation.send(&d.prompt, &[]).map(|()| conversation));
         match started {
             Ok(conversation) => {

@@ -62,6 +62,8 @@ struct Call {
     mcp: Vec<String>,
     /// The folders besides its own it may read.
     read: Vec<PathBuf>,
+    /// Given no tools of its own.
+    no_tools: bool,
 }
 
 #[derive(Debug, Default)]
@@ -345,6 +347,7 @@ impl AgentFactory for Factory {
                 model: settings.model.clone(),
                 mcp: how.mcp.iter().map(|s| format!("{} {} {}", s.name, s.args.join(" "), s.tools.join(","))).collect(),
                 read: how.read.clone(),
+                no_tools: how.no_tools,
             });
             log.calls.len() - 1
         };
@@ -439,14 +442,20 @@ fn a_round_runs_on_three_engines_and_leaves_its_files() {
     let (status, used, cap) = round(&events).expect("the round is drawn as it goes");
     assert_eq!(status, RoundStatus::Idle);
     let log = log.lock().unwrap();
-    // Each call was its own unattended conversation, in the investigation,
-    // told its rules and held to a schema.
+    // Each call was its own unattended conversation, told its rules and held
+    // to a schema: in the investigation, but for its judges and reviewers,
+    // who judge blind — with no tools of their own, and nowhere near the
+    // files that name every author and hold every match.
     for c in log.calls.iter() {
-        assert_eq!(c.cwd, folder.dir());
+        match matches!(c.phase, Phase::Rank | Phase::Reflect) {
+            true => assert!(c.no_tools && !c.cwd.starts_with(folder.dir()), "{:?} {:?} in {:?}", c.seat, c.phase, c.cwd),
+            false => assert!(c.cwd == folder.dir() && !c.no_tools, "{:?} {:?} in {:?}", c.seat, c.phase, c.cwd),
+        }
         assert!(c.schema && c.instructions.contains("unattended") && c.sent.len() == 1, "{:?} {:?}: {:?}", c.seat, c.phase, c.sent.last());
         assert!(c.stopped, "{} was not let go", c.task);
     }
 
+    assert!(log.calls.iter().any(|c| c.phase == Phase::Rank) && log.calls.iter().any(|c| c.phase == Phase::Reflect));
     assert_eq!(used as usize, log.calls.len(), "every call is counted");
     assert!(used <= cap);
     // Framed by the Investigator, then two hypotheses a seat, then each reviewed.
