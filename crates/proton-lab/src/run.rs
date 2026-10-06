@@ -450,21 +450,39 @@ pub(crate) fn settle(path: &Path, dir: &Path) -> Option<Value> {
     }
     #[cfg(unix)]
     if let Some(pid) = record["pid"].as_u64().map(|p| p as u32) {
-        // SAFETY: signal 0 only asks whether the process exists.
-        let alive = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
-        let ours = alive && cwd_of(pid).is_some_and(|cwd| sandbox::real(&cwd) == sandbox::real(dir));
-        if ours {
-            // SAFETY: the group is the run's own, and its leader is working in
-            // the run's folder: it is that run, not a pid reused since.
-            unsafe {
-                libc::killpg(pid as libc::pid_t, libc::SIGKILL);
-            }
-        }
+        stop_group_in(pid, dir, false);
     }
     record["state"] = json!(State::Stopped);
     record["ended"] = json!(now());
     record["note"] = json!("It was running when Proton closed, and did not finish.");
     Some(record)
+}
+
+/// Stop the process group `pid` leads if it is still there and working in
+/// `dir` — or, if `inside`, anywhere in it: the one started there, not a pid
+/// handed to something else since. Whether it was.
+#[cfg(unix)]
+pub(crate) fn stop_group_in(pid: u32, dir: &Path, inside: bool) -> bool {
+    // SAFETY: signal 0 only asks whether the process exists.
+    let alive = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
+    let dir = sandbox::real(dir);
+    let ours = alive
+        && cwd_of(pid).is_some_and(|cwd| {
+            let cwd = sandbox::real(&cwd);
+            if inside {
+                cwd.starts_with(&dir)
+            } else {
+                cwd == dir
+            }
+        });
+    if ours {
+        // SAFETY: the group is the one this crate made for the process, and
+        // its leader is working where it was started.
+        unsafe {
+            libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+        }
+    }
+    ours
 }
 
 /// The last `lines` lines of a file a run wrote, and whether there were more.

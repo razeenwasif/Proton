@@ -8,7 +8,7 @@
 //! pipe and stalls the program.
 
 use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 
@@ -28,7 +28,7 @@ enum Msg {
 }
 
 /// How a job is started, beyond its program and arguments.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct How {
     /// Its own process group, stopped as one: what it starts — curl, an
     /// unpacker — goes when it is stopped, rather than downloading on.
@@ -37,6 +37,8 @@ pub struct How {
     /// user, language, temporary folder, proxies and certificates — so no
     /// variable of theirs changes what is made.
     pub clean: bool,
+    /// The folder it runs in, if not Proton's own.
+    pub dir: Option<PathBuf>,
 }
 
 /// What a clean job is still given from the environment.
@@ -95,6 +97,9 @@ impl Job {
     pub fn start_with(program: &Path, args: &[String], env: &[(String, String)], how: How) -> Result<Job, String> {
         let mut command = Command::new(program);
         command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        if let Some(dir) = &how.dir {
+            command.current_dir(dir);
+        }
         if how.clean {
             command.env_clear();
             for name in PASSED {
@@ -162,6 +167,11 @@ impl Job {
 
     pub fn running(&self) -> bool {
         !self.exited
+    }
+
+    /// Its process id while it runs — its group's too, when it has one.
+    pub fn id(&self) -> Option<u32> {
+        self.child.as_ref().map(Child::id)
     }
 
     /// Stop it now — and, with a group of its own, everything it started.
@@ -234,8 +244,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let pid_file = dir.join("child.pid");
-        let script = format!("sleep 300 & echo $! > '{}'; wait", pid_file.display());
-        let mut job = Job::start_with(&PathBuf::from("/bin/sh"), &["-c".into(), script], &[], How { group: true, clean: false }).unwrap();
+        // Written where it runs: the folder it was given.
+        let script = "sleep 300 & echo $! > child.pid; wait".to_string();
+        let how = How { group: true, dir: Some(dir.clone()), ..How::default() };
+        let mut job = Job::start_with(&PathBuf::from("/bin/sh"), &["-c".into(), script], &[], how).unwrap();
+        assert!(job.id().is_some());
         // The shell makes the file before it writes to it: wait for the number.
         let deadline = Instant::now() + Duration::from_secs(5);
         let read = || std::fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse::<i32>().ok());
@@ -253,7 +266,7 @@ mod tests {
             &PathBuf::from("/bin/sh"),
             &["-c".into(), "echo \"${PROTON_JOB_TEST_SECRET:-none}|${GIVEN:-none}|${HOME:+home}\"".into()],
             &[("GIVEN".into(), "yes".into())],
-            How { group: false, clean: true },
+            How { clean: true, ..How::default() },
         )
         .unwrap();
         let said = drain(&mut job);

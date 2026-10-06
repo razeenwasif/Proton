@@ -81,7 +81,7 @@ pub struct Gate {
 
 /// A check's hold on its gate, let go when it ends.
 #[derive(Debug)]
-struct Pass(Arc<Gate>);
+pub(crate) struct Pass(Arc<Gate>);
 
 impl Drop for Pass {
     fn drop(&mut self) {
@@ -101,7 +101,7 @@ impl Gate {
         self.busy.load(Ordering::SeqCst)
     }
 
-    fn take(self: &Arc<Gate>) -> Option<Pass> {
+    pub(crate) fn take(self: &Arc<Gate>) -> Option<Pass> {
         self.busy.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).ok().map(|_| Pass(self.clone()))
     }
 }

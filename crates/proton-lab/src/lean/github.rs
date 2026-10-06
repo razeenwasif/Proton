@@ -176,13 +176,9 @@ pub fn plan(fetch: &dyn Fetch, platform: &Platform, home: &str, free: u64, git: 
 
     let downloads = vec![
         LeanDownload { what: format!("elan {}", elan.tag), host: "github.com".into(), bytes: elan_asset.size, exact: true, verified: elan_asset.sha256.is_some() },
-        LeanDownload {
-            what: format!("Lean {} toolchain", lean.tag),
-            host: "github.com".into(),
-            bytes: toolchain_asset.size,
-            exact: true,
-            verified: toolchain_asset.sha256.is_some(),
-        },
+        // elan downloads and unpacks it — macOS's tar cannot read zstd — and
+        // checks it against no digest.
+        LeanDownload { what: format!("Lean {} toolchain", lean.tag), host: "github.com".into(), bytes: toolchain_asset.size, exact: true, verified: false },
         LeanDownload { what: format!("Mathlib {} sources", lean.tag), host: "github.com".into(), bytes: MATHLIB_SOURCES, exact: false, verified: false },
         LeanDownload { what: "Mathlib's prebuilt library".into(), host: "cache.mathlib.org".into(), bytes: MATHLIB_DOWNLOAD, exact: false, verified: false },
     ];
@@ -270,7 +266,7 @@ pub(crate) mod tests {
         let asked = script.asked.lock().unwrap().clone();
         assert!(asked.contains(&mathlib_toolchain_url("v4.34.1")) && !asked.iter().any(|u| u.contains("-rc")), "{asked:?}");
         let toolchain = &plan.downloads[1];
-        assert!(toolchain.exact && toolchain.verified && toolchain.bytes > 400_000_000, "{toolchain:?}");
+        assert!(toolchain.exact && !toolchain.verified && toolchain.bytes > 400_000_000, "elan checks the toolchain against no digest: {toolchain:?}");
         assert!(plan.downloads[0].verified && plan.downloads[0].bytes == 2_190_845, "elan, from its own release");
         assert!(!plan.downloads[3].exact && plan.downloads[3].host == "cache.mathlib.org", "Mathlib's library is an estimate, and says so");
         assert_eq!(plan.download, plan.downloads.iter().map(|d| d.bytes).sum::<u64>());
@@ -288,7 +284,6 @@ pub(crate) mod tests {
         script.answers.insert(ELAN_LATEST.to_string(), (200, ELAN.replace("\"digest\"", "\"withheld\"")));
         let plan = plan(&script, &MAC, "/h", u64::MAX, "git").unwrap();
         assert!(!plan.downloads[0].verified && plan.elan_sha256.is_none(), "{:?}", plan.downloads[0]);
-        assert!(plan.downloads[1].verified, "the toolchain's own digest still counts");
     }
 
     #[test]
