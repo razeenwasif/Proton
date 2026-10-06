@@ -5,8 +5,8 @@ open about it, and what it waits on. Items leave this file when they land.
 
 ## Notebook
 
-Gemini Notebook in Proton (S0–S10 and the S3 extras, on `codex-zed-look`,
-unpushed). What is left of the plan, and what came of building it.
+Gemini Notebook in Proton (S0–S10 and the S3 extras, on master). What is
+left of the plan, and what came of building it.
 
 ### Waiting on the person
 

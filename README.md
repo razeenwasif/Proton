@@ -82,12 +82,21 @@ answer in the same tab.
 **Codex** · the editor — buffers, LSP, splits, the agent dock, and the mobile
 target's device / layout-inspector / Logcat panel. C and C++ are formatted by
 clangd, or by `clang-format` — Xcode's, Homebrew's or LLVM's — where there is
-no clangd, with the project's `.clang-format`.
-**Data** · notebook + SQL + dataframe grid + charts, with real cell lineage back
-into the codebase, drawn as Codex is. Data keeps projects of its own, apart
-from Codex's: the folder open in Codex is not carried into it, and going back
-to Data brings back the one it had. Code cells are coloured as you type them,
-and prose cells are drawn as the agent's answers are, TeX included.
+no clangd, with the project's `.clang-format`. Brackets and quotes close as
+they are typed; Enter, `o` and `O` indent as the code calls for, and Tab is
+as wide as the file's own indent — from its `.editorconfig`, else from its
+lines. Saves are whole or not at all, and quitting with unsaved changes asks
+first.
+**Data** · Jupyter notebooks, drawn as Codex is: cells run in a kernel,
+dataframes come back as tables beside them, and an Agent tab shares the side
+with the table — it reads the notebook, runs its cells in your kernel, and
+proposes changes you accept or reject on the cells themselves. A notebook's
+unsaved changes are kept: saved when you open another, close the project or
+quit. Data keeps projects of its own, apart from Codex's: the folder open in
+Codex is not carried into it, and going back to Data brings back the one it
+had. Code cells are coloured as you type them, and prose cells are drawn as
+the agent's answers are, TeX included. SQL cells, charts and lineage back
+into the code are not built yet.
 
 Cells run in a Jupyter kernel, in the first of these that has one:
 `PROTON_PYTHON`; the project's `.venv`, `venv` or `.env`; the Jupyter kernel

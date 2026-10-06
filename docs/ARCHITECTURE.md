@@ -11,14 +11,15 @@ in this document retain historical decisions and measurements.
 
 | Mode | Implemented document and interaction | Remaining limitation |
 |---|---|---|
-| Chat | Saved conversations, provider-backed messages, staged edits, council debates | Requires a configured provider for model requests |
+| Chat | Claude Code's own sessions, and Codex, Gemini and Antigravity conversations, with permissions, artifacts beside the chat, and council debates | Each engine is its own CLI, signed in by the person |
 | Codex | Text buffers, modal editing, search, splits, LSP/DAP, Git, terminal | Language servers, debuggers, and trace backends are external tools |
-| Data | `.ipynb` cells, kernel execution, outputs and dataframe views | Execution requires a configured Jupyter kernel |
+| Data | `.ipynb` cells, kernel execution, outputs and dataframe views; an agent whose edits are proposed on the cells; unsaved changes kept | Execution requires a Jupyter kernel; no SQL cells, charts or lineage yet |
 | Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; figures and 3D scenes drawn in the Lab |
 | Design | CSS tokens and component markup, layers, source-linked artboard | Components requiring a build cannot be previewed directly |
 | Modeling | `.proton.json` scenes, OBJ geometry, transforms, modifiers, material graph, WebGL | Supported formats and viewport budget are bounded |
 | Game | Godot `.tscn` scene hierarchy and property editing | No engine playback process |
 | Video | CMX3600 `.edl` timeline and `.srt` captions | No decoded video/program monitor |
+| Notebook | Notebooks of your own sources with a cited tutor on four engines; study guides, flashcards on FSRS, quizzes marked by another family, exams from past papers, audio overviews, slides | The tutor and studio spend each engine's plan, audio Fish credit |
 
 ```bash
 cargo test --workspace        # headless; some integrations require external tools
@@ -51,7 +52,7 @@ dependency, and the front end is replaceable.**
       ╭─────────▼──────────╮        ╭────────────▼───────────╮
       │  proton-shell      │        │  GPU editor surface    │
       │  webview · chrome  │  ────▶ │  later, only if the    │
-      │  all eight modes   │        │  latency budget fails  │
+      │  all nine modes    │        │  latency budget fails  │
       ╰────────────────────╯        ╰────────────────────────╯
 ```
 
@@ -64,7 +65,7 @@ Two rules keep that seam honest:
    (`Delete·Line`, count 2), which is exactly the boundary that lets a different
    front end reuse it verbatim.
 
-The webview ships first because eight modes demand it. The GPU surface is held
+The webview ships first because nine modes demand it. The GPU surface is held
 in reserve for the editor pane alone, and only once a measured
 input-to-photon number justifies it. See STACK.md § "The actual decision".
 
