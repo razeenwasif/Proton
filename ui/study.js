@@ -85,7 +85,7 @@ export function createStudy(host) {
     stage: q("[data-study-stage]"),
     studio: q("[data-study-studio-body]"),
   };
-  const picker = createPicker({ root: host.root, dispatch: host.dispatch, ws });
+  const picker = createPicker({ root: host.root, dispatch: host.dispatch, ws, discoverable: () => !readOnly() && !!state.notebook?.sources.some(hasWords) });
   const chat = createChat({
     dispatch: host.dispatch, ws, readOnly: () => readOnly(),
     show: (id, at) => host.dispatch({ type: "studyShow", id, at }),
@@ -118,7 +118,7 @@ export function createStudy(host) {
   const decks = createSlides({ dispatch: host.dispatch, readOnly: () => readOnly() });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
-   *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: boolean, removing: string | null,
+   *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web", removing: string | null,
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
    *   progress: import("./study-progress.js").ProgressEvent | null}} */
   const state = {
@@ -130,7 +130,8 @@ export function createStudy(host) {
     creating: false, made: -1,
     // The folder being typed to keep notebooks in, once asked for.
     moving: null,
-    // The notebook's details being edited; text being pasted; a source
+    // The notebook's details being edited; text, or a web address, being
+    // given; a source
     // whose taking out is being confirmed; sources whose download from
     // iCloud is being confirmed.
     editing: false, pasting: false, removing: null, getting: null,
@@ -181,7 +182,8 @@ export function createStudy(host) {
 
   /** @param {SourceRow} s */
   function sourceHtml(s) {
-    const origin = s.origin.from === "file" ? `${s.origin.root}/${s.origin.rel}` : s.origin.from === "note" ? `Note ${s.origin.note}` : "Pasted";
+    const origin = s.origin.from === "file" ? `${s.origin.root}/${s.origin.rel}` : s.origin.from === "note" ? `Note ${s.origin.note}`
+      : s.origin.from === "web" ? s.origin.url : "Pasted";
     const confirm = state.removing === s.id
       ? `<span class="st-confirm">Take out? <button class="st-link" data-study-remove-yes="${esc(s.id)}">Yes</button> <button class="st-link" data-study-remove-no>No</button></span>`
       : "";
@@ -316,18 +318,30 @@ export function createStudy(host) {
       </form>`;
   }
 
+  function webHtml() {
+    return `<form class="st-card st-paste" data-study-web-form novalidate>
+        <h2>Add from the web</h2>
+        <label class="rs-field"><span>Address</span><input name="url" type="url" autocomplete="off" spellcheck="false" placeholder="https://…"></label>
+        <p class="st-faint">A page is fetched once and kept as the text of its article; a PDF is kept whole; a YouTube video is kept as its
+          captions, read with yt-dlp. Nothing is fetched again unless you ask.</p>
+        <div class="rs-actions"><button type="button" class="cc-quiet" data-study-paste-cancel>Cancel</button>
+          <button type="submit" class="cc-primary">Add as a source</button></div>
+      </form>`;
+  }
+
   function notebookHtml() {
     const nb = /** @type {NotebookEvent} */ (state.notebook);
     const held = nb.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nb.readOnly)} has this notebook open: it is read only here.</div>` : "";
     if (state.editing) return held + detailsHtml();
-    if (state.pasting) return held + pasteHtml();
+    if (state.pasting) return held + (state.pasting === "web" ? webHtml() : pasteHtml());
     const head = headHtml();
     if (!nb.sources.length) {
       return `${held}${head}<div class="st-card st-empty">
           <h2>Add sources to begin</h2>
-          <p>Choose notes, slides, labs and past papers from your folders, or paste text. Every answer and everything the
-            studio makes is drawn from them, and cites them.</p>
+          <p>Choose notes, slides, labs and past papers from your folders, add a page from the web, or paste text. Every answer
+            and everything the studio makes is drawn from them, and cites them.</p>
           ${readOnly() ? "" : `<div class="rs-actions"><button class="cc-quiet" data-study-paste>Paste text</button>
+            <button class="cc-quiet" data-study-web>${icon("globe")}From the web</button>
             <button class="cc-primary" data-study-pick>${icon("plus")}Add sources</button></div>`}
         </div>`;
     }
@@ -345,6 +359,7 @@ export function createStudy(host) {
       ? `<div class="st-banner">${icon("cloud")} ${esc(count(waiting.length, "source is", "sources are"))} in iCloud and not read yet (${esc(size(bytes))}).
           <button class="st-link" data-study-get-all>Download ${waiting.length === 1 ? "it" : "them"}</button></div>` : "";
     const actions = readOnly() ? "" : `<div class="rs-actions st-nb-actions"><button class="cc-quiet" data-study-paste>Paste text</button>
+        <button class="cc-quiet" data-study-web>${icon("globe")}From the web</button>
         <button class="cc-quiet" data-study-pick>${icon("plus")}Add sources</button></div>`;
     return `${held}${head}${cloud}<div class="st-groups">${groups}</div>${actions}`;
   }
@@ -378,15 +393,21 @@ export function createStudy(host) {
       body = `<div class="st-lines">${v.text.split("\n").map((line, i) =>
         `<div class="st-ln" data-line="${i + 1}"><i>${i + 1}</i><span>${esc(line) || " "}</span></div>`).join("")}</div>`;
     } else if (v.shape === "pages") {
-      body = v.pages.map((page, i) => `<section class="st-page" data-page="${i + 1}"><header>Page ${i + 1}</header>` +
+      const unit = src.kind === "slides" ? "Slide" : "Page";
+      body = v.pages.map((page, i) => `<section class="st-page" data-page="${i + 1}"><header>${unit} ${i + 1}</header>` +
         (page.trim() ? `<pre>${esc(page.trim())}</pre>` : `<p class="st-faint">No words were read on this page — a picture, or a slide with only a title.</p>`) +
         `</section>`).join("");
     } else {
       body = v.cues.map((c) => `<div class="st-cue" data-start="${c.start}" data-end="${c.end}"><time>${clock(c.start)}</time><span>${esc(c.text)}</span></div>`).join("");
     }
     const said = src.said ? `<div class="st-banner">${icon("clock")} ${esc(src.said)}</div>` : "";
+    const origin = state.notebook?.sources.find((s) => s.id === src.id)?.origin;
+    const web = origin?.from === "web" ? origin : null;
+    const fetched = web?.fetched ? ` · fetched ${new Date(web.fetched * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : "";
+    const page = web ? `<button class="cc-quiet" data-study-page="${esc(web.url)}" title="${esc(web.url)}">${icon("ext")}Open the page</button>` +
+      (readOnly() ? "" : `<button class="cc-quiet" data-study-refresh="${esc(src.id)}" title="Fetch it again, and keep it as it is now">Fetch again</button>`) : "";
     return `<div class="st-reader"><div class="st-reader-head"><button class="cc-quiet" data-study-back title="Back to the notebook">← Back</button>` +
-      `<div><h1>${esc(src.title)}</h1><span class="st-faint">${esc(src.id)} · ${esc(src.kind)}</span></div></div>${said}<div class="st-read">${body}</div></div>`;
+      `<div><h1>${esc(src.title)}</h1><span class="st-faint">${esc(src.id)} · ${esc(src.kind)}${esc(fetched)}</span></div>${page}</div>${said}<div class="st-read">${body}</div></div>`;
   }
 
   /** Mark and scroll to where a source was opened. @param {SourceEvent} src */
@@ -674,11 +695,19 @@ export function createStudy(host) {
       return renderStage();
     }
     if (at("[data-study-paste]")) {
-      state.pasting = true;
+      state.pasting = "text";
       renderStage();
       /** @type {HTMLTextAreaElement | null} */ (els.stage.querySelector("textarea"))?.focus();
       return;
     }
+    if (at("[data-study-web]")) {
+      state.pasting = "web";
+      renderStage();
+      /** @type {HTMLInputElement | null} */ (els.stage.querySelector("[data-study-web-form] input"))?.focus();
+      return;
+    }
+    const page = at("[data-study-page]");
+    if (page) return host.dispatch({ type: "openLink", url: page.dataset.studyPage });
     if (at("[data-study-paste-cancel]")) {
       state.pasting = false;
       return renderStage();
@@ -806,6 +835,13 @@ export function createStudy(host) {
       if (!text) return /** @type {HTMLTextAreaElement | null} */ (form.querySelector("textarea"))?.focus();
       host.dispatch({ type: "studyPaste", title: field("title"), text });
       state.pasting = false;
+    }
+    if (form.matches("[data-study-web-form]")) {
+      const url = field("url");
+      if (!url) return /** @type {HTMLInputElement | null} */ (form.querySelector("input"))?.focus();
+      host.dispatch({ type: "studyAddUrl", url });
+      state.pasting = false;
+      renderStage();
     }
   });
 

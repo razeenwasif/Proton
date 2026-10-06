@@ -8,7 +8,7 @@ const now = Math.floor(Date.now() / 1000);
 /** @param {string} root @param {string} rel @param {string} kind @param {number} size @param {boolean} [inCloud] */
 const file = (root, rel, kind, size, inCloud = false) => ({
   name: rel.split("/").pop(), path: `${root}/${rel}`, kind, size, mtime: now - 86400 * 30, inCloud,
-  readable: !["image", "video", "audio", "slides", "document", "other"].includes(kind), source: null,
+  readable: !["video", "audio", "other"].includes(kind), source: null,
 });
 
 const FILES = [
@@ -126,7 +126,16 @@ export function createStudyPreview(deliver) {
     const passages = words.includes("search")
       ? [{ path: "OnyxVault/03 - Algorithms/Search.md", cite: "OnyxVault/03 - Algorithms/Search.md § Search › Uniform cost L40-58", title: "Search › Uniform cost", text: "Uniform-cost search expands the node with the lowest path cost g(n) first; with positive step costs it is complete and optimal." }]
       : [];
-    return { type: "studyKbResults", query, files, passages };
+    return { type: "studyKbResults", query, files, passages, discovered: false };
+  }
+
+  /** What is like the open notebook and not in it, as Discover finds it. */
+  function discoverEvent() {
+    const have = new Set((state.sources[state.open ?? ""] ?? []).map((s) => (s.origin.from === "file" ? `${s.origin.root}/${s.origin.rel}` : "")));
+    const files = FILES.filter((f) => !have.has(f.path) && f.readable).slice(0, 3).map(withSource);
+    const passages = files.map((f) => ({ path: f.path, cite: `${f.path} p. 2`, title: f.name,
+      text: "The frontier is a priority queue ordered by path cost; uniform-cost search is optimal when every step costs at least ε." }));
+    return { type: "studyKbResults", query: "comp3670 frontier search heuristic cost", files, passages, discovered: true };
   }
 
   /** Read sources on a timer, as a worker would. @param {string} slug @param {string[]} ids */
@@ -354,6 +363,8 @@ export function createStudyPreview(deliver) {
           return [kbEvent()];
         case "studyKbBrowse":
           return [folderEvent(command.root, command.dir)];
+        case "studyDiscover":
+          return [discoverEvent()];
         case "studyKbSearch":
           return [resultsEvent(command.query)];
         case "studyNew": {
@@ -384,6 +395,21 @@ export function createStudyPreview(deliver) {
           const id = `S${String(state.next[slug]++).padStart(2, "0")}`;
           state.sources[slug].push({ id, title: command.title || command.text.split("\n")[0].slice(0, 60), kind: "markdown", role: "notes", origin: { from: "pasted" },
             status: { state: "ready" }, units: "lines", count: command.text.split("\n").length, size: command.text.length, thin: 0, selected: true, labels: [] });
+          return [notebookEvent(), listEvent()];
+        }
+        case "studyAddUrl": {
+          const slug = state.open ?? "";
+          const url = /^https?:\/\//.test(command.url) ? command.url : `https://${command.url}`;
+          const id = `S${String(state.next[slug]++).padStart(2, "0")}`;
+          const video = /youtu\.?be/.test(url);
+          const source = { id, title: url.replace(/^https?:\/\//, ""), kind: video ? "captions" : "web", role: video ? "recording" : "reading",
+            origin: { from: "web", url, fetched: 0 }, status: { state: "reading" }, units: video ? "seconds" : "lines", count: 0, size: 0, thin: 0, selected: true, labels: [] };
+          state.sources[slug].push(source);
+          setTimeout(() => {
+            Object.assign(source, { title: video ? "Lecture 3: Uniform cost search" : "Uniform-cost search — Wikipedia", status: { state: "ready" },
+              count: video ? 600 : 42, size: 48000, origin: { from: "web", url, fetched: Math.floor(Date.now() / 1000) } });
+            deliver(notebookEvent());
+          }, 600);
           return [notebookEvent(), listEvent()];
         }
         case "studyRemove":

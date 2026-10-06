@@ -276,6 +276,215 @@ fn the_reader_shows_what_was_kept_and_notes_become_sources() {
     session.shutdown();
 }
 
+fn here(program: &str, flag: &str) -> bool {
+    std::process::Command::new(program).arg(flag).output().is_ok_and(|o| o.status.success())
+}
+
+#[test]
+fn a_word_document_a_powerpoint_and_a_picture_are_read_when_they_are_made_sources() {
+    if !here("pandoc", "--version") || !here("unzip", "-v") || !here("tesseract", "--version") || !here("magick", "-version") {
+        return;
+    }
+    let scratch = Scratch::new("office");
+    let settings = scratch.knowledge_base();
+    let md = scratch.write("in.md", "# Search\n\nBreadth-first search is complete when $b$ is finite.\n\n# Heuristics\n\n- Admissible\n\n::: notes\nSay it slowly.\n:::\n");
+    let course = scratch.root.join("kb/Courses/COMP3670");
+    for out in ["notes.docx", "Week 3 Lecture.pptx"] {
+        assert!(std::process::Command::new("pandoc").arg(&md).arg("-o").arg(course.join(out)).status().unwrap().success());
+    }
+    let drawn = std::process::Command::new("magick")
+        .args(["-size", "900x160", "xc:white", "-fill", "black", "-pointsize", "64", "-annotate", "+20+100", "Uniform cost search"])
+        .arg(course.join("board.png"))
+        .status()
+        .unwrap();
+    assert!(drawn.success());
+
+    let mut session = session(&scratch, &settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    // The picker offers them, though a search of the whole knowledge base
+    // does not read them.
+    let events = session.apply(Command::StudyKbBrowse { root: "Courses".into(), dir: "COMP3670".into() });
+    let files = events.iter().find_map(|e| match e {
+        Event::StudyKbFolder { files, .. } => Some(files.clone()),
+        _ => None,
+    });
+    let files = files.unwrap_or_else(|| panic!("{events:?}"));
+    for name in ["notes.docx", "Week 3 Lecture.pptx", "board.png"] {
+        assert!(files.iter().any(|f| f.name == name && f.readable), "{name}: {files:?}");
+    }
+
+    session.apply(Command::StudyNew { title: "Office".into() });
+    session.apply(Command::StudyAdd {
+        paths: vec!["Courses/COMP3670/notes.docx".into(), "Courses/COMP3670/Week 3 Lecture.pptx".into(), "Courses/COMP3670/board.png".into()],
+    });
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 3 && sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(sources.clone()),
+        Event::StudyNotebook { sources, .. } if sources.iter().any(|s| matches!(s.status, SourceStatus::Failed { .. })) => panic!("{sources:?}"),
+        _ => None,
+    });
+    let deck = rows.iter().find(|r| r.kind == "slides").unwrap();
+    assert_eq!((deck.units, deck.role), (proton_study::model::Units::Pages, Role::Slides), "a deck is cited by slide");
+    assert!(deck.count >= 2, "{deck:?}");
+
+    // The document as Markdown, cut at its headings, its mathematics TeX.
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Sections { sections }, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(sections.iter().any(|s| s.text.contains("complete when $b$ is finite")), "{sections:?}");
+    // The deck a slide a page, with its speaker notes.
+    let events = session.apply(Command::StudyShow { id: "S02".into(), at: Some(proton_study::view::StudyPlace { from: 2, to: 2 }) });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Pages { pages }, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(pages.iter().any(|p| p.contains("Breadth-first search")) && pages.iter().any(|p| p.contains("Notes: Say it slowly.")), "{pages:?}");
+    // The picture's words, as tesseract read them.
+    let events = session.apply(Command::StudyShow { id: "S03".into(), at: None });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Lines { text }, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(text.to_lowercase().contains("uniform cost search"), "{text}");
+    session.shutdown();
+}
+
+#[test]
+fn discover_finds_what_in_the_knowledge_base_is_like_the_notebook_and_not_in_it_yet() {
+    let scratch = Scratch::new("discover");
+    let settings = scratch.knowledge_base();
+    scratch.write("kb/Vault/ucs.md", "# Uniform cost search\nuniform cost search orders the frontier by path cost, and is optimal\n");
+    scratch.write("kb/Vault/bread.md", "# Bread\nknead the dough and let it rise overnight\n");
+    let mut session = session(&scratch, &settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    let empty = said(&session.apply(Command::StudyDiscover { about: String::new() }));
+    assert!(empty.iter().any(|s| s.contains("Add a source first")), "{empty:?}");
+
+    // Found by the words the notebook's sources use.
+    session.apply(Command::StudyPaste {
+        title: "Search".into(),
+        text: "Uniform cost search expands the cheapest frontier node; breadth first search the shallowest frontier node. Both search a frontier.".into(),
+    });
+    let events = session.apply(Command::StudyDiscover { about: String::new() });
+    let Some(Event::StudyKbResults { query, files, passages, discovered: true }) = events.first() else { panic!("{events:?}") };
+    assert!(query.starts_with("frontier search"), "{query}");
+    let found: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(found.first(), Some(&"Vault/ucs.md"), "the likest first: {found:?}");
+    assert!(found.contains(&"Vault/notes.md") && !found.contains(&"Vault/bread.md"), "{found:?}");
+    assert!(!found.iter().any(|f| f.starts_with("Vault/Private")), "left out is left out: {found:?}");
+    assert_eq!(passages.len(), files.len(), "each with the passage most like it");
+
+    // A source already is not found again; and the person may say what to
+    // look for.
+    session.apply(Command::StudyAdd { paths: vec!["Vault/ucs.md".into()] });
+    let events = session.apply(Command::StudyDiscover { about: "uniform cost".into() });
+    let Some(Event::StudyKbResults { query, files, .. }) = events.first() else { panic!("{events:?}") };
+    assert_eq!(query, "uniform cost");
+    assert!(!files.iter().any(|f| f.path == "Vault/ucs.md"), "{files:?}");
+    session.shutdown();
+}
+
+/// The web, as a test has it: a page that changes each time it is fetched,
+/// a PDF, and nothing else; and what was asked for.
+#[derive(Default)]
+struct Web {
+    asked: std::sync::Mutex<Vec<String>>,
+}
+
+impl proton_literature::http::Transport for Web {
+    fn get(&self, request: &proton_literature::http::Request) -> Result<proton_literature::http::Response, String> {
+        let times = {
+            let mut asked = self.asked.lock().unwrap();
+            asked.push(request.url.clone());
+            asked.iter().filter(|u| **u == request.url).count()
+        };
+        let page = format!(
+            "<html><head><title>Uniform cost search | Notes</title></head><body><nav><a href='/'>Home</a></nav><article>\
+             <h1>Uniform cost search</h1><p>Uniform cost search expands the node with the lowest path cost first, version {times}.</p>\
+             <p>It is optimal when every step costs at least some positive amount.</p></article><footer>Copyright</footer></body></html>"
+        );
+        let (status, kind, body) = match request.url.as_str() {
+            "https://example.com/ucs" => (200, "text/html; charset=utf-8", page.into_bytes()),
+            "https://example.com/files/Week%203%20notes.pdf" => {
+                (200, "application/pdf", proton_library::pdf::fixture(&["Heuristics", "an admissible heuristic never overestimates the cost to the goal"]))
+            }
+            _ => (404, "text/html", b"<p>Not found</p>".to_vec()),
+        };
+        Ok(proton_literature::http::Response {
+            status,
+            headers: vec![("Content-Type".into(), kind.into())],
+            body: Box::new(std::io::Cursor::new(body)),
+        })
+    }
+}
+
+#[test]
+fn a_page_of_the_web_is_fetched_once_kept_as_its_article_and_fetched_again_when_asked() {
+    use proton_literature::http::{FakeClock, Gates, Http};
+    let scratch = Scratch::new("web");
+    let settings = scratch.knowledge_base();
+    let web = std::sync::Arc::new(Web::default());
+    let http = Http::new(web.clone(), std::sync::Arc::new(Gates::default()), std::sync::Arc::new(FakeClock::default()), None);
+    let mut session = Session::new(scratch.root.join("project"))
+        .with_person_settings(settings.clone())
+        .with_study(Study::new().with_person_settings(&settings).flags_with(in_cloud).with_web(http));
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Web".into() });
+
+    // A bare address is given https; a page is titled by what it calls
+    // itself once it is read.
+    let events = session.apply(Command::StudyAddUrl { url: "example.com/ucs".into() });
+    let rows = sources(&events).unwrap();
+    assert_eq!((rows[0].title.as_str(), rows[0].status.clone()), ("example.com/ucs", SourceStatus::Reading));
+    session.apply(Command::StudyAddUrl { url: "https://example.com/files/Week%203%20notes.pdf".into() });
+    session.apply(Command::StudyAddUrl { url: "https://example.com/gone".into() });
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 3 && sources.iter().all(|s| !matches!(s.status, SourceStatus::Reading)) => Some(sources.clone()),
+        _ => None,
+    });
+    assert_eq!((rows[0].title.as_str(), rows[0].kind.as_str(), rows[0].status.clone()), ("Uniform cost search | Notes", "web", SourceStatus::Ready));
+    assert_eq!((rows[1].title.as_str(), rows[1].kind.as_str(), rows[1].count), ("Week 3 notes.pdf", "pdf", 2));
+    let SourceStatus::Failed { why } = &rows[2].status else { panic!("{rows:?}") };
+    assert!(why.contains("no page there (404)"), "{why}");
+    assert!(matches!(&rows[0].origin, proton_study::model::Origin::Web { url, fetched } if url == "https://example.com/ucs" && *fetched > 0));
+
+    // Asked for again, it is the same source; and what is not an address
+    // says so.
+    let said_again = said(&session.apply(Command::StudyAddUrl { url: "https://example.com/ucs".into() }));
+    assert!(said_again.iter().any(|s| s.contains("is already S01")), "{said_again:?}");
+    let said_not = said(&session.apply(Command::StudyAddUrl { url: "breadth first".into() }));
+    assert!(said_not.iter().any(|s| s.contains("not a web address")), "{said_not:?}");
+
+    // The page as its article, its navigation and footer left behind.
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Sections { sections }, .. }) = events.first() else { panic!("{events:?}") };
+    let text: String = sections.iter().map(|s| s.text.as_str()).collect();
+    assert!(text.contains("lowest path cost first, version 1") && !text.contains("Copyright") && !text.contains("Home"), "{text}");
+    // The PDF kept whole, and opened in the document viewer, which may read it.
+    let events = session.apply(Command::StudyShow { id: "S02".into(), at: Some(proton_study::view::StudyPlace { from: 2, to: 2 }) });
+    let Some(Event::Document { path, page, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(path.ends_with(".notebook/web/S02.pdf") && *page == Some(2), "{path}");
+    assert!(session.document_file(path).is_some());
+
+    // Fetched again only when asked: then it reads as the page is now.
+    assert_eq!(web.asked.lock().unwrap().iter().filter(|u| u.ends_with("/ucs")).count(), 1);
+    session.apply(Command::StudyRefresh { id: "S01".into() });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Sections { sections }, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(sections.iter().any(|s| s.text.contains("version 2")), "{sections:?}");
+    assert!(web.asked.lock().unwrap().iter().all(|u| u.starts_with("https://example.com/")), "nothing else was fetched");
+
+    // Taken out, what was kept of it goes too.
+    let kept = scratch.root.join("Notebooks/web/.notebook/web/S02.pdf");
+    assert!(kept.is_file());
+    session.apply(Command::StudyRemove { id: "S02".into() });
+    assert!(!kept.exists(), "the PDF fetched for it is kept still");
+    session.shutdown();
+}
+
 fn said_of(events: &[Event]) -> Vec<String> {
     said(events)
 }

@@ -141,6 +141,21 @@ impl Book {
         self.dir.join(".notebook").join("sources")
     }
 
+    /// Where what was fetched from the web is kept as it came: a PDF, a
+    /// video's captions.
+    pub fn web_dir(&self) -> PathBuf {
+        self.dir.join(".notebook").join("web")
+    }
+
+    /// A PDF fetched from the web for source `id`, kept whole: what the
+    /// document viewer opens.
+    pub fn web_pdf(&self, id: &str) -> Option<PathBuf> {
+        if !id.starts_with('S') || id.contains(['/', '\\', '.']) {
+            return None;
+        }
+        Some(self.web_dir().join(format!("{id}.pdf"))).filter(|p| p.is_file())
+    }
+
     /* ── which sources the tutor uses ─────────────────────────────── */
 
     fn selection_file(&self) -> PathBuf {

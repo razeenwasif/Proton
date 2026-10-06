@@ -130,6 +130,28 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(picker.hidden, 'Escape did not put it away');
   });
 
+  await test('Like this notebook finds what in the folders is like it and not in it yet, by words it shows in the box', async () => {
+    ws().querySelector('[data-study-pick]').click(); await settle();
+    const picker = ws().querySelector('[data-study-picker]');
+    const discover = picker.querySelector('[data-study-discover]');
+    assert(discover && !discover.hidden, 'nothing finds what is like the notebook');
+    const before = win.commands.length;
+    discover.click(); await settle();
+    assert(sent(before, 'studyDiscover')[0]?.about === '', 'it did not ask');
+    assert(picker.textContent.includes('Looking for what is like this notebook'), 'it does not say it is looking');
+    await win.pushEvents([{type: 'studyKbResults', query: 'comp3670 frontier search', discovered: true,
+      files: [{name: 'Week 4.pdf', path: 'Courses/COMP3670/Week 4.pdf', kind: 'pdf', size: 900_000, mtime: 1, inCloud: false, readable: true, source: null}],
+      passages: [{path: 'Courses/COMP3670/Week 4.pdf', cite: 'Courses/COMP3670/Week 4.pdf p. 7', title: 'Week 4', text: 'A* orders the frontier by f(n) = g(n) + h(n).'}]}]); await settle();
+    assert(picker.querySelector('[data-study-search]').value === 'comp3670 frontier search', 'the words it was found by are not in the box');
+    const found = picker.querySelector('.st-found');
+    assert(found?.textContent.includes('Week 4.pdf') && found.textContent.includes('p. 7 A* orders'), `not shown with its passage: ${found?.textContent}`);
+    const tick = found.querySelector('[data-study-choose]');
+    tick.checked = true; tick.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const add = win.commands.length;
+    picker.querySelector('[data-study-add]').click(); await settle();
+    assert(JSON.stringify(sent(add, 'studyAdd')[0]?.paths) === '["Courses/COMP3670/Week 4.pdf"]', `not added: ${JSON.stringify(sent(add, 'studyAdd'))}`);
+  });
+
   await test('A source opens in the reader at the place asked for, and Back returns to the notebook', async () => {
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01', {kind: 'markdown', units: 'lines', title: 'Search.md'})])]); await settle();
@@ -147,6 +169,41 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(ws().querySelector('.st-page[data-page="2"]')?.textContent.includes('No words'), 'an empty page is not said to be');
     ws().querySelector('[data-study-back]').click(); await settle();
     assert(!ws().querySelector('.st-reader') && ws().querySelector('.st-nb-head'), 'Back did not return to the notebook');
+  });
+
+  await test('A page of the web is added by its address, read as its article, opened in the browser, or fetched again', async () => {
+    await win.pushEvents([notebook([row('S01')])]); await settle();
+    ws().querySelector('[data-study-view="overview"]').click(); await settle();
+    ws().querySelector('[data-study-web]').click(); await settle();
+    const form = ws().querySelector('[data-study-web-form]');
+    assert(form && doc.activeElement === form.querySelector('input'), 'no address to type');
+    const before = win.commands.length;
+    form.requestSubmit(); await settle();
+    assert(sent(before, 'studyAddUrl').length === 0, 'an empty address was sent');
+    form.querySelector('input').value = 'en.wikipedia.org/wiki/Uniform-cost_search';
+    form.requestSubmit(); await settle();
+    assert(sent(before, 'studyAddUrl')[0]?.url === 'en.wikipedia.org/wiki/Uniform-cost_search', `not sent: ${JSON.stringify(sent(before, 'studyAddUrl'))}`);
+    assert(!ws().querySelector('[data-study-web-form]'), 'the form stayed up');
+    const url = 'https://en.wikipedia.org/wiki/Uniform-cost_search';
+    await win.pushEvents([notebook([row('S01'), row('S02', {kind: 'web', units: 'lines', count: 42, title: 'Uniform-cost search', origin: {from: 'web', url, fetched: 1_790_000_000}}),
+      row('S03', {kind: 'slides', title: 'Week 3.pptx', origin: {from: 'file', root: 'Courses', rel: 'Week 3.pptx'}})])]); await settle();
+    ws().querySelector('[data-study-view="chat"]').click(); await settle();
+    const web = ws().querySelector('.st-source[data-study-source="S02"]');
+    assert(web?.title.includes(url) && web.querySelector('use')?.getAttribute('href') === '#i-globe', 'the page is not said to be from the web');
+    await win.pushEvents([{type: 'studySource', id: 'S02', title: 'Uniform-cost search', kind: 'web', at: null, said: null,
+      view: {shape: 'sections', sections: [{from: 1, to: 4, text: '# Uniform-cost search\n\nExpands the cheapest node first.'}]}}]); await settle();
+    const head = ws().querySelector('.st-reader-head');
+    assert(head.textContent.includes('fetched') && head.textContent.includes('2026'), `when it was fetched is not said: ${head.textContent}`);
+    const opened = win.commands.length;
+    head.querySelector('[data-study-page]').click(); await settle();
+    assert(sent(opened, 'openLink')[0]?.url === url, 'the page did not open in the browser');
+    head.querySelector('[data-study-refresh]').click(); await settle();
+    assert(sent(opened, 'studyRefresh')[0]?.id === 'S02', 'it was not fetched again');
+    await win.pushEvents([{type: 'studySource', id: 'S03', title: 'Week 3.pptx', kind: 'slides', at: {from: 2, to: 2}, said: null,
+      view: {shape: 'pages', pages: ['Search', 'Uniform cost\n\nNotes: say it slowly.']}}]); await settle();
+    assert(ws().querySelector('.st-page[data-page="2"] header')?.textContent === 'Slide 2', 'a deck\'s pages are not its slides');
+    assert(!ws().querySelector('[data-study-page]'), 'a file is not a page to open');
+    ws().querySelector('[data-study-back]').click(); await settle();
   });
 
   await test('A note is written, saved, and made a source', async () => {

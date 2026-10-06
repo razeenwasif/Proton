@@ -18,7 +18,7 @@ import { escapeHtml as esc, icon } from "./html.js";
 /** @typedef {{roots: Root[], rules: string[], started: boolean, ready: boolean, walking: boolean,
  *   done: number, total: number, paused: boolean, documents: number, passages: number}} KbEvent */
 /** @typedef {{root: string, dir: string, folders: Folder[], files: File[], left: Left[]}} FolderEvent */
-/** @typedef {{query: string, files: File[], passages: Hit[]}} ResultsEvent */
+/** @typedef {{query: string, files: File[], passages: Hit[], discovered: boolean}} ResultsEvent */
 
 /** A size, as a person reads one. @param {number} bytes */
 export function size(bytes) {
@@ -39,10 +39,10 @@ const count = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 /** The icon a kind of file wears. */
 export const KIND_ICON = /** @type {Record<string, string>} */ ({
   pdf: "file-doc", markdown: "file", text: "file", notebook: "file-code", tex: "file-code", captions: "film",
-  table: "table", code: "file-code", document: "file-doc", slides: "file-doc", image: "image", audio: "audio", video: "film",
+  table: "table", code: "file-code", document: "file-doc", slides: "file-doc", image: "image", audio: "audio", video: "film", web: "globe",
 });
 
-/** @param {{root: Document, dispatch: (command: any) => unknown, ws: HTMLElement}} host */
+/** @param {{root: Document, dispatch: (command: any) => unknown, ws: HTMLElement, discoverable: () => boolean}} host */
 export function createPicker(host) {
   const box = document.createElement("div");
   box.className = "st-picker";
@@ -54,7 +54,7 @@ export function createPicker(host) {
   host.ws.append(box);
 
   /** @type {{kb: KbEvent | null, folder: FolderEvent | null, results: ResultsEvent | null, query: string, root: string, dir: string,
-   *   chosen: Map<string, File>, confirming: boolean, editing: boolean, asked: number, open: boolean}} */
+   *   chosen: Map<string, File>, confirming: boolean, editing: boolean, asked: number, open: boolean, discovering: boolean}} */
   const state = {
     kb: null, folder: null, results: null, query: "", root: "", dir: "",
     // What has been ticked to add, by labelled path, kept across folders.
@@ -63,6 +63,8 @@ export function createPicker(host) {
     confirming: false, editing: false,
     // When the knowledge base was last looked at again, by this.
     asked: 0, open: false,
+    // Looking for what is like the open notebook.
+    discovering: false,
   };
 
   const browse = (/** @type {string} */ root, /** @type {string} */ dir) => {
@@ -112,7 +114,20 @@ export function createPicker(host) {
       `<span class="st-faint st-size">${esc(size(f.size))}</span></label>`;
   }
 
+  /** What is like the notebook: each file, and the passage most like it. */
+  function discoveredHtml() {
+    const r = /** @type {ResultsEvent} */ (state.results);
+    if (!r.files.length) return `<p class="st-faint st-pad">Nothing in your folders is like it that is not in it already.</p>`;
+    return `<p class="st-faint st-pad">Not in this notebook yet, and most like it — found by the words in the box, which its sources share.</p>` +
+      r.files.map((f, i) => {
+        const hit = r.passages[i];
+        return `<div class="st-found">${fileHtml(f)}${hit ? `<p class="st-faint">${esc(hit.cite.slice(hit.path.length).trim())} ${esc(hit.text)}</p>` : ""}</div>`;
+      }).join("");
+  }
+
   function listingHtml() {
+    if (state.discovering) return `<p class="st-faint st-pad"><span class="lab-spin"></span> Looking for what is like this notebook…</p>`;
+    if (state.query && state.results?.discovered && state.results.query === state.query) return discoveredHtml();
     if (state.query) return resultsHtml();
     const folder = state.folder;
     if (!state.kb?.ready) return `<p class="st-faint st-pad">The folders are being listed.</p>`;
@@ -191,11 +206,13 @@ export function createPicker(host) {
           <header class="st-picker-head"><b>Add sources</b><span class="grow"></span>
             <button class="tb-btn" data-study-picker-close aria-label="Close" title="Close  Esc">${icon("close")}</button></header>
           <div class="st-picker-bar"><input type="search" data-study-search placeholder="Search your notes, slides and papers — names and words" spellcheck="false" autocomplete="off">
+            <button class="cc-quiet" data-study-discover title="Find what in your folders is like this notebook's sources, and not in it yet">${icon("spark")}Like this notebook</button>
             <span class="st-picker-progress" data-study-progress></span></div>
           <div class="st-picker-body" data-study-picker-body></div>
           <footer class="st-picker-foot" data-study-foot></footer>
         </div>`;
     }
+    /** @type {HTMLElement} */ (box.querySelector("[data-study-discover]")).hidden = editing || !state.kb?.ready || !host.discoverable();
     const body = /** @type {HTMLElement} */ (box.querySelector("[data-study-picker-body]"));
     const keep = body.querySelector(".st-listing")?.scrollTop ?? 0;
     body.innerHTML = editing ? rootsFormHtml() : `<nav class="st-roots">${rootsHtml()}</nav><section class="st-listing">${listingHtml()}</section>`;
@@ -239,6 +256,12 @@ export function createPicker(host) {
     if (let_) {
       host.dispatch({ type: "studyExclude", rule: let_.dataset.studyLet, on: false });
       return browse(state.root, state.dir);
+    }
+    if (at("[data-study-discover]")) {
+      state.discovering = true;
+      state.query = "";
+      host.dispatch({ type: "studyDiscover", about: "" });
+      return render();
     }
     const pause = at("[data-study-kb-pause]");
     if (pause) return host.dispatch({ type: "studyKbPause", paused: pause.dataset.studyKbPause === "true" });
@@ -287,6 +310,7 @@ export function createPicker(host) {
     if (!input.matches("[data-study-search]")) return;
     clearTimeout(typing);
     typing = setTimeout(() => {
+      state.discovering = false;
       state.query = input.value.trim();
       if (state.query) host.dispatch({ type: "studyKbSearch", query: state.query });
       render();
@@ -337,6 +361,14 @@ export function createPicker(host) {
   /** @param {ResultsEvent} event */
   function results(event) {
     state.results = event;
+    // What was found for the notebook is shown with the words it was found
+    // by, in the box, to change.
+    if (event.discovered) {
+      state.discovering = false;
+      state.query = event.query;
+      const search = /** @type {HTMLInputElement | null} */ (box.querySelector("[data-study-search]"));
+      if (search) search.value = event.query;
+    }
     render();
   }
 

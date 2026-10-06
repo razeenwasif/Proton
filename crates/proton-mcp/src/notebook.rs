@@ -316,8 +316,13 @@ fn read(served: &Served, args: &Value) -> Result<String, String> {
     Ok(out)
 }
 
-/// Where a source's file is, through the roots: only a file of one.
+/// Where a source's file is, through the roots: only a file of one, or a
+/// PDF fetched from the web and kept whole in the notebook.
 fn file(served: &Served, source: &Source) -> Result<PathBuf, String> {
+    if let Origin::Web { .. } = &source.origin {
+        let kept = served.book.as_ref().and_then(|book| book.web_pdf(&source.id));
+        return kept.ok_or_else(|| format!("{}'s PDF is not kept here: read_source reads its words", source.id));
+    }
     let Origin::File { root, rel } = &source.origin else {
         return Err(format!("{} has no file to draw: it was pasted or written here", source.id));
     };
@@ -488,5 +493,42 @@ mod tests {
         // With no root to find it under, no file is drawn.
         let mut blind = Served::open(dir, Vec::new());
         assert!(text(&call(&mut blind, "view_pages", &json!({ "source": "S02", "pages": [1] }))).contains("not one this notebook can reach"));
+    }
+
+    #[test]
+    fn a_pdf_fetched_from_the_web_is_drawn_from_the_copy_the_notebook_keeps() {
+        let (dir, _) = notebook("web");
+        let mut book = Book::read(&dir).unwrap();
+        let id = book.sources.take_id();
+        let pages = ["Softmax", "the softmax of a vector is a probability distribution"];
+        snapshot::keep(&book, &id, &Body::Pages(pages.iter().map(|p| p.to_string()).collect())).unwrap();
+        book.sources.sources.push(Source {
+            id: id.clone(),
+            title: "softmax.pdf".into(),
+            kind: "pdf".into(),
+            origin: Origin::Web { url: "https://example.com/softmax.pdf".into(), fetched: 1 },
+            role: Role::Reading,
+            size: 1,
+            mtime: 1,
+            sha256: String::new(),
+            units: Units::Pages,
+            count: 2,
+            thin: Vec::new(),
+            status: SourceStatus::Ready,
+            added: 1,
+            labels: Vec::new(),
+        });
+        book.save_sources().unwrap();
+        book.select(std::slice::from_ref(&id)).unwrap();
+        let mut served = Served::open(dir.clone(), Vec::new());
+        let missing = call(&mut served, "view_pages", &json!({ "source": id, "pages": [1] }));
+        assert!(text(&missing).contains("not kept here"), "{missing}");
+        std::fs::create_dir_all(dir.join(".notebook/web")).unwrap();
+        std::fs::write(dir.join(format!(".notebook/web/{id}.pdf")), proton_library::pdf::fixture(&pages)).unwrap();
+        if pdftoppm().is_some() {
+            let out = call(&mut served, "view_pages", &json!({ "source": id, "pages": [2] }));
+            assert_eq!(out["isError"], json!(false), "{out}");
+            assert_eq!(out["content"][1]["type"], json!("image"));
+        }
     }
 }

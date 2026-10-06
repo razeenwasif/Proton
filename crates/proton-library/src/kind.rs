@@ -15,7 +15,7 @@ pub enum Kind {
     Captions,
     /// CSV or TSV.
     Table,
-    /// Word, OpenDocument, RTF, EPUB: read later, through pandoc.
+    /// Word, OpenDocument, RTF, EPUB: read through pandoc.
     Document,
     Slides,
     Image,
@@ -23,6 +23,8 @@ pub enum Kind {
     Video,
     /// Source code: added to a notebook by hand, never searched.
     Code,
+    /// A page of the web, kept as Markdown: never a file of the knowledge base.
+    Web,
     Other,
 }
 
@@ -51,12 +53,22 @@ impl Kind {
         }
     }
 
-    /// Whether its words can be read here, now.
+    /// Whether its words are read straight from the file, here and now —
+    /// in a search of the whole knowledge base too.
     pub fn readable(self) -> bool {
         matches!(
             self,
             Kind::Markdown | Kind::Text | Kind::Pdf | Kind::Notebook | Kind::Tex | Kind::Captions | Kind::Table | Kind::Code
         )
+    }
+
+    /// Whether it is read only when it is made a source, through a program
+    /// the machine has: a Word document through pandoc, a PowerPoint's
+    /// slides through unzip, a picture's words through tesseract. Never in a
+    /// search of the whole knowledge base, where reading thousands would
+    /// take hours.
+    pub fn converted(self) -> bool {
+        matches!(self, Kind::Document | Kind::Slides | Kind::Image)
     }
 
     /// Whether a library of the whole knowledge base searches it. Code is
@@ -70,12 +82,17 @@ impl Kind {
     ///
     /// A megabyte of prose is a log, not prose. A notebook is mostly its
     /// outputs' pictures, which are dropped, so it may weigh more; a PDF is
-    /// capped by [`crate::pdf::LARGEST`].
+    /// capped by [`crate::pdf::LARGEST`]. A Word document or a deck is mostly
+    /// its pictures too, and only its text is read; a photograph of a
+    /// whiteboard is a few megabytes.
     pub fn largest(self) -> u64 {
         match self {
             Kind::Pdf => crate::pdf::LARGEST,
             Kind::Notebook => 32 << 20,
             Kind::Captions => 4 << 20,
+            Kind::Document => 128 << 20,
+            Kind::Slides => 512 << 20,
+            Kind::Image => 32 << 20,
             _ => 1 << 20,
         }
     }
@@ -101,13 +118,14 @@ impl Kind {
             Kind::Audio => "audio",
             Kind::Video => "video",
             Kind::Code => "code",
+            Kind::Web => "web",
             Kind::Other => "other",
         }
     }
 }
 
 /// Every kind, for reading one back by name.
-const ALL: [Kind; 14] = [
+const ALL: [Kind; 15] = [
     Kind::Markdown,
     Kind::Text,
     Kind::Pdf,
@@ -121,6 +139,7 @@ const ALL: [Kind; 14] = [
     Kind::Audio,
     Kind::Video,
     Kind::Code,
+    Kind::Web,
     Kind::Other,
 ];
 
@@ -150,6 +169,7 @@ mod tests {
         assert!(Kind::Code.readable());
         assert!(!Kind::Code.indexed());
         assert!(Kind::Notebook.indexed());
-        assert!(!Kind::Slides.readable(), "not until pandoc reads them");
+        assert!(!Kind::Slides.readable() && Kind::Slides.converted(), "read when it is made a source, never searched");
+        assert!(!Kind::Video.converted());
     }
 }

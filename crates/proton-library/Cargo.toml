@@ -13,6 +13,10 @@ description = "Your own documents, cut into passages and searched with citations
 fixture = ["dep:lopdf"]
 
 [dependencies]
+# A PowerPoint's slides are XML.
+quick-xml = "0.41"
+# A web page's article, found in its HTML.
+dom_query = "0.27"
 ignore = "0.4"
 pdf-extract = "0.12.0"
 # For the local embedding model. No TLS features: it talks to

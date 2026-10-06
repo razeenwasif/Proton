@@ -117,6 +117,11 @@ pub fn keep_in(snapshots: &Path, id: &str, body: &Body) -> Result<(), String> {
 /// Let go of a source's words: it was taken out of the notebook.
 pub fn forget(book: &Book, id: &str) {
     let _ = std::fs::remove_file(file(&book.snapshots(), id));
+    // And what was fetched for it whole: a PDF, a video's captions.
+    let fetched = std::fs::read_dir(book.web_dir()).into_iter().flatten().flatten().map(|e| e.path());
+    for path in fetched.filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&format!("{id}.")))) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// A source's words, as kept.

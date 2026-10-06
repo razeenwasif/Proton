@@ -4441,10 +4441,12 @@ dependencies = [
 name = "proton-library"
 version = "0.0.1"
 dependencies = [
+ "dom_query",
  "ignore",
  "lopdf",
  "pdf-extract",
  "proton-library",
+ "quick-xml",
  "serde_json",
  "ureq",
 ]

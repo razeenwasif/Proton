@@ -1407,6 +1407,7 @@ impl Workspace {
             | Command::StudyKbRefresh
             | Command::StudyKbBrowse { .. }
             | Command::StudyKbSearch { .. }
+            | Command::StudyDiscover { .. }
             | Command::StudyNew { .. }
             | Command::StudyOpen { .. }
             | Command::StudyClose
@@ -1415,6 +1416,7 @@ impl Workspace {
             | Command::StudyAdd { .. }
             | Command::StudyDownload { .. }
             | Command::StudyPaste { .. }
+            | Command::StudyAddUrl { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }

@@ -67,6 +67,13 @@ pub enum Origin {
     Pasted,
     /// One of the notebook's own notes, made a source.
     Note { note: String },
+    /// A page of the web, as it was when it was fetched: its address, and
+    /// when, in seconds since the epoch.
+    Web {
+        url: String,
+        #[ts(type = "number")]
+        fetched: u64,
+    },
 }
 
 impl Origin {

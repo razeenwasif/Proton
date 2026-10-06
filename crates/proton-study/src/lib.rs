@@ -25,6 +25,7 @@ pub mod audio;
 pub mod cite;
 pub mod clock;
 pub mod deck;
+pub mod discover;
 pub mod exam;
 pub mod infographic;
 pub mod fsrs;

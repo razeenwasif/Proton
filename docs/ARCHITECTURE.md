@@ -1058,9 +1058,10 @@ stand-in home, in the sandbox; a real Lean is the scientist's to make.
 Gemini Notebook, for studying from one's own files: notebooks of sources drawn
 from a knowledge base, a tutor that answers from them and cites them, and a
 studio that makes guides, cards, quizzes and exams of them. It is being built in
-milestones; what is here is the knowledge base, notebooks, sources, the reader,
-notes, the tutor, the studio, flashcards, quizzes with their marking, exams,
-progress by learning objective, audio overviews, slide decks and infographics.
+milestones; what is here is the knowledge base, notebooks, sources — files,
+pages of the web and videos' captions — the reader, notes, the tutor, the
+studio, flashcards, quizzes with their marking, exams, progress by learning
+objective, audio overviews, slide decks and infographics.
 
 **The knowledge base** is the folders the person names (`study.roots` in their
 own settings), less what `study.exclude` leaves out — `.gitignore` lines with
@@ -1089,7 +1090,23 @@ files — `notebook.json`, `sources.json`, `notes/N001.md` — with its machine
 state in a gitignored `.notebook/` (`proton-study`). A source is read once, on
 a worker, and its words are kept there, so a citation of `S07 p. 12` means the
 same thing after its file is edited, moved or evicted; source ids are never
-reused. A source's role (a past paper, a solution, slides, one's own work) is
+reused. Some kinds are read only when they are made sources, through a program
+the machine has, never in a search of the whole knowledge base: Word,
+OpenDocument, RTF and EPUB as Markdown by pandoc; a PowerPoint a slide a page,
+with its speaker notes, from its XML (`unzip` and quick-xml); a picture's words
+by tesseract (`proton-library::formats::office`). A page of the web is a source
+too, fetched on a worker through the literature's polite client and fetched
+again only when asked: an HTML page kept as its article — the element it names
+as one, or the block its paragraphs gather in, without menus, footers, scripts,
+pictures or links' addresses — made Markdown by pandoc with MathML and MathJax's
+`\(…\)` kept as TeX, or by dom_query without pandoc; a PDF kept whole in
+`.notebook/web/`, which the document viewer and `view_pages` open; a YouTube
+video as its English captions, read by yt-dlp without the video
+(`proton-library::formats::web`, `proton-core::study::web`). **Discover** finds
+in the knowledge base what is like a notebook and not in it yet: the words its
+sources share — scored by how many of them use each — and its course are
+searched for, and each file is offered with the passage most like it
+(`proton-study::discover`). A source's role (a past paper, a solution, slides, one's own work) is
 guessed from its path and corrected by hand. `proton-core::study` is one for
 the session, whichever project is open; a notebook another Proton holds open is
 read only, under the same lock an investigation has. The reader shows a

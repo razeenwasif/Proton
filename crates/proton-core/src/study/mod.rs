@@ -21,6 +21,7 @@ mod review;
 pub mod tutor;
 mod visual;
 pub mod voice;
+mod web;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -58,6 +59,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyKbRefresh
             | Command::StudyKbBrowse { .. }
             | Command::StudyKbSearch { .. }
+            | Command::StudyDiscover { .. }
             | Command::StudyNew { .. }
             | Command::StudyOpen { .. }
             | Command::StudyClose
@@ -66,6 +68,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyAdd { .. }
             | Command::StudyDownload { .. }
             | Command::StudyPaste { .. }
+            | Command::StudyAddUrl { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }
@@ -126,6 +129,8 @@ enum Answer {
     /// It is coming down from iCloud.
     Downloading,
     Read(Box<snapshot::Read>),
+    /// A page of the web, fetched and read.
+    Fetched(Box<web::Fetched>),
     /// Its file turned out to be in iCloud.
     InCloud,
     Failed(String),
@@ -190,6 +195,9 @@ pub struct Study {
     found_voices: Vec<proton_voice::Voice>,
     /// The audio overview last looked at: drawn again as it is spoken.
     audio: Option<String>,
+    /// What fetches pages of the web: a test's script, or, once one is
+    /// asked for, the network.
+    web: Option<proton_literature::http::Http>,
 }
 
 impl std::fmt::Debug for Study {
@@ -223,6 +231,7 @@ impl Default for Study {
             errands: Vec::new(),
             found_voices: Vec::new(),
             audio: None,
+            web: None,
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -241,7 +250,7 @@ fn strings(value: Option<&Value>) -> Vec<String> {
 /// What a source's citations will count, before it is read.
 fn units_of(kind: Kind) -> Units {
     match kind {
-        Kind::Pdf => Units::Pages,
+        Kind::Pdf | Kind::Slides => Units::Pages,
         Kind::Captions => Units::Seconds,
         _ => Units::Lines,
     }
@@ -305,6 +314,12 @@ impl Study {
     /// Speak and join by `kit`: for a test, which must not ask Fish.
     pub fn with_voice(mut self, kit: Box<dyn voice::VoiceKit>) -> Study {
         self.voice = kit;
+        self
+    }
+
+    /// Fetch pages of the web through `http`: for a test, a script.
+    pub fn with_web(mut self, http: proton_literature::http::Http) -> Study {
+        self.web = Some(http);
         self
     }
 
@@ -462,6 +477,7 @@ impl Study {
             }
             Command::StudyKbBrowse { root, dir } => vec![self.kb.folder(&root, &dir, &self.sources_by_path())],
             Command::StudyKbSearch { query } => vec![self.kb.search(&query, &self.sources_by_path())],
+            Command::StudyDiscover { about } => self.discover(&about),
             Command::StudyNew { title } => self.create(&title),
             Command::StudyOpen { slug } => self.open(&slug),
             Command::StudyClose => {
@@ -473,6 +489,7 @@ impl Study {
             Command::StudyAdd { paths } => self.add(paths, false),
             Command::StudyDownload { paths } => self.add(paths, true),
             Command::StudyPaste { title, text } => self.paste(&title, &text),
+            Command::StudyAddUrl { url } => self.add_url(&url),
             Command::StudyRemove { id } => self.remove(&id),
             Command::StudySelect { ids } => self.select(&ids),
             Command::StudyRefresh { id } => self.refresh(&id),
@@ -667,6 +684,44 @@ impl Study {
         open.book.sources.sources.iter().filter_map(|s| Some((s.origin.labelled()?, s.id.clone()))).collect()
     }
 
+    /// What in the knowledge base is like the open notebook: by what the
+    /// person said it is about, or by the words its sources share, and its
+    /// course.
+    fn discover(&mut self, about: &str) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        let query = match about.trim() {
+            "" => {
+                let texts: Vec<String> = open
+                    .book
+                    .sources
+                    .sources
+                    .iter()
+                    .filter(|s| s.status.has_words())
+                    .filter_map(|s| snapshot::words(&open.book, &s.id, s.units))
+                    .map(|body| match body {
+                        Body::Lines(text) => text,
+                        Body::Pages(pages) => pages.join("\n"),
+                        Body::Cues(cues) => cues.into_iter().map(|c| c.text).collect::<Vec<_>>().join("\n"),
+                    })
+                    .collect();
+                let mut words = proton_study::discover::about(&texts, 8);
+                let course = open.book.notebook.course.trim().to_lowercase();
+                if !course.is_empty() && !words.contains(&course) {
+                    words.insert(0, course);
+                }
+                words.join(" ")
+            }
+            about => about.to_string(),
+        };
+        if query.is_empty() {
+            return vec![notice("Add a source first: what is like it is what is found.".into(), NoticeLevel::Info)];
+        }
+        if self.kb.catalog().is_none() {
+            return vec![notice("The knowledge base is still being listed.".into(), NoticeLevel::Info)];
+        }
+        vec![self.kb.discover(&query, &self.sources_by_path())]
+    }
+
     fn no_folder() -> Vec<Event> {
         vec![notice("Choose where notebooks are kept first.".into(), NoticeLevel::Warn)]
     }
@@ -835,7 +890,7 @@ impl Study {
                 }
                 continue;
             }
-            if !entry.kind.readable() {
+            if !entry.kind.readable() && !entry.kind.converted() {
                 said.push(format!("{path}: a {} file is not read yet", entry.kind.name()));
                 continue;
             }
@@ -886,6 +941,18 @@ impl Study {
         self.batches.push(Batch { dir: open.book.dir().to_path_buf(), answers, stop });
     }
 
+    fn start_fetching(&mut self, items: Vec<web::Fetch>) {
+        let Some(open) = &self.open else { return };
+        let (send, answers) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (snapshots, kept) = (open.book.snapshots(), open.book.web_dir());
+        let pdfs = Pdfs { extractor: proton_library::pdf::Extractor::default(), cache: proton_library::pdf::cache_dir() };
+        let http = self.web.get_or_insert_with(|| proton_literature::http::Http::live(None)).clone();
+        let halt = Arc::clone(&stop);
+        let _ = std::thread::Builder::new().name("proton-study-web".into()).spawn(move || web::fetch_all(items, http, snapshots, kept, pdfs, halt, send));
+        self.batches.push(Batch { dir: open.book.dir().to_path_buf(), answers, stop });
+    }
+
     /// What the workers have read, written into their notebooks.
     fn take_answers(&mut self) -> Vec<Event> {
         let mut answered: Vec<(PathBuf, String, Answer)> = Vec::new();
@@ -911,8 +978,10 @@ impl Study {
                     Err(_) => continue,
                 },
             };
+            let same = |sha256: &str| book.sources.sources.iter().find(|s| s.id != id && s.sha256 == sha256 && s.status.has_words()).map(|s| s.id.clone());
             let duplicate = match &answer {
-                Answer::Read(read) => book.sources.sources.iter().find(|s| s.id != id && s.sha256 == read.sha256 && s.status.has_words()).map(|s| s.id.clone()),
+                Answer::Read(read) => same(&read.sha256),
+                Answer::Fetched(fetched) => same(&fetched.read.sha256),
                 _ => None,
             };
             if let Some(first) = duplicate {
@@ -926,6 +995,25 @@ impl Study {
                     Answer::InCloud => source.status = SourceStatus::InCloud,
                     Answer::Failed(why) => source.status = SourceStatus::Failed { why },
                     Answer::Read(read) => {
+                        source.size = read.size;
+                        source.mtime = read.mtime;
+                        source.sha256 = read.sha256.clone();
+                        source.units = read.units();
+                        source.count = read.count();
+                        source.thin = read.thin();
+                        source.status = SourceStatus::Ready;
+                    }
+                    Answer::Fetched(fetched) => {
+                        let read = &fetched.read;
+                        // Titled by what the page calls itself, unless the
+                        // person has named it since.
+                        if let Origin::Web { url, fetched: when } = &mut source.origin {
+                            if source.title == web::provisional(url) && !fetched.title.trim().is_empty() {
+                                source.title = fetched.title.trim().chars().take(160).collect();
+                            }
+                            *when = read.mtime;
+                        }
+                        source.kind = fetched.kind.name().to_string();
                         source.size = read.size;
                         source.mtime = read.mtime;
                         source.sha256 = read.sha256.clone();
@@ -988,6 +1076,44 @@ impl Study {
         events
     }
 
+    /// Add a page of the web as a source, fetched on a worker: a page as its
+    /// article, a PDF whole, a YouTube video as its captions.
+    fn add_url(&mut self, typed: &str) -> Vec<Event> {
+        let Some(url) = web::address(typed) else {
+            return vec![notice("That is not a web address: it would begin https://".into(), NoticeLevel::Info)];
+        };
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        if let Some(source) = book.sources.sources.iter().find(|s| matches!(&s.origin, Origin::Web { url: u, .. } if *u == url)) {
+            return vec![notice(format!("{} is already {}", source.title, source.id), NoticeLevel::Info)];
+        }
+        let video = proton_library::formats::web::youtube(&url).is_some();
+        let id = book.sources.take_id();
+        book.sources.sources.push(Source {
+            id: id.clone(),
+            title: web::provisional(&url),
+            kind: if video { Kind::Captions } else { Kind::Web }.name().to_string(),
+            origin: Origin::Web { url: url.clone(), fetched: 0 },
+            role: if video { Role::Recording } else { Role::Reading },
+            size: 0,
+            mtime: 0,
+            sha256: String::new(),
+            units: if video { Units::Seconds } else { Units::Lines },
+            count: 0,
+            thin: Vec::new(),
+            status: SourceStatus::Reading,
+            added: proton_study::now(),
+            labels: Vec::new(),
+        });
+        let _ = book.tick(&id);
+        self.start_fetching(vec![web::Fetch { id, url }]);
+        let mut events = self.saved();
+        events.insert(0, self.list_event());
+        events
+    }
+
     fn remove(&mut self, id: &str) -> Vec<Event> {
         let book = match self.writable() {
             Ok(book) => book,
@@ -1038,6 +1164,18 @@ impl Study {
             };
             match &source.origin {
                 Origin::File { root, rel } => self.kb.file(root, rel).map(|path| (path, Kind::from_name(&source.kind))),
+                Origin::Web { url, .. } => {
+                    let fetch = web::Fetch { id: id.to_string(), url: url.clone() };
+                    let book = match self.writable() {
+                        Ok(book) => book,
+                        Err(events) => return events,
+                    };
+                    if let Some(source) = book.sources.get_mut(id) {
+                        source.status = SourceStatus::Reading;
+                    }
+                    self.start_fetching(vec![fetch]);
+                    return self.saved();
+                }
                 _ => return vec![notice(format!("{} has no file to read again.", source.title), NoticeLevel::Info)],
             }
         };
@@ -1316,6 +1454,7 @@ impl Study {
         };
         let file = match &source.origin {
             Origin::File { root, rel } => self.kb.file(root, rel),
+            Origin::Web { .. } => open.book.web_pdf(id),
             _ => None,
         };
         let meta = file.as_ref().and_then(|f| std::fs::symlink_metadata(f).ok());
@@ -1346,7 +1485,7 @@ impl Study {
         };
         let view = match body {
             Body::Lines(text) => match Kind::from_name(&source.kind) {
-                Kind::Markdown | Kind::Notebook => StudyView::Sections { sections: proton_study::view::sections(&text) },
+                Kind::Markdown | Kind::Notebook | Kind::Document | Kind::Web => StudyView::Sections { sections: proton_study::view::sections(&text) },
                 _ => StudyView::Lines { text },
             },
             Body::Pages(pages) => StudyView::Pages { pages },

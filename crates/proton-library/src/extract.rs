@@ -88,6 +88,9 @@ pub fn read(path: &Path, kind: Kind, pdfs: &Pdfs) -> Result<Body, Unread> {
         Kind::Markdown | Kind::Text | Kind::Code | Kind::Tex | Kind::Table => Body::Lines(text(path)?),
         Kind::Notebook => Body::Lines(crate::formats::ipynb::text(&text(path)?).map_err(Unread::Failed)?),
         Kind::Captions => Body::Cues(captions::parse(&text(path)?)),
+        Kind::Document => Body::Lines(crate::formats::office::document(path).map_err(Unread::Failed)?),
+        Kind::Slides => Body::Pages(crate::formats::office::slides(path).map_err(Unread::Failed)?),
+        Kind::Image => Body::Lines(crate::formats::office::picture(path).map_err(Unread::Failed)?),
         other => return Err(Unread::NotReadable(other)),
     };
     match body.letters() {
@@ -163,11 +166,13 @@ mod tests {
         let base = dir("unread");
         std::fs::write(base.join("empty.md"), "   \n\n").unwrap();
         std::fs::write(base.join("deck.pptx"), "PK").unwrap();
+        std::fs::write(base.join("talk.mp3"), "ID3").unwrap();
         std::fs::write(base.join("big.md"), "x".repeat((1 << 20) + 1)).unwrap();
         std::fs::write(base.join("broken.ipynb"), "{").unwrap();
         let unread = |name: &str| read(&base.join(name), Kind::of(Path::new(name)), &Pdfs::default()).unwrap_err();
         assert_eq!(unread("empty.md"), Unread::NoWords);
-        assert_eq!(unread("deck.pptx"), Unread::NotReadable(Kind::Slides));
+        assert_eq!(unread("talk.mp3"), Unread::NotReadable(Kind::Audio));
+        assert!(matches!(unread("deck.pptx"), Unread::Failed(why) if why.contains("unzip")), "a broken deck says what could not read it");
         assert!(matches!(unread("big.md"), Unread::TooBig { .. }));
         assert!(matches!(unread("broken.ipynb"), Unread::Failed(why) if why.contains("not a notebook")));
         assert!(matches!(unread("missing.md"), Unread::Failed(_)));

@@ -16,6 +16,9 @@ use proton_study::view::{StudyKbFile, StudyKbFolder, StudyKbHit, StudyKbLeft, St
 
 use crate::bus::Event;
 
+/// How many files Discover suggests.
+const DISCOVERED: usize = 12;
+
 /// What the knowledge base last said, so it is said again only when it moved.
 #[derive(Debug, Clone, PartialEq)]
 struct Said {
@@ -235,7 +238,36 @@ impl Kb {
             true => Vec::new(),
             false => self.shelf.search(query, 20).iter().map(StudyKbHit::of).collect(),
         };
-        Event::StudyKbResults { query: query.to_string(), files, passages }
+        Event::StudyKbResults { query: query.to_string(), files, passages, discovered: false }
+    }
+
+    /// The files most like `query` that are not sources yet — of `sources`,
+    /// by labelled path — each with the passage most like it, best first:
+    /// a file is as like as its three likest passages together.
+    pub fn discover(&self, query: &str, sources: &HashMap<String, String>) -> Event {
+        let mut files = Vec::new();
+        let mut passages = Vec::new();
+        if let Some(catalog) = self.catalog() {
+            let mut docs: Vec<(String, Vec<&proton_library::Hit>)> = Vec::new();
+            let hits = self.shelf.search(query, 200);
+            for hit in &hits {
+                if sources.contains_key(&hit.doc) {
+                    continue;
+                }
+                match docs.iter_mut().find(|(doc, _)| *doc == hit.doc) {
+                    Some((_, of)) => of.push(hit),
+                    None => docs.push((hit.doc.clone(), vec![hit])),
+                }
+            }
+            let like = |of: &Vec<&proton_library::Hit>| of.iter().take(3).map(|h| h.score).sum::<f32>();
+            docs.sort_by(|a, b| like(&b.1).total_cmp(&like(&a.1)));
+            for (doc, of) in docs.into_iter().take(DISCOVERED) {
+                let Some(entry) = catalog.get(&doc) else { continue };
+                files.push(StudyKbFile::of(catalog, entry, None));
+                passages.push(StudyKbHit::of(of[0]));
+            }
+        }
+        Event::StudyKbResults { query: query.to_string(), files, passages, discovered: true }
     }
 
     /// Where a root's files are on the disk: for a source's file, by its

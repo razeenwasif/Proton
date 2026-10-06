@@ -489,6 +489,12 @@ pub enum Command {
     StudyKbSearch {
         query: String,
     },
+    /// Find in the knowledge base what is like the open notebook, and not
+    /// in it yet: by `about`, or, when it is empty, by the words its sources
+    /// share.
+    StudyDiscover {
+        about: String,
+    },
     /// Make a notebook, and open it.
     StudyNew {
         title: String,
@@ -523,6 +529,10 @@ pub enum Command {
     StudyPaste {
         title: String,
         text: String,
+    },
+    /// Add a page of the web as a source: fetched once, and kept.
+    StudyAddUrl {
+        url: String,
     },
     /// Take a source out of the open notebook. Its id is not given again.
     StudyRemove {
@@ -1571,6 +1581,9 @@ pub enum Event {
         query: String,
         files: Vec<proton_study::view::StudyKbFile>,
         passages: Vec<proton_study::view::StudyKbHit>,
+        /// Found for the open notebook, by words it chose: each file one
+        /// it does not have yet, with the passage most like it.
+        discovered: bool,
     },
     /// A source in the reader: its words as kept, and where to open it.
     StudySource {

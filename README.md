@@ -154,7 +154,11 @@ Codex, Gemini or Antigravity that answers from them and cites them, and a
 studio that makes study guides, flashcards, quizzes and exams of them. So far:
 notebooks, each a folder in `~/Github/Notebooks`; sources chosen from your
 folders in a picker — browsed, searched by name and by word, with what is left
-out and why — and read once, their words kept in the notebook; a reader; notes;
+out and why, or found for you as what is like the notebook — and read once,
+their words kept in the notebook: notes, PDFs, notebooks, LaTeX, captions, Word
+documents and EPUBs (with pandoc), PowerPoints, pictures' words (with
+tesseract), pages of the web kept as their articles, and YouTube videos'
+captions (with yt-dlp); a reader; notes;
 and the tutor, which searches the sources you tick through Proton's own MCP
 server and cites them — each citation a number whose passage shows over it and
 opens at its place — as a plain tutor, a learning guide, or a role you write,
