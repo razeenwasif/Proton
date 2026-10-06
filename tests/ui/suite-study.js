@@ -206,6 +206,30 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     ws().querySelector('[data-study-back]').click(); await settle();
   });
 
+  await test('A recording is transcribed only once what is sent to Fish, and what it costs, is said', async () => {
+    const lecture = (/** @type {any} */ status) => row('S02', {kind: 'video', units: 'seconds', count: 3120, title: 'Lecture 5.mp4', role: 'recording',
+      origin: {from: 'file', root: 'Courses', rel: 'COMP3670/Lecture 5.mp4'}, status});
+    await win.pushEvents([notebook([row('S01'), lecture({state: 'untranscribed', seconds: 3120})])]); await settle();
+    const badge = ws().querySelector('[data-study-transcribe="S02"]');
+    assert(badge?.textContent.includes('Transcribe · 52 min'), `no way to transcribe it: ${badge?.textContent}`);
+    assert(ws().querySelector('[data-study-tick="S02"]').disabled, 'a recording not yet heard can be ticked');
+    const before = win.commands.length;
+    badge.click(); await settle();
+    assert(sent(before, 'studyTranscribe').length === 0, 'it was sent before what it costs was said');
+    const ask = ws().querySelector('.st-ask');
+    assert(ask?.textContent.includes('52 min recording') && ask.textContent.includes('about $0.31') && ask.textContent.includes('Fish Audio'), `the cost is not said: ${ask?.textContent}`);
+    ask.querySelector('[data-study-transcribe-no]').click(); await settle();
+    assert(!ws().querySelector('.st-ask') && sent(before, 'studyTranscribe').length === 0, 'Cancel did not cancel');
+    ws().querySelector('[data-study-transcribe="S02"]').click(); await settle();
+    ws().querySelector('[data-study-transcribe-yes]').click(); await settle();
+    assert(sent(before, 'studyTranscribe')[0]?.id === 'S02', 'it was not transcribed when asked');
+    await win.pushEvents([notebook([row('S01'), lecture({state: 'transcribing'})])]); await settle();
+    assert(ws().querySelector('.st-source[data-study-source="S02"]')?.textContent.includes('Transcribing'), 'it is not said to be transcribing');
+    await win.pushEvents([notebook([row('S01'), lecture({state: 'failed', why: 'Fish Audio says the account has no credit left for this.'})])]); await settle();
+    const again = ws().querySelector('[data-study-transcribe="S02"]');
+    assert(again?.textContent.includes('Not transcribed') && again.title.includes('no credit'), 'a failed transcription cannot be tried again');
+  });
+
   await test('A note is written, saved, and made a source', async () => {
     ws().querySelector('[data-study-new-note]').click(); await settle();
     const form = ws().querySelector('[data-study-note-form]');

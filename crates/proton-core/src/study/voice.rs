@@ -10,16 +10,23 @@
 //! whether it was found. A piece spoken is kept until the whole is joined, so
 //! an overview that stopped part way — out of credit, Fish busy, Proton quit
 //! — is taken up again where it stopped, not paid for twice.
+//!
+//! A recording among the sources is transcribed by Fish too, when the person
+//! asks and has been told what it costs: its sound cut by ffmpeg into pieces
+//! under the hour Fish hears at once, each sent, and the words put back in
+//! their places as timed cues.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 
+use proton_library::extract::Body;
+use proton_library::formats::captions;
 use proton_study::audio::{self, Audio};
 use proton_study::view::{StudyHost, StudyVoice, StudyVoiceState};
 use proton_study::Book;
-use proton_voice::fish::{self, Fish, FishError, Key, Speech, Voice, VoiceQuery};
+use proton_voice::fish::{self, Fish, FishError, Heard, Key, Speech, Voice, VoiceQuery};
 use serde_json::Value;
 
 use super::media;
@@ -31,11 +38,15 @@ use crate::workspace::notice;
 /// The names Fish's key may go by.
 const KEY_NAMES: [&str; 2] = ["FISH_API_KEY", "FISH_AUDIO_API_KEY"];
 
-/// What speaks: Fish in the app, a script in a test.
+/// What speaks, and hears: Fish in the app, a script in a test.
 pub trait Speaker: Send + Sync {
     fn speak(&self, speech: &Speech, out: &Path, cancel: &AtomicBool) -> Result<u64, FishError>;
     fn voices(&self, query: &VoiceQuery, cancel: &AtomicBool) -> Result<(u64, Vec<Voice>), FishError>;
     fn sample(&self, url: &str, out: &Path, cancel: &AtomicBool) -> Result<u64, FishError>;
+    /// What a piece of a recording says, and when.
+    fn transcribe(&self, _audio: &Path, _cancel: &AtomicBool) -> Result<Heard, FishError> {
+        Err(FishError::Failed("nothing here transcribes".into()))
+    }
 }
 
 impl Speaker for Fish {
@@ -48,6 +59,9 @@ impl Speaker for Fish {
     fn sample(&self, url: &str, out: &Path, cancel: &AtomicBool) -> Result<u64, FishError> {
         Fish::sample(self, url, out, cancel)
     }
+    fn transcribe(&self, audio: &Path, cancel: &AtomicBool) -> Result<Heard, FishError> {
+        Fish::transcribe(self, audio, None, cancel)
+    }
 }
 
 /// What measures and joins sound: ffmpeg in the app, a script in a test.
@@ -56,6 +70,11 @@ pub trait Media: Send + Sync {
     fn duration(&self, file: &Path) -> Result<f64, String>;
     /// The parts, one after another, as one file.
     fn join(&self, parts: &[PathBuf], out: &Path) -> Result<(), String>;
+    /// A recording's sound, alone and small, in pieces of `seconds` each,
+    /// written into `dir`, in order.
+    fn pieces(&self, _file: &Path, _dir: &Path, _seconds: u32) -> Result<Vec<PathBuf>, String> {
+        Err("nothing here cuts sound".into())
+    }
 }
 
 /// ffmpeg and ffprobe, as installed.
@@ -90,6 +109,98 @@ impl Media for Ffmpeg {
         }
         std::fs::rename(&part, out).map_err(|e| e.to_string())
     }
+
+    fn pieces(&self, file: &Path, dir: &Path, seconds: u32) -> Result<Vec<PathBuf>, String> {
+        // One channel at sixteen thousand samples a second, 48 kb/s: what
+        // speech needs, and an hour of it 21 MB. MP3 where ffmpeg has LAME,
+        // else AAC, which every ffmpeg has.
+        let cut = |codec: &[&str], ext: &str| -> Result<Vec<PathBuf>, String> {
+            for old in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let _ = std::fs::remove_file(old.path());
+            }
+            let status = std::process::Command::new("ffmpeg")
+                .args(["-v", "error", "-y", "-i"])
+                .arg(file)
+                .args(["-vn", "-ac", "1", "-ar", "16000"])
+                .args(codec)
+                .args(["-f", "segment", "-segment_time", &seconds.to_string(), "-reset_timestamps", "1"])
+                .arg(dir.join(format!("piece%03d.{ext}")))
+                .status()
+                .map_err(|_| "Transcribing needs ffmpeg: brew install ffmpeg".to_string())?;
+            if !status.success() {
+                return Err("ffmpeg could not take the sound out of it".into());
+            }
+            let mut pieces: Vec<PathBuf> = std::fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|e| e == ext))
+                .collect();
+            pieces.sort();
+            match pieces.is_empty() {
+                true => Err("there is no sound in it".into()),
+                false => Ok(pieces),
+            }
+        };
+        cut(&["-c:a", "libmp3lame", "-b:a", "48k"], "mp3").or_else(|_| cut(&["-c:a", "aac", "-b:a", "48k"], "aac"))
+    }
+}
+
+/// How long a piece of a recording sent to be heard is: under the hour Fish
+/// hears at once.
+pub const PIECE: u32 = 55 * 60;
+
+/// A recording heard, on a worker: its sound cut into pieces, each sent to
+/// Fish, the words put back in their places as cues, kept as its words.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn hear(
+    id: String,
+    file: PathBuf,
+    speaker: Arc<dyn Speaker>,
+    media: Arc<dyn Media>,
+    snapshots: PathBuf,
+    work: PathBuf,
+    stop: Arc<AtomicBool>,
+    answers: std::sync::mpsc::Sender<(String, super::Answer)>,
+) {
+    let heard = (|| -> Result<proton_study::snapshot::Read, String> {
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+        let pieces = media.pieces(&file, &work, PIECE)?;
+        let mut words: Vec<(f64, f64, String)> = Vec::new();
+        for (n, piece) in pieces.iter().enumerate() {
+            if stop.load(Ordering::Relaxed) {
+                return Err("Cancelled.".into());
+            }
+            let heard = speaker.transcribe(piece, &stop).map_err(|e| e.describe())?;
+            let offset = f64::from(PIECE) * n as f64;
+            match heard.segments.is_empty() {
+                true => words.extend(captions::from_text(&heard.text, heard.duration).into_iter().map(|c| (c.start + offset, c.end + offset, c.text))),
+                false => words.extend(heard.segments.into_iter().map(|w| (w.start + offset, w.end + offset, w.text))),
+            }
+        }
+        let cues = captions::from_words(&words);
+        if cues.is_empty() {
+            return Err("no words were heard in it".into());
+        }
+        let meta = std::fs::metadata(&file).map_err(|e| e.to_string())?;
+        let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+        let body = Body::Cues(cues);
+        proton_study::snapshot::keep_in(&snapshots, &id, &body)?;
+        Ok(proton_study::snapshot::Read { body, size: meta.len(), mtime, sha256: proton_study::snapshot::digest(&file)? })
+    })();
+    let _ = std::fs::remove_dir_all(&work);
+    let answer = match heard {
+        Ok(read) => super::Answer::Read(Box::new(read)),
+        Err(why) => super::Answer::Failed(why),
+    };
+    let _ = answers.send((id, answer));
+}
+
+/// What transcribing a recording of `seconds` costs, in US dollars.
+pub fn cost(seconds: u32) -> f64 {
+    f64::from(seconds) / 3600.0 * fish::CENTS_AN_HOUR / 100.0
 }
 
 /// What makes the speaker and the media: the real ones, or a test's.

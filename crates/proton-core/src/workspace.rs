@@ -1417,6 +1417,7 @@ impl Workspace {
             | Command::StudyDownload { .. }
             | Command::StudyPaste { .. }
             | Command::StudyAddUrls { .. }
+            | Command::StudyTranscribe { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }

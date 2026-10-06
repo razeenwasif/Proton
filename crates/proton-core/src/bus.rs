@@ -534,6 +534,11 @@ pub enum Command {
     StudyAddUrls {
         urls: Vec<String>,
     },
+    /// Transcribe a recording among the sources through Fish Audio: the
+    /// person has been told what it costs.
+    StudyTranscribe {
+        id: String,
+    },
     /// Take a source out of the open notebook. Its id is not given again.
     StudyRemove {
         id: String,

@@ -1492,6 +1492,7 @@ mod voices {
     use std::sync::{Arc, Mutex};
 
     use proton_core::study::voice::{Media, Speaker, VoiceKit};
+    use proton_voice::fish::{Heard, HeardWord};
     use proton_voice::{FishError, Speech, Voice, VoiceQuery};
 
     /// What a scripted Fish was asked, and how it is to answer.
@@ -1501,6 +1502,8 @@ mod voices {
         /// Fail the speech asked for at this count, once.
         pub fail_at: Option<usize>,
         pub no_key: bool,
+        /// The pieces of recordings sent to be heard.
+        pub heard: Vec<PathBuf>,
     }
 
     pub struct Script(pub Arc<Mutex<Said>>);
@@ -1535,6 +1538,14 @@ mod voices {
             std::fs::write(out, b"sample").unwrap();
             Ok(6)
         }
+        /// Each piece says two words: which piece it is, a second apart.
+        fn transcribe(&self, audio: &Path, _: &AtomicBool) -> Result<Heard, FishError> {
+            let mut said = self.0.lock().unwrap();
+            said.heard.push(audio.to_path_buf());
+            let n = said.heard.len();
+            let word = |text: &str, start: f64| HeardWord { text: text.into(), start, end: start + 0.5 };
+            Ok(Heard { text: format!("Piece {n}."), duration: 2.0, segments: vec![word("Piece", 0.0), word(&format!("{n}."), 1.0)], language: "en".into() })
+        }
     }
 
     /// Sound one byte a hundredth of a second; joined, one after another.
@@ -1547,6 +1558,19 @@ mod voices {
         fn join(&self, parts: &[PathBuf], out: &Path) -> Result<(), String> {
             let joined: Vec<u8> = parts.iter().flat_map(|p| std::fs::read(p).unwrap()).collect();
             std::fs::write(out, joined).map_err(|e| e.to_string())
+        }
+        /// A piece for each hundred bytes.
+        fn pieces(&self, file: &Path, dir: &Path, _: u32) -> Result<Vec<PathBuf>, String> {
+            let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
+            Ok(bytes
+                .chunks(100)
+                .enumerate()
+                .map(|(i, chunk)| {
+                    let piece = dir.join(format!("piece{i:03}.mp3"));
+                    std::fs::write(&piece, chunk).unwrap();
+                    piece
+                })
+                .collect())
         }
     }
 
@@ -1563,6 +1587,80 @@ mod voices {
             Arc::new(Bytes)
         }
     }
+}
+
+#[test]
+fn a_recording_is_measured_when_added_and_transcribed_by_fish_only_when_asked_its_pieces_put_back_in_place() {
+    let scratch = Scratch::new("heard");
+    let settings = scratch.knowledge_base();
+    std::fs::write(scratch.root.join("kb/Courses/COMP3670/Lecture 3.mp4"), vec![7u8; 150]).unwrap();
+    scratch.write("kb/Courses/COMP3670/Lecture 3.srt", "1\n00:00:01,000 --> 00:00:02,000\nHello\n");
+    let said = std::sync::Arc::new(std::sync::Mutex::new(voices::Said { no_key: true, ..Default::default() }));
+    let mut session = Session::new(scratch.root.join("project"))
+        .with_person_settings(settings.clone())
+        .with_study(Study::new().with_person_settings(&settings).flags_with(in_cloud).with_voice(Box::new(voices::Kit(std::sync::Arc::clone(&said)))));
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Lectures".into() });
+    let events = session.apply(Command::StudyAdd { paths: vec!["Courses/COMP3670/Lecture 3.mp4".into()] });
+    assert!(said_of(&events).iter().any(|s| s.contains("captions beside it, Courses/COMP3670/Lecture 3.srt")), "{:?}", said_of(&events));
+    // Measured — a hundredth of a second a byte, as the script's media has
+    // it — and not heard.
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if matches!(sources[0].status, SourceStatus::Untranscribed { .. }) => Some(sources.clone()),
+        _ => None,
+    });
+    assert_eq!((rows[0].status.clone(), rows[0].units, rows[0].role), (SourceStatus::Untranscribed { seconds: 2 }, proton_study::model::Units::Seconds, Role::Recording));
+    assert!(said.lock().unwrap().heard.is_empty(), "nothing is sent until asked");
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    assert!(said_of(&events).iter().any(|s| s.contains("not transcribed yet")), "{events:?}");
+
+    // Without Fish's key, it says so.
+    let events = session.apply(Command::StudyTranscribe { id: "S01".into() });
+    assert!(said_of(&events).iter().any(|s| s.contains("FISH_API_KEY")), "{events:?}");
+    said.lock().unwrap().no_key = false;
+    let events = session.apply(Command::StudyTranscribe { id: "S01".into() });
+    assert_eq!(sources(&events).unwrap()[0].status, SourceStatus::Transcribing);
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources[0].status == SourceStatus::Ready => Some(sources.clone()),
+        Event::StudyNotebook { sources, .. } if matches!(sources[0].status, SourceStatus::Failed { .. }) => panic!("{sources:?}"),
+        _ => None,
+    });
+    assert_eq!(rows[0].units, proton_study::model::Units::Seconds);
+    assert_eq!(said.lock().unwrap().heard.len(), 2, "two pieces, each sent");
+    // The second piece's words are where the second piece begins.
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Cues { cues }, .. }) = events.first() else { panic!("{events:?}") };
+    let heard: Vec<(f64, &str)> = cues.iter().map(|c| (c.start, c.text.as_str())).collect();
+    assert_eq!(heard, [(0.0, "Piece 1."), (3300.0, "Piece 2.")]);
+    assert!(!scratch.root.join("Notebooks/lectures/.notebook/heard/S01").exists(), "the pieces are not kept");
+    // Once heard, it is not heard again.
+    let events = session.apply(Command::StudyTranscribe { id: "S01".into() });
+    assert!(said_of(&events).iter().any(|s| s.contains("not a recording waiting")), "{events:?}");
+    session.shutdown();
+}
+
+#[test]
+fn ffmpeg_cuts_a_recordings_sound_into_small_pieces_when_it_is_here() {
+    use proton_core::study::voice::{Ffmpeg, Media};
+    if !here("ffmpeg", "-version") {
+        return;
+    }
+    let scratch = Scratch::new("pieces");
+    let video = scratch.root.join("tone.mp4");
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=3", "-shortest"])
+        .arg(&video)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let dir = scratch.root.join("pieces");
+    std::fs::create_dir_all(&dir).unwrap();
+    let pieces = Ffmpeg.pieces(&video, &dir, 1).unwrap();
+    assert!((3..=4).contains(&pieces.len()), "a second a piece: {pieces:?}");
+    let first = Ffmpeg.duration(&pieces[0]).unwrap();
+    assert!((0.5..1.6).contains(&first), "{first}");
 }
 
 /// An overview as its event has it: its state, why, each turn's timing,

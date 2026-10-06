@@ -107,7 +107,8 @@ export function createPicker(host) {
     const added = f.source ? `<span class="st-tag" title="Already in this notebook">${esc(f.source)}</span>` : "";
     const cloud = f.inCloud ? `<span class="st-cloud" title="In iCloud: added, it stays there until you download it">${icon("cloud")}</span>` : "";
     const can = f.readable && !f.source;
-    const why = !f.readable ? ` title="${esc(f.kind)} files are not read yet"` : "";
+    const why = !f.readable ? ` title="${esc(f.kind)} files are not read yet"`
+      : f.kind === "audio" || f.kind === "video" ? ` title="A recording: added, it is transcribed by Fish Audio only when you choose, told what it costs"` : "";
     return `<label class="st-file${can ? "" : " off"}"${why}>` +
       `<input type="checkbox" data-study-choose="${esc(f.path)}"${chosen ? " checked" : ""}${can ? "" : " disabled"}>` +
       `${icon(KIND_ICON[f.kind] ?? "file")}<span class="st-file-name">${esc(f.name)}</span>${cloud}${added}` +

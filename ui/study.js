@@ -64,6 +64,17 @@ function clock(seconds) {
   return h ? `${h}:${two(m)}:${two(r)}` : `${m}:${two(r)}`;
 }
 
+/** Seconds, as minutes or hours and minutes. @param {number} seconds */
+function minutes(seconds) {
+  const m = Math.max(1, Math.round(seconds / 60));
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+/** Dollars, to the cent, and never nothing. @param {number} amount */
+function dollars(amount) {
+  return amount < 0.01 ? "under a cent" : `$${amount.toFixed(2)}`;
+}
+
 /** What a source's units count, in words. @param {SourceRow} s */
 function extent(s) {
   if (!hasWords(s)) return "";
@@ -120,7 +131,7 @@ export function createStudy(host) {
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web", removing: string | null,
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
-   *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>}} */
+   *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -144,6 +155,8 @@ export function createStudy(host) {
     progress: null,
     // What was found on the web that is not to be added, of what is shown.
     unpicked: new Set(),
+    // A recording whose transcribing — and what it costs — is being asked.
+    hearing: null,
   };
 
   /** The notebook's pages of the web, by address: what was found that it has. */
@@ -177,9 +190,14 @@ export function createStudy(host) {
       case "reading": return `<span class="st-badge busy"><span class="lab-spin"></span>Reading</span>`;
       case "downloading": return `<span class="st-badge busy"><span class="lab-spin"></span>Downloading</span>`;
       case "inCloud": return `<button class="st-badge cloud" data-study-get="${esc(s.id)}" title="In iCloud — ${esc(size(s.size))} to download">${icon("cloud")}Download</button>`;
-      case "failed": return `<span class="st-badge bad" title="${esc(st.why)}">Not read</span>`;
+      case "failed": return s.kind === "audio" || s.kind === "video"
+        ? `<button class="st-badge bad" data-study-transcribe="${esc(s.id)}" title="${esc(st.why)} — transcribe it again">Not transcribed</button>`
+        : `<span class="st-badge bad" title="${esc(st.why)}">Not read</span>`;
       case "missing": return `<span class="st-badge" title="Its file is gone; what was read of it is kept">File gone</span>`;
       case "changed": return `<button class="st-badge" data-study-refresh="${esc(s.id)}" title="Its file has changed since it was read">Read again</button>`;
+      case "untranscribed": return `<button class="st-badge" data-study-transcribe="${esc(s.id)}" title="Transcribe it with Fish Audio: you are told what it costs first">` +
+        `${icon("mic")}Transcribe${st.seconds ? ` · ${esc(minutes(st.seconds))}` : ""}</button>`;
+      case "transcribing": return `<span class="st-badge busy"><span class="lab-spin"></span>Transcribing</span>`;
       default: return "";
     }
   }
@@ -237,8 +255,17 @@ export function createStudy(host) {
   }
 
   /** Bringing sources down from iCloud is said before it is done: what
-   *  comes down, and how much. */
+   *  comes down, and how much. So is transcribing a recording: what is sent
+   *  to Fish, and what it costs. */
   function confirmHtml() {
+    const hearing = (state.notebook?.sources ?? []).find((s) => s.id === state.hearing);
+    if (hearing) {
+      const seconds = hearing.status.state === "untranscribed" ? hearing.status.seconds : hearing.count;
+      const cost = seconds ? `about ${dollars(seconds / 3600 * 0.36)} of your Fish credit, at 36¢ an hour of sound` : "36¢ an hour of sound, from your Fish credit";
+      const long = seconds ? `this ${esc(minutes(seconds))} recording` : "this recording";
+      return `<div class="st-ask">${icon("mic")}<span>Send ${long}'s sound — <b>${esc(hearing.title)}</b> — to Fish Audio to be transcribed? It costs ${cost}.</span>
+        <span class="rs-actions"><button class="cc-quiet" data-study-transcribe-no>Cancel</button><button class="cc-primary" data-study-transcribe-yes>Transcribe</button></span></div>`;
+    }
     const ids = state.getting;
     const sources = (state.notebook?.sources ?? []).filter((s) => ids?.includes(s.id) && s.status.state === "inCloud");
     if (!sources.length) return "";
@@ -739,6 +766,22 @@ export function createStudy(host) {
       return renderSources();
     }
     if (at("[data-study-get-yes]")) return download();
+    const hear = at("[data-study-transcribe]");
+    if (hear) {
+      state.hearing = hear.dataset.studyTranscribe ?? null;
+      state.getting = null;
+      return renderSources();
+    }
+    if (at("[data-study-transcribe-yes]")) {
+      const id = state.hearing;
+      state.hearing = null;
+      if (id) host.dispatch({ type: "studyTranscribe", id });
+      return renderSources();
+    }
+    if (at("[data-study-transcribe-no]")) {
+      state.hearing = null;
+      return renderSources();
+    }
     if (at("[data-study-get-no]")) {
       state.getting = null;
       return renderSources();

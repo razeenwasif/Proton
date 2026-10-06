@@ -150,7 +150,7 @@ impl StudyKbFile {
             size: entry.size,
             mtime: entry.mtime,
             in_cloud: entry.dataless,
-            readable: (entry.kind.readable() || entry.kind.converted()) && entry.size <= entry.kind.largest(),
+            readable: entry.kind.addable() && entry.size <= entry.kind.largest(),
             source,
         }
     }

@@ -3,4 +3,4 @@
 /**
  * Where a source stands.
  */
-export type StudySourceStatus = { "state": "ready" } | { "state": "reading" } | { "state": "inCloud" } | { "state": "downloading" } | { "state": "missing" } | { "state": "changed" } | { "state": "failed", why: string, };
+export type StudySourceStatus = { "state": "ready" } | { "state": "reading" } | { "state": "inCloud" } | { "state": "downloading" } | { "state": "missing" } | { "state": "changed" } | { "state": "failed", why: string, } | { "state": "untranscribed", seconds: number, } | { "state": "transcribing" };

@@ -103,10 +103,105 @@ fn clean(line: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Whether a character is written without spaces between words: Chinese,
+/// Japanese, Korean.
+fn unspaced(c: char) -> bool {
+    matches!(c, '\u{3040}'..='\u{30ff}' | '\u{3400}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{ac00}'..='\u{d7af}' | '\u{3000}'..='\u{303f}' | '\u{ff00}'..='\u{ffef}')
+}
+
+/// Words heard, each with when it was said, in seconds, made cues: a
+/// sentence a cue once it has run three seconds, twelve seconds at most,
+/// and a new one after a pause of more than a second and a half.
+pub fn from_words(words: &[(f64, f64, String)]) -> Vec<Cue> {
+    let mut out: Vec<Cue> = Vec::new();
+    let mut text = String::new();
+    let (mut start, mut end) = (0.0, 0.0);
+    let mut close = |text: &mut String, start: f64, end: f64| {
+        if !text.is_empty() {
+            out.push(Cue { start, end: end.max(start), text: std::mem::take(text) });
+        }
+    };
+    for (from, to, word) in words {
+        let word = word.trim();
+        if word.is_empty() {
+            continue;
+        }
+        if !text.is_empty() && from - end > 1.5 {
+            close(&mut text, start, end);
+        }
+        if text.is_empty() {
+            start = *from;
+        }
+        let first = word.chars().next().unwrap_or(' ');
+        let last = text.chars().last().unwrap_or(' ');
+        let joined = matches!(first, ',' | '.' | ';' | ':' | '!' | '?' | ')' | ']' | '%' | '\'' | '’') || last == '(' || (unspaced(first) && unspaced(last));
+        if !text.is_empty() && !joined {
+            text.push(' ');
+        }
+        text.push_str(word);
+        end = end.max(*to);
+        let sentence = word.ends_with(['.', '?', '!', '。', '？', '！']);
+        if (sentence && end - start >= 3.0) || end - start >= 12.0 {
+            close(&mut text, start, end);
+        }
+    }
+    close(&mut text, start, end);
+    out
+}
+
+/// What was heard with no word's time: its sentences spread over the
+/// recording's length in proportion to how long each is.
+pub fn from_text(text: &str, duration: f64) -> Vec<Cue> {
+    let mut sentences: Vec<String> = Vec::new();
+    let mut sentence = String::new();
+    for c in text.chars() {
+        sentence.push(c);
+        if matches!(c, '.' | '?' | '!' | '。' | '？' | '！') {
+            sentences.push(sentence.trim().to_string());
+            sentence.clear();
+        }
+    }
+    if !sentence.trim().is_empty() {
+        sentences.push(sentence.trim().to_string());
+    }
+    sentences.retain(|s| !s.is_empty());
+    let total: usize = sentences.iter().map(|s| s.chars().count()).sum::<usize>().max(1);
+    let mut at = 0.0;
+    sentences
+        .into_iter()
+        .map(|text| {
+            let length = duration * text.chars().count() as f64 / total as f64;
+            let cue = Cue { start: at, end: at + length, text };
+            at += length;
+            cue
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn words_heard_are_cues_a_sentence_each_and_a_pause_ends_one() {
+        let w = |from: f64, to: f64, word: &str| (from, to, word.to_string());
+        let words = vec![
+            w(0.0, 0.5, "So"), w(0.5, 0.9, " the"), w(0.9, 1.6, " frontier"), w(1.6, 2.0, " is"), w(2.0, 2.4, " a"), w(2.4, 3.4, " queue."),
+            w(3.5, 3.9, "Ordered"), w(3.9, 4.2, "by"), w(4.2, 4.6, "g(n)"), w(4.6, 4.7, ","),
+            w(8.0, 8.4, "and"), w(8.4, 9.0, "that"), w(9.0, 9.4, "is"), w(9.4, 9.8, "all."),
+            w(10.0, 10.3, "最"), w(10.3, 10.6, "好。"),
+        ];
+        let cues = from_words(&words);
+        let said: Vec<&str> = cues.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(said, ["So the frontier is a queue.", "Ordered by g(n),", "and that is all. 最好。"], "{cues:#?}");
+        assert_eq!((cues[0].start, cues[0].end, cues[1].start, cues[1].end), (0.0, 3.4, 3.5, 4.7));
+        let long: Vec<(f64, f64, String)> = (0..40).map(|i| (i as f64 * 0.5, i as f64 * 0.5 + 0.5, "word".to_string())).collect();
+        assert!(from_words(&long).iter().all(|c| c.end - c.start <= 12.5), "twelve seconds at most");
+        let spread = from_text("One two. Three four five!", 30.0);
+        assert_eq!(spread.len(), 2);
+        assert!((spread[0].end - 10.0).abs() < 1e-9 && (spread[1].end - 30.0).abs() < 1e-9, "{spread:?}");
+    }
 
     #[test]
     fn srt_cues_are_read_with_their_times() {

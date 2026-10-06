@@ -69,6 +69,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyDownload { .. }
             | Command::StudyPaste { .. }
             | Command::StudyAddUrls { .. }
+            | Command::StudyTranscribe { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }
@@ -131,6 +132,9 @@ enum Answer {
     Read(Box<snapshot::Read>),
     /// A page of the web, fetched and read.
     Fetched(Box<web::Fetched>),
+    /// A recording, measured, to be transcribed when asked: how long it
+    /// plays, and its file's stamp.
+    Recording { seconds: u32, size: u64, mtime: u64 },
     /// Its file turned out to be in iCloud.
     InCloud,
     Failed(String),
@@ -251,7 +255,7 @@ fn strings(value: Option<&Value>) -> Vec<String> {
 fn units_of(kind: Kind) -> Units {
     match kind {
         Kind::Pdf | Kind::Slides => Units::Pages,
-        Kind::Captions => Units::Seconds,
+        Kind::Captions | Kind::Audio | Kind::Video => Units::Seconds,
         _ => Units::Lines,
     }
 }
@@ -265,7 +269,7 @@ fn bring_down(path: &Path) -> Result<(), String> {
 
 /// A worker: each source read — brought down first if asked — and its words
 /// kept in the notebook; each answer sent as it is had.
-fn read_all(items: Vec<Item>, snapshots: PathBuf, pdfs: Pdfs, stop: Arc<AtomicBool>, answers: Sender<(String, Answer)>) {
+fn read_all(items: Vec<Item>, snapshots: PathBuf, pdfs: Pdfs, media: Arc<dyn voice::Media>, stop: Arc<AtomicBool>, answers: Sender<(String, Answer)>) {
     // Nothing is brought down unless an item asks for it.
     let _no_downloads = dataless::NoDownloads::on_this_thread();
     for item in items {
@@ -282,6 +286,23 @@ fn read_all(items: Vec<Item>, snapshots: PathBuf, pdfs: Pdfs, stop: Arc<AtomicBo
                 let _ = answers.send((item.id, Answer::Failed(format!("it could not be downloaded: {why}"))));
                 continue;
             }
+        }
+        // A recording is only measured — by a program of its own, so never
+        // a file still in iCloud, which it would bring down.
+        if item.kind.recording() {
+            let answer = match std::fs::symlink_metadata(&item.path) {
+                Err(why) => Answer::Failed(why.to_string()),
+                Ok(meta) if dataless::is_dataless(&meta) => Answer::InCloud,
+                Ok(meta) => {
+                    let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+                    let seconds = media.duration(&item.path).map_or(0, |s| s.round().max(0.0) as u32);
+                    Answer::Recording { seconds, size: meta.len(), mtime }
+                }
+            };
+            if answers.send((item.id, answer)).is_err() {
+                return;
+            }
+            continue;
         }
         let answer = match snapshot::read(&item.path, item.kind, &pdfs) {
             Ok(read) => match snapshot::keep_in(&snapshots, &item.id, &read.body) {
@@ -490,6 +511,7 @@ impl Study {
             Command::StudyDownload { paths } => self.add(paths, true),
             Command::StudyPaste { title, text } => self.paste(&title, &text),
             Command::StudyAddUrls { urls } => self.add_urls(&urls),
+            Command::StudyTranscribe { id } => self.transcribe(&id),
             Command::StudyRemove { id } => self.remove(&id),
             Command::StudySelect { ids } => self.select(&ids),
             Command::StudyRefresh { id } => self.refresh(&id),
@@ -863,6 +885,15 @@ impl Study {
                 (path, at)
             })
             .collect();
+        // A recording with captions beside it: those are its words, free.
+        let beside: Vec<Option<String>> = found
+            .iter()
+            .map(|(path, at)| {
+                at.as_ref().filter(|(_, entry, _)| entry.kind.recording())?;
+                let stem = path.rsplit_once('.').map_or(path.as_str(), |(stem, _)| stem);
+                ["srt", "vtt", "en.srt", "en.vtt"].iter().map(|ext| format!("{stem}.{ext}")).find(|p| self.kb.locate(p).is_some())
+            })
+            .collect();
         let book = match self.writable() {
             Ok(book) => book,
             Err(events) => return events,
@@ -870,7 +901,7 @@ impl Study {
         let mut said = Vec::new();
         let mut items = Vec::new();
         let now = proton_study::now();
-        for (path, at) in found {
+        for ((path, at), beside) in found.into_iter().zip(beside) {
             let Some((file, entry, root)) = at else {
                 said.push(format!("{path}: not in the knowledge base"));
                 continue;
@@ -886,9 +917,12 @@ impl Study {
                 }
                 continue;
             }
-            if !entry.kind.readable() && !entry.kind.converted() {
+            if !entry.kind.addable() {
                 said.push(format!("{path}: a {} file is not read yet", entry.kind.name()));
                 continue;
+            }
+            if let Some(captions) = beside {
+                said.push(format!("{path} has captions beside it, {captions}: add those to read it free, rather than transcribe it."));
             }
             let id = book.sources.take_id();
             let status = match (entry.dataless, download) {
@@ -933,7 +967,8 @@ impl Study {
         let snapshots = open.book.snapshots();
         let pdfs = Pdfs { extractor: proton_library::pdf::Extractor::default(), cache: proton_library::pdf::cache_dir() };
         let halt = Arc::clone(&stop);
-        let _ = std::thread::Builder::new().name("proton-study-read".into()).spawn(move || read_all(items, snapshots, pdfs, halt, send));
+        let media = self.voice.media();
+        let _ = std::thread::Builder::new().name("proton-study-read".into()).spawn(move || read_all(items, snapshots, pdfs, media, halt, send));
         self.batches.push(Batch { dir: open.book.dir().to_path_buf(), answers, stop });
     }
 
@@ -988,6 +1023,13 @@ impl Study {
             } else if let Some(source) = book.sources.get_mut(&id) {
                 match answer {
                     Answer::Downloading => source.status = SourceStatus::Downloading,
+                    Answer::Recording { seconds, size, mtime } => {
+                        source.size = size;
+                        source.mtime = mtime;
+                        source.units = Units::Seconds;
+                        source.count = seconds as usize;
+                        source.status = SourceStatus::Untranscribed { seconds };
+                    }
                     Answer::InCloud => source.status = SourceStatus::InCloud,
                     Answer::Failed(why) => source.status = SourceStatus::Failed { why },
                     Answer::Read(read) => {
@@ -1124,6 +1166,53 @@ impl Study {
         };
         events.extend(said.into_iter().map(|s| notice(s, NoticeLevel::Info)));
         events
+    }
+
+    /// Transcribe a recording among the sources, as the person asked having
+    /// been told what it costs: its sound sent to Fish on a worker, its
+    /// words kept as timed cues. Never a file still in iCloud.
+    fn transcribe(&mut self, id: &str) -> Vec<Event> {
+        let file = {
+            let Some(open) = &self.open else { return Vec::new() };
+            let Some(source) = open.book.sources.get(id) else {
+                return vec![notice(format!("{id}: no such source"), NoticeLevel::Warn)];
+            };
+            let waiting = matches!(source.status, SourceStatus::Untranscribed { .. } | SourceStatus::Failed { .. });
+            if !Kind::from_name(&source.kind).recording() || !waiting {
+                return vec![notice(format!("{} is not a recording waiting to be transcribed.", source.title), NoticeLevel::Info)];
+            }
+            match &source.origin {
+                Origin::File { root, rel } => self.kb.file(root, rel),
+                _ => None,
+            }
+        };
+        let Some(file) = file else {
+            return vec![notice("Its folder is no longer in the knowledge base.".into(), NoticeLevel::Warn)];
+        };
+        match std::fs::symlink_metadata(&file) {
+            Err(_) => return vec![notice("Its file is gone.".into(), NoticeLevel::Warn)],
+            Ok(meta) if dataless::is_dataless(&meta) => return vec![notice("It is in iCloud: download it first.".into(), NoticeLevel::Info)],
+            Ok(_) => {}
+        }
+        let speaker = match self.voice.speaker() {
+            Ok(speaker) => speaker,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let media = self.voice.media();
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        if let Some(source) = book.sources.get_mut(id) {
+            source.status = SourceStatus::Transcribing;
+        }
+        let (snapshots, work, dir) = (book.snapshots(), book.dir().join(".notebook/heard").join(id), book.dir().to_path_buf());
+        let (send, answers) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (halt, id) = (Arc::clone(&stop), id.to_string());
+        let _ = std::thread::Builder::new().name("proton-study-hear".into()).spawn(move || voice::hear(id, file, speaker, media, snapshots, work, halt, send));
+        self.batches.push(Batch { dir, answers, stop });
+        self.saved()
     }
 
     fn remove(&mut self, id: &str) -> Vec<Event> {
@@ -1492,6 +1581,8 @@ impl Study {
                 SourceStatus::InCloud => "It is in iCloud and has not been read yet.".to_string(),
                 SourceStatus::Reading | SourceStatus::Downloading => "It is still being read.".to_string(),
                 SourceStatus::Failed { why } => format!("It could not be read: {why}"),
+                SourceStatus::Untranscribed { .. } => "It is a recording, not transcribed yet.".to_string(),
+                SourceStatus::Transcribing => "It is being transcribed.".to_string(),
                 _ => "Its words are not kept here.".to_string(),
             };
             return vec![notice(format!("{}: {why}", source.title), NoticeLevel::Info)];

@@ -115,6 +115,11 @@ pub enum SourceStatus {
     Changed,
     /// It could not be read.
     Failed { why: String },
+    /// A recording, not transcribed yet: how long it plays, in seconds, if
+    /// that could be told.
+    Untranscribed { seconds: u32 },
+    /// A recording being transcribed.
+    Transcribing,
 }
 
 impl SourceStatus {

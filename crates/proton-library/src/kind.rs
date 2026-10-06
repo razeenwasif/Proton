@@ -71,6 +71,17 @@ impl Kind {
         matches!(self, Kind::Document | Kind::Slides | Kind::Image)
     }
 
+    /// Whether it is a recording: added as one, and read only when it is
+    /// transcribed, as the person chooses.
+    pub fn recording(self) -> bool {
+        matches!(self, Kind::Audio | Kind::Video)
+    }
+
+    /// Whether it can be made a source at all.
+    pub fn addable(self) -> bool {
+        self.readable() || self.converted() || self.recording()
+    }
+
     /// Whether a library of the whole knowledge base searches it. Code is
     /// readable but not searched: a course's thousand helper scripts would
     /// drown its notes in every answer.
@@ -93,6 +104,10 @@ impl Kind {
             Kind::Document => 128 << 20,
             Kind::Slides => 512 << 20,
             Kind::Image => 32 << 20,
+            // Only a recording's sound is sent to be heard, and it is never
+            // read whole.
+            Kind::Audio => 4 << 30,
+            Kind::Video => 32 << 30,
             _ => 1 << 20,
         }
     }

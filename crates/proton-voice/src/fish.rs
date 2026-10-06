@@ -8,6 +8,10 @@
 //! `GET https://api.fish.audio/model`, searched by name and language, each
 //! with a sample to listen to.
 //!
+//! What a recording says is `POST https://api.fish.audio/v1/asr`: the audio
+//! as a form's file, its timings asked for, on `transcribe-1-pro` — an hour
+//! at most a request, and paid for, at 36 cents an hour of audio.
+//!
 //! A busy answer — 429, 503 — is asked again after a wait, three times at
 //! most, as long as it says when it says; 401 is a key Fish does not take,
 //! 402 an account out of credit. No error says the key.
@@ -29,6 +33,12 @@ pub const MODEL: &str = "s2.1-pro-free";
 const LIMIT: u64 = 256 * 1024 * 1024;
 /// The most of any other answer read.
 const API_LIMIT: u64 = 8 * 1024 * 1024;
+/// What transcribes: speakers told apart, an hour of audio a request.
+pub const TRANSCRIBER: &str = "transcribe-1-pro";
+/// What an hour of audio costs to transcribe, in US cents.
+pub const CENTS_AN_HOUR: f64 = 36.0;
+/// The most of a recording one request may carry, in seconds.
+pub const LONGEST_HEARD: u32 = 3600;
 
 /// An API key, which cannot be printed.
 #[derive(Clone, PartialEq, Eq)]
@@ -200,6 +210,27 @@ pub struct Voice {
     pub uses: u64,
 }
 
+/// What a recording said, and when.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Heard {
+    /// All of it, its speakers' marks and its sounds' cues taken out.
+    pub text: String,
+    /// How long it is, in seconds.
+    pub duration: f64,
+    /// Its words, each with when it was said.
+    pub segments: Vec<HeardWord>,
+    /// The language it was heard in: `en`.
+    pub language: String,
+}
+
+/// A word, or a few, and when they were said, in seconds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeardWord {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+}
+
 /// Voices asked for: by name, in a language.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VoiceQuery {
@@ -346,6 +377,24 @@ impl Fish {
         Ok((value["total"].as_u64().unwrap_or(0), voices))
     }
 
+    /// What a recording says, and when: the file sent as a form's `audio`,
+    /// its timings asked for, its sounds' cues left out.
+    pub fn transcribe(&self, audio: &Path, language: Option<&str>, cancel: &AtomicBool) -> Result<Heard, FishError> {
+        let bytes = std::fs::read(audio).map_err(|e| FishError::Failed(format!("{}: {e}", audio.display())))?;
+        let name = audio.file_name().and_then(|n| n.to_str()).unwrap_or("audio.mp3").replace(['"', '\r', '\n'], "");
+        let mut fields = vec![("ignore_timestamps", "false".to_string()), ("tag_audio_events", "false".to_string())];
+        if let Some(language) = language.map(str::trim).filter(|l| !l.is_empty()) {
+            fields.push(("language", language.to_string()));
+        }
+        let (boundary, body) = form(&fields, "audio", &name, &bytes);
+        let headers = self.authorised(vec![("Content-Type".into(), format!("multipart/form-data; boundary={boundary}")), ("model".into(), TRANSCRIBER.into())]);
+        // A long recording takes minutes to hear.
+        let request = Request { method: Method::Post, url: format!("{}/v1/asr", self.base), headers, body, timeout: Duration::from_secs(15 * 60), limit: 64 * 1024 * 1024 };
+        let response = self.send(&request, cancel)?;
+        let value: Value = serde_json::from_reader(response.body).map_err(|e| FishError::Failed(format!("Fish Audio's transcript did not read: {e}")))?;
+        Ok(heard(&value))
+    }
+
     /// A voice's sample, fetched to `out`: from Fish's own servers only.
     pub fn sample(&self, url: &str, out: &Path, cancel: &AtomicBool) -> Result<u64, FishError> {
         let host = url.strip_prefix("https://").and_then(|rest| rest.split('/').next()).unwrap_or_default();
@@ -363,6 +412,51 @@ impl Fish {
         drop(file);
         std::fs::rename(&part, out).map_err(|e| FishError::Failed(e.to_string()))?;
         Ok(written)
+    }
+}
+
+/// A form of `fields` and one file, as `multipart/form-data`: its boundary,
+/// and its bytes.
+fn form(fields: &[(&str, String)], file_field: &str, file_name: &str, file: &[u8]) -> (String, Vec<u8>) {
+    // A boundary the file is all but certain not to hold: its length and a
+    // hash of its bytes.
+    let hash = file.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3));
+    let boundary = format!("proton-{:x}-{hash:016x}", file.len());
+    let mut body = Vec::with_capacity(file.len() + 512);
+    for (name, value) in fields {
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
+    }
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes());
+    body.extend_from_slice(file);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (boundary, body)
+}
+
+/// Fish's transcript, read: its speakers' marks and sounds' cues taken out
+/// of the whole, and its words with their times.
+fn heard(value: &Value) -> Heard {
+    let mut text = String::new();
+    let mut rest = value["text"].as_str().unwrap_or_default();
+    while let Some(start) = rest.find("<|") {
+        text.push_str(&rest[..start]);
+        rest = rest[start..].find("|>").map_or("", |end| &rest[start + end + 2..]);
+    }
+    text.push_str(rest);
+    let segments = value["segments"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| {
+            let text = s["text"].as_str()?.to_string();
+            let (start, end) = (s["start"].as_f64()?, s["end"].as_f64()?);
+            (!text.trim().is_empty() && end >= start).then_some(HeardWord { text, start, end })
+        })
+        .collect();
+    Heard {
+        text: text.split_whitespace().collect::<Vec<_>>().join(" "),
+        duration: value["duration"].as_f64().unwrap_or(0.0),
+        segments,
+        language: value["language_code"].as_str().unwrap_or_default().to_string(),
     }
 }
 
@@ -511,6 +605,31 @@ mod tests {
         let cancel = AtomicBool::new(true);
         assert_eq!(fish(script).speak(&speech(), &out, &cancel), Err(FishError::Cancelled));
         assert!(!out.exists() && !part_of(&out).exists());
+    }
+
+    #[test]
+    fn a_recording_is_sent_as_a_form_and_its_words_read_with_their_times() {
+        let answer = br#"{"text": "<|speaker:0|>Uniform cost search  expands the cheapest node.", "duration": 3.5, "language_code": "en",
+            "segments": [{"text": "Uniform", "start": 0.0, "end": 0.4}, {"text": " cost", "start": 0.4, "end": 0.7}, {"text": " ", "start": 1, "end": 1}]}"#;
+        let script = Arc::new(Script::default().answer(503, &[], b"").answer(200, &[("content-type", "application/json")], answer));
+        let audio = scratch("asr").join("lecture.mp3");
+        std::fs::write(&audio, b"ID3 fake mp3").unwrap();
+        let heard = fish(Arc::clone(&script)).transcribe(&audio, Some("en"), &AtomicBool::new(false)).unwrap();
+        assert_eq!(heard.text, "Uniform cost search expands the cheapest node.", "its speakers' marks taken out");
+        assert_eq!((heard.duration, heard.language.as_str(), heard.segments.len()), (3.5, "en", 2), "a busy Fish is asked again; an empty word is none");
+        let asked = script.asked.lock().unwrap();
+        let request = asked.last().unwrap();
+        assert!(request.url.ends_with("/v1/asr") && request.header("model") == Some("transcribe-1-pro"), "{request:?}");
+        let boundary = request.header("content-type").unwrap().strip_prefix("multipart/form-data; boundary=").unwrap().to_string();
+        let body = String::from_utf8_lossy(&request.body).into_owned();
+        assert!(body.starts_with(&format!("--{boundary}\r\nContent-Disposition: form-data; name=\"ignore_timestamps\"\r\n\r\nfalse\r\n")), "{body}");
+        assert!(body.contains("name=\"tag_audio_events\"\r\n\r\nfalse\r\n") && body.contains("name=\"language\"\r\n\r\nen\r\n"), "{body}");
+        assert!(body.contains("name=\"audio\"; filename=\"lecture.mp3\"") && body.contains("\r\n\r\nID3 fake mp3\r\n"), "{body}");
+        assert!(body.ends_with(&format!("--{boundary}--\r\n")), "{body}");
+        assert!(!format!("{request:?}").contains("sk-secret-123"));
+        drop(asked);
+        let broke = Arc::new(Script::default().answer(402, &[], b"{}"));
+        assert_eq!(fish(broke).transcribe(&audio, None, &AtomicBool::new(false)).unwrap_err(), FishError::NoCredit);
     }
 
     #[test]

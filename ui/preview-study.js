@@ -8,7 +8,7 @@ const now = Math.floor(Date.now() / 1000);
 /** @param {string} root @param {string} rel @param {string} kind @param {number} size @param {boolean} [inCloud] */
 const file = (root, rel, kind, size, inCloud = false) => ({
   name: rel.split("/").pop(), path: `${root}/${rel}`, kind, size, mtime: now - 86400 * 30, inCloud,
-  readable: !["video", "audio", "other"].includes(kind), source: null,
+  readable: kind !== "other", source: null,
 });
 
 const FILES = [
@@ -21,6 +21,7 @@ const FILES = [
   file("Courses", "COMP3670/Week 3 - Informed search.pdf", "pdf", 2_400_000),
   file("Courses", "COMP3670/lab2.ipynb", "notebook", 96_000),
   file("Courses", "COMP3670/Lecture 4.vtt", "captions", 71_000),
+  file("Courses", "COMP3670/Lecture 5.mp4", "video", 412_000_000),
   file("Courses", "COMP3670/screenshot.png", "image", 340_000),
   file("ANU", "2023 S2/COMP2310/Final exam 2022.pdf", "pdf", 1_800_000, true),
   file("ANU", "2023 S2/COMP2310/Lecture 12 - Virtual memory.pdf", "pdf", 5_100_000, true),
@@ -143,7 +144,8 @@ export function createStudyPreview(deliver) {
     setTimeout(() => {
       for (const source of state.sources[slug] ?? []) {
         if (!ids.includes(source.id)) continue;
-        source.status = { state: "ready" };
+        const recording = source.kind === "audio" || source.kind === "video";
+        source.status = recording && source.status.state !== "transcribing" ? { state: "untranscribed", seconds: 3120 } : { state: "ready" };
         source.count = source.units === "pages" ? 14 : source.units === "seconds" ? 3120 : 180;
       }
       if (state.open === slug) [notebookEvent(), listEvent()].forEach((event) => deliver(event));
@@ -171,7 +173,7 @@ export function createStudyPreview(deliver) {
       const [root, ...rest] = path.split("/");
       const status = f.inCloud && !download ? "inCloud" : f.inCloud ? "downloading" : "reading";
       list.push({ id, title: f.name, kind: f.kind, role: /exam/i.test(f.name) ? (/sol/i.test(f.name) ? "solution" : "pastPaper") : f.kind === "markdown" ? "notes" : "reading",
-        origin: { from: "file", root, rel: rest.join("/") }, status: { state: status }, units: f.kind === "pdf" ? "pages" : f.kind === "captions" ? "seconds" : "lines",
+        origin: { from: "file", root, rel: rest.join("/") }, status: { state: status }, units: f.kind === "pdf" ? "pages" : ["captions", "audio", "video"].includes(f.kind) ? "seconds" : "lines",
         count: 0, size: f.size, thin: 0, selected: true, labels: [] });
       if (status !== "inCloud") reading.push(id);
     }
@@ -433,6 +435,14 @@ export function createStudyPreview(deliver) {
             }, 600);
           }
           return [notebookEvent(), listEvent()];
+        }
+        case "studyTranscribe": {
+          const slug = state.open ?? "";
+          const source = (state.sources[slug] ?? []).find((x) => x.id === command.id);
+          if (!source) return [];
+          source.status = { state: "transcribing" };
+          read(slug, [source.id]);
+          return [notebookEvent()];
         }
         case "studyRemove":
           state.sources[state.open ?? ""] = (state.sources[state.open ?? ""] ?? []).filter((s) => s.id !== command.id);

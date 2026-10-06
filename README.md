@@ -158,8 +158,9 @@ out and why, or found for you as what is like the notebook, or found on the
 web by Discover or Deep Research, which writes a report of what it read — and read once,
 their words kept in the notebook: notes, PDFs, notebooks, LaTeX, captions, Word
 documents and EPUBs (with pandoc), PowerPoints, pictures' words (with
-tesseract), pages of the web kept as their articles, and YouTube videos'
-captions (with yt-dlp); a reader; notes;
+tesseract), pages of the web kept as their articles, YouTube videos'
+captions (with yt-dlp), and recordings, transcribed by Fish Audio when you
+choose, told what it costs; a reader; notes;
 and the tutor, which searches the sources you tick through Proton's own MCP
 server and cites them — each citation a number whose passage shows over it and
 opens at its place — as a plain tutor, a learning guide, or a role you write,

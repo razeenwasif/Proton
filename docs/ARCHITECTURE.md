@@ -1102,7 +1102,14 @@ pictures or links' addresses — made Markdown by pandoc with MathML and MathJax
 `\(…\)` kept as TeX, or by dom_query without pandoc; a PDF kept whole in
 `.notebook/web/`, which the document viewer and `view_pages` open; a YouTube
 video as its English captions, read by yt-dlp without the video
-(`proton-library::formats::web`, `proton-core::study::web`). **Discover** finds
+(`proton-library::formats::web`, `proton-core::study::web`). A recording —
+audio or video — is added untranscribed, measured by ffprobe on the reading
+worker (never while its file is in iCloud), and said to have captions beside
+it when it has; it is transcribed only when the person asks, having been told
+its length and what Fish charges (36¢ an hour of sound): ffmpeg cuts its sound
+into mono pieces under Fish's hour, each is sent to `/v1/asr` on
+`transcribe-1-pro`, and the words, put back at their places, are kept as cues
+(`proton-core::study::voice::hear`, `proton-library::formats::captions::from_words`). **Discover** finds
 in the knowledge base what is like a notebook and not in it yet: the words its
 sources share — scored by how many of them use each — and its course are
 searched for, and each file is offered with the passage most like it
