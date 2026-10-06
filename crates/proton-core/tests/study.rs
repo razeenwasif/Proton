@@ -307,12 +307,14 @@ mod tutor {
     use proton_core::study::tutor::Tutors;
     use serde_json::json;
 
-    /// What a scripted tutor was started with and told.
+    /// What a scripted tutor was started with and told — and the answers
+    /// it is to give, in turn, before falling back to the script's own.
     #[derive(Default)]
     pub struct Log {
         pub started: Vec<(Engine, PathBuf, Unattended, Option<String>)>,
         pub sent: Vec<String>,
         pub interrupted: bool,
+        pub answers: std::collections::VecDeque<String>,
     }
 
     /// Tutors that answer as an engine would: a search, then an answer
@@ -374,7 +376,12 @@ mod tutor {
             self.fold.said(text, 0);
             self.fold.working();
             self.fold.status_mut().model = "scripted-model".into();
-            self.log.lock().unwrap().sent.push(text.to_string());
+            let mut log = self.log.lock().unwrap();
+            log.sent.push(text.to_string());
+            if let Some(next) = log.answers.pop_front() {
+                self.answer = next;
+            }
+            drop(log);
             self.stage = Some(0);
             self.turn += 1;
             Ok(())
@@ -565,5 +572,132 @@ fn with_no_server_every_engine_is_given_passages() {
     assert!(log.started[0].2.mcp.is_empty());
     assert!(log.sent[0].contains("[[S01 § Search L1-2]]"), "{}", log.sent[0]);
     drop(log);
+    session.shutdown();
+}
+
+/* ── the studio ───────────────────────────────────────────────────── */
+
+fn studio(events: &[Event]) -> Option<(Vec<proton_core::study::jobs::StudyJob>, Vec<proton_study::studio::StudyMade>)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::StudyStudio { jobs, made } => Some((jobs.clone(), made.clone())),
+        _ => None,
+    })
+}
+
+#[test]
+fn the_studio_makes_from_the_sources_mends_what_will_not_read_and_keeps_every_call() {
+    use proton_study::studio::{Make, Options, StudyMadeBody};
+    let scratch = Scratch::new("studio");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into(), "Courses/COMP3670/Exam_2020.pdf".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 2 && sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(()),
+        _ => None,
+    });
+    {
+        let mut log = log.lock().unwrap();
+        log.answers.push_back("# Search, a study guide\n\n## Uninformed search\n\nBreadth-first search is complete [[S01 § Search L1-2]]. The exam asks why [[S02 p. 1]].".into());
+        log.answers.push_back("this is not a map".into());
+        log.answers.push_back(r#"{"title": "Search", "nodes": [{"id": "1", "parent": null, "label": "Search", "cites": []}, {"id": "2", "parent": "1", "label": "UCS: $\frac{g}{1}$", "cites": ["S02 p. 1"]}]}"#.into());
+    }
+
+    // A study guide: the notebook is small, so it is given whole.
+    let events = session.apply(Command::StudyMake { kind: Make::StudyGuide, options: Options::default() });
+    let (jobs, _) = studio(&events).expect("the studio");
+    assert_eq!((jobs[0].id.as_str(), jobs[0].state.as_str()), ("J0001", "running"));
+    let made = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        _ => None,
+    });
+    assert_eq!((made[0].id.as_str(), made[0].title.as_str()), ("R001", "Search, a study guide"), "titled by its own heading");
+    assert!(made[0].by.starts_with("Claude Code"));
+    {
+        let log = log.lock().unwrap();
+        let (_, _, how, _) = &log.started[0];
+        assert!(how.mcp.is_empty() && how.instructions.contains("given to you below") && how.schema.is_none());
+        assert!(log.sent[0].contains("study guide") && log.sent[0].contains("The sources:") && log.sent[0].contains("[[S01 § Search L1-2]]"), "{}", log.sent[0]);
+    }
+    let book = scratch.root.join("Notebooks/search");
+    assert!(book.join("studio/reports/R001.md").is_file());
+    let task: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(book.join("tasks/J0001.json")).unwrap()).unwrap();
+    assert_eq!((task["state"].as_str(), task["made"].as_str()), (Some("done"), Some("R001")));
+    let events = session.apply(Command::StudyShowMade { id: "R001".into() });
+    let Some(Event::StudyMadeOpen { body: StudyMadeBody::Prose { markdown }, citations, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(markdown.starts_with("# Search, a study guide"));
+    assert_eq!(citations.iter().map(|c| (c.source.as_str(), c.resolved)).collect::<Vec<_>>(), [("S01", true), ("S02", true)]);
+
+    // A mind map whose first answer will not read: sent back once, then kept.
+    session.apply(Command::StudyMake { kind: Make::MindMap, options: Options { focus: "uniform cost".into(), ..Default::default() } });
+    let made = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0002" && j.state == "done") => Some(made.clone()),
+        _ => None,
+    });
+    assert!(made.iter().any(|m| m.id == "M001"));
+    assert!(log.lock().unwrap().sent.iter().any(|s| s.starts_with("Your answer could not be read")), "it was not sent back");
+    assert!(log.lock().unwrap().started[1].2.schema.is_some(), "a map is held to its schema");
+    let events = session.apply(Command::StudyShowMade { id: "M001".into() });
+    let Some(Event::StudyMadeOpen { body: StudyMadeBody::Map { nodes }, citations, .. }) = events.first() else { panic!() };
+    assert_eq!(nodes[1].label, "UCS: $\\frac{g}{1}$", "the TeX JSON ate is mended");
+    assert_eq!(citations.len(), 1);
+
+    // A table that never reads fails, and says why.
+    {
+        let mut log = log.lock().unwrap();
+        log.answers.push_back("[]".into());
+        log.answers.push_back("still not a table".into());
+    }
+    session.apply(Command::StudyMake { kind: Make::Table, options: Options { columns: vec!["Algorithm".into(), "Complete".into()], ..Default::default() } });
+    let failed = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.id == "J0003" && j.state == "failed").cloned(),
+        _ => None,
+    });
+    assert!(failed.why.unwrap_or_default().contains("could not be read"));
+    // What a call was told and asked can be read.
+    let events = session.apply(Command::StudyShowTask { id: "J0001".into() });
+    let Some(Event::StudyTask { prompt, instructions, state, .. }) = events.first() else { panic!() };
+    assert!(prompt.contains("The sources:") && instructions.contains("Rules:") && state == "done");
+    // A table needs its columns; a report, its asking.
+    let refused = session.apply(Command::StudyMake { kind: Make::Table, options: Options::default() });
+    assert!(said(&refused).iter().any(|s| s.contains("columns")));
+    session.shutdown();
+}
+
+#[test]
+fn the_studio_runs_three_calls_at_once_and_two_on_an_engine() {
+    use proton_study::studio::{Make, Options};
+    let scratch = Scratch::new("studio-many");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.iter().all(|s| s.status == SourceStatus::Ready) && !sources.is_empty() => Some(()),
+        _ => None,
+    });
+    // Every look at the studio, as the four are asked for and run.
+    let mut seen = Vec::new();
+    for kind in [Make::Faq, Make::Glossary, Make::Briefing, Make::Timeline] {
+        seen.extend(studio(&session.apply(Command::StudyMake { kind, options: Options::default() })).map(|(jobs, _)| jobs));
+    }
+    until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } => {
+            seen.push(jobs.clone());
+            (jobs.iter().filter(|j| j.state == "done").count() == 4).then_some(())
+        }
+        _ => None,
+    });
+    let most = seen.iter().map(|jobs| jobs.iter().filter(|j| j.state == "running").count()).max().unwrap_or(0);
+    assert_eq!(most, 2, "never more than two on Claude Code at once, and two at some point");
+    assert!(seen.iter().any(|jobs| jobs.iter().any(|j| j.state == "waiting")), "the rest waited their turn");
     session.shutdown();
 }

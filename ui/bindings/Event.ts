@@ -63,11 +63,15 @@ import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
 import type { StudyChatSummary } from "./StudyChatSummary";
+import type { StudyCitation } from "./StudyCitation";
+import type { StudyJob } from "./StudyJob";
 import type { StudyKbFile } from "./StudyKbFile";
 import type { StudyKbFolder } from "./StudyKbFolder";
 import type { StudyKbHit } from "./StudyKbHit";
 import type { StudyKbLeft } from "./StudyKbLeft";
 import type { StudyLive } from "./StudyLive";
+import type { StudyMade } from "./StudyMade";
+import type { StudyMadeBody } from "./StudyMadeBody";
 import type { StudyNoteRow } from "./StudyNoteRow";
 import type { StudyPlace } from "./StudyPlace";
 import type { StudyRoot } from "./StudyRoot";
@@ -236,7 +240,7 @@ said: string | null, view: StudyView, } | { "type": "studyChat", id: string, tit
  * How the tutor reaches the sources, once it has started: `tools`
  * or `passages`.
  */
-grounding: string | null, chats: Array<StudyChatSummary>, } | { "type": "studyChatLive", id: string, live: StudyLive, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
+grounding: string | null, chats: Array<StudyChatSummary>, } | { "type": "studyStudio", jobs: Array<StudyJob>, made: Array<StudyMade>, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyTask", id: string, title: string, engine: string, model: string, state: string, why: string | null, instructions: string, prompt: string, } | { "type": "studyChatLive", id: string, live: StudyLive, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
 /**
  * Whether it is a source of the notebook too.
  */

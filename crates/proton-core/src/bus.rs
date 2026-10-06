@@ -586,6 +586,27 @@ pub enum Command {
     StudySaveAnswer {
         turn: usize,
     },
+    /// Make something of the open notebook's ticked sources, in the studio.
+    StudyMake {
+        kind: proton_study::studio::Make,
+        options: proton_study::studio::Options,
+    },
+    /// Stop a call of the studio's, or take it off the queue.
+    StudyCancelJob {
+        id: String,
+    },
+    /// Show something the studio made.
+    StudyShowMade {
+        id: String,
+    },
+    /// Put something the studio made in the notebook's bin.
+    StudyBinMade {
+        id: String,
+    },
+    /// What a call of the studio's was told and asked.
+    StudyShowTask {
+        id: String,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1447,6 +1468,28 @@ pub enum Event {
         /// or `passages`.
         grounding: Option<String>,
         chats: Vec<proton_study::tutor::StudyChatSummary>,
+    },
+    /// The studio of the open notebook: its calls, and what they made.
+    StudyStudio {
+        jobs: Vec<crate::study::jobs::StudyJob>,
+        made: Vec<proton_study::studio::StudyMade>,
+    },
+    /// Something the studio made, whole, its citations resolved.
+    StudyMadeOpen {
+        made: proton_study::studio::StudyMade,
+        body: proton_study::studio::StudyMadeBody,
+        citations: Vec<proton_study::cite::StudyCitation>,
+    },
+    /// What a call of the studio's was told and asked, and how it ended.
+    StudyTask {
+        id: String,
+        title: String,
+        engine: String,
+        model: String,
+        state: String,
+        why: Option<String>,
+        instructions: String,
+        prompt: String,
     },
     /// The answer coming in the open chat, as far as it has come.
     StudyChatLive {

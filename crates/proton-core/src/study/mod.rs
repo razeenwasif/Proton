@@ -12,6 +12,7 @@
 //! heartbeat. A file in iCloud is never brought down unless the person asked
 //! for exactly that file, having been told how big it is.
 
+pub mod jobs;
 mod kb;
 pub mod tutor;
 
@@ -74,6 +75,11 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyChatOpen { .. }
             | Command::StudyTutor { .. }
             | Command::StudySaveAnswer { .. }
+            | Command::StudyMake { .. }
+            | Command::StudyCancelJob { .. }
+            | Command::StudyShowMade { .. }
+            | Command::StudyBinMade { .. }
+            | Command::StudyShowTask { .. }
     )
 }
 
@@ -134,6 +140,8 @@ pub struct Study {
     tutor: Option<Tutor>,
     /// What makes tutors: the engines, or a test's script.
     tutors: Box<dyn Tutors>,
+    /// The studio's calls.
+    jobs: jobs::Jobs,
 }
 
 impl std::fmt::Debug for Study {
@@ -157,6 +165,7 @@ impl Default for Study {
             documents: Default::default(),
             tutor: None,
             tutors: Box::new(tutor::Live),
+            jobs: jobs::Jobs::default(),
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -293,6 +302,7 @@ impl Study {
         let mut events = vec![self.list_event(), self.kb.event()];
         events.extend(self.notebook_event());
         events.extend(self.chat_event());
+        events.extend(self.studio_event());
         events
     }
 
@@ -303,6 +313,10 @@ impl Study {
         }
         events.extend(self.take_answers());
         events.extend(self.poll_tutor());
+        let roots = self.kb.labelled_roots();
+        if self.jobs.poll(self.tutors.as_mut(), &roots) {
+            events.extend(self.studio_event());
+        }
         if let Some(open) = &mut self.open {
             let now = proton_study::now();
             if now.saturating_sub(open.beat) >= BEAT {
@@ -329,6 +343,7 @@ impl Study {
             tutor.stop();
         }
         self.tutor = None;
+        self.jobs.stop_all();
         for batch in &self.batches {
             batch.stop.store(true, Ordering::Relaxed);
         }
@@ -394,6 +409,22 @@ impl Study {
             Command::StudyChatOpen { id } => self.open_chat(&id),
             Command::StudyTutor { settings } => self.set_tutor(settings),
             Command::StudySaveAnswer { turn } => self.save_answer(turn),
+            Command::StudyMake { kind, options } => self.make(kind, options),
+            Command::StudyCancelJob { id } => {
+                if let Some(open) = &self.open {
+                    let dir = open.book.dir().to_path_buf();
+                    self.jobs.cancel(&dir, &id);
+                }
+                self.studio_event().into_iter().collect()
+            }
+            Command::StudyShowMade { id } => self.show_made(&id),
+            Command::StudyBinMade { id } => {
+                let result = self.writable().and_then(|book| book.bin_made(&id).map_err(|why| vec![notice(why, NoticeLevel::Error)]));
+                let mut events = result.err().unwrap_or_default();
+                events.extend(self.studio_event());
+                events
+            }
+            Command::StudyShowTask { id } => self.show_task(&id),
             _ => Vec::new(),
         }
     }
@@ -565,6 +596,7 @@ impl Study {
         let mut events = vec![self.list_event()];
         events.extend(self.notebook_event());
         events.extend(self.chat_event());
+        events.extend(self.studio_event());
         events
     }
 
@@ -1029,6 +1061,66 @@ impl Study {
         events.extend(self.note_event(&id));
         events.push(notice(format!("Kept as {id}."), NoticeLevel::Info));
         events
+    }
+
+    /* ── the studio ─────────────────────────────────────────────────── */
+
+    /// The open notebook's studio: its calls, and what they made.
+    fn studio_event(&self) -> Option<Event> {
+        let open = self.open.as_ref()?;
+        Some(Event::StudyStudio { jobs: self.jobs.rows(open.book.dir()), made: open.book.made() })
+    }
+
+    fn make(&mut self, kind: proton_study::studio::Make, options: proton_study::studio::Options) -> Vec<Event> {
+        if kind == proton_study::studio::Make::Table && options.columns.iter().all(|c| c.trim().is_empty()) {
+            return vec![notice("Name the table's columns.".into(), NoticeLevel::Warn)];
+        }
+        if kind == proton_study::studio::Make::Report && options.ask.trim().is_empty() {
+            return vec![notice("Say what the report is to be.".into(), NoticeLevel::Warn)];
+        }
+        let book = match self.writable() {
+            Ok(book) => book.clone(),
+            Err(events) => return events,
+        };
+        self.jobs.ask(&book, kind, options);
+        let roots = self.kb.labelled_roots();
+        self.jobs.poll(self.tutors.as_mut(), &roots);
+        self.studio_event().into_iter().collect()
+    }
+
+    fn show_made(&self, id: &str) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        let Some((made, body)) = open.book.made_one(id) else {
+            return vec![notice(format!("{id}: nothing made has that id"), NoticeLevel::Warn)];
+        };
+        use proton_study::studio::StudyMadeBody;
+        let text = match &body {
+            StudyMadeBody::Prose { markdown } => markdown.clone(),
+            StudyMadeBody::Map { nodes } => nodes.iter().flat_map(|n| n.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            StudyMadeBody::Table { rows, .. } => rows.iter().flat_map(|r| r.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            StudyMadeBody::Objectives { objectives } => objectives.iter().flat_map(|o| o.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+        };
+        let citations = proton_study::cite::resolve(&open.book, &text);
+        vec![Event::StudyMadeOpen { made, body, citations }]
+    }
+
+    fn show_task(&self, id: &str) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        let file = proton_study::studio::task_file(&open.book, id);
+        let Some(task) = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else {
+            return vec![notice(format!("{id}: no such call"), NoticeLevel::Warn)];
+        };
+        let field = |key: &str| task.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+        vec![Event::StudyTask {
+            id: id.to_string(),
+            title: field("title"),
+            engine: field("engine"),
+            model: field("model"),
+            state: field("state"),
+            why: task.get("why").and_then(Value::as_str).map(str::to_string),
+            instructions: field("instructions"),
+            prompt: field("prompt"),
+        }]
     }
 
     /* ── the reader ─────────────────────────────────────────────────── */

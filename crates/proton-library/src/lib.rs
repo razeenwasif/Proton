@@ -294,6 +294,14 @@ impl Library {
         self.search_in(query, limit, &Scope::everything())
     }
 
+    /// Every passage, in the order read, as a search would give it: for a
+    /// call given a notebook whole.
+    pub fn all(&self) -> Vec<Hit> {
+        (0..self.passages.len())
+            .map(|i| Hit { passage: self.passages[i].clone(), score: 0.0, cite: self.cites[i].clone(), doc: self.docs[self.doc_of[i]].clone() })
+            .collect()
+    }
+
     /// The text of every passage, in order, for whoever is making vectors.
     pub fn texts(&self) -> Vec<String> {
         self.passages

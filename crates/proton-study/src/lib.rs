@@ -27,6 +27,8 @@ pub mod model;
 pub mod role;
 pub mod snapshot;
 pub mod store;
+pub mod studio;
+pub mod tex;
 pub mod tutor;
 pub mod view;
 
