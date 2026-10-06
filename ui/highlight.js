@@ -199,6 +199,17 @@ const LANGS = {
     constants: words("true false"),
   },
   latex: { line: ["%"] },
+  lean: {
+    line: ["--"], block: [["/-", "-/"]], quotes: ['"'], typeCase: true,
+    keywords: words("theorem lemma def example abbrev instance structure class inductive where with fun by have show from at " +
+      "calc match let in if then else do return namespace section end open variable universe import set_option attribute " +
+      "local private protected noncomputable deriving extends mutual termination_by decreasing_by sorry " +
+      "intro intros apply exact refine rfl simp simp_all rw rwa ring ring_nf linarith nlinarith omega norm_num decide " +
+      "induction cases rcases obtain use constructor exists aesop positivity field_simp push_neg by_contra contradiction " +
+      "exfalso trivial gcongr unfold specialize"),
+    types: words("Prop Type Sort ℕ ℤ ℚ ℝ ℂ Nat Int Rat Real Complex Bool List Finset Set"),
+    constants: words("True False true false"),
+  },
 };
 
 /** Languages with a lexer of their own rather than the shared one. */
@@ -216,7 +227,7 @@ const ALIASES = /** @type {Record<string, string>} */ ({
   dockerfile: "shell", docker: "shell", makefile: "shell", make: "shell", cmake: "shell", psql: "sql", mysql: "sql",
   sqlite: "sql", postgres: "sql", postgresql: "sql", glsl: "c", hlsl: "c", wgsl: "rust", metal: "cpp", cu: "cpp",
   cuda: "cpp", objc: "c", "objective-c": "c", proto: "c", protobuf: "c", gradle: "kotlin", groovy: "java",
-  sol: "javascript", solidity: "javascript",
+  sol: "javascript", solidity: "javascript", lean4: "lean",
 });
 
 /** The language a fence names, as one this file knows, or "".

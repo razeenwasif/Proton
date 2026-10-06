@@ -50,3 +50,13 @@ test('a scene is framed by everything in every frame', () => {
   const arrow = bounds({format: 'proton.scene/1', frames: [[{kind: 'arrow', origin: [0, 0, 0], vector: [0, 4, 0]}]]});
   deepEqual(arrow.center, [0, 2, 0], 'an arrow is framed to its tip');
 });
+
+import {highlight, language} from '../../ui/highlight.js';
+
+test('Lean is coloured: its words, its comments, and lean4 is Lean too', () => {
+  equal(language('lean4'), 'lean');
+  const html = highlight('/- A cube. -/\ntheorem H001 (n : ℕ) : n + 0 = n := by simp -- done\n', 'lean');
+  for (const [cls, text] of [['cm', '/- A cube. -/'], ['k', 'theorem'], ['ty', 'ℕ'], ['k', 'by'], ['k', 'simp'], ['cm', '-- done'], ['num', '0']]) {
+    equal(html.includes(`<span class="${cls}">${text}</span>`), true, `${text} is not ${cls}: ${html}`);
+  }
+});

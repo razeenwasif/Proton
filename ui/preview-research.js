@@ -67,13 +67,56 @@ function sky() {
   };
 }
 
+/** Three cubes: one hypothesis proved in Lean, one stated with its proof open. */
 function cubes() {
+  const hypotheses = [
+    { id: "H001", title: "No sum of three cubes is 4 or 5 modulo 9", author: claude, round: 1, status: "active", parents: [],
+      statement: "For all integers $x, y, z$, $x^3 + y^3 + z^3 \\not\\equiv 4, 5 \\pmod 9$: a cube is $0$ or $\\pm 1 \\pmod 9$, and no three of those sum to $\\pm 4$.",
+      rationale: "The classical obstruction: it settles which $n$ cannot be a sum of three cubes at all.", predictions: ["No representation exists for $n = 4, 5, 13, 14, \\ldots$"], assumptions: [] },
+    { id: "H002", title: "Every other n below 1000 is a sum of three cubes", author: codex, round: 1, status: "active", parents: [],
+      statement: "Every $0 < n < 1000$ with $n \\not\\equiv \\pm 4 \\pmod 9$ is $x^3 + y^3 + z^3$ for some integers $x, y, z$.",
+      rationale: "Booker (2019) found 33 and Booker and Sutherland (2021) found 42; the rest below 1000 have smaller solutions.",
+      predictions: ["A search to $|x|, |y|, |z| \\le 10^{16}$ finds each."], assumptions: [] },
+  ];
+  const reviews = [
+    { id: "H001.1", hypothesis: "H001", reviewer: agy, kind: "verification", verdict: "strong", correctness: 5, novelty: 1, testability: 5, round: 1,
+      summary: "Cubes modulo 9 are 0, 1 and 8, and no three of them sum to 4 or 5.", critique: "", citations: [] },
+    { id: "H001.2", hypothesis: "H001", reviewer: codex, kind: "formal", verdict: "strong", correctness: 5, novelty: 3, testability: 3, round: 1,
+      summary: "Lean proves it, as `∀ (x y z : ℤ), (x ^ 3 + y ^ 3 + z ^ 3) % 9 ≠ 4 ∧ (x ^ 3 + y ^ 3 + z ^ 3) % 9 ≠ 5`.",
+      critique: "The statement is the hypothesis's, residue by residue.\n\nChecked by Lean v4.34.1 with Mathlib v4.34.1, on propext, Classical.choice, Quot.sound. The file is `proofs/H001.lean`.",
+      citations: [] },
+  ];
+  const proofs = {
+    H001: {
+      record: { hypothesis: "H001", outcome: "proved", kind: "proof",
+        statement: "∀ (x y z : ℤ), (x ^ 3 + y ^ 3 + z ^ 3) % 9 ≠ 4 ∧ (x ^ 3 + y ^ 3 + z ^ 3) % 9 ≠ 5",
+        axioms: ["propext", "Classical.choice", "Quot.sound"],
+        notes: "The statement is the hypothesis's: for every $x, y, z$ the sum of their cubes leaves neither 4 nor 5 modulo 9.",
+        prover: codex, round: 1, task: "T0011", attempts: 2, attempt: 2, lean: "v4.34.1", mathlib: "v4.34.1", messages: [], at: now - 1800 },
+      lean: "import Mathlib\n\n/-- A cube is 0, 1 or 8 modulo 9. -/\nlemma cube_mod_nine (t : ℤ) : t ^ 3 % 9 = 0 ∨ t ^ 3 % 9 = 1 ∨ t ^ 3 % 9 = 8 := by\n" +
+        "  have h : t % 9 = 0 ∨ t % 9 = 1 ∨ t % 9 = 2 ∨ t % 9 = 3 ∨ t % 9 = 4 ∨ t % 9 = 5 ∨ t % 9 = 6 ∨ t % 9 = 7 ∨ t % 9 = 8 := by omega\n" +
+        "  rcases h with h | h | h | h | h | h | h | h | h <;> simp [pow_succ, Int.mul_emod, h]\n\n" +
+        "theorem H001 (x y z : ℤ) :\n    (x ^ 3 + y ^ 3 + z ^ 3) % 9 ≠ 4 ∧ (x ^ 3 + y ^ 3 + z ^ 3) % 9 ≠ 5 := by\n" +
+        "  rcases cube_mod_nine x with hx | hx | hx <;> rcases cube_mod_nine y with hy | hy | hy <;>\n    rcases cube_mod_nine z with hz | hz | hz <;> omega\n",
+    },
+    H002: {
+      record: { hypothesis: "H002", outcome: "open", kind: "proof",
+        statement: "∀ (n : ℤ), 0 < n → n < 1000 → n % 9 ≠ 4 → n % 9 ≠ 5 → ∃ x y z, x ^ 3 + y ^ 3 + z ^ 3 = n",
+        axioms: ["propext", "sorryAx", "Classical.choice", "Quot.sound"],
+        notes: "Stated as the hypothesis is. The witnesses for 33 and 42 are too large to check here, so the cases are left open.",
+        prover: claude, round: 1, task: "T0013", attempts: 3, attempt: 5, lean: "v4.34.1", mathlib: "v4.34.1",
+        messages: [{ severity: "warning", line: 3, column: 8, text: "declaration uses 'sorry'" }], at: now - 900 },
+      lean: "import Mathlib\n\ntheorem H002 : ∀ n : ℤ, 0 < n → n < 1000 → n % 9 ≠ 4 → n % 9 ≠ 5 →\n    ∃ x y z : ℤ, x ^ 3 + y ^ 3 + z ^ 3 = n := by\n  sorry\n",
+    },
+  };
   return {
-    slug: "sums-of-three-cubes-below-1000", title: "Sums of three cubes below 1000", discipline: "mathematics", created: now - 3600, rounds: 0,
+    slug: "sums-of-three-cubes-below-1000", title: "Sums of three cubes below 1000", discipline: "mathematics", created: now - 3600, rounds: 1,
     brief: brief("Sums of three cubes below 1000", "Mathematics",
       "Which $n < 1000$ with $n \\not\\equiv \\pm 4 \\pmod 9$ still lack a known representation $n = x^3 + y^3 + z^3$, and what search would find one?"),
-    plan: PLACEHOLDER.plan, overview: PLACEHOLDER.overview, verdicts: PLACEHOLDER.verdicts, sandbox: PLACEHOLDER.sandbox,
-    hypotheses: [], reviews: [], matches: [],
+    plan: PLACEHOLDER.plan, overview: PLACEHOLDER.overview, sandbox: PLACEHOLDER.sandbox,
+    verdicts: "# Verdicts\n\n_The Lab Engineer's verifications, newest last._\n\n## H001, round 1 — Lean: proved\n\n_Codex (gpt-6.1-sol), in 2 checks; Lean v4.34.1, Mathlib v4.34.1._\n\n" +
+      "**What Lean proved.**\n\n```lean\n∀ (x y z : ℤ), (x ^ 3 + y ^ 3 + z ^ 3) % 9 ≠ 4 ∧ (x ^ 3 + y ^ 3 + z ^ 3) % 9 ≠ 5\n```\n\nThe file is `proofs/H001.lean`.\n",
+    hypotheses, reviews, matches: [], proofs,
   };
 }
 
@@ -167,6 +210,27 @@ export function createResearchPreview(deliver = (/** @type {any} */ _event) => {
   /** @type {any} */
   let labTimer = null;
   const labEvent = () => ({ type: "labEnv", env });
+
+  /* Lean and Mathlib: missing until planned and made, each on a timer. */
+  const LEAN_HOME = "/Users/you/.proton/lean";
+  const LEAN_MISSING = { state: "missing", needs: [], free: 88_000_000_000, home: LEAN_HOME };
+  /** @type {any} */
+  let lean = LEAN_MISSING;
+  /** @type {any} */
+  let leanTimer = null;
+  const leanEvent = () => ({ type: "leanEnv", env: lean });
+  const leanPlan = () => {
+    const downloads = [
+      { what: "elan v4.2.4", host: "github.com", bytes: 2_190_845, exact: true, verified: true },
+      { what: "Lean v4.34.1 toolchain", host: "github.com", bytes: 562_038_070, exact: true, verified: false },
+      { what: "Mathlib v4.34.1 sources", host: "github.com", bytes: 700_000_000, exact: false, verified: false },
+      { what: "Mathlib's prebuilt library", host: "cache.mathlib.org", bytes: 2_400_000_000, exact: false, verified: false },
+    ];
+    return { lean: "v4.34.1", mathlib: "v4.34.1", elan: "v4.2.4", toolchain: "leanprover/lean4:v4.34.1", downloads,
+      download: downloads.reduce((n, d) => n + d.bytes, 0), disk: 17_586_826_879, kept: 14_622_597_964, free: 88_000_000_000, fits: true,
+      home: LEAN_HOME, git: "/opt/homebrew/bin/git", elanUrl: "https://github.com/leanprover/elan/releases/download/v4.2.4/elan-aarch64-apple-darwin.tar.gz",
+      elanSha256: null };
+  };
 
   /* Experiments and runs, by investigation. */
   const SPECTRUM = `import numpy as np
@@ -286,7 +350,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         id: h.id, title: h.title, author: h.author, family: family[h.author.seat], round: h.round, status: h.status,
         elo: Math.round(rating.elo), wins: rating.wins, losses: rating.losses,
         verdicts: i.reviews.filter((v) => v.hypothesis === h.id).map((v) => v.verdict),
-        parents: h.parents, duplicateOf: null, experiments: 0,
+        parents: h.parents, duplicateOf: null, experiments: 0, formal: i.proofs?.[h.id]?.record.outcome ?? null,
       };
     }).sort((a, b) => Number(a.status === "retired") - Number(b.status === "retired") || b.elo - a.elo || a.id.localeCompare(b.id));
   }
@@ -303,7 +367,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         const opponent = m.a === id ? m.b : m.a;
         return { round: m.round, opponent, opponentTitle: title(opponent), judge: m.judge, won: m.winner === id, rationale: m.rationale };
       }),
-      experiments: [], task: null,
+      experiments: [], task: null, proof: i.proofs?.[id] ?? null,
     };
   }
 
@@ -531,7 +595,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
 
   function sync() {
     return [{ type: "researchList", investigations: investigations.map(summary), open, folder: kept }, ...board(), ...literatureEvents(), ...resultsEvents(),
-      ...roundEvent(), labEvent(), ...labRunsEvent()];
+      ...roundEvent(), labEvent(), leanEvent(), ...labRunsEvent()];
   }
 
   /** @param {any} command */
@@ -778,6 +842,51 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
           deliver(labEvent());
         }, 800);
         return [labEvent()];
+      case "leanPlan":
+        clearTimeout(leanTimer);
+        lean = { state: "planning" };
+        leanTimer = setTimeout(() => { lean = { state: "planned", plan: leanPlan() }; deliver(leanEvent()); }, 1200);
+        return [leanEvent()];
+      case "leanCreate": {
+        if (lean.state !== "planned") return [];
+        // Each stage in a few ticks: what it downloads, and what it ran.
+        const stages = [["elan", 2_190_845, "curl -q -fsSL --proto =https … -o elan.tar.gz"],
+          ["toolchain", 562_038_070, "elan toolchain install leanprover/lean4:v4.34.1"], ["mathlib", 700_000_000, "lake update"],
+          ["library", 2_400_000_000, "lake exe cache get"], ["finding", 0, "lake env printenv LEAN_PATH"], ["checking", 0, "lean --json --threads=4 Proof.lean"],
+          ["finishing", 0, ""]];
+        let at = 0;
+        let step = 0;
+        const show = () => {
+          const [stage, total, ran] = stages[at];
+          lean = { state: "making", stage, done: Math.round((Number(total) * step) / 3), total, log: ran ? [`$ ${ran}`] : [] };
+        };
+        show();
+        clearInterval(leanTimer);
+        leanTimer = setInterval(() => {
+          step++;
+          if (step > 3 || !stages[at][1]) {
+            at++;
+            step = 0;
+          }
+          if (at >= stages.length) {
+            clearInterval(leanTimer);
+            lean = { state: "ready", lean: "v4.34.1", mathlib: "v4.34.1", commit: "6f3a1c2e9b5d47a0", size: 14_100_000_000, home: LEAN_HOME };
+          } else {
+            show();
+          }
+          deliver(leanEvent());
+        }, 400);
+        return [leanEvent()];
+      }
+      case "leanCancel":
+        clearInterval(leanTimer);
+        clearTimeout(leanTimer);
+        lean = LEAN_MISSING;
+        return [leanEvent()];
+      case "leanRemove":
+        lean = { state: "removing" };
+        setTimeout(() => { lean = LEAN_MISSING; deliver(leanEvent()); }, 800);
+        return [leanEvent()];
       case "researchSeat": {
         const r = roundOf(open);
         if (command.enabled) r.off.delete(command.seat);

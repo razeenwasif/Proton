@@ -32,6 +32,7 @@ import { createTerminalGL, xtermHex } from "./term-gl.js";
 import { createClaude } from "./claude.js";
 import { createResearch } from "./research.js";
 import { createLab } from "./lab.js";
+import { createLean } from "./lean.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -863,6 +864,8 @@ const claude = createClaude({
 const research = createResearch({ root: document, dispatch });
 /* The Lab: the Python an investigation's code runs in, made with your say-so. */
 const lab = createLab({ root: document, dispatch, readLab });
+/* Lean and Mathlib, in which a mathematics investigation's proofs are checked. */
+const lean = createLean({ root: document, dispatch });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -4831,6 +4834,7 @@ function renderEvent(event) {
 
     case "researchBoard":
       research?.board(event);
+      lean?.discipline(event.discipline);
       break;
 
     case "researchHypothesis":
@@ -4859,6 +4863,10 @@ function renderEvent(event) {
 
     case "labEnv":
       lab?.env(event);
+      break;
+
+    case "leanEnv":
+      lean?.env(event);
       break;
 
     case "researchLab":

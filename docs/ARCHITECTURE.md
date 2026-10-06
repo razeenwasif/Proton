@@ -868,7 +868,7 @@ left alone), and closed out either way.
 
 | | |
 |---|---|
-| macOS | Seatbelt via `sandbox-exec`: network denied; writes only in the run's folder; the home folder unreadable but for that folder and the Lab's Python |
+| macOS | Seatbelt via `sandbox-exec`: network denied; writes only in the run's folder; the home folder unreadable but for that folder and the Lab's Python (or Proton's Lean) — the folders on the way to them may be looked at, not into, since macOS's `realpath(3)` asks each for its attributes |
 | Linux | bubblewrap: the root read only, the home folder replaced by an empty one, the Lab's Python and the run's folder bound back, no network |
 | Either | tried on the machine before it is trusted: a probe in a stand-in home must write its folder and be refused writing and reading beside it |
 | Neither | runs only when the scientist says so, knowing the code can do what they can; the record says it ran unsandboxed |
@@ -971,6 +971,87 @@ scientist says otherwise. Off, nothing is asked of anybody: the scientist's
 searches and lookups are refused with the reason, and whatever was being asked
 is let go. Research outside the app (tests) asks nobody: its source is
 `Offline`, or a script.
+
+### Lean
+
+A mathematics investigation's leading hypothesis is stated in Lean 4 with
+Mathlib each round, and proved — or its negation — where it can be. Lean and
+Mathlib are Proton's own, one for the machine in `~/.proton/lean`, made as the
+Lab's Python is, on two say-sos (`proton-lab::lean`). Planning asks GitHub
+for Lean's newest stable releases and takes the newest one Mathlib has tagged
+(Mathlib's `lean-toolchain` at that tag must name it), and elan's latest; the
+plan says what each download costs — elan's and the toolchain's sizes exactly,
+Mathlib's sources and prebuilt library as estimates, since only its cache tool
+knows them — what it takes on disk at its fullest and keeps, and whether there
+is room. Making it downloads elan with curl and checks it against the SHA-256
+GitHub publishes for it, installs it with no default toolchain, installs the
+plan's Lean with it (elan unpacks the `.tar.zst`, which macOS's `tar` cannot
+read, and checks it against no digest, so the plan does not call it verified),
+writes a Lake project requiring Mathlib at its tag, runs `lake update` (with
+`MATHLIB_NO_CACHE_ON_UPDATE`, so the library is a step of its own) and `lake exe
+cache get`, asks Lake where Lean finds Mathlib, and checks a file importing
+Mathlib in the sandbox checks run in. Then it deletes what was downloaded only
+to be unpacked, measures itself, and writes `ready.json` last: a Lean is ready
+only when that marker says so and everything it names is there, inside
+`~/.proton/lean`, and nothing is started to find out. Every step is a process
+group of its own with none of the person's environment but what a download
+needs and a `HOME` inside `~/.proton/lean`, so nothing is written to `~/.elan`
+or `~/.cache` and no `.curlrc` or `.gitconfig` changes what is made. A making
+cancelled or failed is taken away whole; one cut short by Proton closing is
+stopped and taken away the next time Proton looks (`making.json`, as a run's
+record is reaped); removing takes the marker first, and waits for a check.
+
+The round's Proof step (`proton-research::supervisor`) comes once the leader
+is verified, in mathematics, with Lean made, unless Lean has already settled
+that hypothesis or found no statement of it. A seat of another model family
+than its author — the Lab Engineer first — is told to state it as the theorem
+Proton names after it, `H004`, at the top level, importing Mathlib alone, and
+to prove it or its negation; it may read Mathlib's sources (Claude Code is
+given the folder with `--add-dir`; Codex's sandbox reads it already) but cannot
+run Lean. Its answer, `{label, kind: proof | disproof | none, lean, notes}`, is
+vetted (`proton-research::lean`): the file is read as Lean reads it, comments
+and strings skipped, and refused if it imports anything but Mathlib, uses a
+word that makes Lean run code, take something on trust or skip its checks
+(`#eval`, `axiom`, `elab` and `macro` and `syntax`, `run_cmd`, `native_decide`,
+`implemented_by`, simprocs, Lean's own namespaces and `IO`, `debug.` options),
+leaves a namespace open, or lacks the theorem; over 100 KB it is refused, not
+cut. The file Lean is given ends with Proton's two questions, `#check @H004`
+and `#print axioms H004`, on lines it records, and their answers are read from
+those lines alone, so nothing the file prints can pass for them. A proof counts
+only on `propext`, `Classical.choice` and `Quot.sound`; with `sorry` in it the
+statement stands and the proof is open.
+
+The supervisor returns `Answered::Check`; the driver makes the attempt's
+folder, `proofs/H004/attempt-N/`, keeps the call's conversation open, and
+checks the file through a `Checker` (`research::lean`): `Live` runs the
+toolchain's own `lean --json --threads=N` with `LEAN_PATH`, no elan and no
+Lake, in the Lab's sandbox with `~/.proton/lean` its one other readable tree,
+a process group with limits on CPU time (its timeout times its threads, and
+30 s) and file size, one check at a time on the machine; `Offline` never
+starts one; `Scripted` answers as a test says. While Lean has a proof only the
+check is looked at, so an answer is never read twice. What Lean said goes to
+`lean_checked`: a proof or a disproof ends the call; Lean's errors (6 KB at
+most, with their lines), a `sorry`, or a refused file go back to the prover
+in the same conversation, with the call's whole time again, while the proof's
+calls (`LeanPolicy.calls`, three a round, however many seats make them) and the
+round can spare one, keeping back what the evolution and the overview still
+need. A statement Lean accepted with `sorry` is kept meanwhile, and written as
+an open proof when the calls run out. What it comes to is `proofs/H004.lean`
+beside `proofs/H004.json`, an entry in `VERDICT.md`, and — for a proof or a
+disproof only — a formal review, Strong or Flawed, which the leader's score
+sees; a disproof retires nothing by itself. The overview waits for the proof;
+the evolution does not. Judges are told what Lean has settled; the evolution
+and the overview what it has said. A check is stopped with its round, and one
+a crashed Proton left running is settled when the investigation is opened; a
+round closed mid-check asks again with the file that was being checked.
+
+`LeanPolicy` (on, three calls, 300 s a check) is on for investigations made
+before there was Lean too: nothing leaves the machine. Checks run without
+asking only in a sandbox; on a machine with none, a round says Lean is not
+ready. The tests read hand-written `lean --json` output
+(`crates/proton-research/fixtures/lean`), play rounds with a scripted prover
+and Lean, and run a whole round through `Live` with a stand-in `lean` in a
+stand-in home, in the sandbox; a real Lean is the scientist's to make.
 
 ### Trace
 

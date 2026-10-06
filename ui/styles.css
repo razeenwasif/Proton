@@ -3809,6 +3809,18 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .rs-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rs-name b { color: var(--cc-accent); font-weight: 600; margin-right: 4px; }
 .rs-dup, .rs-tag { margin-left: 8px; padding: 1px 6px; border-radius: 4px; background: var(--cc-raise-2); color: var(--cc-muted); font-size: var(--z-2xs); }
+/* What Lean has said of a hypothesis: settled in colour, open or unstated plainly. */
+.rs-formal { margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: var(--z-2xs); font-weight: 600; white-space: nowrap;
+  background: color-mix(in srgb, var(--f, var(--cc-faint)) 16%, transparent); color: var(--f, var(--cc-muted)); }
+.rs-formal[data-formal="proved"], .rs-proof[data-formal="proved"] { --f: var(--ok); }
+.rs-formal[data-formal="disproved"], .rs-proof[data-formal="disproved"] { --f: var(--err); }
+.rs-formal[data-formal="open"], .rs-proof[data-formal="open"] { --f: var(--warn); }
+.rs-proof { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--f, var(--cc-line)) 40%, var(--cc-line)); border-radius: 8px; }
+.rs-proof .rs-proof-head { margin: 0 0 2px; color: var(--f, var(--cc-text)); }
+.rs-proof-what { display: grid; gap: 4px; margin: 0 0 10px; font-size: var(--z-2xs); }
+.rs-proof-file { margin: 8px 0 0; }
+.rs-proof-messages { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.rs-proof-messages pre { margin: 2px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--cc-code); color: var(--cc-muted); font: 11px/1.5 var(--zed); white-space: pre-wrap; }
 .rs-seat { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--z-2xs); color: var(--cc-muted); }
 .rs-seat[data-seat="claude"] { color: var(--cc-accent); }
 .rs-seat[data-seat="codex"] { color: color-mix(in srgb, var(--ok) 70%, var(--cc-faint)); }
@@ -4083,6 +4095,17 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .lab-packages td { padding: 1px 6px 1px 0; color: var(--cc-soft); }
 .lab-packages td:last-child { text-align: right; color: var(--cc-muted); white-space: nowrap; }
 .lab-confirm { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--err) 40%, transparent); border-radius: 8px; }
+/* Lean's card: the stages of a making, ticked as they are done. */
+.lean-env[hidden] { display: none; }
+.lean-stages { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; color: var(--cc-faint); }
+.lean-stages li { display: flex; align-items: center; gap: 6px; padding-left: 19px; }
+.lean-stages li.done { padding-left: 0; color: var(--cc-muted); }
+.lean-stages li.on { color: var(--cc-text); }
+.lean-needs { margin: 0; padding-left: 18px; color: var(--cc-text); }
+.lean-downloads td { vertical-align: top; }
+.lean-downloads td:nth-child(2) { white-space: nowrap; text-align: right; color: var(--cc-text); }
+.lean-downloads td:nth-child(3) { width: 16px; padding-right: 0; }
+.lean-downloads p { margin: 6px 0 0; }
 
 /* ── what waits, and what has run ── */
 .lab-work { display: grid; gap: 10px; padding: 12px 16px 24px; font: var(--z-2xs)/1.6 var(--cc-font); color: var(--cc-soft); }

@@ -738,6 +738,22 @@ what is cached already, with Make it and Not now. Making it shows what has downl
 has, and asks before it is removed. Nothing is fetched or installed on a
 step the scientist did not take.
 
+**Lean is the scientist's to make too, and proves what it can.** Below the
+Lab's Python, for a mathematics investigation — and whenever Lean is made,
+being made or failed — a card in the same two steps: what Lean is for and
+where it would go, then a plan of what it downloads, each size said exactly
+or as about, a tick on what is checked against a published digest, and
+whether there is room; Make it is not offered without. Making it ticks off
+its stages — elan, Lean's toolchain, Mathlib's sources, its prebuilt library,
+finding it, a first proof, tidying up — with a bar for what each downloads,
+and Stop keeps nothing. On the leaderboard a hypothesis Lean has spoken of
+carries a badge beside its id — Lean ✓ proved, Lean … open, Lean ✗ disproved,
+Lean — no statement. Its page has a Formal proof section framed in the same
+colour: what Lean proved, or accepted as stated, beside the hypothesis's own
+statement; the prover's case that they are the same; the axioms; the file,
+coloured, with Copy, folded once it is proved; and what Lean said of it. In
+Activity the step is Proof, and a call Lean is checking is Checking with Lean.
+
 **Nothing runs unread.** What an agent proposes to run waits in the Lab
 under Waiting for you: what it would test and what it expects, who proposed
 it, and the code, coloured, the first lines shown until it is opened. A round

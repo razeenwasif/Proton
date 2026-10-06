@@ -1939,6 +1939,93 @@ await test('The Lab\'s Python is planned, then made, each on its own say-so', as
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('Lean is shown for mathematics, planned and made on its own say-sos, its sizes exact or about', async () => {
+  await win.dispatch({type: 'setMode', mode: 'research'}); await settle();
+  const box = $('[data-lean-env]');
+  const text = () => box.textContent.replace(/\s+/g, ' ');
+  const home = '/Users/you/.proton/lean';
+  const missing = {type: 'leanEnv', env: {state: 'missing', needs: [], free: 88e9, home}};
+  const maths = {...researchBoard(), discipline: 'mathematics'};
+  assert(!win.commands.some((c) => c.type.startsWith('lean')), 'Lean was asked before it was told to');
+  await win.pushEvents([missing, researchBoard()]);
+  assert(box.hidden, 'Lean is offered to a physics investigation');
+  await win.pushEvents([maths]);
+  assert(!box.hidden && text().includes('~/.proton/lean') && text().includes('Nothing is downloaded yet'), `the first say-so is not said: ${text()}`);
+  let before = win.commands.length;
+  box.querySelector('[data-lean="plan"]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'leanPlan'), 'planning was not asked for');
+  const downloads = [{what: 'elan v4.2.4', host: 'github.com', bytes: 2190845, exact: true, verified: true},
+    {what: 'Lean v4.34.1 toolchain', host: 'github.com', bytes: 562038070, exact: true, verified: false},
+    {what: "Mathlib's prebuilt library", host: 'cache.mathlib.org', bytes: 2400000000, exact: false, verified: false}];
+  const plan = {lean: 'v4.34.1', mathlib: 'v4.34.1', elan: 'v4.2.4', toolchain: 'leanprover/lean4:v4.34.1', downloads, download: 2964228915,
+    disk: 17e9, kept: 14e9, free: 88e9, fits: true, home, git: '/opt/homebrew/bin/git', elanUrl: 'https://github.com/x', elanSha256: 'ab'};
+  await win.pushEvents([{type: 'leanEnv', env: {state: 'planned', plan}}]);
+  assert(box.querySelectorAll('.lean-downloads tr').length === 3 && text().includes('536.0 MB') && text().includes('about 2.24 GB'),
+    `the sizes are not said as exact or as estimates: ${text()}`);
+  assert(box.querySelectorAll('.lean-downloads tr')[0].querySelector('.lab-ok') && !box.querySelectorAll('.lean-downloads tr')[1].querySelector('.lab-ok'),
+    'what is checked against its digest is not told from what is not');
+  await win.pushEvents([{type: 'leanEnv', env: {state: 'planned', plan: {...plan, free: 5e9, fits: false}}}]);
+  assert(box.querySelector('[data-lean="create"]').disabled && text().includes('There is not room for it'), 'a plan without room can be made');
+  await win.pushEvents([{type: 'leanEnv', env: {state: 'planned', plan}}]);
+  before = win.commands.length;
+  box.querySelector('[data-lean="create"]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'leanCreate'), 'making it was not asked for');
+  await win.pushEvents([{type: 'leanEnv', env: {state: 'making', stage: 'library', done: 1200000000, total: 2400000000, log: ['$ lake exe cache get']}}]);
+  assert(box.querySelector('.lab-bar > i').style.width === '50%' && box.querySelectorAll('.lean-stages li.done').length === 3
+    && box.querySelector('.lean-stages li.on')?.dataset.stage === 'library' && box.querySelector('.lab-log')?.textContent.includes('lake exe cache get'),
+    `making it shows no stage: ${text()}`);
+  await win.pushEvents([{type: 'leanEnv', env: {state: 'ready', lean: 'v4.34.1', mathlib: 'v4.34.1', commit: '6f3a1c2e9b5d', size: 14e9, home}}]);
+  assert(text().includes('Lean v4.34.1') && text().includes('Mathlib v4.34.1') && text().includes('6f3a1c2e'), `a ready Lean does not say what it is: ${text()}`);
+  // Made, it is shown whatever is open: it is the machine's.
+  await win.pushEvents([researchBoard()]);
+  assert(!box.hidden, 'a made Lean is hidden from a physics investigation');
+  before = win.commands.length;
+  box.querySelector('[data-lean="confirm"]').click(); await settle();
+  assert(box.querySelector('.lab-confirm')?.textContent.includes('Proofs already checked keep their files'), 'removing does not ask first');
+  box.querySelector('[data-lean="remove"]').click(); await settle();
+  const sent = win.commands.slice(before).map((c) => c.type).filter((t) => t.startsWith('lean'));
+  assert(sent.join() === 'leanRemove', `wrong commands: ${sent}`);
+  await win.pushEvents([{type: 'leanEnv', env: {state: 'failed', step: 'library', why: 'lake stopped with exit status 1', log: ['x']}}]);
+  assert(text().includes("Downloading Mathlib's library failed") && text().includes('Nothing it made is kept'), `a failure is not said: ${text()}`);
+  await win.pushEvents([{type: 'leanEnv', env: {state: 'missing', needs: ['git, to fetch Mathlib'], free: 88e9, home}}, maths]);
+  assert(text().includes('git, to fetch Mathlib') && !box.querySelector('[data-lean="plan"]'), 'without git, Lean offers what it cannot do');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  await win.pushEvents([missing, researchBoard()]);
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
+await test('What Lean said of a hypothesis is on its row, and whole in its detail', async () => {
+  const ws = await openSky(researchRound({status: 'idle'}));
+  const board = ws.querySelector('[data-research-board]') ?? ws;
+  const rows = researchBoard().hypotheses.map((h, n) => ({...h, formal: n === 0 ? 'proved' : 'open'}));
+  await win.pushEvents([{...researchBoard(), hypotheses: rows}]);
+  const badges = [...ws.querySelectorAll('.rs-row .rs-formal')].map((b) => `${b.dataset.formal}:${b.textContent}`);
+  assert(badges.join() === 'proved:Lean ✓,open:Lean …', `the rows do not say what Lean said: ${badges}`);
+  const statement = '∀ (n : ℕ), n + 0 = n';
+  const record = {hypothesis: 'H002', outcome: 'proved', kind: 'proof', statement, axioms: ['propext'], notes: 'It is the hypothesis, for every $n$.',
+    prover: {seat: 'claude', model: 'claude-opus-5-5'}, round: 1, task: 'T0012', attempts: 2, attempt: 2, lean: 'v4.34.1', mathlib: 'v4.34.1', messages: [], at: 0};
+  const lean = 'import Mathlib\n\ntheorem H002 (n : ℕ) : n + 0 = n := by simp\n';
+  const detail = (proof) => ({type: 'researchHypothesis', slug: 'sky', detail: {row: rows[0], statement: 'Adding zero changes nothing.', rationale: '',
+    predictions: [], assumptions: [], children: [], experiments: [], task: null, matches: [],
+    reviews: [{id: 'H002.2', reviewer: {seat: 'claude', model: 'claude-opus-5-5'}, kind: 'formal', verdict: 'strong', correctness: 5, novelty: 3, testability: 3,
+      round: 1, summary: `Lean proves it, as \`${statement}\`.`, critique: 'Checked by Lean v4.34.1.', citations: []}], proof}});
+  await win.pushEvents([detail({record, lean})]);
+  const proof = ws.querySelector('.rs-proof');
+  const said = proof?.textContent.replace(/\s+/g, ' ') ?? '';
+  assert(proof?.dataset.formal === 'proved' && said.includes('Proved in Lean') && said.includes('What Lean proved') && said.includes(statement), `the proof is not drawn: ${said}`);
+  assert(said.includes('2 checks') && said.includes('Lean v4.34.1') && said.includes('On propext.'), `the proof does not say how it was checked: ${said}`);
+  assert(proof.querySelector('.rs-proof-file code[data-lang="lean"] .k')?.textContent === 'import', 'the file is not Lean, coloured');
+  assert(ws.querySelector('.rs-review')?.textContent.includes('Formal proof by'), 'the formal review is not named as one');
+  // Open: Lean's statement as accepted, the file unfolded, and what Lean said.
+  await win.pushEvents([detail({record: {...record, outcome: 'open', axioms: ['sorryAx'], messages: [{severity: 'warning', line: 3, column: 8, text: "declaration uses 'sorry'"}]}, lean})]);
+  const open = ws.querySelector('.rs-proof');
+  assert(open.dataset.formal === 'open' && open.textContent.includes('What Lean accepted as stated') && open.querySelector('.rs-proof-file').open
+    && open.textContent.includes("declaration uses 'sorry'") && !open.textContent.includes('On sorryAx'), `an open proof is not drawn as one: ${open.textContent}`);
+  await win.pushEvents([detail(null)]);
+  assert(!ws.querySelector('.rs-proof'), 'a hypothesis Lean has said nothing of shows a proof');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  await win.pushEvents([{type: 'researchHypothesis', slug: 'sky', detail: null}]);
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('An experiment is read, then run in the sandbox or turned down, and its run opens whole', async () => {
   await openSky(researchRound({status: 'idle'}));
   const work = $('[data-lab-work]');

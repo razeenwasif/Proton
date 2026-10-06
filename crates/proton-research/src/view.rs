@@ -9,8 +9,8 @@ use crate::cite::{self, Check, Checked, Ident};
 use crate::elo::{self, Rating};
 use crate::literature;
 use crate::model::{
-    Access, AddedBy, Author, Discipline, Experiment, ExperimentStatus, Family, Hypothesis, HypothesisStatus, LiteratureSource, Match, Paper, Review,
-    ReviewKind, Role, Seat, Verdict,
+    Access, AddedBy, Author, Discipline, Experiment, ExperimentStatus, Family, FormalOutcome, Hypothesis, HypothesisStatus, LiteratureSource, Match, Paper,
+    ProofRecord, Review, ReviewKind, Role, Seat, Verdict,
 };
 use crate::proximity::{Index, DUPLICATE};
 use crate::store::Folder;
@@ -58,6 +58,8 @@ pub struct HypothesisRow {
     /// An older hypothesis it says the same as.
     pub duplicate_of: Option<String>,
     pub experiments: u32,
+    /// What Lean has said of it, if it has.
+    pub formal: Option<FormalOutcome>,
 }
 
 /// Everything about one hypothesis.
@@ -81,6 +83,17 @@ pub struct HypothesisDetail {
     pub matches: Vec<MatchView>,
     pub experiments: Vec<String>,
     pub task: Option<String>,
+    /// What proving it in Lean came to, and the file Lean checked.
+    pub proof: Option<ProofView>,
+}
+
+/// What Lean has said of a hypothesis, and the file it checked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct ProofView {
+    pub record: ProofRecord,
+    pub lean: String,
 }
 
 /// A DOI or an arXiv id the team cited, and what checking it found.
@@ -369,18 +382,29 @@ pub struct Board {
     /// What checking the names the team cites found, by key.
     pub citations: BTreeMap<String, Checked>,
     pub ratings: BTreeMap<String, Rating>,
+    /// What proving hypotheses in Lean came to, and the files it checked.
+    pub proofs: Vec<ProofRecord>,
+    pub proof_files: BTreeMap<String, String>,
 }
 
 impl Board {
     pub fn read(folder: &Folder) -> Board {
         let mut board = Board::from(folder.hypotheses(), folder.reviews(), folder.matches(), folder.experiments()).with_papers(folder.papers());
         board.citations = folder.citations();
-        board
+        let proofs = folder.proofs();
+        let files = proofs.iter().filter_map(|p| Some((p.hypothesis.clone(), folder.proof_file(&p.hypothesis)?))).collect();
+        board.with_proofs(proofs, files)
     }
 
     pub fn from(hypotheses: Vec<Hypothesis>, reviews: Vec<Review>, matches: Vec<Match>, experiments: Vec<Experiment>) -> Board {
         let ratings = elo::ratings(&matches);
-        Board { hypotheses, reviews, matches, experiments, papers: Vec::new(), citations: BTreeMap::new(), ratings }
+        Board { hypotheses, reviews, matches, experiments, papers: Vec::new(), citations: BTreeMap::new(), ratings, proofs: Vec::new(), proof_files: BTreeMap::new() }
+    }
+
+    pub fn with_proofs(mut self, proofs: Vec<ProofRecord>, files: BTreeMap<String, String>) -> Board {
+        self.proofs = proofs;
+        self.proof_files = files;
+        self
     }
 
     pub fn with_papers(mut self, papers: Vec<Paper>) -> Board {
@@ -519,6 +543,7 @@ impl Board {
             parents: h.parents.clone(),
             duplicate_of: duplicates.get(&h.id).cloned(),
             experiments: self.experiments.iter().filter(|e| e.hypothesis.as_deref() == Some(&h.id)).count() as u32,
+            formal: self.proofs.iter().find(|p| p.hypothesis == h.id).map(|p| p.outcome),
         }
     }
 
@@ -600,6 +625,7 @@ impl Board {
                 .collect(),
             experiments: self.experiments.iter().filter(|e| e.hypothesis.as_deref() == Some(id)).map(|e| e.id.clone()).collect(),
             task: h.task.clone(),
+            proof: self.proofs.iter().find(|p| p.hypothesis == id).map(|p| ProofView { record: p.clone(), lean: self.proof_files.get(id).cloned().unwrap_or_default() }),
         })
     }
 }
@@ -726,5 +752,35 @@ mod tests {
         assert_eq!(detail.matches.len(), 1);
         assert!(!detail.matches[0].won && detail.matches[0].opponent == "H004" && detail.matches[0].opponent_title == "Title H004");
         assert!(board.detail("H999").is_none());
+    }
+
+    #[test]
+    fn what_lean_said_of_a_hypothesis_is_on_its_row_and_whole_in_its_detail() {
+        use crate::model::{FormalOutcome, ProofKind, ProofRecord};
+        let record = ProofRecord {
+            hypothesis: "H002".into(),
+            outcome: FormalOutcome::Proved,
+            kind: ProofKind::Proof,
+            statement: Some("∀ (n : ℕ), n + 0 = n".into()),
+            axioms: vec!["propext".into()],
+            notes: "The statement is the hypothesis's.".into(),
+            prover: Author::new(Seat::Codex, "gpt-6.1-sol"),
+            round: 1,
+            task: Some("T0012".into()),
+            attempts: 2,
+            attempt: 2,
+            lean: "v4.34.1".into(),
+            mathlib: "v4.34.1".into(),
+            messages: Vec::new(),
+            at: 0,
+        };
+        let files = BTreeMap::from([("H002".to_string(), "import Mathlib\n".to_string())]);
+        let board = Board::from(vec![h("H001", "a", HypothesisStatus::Active, &[]), h("H002", "b", HypothesisStatus::Active, &[])], Vec::new(), Vec::new(), Vec::new())
+            .with_proofs(vec![record.clone()], files);
+        let formal: Vec<(String, Option<FormalOutcome>)> = board.rows().into_iter().map(|r| (r.id, r.formal)).collect();
+        assert!(formal.contains(&("H002".into(), Some(FormalOutcome::Proved))) && formal.contains(&("H001".into(), None)), "{formal:?}");
+        let proof = board.detail("H002").unwrap().proof.expect("its proof");
+        assert_eq!((proof.record, proof.lean.as_str()), (record, "import Mathlib\n"));
+        assert!(board.detail("H001").unwrap().proof.is_none());
     }
 }

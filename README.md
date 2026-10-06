@@ -54,7 +54,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-data/` | Notebooks and the Jupyter kernel behind Data mode |
 | `crates/proton-research/` | Research's investigations — the files each is, and the co-scientist round that grows it |
 | `crates/proton-literature/` | Research's literature — arXiv, Semantic Scholar and OpenAlex asked politely, citations checked, open PDFs kept |
-| `crates/proton-lab/` | Research's Lab — the Python its code runs in, made with your say-so |
+| `crates/proton-lab/` | Research's Lab — the Python its code runs in, and Lean with Mathlib, made with your say-so |
 | `crates/proton-vcs/` | The gutter, and what git considers changed |
 | `crates/proton-dap/` | The debug-adapter client |
 | `crates/proton-term/` | The pseudo-terminal, and the screen it paints |
@@ -140,7 +140,14 @@ of the code and environment by digest and of who approved it. Its pictures are
 drawn in the Lab, and its 3D scenes — spheres and bonds, points, lines, arrows
 and meshes, in frames for anything that moves — open there in three.js to be
 turned and played. What a run showed goes back to the team: a seat of another
-model family reviews it against its hypothesis, in the round or the next.
+model family reviews it against its hypothesis, in the round or the next. In
+mathematics, the leading hypothesis is stated in Lean 4 with Mathlib each round
+and proved — or its negation — by a seat of another family, Lean's errors going
+back to it until it is proved or its three calls are spent; Lean checks every
+file in the sandbox, a proof counts only on Lean's standard axioms, and the
+hypothesis shows Lean's own statement of what was proved beside its own. Lean and
+Mathlib are Proton's, in `~/.proton/lean` (about 15 GB), made with your say-so
+twice like the Lab's Python.
 **Design** · a web builder with a layer tree and an artboard, two-way bound to
 real component source and design tokens.
 **Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a

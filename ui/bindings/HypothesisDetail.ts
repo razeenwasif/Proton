@@ -2,6 +2,7 @@
 import type { HypothesisRow } from "./HypothesisRow";
 import type { IdentCheck } from "./IdentCheck";
 import type { MatchView } from "./MatchView";
+import type { ProofView } from "./ProofView";
 import type { ReviewView } from "./ReviewView";
 
 /**
@@ -20,4 +21,8 @@ checks: Array<IdentCheck>,
 /**
  * What was evolved from it.
  */
-children: Array<string>, reviews: Array<ReviewView>, matches: Array<MatchView>, experiments: Array<string>, task: string | null, };
+children: Array<string>, reviews: Array<ReviewView>, matches: Array<MatchView>, experiments: Array<string>, task: string | null, 
+/**
+ * What proving it in Lean came to, and the file Lean checked.
+ */
+proof: ProofView | null, };

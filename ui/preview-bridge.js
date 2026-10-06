@@ -880,7 +880,7 @@ FCM: NON-DROP FRAME
     if (command.type.startsWith("claude") || command.type.startsWith("chatFolder") || command.type === "forgetArtifact" || command.type === "openLink") {
       return claude.command(command);
     }
-    if (command.type.startsWith("research") || command.type.startsWith("lab")) return research.command(command);
+    if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
     if (command.type === "runCell") {
       // The shape of a real run: the cell goes busy, and the answer arrives
       // later on its own — which is what the panel has to survive.

@@ -152,10 +152,15 @@ cover its Python's two say-sos, from conda or — with no conda — PyPI, a
 proposal read and run or turned down (and said to be unsandboxed where there
 is no sandbox), a run opened whole, its pictures read through `read_lab`, a
 scene drawn or — without WebGL — said not to be, and the switch that lets
-proposals run unasked offered only with a sandbox. `npm run test:unit` checks
+proposals run unasked offered only with a sandbox. The Lean checks cover its
+card — shown for mathematics, or once made; its plan's sizes exact or about,
+and what is checked against a digest; Make it withheld without room; a making's
+stages; ready, removing, a failure, and a machine without git — and a
+hypothesis's badge and Formal proof section, proved and open. `npm run test:unit` checks
 what the composer reads as a hypothesis or a paper, the literature's sources
-line, sizes, and the 3D view's geometry.
+line, sizes, the 3D view's geometry, and Lean's colouring.
 The rounds, the runs and the sandbox are exercised in Rust:
 `cargo test -p proton-core --lib research::` plays rounds on scripted engines,
 and `cargo test -p proton-lab` drives a fake conda and a fake Python's venv
-and pip, real runs and, on macOS, the Seatbelt fence.
+and pip, real runs and, on macOS, the Seatbelt fence — and makes Lean with
+stand-ins for curl, elan and lake, and checks files with a stand-in Lean.

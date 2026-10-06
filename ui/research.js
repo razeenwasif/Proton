@@ -86,6 +86,17 @@ const KINDS = /** @type {Record<string, string>} */ ({
   review: "Review", verification: "Verification", simulation: "Simulation review", formal: "Formal proof",
 });
 
+/** What Lean has said of a hypothesis: its badge on the leaderboard, and its heading. */
+const FORMAL = /** @type {Record<string, {badge: string, title: string, head: string}>} */ ({
+  proved: { badge: "Lean ✓", title: "Proved in Lean", head: "Proved in Lean" },
+  open: { badge: "Lean …", title: "Stated in Lean; the proof is open", head: "Stated in Lean — the proof is open" },
+  disproved: { badge: "Lean ✗", title: "Its negation is proved in Lean", head: "Disproved in Lean — its negation is proved" },
+  unformalized: { badge: "Lean —", title: "No faithful statement in Lean was found", head: "Not stated in Lean" },
+});
+
+/** What a review's longer part is called, by its kind. */
+const FOLDS = /** @type {Record<string, string>} */ ({ verification: "Derivation", formal: "How Lean checked it" });
+
 /** What a task's state is called. */
 const STATES = /** @type {Record<string, string>} */ ({
   ready: "Waiting", running: "Working", repairing: "Mending its answer", checking: "Checking with Lean", done: "Done",
@@ -378,9 +389,11 @@ export function createResearch(host) {
       if (!retired) rank++;
       const dup = h.duplicateOf ? `<span class="rs-dup" title="Says what ${esc(h.duplicateOf)} says">≈ ${esc(h.duplicateOf)}</span>` : "";
       const pin = h.status === "pinned" ? `<span class="rs-tag">pinned</span>` : "";
+      const said = h.formal ? FORMAL[h.formal] : null;
+      const formal = said ? `<span class="rs-formal" data-formal="${esc(h.formal ?? "")}" title="${esc(said.title)}">${esc(said.badge)}</span>` : "";
       return `<button class="rs-row${retired ? " retired" : ""}" data-research-hypothesis="${esc(h.id)}">` +
         `<span class="rs-rank">${retired ? "–" : rank}</span>` +
-        `<span class="rs-name"><b>${esc(h.id)}</b> ${esc(h.title)}${pin}${dup}</span>` +
+        `<span class="rs-name"><b>${esc(h.id)}</b>${formal} ${esc(h.title)}${pin}${dup}</span>` +
         `<span class="rs-seat" data-seat="${esc(h.author.seat)}" title="${esc(who(h.author))}">${esc(SEATS[h.author.seat] ?? h.author.seat)}</span>` +
         `<span class="rs-elo">${h.elo}</span>` +
         `<span class="rs-wl">${h.wins}–${h.losses}</span>` +
@@ -411,6 +424,37 @@ export function createResearch(host) {
       button("retired", "Retire", "Out of the tournament");
   }
 
+  /** Lean code, coloured, with a copy button. @param {string} code */
+  const lean = (code) => markdown(`~~~~lean\n${code.replace(/\s+$/, "")}\n~~~~`);
+
+  /** What Lean said of a hypothesis: the statement it proved or accepted,
+   *  beside the hypothesis's own; the prover's case that they are the same;
+   *  the file; and what Lean said of it, when that was not a proof.
+   *  @param {Detail} d */
+  function proofHtml(d) {
+    const p = d.proof;
+    if (!p) return "";
+    const r = p.record;
+    const settled = r.outcome === "proved" || r.outcome === "disproved";
+    const checks = `${r.attempts} ${r.attempts === 1 ? "check" : "checks"}`;
+    const meta = [who(r.prover), `round ${r.round}`, ...(r.outcome === "unformalized" ? [] : [checks, `Lean ${r.lean}`, `Mathlib ${r.mathlib}`])].map(esc).join(" · ");
+    const statement = r.statement
+      ? `<div class="rs-proof-what"><span class="rs-faint">${settled ? "What Lean proved" : "What Lean accepted as stated"}</span>${lean(r.statement)}</div>` : "";
+    const axioms = settled ? `<p class="rs-faint">On ${r.axioms.length ? r.axioms.map(esc).join(", ") : "no axioms"}.</p>` : "";
+    const file = p.lean.trim()
+      ? `<details class="rs-fold rs-proof-file"${settled ? "" : " open"}><summary>proofs/${esc(r.hypothesis)}.lean</summary>${lean(p.lean)}</details>` : "";
+    const messages = r.messages.length
+      ? `<details class="rs-fold"><summary>What Lean said</summary><ul class="rs-proof-messages">${r.messages.map((m) =>
+        `<li><span class="rs-faint">line ${m.line}, ${esc(m.severity)}</span><pre>${esc(m.text)}</pre></li>`).join("")}</ul></details>` : "";
+    return `<section class="rs-doc rs-proof" data-formal="${esc(r.outcome)}"><header><span>Formal proof</span></header>
+      <p class="rs-proof-head"><b>${esc(FORMAL[r.outcome]?.head ?? r.outcome)}</b></p>
+      <div class="rs-meta">${meta}</div>
+      ${statement}
+      ${r.notes.trim() ? `<div class="cc-prose">${prose(r.notes)}</div>` : ""}
+      ${axioms}${file}${messages}
+    </section>`;
+  }
+
   /** @param {Detail} d */
   function detailHtml(d) {
     const h = d.row;
@@ -430,7 +474,7 @@ export function createResearch(host) {
           <span class="grow"></span>
           <span class="rs-scores" title="Correctness, novelty, testability (1–5)">C ${r.correctness} · N ${r.novelty} · T ${r.testability}</span></header>
         <div class="cc-prose">${prose(r.summary)}</div>
-        ${r.critique.trim() ? `<details class="rs-fold"><summary>${r.kind === "verification" ? "Derivation" : "Critique"}</summary><div class="cc-prose">${prose(r.critique)}</div></details>` : ""}
+        ${r.critique.trim() ? `<details class="rs-fold"><summary>${FOLDS[r.kind] ?? "Critique"}</summary><div class="cc-prose">${prose(r.critique)}</div></details>` : ""}
         ${r.citations.length ? `<div class="rs-cites"><ul>${r.citations.map((c) => `<li>${citationHtml(c, d.checks ?? [])}</li>`).join("")}</ul></div>` : ""}
       </article>`).join("");
     const matches = d.matches.map((m) => `<li class="rs-match ${m.won ? "won" : "lost"}">
@@ -445,6 +489,7 @@ export function createResearch(host) {
       ${lineage ? `<div class="rs-lineage">${lineage}</div>` : ""}
       ${unfound ? `<div class="cc-notice warn rs-unfound">${esc(unfound)}</div>` : ""}
       <section class="rs-doc"><header><span>Statement</span></header><div class="cc-prose">${prose(d.statement)}</div></section>
+      ${proofHtml(d)}
       ${d.rationale.trim() ? `<section class="rs-doc"><header><span>Rationale</span></header><div class="cc-prose">${prose(d.rationale)}</div></section>` : ""}
       ${d.predictions.length ? `<section class="rs-doc"><header><span>Predictions</span></header><div class="cc-prose">${list(d.predictions)}</div></section>` : ""}
       ${d.assumptions.length ? `<section class="rs-doc"><header><span>Assumptions</span></header><div class="cc-prose">${list(d.assumptions)}</div></section>` : ""}
