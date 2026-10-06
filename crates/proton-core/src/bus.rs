@@ -695,6 +695,13 @@ pub enum Command {
         html: bool,
         scheme: bool,
     },
+    /// Where the student stands, objective by objective.
+    StudyProgress,
+    /// A lesson on a learning objective: a new chat with the tutor as a
+    /// learning guide, begun on the objective and the passages it cites.
+    StudyLesson {
+        objective: String,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1556,6 +1563,24 @@ pub enum Event {
         /// or `passages`.
         grounding: Option<String>,
         chats: Vec<proton_study::tutor::StudyChatSummary>,
+        /// The objective the chat is a lesson on, if it is one.
+        lesson: Option<proton_study::studio::StudyObjective>,
+    },
+    /// Where the student stands: each learning objective, the weakest
+    /// first; the flashcards due; how each quiz and exam went.
+    StudyProgress {
+        objectives: Vec<proton_study::mastery::StudyMastery>,
+        due: usize,
+        quizzes: Vec<proton_study::mastery::StudyQuizRow>,
+    },
+    /// A Learning Overview: its topics, the deck its cards are and the quiz
+    /// it ends in, and its citations resolved.
+    StudyOverview {
+        made: proton_study::studio::StudyMade,
+        topics: Vec<proton_study::overview::StudyOverviewTopic>,
+        deck: Option<String>,
+        quiz: Option<String>,
+        citations: Vec<proton_study::cite::StudyCitation>,
     },
     /// The studio of the open notebook: its calls, and what they made.
     StudyStudio {

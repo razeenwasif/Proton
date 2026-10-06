@@ -27,6 +27,7 @@ export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["flashcards", "Flashcards", "cards", "Cards to learn by, each brought back as it is about to be forgotten"],
   ["quiz", "Quiz", "check", "Questions of every kind, each marked as you answer it"],
   ["practice", "Practice problems", "bulb", "Problems to work through, with hints and worked solutions"],
+  ["overview", "Learning overview", "layers", "The course topic by topic: taught, mapped, carded and checked"],
   ["exam", "Practice exam", "files", "A new paper like the past papers, to sit against the clock"],
   ["pastPaper", "Past paper", "file", "A past paper itself, to sit again, marked by its solutions"],
   ["objectives", "Learning objectives", "target", "What you must be able to do in the exam"],
@@ -59,7 +60,7 @@ function ago(s) {
 }
 
 /** A mind map, drawn as a tree whose branches fold. @param {Node[]} nodes @param {Citation[]} citations */
-function mapHtml(nodes, citations) {
+export function mapHtml(nodes, citations) {
   /** @param {string | null} parent @param {number} depth @returns {string} */
   const branch = (parent, depth) => {
     const children = nodes.filter((n) => n.parent === parent);
@@ -101,6 +102,9 @@ export function madeHtml(e, readOnly) {
     // A deck opens as a deck (study-cards.js); this is only its cards, read.
     content = `<ol class="st-cards" data-turn="made">${body.cards.map((c) => `<li class="st-card-row"><div class="st-card-sides">` +
       `<div class="st-card-front md">${answerHtml(c.front, citations)}</div><div class="st-card-back md">${answerHtml(c.back, citations)}</div></div></li>`).join("")}</ol>`;
+  } else if (body.shape === "overview") {
+    // An overview opens as one (study-overview.js); this is only its topics.
+    content = `<div class="st-answer st-doc md" data-turn="made">${body.topics.map((t) => `<h2>${esc(t.title)}</h2>${answerHtml(t.summary, citations)}`).join("")}</div>`;
   } else if (body.shape === "questions" || body.shape === "paper") {
     // A quiz opens as a quiz (study-quiz.js); this is only its questions, read.
     content = `<ol class="st-cards" data-turn="made">${body.questions.map((q) => `<li class="st-card-row"><div class="md">${answerHtml(q.prompt, citations)}</div></li>`).join("")}</ol>`;
@@ -226,6 +230,7 @@ export function createStudio(host) {
       deck: null,
       objectives: [],
       source: data.get("source") ? String(data.get("source")) : null,
+      count: null,
     };
     if (kind === "pastPaper" && !options.source) return true;
     if ((kind === "table" && !options.columns.length) || (kind === "report" && !options.ask)) {

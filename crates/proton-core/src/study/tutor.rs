@@ -101,7 +101,7 @@ impl Tutor {
     /// A new chat, as the notebook has its tutor set.
     pub fn new(book: &Book) -> Tutor {
         let now = proton_study::now();
-        let chat = Chat { id: book.new_chat_id(), title: "New chat".into(), created: now, updated: now, settings: book.notebook.tutor.clone(), turns: Vec::new() };
+        let chat = Chat { id: book.new_chat_id(), title: "New chat".into(), created: now, updated: now, settings: book.notebook.tutor.clone(), turns: Vec::new(), lesson: None };
         Tutor { kept: false, ..Tutor::of(chat) }
     }
 
@@ -174,7 +174,8 @@ impl Tutor {
         }
         let conversation = self.conversation.as_mut().expect("just started");
         self.from = conversation.fold().items().len();
-        if self.chat.turns.is_empty() {
+        // A lesson keeps its own title.
+        if self.chat.turns.is_empty() && self.chat.lesson.is_none() {
             self.chat.title = plan::title(question);
         }
         conversation.send(&message, &[])?;

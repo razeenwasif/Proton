@@ -168,3 +168,55 @@ fn an_exam_is_set_like_the_past_paper_and_the_past_paper_transcribed_with_its_so
     }
     session.shutdown();
 }
+
+#[test]
+#[ignore = "asks a real engine for objectives, a diagnostic and a learning overview, which costs a little of its plan"]
+fn objectives_a_diagnostic_and_a_learning_overview_are_made_from_the_sources() {
+    let root = std::env::temp_dir().join(format!("proton-learning-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let kb = root.join("kb/Notes");
+    std::fs::create_dir_all(&kb).unwrap();
+    std::fs::write(
+        kb.join("search.md"),
+        "# Uninformed search\n\nBreadth-first search expands the shallowest node first; it is complete when the branching factor b is finite, and \
+         optimal when every step costs the same. Uniform-cost search expands by path cost g(n), and is optimal when every step costs at least \
+         0.25 in this course's convention.\n\n# Informed search\n\nA* orders the frontier by f(n) = g(n) + h(n). With an admissible heuristic — \
+         one that never overestimates — tree search with A* is optimal.\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("Notebooks")).unwrap();
+    let settings = root.join("settings.json");
+    std::fs::write(&settings, serde_json::json!({"study": {"roots": [kb], "folder": root.join("Notebooks")}}).to_string()).unwrap();
+    let mut session = Session::new(&root).with_person_settings(settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    until(&mut session, Duration::from_secs(30), |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(())).expect("the knowledge base");
+    session.apply(Command::StudyNew { title: "Learning, live".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Notes/search.md".into()] });
+    until(&mut session, Duration::from_secs(30), |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.iter().any(|s| s.status == SourceStatus::Ready) => Some(()),
+        _ => None,
+    })
+    .expect("the source read");
+    let engine = std::env::var("PROTON_QUIZ_SETTER").unwrap_or_else(|_| "claude".into());
+    session.apply(Command::StudyTutor { settings: TutorSettings { engine, ..TutorSettings::default() } });
+    for make in [Make::Objectives, Make::Diagnostic, Make::Overview] {
+        session.apply(Command::StudyMake { kind: make, options: Options::default() });
+        let job = until(&mut session, Duration::from_secs(16 * 60), |e| match e {
+            Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.kind == make && matches!(j.state.as_str(), "done" | "failed")).cloned(),
+            _ => None,
+        })
+        .expect("made within sixteen minutes");
+        assert_eq!(job.state, "done", "{make:?}: {}", job.why.unwrap_or_default());
+    }
+    let Some(Event::StudyProgress { objectives, .. }) = session.apply(Command::StudyProgress).first().cloned() else { panic!() };
+    println!("\n{} objectives", objectives.len());
+    assert!(objectives.len() >= 2);
+    let events = session.apply(Command::StudyShowMade { id: "L001".into() });
+    let Some(Event::StudyOverview { topics, deck, quiz, citations, .. }) = events.first() else { panic!("{events:?}") };
+    for t in topics {
+        println!("  {} — {} cards, {} checks, {} map nodes", t.title, t.cards.len(), t.check.len(), t.map.len());
+    }
+    assert!(topics.len() >= 2 && deck.is_some() && quiz.is_some());
+    assert!(!citations.is_empty() && citations.iter().all(|c| c.resolved), "citations: {:?}", citations.iter().map(|c| &c.raw).collect::<Vec<_>>());
+    session.shutdown();
+}

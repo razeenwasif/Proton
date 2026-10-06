@@ -4934,6 +4934,14 @@ function renderEvent(event) {
       study?.quiz(event);
       break;
 
+    case "studyProgress":
+      study?.progress(event);
+      break;
+
+    case "studyOverview":
+      study?.learning(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

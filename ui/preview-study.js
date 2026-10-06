@@ -170,7 +170,7 @@ export function createStudyPreview(deliver) {
     return [notebookEvent(), listEvent()];
   }
 
-  const chatEvent = () => ({ type: "studyChat", live: null, ...state.chat });
+  const chatEvent = () => ({ type: "studyChat", live: null, lesson: null, ...state.chat });
 
   /** The studio: one thing made, and anything being made. */
   const studio = {
@@ -179,7 +179,8 @@ export function createStudyPreview(deliver) {
       { id: "R001", kind: "studyGuide", title: "COMP3670 — Search, a study guide", made: now - 4000, by: "Codex · gpt-6.1-sol", task: "J0002" },
       { id: "D001", kind: "flashcards", title: "Flashcards: search", made: now - 3000, by: "Claude Code · claude-opus-5-5", task: "J0003" },
       { id: "Q001", kind: "quiz", title: "Quiz: search", made: now - 2000, by: "Claude Code · claude-opus-5-5", task: "J0004" },
-      { id: "Q002", kind: "exam", title: "COMP3670 practice final", made: now - 1000, by: "Codex · gpt-6.1-sol", task: "J0005" }],
+      { id: "Q002", kind: "exam", title: "COMP3670 practice final", made: now - 1000, by: "Codex · gpt-6.1-sol", task: "J0005" },
+      { id: "L001", kind: "overview", title: "Search, an overview", made: now - 500, by: "Claude Code · claude-opus-5-5", task: "J0006" }],
   };
   /** A quiz, and a stand-in for its marking: the real one is by rule, or by a model of another family, in the core. */
   const question = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {Record<string, any>} */ more) => ({ id, kind, prompt: "", options: [], correct: [], rationales: [], blanks: [],
@@ -404,7 +405,7 @@ export function createStudyPreview(deliver) {
           state.chat.settings = command.settings;
           return [chatEvent()];
         case "studyChatNew":
-          state.chat = { ...state.chat, id: "C002", title: "New chat", turns: [], chats: [...state.chat.chats] };
+          state.chat = { ...state.chat, id: "C002", title: "New chat", turns: [], chats: [...state.chat.chats], lesson: null };
           return [chatEvent()];
         case "studySaveAnswer":
           return [notebookEvent()];
@@ -424,6 +425,14 @@ export function createStudyPreview(deliver) {
           if (command.id === "D001") return [deckEvent()];
           if (command.id === "Q001") return [quizEvent()];
           if (command.id === "Q002") return [paperEvent()];
+          if (command.id === "L001") return [{ type: "studyOverview", made: studio.made.find((m) => m.id === "L001"), deck: "D001", quiz: "Q001", citations: cites, topics: [
+            { title: "Uninformed search", summary: "Breadth-first search expands every node at depth $d$ before any at $d + 1$, so it is complete when the branching factor is finite [[S02 § Search › Uniform cost L40-58]].\n\nUniform-cost search orders the frontier by path cost $g(n)$ instead [[S01 p. 3]].",
+              map: [{ id: "1", parent: null, label: "Uninformed", cites: [] }, { id: "2", parent: "1", label: "BFS", cites: [] }, { id: "3", parent: "1", label: "UCS: by $g(n)$", cites: ["S01 p. 3"] }],
+              cards: deck.cards.slice(0, 2).map((r) => r.card),
+              check: [question("k01", "choice", { prompt: "Which is complete?", options: ["DFS", "BFS"], correct: [1], explanation: "BFS goes layer by layer." })] },
+            { title: "Informed search", summary: "A* orders the frontier by $f(n) = g(n) + h(n)$; with an admissible $h$ it returns an optimal solution [[S01 p. 1]].",
+              map: [], cards: [], check: [question("k01", "blanks", { prompt: "A heuristic that never overestimates is ___.", blanks: [["admissible"]], explanation: "That is what admissible means." })] },
+          ] }];
           const made = studio.made.find((m) => m.id === command.id);
           return made ? [{ type: "studyMadeOpen", made, body: BODIES[command.id], citations: cites }] : [];
         }
@@ -481,6 +490,19 @@ export function createStudyPreview(deliver) {
         }
         case "studyExamExport":
           return [{ type: "notice", level: "info", text: `Written to ~/Github/Notebooks/comp3670-exam/exports/Q002-comp3670-practice-final${command.scheme ? "-scheme" : ""}.${command.html ? "html. Open it in a browser to print it." : "md."}` }];
+        case "studyProgress":
+          return [{ type: "studyProgress", due: 3, objectives: [
+            { objective: "O002", text: "Explain why uniform-cost search is optimal", topic: "Search", level: 0.35, evidence: 3, state: "focus" },
+            { objective: "O003", text: "Derive the memory of iterative deepening", topic: "Search", level: 0.7, evidence: 2, state: "developing" },
+            { objective: "O004", text: "Prove A* optimal with an admissible $h$", topic: "Heuristics", level: null, evidence: 0, state: "notStarted" },
+            { objective: "O001", text: "Say when breadth-first search is complete", topic: "Search", level: 0.92, evidence: 4, state: "strong" },
+          ], quizzes: [{ id: "Q001", title: "Quiz: search", kind: "quiz", attempts: 2, best: 0.8, last: 0.6, finished: now - 3600 }] }];
+        case "studyLesson":
+          state.chat = { ...state.chat, id: "C003", title: "Lesson: Explain why uniform-cost search is optimal", turns: [], busy: true,
+            settings: { ...state.chat.settings, style: "guide" }, chats: [...state.chat.chats],
+            lesson: { id: command.objective, text: "Explain why uniform-cost search is optimal", topic: "Search", cites: [] } };
+          answer("Teach me this");
+          return [chatEvent()];
         case "studyQuizStart": {
           const last = quiz.attempts.at(-1);
           const ids = command.missed && last ? last.questions.filter((/** @type {string} */ id) => { const a = last.answers.find((/** @type {any} */ x) => x.question === id); const g = a && (a.second ?? a.grade); return !g || g.score < g.of; })

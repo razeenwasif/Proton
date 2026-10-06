@@ -43,6 +43,8 @@
     "study-chat.js",
     "study-studio.js",
     "study-cards.js",
-    "study-quiz.js"
+    "study-quiz.js",
+    "study-progress.js",
+    "study-overview.js"
   ]
 }

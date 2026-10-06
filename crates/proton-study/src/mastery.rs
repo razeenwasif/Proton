@@ -120,6 +120,48 @@ pub fn mastery(objectives: &[StudyObjective], evidence: &[Evidence], now: i64) -
     out
 }
 
+/// A quiz or exam, as the progress it is part of lists it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyQuizRow {
+    pub id: String,
+    pub title: String,
+    pub kind: crate::studio::Make,
+    pub attempts: usize,
+    /// Its best finished attempt's share of the marks.
+    pub best: Option<f64>,
+    /// Its latest finished attempt's.
+    pub last: Option<f64>,
+    #[ts(type = "number | null")]
+    pub finished: Option<i64>,
+}
+
+/// Every quiz and exam of a notebook, with how its attempts went.
+pub fn quiz_rows(book: &Book) -> Vec<StudyQuizRow> {
+    let mut out: Vec<StudyQuizRow> = book
+        .quiz_ids()
+        .into_iter()
+        .filter_map(|id| {
+            let quiz = book.quiz(&id)?;
+            let attempts = quiz::attempts(&book.quiz_lines(&id));
+            let finished: Vec<&quiz::StudyAttempt> = attempts.iter().filter(|a| a.finished.is_some() && a.of > 0.0).collect();
+            let share = |a: &&quiz::StudyAttempt| a.score / a.of;
+            Some(StudyQuizRow {
+                id,
+                title: quiz.title,
+                kind: quiz.kind,
+                attempts: attempts.len(),
+                best: finished.iter().map(share).max_by(f64::total_cmp),
+                last: finished.last().map(share),
+                finished: finished.last().and_then(|a| a.finished),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| b.finished.cmp(&a.finished).then_with(|| b.id.cmp(&a.id)));
+    out
+}
+
 /// The objectives a student is weak in: a focus, or developing with little to show.
 pub fn weak(mastery: &[StudyMastery]) -> Vec<String> {
     mastery.iter().filter(|m| m.state == "focus" || (m.state == "developing" && m.level.is_some_and(|l| l < 0.75))).map(|m| m.objective.clone()).collect()

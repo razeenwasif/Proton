@@ -1059,7 +1059,8 @@ Gemini Notebook, for studying from one's own files: notebooks of sources drawn
 from a knowledge base, a tutor that answers from them and cites them, and a
 studio that makes guides, cards, quizzes and exams of them. It is being built in
 milestones; what is here is the knowledge base, notebooks, sources, the reader,
-notes, the tutor, the studio, flashcards, quizzes with their marking, and exams.
+notes, the tutor, the studio, flashcards, quizzes with their marking, exams, and
+progress by learning objective.
 
 **The knowledge base** is the folders the person names (`study.roots` in their
 own settings), less what `study.exclude` leaves out — `.gitignore` lines with
@@ -1181,6 +1182,20 @@ are written, it gives no hints and marks nothing until it is handed in — by th
 person, or by the heartbeat when the time is up — and then says how it went
 section by section. A paper goes out as Markdown or as a page to print, alone
 or with its marking scheme.
+
+**Progress** is by learning objective: Notebook's Progress tab says, from every
+answer and review tagged with one, which are focus areas, which developing,
+which strengths and which not started, topic by topic, beside how each quiz
+and exam went. A diagnostic quiz asks a question of each objective. A lesson on
+one is a chat of its own (`chats/C001.json` with its `lesson`), the tutor a
+learning guide in that chat alone, begun on the objective and the passages
+that teach it; it ends, when asked, in a check of three questions. A Learning
+Overview (`studio/overviews/L001.json`, `proton-study::overview`) takes the
+course topic by topic in the order to learn it — each taught in a cited
+summary, its ideas mapped, a few flashcards turned over in place and a check of
+a question or two marked at once — and ends in a quiz; its cards are kept as a
+deck and its quiz as a quiz of their own, so they are scheduled and marked like
+any others.
 
 ### Trace
 

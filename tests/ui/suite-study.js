@@ -246,7 +246,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 14, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 15, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -566,6 +566,83 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(bySection[0]?.includes('Section A') && bySection[0].includes('2/2') && bySection[1]?.includes('5/8'), `by section: ${bySection}`);
     assert(ws().querySelector('.st-quiz-score')?.textContent.includes('sat against the clock'), 'the sitting is not said');
     ws().querySelector('[data-study-back]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('Progress is by learning objective: what to focus on, with a lesson or practice for each, and a diagnostic', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
+    const ask = win.commands.length;
+    ws().querySelector('[data-study-view="progress"]').click(); await settle();
+    assert(sent(ask, 'studyProgress').length === 1, 'the progress was not asked for');
+    await win.pushEvents([{type: 'studyProgress', due: 0, objectives: [], quizzes: []}]); await settle();
+    const make = win.commands.length;
+    ws().querySelector('[data-study-progress-make="objectives"]').click(); await settle();
+    assert(sent(make, 'studyMake')[0]?.kind === 'objectives', 'with no objectives, they are not offered');
+    const mastery = (/** @type {string} */ objective, /** @type {string} */ state, /** @type {number | null} */ level, /** @type {string} */ topic = 'Search') =>
+      ({objective, text: `objective ${objective}`, topic, level, evidence: level === null ? 0 : 2, state});
+    await win.pushEvents([{type: 'studyProgress', due: 4, objectives: [mastery('O002', 'focus', 0.3), mastery('O003', 'notStarted', null, 'Heuristics'), mastery('O001', 'strong', 0.95)],
+      quizzes: [{id: 'Q001', title: 'Quiz: search', kind: 'quiz', attempts: 2, best: 0.8, last: 0.6, finished: 1}]}]); await settle();
+    const groups = [...ws().querySelectorAll('.st-standing-group h3')].map((h) => h.textContent);
+    assert(groups[0]?.startsWith('Focus areas') && groups.some((g) => g.startsWith('Not started')) && groups.at(-1)?.startsWith('Strengths'), `the groups: ${groups}`);
+    assert(ws().querySelector('.st-tally.focus b')?.textContent === '1' && ws().querySelector('.st-progress-go')?.textContent.includes('4 cards due today'), 'the tallies or the cards due are not shown');
+    assert(ws().querySelector('.st-quiz-row')?.textContent.includes('best 80%'), 'how the quizzes went is not shown');
+    const lesson = win.commands.length;
+    ws().querySelector('[data-study-lesson="O002"]').click(); await settle();
+    assert(sent(lesson, 'studyLesson')[0]?.objective === 'O002', 'no lesson asked for');
+    const practise = win.commands.length;
+    ws().querySelector('[data-study-practise="O003"]').click(); await settle();
+    assert(JSON.stringify(sent(practise, 'studyMake')[0]?.options.objectives) === '["O003"]', 'no practice asked for');
+    const diagnostic = win.commands.length;
+    ws().querySelector('[data-study-progress-make="diagnostic"]').click(); await settle();
+    assert(sent(diagnostic, 'studyMake')[0]?.kind === 'diagnostic', 'no diagnostic asked for');
+  });
+
+  await test('A lesson is a chat of its own, which says what it is on and ends in a check of three questions', async () => {
+    const chatOf = (/** @type {any} */ lesson) => ({type: 'studyChat', id: 'C009', title: 'Lesson: objective O002', live: null, busy: false, error: null, grounding: 'tools', chats: [],
+      settings: {engine: 'claude', model: '', style: 'guide', custom: '', length: 'default', language: ''}, turns: [], lesson});
+    await win.pushEvents([chatOf({id: 'O002', text: 'Explain why UCS is optimal', topic: 'Search', cites: []})]); await settle();
+    ws().querySelector('[data-study-view="chat"]').click(); await settle();
+    const banner = ws().querySelector('.st-lesson');
+    assert(banner?.textContent.includes('A lesson on O002') && banner.textContent.includes('Explain why UCS is optimal'), 'the lesson is not said');
+    assert(ws().querySelector('.st-chat-head')?.textContent.includes('Learning guide'), 'the tutor is not a learning guide');
+    const check = win.commands.length;
+    banner.querySelector('[data-study-lesson-check]').click(); await settle();
+    const made = sent(check, 'studyMake')[0];
+    assert(made?.kind === 'quiz' && made.options.count === 3 && JSON.stringify(made.options.objectives) === '["O002"]', `no check asked for: ${JSON.stringify(made)}`);
+    await win.pushEvents([chatOf(null)]); await settle();
+    assert(!ws().querySelector('.st-lesson'), 'a chat that is no lesson says it is one');
+  });
+
+  await test('A Learning Overview teaches topic by topic: its cards turn over, its checks are marked at once, and it ends in a quiz', async () => {
+    const overviewMade = {id: 'L001', kind: 'overview', title: 'Search, an overview', made: 1, by: 'Claude Code', task: 'J0007'};
+    await win.pushEvents([{type: 'studyStudio', jobs: [], made: [overviewMade]}]); await settle();
+    const open = win.commands.length;
+    ws().querySelector('[data-study-made="L001"]').click(); await settle();
+    assert(sent(open, 'studyShowMade')[0]?.id === 'L001', 'not asked for');
+    await win.pushEvents([{type: 'studyOverview', made: overviewMade, deck: 'D004', quiz: 'Q005', citations: [cite(1, 'S01 p. 3')], topics: [
+      {title: 'Uninformed search', summary: 'BFS goes layer by layer [[S01 p. 3]], so it is complete when b is finite.', map: [{id: '1', parent: null, label: 'Uninformed', cites: []}],
+        cards: [flash('C001', 'basic', 'Is BFS complete?', 'Yes, when b is finite.')],
+        check: [ask('k01', 'choice', {prompt: 'Which is complete?', options: ['DFS', 'BFS'], correct: [1], explanation: 'Layers.'})]},
+      {title: 'Informed search', summary: 'A* orders by f(n) = g(n) + h(n); with an admissible h it is optimal.', map: [], cards: [],
+        check: [ask('k01', 'blanks', {prompt: 'A heuristic that never overestimates is ___.', blanks: [['admissible']]})]}]}]); await settle();
+    const view = ws().querySelector('.st-overview-view');
+    assert(view && view.querySelectorAll('.st-ov-topic').length === 2 && view.querySelectorAll('.st-ov-nav button').length === 2, 'the overview is not drawn');
+    assert(view.querySelector('.st-ov-topic .st-cite'), 'a summary\'s citation is not a chip');
+    const card = view.querySelector('[data-study-ov-card]');
+    card.click(); await settle();
+    assert(card.classList.contains('flipped'), 'a card does not turn over');
+    const checks = view.querySelectorAll('[data-study-check]');
+    checks[0].querySelectorAll('.st-option input')[0].checked = true;
+    checks[0].querySelector('[data-study-check-go]').click(); await settle();
+    assert(checks[0].classList.contains('wrong') && checks[0].querySelectorAll('.st-option')[1].classList.contains('correct'), 'a wrong check is not marked, nor the right one shown');
+    checks[1].querySelector('.st-blank').value = ' Admissible.';
+    checks[1].querySelector('[data-study-check-go]').click(); await settle();
+    assert(checks[1].classList.contains('right'), 'a right blank is not marked right');
+    const quiz = win.commands.length;
+    view.querySelector('.st-ov-end [data-study-made="Q005"]').click(); await settle();
+    assert(sent(quiz, 'studyShowMade')[0]?.id === 'Q005', 'the quiz it ends in was not asked for');
+    ws().querySelector('[data-study-back]')?.click(); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 

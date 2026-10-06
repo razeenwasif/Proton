@@ -78,9 +78,12 @@ import type { StudyMade } from "./StudyMade";
 import type { StudyMadeBody } from "./StudyMadeBody";
 import type { StudyMastery } from "./StudyMastery";
 import type { StudyNoteRow } from "./StudyNoteRow";
+import type { StudyObjective } from "./StudyObjective";
+import type { StudyOverviewTopic } from "./StudyOverviewTopic";
 import type { StudyPaperSection } from "./StudyPaperSection";
 import type { StudyPlace } from "./StudyPlace";
 import type { StudyQuestion } from "./StudyQuestion";
+import type { StudyQuizRow } from "./StudyQuizRow";
 import type { StudyResult } from "./StudyResult";
 import type { StudyReview } from "./StudyReview";
 import type { StudyRoot } from "./StudyRoot";
@@ -249,7 +252,11 @@ said: string | null, view: StudyView, } | { "type": "studyChat", id: string, tit
  * How the tutor reaches the sources, once it has started: `tools`
  * or `passages`.
  */
-grounding: string | null, chats: Array<StudyChatSummary>, } | { "type": "studyStudio", jobs: Array<StudyJob>, made: Array<StudyMade>, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyDeck", made: StudyMade, cards: Array<StudyCardRow>, counts: StudyCounts, citations: Array<StudyCitation>, } | { "type": "studyReviewing", review: StudyReview | null, } | { "type": "studyQuiz", made: StudyMade, questions: Array<StudyQuestion>, attempts: Array<StudyAttempt>, 
+grounding: string | null, chats: Array<StudyChatSummary>, 
+/**
+ * The objective the chat is a lesson on, if it is one.
+ */
+lesson: StudyObjective | null, } | { "type": "studyProgress", objectives: Array<StudyMastery>, due: number, quizzes: Array<StudyQuizRow>, } | { "type": "studyOverview", made: StudyMade, topics: Array<StudyOverviewTopic>, deck: string | null, quiz: string | null, citations: Array<StudyCitation>, } | { "type": "studyStudio", jobs: Array<StudyJob>, made: Array<StudyMade>, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyDeck", made: StudyMade, cards: Array<StudyCardRow>, counts: StudyCounts, citations: Array<StudyCitation>, } | { "type": "studyReviewing", review: StudyReview | null, } | { "type": "studyQuiz", made: StudyMade, questions: Array<StudyQuestion>, attempts: Array<StudyAttempt>, 
 /**
  * Answers being marked now: `2/q03`, the attempt and the question.
  */

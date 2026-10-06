@@ -167,7 +167,10 @@ answer, a written answer by another family of model against its rubric, each
 mark quoting the words that earned it and open to dispute, with how you did by
 learning objective; and exams — a new paper set like your past papers, never one
 of theirs reworded, or a past paper itself marked by its solutions — sat against
-the clock with every answer saved as you write it, and printed. Your folders are named in your own settings,
+the clock with every answer saved as you write it, and printed; and your
+progress by learning objective, with a diagnostic quiz, a lesson on any gap
+with the tutor as a guide, and a Learning Overview that takes the course topic by
+topic. Your folders are named in your own settings,
 `{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,

@@ -14,6 +14,7 @@
 
 pub mod jobs;
 mod kb;
+mod learning;
 mod quizzes;
 mod review;
 pub mod tutor;
@@ -96,6 +97,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyQuizFinish { .. }
             | Command::StudyExamSit { .. }
             | Command::StudyExamExport { .. }
+            | Command::StudyProgress
+            | Command::StudyLesson { .. }
     )
 }
 
@@ -482,6 +485,8 @@ impl Study {
             Command::StudyQuizFinish { quiz, attempt } => self.finish_quiz(&quiz, attempt),
             Command::StudyExamSit { quiz, minutes } => self.sit(&quiz, minutes),
             Command::StudyExamExport { quiz, html, scheme } => self.export_exam(&quiz, html, scheme),
+            Command::StudyProgress => self.progress(),
+            Command::StudyLesson { objective } => self.lesson(&objective),
             _ => Vec::new(),
         }
     }
@@ -1022,6 +1027,7 @@ impl Study {
             error: tutor.error.clone(),
             grounding: tutor.grounding().map(str::to_string),
             chats: open.book.chats(),
+            lesson: tutor.chat.lesson.as_ref().and_then(|id| learning::objectives(&open.book).into_iter().find(|o| &o.id == id)),
         })
     }
 
@@ -1144,6 +1150,9 @@ impl Study {
         if kind == proton_study::studio::Make::Marking {
             return vec![notice("A mark is asked for by answering.".into(), NoticeLevel::Warn)];
         }
+        if kind == proton_study::studio::Make::Diagnostic && self.open.as_ref().is_some_and(|o| learning::objectives(&o.book).is_empty()) {
+            return vec![notice("Make the learning objectives first: a diagnostic asks a question of each.".into(), NoticeLevel::Warn)];
+        }
         if kind == proton_study::studio::Make::PastPaper {
             let paper = options.source.as_deref().and_then(|id| self.open.as_ref()?.book.sources.get(id));
             if !paper.is_some_and(|s| s.status.has_words()) {
@@ -1169,6 +1178,9 @@ impl Study {
         if id.starts_with('Q') {
             return self.show_quiz(id);
         }
+        if id.starts_with('L') {
+            return self.show_overview(id);
+        }
         if id.starts_with('D') {
             return match self.deck_event(id) {
                 Some(event) => vec![event],
@@ -1187,6 +1199,7 @@ impl Study {
             StudyMadeBody::Objectives { objectives } => objectives.iter().flat_map(|o| o.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Cards { cards } => cards.iter().flat_map(|c| c.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Questions { questions } | StudyMadeBody::Paper { questions, .. } => questions.iter().flat_map(|q| q.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            StudyMadeBody::Overview { topics, .. } => topics.iter().map(|t| t.summary.clone()).collect::<Vec<_>>().join("\n"),
         };
         let citations = proton_study::cite::resolve(&open.book, &text);
         vec![Event::StudyMadeOpen { made, body, citations }]

@@ -4212,8 +4212,9 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .st-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; padding: 9px 12px; border-radius: 8px;
   background: color-mix(in srgb, var(--cc-accent) 10%, transparent); font: var(--z-2xs)/1.5 var(--cc-font); color: var(--cc-muted); }
 .st-banner .i { width: 14px; height: 14px; }
-.st-nb-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
-.st-nb-head > div { flex: 1 1 auto; min-width: 0; }
+.st-nb-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; margin-bottom: 18px; }
+.st-nb-head > div:first-child { flex: 1 1 14em; min-width: 0; }
+.st-nb-head > .rs-tabs { flex: 0 0 auto; }
 .st-nb-head h1 { margin: 0 0 4px; font: 600 calc(var(--z-sm) * 1.35)/1.25 var(--cc-font); color: var(--cc-text); overflow-wrap: anywhere; }
 .st-nb-head .st-faint { font: var(--z-2xs)/1.4 var(--cc-font); }
 .st-empty { margin-top: 4vh; }
@@ -4335,8 +4336,8 @@ button.st-source-name:hover { color: var(--cc-accent); }
   font: var(--z-2xs)/1.35 var(--cc-font); color: var(--cc-text); }
 .st-note .st-faint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--z-2xs) * .92); }
 .st-note:hover, .st-note.on { background: var(--row-hover); }
-.st-reader-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
-.st-reader-head > div { flex: 1 1 auto; min-width: 0; }
+.st-reader-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; margin-bottom: 16px; }
+.st-reader-head > div { flex: 1 1 12em; min-width: 0; }
 .st-reader-head h1 { margin: 0 0 4px; font: 600 calc(var(--z-sm) * 1.2)/1.25 var(--cc-font); color: var(--cc-text); overflow-wrap: anywhere; }
 .st-reader-head .st-faint { font: var(--z-2xs)/1.3 var(--cc-font); }
 .st-reader-head .cc-quiet { flex: 0 0 auto; padding: 4px 10px; font-size: var(--z-2xs); }
@@ -4687,3 +4688,53 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .st-paper-section > p { margin: 0; font: var(--z-xs)/1.5 var(--cc-font); }
 .st-question-tags { display: flex; align-items: baseline; gap: 10px; }
 .st-saved { margin-left: auto; color: var(--cc-faint); font-size: var(--z-2xs); }
+
+/* ── learning ── */
+.st-progress { display: grid; gap: 12px; }
+.st-progress h3 { margin: 10px 0 4px; font: 600 var(--z-xs)/1.3 var(--cc-font); color: var(--cc-text); }
+.st-progress h3 .st-faint { font-weight: 400; font-size: var(--z-2xs); }
+.st-progress h4 { margin: 8px 0 2px; font: 600 var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.st-progress-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--cc-line); border-radius: 10px; background: var(--cc-raise); }
+.st-tallies { display: flex; flex-wrap: wrap; gap: 12px; font: var(--z-xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.st-tally b { margin-right: 4px; font: 600 var(--z-sm)/1 var(--zed); }
+.st-tally.focus b { color: var(--err); }
+.st-tally.developing b { color: var(--warn); }
+.st-tally.strong b { color: var(--ok); }
+.st-progress-go { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font: var(--z-2xs)/1.3 var(--cc-font); }
+.st-progress-go .cc-primary, .st-progress-go .cc-quiet { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; font-size: var(--z-2xs); }
+.st-progress-go .i { width: 12px; height: 12px; }
+.st-objective { display: grid; grid-template-columns: 3.4em minmax(0, 1fr); align-items: baseline; gap: 2px 10px; padding: 6px 0;
+  border-bottom: 1px solid var(--cc-line); font: var(--z-xs)/1.45 var(--cc-font); color: var(--cc-text); }
+.st-objective > .st-faint, .st-objective-meta .st-faint { font-size: var(--z-2xs); }
+.st-objective-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 3px; }
+.st-objective-meta .st-bar { flex: 0 1 90px; min-width: 40px; }
+.st-objective-go { display: inline-flex; gap: 8px; }
+.st-objective-go .st-link { font-size: var(--z-2xs); }
+.st-objective.focus .st-bar i { background: var(--err); }
+.st-objective.developing .st-bar i { background: var(--warn); }
+.st-objective.strong .st-bar i { background: var(--ok); }
+.st-quiz-rows { display: grid; gap: 2px; }
+.st-lesson { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 8px 12px; border-radius: 9px;
+  background: color-mix(in srgb, var(--cc-accent) 9%, transparent); font: var(--z-xs)/1.45 var(--cc-font); color: var(--cc-text); }
+.st-lesson > .i { flex: 0 0 auto; width: 14px; height: 14px; color: var(--cc-accent); }
+.st-lesson > span { flex: 1 1 auto; min-width: 0; }
+.st-lesson .cc-quiet { flex: 0 0 auto; padding: 4px 10px; font-size: var(--z-2xs); }
+.st-ov-nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.st-ov-topic { display: grid; gap: 10px; padding: 14px 0; border-top: 1px solid var(--cc-line); scroll-margin-top: 12px; }
+.st-ov-topic h2 { margin: 0; font: 600 var(--z-sm)/1.3 var(--cc-font); color: var(--cc-text); }
+.st-ov-topic h4 { margin: 6px 0 0; font: 600 var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.st-ov-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.st-ov-card { display: grid; min-height: 84px; padding: 10px 12px; border: 1px solid var(--cc-line-2); border-radius: 10px; background: var(--cc-raise);
+  color: var(--cc-text); font: var(--z-xs)/1.5 var(--cc-font); text-align: left; cursor: pointer; }
+.st-ov-card:hover { border-color: var(--cc-accent); }
+.st-ov-card .st-ov-back { display: none; color: var(--cc-muted); }
+.st-ov-card.flipped .st-ov-front { display: none; }
+.st-ov-card.flipped .st-ov-back { display: block; }
+.st-ov-card p { margin: 0; }
+.st-ov-check { padding: 12px 14px; }
+.st-ov-check.right { border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
+.st-ov-check.wrong { border-color: color-mix(in srgb, var(--err) 55%, transparent); }
+.st-ov-check .rs-actions .cc-quiet { padding: 4px 11px; font-size: var(--z-2xs); }
+.st-check-said { font: var(--z-xs)/1.45 var(--cc-font); color: var(--cc-text); }
+.st-ov-end { margin-top: 10px; }

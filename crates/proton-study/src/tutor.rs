@@ -95,6 +95,9 @@ pub struct Chat {
     pub updated: u64,
     pub settings: TutorSettings,
     pub turns: Vec<StudyTurn>,
+    /// The learning objective it is a lesson on, if it is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lesson: Option<String>,
 }
 
 /// A chat, as a list of them shows it.
@@ -286,7 +289,7 @@ mod tests {
         assert_eq!(book.new_chat_id(), "C001");
         let turn = StudyTurn { asked: "Why is UCS optimal?".into(), answer: "Because [[S01 p. 1]].".into(), citations: Vec::new(), at: 5, engine: "claude".into(), model: "m".into(), error: None };
         for (id, updated) in [("C001", 10), ("C002", 20)] {
-            book.write_chat(&Chat { id: id.into(), title: title(&turn.asked), created: 1, updated, settings: TutorSettings::default(), turns: vec![turn.clone()] }).unwrap();
+            book.write_chat(&Chat { id: id.into(), title: title(&turn.asked), created: 1, updated, settings: TutorSettings::default(), turns: vec![turn.clone()], lesson: None }).unwrap();
         }
         assert_eq!(book.chats().iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["C002", "C001"]);
         assert_eq!(book.chat("C001").unwrap().turns, [turn]);

@@ -1092,3 +1092,103 @@ fn an_exam_is_set_like_the_past_papers_sat_against_the_clock_and_marked_when_han
     assert_eq!((kept["source"].as_str(), kept["minutes"].is_null()), (Some("S02"), true));
     session.shutdown();
 }
+
+#[test]
+fn progress_is_by_objective_a_diagnostic_finds_it_a_lesson_teaches_a_gap_and_an_overview_ends_in_a_quiz() {
+    use proton_study::quiz::Given;
+    use proton_study::studio::{Make, Options};
+    use proton_study::tutor::Style;
+    let scratch = Scratch::new("learning");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+    let done = |session: &mut Session, id: &str| {
+        until(session, |e| match e {
+            Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.id == id && matches!(j.state.as_str(), "done" | "failed")).cloned(),
+            _ => None,
+        })
+    };
+
+    // No diagnostic without objectives; then the objectives, and the diagnostic asks of each.
+    let refused = session.apply(Command::StudyMake { kind: Make::Diagnostic, options: Options::default() });
+    assert!(said(&refused).iter().any(|s| s.contains("learning objectives first")));
+    log.lock().unwrap().answers.push_back(r#"{"objectives": [{"text": "Explain why breadth-first search is complete", "topic": "Search", "cites": ["S01 § Search L1-2"]}, {"text": "Compare uniform-cost search with BFS", "topic": "Search", "cites": []}]}"#.into());
+    session.apply(Command::StudyMake { kind: Make::Objectives, options: Options::default() });
+    assert_eq!(done(&mut session, "J0001").state, "done");
+    let progress = session.apply(Command::StudyProgress);
+    let Some(Event::StudyProgress { objectives, due, quizzes }) = progress.first() else { panic!("{progress:?}") };
+    assert_eq!(objectives.iter().map(|o| (o.objective.as_str(), o.state.as_str())).collect::<Vec<_>>(), [("O001", "notStarted"), ("O002", "notStarted")]);
+    assert_eq!((*due, quizzes.len()), (0, 0));
+    log.lock().unwrap().answers.push_back(
+        r#"{"title": "Diagnostic", "questions": [
+            {"kind": "choice", "prompt": "Is BFS complete when b is finite?", "options": ["Yes", "No"], "correct": [0], "rationales": ["", ""], "blanks": [], "number": null, "tolerance": 0, "unit": "",
+             "rubric": [], "modelAnswer": "", "hint": "", "explanation": "", "topic": "Search", "objectives": ["O001"], "cites": []}
+        ]}"#
+            .into(),
+    );
+    session.apply(Command::StudyMake { kind: Make::Diagnostic, options: Options::default() });
+    let job = done(&mut session, "J0002");
+    assert_eq!((job.state.as_str(), job.made.as_deref()), ("done", Some("Q001")));
+    let asked = log.lock().unwrap().sent.last().cloned().unwrap();
+    assert!(asked.contains("diagnostic quiz") && asked.contains("- O001 (Search): Explain why breadth-first search is complete"), "{asked}");
+    // Answered right: O001 is under way, O002 not started.
+    let events = session.apply(Command::StudyShowMade { id: "Q001".into() });
+    let Some(Event::StudyQuiz { questions, .. }) = events.iter().find(|e| matches!(e, Event::StudyQuiz { .. })) else { panic!() };
+    let right = questions[0].correct[0];
+    session.apply(Command::StudyQuizStart { quiz: "Q001".into(), missed: false });
+    session.apply(Command::StudyQuizAnswer { quiz: "Q001".into(), attempt: 1, question: "q01".into(), given: Given::Choice { index: right }, hinted: false });
+    session.apply(Command::StudyQuizFinish { quiz: "Q001".into(), attempt: 1 });
+    let Some(Event::StudyProgress { objectives, quizzes, .. }) = session.apply(Command::StudyProgress).first().cloned() else { panic!() };
+    let state = |id: &str| objectives.iter().find(|o| o.objective == id).map(|o| o.state.clone()).unwrap();
+    assert_eq!((state("O001").as_str(), state("O002").as_str()), ("developing", "notStarted"), "one right answer is not yet a strength");
+    assert_eq!((quizzes[0].kind, quizzes[0].best), (Make::Diagnostic, Some(1.0)));
+
+    // A lesson on the gap: a chat of its own, the tutor a learning guide in it alone.
+    let events = session.apply(Command::StudyLesson { objective: "O002".into() });
+    let lesson = events.iter().rev().find_map(|e| match e {
+        Event::StudyChat { title, settings, lesson, .. } => Some((title.clone(), settings.style, lesson.clone())),
+        _ => None,
+    });
+    let (title, style, lesson) = lesson.expect("the lesson's chat");
+    assert_eq!((title.as_str(), style), ("Lesson: Compare uniform-cost search with BFS", Style::Guide));
+    assert_eq!(lesson.map(|o| o.id).as_deref(), Some("O002"));
+    assert!(log.lock().unwrap().sent.last().unwrap().contains("Teach me this, from the sources: \"Compare uniform-cost search with BFS\""));
+    let notebook: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(scratch.root.join("Notebooks/search/notebook.json")).unwrap()).unwrap();
+    assert_ne!(notebook["tutor"]["style"], "guide", "the notebook's own tutor is as it was");
+
+    // A Learning Overview, its cards a deck and its quiz a quiz.
+    log.lock().unwrap().answers.push_back(
+        r#"{"title": "Search, an overview", "topics": [
+            {"title": "Uninformed search", "summary": "Breadth-first search expands the shallowest node first, so it is complete when b is finite [[S01 § Search L1-2]].",
+             "map": [{"id": "1", "parent": null, "label": "Uninformed", "cites": []}, {"id": "2", "parent": "1", "label": "BFS", "cites": ["S01 § Search L1-2"]}],
+             "cards": [{"kind": "basic", "front": "Is BFS complete?", "back": "Yes, when b is finite.", "topic": "Search", "objectives": ["O001"], "cites": ["S01 § Search L1-2"]}],
+             "check": [{"kind": "choice", "prompt": "Which is complete?", "options": ["DFS", "BFS"], "correct": [1], "rationales": ["", ""], "blanks": [], "number": null, "tolerance": 0, "unit": "",
+                        "rubric": [], "modelAnswer": "", "hint": "", "explanation": "Layers.", "topic": "Search", "objectives": [], "cites": []}]}
+        ], "quiz": [{"kind": "blanks", "prompt": "BFS expands the ___ node first.", "options": [], "correct": [], "rationales": [], "blanks": [["shallowest"]], "number": null, "tolerance": 0,
+                     "unit": "", "rubric": [], "modelAnswer": "", "hint": "", "explanation": "", "topic": "Search", "objectives": [], "cites": []}]}"#
+            .into(),
+    );
+    let events = session.apply(Command::StudyMake { kind: Make::Overview, options: Options::default() });
+    let id = studio(&events).unwrap().0[0].id.clone();
+    let job = done(&mut session, &id);
+    assert_eq!((job.state.as_str(), job.made.as_deref()), ("done", Some("L001")));
+    let events = session.apply(Command::StudyShowMade { id: "L001".into() });
+    let Some(Event::StudyOverview { topics, deck, quiz, citations, .. }) = events.first() else { panic!("{events:?}") };
+    assert_eq!((topics.len(), deck.as_deref(), quiz.as_deref()), (1, Some("D001"), Some("Q002")));
+    assert!(citations.iter().all(|c| c.resolved) && !citations.is_empty());
+    assert_eq!(topics[0].cards[0].id, "C001");
+    let made = studio(&session.apply(Command::StudyMake { kind: Make::Faq, options: Options::default() })).unwrap().1;
+    for id in ["L001", "D001", "Q002"] {
+        assert!(made.iter().any(|m| m.id == id), "{id} is not in the studio");
+    }
+    session.shutdown();
+}

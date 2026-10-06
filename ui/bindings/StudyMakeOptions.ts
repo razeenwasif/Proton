@@ -37,4 +37,8 @@ objectives: Array<string>,
 /**
  * The past paper to transcribe: `S03`.
  */
-source: string | null, };
+source: string | null, 
+/**
+ * Exactly how many questions, when it is not the amount's.
+ */
+count: number | null, };

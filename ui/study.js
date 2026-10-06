@@ -14,6 +14,8 @@ import { markdown } from "./markdown.js";
 import { createCards } from "./study-cards.js";
 import { createChat } from "./study-chat.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
+import { overviewClick, overviewHtml as learningHtml } from "./study-overview.js";
+import { progressClick, progressHtml } from "./study-progress.js";
 import { createQuiz } from "./study-quiz.js";
 import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 
@@ -28,8 +30,9 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {{id: string, title: string, body: string, updated: number, source: string | null}} NoteEvent */
 /** @typedef {import("./study-studio.js").MadeEvent} MadeEvent */
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
-/** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
- *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}} Shown */
+/** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "progress"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
+ *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}
+ *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent}} Shown */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
  *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
 
@@ -88,6 +91,7 @@ export function createStudy(host) {
       const shown = state.shown;
       if (shown.kind === "made") return shown.made.citations;
       if (shown.kind === "quiz") return quizzes.citations();
+      if (shown.kind === "learning") return shown.learning.citations;
       return shown.kind === "deck" || shown.kind === "review" ? cards.citations(shown.kind) : [];
     },
   });
@@ -106,7 +110,8 @@ export function createStudy(host) {
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: boolean, removing: string | null,
-   *   getting: string[] | null, shown: Shown, back: "chat" | "overview", want: string | null}} */
+   *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
+   *   progress: import("./study-progress.js").ProgressEvent | null}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -126,6 +131,8 @@ export function createStudy(host) {
     back: "chat",
     // Something made that was clicked, to be shown when the core sends it.
     want: null,
+    // Where the student stands, as the core last said.
+    progress: null,
   };
 
   const readOnly = () => Boolean(state.notebook?.readOnly);
@@ -341,7 +348,8 @@ export function createStudy(host) {
     const usable = nb.sources.filter(hasWords).length;
     const tabs = `<div class="rs-tabs st-tabs" role="tablist" aria-label="Notebook">` +
       `<button class="rs-tab${on("chat")}" role="tab" aria-selected="${state.shown.kind === "chat"}" data-study-view="chat">Chat</button>` +
-      `<button class="rs-tab${on("overview")}" role="tab" aria-selected="${state.shown.kind === "overview"}" data-study-view="overview">Sources<span class="rs-count">${usable || ""}</span></button></div>`;
+      `<button class="rs-tab${on("overview")}" role="tab" aria-selected="${state.shown.kind === "overview"}" data-study-view="overview">Sources<span class="rs-count">${usable || ""}</span></button>` +
+      `<button class="rs-tab${on("progress")}" role="tab" aria-selected="${state.shown.kind === "progress"}" data-study-view="progress">Progress</button></div>`;
     const due = state.list.find((n) => n.slug === nb.slug)?.due ?? 0;
     const review = readOnly() ? ""
       : cards.active() ? `<button class="cc-primary" data-study-resume title="The session of flashcards under way">${icon("cards")}Back to review</button>`
@@ -470,6 +478,16 @@ export function createStudy(host) {
       quizzes.render(els.stage);
       return;
     }
+    if (shown.kind === "learning") {
+      els.stage.innerHTML = learningHtml(shown.learning, readOnly());
+      return;
+    }
+    if (shown.kind === "progress") {
+      const nbox = /** @type {NotebookEvent} */ (nb);
+      const held = nbox.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nbox.readOnly)} has this notebook open: it is read only here.</div>` : "";
+      els.stage.innerHTML = held + headHtml() + progressHtml(state.progress, readOnly());
+      return;
+    }
     els.stage.innerHTML = notebookHtml();
   }
 
@@ -509,7 +527,16 @@ export function createStudy(host) {
     if (studio.click(t)) return;
     if (els.stage.contains(t) && cards.click(t, () => renderStage())) return;
     if (els.stage.contains(t) && quizzes.click(t, () => renderStage())) return;
+    if (els.stage.contains(t) && state.shown.kind === "learning" && overviewClick(t, state.shown.learning)) return;
+    if (els.stage.contains(t) && progressClick(t, host.dispatch)) return;
     const at_ = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
+    // Something made, opened from the middle: a deck or a quiz an overview
+    // or the progress names.
+    const named = els.stage.contains(t) ? at_("[data-study-made]") : null;
+    if (named) {
+      state.want = named.dataset.studyMade ?? null;
+      return host.dispatch({ type: "studyShowMade", id: named.dataset.studyMade });
+    }
     if (at_("[data-study-resume]")) {
       state.shown = { kind: "review" };
       els.stage.innerHTML = "";
@@ -571,9 +598,11 @@ export function createStudy(host) {
     }
     const view = at("[data-study-view]");
     if (view) {
-      state.shown = { kind: view.dataset.studyView === "overview" ? "overview" : "chat" };
-      state.back = state.shown.kind === "overview" ? "overview" : "chat";
+      const to = view.dataset.studyView;
+      state.shown = { kind: to === "overview" ? "overview" : to === "progress" ? "progress" : "chat" };
+      state.back = state.shown.kind === "overview" ? "overview" : state.shown.kind === "progress" ? "progress" : "chat";
       els.stage.innerHTML = "";
+      if (state.shown.kind === "progress") host.dispatch({ type: "studyProgress" });
       return render();
     }
     if (at("[data-study-new-note]")) {
@@ -819,6 +848,19 @@ export function createStudy(host) {
     if (state.shown.kind === "deck") renderStage();
   }
 
+  /** Where the student stands. @param {import("./study-progress.js").ProgressEvent} event */
+  function progressEvent(event) {
+    state.progress = event;
+    if (state.shown.kind === "progress") renderStage();
+  }
+
+  /** A Learning Overview, opened. @param {import("./study-overview.js").OverviewEvent} event */
+  function learningEvent(event) {
+    state.shown = { kind: "learning", learning: event };
+    els.stage.innerHTML = "";
+    render();
+  }
+
   /** A quiz: drawn again where it is shown, or opened when it was asked for.
    *  @param {import("./study-quiz.js").QuizEvent} event */
   function quizEvent(event) {
@@ -881,6 +923,6 @@ export function createStudy(host) {
   render();
 
   return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
-    deck: deckEvent, reviewing: reviewingEvent, quiz: quizEvent,
+    deck: deckEvent, reviewing: reviewingEvent, quiz: quizEvent, progress: progressEvent, learning: learningEvent,
     kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
 }

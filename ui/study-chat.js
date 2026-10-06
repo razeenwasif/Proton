@@ -17,8 +17,9 @@ import { markdown } from "./markdown.js";
 /** @typedef {import("./bindings/StudyTutorSettings").StudyTutorSettings} Settings */
 /** @typedef {import("./bindings/StudyChatSummary").StudyChatSummary} Summary */
 /** @typedef {import("./bindings/ClaudeCapabilities").ClaudeCapabilities} Capabilities */
+/** @typedef {import("./bindings/StudyObjective").StudyObjective} Objective */
 /** @typedef {{id: string, title: string, settings: Settings, turns: Turn[], live: Live | null, busy: boolean,
- *   error: string | null, grounding: string | null, chats: Summary[]}} ChatEvent */
+ *   error: string | null, grounding: string | null, chats: Summary[], lesson: Objective | null}} ChatEvent */
 
 /** The engines a tutor can be, in the order offered. */
 export const ENGINES = /** @type {[string, string][]} */ ([
@@ -109,7 +110,16 @@ export function createChat(host) {
         <span class="grow"></span>
         <button class="st-chip-btn" data-study-menu="tutor" title="Who answers, and how">${icon("spark")}<span>${esc(who)}${style(how)}</span></button>${passages}
         <button class="st-chip-btn" data-study-chat-new title="A new chat">${icon("plus")}</button>
-      </div>`;
+      </div>${lessonHtml()}`;
+  }
+
+  /** What a lesson is on, and the check that ends it. */
+  function lessonHtml() {
+    const lesson = state.chat?.lesson;
+    if (!lesson) return "";
+    const text = markdown(lesson.text).replace(/^<p>|<\/p>\s*$/g, "");
+    return `<div class="st-lesson">${icon("target")}<span>A lesson on <b>${esc(lesson.id)}</b>: ${text}</span>` +
+      (host.readOnly() ? "" : `<button class="cc-quiet" data-study-lesson-check="${esc(lesson.id)}" title="Three questions on it, made from the sources">Check me</button>`) + `</div>`;
   }
 
   /** @param {string} how */
@@ -314,6 +324,12 @@ export function createChat(host) {
     if (at("[data-study-chat-new]")) {
       state.menu = null;
       host.dispatch({ type: "studyChatNew" });
+      return true;
+    }
+    const check = at("[data-study-lesson-check]");
+    if (check) {
+      host.dispatch({ type: "studyMake", kind: "quiz", options: { focus: "", ask: "", columns: [], amount: "fewer", level: "medium", deck: null,
+        objectives: [check.dataset.studyLessonCheck], source: null, count: 3 } });
       return true;
     }
     const pick = at("[data-study-chat]");

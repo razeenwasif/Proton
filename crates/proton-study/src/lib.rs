@@ -29,6 +29,7 @@ pub mod fsrs;
 pub mod lock;
 pub mod mastery;
 pub mod model;
+pub mod overview;
 pub mod quiz;
 pub mod role;
 pub mod snapshot;
