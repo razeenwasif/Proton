@@ -13,6 +13,9 @@ serde_json = { workspace = true }
 ts-rs = { workspace = true }
 # A run's record names its code and environment by digest.
 sha2 = "0.10"
+# Planning Lean asks GitHub what there is; making it downloads elan. The
+# same build of ureq as the literature's, so nothing new is compiled.
+ureq = { version = "3", default-features = false, features = ["rustls", "json", "platform-verifier"] }
 
 [target.'cfg(unix)'.dependencies]
 # A run is its own process group, stopped as one.

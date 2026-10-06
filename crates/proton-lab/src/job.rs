@@ -27,8 +27,28 @@ enum Msg {
     Closed,
 }
 
+/// How a job is started, beyond its program and arguments.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct How {
+    /// Its own process group, stopped as one: what it starts — curl, an
+    /// unpacker — goes when it is stopped, rather than downloading on.
+    pub group: bool,
+    /// None of the person's environment but what a download needs — home,
+    /// user, language, temporary folder, proxies and certificates — so no
+    /// variable of theirs changes what is made.
+    pub clean: bool,
+}
+
+/// What a clean job is still given from the environment.
+const PASSED: [&str; 17] = [
+    "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "no_proxy",
+    "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO",
+];
+
 pub struct Job {
     child: Option<Child>,
+    /// Its process group, when it has one of its own.
+    group: Option<u32>,
     said: Receiver<Msg>,
     /// Streams still open, and whether the exit has been sent.
     open: u8,
@@ -68,12 +88,31 @@ fn pump(stream: impl Read + Send + 'static, send: impl Fn(String) -> bool + Send
 impl Job {
     /// Start `program` with `args` and these environment variables set.
     pub fn start(program: &Path, args: &[String], env: &[(String, String)]) -> Result<Job, String> {
+        Job::start_with(program, args, env, How::default())
+    }
+
+    /// The same, started as `how` says.
+    pub fn start_with(program: &Path, args: &[String], env: &[(String, String)], how: How) -> Result<Job, String> {
         let mut command = Command::new(program);
         command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        if how.clean {
+            command.env_clear();
+            for name in PASSED {
+                if let Some(value) = std::env::var_os(name) {
+                    command.env(name, value);
+                }
+            }
+        }
         for (key, value) in env {
             command.env(key, value);
         }
+        #[cfg(unix)]
+        if how.group {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
         let mut child = command.spawn().map_err(|e| format!("{}: {e}", program.display()))?;
+        let group = (how.group && cfg!(unix)).then(|| child.id());
         let (tx, said) = channel();
         let (out, err) = (child.stdout.take(), child.stderr.take());
         let mut open = 0;
@@ -87,7 +126,7 @@ impl Job {
             let (lines, closed) = (tx.clone(), tx.clone());
             pump(err, move |l| lines.send(Msg::Said(Said::Err(l))).is_ok(), move || drop(closed.send(Msg::Closed)));
         }
-        Ok(Job { child: Some(child), said, open, exited: false })
+        Ok(Job { child: Some(child), group, said, open, exited: false })
     }
 
     /// What it has said since last asked, ending with its exit once both
@@ -125,8 +164,13 @@ impl Job {
         !self.exited
     }
 
-    /// Stop it now.
+    /// Stop it now — and, with a group of its own, everything it started.
     pub fn kill(&mut self) {
+        #[cfg(unix)]
+        if let (Some(group), false) = (self.group, self.exited) {
+            // SAFETY: killpg only sends a signal, to a group this job made.
+            unsafe { libc::killpg(group as libc::pid_t, libc::SIGKILL) };
+        }
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -184,6 +228,39 @@ mod tests {
         assert!(!job.running() && started.elapsed() < Duration::from_secs(5));
         let job = Job::start(&PathBuf::from("/bin/sh"), &["-c".into(), "sleep 30".into()], &[]).unwrap();
         drop(job);
+    }
+
+    #[test]
+    fn a_job_with_a_group_of_its_own_takes_what_it_started_with_it_and_a_clean_one_none_of_the_environment() {
+        let dir = std::env::temp_dir().join(format!("proton-job-group-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid_file = dir.join("child.pid");
+        let script = format!("sleep 300 & echo $! > '{}'; wait", pid_file.display());
+        let mut job = Job::start_with(&PathBuf::from("/bin/sh"), &["-c".into(), script], &[], How { group: true, clean: false }).unwrap();
+        // The shell makes the file before it writes to it: wait for the number.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let read = || std::fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse::<i32>().ok());
+        while read().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid = read().expect("the job never said what it started");
+        job.kill();
+        std::thread::sleep(Duration::from_millis(200));
+        // SAFETY: signal 0 only asks whether the process exists.
+        assert!(unsafe { libc::kill(pid, 0) } != 0, "what the job started outlived it");
+
+        std::env::set_var("PROTON_JOB_TEST_SECRET", "s3cret");
+        let mut job = Job::start_with(
+            &PathBuf::from("/bin/sh"),
+            &["-c".into(), "echo \"${PROTON_JOB_TEST_SECRET:-none}|${GIVEN:-none}|${HOME:+home}\"".into()],
+            &[("GIVEN".into(), "yes".into())],
+            How { group: false, clean: true },
+        )
+        .unwrap();
+        let said = drain(&mut job);
+        assert!(said.contains(&Said::Out("none|yes|home".into())), "{said:?}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
