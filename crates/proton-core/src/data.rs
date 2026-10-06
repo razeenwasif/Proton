@@ -238,6 +238,14 @@ impl Data {
         *self = Data::default();
     }
 
+    /// Proton is going: the kernel is stopped, with everything it started,
+    /// and its connection file removed. The shell exits without dropping
+    /// anything, so nothing else would.
+    pub fn shutdown(&mut self) {
+        self.kernel = None;
+        self.running.clear();
+    }
+
     /// What the panel draws.
     pub fn cells(&self) -> Vec<CellView> {
         let Some(notebook) = &self.notebook else {
@@ -919,6 +927,74 @@ mod tests {
         let path = std::env::join_paths([without.parent().unwrap(), with.parent().unwrap()]).unwrap();
         assert_eq!(with_ipykernel(&path), Some(with));
         assert_eq!(with_ipykernel(&std::env::join_paths([without.parent().unwrap()]).unwrap()), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Whether a process is there.
+    #[cfg(unix)]
+    fn there(pid: &str) -> bool {
+        std::process::Command::new("/bin/sh")
+            .args(["-c", "kill -0 \"$1\" 2>/dev/null", "sh", pid])
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    /// Whether a process is gone, given a moment: one orphaned when its
+    /// parent was stopped is a zombie until whatever adopts it waits for it.
+    #[cfg(unix)]
+    fn gone(pid: &str) -> bool {
+        use std::time::{Duration, Instant};
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while there(pid) {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        true
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn quitting_stops_the_kernel_with_what_it_started_and_removes_its_file() {
+        use crate::bus::Command;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
+        let dir = scratch("quit");
+        // The project's own Python: a kernel that never answers, but starts
+        // something of its own and says both their pids and its connection
+        // file, which a kernel is handed after `-f`.
+        let python = dir.join(".venv/bin/python3");
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        let fake = "#!/bin/sh\nsleep 60 &\necho \"$$ $! $4\" > kernel.part && mv kernel.part kernel\nwait\n";
+        std::fs::write(&python, fake).unwrap();
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(
+            dir.join("n.ipynb"),
+            r#"{"cells": [{"cell_type": "code", "execution_count": null, "metadata": {}, "outputs": [], "source": ["1 + 1"]}],
+                "metadata": {}, "nbformat": 4, "nbformat_minor": 4}"#,
+        )
+        .unwrap();
+
+        let mut session = crate::session::Session::new(&dir);
+        session.active_mut().apply(Command::OpenBuffer { path: "n.ipynb".into() });
+        let ran = session.active_mut().apply(Command::RunCell { index: 0 });
+        let said = || std::fs::read_to_string(dir.join("kernel")).ok();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while said().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let said = said().unwrap_or_else(|| panic!("the kernel never started: {ran:?}"));
+        let [kernel, started, file] = said.split_whitespace().collect::<Vec<_>>()[..] else {
+            panic!("the kernel said {said:?}");
+        };
+        let file = PathBuf::from(file);
+        assert!(there(kernel) && there(started) && file.exists(), "the kernel was not running");
+
+        session.shutdown();
+        assert!(gone(kernel), "the kernel outlived Proton");
+        assert!(gone(started), "what the kernel started outlived Proton");
+        assert!(!file.exists(), "the kernel's connection file outlived Proton");
         let _ = std::fs::remove_dir_all(dir);
     }
 

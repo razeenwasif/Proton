@@ -2111,6 +2111,19 @@ and a client waiting for it waits forever.
 runs, printing and results arrive as different messages, a traceback survives,
 state persists between cells, and two cells in flight keep their output apart.
 
+**A kernel goes when Proton does.** It runs whatever the notebook says, which
+can start processes of its own, so it is started in a session of its own — the
+leader of a process group, with no terminal, as Jupyter starts kernels — and
+the group is stopped as one: when the kernel is let go of, when it is found to
+have exited, and when Proton quits. The shell exits without dropping the
+session, so quitting stops every workspace's kernel by name. The connection
+file, which names the signing key, is its owner's alone to read and goes with
+the kernel. Nothing reconnects to a kernel across a relaunch, so one a crashed
+Proton left is out of everybody's reach: the next Proton to start stops it, if
+its file names a pid that is still that kernel — its command line names the
+file — and no longer the child of the Proton that started it. Another Proton's
+kernel, and a pid handed to something else since, are left alone.
+
 **The document ships, and it is the part that had to be exact.** A notebook is
 JSON, so Data mode obeys the load-bearing rule — but that rule is only worth
 anything if a notebook Proton saved looks like one Jupyter saved. A diff in

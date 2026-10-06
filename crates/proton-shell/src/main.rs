@@ -455,8 +455,9 @@ fn main() {
                         Err(poisoned) => poisoned.into_inner(),
                     };
                     session.session.save();
-                    // A Lab run is a process group of its own: it would
-                    // outlive the app if it were not stopped here.
+                    // A Lab run and a notebook's kernel each lead a process
+                    // group of their own, and the app exits without dropping
+                    // the session: they would outlive it if not stopped here.
                     session.session.shutdown();
                 }
             }

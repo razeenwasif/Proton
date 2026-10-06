@@ -30,6 +30,14 @@ pub struct Connection {
     pub signature_scheme: String,
     #[serde(default)]
     pub kernel_name: String,
+    /// The kernel's process, once it has one, and the Proton that started
+    /// it. Not Jupyter's, and ignored by a kernel: what lets a Proton started
+    /// after one that crashed find the kernels nobody can reach — see
+    /// `kernel::reap`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<u32>,
 }
 
 impl Connection {
@@ -52,6 +60,8 @@ impl Connection {
                 key,
                 signature_scheme: "hmac-sha256".into(),
                 kernel_name: String::new(),
+                pid: None,
+                parent: None,
             },
             held,
         ))
@@ -63,12 +73,32 @@ impl Connection {
         serde_json::from_str(&text).map_err(|err| format!("{}: {err}", path.display()))
     }
 
+    /// Written whole or not at all, by a rename: it is written again once the
+    /// kernel has a pid, and the kernel may be reading it as it starts. And
+    /// readable by its owner alone, since it names the key that lets anybody
+    /// who reads it run code in the kernel.
     pub fn write(&self, path: &Path) -> Result<(), String> {
+        use std::io::Write;
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         let text = serde_json::to_string_pretty(self).map_err(|err| err.to_string())?;
-        std::fs::write(path, text).map_err(|err| format!("{}: {err}", path.display()))
+        let mut part = path.as_os_str().to_owned();
+        part.push(".part");
+        let part = PathBuf::from(part);
+        let _ = std::fs::remove_file(&part);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        options
+            .open(&part)
+            .and_then(|mut file| file.write_all(text.as_bytes()))
+            .and_then(|()| std::fs::rename(&part, path))
+            .map_err(|err| {
+                let _ = std::fs::remove_file(&part);
+                format!("{}: {err}", path.display())
+            })
     }
 
     pub fn address(&self, port: u16) -> String {
@@ -115,7 +145,21 @@ impl Reserved {
 /// and dies with the kernel, so it is neither the user's business nor
 /// something a repository should ever see.
 pub fn connection_file(id: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("proton-kernel-{id}.json"))
+    connection_dir().join(format!("{PREFIX}{id}.json"))
+}
+
+/// Where every connection file is.
+pub(crate) fn connection_dir() -> PathBuf {
+    std::env::temp_dir()
+}
+
+/// What every connection file's name starts with.
+const PREFIX: &str = "proton-kernel-";
+
+/// Whether a file's name is one `connection_file` gives.
+#[cfg(unix)]
+pub(crate) fn is_connection_file(name: &str) -> bool {
+    name.starts_with(PREFIX) && name.ends_with(".json")
 }
 
 #[cfg(test)]

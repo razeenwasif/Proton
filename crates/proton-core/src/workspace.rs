@@ -3475,9 +3475,11 @@ impl Workspace {
         self.modeling.mesh_bytes(key)
     }
 
-    /// Proton is going: Research's runs are stopped and its calls let go —
-    /// the project's own, that is; the session stops one it shares.
+    /// Proton is going: the notebook's kernel is stopped, and Research's runs
+    /// are stopped and its calls let go — the project's own, that is; the
+    /// session stops one it shares.
     pub fn shutdown(&mut self) {
+        self.data.shutdown();
         if !self.research_shared {
             self.research().shutdown();
         }

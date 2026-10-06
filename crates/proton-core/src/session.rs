@@ -428,6 +428,12 @@ impl Session {
     /// put a downloads folder in the projects list for good because somebody
     /// once started the editor from there.
     pub fn restore(requested: Option<PathBuf>, fallback: Option<PathBuf>) -> Session {
+        // Kernels a Proton that crashed left running: nothing reconnects to
+        // one, and each holds whatever its notebook loaded. Looked for beside
+        // the start rather than in its way.
+        let _ = std::thread::Builder::new()
+            .name("proton-reap-kernels".into())
+            .spawn(proton_data::kernel::reap);
         Session::restore_from(state_file(), requested, fallback)
             .with_language_servers()
             .with_plugins()
@@ -541,7 +547,7 @@ impl Session {
     }
 
     /// Proton is going: what every workspace has running that would outlive
-    /// it — Research's runs and calls — is stopped.
+    /// it — a notebook's kernel, Research's runs and calls — is stopped.
     pub fn shutdown(&mut self) {
         for workspace in &mut self.workspaces {
             workspace.shutdown();

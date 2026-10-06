@@ -4391,6 +4391,7 @@ name = "proton-data"
 version = "0.0.1"
 dependencies = [
  "hmac",
+ "libc",
  "rand 0.9.5",
  "serde",
  "serde_json",
