@@ -365,27 +365,19 @@ fn window_icon() -> Option<tauri::image::Image<'static>> {
 /// that policy names neither `ipc:` nor the editor's own origin, so a page
 /// can draw itself and reach nothing of Proton's. The pane frames it
 /// sandboxed besides, with an origin of its own.
+///
+/// A page's `<video>` and `<audio>` seek by asking for ranges of bytes, and
+/// WebKit plays a custom scheme's media only when it is answered so: each
+/// range is answered 206, a piece at a time.
 fn artifact_page(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
     use proton_claude::artifacts;
-    let root = artifacts::root();
-    let found = artifacts::resolve(&root, request.uri().path()).and_then(|file| {
-        let bytes = std::fs::read(&file).ok()?;
-        Some((artifacts::content_type(&file), bytes))
-    });
-    let builder = tauri::http::Response::builder()
-        .header("Content-Security-Policy", artifacts::CSP)
-        .header("X-Content-Type-Options", "nosniff")
-        // A sandboxed frame's origin is opaque, so a page fetching its own
-        // data file is a cross-origin request to itself.
-        .header("Access-Control-Allow-Origin", "*");
-    let response = match found {
-        Some((kind, bytes)) => builder.status(200).header("Content-Type", kind).body(bytes),
-        None => builder
-            .status(404)
-            .header("Content-Type", "text/plain; charset=utf-8")
-            .body(b"This artifact is not kept here.".to_vec()),
-    };
-    response.unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+    let range = request.headers().get("range").and_then(|v| v.to_str().ok());
+    let served = artifacts::serve(&artifacts::root(), request.uri().path(), range);
+    let mut builder = tauri::http::Response::builder().status(served.status);
+    for (name, value) in served.headers {
+        builder = builder.header(name, value);
+    }
+    builder.body(served.body).unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
 }
 
 /// Notebook's media: a notebook's audio overview, or a voice's sample.

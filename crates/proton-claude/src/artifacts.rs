@@ -31,13 +31,17 @@ use ts_rs::TS;
 /// are written that way. What it does not allow is the one thing that
 /// matters inside an editor: `ipc:` and the shell's own origin are absent
 /// from every directive, so a page cannot reach Proton, only draw itself.
+///
+/// Pictures and media may come from anywhere — and from the page's own
+/// folder, named outright: WebKit's `*` matches the web's schemes, not
+/// `artifact:`, so a page's clips and posters were refused without it.
 pub const CSP: &str = "default-src 'self' artifact: http://artifact.localhost data: blob:; \
 script-src 'self' 'unsafe-inline' 'unsafe-eval' artifact: http://artifact.localhost blob: \
 https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://cdn.tailwindcss.com https://code.jquery.com; \
 style-src 'self' 'unsafe-inline' artifact: http://artifact.localhost https://fonts.googleapis.com \
 https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; \
 font-src 'self' artifact: http://artifact.localhost data: https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; \
-img-src * data: blob:; media-src * data: blob:; \
+img-src 'self' artifact: http://artifact.localhost * data: blob:; media-src 'self' artifact: http://artifact.localhost * data: blob:; \
 connect-src 'self' artifact: http://artifact.localhost https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; \
 frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'";
 
@@ -105,6 +109,9 @@ pub struct Imported {
     pub updated: usize,
     /// Of those, how many came without a page — theirs is gone from disk.
     pub remote: usize,
+    /// Versions kept before without files their page uses — clips, images,
+    /// scripts — given them now.
+    pub mended: usize,
 }
 
 /// The gallery: every artifact kept, newest first, in `index.json`.
@@ -134,6 +141,103 @@ fn plain(path: &str) -> Option<PathBuf> {
         }
     }
     (!out.as_os_str().is_empty()).then_some(out)
+}
+
+/// Where a publish's files are found, best first, as the Artifact tool finds
+/// them: under its `root` when it named one, else the working directory it
+/// was called in — which a page named by a relative path gives away, and
+/// which is otherwise the project's — and, last, beside the page itself.
+fn bases(input: &Value, page: Option<&Path>, project: &str) -> Vec<PathBuf> {
+    let mut cwd: Vec<PathBuf> = Vec::new();
+    if let (Some(named), Some(page)) = (input.get("file_path").and_then(Value::as_str), page) {
+        let named: Vec<Component> = Path::new(named).components().filter(|c| !matches!(c, Component::CurDir)).collect();
+        let whole: Vec<Component> = page.components().collect();
+        let relative = named.iter().all(|c| matches!(c, Component::Normal(_)));
+        if relative && !named.is_empty() && whole.len() > named.len() && whole[whole.len() - named.len()..] == named[..] {
+            cwd.push(whole[..whole.len() - named.len()].iter().collect());
+        }
+    }
+    if !project.is_empty() {
+        cwd.push(PathBuf::from(project));
+    }
+    let mut out: Vec<PathBuf> = Vec::new();
+    if let Some(root) = input.get("root").and_then(Value::as_str).filter(|r| !r.is_empty()) {
+        match Path::new(root).is_absolute() {
+            true => out.push(PathBuf::from(root)),
+            false => out.extend(cwd.iter().map(|dir| dir.join(root))),
+        }
+    }
+    out.extend(cwd);
+    if let Some(dir) = page.and_then(Path::parent) {
+        out.push(dir.to_path_buf());
+    }
+    let mut seen: Vec<PathBuf> = Vec::new();
+    out.retain(|dir| {
+        let new = !seen.contains(dir);
+        seen.push(dir.clone());
+        new
+    });
+    out
+}
+
+/// What a publish brought with it: each file's published path and where it
+/// came from, as the tool takes them — a map of published path to source
+/// (a path, or `{from}`), or a list of paths each published as itself.
+/// One removed (`null`), or copied from another artifact, has no source here.
+fn brought(files: Option<&Value>) -> Vec<(PathBuf, String)> {
+    match files {
+        Some(Value::Object(map)) => map
+            .iter()
+            .filter_map(|(published, from)| {
+                let from = match from {
+                    Value::String(from) => from.as_str(),
+                    Value::Object(spec) => spec.get("from").and_then(Value::as_str)?,
+                    _ => return None,
+                };
+                Some((plain(published)?, from.to_string()))
+            })
+            .collect(),
+        Some(Value::Array(list)) => list
+            .iter()
+            .filter_map(|item| {
+                let path = item.as_str().or_else(|| item.get("path").and_then(Value::as_str))?;
+                Some((plain(path)?, path.to_string()))
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The paths a publish removed from its artifact: `null` in its map.
+fn removed(files: Option<&Value>) -> Vec<PathBuf> {
+    files.and_then(Value::as_object).into_iter().flatten().filter(|(_, from)| from.is_null()).filter_map(|(published, _)| plain(published)).collect()
+}
+
+/// Every file under a folder, as paths within it.
+fn within(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![PathBuf::new()];
+    while let Some(rel) = stack.pop() {
+        for entry in std::fs::read_dir(dir.join(&rel)).into_iter().flatten().flatten() {
+            let rel = rel.join(entry.file_name());
+            match entry.file_type() {
+                Ok(t) if t.is_dir() => stack.push(rel),
+                Ok(t) if t.is_file() => out.push(rel),
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// A file put in place: linked where it can be — a version's clips are
+/// the same bytes as the last's — and copied where it cannot.
+fn place(from: &Path, to: &Path) -> bool {
+    if let Some(parent) = to.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::remove_file(to);
+    std::fs::hard_link(from, to).is_ok() || std::fs::copy(from, to).is_ok()
 }
 
 /// A UUID, or anything else made of the characters one is: an id safe to
@@ -206,7 +310,8 @@ impl Store {
             Some(kept) => kept.id.clone(),
             None => id,
         };
-        let file = self.keep(&id, seq, source.as_deref(), input.get("files"));
+        let bases = bases(input, source.as_deref(), project);
+        let file = self.keep(&id, seq, source.as_deref(), input.get("files"), &bases);
 
         let icon = result
             .get("icon")
@@ -252,10 +357,12 @@ impl Store {
         Some(ArtifactRef { id, seq, title, url, icon, file })
     }
 
-    /// Copy a page — and the files it brought with it, where it asks for
-    /// them — into a version's folder. The page's name in that folder, or
-    /// nothing when there was no page to copy.
-    fn keep(&self, id: &str, seq: u32, source: Option<&Path>, files: Option<&Value>) -> String {
+    /// Copy a page — and the files it brought with it, found under `bases`
+    /// — into a version's folder. A version is what claude.ai serves after
+    /// that publish: the files the last version had, unless this one
+    /// replaced or removed them, and the ones it brought. The page's name in
+    /// the folder, or nothing when there was no page to copy.
+    fn keep(&self, id: &str, seq: u32, source: Option<&Path>, files: Option<&Value>, bases: &[PathBuf]) -> String {
         let Some(source) = source.filter(|path| path.is_file()) else { return String::new() };
         let folder = self.root.join(id).join(seq.to_string());
         let name = source
@@ -265,25 +372,48 @@ impl Store {
         if std::fs::create_dir_all(&folder).is_err() || std::fs::copy(source, folder.join(&name)).is_err() {
             return String::new();
         }
-        if let Some(files) = files.and_then(Value::as_object) {
-            let base = source.parent().map(Path::to_path_buf).unwrap_or_default();
-            for (published, from) in files {
-                let from = match from {
-                    Value::String(from) => Some(from.as_str()),
-                    Value::Object(spec) => spec.get("from").and_then(Value::as_str),
-                    _ => None,
-                };
-                let (Some(to), Some(from)) = (plain(published), from) else { continue };
-                let from = Path::new(from);
-                let from = if from.is_absolute() { from.to_path_buf() } else { base.join(from) };
-                let to = folder.join(to);
-                if let Some(parent) = to.parent() {
-                    let _ = std::fs::create_dir_all(parent);
+        // What the last version had, carried over.
+        let earlier = self.items.iter().find(|a| a.id == id).and_then(|a| a.versions.iter().filter(|v| v.seq < seq && !v.file.is_empty()).max_by_key(|v| v.seq).cloned());
+        if let Some(earlier) = earlier {
+            let from = self.root.join(id).join(earlier.seq.to_string());
+            let gone = removed(files);
+            for rel in within(&from) {
+                if rel == Path::new(&earlier.file) || rel == Path::new(&name) || gone.contains(&rel) || folder.join(&rel).exists() {
+                    continue;
                 }
-                let _ = std::fs::copy(from, to);
+                place(&from.join(&rel), &folder.join(&rel));
             }
         }
+        self.bring(&folder, files, bases, false);
         name
+    }
+
+    /// Put the files a publish brought into a version's folder, each found
+    /// under the first of `bases` that has it. Only those missing, when
+    /// `missing`; how many were put.
+    fn bring(&self, folder: &Path, files: Option<&Value>, bases: &[PathBuf], missing: bool) -> usize {
+        let mut put = 0;
+        for (to, from) in brought(files) {
+            let to = folder.join(to);
+            if missing && to.is_file() {
+                continue;
+            }
+            let from = Path::new(&from);
+            let found = match from.is_absolute() {
+                true => Some(from.to_path_buf()).filter(|f| f.is_file()),
+                false => bases.iter().map(|base| base.join(from)).find(|f| f.is_file()),
+            };
+            // Copied, never linked: the source is the person's, and may be
+            // written over in place.
+            let Some(found) = found else { continue };
+            if let Some(parent) = to.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::copy(&found, &to).is_ok() {
+                put += 1;
+            }
+        }
+        put
     }
 
     /// Bring in artifacts published before Proton kept them.
@@ -305,6 +435,8 @@ impl Store {
             let at = self.items.iter().position(|a| a.id == id || crate::import::same_url(&a.url, &one.url));
             let key = at.map(|i| self.items[i].id.clone()).unwrap_or_else(|| id.clone());
             let source = one.source.clone().filter(|p| p.is_file());
+            let input = serde_json::json!({ "files": one.files.clone().unwrap_or(Value::Null) });
+            let bases = bases(&input, source.as_deref(), &one.project);
             let latest = at.and_then(|i| self.items[i].versions.last().cloned());
             if let Some(latest) = &latest {
                 let kept = self.root.join(&key).join(latest.seq.to_string()).join(&latest.file);
@@ -313,6 +445,11 @@ impl Store {
                     None => true,
                 };
                 if unchanged {
+                    // Kept before its files were found where it found them:
+                    // given them now.
+                    if !latest.file.is_empty() && self.bring(&self.root.join(&key).join(latest.seq.to_string()), one.files.as_ref(), &bases, true) > 0 {
+                        done.mended += 1;
+                    }
                     continue;
                 }
             }
@@ -322,7 +459,7 @@ impl Store {
                 (Some(seq), None) => seq.max(1),
                 (None, None) => 1,
             };
-            let file = self.keep(&key, seq, source.as_deref(), one.files.as_ref());
+            let file = self.keep(&key, seq, source.as_deref(), one.files.as_ref(), &bases);
             if file.is_empty() {
                 done.remote += 1;
             }
@@ -430,15 +567,108 @@ pub fn content_type(path: &Path) -> &'static str {
         Some("woff") => "font/woff",
         Some("ttf") => "font/ttf",
         Some("otf") => "font/otf",
-        Some("mp4") => "video/mp4",
+        Some("avif") => "image/avif",
+        Some("bmp") => "image/bmp",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("mov") => "video/quicktime",
         Some("webm") => "video/webm",
+        Some("ogv") => "video/ogg",
         Some("mp3") => "audio/mpeg",
+        Some("m4a") => "audio/mp4",
+        Some("aac") => "audio/aac",
+        Some("flac") => "audio/flac",
+        Some("ogg" | "oga" | "opus") => "audio/ogg",
         Some("wav") => "audio/wav",
+        Some("vtt") => "text/vtt; charset=utf-8",
+        Some("xml") => "application/xml",
+        Some("tsv") => "text/tab-separated-values; charset=utf-8",
+        Some("map" | "geojson") => "application/json",
+        Some("glb") => "model/gltf-binary",
+        Some("gltf") => "model/gltf+json",
         Some("pdf") => "application/pdf",
         Some("txt") => "text/plain; charset=utf-8",
         Some("csv") => "text/csv; charset=utf-8",
         Some("wasm") => "application/wasm",
         _ => "application/octet-stream",
+    }
+}
+
+/// The bytes asked for by a `Range` header, of a file so long: `[start, end]`.
+/// A player asks for one range at a time; more than one is answered as the
+/// first.
+pub fn range(header: Option<&str>, len: u64) -> Option<(u64, u64)> {
+    let spec = header?.trim().strip_prefix("bytes=")?;
+    let (from, to) = spec.split(',').next()?.trim().split_once('-')?;
+    if len == 0 {
+        return None;
+    }
+    let (start, end) = match (from.trim(), to.trim()) {
+        ("", suffix) => {
+            let n: u64 = suffix.parse().ok()?;
+            (len.saturating_sub(n.max(1)), len - 1)
+        }
+        (start, "") => (start.parse().ok()?, len - 1),
+        (start, end) => (start.parse().ok()?, end.parse::<u64>().ok()?.min(len - 1)),
+    };
+    (start <= end && start < len).then_some((start, end))
+}
+
+/// The most of a file answered at once when a range is asked: a player
+/// asks again for the rest.
+pub const PIECE: u64 = 4 * 1024 * 1024;
+
+/// An answer to a request for a file: its status, headers and bytes.
+pub struct Served {
+    pub status: u16,
+    pub headers: Vec<(&'static str, String)>,
+    pub body: Vec<u8>,
+}
+
+/// A file answered as a player asks for it: whole, or — for `<video>` and
+/// `<audio>`, which seek by asking for bytes — the range asked, a piece at
+/// a time, 206 with where it is. A range the file has not got is 416.
+pub fn answer(file: &Path, kind: &str, range_header: Option<&str>) -> Option<Served> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut handle = std::fs::File::open(file).ok()?;
+    let len = handle.metadata().ok()?.len();
+    let mut headers = vec![("Content-Type", kind.to_string()), ("Accept-Ranges", "bytes".to_string())];
+    let asked = range(range_header, len);
+    if range_header.is_some() && asked.is_none() {
+        headers.push(("Content-Range", format!("bytes */{len}")));
+        return Some(Served { status: 416, headers, body: Vec::new() });
+    }
+    let (start, end) = asked.map_or((0, len.saturating_sub(1)), |(s, e)| (s, e.min(s + PIECE - 1)));
+    let mut body = vec![0u8; if len == 0 { 0 } else { (end - start + 1) as usize }];
+    handle.seek(SeekFrom::Start(start)).ok()?;
+    handle.read_exact(&mut body).ok()?;
+    if asked.is_some() {
+        headers.push(("Content-Range", format!("bytes {start}-{end}/{len}")));
+    }
+    Some(Served { status: if asked.is_some() { 206 } else { 200 }, headers, body })
+}
+
+/// Answer `artifact://localhost/<path>`: a kept file, under the artifacts'
+/// policy, whole or the range a player asked for; or 404.
+pub fn serve(root: &Path, path: &str, range_header: Option<&str>) -> Served {
+    let common = || {
+        vec![
+            ("Content-Security-Policy", CSP.to_string()),
+            ("X-Content-Type-Options", "nosniff".to_string()),
+            // A sandboxed frame's origin is opaque, so a page fetching its
+            // own data file is a cross-origin request to itself.
+            ("Access-Control-Allow-Origin", "*".to_string()),
+        ]
+    };
+    match resolve(root, path).and_then(|file| answer(&file, content_type(&file), range_header)) {
+        Some(mut served) => {
+            served.headers.extend(common());
+            served
+        }
+        None => {
+            let mut headers = common();
+            headers.push(("Content-Type", "text/plain; charset=utf-8".to_string()));
+            Served { status: 404, headers, body: b"This artifact is not kept here.".to_vec() }
+        }
     }
 }
 
@@ -503,7 +733,7 @@ mod tests {
         let gone = Found { url: "https://claude.ai/artifact/Gone1".into(), source: Some(dir.join("missing.html")), ..found(None, 5) };
 
         let done = store.import(vec![found(Some(page.clone()), 10), gone.clone()]);
-        assert_eq!(done, Imported { added: 2, updated: 0, remote: 1 });
+        assert_eq!(done, Imported { added: 2, updated: 0, remote: 1, mended: 0 });
         // Again, unchanged: nothing new.
         assert_eq!(store.import(vec![found(Some(page.clone()), 10), gone]), Imported::default());
         // The page changed on disk: a second version.
@@ -555,7 +785,97 @@ mod tests {
     }
 
     #[test]
+    fn a_publishs_files_are_found_where_the_tool_found_them() {
+        let cwd = scratch("bases");
+        std::fs::create_dir_all(cwd.join("dev/build")).unwrap();
+        std::fs::create_dir_all(cwd.join("media/clips")).unwrap();
+        std::fs::create_dir_all(cwd.join("dev/out")).unwrap();
+        std::fs::create_dir_all(cwd.join("data")).unwrap();
+        let page = cwd.join("dev/build/artifact.html");
+        std::fs::write(&page, "<video src=media/clips/ch1.mp4>").unwrap();
+        std::fs::write(cwd.join("media/clips/ch1.mp4"), "clip").unwrap();
+        std::fs::write(cwd.join("dev/out/app.js"), "js").unwrap();
+        std::fs::write(cwd.join("data/x.json"), "{}").unwrap();
+        let mut store = Store::at(cwd.join("store"));
+        let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        let result = |seq: u32| json!({ "url": "https://claude.ai/artifact/Clips", "path": page, "artifact_id": id, "title": "Clips", "seq": seq });
+        // The page named relatively: the working directory is what is left.
+        let input = json!({ "file_path": "dev/build/artifact.html", "files": { "media/clips/ch1.mp4": "media/clips/ch1.mp4" } });
+        store.record(&input, &result(1), "", "s").unwrap();
+        assert!(resolve(store.root(), &format!("/{id}/1/media/clips/ch1.mp4")).is_some(), "a clip found under the working directory");
+        // Named absolutely, the project is where they are; a `root` is under it;
+        // a list publishes each path as itself.
+        let input = json!({ "file_path": page, "root": "dev/out", "files": { "js/app.js": "app.js" } });
+        store.record(&input, &result(2), cwd.to_str().unwrap(), "s").unwrap();
+        assert!(resolve(store.root(), &format!("/{id}/2/js/app.js")).is_some(), "found under the root it named");
+        let input = json!({ "file_path": page, "files": [{ "path": "data/x.json" }] });
+        store.record(&input, &result(3), cwd.to_str().unwrap(), "s").unwrap();
+        assert!(resolve(store.root(), &format!("/{id}/3/data/x.json")).is_some(), "a list of paths");
+        // Each version is what claude.ai serves after it: what the last had,
+        // with what this one brought.
+        assert!(resolve(store.root(), &format!("/{id}/3/media/clips/ch1.mp4")).is_some() && resolve(store.root(), &format!("/{id}/3/js/app.js")).is_some());
+        // One removed is not carried on.
+        store.record(&json!({ "file_path": page, "files": { "js/app.js": null } }), &result(4), cwd.to_str().unwrap(), "s").unwrap();
+        assert!(resolve(store.root(), &format!("/{id}/4/js/app.js")).is_none() && resolve(store.root(), &format!("/{id}/4/data/x.json")).is_some());
+    }
+
+    #[test]
+    fn importing_gives_a_version_kept_without_its_files_the_files_it_names() {
+        use crate::import::Found;
+        let cwd = scratch("mend");
+        std::fs::create_dir_all(cwd.join("dev/build")).unwrap();
+        std::fs::create_dir_all(cwd.join("media/clips")).unwrap();
+        let page = cwd.join("dev/build/artifact.html");
+        std::fs::write(&page, "<video>").unwrap();
+        std::fs::write(cwd.join("media/clips/ch1.mp4"), "clip").unwrap();
+        let mut store = Store::at(cwd.join("store"));
+        let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        // Kept as it was before this was fixed: the page alone.
+        let result = json!({ "url": "https://claude.ai/artifact/Mend1", "path": page, "artifact_id": id, "title": "Mend", "seq": 1 });
+        store.record(&json!({ "file_path": page }), &result, "", "s").unwrap();
+        assert!(resolve(store.root(), &format!("/{id}/1/media/clips/ch1.mp4")).is_none());
+        let found = Found {
+            url: "https://claude.ai/artifact/Mend1".into(), id: Some(id.into()), title: "Mend".into(), source: Some(page.clone()),
+            files: Some(json!({ "media/clips/ch1.mp4": "media/clips/ch1.mp4" })), icon: String::new(), description: String::new(),
+            project: cwd.to_str().unwrap().into(), session: "s".into(), seq: Some(1), at: 1,
+        };
+        assert_eq!(store.import(vec![found.clone()]), Imported { mended: 1, ..Imported::default() });
+        assert!(resolve(store.root(), &format!("/{id}/1/media/clips/ch1.mp4")).is_some(), "the clip it names, given it");
+        assert_eq!(store.import(vec![found]), Imported::default(), "and only once");
+    }
+
+    #[test]
+    fn a_player_is_answered_the_range_it_asks_for() {
+        assert_eq!(range(Some("bytes=0-"), 100), Some((0, 99)));
+        assert_eq!(range(Some("bytes=90-500"), 100), Some((90, 99)));
+        assert_eq!(range(Some("bytes=-30"), 100), Some((70, 99)));
+        assert_eq!(range(Some("bytes=100-"), 100), None);
+        let dir = scratch("range");
+        let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        std::fs::create_dir_all(dir.join(id).join("1/media")).unwrap();
+        std::fs::write(dir.join(id).join("1/media/clip.mp4"), (0..=255u8).cycle().take(10_000).collect::<Vec<_>>()).unwrap();
+        let path = format!("/{id}/1/media/clip.mp4");
+        let has = |served: &Served, name: &str, value: &str| served.headers.iter().any(|(k, v)| *k == name && v == value);
+        let whole = serve(&dir, &path, None);
+        assert_eq!((whole.status, whole.body.len()), (200, 10_000));
+        assert!(has(&whole, "Content-Type", "video/mp4") && has(&whole, "Accept-Ranges", "bytes") && has(&whole, "Content-Security-Policy", CSP));
+        let part = serve(&dir, &path, Some("bytes=256-511"));
+        assert_eq!((part.status, part.body.len(), part.body[0]), (206, 256, 0));
+        assert!(has(&part, "Content-Range", "bytes 256-511/10000"));
+        assert_eq!(serve(&dir, &path, Some("bytes=20000-")).status, 416);
+        let missing = serve(&dir, &format!("/{id}/1/nothing.mp4"), None);
+        assert!(missing.status == 404 && has(&missing, "Content-Security-Policy", CSP));
+        assert_eq!(content_type(Path::new("lecture.MOV")), "video/quicktime");
+        assert_eq!(content_type(Path::new("talk.vtt")), "text/vtt; charset=utf-8");
+    }
+
+    #[test]
     fn the_page_policy_keeps_the_editor_out_of_reach() {
+        // A page's own clips and pictures, named by its scheme: `*` is not it.
+        for directive in ["img-src", "media-src"] {
+            let rule = CSP.split(';').map(str::trim).find(|d| d.starts_with(directive)).unwrap();
+            assert!(rule.contains(" artifact: ") && rule.contains("http://artifact.localhost"), "{rule}");
+        }
         assert!(!CSP.contains("ipc:"));
         assert!(!CSP.contains("tauri:"));
         assert!(CSP.contains("script-src 'self' 'unsafe-inline'"));

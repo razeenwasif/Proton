@@ -9,11 +9,10 @@
 //! followed. A player seeking asks for a range of bytes (`Range:
 //! bytes=1000-`), and is answered 206 with that range, a piece at a time.
 
-use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-/// The most of a file answered at once: a player asks again for the rest.
-const PIECE: u64 = 4 * 1024 * 1024;
+/// A range asked and the answer to it, as artifacts are answered.
+pub use proton_claude::artifacts::{range, Served};
 
 /// Where voices' samples are kept, or `None` if the platform will not say.
 pub fn voices_dir() -> Option<PathBuf> {
@@ -58,32 +57,6 @@ pub fn resolve(folder: Option<&Path>, voices: Option<&Path>, path: &str) -> Opti
     (found.starts_with(&base) && found.is_file()).then_some(found)
 }
 
-/// The bytes asked for by a `Range` header, of a file so long: `[start, end]`.
-pub fn range(header: Option<&str>, len: u64) -> Option<(u64, u64)> {
-    let spec = header?.trim().strip_prefix("bytes=")?;
-    // One range only: a player never asks for more.
-    let (from, to) = spec.split(',').next()?.trim().split_once('-')?;
-    if len == 0 {
-        return None;
-    }
-    let (start, end) = match (from.trim(), to.trim()) {
-        ("", suffix) => {
-            let n: u64 = suffix.parse().ok()?;
-            (len.saturating_sub(n.max(1)), len - 1)
-        }
-        (start, "") => (start.parse().ok()?, len - 1),
-        (start, end) => (start.parse().ok()?, end.parse::<u64>().ok()?.min(len - 1)),
-    };
-    (start <= end && start < len).then_some((start, end))
-}
-
-/// An answer to a player.
-pub struct Served {
-    pub status: u16,
-    pub headers: Vec<(&'static str, String)>,
-    pub body: Vec<u8>,
-}
-
 fn content_type(file: &Path) -> &'static str {
     match file.extension().and_then(|e| e.to_str()) {
         Some("m4a") => "audio/mp4",
@@ -96,25 +69,12 @@ fn content_type(file: &Path) -> &'static str {
 pub fn serve(folder: Option<&Path>, voices: Option<&Path>, path: &str, range_header: Option<&str>) -> Served {
     let missing = || Served { status: 404, headers: vec![("Content-Type", "text/plain; charset=utf-8".into())], body: b"Not kept here.".to_vec() };
     let Some(file) = resolve(folder, voices, path) else { return missing() };
-    let Ok(mut handle) = std::fs::File::open(&file) else { return missing() };
-    let len = handle.metadata().map(|m| m.len()).unwrap_or(0);
-    let mut headers = vec![("Content-Type", content_type(&file).to_string()), ("Accept-Ranges", "bytes".to_string()), ("Cache-Control", "no-cache".to_string())];
-    let asked = range(range_header, len);
-    if range_header.is_some() && asked.is_none() {
-        headers.push(("Content-Range", format!("bytes */{len}")));
-        return Served { status: 416, headers, body: Vec::new() };
-    }
-    let (start, end) = asked.map_or((0, len.saturating_sub(1)), |(s, e)| (s, e.min(s + PIECE - 1)));
-    let mut body = vec![0u8; if len == 0 { 0 } else { (end - start + 1) as usize }];
-    if handle.seek(SeekFrom::Start(start)).is_err() || handle.read_exact(&mut body).is_err() {
-        return missing();
-    }
-    match asked {
-        Some(_) => {
-            headers.push(("Content-Range", format!("bytes {start}-{end}/{len}")));
-            Served { status: 206, headers, body }
+    match proton_claude::artifacts::answer(&file, content_type(&file), range_header) {
+        Some(mut served) => {
+            served.headers.push(("Cache-Control", "no-cache".to_string()));
+            served
         }
-        None => Served { status: 200, headers, body },
+        None => missing(),
     }
 }
 

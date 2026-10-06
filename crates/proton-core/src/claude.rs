@@ -372,7 +372,13 @@ impl Claude {
         };
         self.importing = None;
         let done = self.store().import(found);
+        let mended = match done.mended {
+            0 => String::new(),
+            1 => " One kept before without the files its page uses — clips, pictures — has them now.".to_string(),
+            n => format!(" {n} kept before without the files their pages use — clips, pictures — have them now."),
+        };
         let text = match (done.added, done.updated) {
+            (0, 0) if done.mended > 0 => mended.trim_start().to_string(),
             (0, 0) => "No artifacts to import: every one published from this machine is already here.".to_string(),
             (added, updated) => {
                 let mut parts = Vec::new();
@@ -387,7 +393,7 @@ impl Claude {
                 } else {
                     String::new()
                 };
-                format!("Imported {}.{remote}", parts.join(" and "))
+                format!("Imported {}.{remote}{mended}", parts.join(" and "))
             }
         };
         vec![self.artifacts_event(), crate::workspace::notice(text, crate::bus::NoticeLevel::Info)]
