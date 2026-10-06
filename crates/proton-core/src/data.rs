@@ -218,6 +218,10 @@ pub struct Data {
     /// What the agent proposed and nobody has answered yet.
     proposals: Vec<Proposal>,
     next_proposal: u64,
+    /// Each cell's outputs as drawn, made once and kept until they change:
+    /// re-parsing every dataframe's HTML on every notebook event was most of
+    /// what one cost.
+    drawn: std::cell::RefCell<HashMap<u64, Vec<OutputView>>>,
     /// What the kernel said when it failed to start, so the panel can say so
     /// rather than showing a notebook that silently never runs.
     problem: Option<String>,
@@ -290,6 +294,7 @@ impl Data {
         self.running.clear();
         self.collected.clear();
         self.keys = (0..count).map(|_| self.fresh_key()).collect();
+        self.drawn.borrow_mut().clear();
         self.modified = false;
         self.proposals.clear();
         self.problem = None;
@@ -348,7 +353,12 @@ impl Data {
                 // which reads as if it had already finished.
                 let outputs = match self.collected.get(&key) {
                     Some(live) => live.iter().map(OutputView::of).collect(),
-                    None => cell.outputs.iter().map(OutputView::of).collect(),
+                    None => self
+                        .drawn
+                        .borrow_mut()
+                        .entry(key)
+                        .or_insert_with(|| cell.outputs.iter().map(OutputView::of).collect())
+                        .clone(),
                 };
                 CellView {
                     kind: match cell.kind {
@@ -686,6 +696,7 @@ impl Data {
             }
         }
         self.collected.remove(&key);
+        self.drawn.borrow_mut().remove(&key);
         self.modified = true;
         true
     }
@@ -884,6 +895,7 @@ impl Data {
         // deleted while it ran.
         for (key, count) in finished {
             let outputs = self.collected.remove(&key).unwrap_or_default();
+            self.drawn.borrow_mut().remove(&key);
             let Some(index) = self.index_of(key) else { continue };
             if let Some(notebook) = self.notebook.as_mut() {
                 self.modified |= notebook.set_outputs(index, &outputs, count);

@@ -245,19 +245,18 @@ fn the_keystroke_itself_carries_the_new_selection() {
     // The panel redraws from what a keystroke returned. If the selection only
     // shows up on the *next* Sync, `j` moves the cursor and nothing on screen
     // says so — which is exactly what it looked like in the app.
+    //
+    // Only the selection, though: the whole notebook, every output in it,
+    // used to come back with every `j`.
     let mut space = open("live");
     let events = keys(&mut space, "j");
-    let cells = events
-        .iter()
-        .find_map(|event| match event {
-            Event::Notebook { cells, .. } => Some(cells.clone()),
-            _ => None,
-        })
-        .expect("pressing j should send the notebook back");
-    assert_eq!(
-        selected(&cells),
-        1,
-        "the returned cells should say where it is"
+    assert!(
+        events.iter().any(|event| matches!(event, Event::CellSelected { index: 1 })),
+        "pressing j should say where the cursor went: {events:?}"
+    );
+    assert!(
+        !events.iter().any(|event| matches!(event, Event::Notebook { .. })),
+        "and not send the whole notebook again"
     );
 }
 

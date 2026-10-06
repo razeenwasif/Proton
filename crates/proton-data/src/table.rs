@@ -219,9 +219,17 @@ fn unescape(text: &str) -> String {
 }
 
 /// `find`, ignoring case, because HTML tags may be written either way.
+///
+/// Compared where it stands rather than on a lowercased copy: called once a
+/// row and once a cell on the rest of the table, a copy each time made a
+/// table of thousands of rows cost its length squared to read. `needle` is
+/// ASCII, so where it matches is a character boundary.
 fn find_ci(haystack: &str, needle: &str) -> Option<usize> {
-    let lower = haystack.to_ascii_lowercase();
-    lower.find(needle)
+    let needle = needle.as_bytes();
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack.as_bytes().windows(needle.len()).position(|window| window.eq_ignore_ascii_case(needle))
 }
 
 #[cfg(test)]

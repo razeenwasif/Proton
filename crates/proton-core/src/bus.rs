@@ -1445,6 +1445,12 @@ pub enum Event {
         /// on each cell, and listed here for the agent's panel.
         proposals: Vec<crate::data::ProposalView>,
     },
+    /// The notebook's cursor moved to another cell, and nothing else changed:
+    /// sent in place of the whole notebook, which `j` and `k` resent with
+    /// every output in it.
+    CellSelected {
+        index: usize,
+    },
     /// Quitting now would lose these files' unsaved changes: the quit waits
     /// for the person to say whether to save them.
     Unsaved {

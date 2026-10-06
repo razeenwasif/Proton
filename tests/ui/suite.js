@@ -904,6 +904,20 @@ await test('Chat redraws only the rows that changed, and keeps an open diff open
   const items = ws.querySelectorAll('[data-claude-items] > .cc-item');
   assert(items[items.length - 1].dataset.item === 't-live', 'a new row was not added at the end');
 });
+await test('A streaming reply draws what has settled once, and the whole reply when it is done', async () => {
+  const ws = $('.workspace[data-ws="chat"]');
+  await ccPush(ccItems([ccRun('First **paragraph**.\n\nSecond', {id: 't-settle', done: false})]));
+  const settledBox = ws.querySelector('[data-item="t-settle"] [data-settled]');
+  const first = settledBox?.firstElementChild;
+  assert(first?.querySelector('strong')?.textContent === 'paragraph', 'the settled paragraph was not drawn');
+  assert(ws.querySelector('[data-item="t-settle"] [data-tail]')?.textContent.includes('Second'), 'the arriving paragraph was not drawn');
+  await ccPush(ccItems([ccRun('First **paragraph**.\n\nSecond one, longer\n\n```\ncode\n\nmore', {id: 't-settle', done: false})]));
+  assert(settledBox.firstElementChild === first, 'what had settled was drawn again');
+  assert(ws.querySelector('[data-item="t-settle"] [data-tail] pre, [data-item="t-settle"] [data-tail] code'), 'an open fence did not stay in the arriving part');
+  await ccPush(ccItems([ccRun('First **paragraph**.\n\nSecond one, longer\n\n```\ncode\n\nmore\n```', {id: 't-settle', done: true})]));
+  const done = ws.querySelector('[data-item="t-settle"]');
+  assert(!done.querySelector('[data-settled]') && !done.querySelector('.cc-caret') && done.querySelector('pre'), 'the finished reply was not drawn whole');
+});
 await test('A permission card answers the request it was asked with, as allow, always or deny', async () => {
   const ws = $('.workspace[data-ws="chat"]');
   const ask = {request: 'req-7', kind: 'permission', description: 'touch x', blocked: null,

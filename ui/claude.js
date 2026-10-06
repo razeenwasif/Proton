@@ -744,10 +744,56 @@ export function createClaude(host) {
     return el;
   }
 
+  /** Where streaming prose's settled part ends, for each item still
+   * streaming: what comes before its last paragraph break outside a code
+   * fence cannot change any more, so it is drawn once and kept, and only the
+   * paragraph still arriving is drawn again each frame — a long answer cost
+   * its whole length to draw on every frame of it. Drawn whole once it is
+   * done, so what stays on screen is exactly what a finished answer draws.
+   * @type {Map<string, number>} */
+  const settledTo = new Map();
+
+  /** Where the settled part of `text` ends, scanning on from `from`, which
+   * is outside any fence. @param {string} text @param {number} from */
+  function settleAt(text, from) {
+    let fence = false;
+    let cut = from;
+    let at = from;
+    for (;;) {
+      const end = text.indexOf("\n", at);
+      // The last line is still arriving.
+      if (end < 0) break;
+      const line = text.slice(at, end);
+      if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+      else if (!fence && !line.trim()) cut = end + 1;
+      at = end + 1;
+    }
+    return cut;
+  }
+
+  /** Streaming prose, a settled block at a time. @param {HTMLElement} el @param {Item & {kind: "text"}} item */
+  function drawStreaming(el, item) {
+    let prose = el.querySelector(":scope > .cc-prose.live");
+    const from = prose ? settledTo.get(item.id) ?? 0 : 0;
+    if (!prose || from > item.text.length) {
+      el.innerHTML = `<div class="cc-prose live"><div data-settled></div><div data-tail></div><span class="cc-caret"></span></div>`;
+      prose = el.querySelector(":scope > .cc-prose.live");
+      settledTo.delete(item.id);
+      return drawStreaming(el, item);
+    }
+    const cut = settleAt(item.text, from);
+    if (cut > from) prose.querySelector("[data-settled]")?.insertAdjacentHTML("beforeend", markdown(item.text.slice(from, cut)));
+    settledTo.set(item.id, cut);
+    const tail = prose.querySelector("[data-tail]");
+    if (tail) tail.innerHTML = markdown(item.text.slice(cut), { streaming: true });
+  }
+
   /** @param {Item} item */
   function draw(item) {
     const el = slot(item);
     el.className = itemClass(item);
+    if (item.kind === "text" && !item.done) return drawStreaming(el, item);
+    settledTo.delete(item.id);
     // A form being filled in is not redrawn under the person filling it.
     if (el.querySelector("form.cc-question") && item.kind === "tool" && item.ask) return;
     // Keep what is focused or typed into an answer card across a redraw.

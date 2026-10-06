@@ -79,6 +79,17 @@ pub struct Workspace {
     data: crate::data::Data,
     design: crate::design::Design,
     settings: crate::settings::Settings,
+    /// Polled while another project is on screen: what it hears is taken in,
+    /// but its notebook, terminal and conversation are not drawn into events
+    /// nobody will see — switching back draws them all.
+    quiet: bool,
+    /// What the agent's last event showed, so a heartbeat on which nothing
+    /// changed sends nothing — while a turn ran, every one sent the whole
+    /// conversation, and kept the heartbeat at its fastest.
+    agent_shown: Option<u64>,
+    /// How the agent signs in, as the pane says it: asked of the disk once a
+    /// provider and kept, where every agent event asked it again.
+    credential: std::cell::RefCell<Option<(String, String)>>,
     /// What each file's `.editorconfig` says about its indentation, read the
     /// first time it is needed and forgotten when an `.editorconfig` is
     /// written here.
@@ -344,6 +355,11 @@ impl Workspace {
 
     pub fn vim_mode(&self) -> VimMode {
         self.vim.mode()
+    }
+
+    /// Whether this is polled in the background: see `quiet`.
+    pub fn set_quiet(&mut self, quiet: bool) {
+        self.quiet = quiet;
     }
 
     /// Put text at the cursor exactly as it is, as a paste does: none of the
@@ -688,7 +704,7 @@ impl Workspace {
 
             Command::SelectCell { index } => {
                 self.data.select_cell(index);
-                vec![self.notebook_event()]
+                vec![Event::CellSelected { index: self.data.selected() }]
             }
 
             /* ── themes ────────────────────────────────────── */
@@ -995,7 +1011,10 @@ impl Workspace {
             }
 
             /* ── settings ──────────────────────────────────── */
-            Command::SetSetting { key, value } => match self.settings.set(&key, value) {
+            Command::SetSetting { key, value } => match {
+                self.credential.replace(None);
+                self.settings.set(&key, value)
+            } {
                 // Already had that value. The panel emits on every click and
                 // most clicks change nothing.
                 Ok(false) => Vec::new(),
@@ -1367,6 +1386,8 @@ impl Workspace {
             }
 
             Command::Ask { text } => {
+                // Signed in since it was last asked, perhaps: asked again.
+                self.credential.replace(None);
                 let mut events = self.ask(&text);
                 // Saved as soon as it is asked, not when the answer lands. A
                 // question whose answer never arrived is still something you
@@ -2885,9 +2906,11 @@ impl Workspace {
             if let Some(why) = self.data.complaint() {
                 events.push(notice(why, NoticeLevel::Error));
             }
-            events.push(self.notebook_event());
+            if !self.quiet {
+                events.push(self.notebook_event());
+            }
         }
-        if self.terminal.as_mut().is_some_and(|t| t.poll()) {
+        if self.terminal.as_mut().is_some_and(|t| t.poll()) && !self.quiet {
             events.push(self.terminal_event());
         }
 
@@ -4054,7 +4077,12 @@ impl Workspace {
             Err(why) => events.push(notice(why, NoticeLevel::Error)),
         }
 
-        events.push(self.agent_event());
+        // Only when there is something new to show, and somebody to see it.
+        let shown = self.agent_fingerprint();
+        if !self.quiet && self.agent_shown != Some(shown) {
+            self.agent_shown = Some(shown);
+            events.push(self.agent_event());
+        }
 
         // The turn ended between the start of this poll and its end, which is
         // the only moment the next task may start: two turns in flight would
@@ -4957,6 +4985,35 @@ impl Workspace {
         }
     }
 
+    /// What the agent's pane would show, in one number: the length of the
+    /// conversation, what it is doing, what it has cost, and the last two
+    /// entries whole — the only ones that grow while a turn runs.
+    fn agent_fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        let transcript = self.agent.transcript();
+        transcript.len().hash(&mut hash);
+        for entry in transcript.iter().rev().take(2) {
+            format!("{entry:?}").hash(&mut hash);
+        }
+        format!("{:?} {:?} {} {}", self.agent.activity(), self.agent.usage(), self.agent.provider().id(), self.agent.model()).hash(&mut hash);
+        hash.finish()
+    }
+
+    /// How the agent signs in, asked once a provider: see `credential`.
+    fn credential_said(&self) -> String {
+        let provider = self.agent.provider().id().to_string();
+        let mut kept = self.credential.borrow_mut();
+        if let Some((for_provider, said)) = kept.as_ref() {
+            if *for_provider == provider {
+                return said.clone();
+            }
+        }
+        let said = self.agent.credential();
+        *kept = Some((provider, said.clone()));
+        said
+    }
+
     fn agent_event(&self) -> Event {
         let usage = self.agent.usage();
         Event::Agent {
@@ -4969,7 +5026,7 @@ impl Workspace {
             output_tokens: usage.output_tokens,
             provider: self.agent.provider().id().to_string(),
             model: self.agent.model().to_string(),
-            credential: self.agent.credential(),
+            credential: self.credential_said(),
             cached_tokens: usage.cache_read_input_tokens,
         }
     }
@@ -5978,8 +6035,13 @@ impl Workspace {
                 action: action.clone(),
                 description,
             }];
-            if changed || matches!(action.verb, Verb::Move | Verb::Yank) {
-                events.push(self.notebook_event());
+            // A move changes only which cell is marked; a yank, nothing on
+            // screen. Everything else is the notebook again.
+            match action.verb {
+                Verb::Move => events.push(Event::CellSelected { index: self.data.selected() }),
+                Verb::Yank => {}
+                _ if changed => events.push(self.notebook_event()),
+                _ => {}
             }
             return (events, false);
         }

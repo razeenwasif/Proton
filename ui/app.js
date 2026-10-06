@@ -1590,6 +1590,25 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/** The notebook's cursor moved, and nothing else: only the mark moves — on
+ * the focused pane's cells, kept in view — and the table follows it.
+ * @param {number} index */
+function selectCell(index) {
+  if (!lastNotebook) return;
+  lastNotebook.cells.forEach((cell, i) => { cell.selected = i === index; });
+  const box = focusedCells();
+  if (box) {
+    for (const cell of box.querySelectorAll(":scope > [data-cell]")) {
+      cell.classList.toggle("on", Number(/** @type {HTMLElement} */ (cell).dataset.cell) === index);
+    }
+    box.querySelector(`:scope > [data-cell="${index}"]`)?.scrollIntoView({ block: "nearest" });
+    // What is painted no longer says which cell was marked: drawn afresh
+    // the next time the notebook comes.
+    notebookPainted.delete(Number(box.dataset.view ?? 0));
+  }
+  renderTableDock(lastNotebook);
+}
+
 function renderNotebook(event) {
   lastNotebook = event;
   const name = $("[data-nb-name]");
@@ -4896,6 +4915,10 @@ function renderEvent(event) {
       renderNotebook(event);
       break;
 
+    case "cellSelected":
+      selectCell(event.index);
+      break;
+
     case "claudeSessions":
       claude?.sessions(event);
       break;
@@ -5916,6 +5939,33 @@ function answerHtml(text, streaming) {
 /** The model that is answering, for the transcript's byline. */
 let answeringModel = "";
 
+/** What each agent thread last drew: each entry's key and its markup. */
+const threadDrawn = new WeakMap();
+
+/** Draw a conversation into a thread, replacing only the entries whose key
+ * changed. A conversation that was cleared clears the thread, or `New chat`
+ * would leave the last one on screen.
+ * @param {Element} thread @param {any[]} transcript @param {string[]} keys */
+function paintThread(thread, transcript, keys) {
+  const before = threadDrawn.get(thread) ?? { keys: [], rows: [] };
+  const rows = keys.map((key, i) => (before.keys[i] === key ? before.rows[i] : entryHtml(transcript[i])));
+  const kids = thread.children;
+  if (kids.length !== before.rows.length || rows.length < before.rows.length) {
+    thread.innerHTML = rows.join("");
+  } else {
+    for (let i = 0; i < rows.length; i++) {
+      if (kids[i] && before.keys[i] === keys[i]) continue;
+      const holder = document.createElement("div");
+      holder.innerHTML = rows[i];
+      const fresh = holder.firstElementChild;
+      if (!fresh) continue;
+      if (kids[i]) kids[i].replaceWith(fresh);
+      else thread.appendChild(fresh);
+    }
+  }
+  threadDrawn.set(thread, { keys, rows });
+}
+
 function entryHtml(entry) {
   const you = entry.speaker === "you";
   const who = you
@@ -6359,20 +6409,16 @@ function renderAgent(event) {
   // Every thread: Codex's dock and Chat's stage show the same conversation,
   // and one of them is always off screen. Painting only the visible one would
   // leave the other showing whatever it had when it was last looked at.
-  const html = event.transcript.length ? event.transcript.map(entryHtml).join("") : null;
+  // Entry by entry: what has not changed is not drawn again — while a turn
+  // streams, only its last entry grows.
+  const keys = event.transcript.map((entry) => `${answeringModel}\u0000${JSON.stringify(entry)}`);
   for (const thread of $$("[data-agent-thread]")) {
-    if (html === null) continue;
     const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60;
-    thread.innerHTML = html;
+    paintThread(thread, event.transcript, keys);
     // Follow the answer only if the reader was already at the bottom —
     // yanking someone back down while they are reading is worse than
     // making them scroll.
     if (atBottom) thread.scrollTop = thread.scrollHeight;
-  }
-  // A conversation that was cleared has to clear the panes too, or `New chat`
-  // leaves the last one on screen.
-  if (!event.transcript.length) {
-    for (const thread of $$("[data-agent-thread]")) thread.innerHTML = "";
   }
 
   // Which service answered. Worth a permanent chip rather than a setting you

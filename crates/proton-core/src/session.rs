@@ -868,7 +868,9 @@ impl Session {
         let side = self.side();
         let mut events = Vec::new();
         for (index, workspace) in self.workspaces.iter_mut().enumerate() {
+            workspace.set_quiet(index != active);
             let produced = workspace.apply(Command::Poll);
+            workspace.set_quiet(false);
             if index == active {
                 events = produced;
             }

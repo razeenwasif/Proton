@@ -4888,3 +4888,6 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .quit-acts .grow { flex: 1; }
 .quit-acts button { border: 0; border-radius: 8px; padding: 6px 12px; cursor: pointer; font: 500 12px var(--sans); background: var(--e3); color: var(--ink); }
 .quit-acts button.go { background: color-mix(in srgb, var(--accent) 70%, var(--e3)); }
+/* Streaming prose, drawn a settled block at a time: the two parts lay out as
+   one answer. */
+.cc-prose.live > [data-settled], .cc-prose.live > [data-tail] { display: contents; }

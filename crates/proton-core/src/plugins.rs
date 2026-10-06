@@ -53,6 +53,15 @@ impl Plugins {
     /// engine and compile whatever happens to be installed on the machine
     /// running it.
     pub fn load(&mut self, from: &std::path::Path) {
+        let (found, broken) = proton_plugin::discover(from);
+        for why in broken {
+            self.problems.push((String::new(), why));
+        }
+        // No engine without a plugin to run in it: its ticker wakes a hundred
+        // times a second for as long as it lives, plugins or none.
+        if found.is_empty() {
+            return;
+        }
         let host = match Host::new() {
             Ok(host) => host,
             Err(why) => {
@@ -60,11 +69,6 @@ impl Plugins {
                 return;
             }
         };
-
-        let (found, broken) = proton_plugin::discover(from);
-        for why in broken {
-            self.problems.push((String::new(), why));
-        }
 
         for installed in found {
             let id = installed.manifest.id.clone();

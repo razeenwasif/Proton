@@ -20,6 +20,12 @@ use proton_core::{Command, Workspace};
 
 /// Serve a scripted turn per request, and report each body that arrives.
 fn api(turns: Vec<String>) -> (String, mpsc::Receiver<String>) {
+    api_after(turns, Duration::ZERO)
+}
+
+/// The same, each answer coming `delay` after its request, as a model that
+/// thinks before it speaks.
+fn api_after(turns: Vec<String>, delay: Duration) -> (String, mpsc::Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let (tx, rx) = mpsc::channel();
@@ -48,6 +54,7 @@ fn api(turns: Vec<String>) -> (String, mpsc::Receiver<String>) {
             let _ = reader.read_exact(&mut sent);
             let _ = tx.send(String::from_utf8_lossy(&sent).into_owned());
 
+            std::thread::sleep(delay);
             let mut socket = socket;
             let _ = write!(
                 socket,
@@ -181,6 +188,15 @@ fn a_question_runs_a_tool_and_comes_back_with_an_answer() {
 
     let events = settle(&mut ws);
     let entries = transcript(&events);
+    // Sent when something changed, not on every heartbeat of the turn.
+    let sent: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Agent { transcript, activity, .. } => Some(format!("{transcript:?} {activity:?}")),
+            _ => None,
+        })
+        .collect();
+    assert!(sent.windows(2).all(|w| w[0] != w[1]), "the same conversation was sent twice running");
 
     assert_eq!(entries.len(), 2, "the question and the answer");
     assert_eq!(entries[0].speaker, Speaker::You);
@@ -204,6 +220,28 @@ fn a_question_runs_a_tool_and_comes_back_with_an_answer() {
         "the grep should have found the real file, got {:?}",
         call.result
     );
+}
+
+#[test]
+fn a_turn_waiting_on_the_model_sends_nothing_new() {
+    // While the model thinks, nothing changes, and nothing is sent: every
+    // heartbeat of a turn used to send the whole conversation again.
+    let _guard = exclusive();
+    let (url, _seen) = api_after(vec![answers()], Duration::from_millis(400));
+    std::env::set_var("ANTHROPIC_BASE_URL", &url);
+    std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key");
+    let mut ws = Workspace::rooted(std::env::temp_dir());
+    ws.apply(Command::Ask { text: "hello".into() });
+    let events = settle(&mut ws);
+    let sent: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Agent { transcript, activity, .. } => Some(format!("{transcript:?} {activity:?}")),
+            _ => None,
+        })
+        .collect();
+    assert!(sent.windows(2).all(|w| w[0] != w[1]), "the same conversation was sent twice running");
+    assert!(sent.len() < 10, "{} agent events for one short answer", sent.len());
 }
 
 #[test]
