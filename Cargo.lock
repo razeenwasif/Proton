@@ -4608,6 +4608,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-voice"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "pulley-interpreter"
 version = "48.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

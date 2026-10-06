@@ -15,6 +15,7 @@
 pub mod jobs;
 mod kb;
 mod learning;
+pub mod media;
 mod quizzes;
 mod review;
 pub mod tutor;

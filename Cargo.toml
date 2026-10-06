@@ -27,6 +27,7 @@ members = [
     "crates/proton-trace",
     "crates/proton-vcs",
     "crates/proton-video",
+    "crates/proton-voice",
 ]
 
 [workspace.package]
@@ -39,6 +40,7 @@ repository = "https://github.com/razeenwasif/Proton"
 [workspace.dependencies]
 proton-agent = { path = "crates/proton-agent" }
 proton-claude = { path = "crates/proton-claude" }
+proton-voice = { path = "crates/proton-voice" }
 proton-council = { path = "crates/proton-council" }
 proton-core = { path = "crates/proton-core" }
 proton-dap = { path = "crates/proton-dap" }

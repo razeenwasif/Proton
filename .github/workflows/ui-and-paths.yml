@@ -76,6 +76,9 @@ jobs:
         if: runner.os != 'Windows'
       - run: cargo test --locked -p proton-core --test study
         if: runner.os != 'Windows'
+      # Fish Audio's client, over a scripted transport: what speech is asked
+      # as, a busy Fish asked again, refusals said without the key.
+      - run: cargo test --locked -p proton-voice
       # The engines as Research drives them unattended: their flags, and
       # turns recorded from the real CLIs replayed. Not yet run on Windows.
       - run: cargo test --locked -p proton-claude --lib --test engines --test fold

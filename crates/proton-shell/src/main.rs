@@ -388,9 +388,30 @@ fn artifact_page(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Respon
     response.unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
 }
 
+/// Notebook's media: a notebook's audio overview, or a voice's sample.
+///
+/// `study://localhost/<slug>/A001.mp3` and `study://localhost/_voices/<id>.mp3`
+/// and nothing else, resolved by `proton_core::study::media`, which answers
+/// only with an audio file under a notebook's `.notebook/audio` or the voices'
+/// cache — and with the range of it a player seeking asks for.
+fn study_media(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
+    use proton_core::study::media;
+    let settings = proton_core::settings::Settings::person();
+    let folder = settings.get("study.folder").and_then(|v| v.as_str()).and_then(proton_core::settings::research_path);
+    let voices = media::voices_dir();
+    let range = request.headers().get("range").and_then(|v| v.to_str().ok());
+    let served = media::serve(folder.as_deref(), voices.as_deref(), request.uri().path(), range);
+    let mut builder = tauri::http::Response::builder().status(served.status).header("X-Content-Type-Options", "nosniff");
+    for (name, value) in served.headers {
+        builder = builder.header(name, value);
+    }
+    builder.body(served.body).unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
 fn main() {
     tauri::Builder::default()
         .register_uri_scheme_protocol("artifact", |_, request| artifact_page(&request))
+        .register_uri_scheme_protocol("study", |_, request| study_media(&request))
         .manage(Mutex::new(BridgeSession::new(Session::restore(
             requested_folder(),
             working_folder(),
