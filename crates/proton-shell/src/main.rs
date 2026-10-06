@@ -401,6 +401,19 @@ fn study_media(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response
 }
 
 fn main() {
+    // Opened from the Finder or the Dock, this has launchd's PATH, and so
+    // would everything it starts by name — ffprobe, pandoc, git, a kernel's
+    // `!pip`. What a login shell adds is added first, while this is still the
+    // only thread: setting the environment races with anything reading it.
+    if let Some(path) = proton_claude::process::launch_path() {
+        std::env::set_var("PATH", path);
+    }
+    // The interactive login shell's PATH — conda's, nvm's — which the engines
+    // and a notebook's kernel start with: asked now and off this thread, so
+    // neither the first chat nor the first cell waits seconds for it.
+    std::thread::spawn(|| {
+        proton_claude::process::login_path();
+    });
     tauri::Builder::default()
         .register_uri_scheme_protocol("artifact", |_, request| artifact_page(&request))
         .register_uri_scheme_protocol("study", |_, request| study_media(&request))

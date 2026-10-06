@@ -87,13 +87,21 @@ pub trait Media: Send + Sync {
 /// ffmpeg and ffprobe, as installed.
 pub struct Ffmpeg;
 
+/// Why ffmpeg's `program` could not be started, said so it can be acted on.
+fn not_started(program: &str, e: &std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => format!("{program} was not found. It comes with ffmpeg: brew install ffmpeg"),
+        _ => format!("{program} could not be run: {e}"),
+    }
+}
+
 impl Media for Ffmpeg {
     fn duration(&self, file: &Path) -> Result<f64, String> {
         let out = std::process::Command::new("ffprobe")
             .args(["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0"])
             .arg(file)
             .output()
-            .map_err(|e| format!("ffprobe could not be run: {e}"))?;
+            .map_err(|e| not_started("ffprobe", &e))?;
         String::from_utf8_lossy(&out.stdout).trim().parse::<f64>().map_err(|_| format!("ffprobe could not say how long {} is", file.display()))
     }
 
@@ -108,7 +116,7 @@ impl Media for Ffmpeg {
             .args(["-c", "copy"])
             .arg(&part)
             .status()
-            .map_err(|e| format!("ffmpeg could not be run: {e}"))?;
+            .map_err(|e| not_started("ffmpeg", &e))?;
         let _ = std::fs::remove_file(&list);
         if !status.success() {
             let _ = std::fs::remove_file(&part);
