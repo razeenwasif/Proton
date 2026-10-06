@@ -228,12 +228,21 @@ impl Jobs {
         self.waiting.iter().any(of) || self.running.iter().any(|r| of(&r.asked))
     }
 
+    /// Proton is going: every call stops. An answer being marked, or waiting
+    /// to be, is written down as not marked — so it shows as such and can be
+    /// marked again — rather than dropped, which left it marked by nobody and
+    /// refused another go: a whole exam's marking, if it was handed in just
+    /// before quitting.
     pub fn stop_all(&mut self) {
-        for running in &mut self.running {
+        const QUIT: &str = "Proton quit before it was marked.";
+        for mut running in std::mem::take(&mut self.running) {
             running.conversation.stop();
+            record(&running.asked, json!({ "state": "failed", "why": QUIT }));
+            unmarked(&running.asked, QUIT);
         }
-        self.running.clear();
-        self.waiting.clear();
+        for asked in std::mem::take(&mut self.waiting) {
+            unmarked(&asked, QUIT);
+        }
     }
 
     fn set(&mut self, dir: &std::path::Path, id: &str, state: &str, why: Option<String>, made: Option<String>) {
@@ -658,4 +667,35 @@ fn record(asked: &Asked, more: serde_json::Value) {
         value["ended"] = json!(proton_study::now());
     }
     let _ = proton_research::store::atomic_write(&file, format!("{}\n", serde_json::to_string_pretty(&value).unwrap_or_default()).as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_answer_still_to_be_marked_when_proton_quits_is_written_down_as_not_marked() {
+        let root = std::env::temp_dir().join(format!("proton-jobs-quit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let book = proton_study::store::Folder::new(&root).create("Quit", 0).unwrap();
+        let mut jobs = Jobs::default();
+        jobs.waiting.push_back(Asked {
+            id: "J0001".into(),
+            dir: book.dir().to_path_buf(),
+            make: Make::Marking,
+            options: Options::default(),
+            engine: Engine::Claude,
+            model: String::new(),
+            title: "Marking".into(),
+            started: 0,
+            marking: Some(Marking { quiz: "Q001".into(), attempt: 1, question: "q1".into(), second: false }),
+        });
+        jobs.stop_all();
+        let lines = book.quiz_lines("Q001");
+        assert!(
+            matches!(lines.as_slice(), [Line::Unmarked { attempt: 1, question, why, .. }] if question == "q1" && why.contains("quit")),
+            "{lines:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

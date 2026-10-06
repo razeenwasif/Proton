@@ -651,6 +651,41 @@ pub struct StudyObjective {
     pub cites: Vec<String>,
 }
 
+/// New objectives with the ids of the old ones they say again — the same
+/// words, whatever their case, spacing and punctuation — and ids past every
+/// one given before (`floor`, and the old ones') for the rest. Answers the
+/// objectives and the highest id given.
+pub fn rekey_objectives(before: &[StudyObjective], after: &[StudyObjective], floor: u32) -> (Vec<StudyObjective>, u32) {
+    let said = |text: &str| {
+        text.chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+            .collect::<String>()
+            .to_lowercase()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let number = |id: &str| id.strip_prefix('O').and_then(|n| n.parse::<u32>().ok());
+    let mut next = before.iter().filter_map(|o| number(&o.id)).max().unwrap_or(0).max(floor);
+    let mut taken = std::collections::HashSet::new();
+    let kept = after
+        .iter()
+        .map(|o| {
+            let again = before.iter().find(|b| !taken.contains(&b.id) && said(&b.text) == said(&o.text));
+            let id = match again {
+                Some(old) => old.id.clone(),
+                None => {
+                    next += 1;
+                    format!("O{next:03}")
+                }
+            };
+            taken.insert(id.clone());
+            StudyObjective { id, ..o.clone() }
+        })
+        .collect();
+    (kept, next)
+}
+
 /// Something made, whole, as it is kept.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
@@ -844,6 +879,27 @@ impl Book {
     /// deck; the notebook's objectives replaced.
     pub fn keep_made(&self, kind: Make, title: &str, by: &str, task: &str, body: &StudyMadeBody) -> Result<StudyMade, String> {
         let made = crate::now();
+        // Objectives made again keep the ids of the ones they say again, and
+        // new ones take ids past any ever given: answers, cards and mastery
+        // name objectives by id, and numbered afresh by position each time,
+        // every one of those pointed at a different objective.
+        let mut highest = 0;
+        let rekeyed;
+        let body = match body {
+            StudyMadeBody::Objectives { objectives } => {
+                let old: serde_json::Value = std::fs::read_to_string(self.dir().join("objectives.json"))
+                    .ok()
+                    .and_then(|text| serde_json::from_str(&text).ok())
+                    .unwrap_or_default();
+                let before: Vec<StudyObjective> = serde_json::from_value(old["objectives"].clone()).unwrap_or_default();
+                let floor = old["highest"].as_u64().unwrap_or(0) as u32;
+                let (kept, top) = rekey_objectives(&before, objectives, floor);
+                highest = top;
+                rekeyed = StudyMadeBody::Objectives { objectives: kept };
+                &rekeyed
+            }
+            other => other,
+        };
         if let StudyMadeBody::Cards { cards } = body {
             let id = self.new_deck_id();
             let cards: Vec<StudyCard> = cards.iter().cloned().map(|c| StudyCard { task: task.to_string(), ..c }).collect();
@@ -956,6 +1012,9 @@ impl Book {
                     if k != "shape" {
                         value[k] = v.clone();
                     }
+                }
+                if kind.shape() == Shape::Objectives {
+                    value["highest"] = highest.into();
                 }
                 format!("{}\n", serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?)
             }
@@ -1110,6 +1169,40 @@ pub fn new_task_id(book: &Book) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn objectives_made_again_keep_the_ids_of_the_ones_they_say_again() {
+        let o = |id: &str, text: &str| StudyObjective { id: id.into(), text: text.into(), topic: String::new(), cites: Vec::new() };
+        let before = [o("O001", "Explain uniform-cost search."), o("O002", "State A*'s optimality condition."), o("O003", "Trace BFS.")];
+        let after = [o("O001", "State A*’s optimality condition"), o("O002", "Compare greedy and A* search."), o("O003", "explain uniform-cost  search")];
+        let (kept, highest) = rekey_objectives(&before, &after, 0);
+        let ids: Vec<&str> = kept.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, ["O002", "O004", "O001"], "the same objective keeps its id; a new one gets a new one");
+        assert_eq!(highest, 4);
+        // An id given before, and since dropped, is never given again.
+        let (kept, highest) = rekey_objectives(&kept, &[o("O001", "Something new.")], 9);
+        assert_eq!((kept[0].id.as_str(), highest), ("O010", 10));
+    }
+
+    #[test]
+    fn objectives_kept_again_keep_their_ids_and_the_highest_ever_given() {
+        let root = std::env::temp_dir().join(format!("proton-objectives-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let book = crate::store::Folder::new(&root).create("Objectives", 0).unwrap();
+        let o = |text: &str| StudyObjective { id: "O001".into(), text: text.into(), topic: String::new(), cites: Vec::new() };
+        let keep = |objectives: Vec<StudyObjective>| {
+            book.keep_made(Make::Objectives, "Objectives", "m", "J0001", &StudyMadeBody::Objectives { objectives }).unwrap();
+            match book.made_one("objectives") {
+                Some((_, StudyMadeBody::Objectives { objectives })) => objectives.into_iter().map(|o| o.id).collect::<Vec<_>>(),
+                other => panic!("{other:?}"),
+            }
+        };
+        assert_eq!(keep(vec![o("Trace BFS."), o("Trace DFS.")]), ["O001", "O002"]);
+        assert_eq!(keep(vec![o("Trace DFS."), o("Trace UCS.")]), ["O002", "O003"]);
+        // BFS and UCS are gone; one new objective must not be given either's id.
+        assert_eq!(keep(vec![o("Trace A*.")]), ["O004"]);
+        let _ = std::fs::remove_dir_all(root);
+    }
     use crate::store::Folder;
 
     fn book() -> Book {

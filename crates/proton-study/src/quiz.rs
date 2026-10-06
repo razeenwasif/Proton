@@ -919,9 +919,22 @@ pub fn marking_schema() -> Value {
     })
 }
 
-/// Words compared for a quote: lower case, spacing and TeX's dollars as one.
+/// Words compared for a quote: lower case, spacing and TeX's dollars as one,
+/// and a curly quote, a prime or a typographer's dash as the key that types
+/// it — a marker that quotes "isn’t" or "x − 1" has quoted "isn't" and "x - 1".
 fn squeezed(text: &str) -> String {
-    text.replace('$', "").split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    let plain: String = text
+        .chars()
+        .filter(|c| *c != '$')
+        .map(|c| match c {
+            '\u{2018}' | '\u{2019}' | '\u{2032}' | '\u{00B4}' => '\'',
+            '\u{201C}' | '\u{201D}' | '\u{2033}' => '"',
+            '\u{2212}' | '\u{2013}' | '\u{2014}' | '\u{2010}' | '\u{2011}' => '-',
+            '\u{00A0}' | '\u{2009}' | '\u{202F}' => ' ',
+            c => c,
+        })
+        .collect();
+    plain.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
 /// A marker's answer, read and held to the rubric: every criterion once, no
@@ -1117,6 +1130,14 @@ mod tests {
         assert!(read_mark(&q, answer, &too_many, "m", true).unwrap_err().contains("worth 2 at most"));
         let missing = json!({ "criteria": [{ "id": "c1", "points": 1, "evidence": ["orders"], "why": "" }], "feedback": "" });
         assert!(read_mark(&q, answer, &missing, "m", true).unwrap_err().contains("c2 is not marked"));
+        // A quote typeset by the marker — a curly apostrophe, a minus sign —
+        // is the same words as the answer's.
+        let typeset = json!({ "criteria": [
+            { "id": "c1", "points": 2, "evidence": ["the cheapest\u{2019}s not it", "g(n) \u{2212} 1"], "why": "" },
+            { "id": "c2", "points": 0, "evidence": [], "why": "" }
+        ], "feedback": "" });
+        let plain = "UCS orders by g(n) - 1. So the cheapest's not it.";
+        assert_eq!(read_mark(&q, plain, &typeset, "m", true).unwrap().score, 2.0);
         let asked = marking(&q, answer, "[[S01 p. 3]] UCS is optimal for ε > 0.", Some(("I did say g(n)", &grade)));
         assert!(asked.contains("- c1 (2 points)") && asked.contains("The student disputes the mark it was given, 2 of 3") && asked.contains("[[S01 p. 3]]"), "{asked}");
     }
