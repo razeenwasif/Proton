@@ -172,6 +172,54 @@ fn ready(name: &str) -> Option<(Workspace, std::path::PathBuf)> {
 
 #[test]
 #[ignore = "starts a Jupyter kernel"]
+fn a_cells_pip_is_the_kernels_own() {
+    // `!pip` in a cell is run by a shell the kernel starts, and found on the
+    // kernel's PATH: the pip of the kernel's own environment, so it installs
+    // where `import` looks. Run from launchd's PATH, as an app opened from
+    // the Dock has it, to see it found all the same:
+    //
+    //   env -i HOME="$HOME" SHELL="$SHELL" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    //     PROTON_TEST_KERNEL=… <this test binary> --ignored pip
+    let Ok(python) = std::env::var("PROTON_TEST_KERNEL") else {
+        println!("skipping: PROTON_TEST_KERNEL not set");
+        return;
+    };
+    std::env::set_var("PROTON_PYTHON", &python);
+    let root = project("pip");
+    let asks = NOTEBOOK.replace("print('from the kernel')\\n\",\n    \"21 * 2", "!pip --version");
+    assert_ne!(asks, NOTEBOOK);
+    std::fs::write(root.join("work.ipynb"), asks).unwrap();
+    let mut space = Workspace::rooted(&root);
+    space.apply(Command::OpenBuffer {
+        path: "work.ipynb".into(),
+    });
+
+    space.apply(Command::RunCell { index: 1 });
+    let cells = until(&mut space, |cells| {
+        !cells[1].running && !cells[1].outputs.is_empty()
+    });
+    let said: String = cells[1]
+        .outputs
+        .iter()
+        .filter_map(|o| match o {
+            OutputView::Stream { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    // `pip X from <the environment>/lib/python3.N/site-packages/pip`.
+    let environment = std::path::Path::new(&python)
+        .parent()
+        .and_then(std::path::Path::parent)
+        .unwrap();
+    assert!(
+        said.contains(&*environment.to_string_lossy()),
+        "{said:?} is not the pip of {}",
+        environment.display()
+    );
+}
+
+#[test]
+#[ignore = "starts a Jupyter kernel"]
 fn a_cell_runs_and_its_output_comes_back() {
     let Some((mut space, _root)) = ready("run") else {
         println!("skipping: PROTON_TEST_KERNEL not set");

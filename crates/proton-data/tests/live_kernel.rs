@@ -31,7 +31,7 @@ fn start() -> Option<Kernel> {
         "-f".into(),
         "{connection_file}".into(),
     ];
-    let mut kernel = Kernel::start(&argv, &std::env::temp_dir()).expect("the kernel should start");
+    let mut kernel = Kernel::start(&argv, &std::env::temp_dir(), None).expect("the kernel should start");
     let info = kernel
         .wait_ready(Duration::from_secs(60))
         .unwrap_or_else(|err| panic!("kernel not ready: {err}"));

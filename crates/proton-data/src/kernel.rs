@@ -34,8 +34,9 @@
 //! running destructors. A Proton that crashed let go of nothing, and its
 //! kernels are stopped by the next one to start — see `reap`.
 
+use std::ffi::{OsStr, OsString};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
@@ -91,11 +92,13 @@ impl Drop for Kernel {
 }
 
 impl Kernel {
-    /// Start a kernel from the argv a kernelspec gave.
+    /// Start a kernel from the argv a kernelspec gave, with `path` for its
+    /// PATH — this process's own when `None` — and the folder its program is
+    /// in ahead of that (see [`kernel_path`]).
     ///
     /// `{connection_file}` in the argv is replaced, which is how every
     /// kernelspec says "tell me where to listen".
-    pub fn start(argv: &[String], cwd: &std::path::Path) -> Result<Kernel, String> {
+    pub fn start(argv: &[String], cwd: &std::path::Path, path: Option<&OsStr>) -> Result<Kernel, String> {
         if argv.is_empty() {
             return Err("a kernel needs a command to run".into());
         }
@@ -119,6 +122,9 @@ impl Kernel {
         reserved.release();
 
         let mut command = Command::new(&argv[0]);
+        if let Some(path) = kernel_path(Path::new(&argv[0]), path) {
+            command.env("PATH", path);
+        }
         command
             .args(&args)
             .current_dir(cwd)
@@ -297,6 +303,31 @@ impl Kernel {
 ///
 /// One thread rather than one for sending and one for receiving, because a
 /// ZeroMQ socket belongs to a single thread and a DEALER does both.
+/// The PATH a kernel runs with: the folder its program is in, then `path`
+/// or this process's own.
+///
+/// Activating an environment puts its folder first, and a cell's `!pip` or
+/// `!python` is run by a shell the kernel starts, so with the kernel's own
+/// folder first they are its environment's — `pip` installs where `import`
+/// looks — rather than whichever one comes first on the PATH, or none, as
+/// in an app opened from the Dock. A program named by name alone, as in a
+/// kernelspec's `python`, has no folder to put first.
+pub fn kernel_path(program: &Path, path: Option<&OsStr>) -> Option<OsString> {
+    let ours = path.map(OsStr::to_os_string).or_else(|| std::env::var_os("PATH")).unwrap_or_default();
+    let mut dirs: Vec<PathBuf> = program
+        .parent()
+        .filter(|dir| dir.is_absolute())
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect();
+    if !ours.is_empty() {
+        dirs.extend(std::env::split_paths(&ours));
+    }
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|dir| seen.insert(dir.clone()));
+    std::env::join_paths(dirs).ok().filter(|joined| !joined.is_empty())
+}
+
 fn spawn_shell(
     context: &zmq::Context,
     connection: &Connection,
@@ -620,7 +651,7 @@ mod tests {
 
     fn kernel(dir: &Path, then: &str) -> Kernel {
         let argv = ["/bin/sh", "-c", STARTS_ONE, "sh", then].map(String::from);
-        Kernel::start(&argv, dir).unwrap()
+        Kernel::start(&argv, dir, None).unwrap()
     }
 
     #[test]
@@ -667,6 +698,51 @@ mod tests {
             heard.recv_timeout(Duration::from_secs(5)).is_ok(),
             "reading what it said never finished"
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_kernel_runs_with_its_own_folder_first_on_its_path() {
+        let path = OsStr::new("/opt/homebrew/bin:/env/bin:/usr/bin");
+        assert_eq!(
+            kernel_path(Path::new("/env/bin/python3"), Some(path)),
+            Some("/env/bin:/opt/homebrew/bin:/usr/bin".into())
+        );
+        // Named by name alone, as a kernelspec's `python` is: nothing to put
+        // first, and the PATH it is found on is left as it was.
+        assert_eq!(
+            kernel_path(Path::new("python3"), Some(OsStr::new("/usr/bin:/bin"))),
+            Some("/usr/bin:/bin".into())
+        );
+    }
+
+    #[test]
+    fn a_cells_pip_is_the_kernels_own() {
+        // An environment of its own: a "python" that, as a kernel, asks its
+        // shell where `pip` is — as `!pip install numpy` in a cell would —
+        // and a pip beside it. The PATH it is given has no pip at all, as an
+        // app opened from the Dock has none.
+        let dir = scratch("pip");
+        let bin = dir.join("env").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let script = |name: &str, body: &str| {
+            let exe = bin.join(name);
+            std::fs::write(&exe, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+            exe
+        };
+        let python = script("python", "command -v pip > found.part && mv found.part found; exec sleep 60");
+        let pip = script("pip", "exit 0");
+
+        let argv = [python.display().to_string()];
+        let kernel = Kernel::start(&argv, &dir, Some(OsStr::new("/usr/bin:/bin"))).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !dir.join("found").exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let found = std::fs::read_to_string(dir.join("found")).expect("the kernel never looked for pip");
+        assert_eq!(found.trim(), pip.display().to_string());
+        drop(kernel);
         let _ = std::fs::remove_dir_all(dir);
     }
 

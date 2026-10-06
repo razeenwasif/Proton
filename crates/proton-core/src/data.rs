@@ -541,7 +541,7 @@ impl Data {
             "-f".into(),
             "{connection_file}".into(),
         ];
-        match Kernel::start(&argv, cwd) {
+        match Kernel::start(&argv, cwd, search_path().as_deref()) {
             Ok(kernel) => {
                 self.kernel = Some(kernel);
                 self.problem = None;
@@ -719,11 +719,17 @@ pub fn python_for(root: &Path, kernel: Option<&str>) -> Option<PathBuf> {
     // editor is started from its own folder or from a Start-menu shortcut, so
     // a relative `.venv` would look next to the executable and never find the
     // one belonging to the notebook that is open.
+    //
+    // By the path it has there, made absolute and never resolved: a venv's
+    // `python3` is a link to the Python it was made from, and started by
+    // that Python's own path it is no longer in the venv, which it knows
+    // only from where it was started — none of the venv's packages, its
+    // ipykernel included, can be imported.
     for venv in [".venv", "venv", ".env"] {
         for exe in ["Scripts/python.exe", "bin/python3", "bin/python"] {
             let path = root.join(venv).join(exe);
             if path.is_file() {
-                return std::fs::canonicalize(&path).ok().or(Some(path));
+                return Some(std::path::absolute(&path).unwrap_or(path));
             }
         }
     }
@@ -731,6 +737,19 @@ pub fn python_for(root: &Path, kernel: Option<&str>) -> Option<PathBuf> {
         .or_else(|| proton_claude::process::login_path().and_then(|path| with_ipykernel(path.as_ref())))
         .or_else(|| which("python3"))
         .or_else(|| which("python"))
+}
+
+/// The PATH a kernel is given, behind the folder its Python is in: the login
+/// shell's, so a cell's `!` commands find what they would in a terminal,
+/// then whatever of this process's that lacks. `None`, for this process's
+/// own, when the login shell did not answer.
+fn search_path() -> Option<std::ffi::OsString> {
+    let login = proton_claude::process::login_path()?;
+    let ours = std::env::var_os("PATH").unwrap_or_default();
+    Some(
+        proton_claude::process::with_missing(std::ffi::OsStr::new(login), &ours.to_string_lossy())
+            .unwrap_or_else(|| login.into()),
+    )
 }
 
 /// Where Jupyter keeps kernelspecs, in the order `jupyter kernelspec list`
@@ -905,6 +924,26 @@ mod tests {
         assert_eq!(registered("python3", &dirs), None);
         assert_eq!(registered("ir", &dirs), None);
         assert_eq!(registered("nothing", &dirs), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_venvs_python_is_started_as_the_venvs_and_not_as_what_it_links_to() {
+        // `python -m venv` makes `bin/python3` a link to the Python it was
+        // made from. Started by that Python's path, it is outside the venv.
+        if std::env::var_os("PROTON_PYTHON").is_some() {
+            return;
+        }
+        let dir = scratch("venv-link");
+        let base = dir.join("base").join("python3.12");
+        std::fs::create_dir_all(base.parent().unwrap()).unwrap();
+        std::fs::write(&base, "").unwrap();
+        let bin = dir.join("project").join(".venv").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink(&base, bin.join("python3")).unwrap();
+
+        assert_eq!(python_for(&dir.join("project"), None), Some(bin.join("python3")));
         let _ = std::fs::remove_dir_all(dir);
     }
 
