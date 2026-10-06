@@ -473,7 +473,7 @@ impl Session {
                 s.recents
                     .iter()
                     .map(PathBuf::from)
-                    .filter(|path| path.is_absolute())
+                    .filter(|path| path.is_absolute() && !folder::is_root(path))
                     .collect()
             })
             .unwrap_or_default();
@@ -487,11 +487,17 @@ impl Session {
             // as typed wrote one, and the folder it meant — wherever that
             // terminal was — is recorded nowhere, so reading it against this
             // launch's working directory would open some other folder.
+            //
+            // So is the top of the disk, here and in the recents. Builds from
+            // before the shell stopped offering `/` as the working folder wrote
+            // it down on a launch from the Finder without anybody choosing it,
+            // and reopening it would walk the whole disk at every launch.
+            // Somebody who meant it can `:cd /` again.
             let alive: Vec<PathBuf> = saved
                 .open
                 .iter()
                 .map(PathBuf::from)
-                .filter(|path| path.is_absolute() && path.is_dir())
+                .filter(|path| path.is_absolute() && path.is_dir() && !folder::is_root(path))
                 .collect();
             if !alive.is_empty() {
                 session.workspaces = alive.iter().map(|path| session.build(path)).collect();

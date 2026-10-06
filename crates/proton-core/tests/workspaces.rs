@@ -1066,6 +1066,34 @@ fn a_relative_path_in_the_stored_session_is_not_reopened() {
 }
 
 #[test]
+fn a_stored_top_of_the_disk_is_not_reopened() {
+    // What a build that took `/` as the working folder wrote on a first launch
+    // from the Finder, or what a deliberate `:cd /` leaves behind. Reopened, it
+    // is the whole disk walked again at every launch, so it is skipped on the
+    // way in like a project that has since been deleted.
+    let scratch = Scratch::new("stored-slash");
+    let store = scratch.root.join("session.json");
+    // `/`, or on Windows the root of the drive the scratch folder is on.
+    let top = scratch.root.ancestors().last().unwrap().display().to_string();
+    let alpha = folder::normalise(&scratch.root.join("alpha"));
+    let old = serde_json::json!({
+        "version": 1,
+        "open": [top, alpha.display().to_string()],
+        "active": 0,
+        "recents": [top, alpha.display().to_string()],
+    });
+    std::fs::write(&store, old.to_string()).unwrap();
+
+    let session = Session::restore_from(Some(store), None, None);
+    assert_eq!(roots(&session), [alpha.clone()]);
+    assert_eq!(
+        session.recents(),
+        [alpha],
+        "nor offered again by the picker"
+    );
+}
+
+#[test]
 fn recents_outlive_the_projects_being_closed() {
     // Closing a project is not forgetting it — reopening is one keystroke and
     // a name, which is the point of the list.

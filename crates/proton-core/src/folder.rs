@@ -191,6 +191,14 @@ pub fn name_of(path: &Path) -> String {
     }
 }
 
+/// Whether a folder is the top of a disk: `/`, or a drive root like `C:\`.
+///
+/// Nowhere the session should land without being told to. A workspace rooted
+/// at one builds its file index by walking everything on the drive.
+pub fn is_root(path: &Path) -> bool {
+    path.parent().is_none()
+}
+
 /// Names for a set of folders, with enough of the parent added to tell any two
 /// apart.
 ///
