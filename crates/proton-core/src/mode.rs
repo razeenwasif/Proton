@@ -20,6 +20,11 @@ pub enum ModeId {
     /// A team of AI researchers with a scientist in the loop: co-scientist's
     /// rounds over an investigation's files, and a Lab that runs their code.
     Research,
+    /// Notebooks of one's own sources, to study from: a tutor that answers
+    /// from them and cites them, and what it makes of them — guides, cards,
+    /// quizzes, exams. "Notebook" on the rail; Data's Jupyter notebooks keep
+    /// the word in the code.
+    Study,
     Design,
     Modeling,
     Game,
@@ -27,13 +32,15 @@ pub enum ModeId {
 }
 
 impl ModeId {
-    /// Ordered as the rail shows them, which is also the `1`–`8` binding:
-    /// Data and Research beside Codex, the three a working day moves between.
-    pub const ALL: [ModeId; 8] = [
+    /// Ordered as the rail shows them, which is also the `1`–`9` binding:
+    /// Data and Research beside Codex, the three a working day moves between,
+    /// and Notebook after Research.
+    pub const ALL: [ModeId; 9] = [
         ModeId::Chat,
         ModeId::Codex,
         ModeId::Data,
         ModeId::Research,
+        ModeId::Study,
         ModeId::Design,
         ModeId::Modeling,
         ModeId::Game,
@@ -50,6 +57,7 @@ impl ModeId {
             ModeId::Video => "video",
             ModeId::Data => "data",
             ModeId::Research => "research",
+            ModeId::Study => "study",
         }
     }
 
@@ -57,7 +65,7 @@ impl ModeId {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`8`, one-indexed as the user sees them.
+    /// `1`–`9`, one-indexed as the user sees them.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }

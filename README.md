@@ -4,7 +4,7 @@
 
 A code editor that is also a chat client, a data notebook, a research
 workbench, a design tool, a 3D workspace, a game editor and a video editor —
-one window, eight modes, a shared Vim-style modal engine underneath all of
+one window, nine modes, a shared Vim-style modal engine underneath all of
 them, and an agent that can act in any of them.
 
 **M0 through M7 are built**, and every mode in the window now reads and writes
@@ -64,14 +64,14 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-game/` | Godot `.tscn` scenes, for Game mode |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
-| `ui/` | The front end — the app's real chrome, and the interactive prototype — all eight modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
+| `ui/` | The front end — the app's real chrome, and the interactive prototype — all nine modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
 | `design/DESIGN.md` | The design system, the mode-by-mode spec, and which reference each idea came from |
 | `docs/ARCHITECTURE.md` | The build document — crate layout, the core/UI seam, the mode contract, milestones |
 | `docs/STACK.md` | Language, renderer, parser, plugin runtime — what is settled and what is still a real decision |
 | `docs/CODE-VISUALIZER.md` | Integration plan for [Code-Visualizer](https://github.com/razeenwasif/Code-Visualizer) |
 | `assets/` | The reference designs the whole thing was drawn from |
 
-## The eight modes
+## The nine modes
 
 See the [current capability matrix](docs/ARCHITECTURE.md) for implemented documents and runtime limitations.
 
@@ -148,6 +148,13 @@ file in the sandbox, a proof counts only on Lean's standard axioms, and the
 hypothesis shows Lean's own statement of what was proved beside its own. Lean and
 Mathlib are Proton's, in `~/.proton/lean` (about 15 GB), made with your say-so
 twice like the Lab's Python.
+**Notebook** · Gemini Notebook for studying, being built: notebooks of your own
+sources — a vault, a courses folder, an iCloud archive — a tutor on Claude Code,
+Codex, Gemini or Antigravity that answers from them and cites them, and a
+studio that makes study guides, flashcards, quizzes and exams of them. The
+knowledge base is catalogued in under a second without opening a file, and a
+file still in iCloud is never read until you choose to download it. The tab is
+here and empty; the milestones are in the plan.
 **Design** · a web builder with a layer tree and an artboard, two-way bound to
 real component source and design tokens.
 **Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a

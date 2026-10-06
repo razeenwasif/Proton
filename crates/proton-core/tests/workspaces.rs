@@ -431,6 +431,22 @@ fn research_works_in_the_project_data_has() {
 }
 
 #[test]
+fn study_works_in_the_project_data_has() {
+    // A notebook is the person's, not the codebase's: Notebook sits with Data
+    // and Research, and moving between them is no change of project.
+    let scratch = Scratch::new("study-side");
+    let mut session = Session::new(scratch.at("alpha"));
+    mode(&mut session, ModeId::Data);
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    mode(&mut session, ModeId::Study);
+    assert_eq!((here(&session), session.active().mode()), ("beta".to_string(), ModeId::Study));
+    mode(&mut session, ModeId::Research);
+    assert_eq!(here(&session), "beta", "Notebook to Research is not a change of project");
+    mode(&mut session, ModeId::Codex);
+    assert_eq!(here(&session), "alpha");
+}
+
+#[test]
 fn the_switcher_numbers_the_projects_of_the_side_on_screen() {
     // The front end sends a tile's place in the list it was given, and each
     // side is given its own list.

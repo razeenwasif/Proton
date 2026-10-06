@@ -202,6 +202,7 @@
       <button class="mode" role="tab" aria-selected="true"  data-mode="codex"><svg class="i"><use href="#i-code"/></svg><span>Codex</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="data"><svg class="i"><use href="#i-chart"/></svg><span>Data</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="research"><svg class="i"><use href="#i-flask"/></svg><span>Research</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="study"><svg class="i"><use href="#i-book"/></svg><span>Notebook</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="design"><svg class="i"><use href="#i-pen"/></svg><span>Design</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="modeling"><svg class="i"><use href="#i-cube"/></svg><span>Model</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="game"><svg class="i"><use href="#i-game"/></svg><span>Game</span></button>
@@ -1053,6 +1054,47 @@
         </div>
       </aside>
     </section>
+
+    <!-- Notebook: notebooks of your own sources, to study from. The sources,
+         ticked for the tutor; the tutor, which answers from them and cites
+         them; and the studio, which makes guides, cards, quizzes and exams of
+         them. Each notebook is a folder of its own in ~/Github/Notebooks/, and
+         this draws what the core reads from it (ui/study.js). Drawn as Chat
+         is: Codex's ground and type. -->
+    <section class="workspace cc st" data-ws="study"
+             style="--col-l:280px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side cc-side st-side">
+        <div class="cc-side-head">
+          <button class="cc-new" data-study-new title="New notebook"><svg class="i"><use href="#i-plus"/></svg>New notebook</button>
+        </div>
+        <!-- From Event::StudyList: the notebooks, the last opened first. -->
+        <div class="scroll cc-sessions st-list" data-study-list></div>
+        <!-- From Event::StudyNotebook: the open notebook's sources, ticked
+             for the tutor to use, and its notes. -->
+        <div class="st-sources" data-study-sources hidden></div>
+        <!-- Where notebooks are kept, and what they are drawn from. -->
+        <div class="rs-where st-where" data-study-where></div>
+      </aside>
+
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
+
+      <main class="pane cc-main st-main">
+        <header class="cc-head st-head">
+          <div class="cc-title" data-study-title>Notebook</div>
+          <span class="grow"></span>
+        </header>
+        <!-- The tutor, and what is open beside it: a source, a note, something the studio made. -->
+        <div class="scroll st-stage" data-study-stage></div>
+      </main>
+
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+
+      <!-- The studio: what can be made of the sources, and what has been. -->
+      <aside class="pane st-studio" data-study-studio>
+        <header class="cc-head st-studio-head"><div class="cc-title">Studio</div></header>
+        <div class="scroll st-studio-body" data-study-studio-body></div>
+      </aside>
+    </section>
   </div>
 
   <!-- ══ title bar — Codex only ═══════════════════════════════════
@@ -1060,7 +1102,7 @@
        one ground from edge to edge. The title bar it does keep stands on its
        end down the right edge, so the code has the window's full height. It
        holds what the rails held that Codex still needs: the window controls,
-       the modes — so the window can be left by mouse as well as by ⌃1–8 —
+       the modes — so the window can be left by mouse as well as by ⌃1–9 —
        and the panel toggles a hidden statusline would otherwise take with
        it. The empty stretch between them is the window's drag surface.
        After the body in the source because it is after it on screen, so Tab
@@ -1078,10 +1120,11 @@
       <button class="mode" role="tab" aria-selected="true"  data-mode="codex" title="Codex  ⌃2"><span>Codex</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="data" title="Data  ⌃3"><span>Data</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="research" title="Research  ⌃4"><span>Research</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="design" title="Design  ⌃5"><span>Design</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="modeling" title="Model  ⌃6"><span>Model</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="game" title="Game  ⌃7"><span>Game</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="video" title="Video  ⌃8"><span>Video</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="study" title="Notebook  ⌃5"><span>Notebook</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="design" title="Design  ⌃6"><span>Design</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="modeling" title="Model  ⌃7"><span>Model</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="game" title="Game  ⌃8"><span>Game</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="video" title="Video  ⌃9"><span>Video</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
     <div class="tb-actions">
@@ -1378,7 +1421,7 @@
   <button class="hint-toggle" title="Keyboard hints"><svg class="i"><use href="#i-keyboard"/></svg></button>
   <div class="hint-keys">
   <span>Try</span>
-  <kbd>⌃1</kbd><kbd>…</kbd><kbd>⌃8</kbd><span style="color:var(--ink-3)">modes</span>
+  <kbd>⌃1</kbd><kbd>…</kbd><kbd>⌃9</kbd><span style="color:var(--ink-3)">modes</span>
   <kbd>␣</kbd><span style="color:var(--ink-3)">leader</span>
   <kbd>⌘K</kbd><span style="color:var(--ink-3)">telescope</span>
   <kbd>:</kbd><span style="color:var(--ink-3)">cmd</span>

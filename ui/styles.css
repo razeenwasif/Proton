@@ -2446,8 +2446,8 @@ body { font-size: calc(13px * var(--ui-scale)); }
    size. The one place Codex parts from that setup on purpose is the title
    bar, which stands on its end down the right edge.
 
-   Scoped to Codex, and to the modes drawn this way since — Chat, Data and
-   Research.
+   Scoped to Codex, and to the modes drawn this way since — Chat, Data,
+   Research and Notebook.
    The others keep the glass until they are, which is why everything here
    hangs off `data-mode` or the workspace rather than replacing a rule.
    ═══════════════════════════════════════════════════════════════════ */
@@ -2455,7 +2455,8 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="codex"],
 :root[data-mode="chat"],
 :root[data-mode="data"],
-:root[data-mode="research"] {
+:root[data-mode="research"],
+:root[data-mode="study"] {
   --z-ui:  calc(17.5px * var(--ui-scale));  /* tree, breadcrumb, headers */
   --z-sm:  calc(15px * var(--ui-scale));    /* the agent's prose */
   --z-xs:  calc(14px * var(--ui-scale));    /* tool rows, composer controls */
@@ -2487,25 +2488,32 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .statusline,
 :root[data-mode="data"] .hint,
 :root[data-mode="research"] .chrome-rail,
+:root[data-mode="study"] .chrome-rail,
 :root[data-mode="research"] .rail,
+:root[data-mode="study"] .rail,
 :root[data-mode="research"] .statusline,
+:root[data-mode="study"] .statusline,
 :root[data-mode="research"] .hint,
-/* The terminal is Codex's; in Chat, Data and Research its toggle would
-   open something that is not on screen. */
+:root[data-mode="study"] .hint,
+/* The terminal is Codex's; in Chat, Data, Research and Notebook its toggle
+   would open something that is not on screen. */
 :root[data-mode="chat"] .titlebar [data-term-toggle],
 :root[data-mode="data"] .titlebar [data-term-toggle],
-:root[data-mode="research"] .titlebar [data-term-toggle] { display: none; }
+:root[data-mode="research"] .titlebar [data-term-toggle],
+:root[data-mode="study"] .titlebar [data-term-toggle] { display: none; }
 :root[data-mode="codex"] .app,
 :root[data-mode="chat"] .app,
 :root[data-mode="data"] .app,
-:root[data-mode="research"] .app {
+:root[data-mode="research"] .app,
+:root[data-mode="study"] .app {
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr) auto;
 }
 :root[data-mode="codex"] .body,
 :root[data-mode="chat"] .body,
 :root[data-mode="data"] .body,
-:root[data-mode="research"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
+:root[data-mode="research"] .body,
+:root[data-mode="study"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
 
 /* Opaque, as Zed is. The window's own fill may be a veil over the desktop;
    these two cover it, and the veils the backdrop puts on the panes are the
@@ -2514,13 +2522,15 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="chat"] .titlebar,
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
+:root[data-mode="study"] .titlebar,
 .workspace[data-ws="codex"],
 .workspace[data-ws="data"] { background: var(--bg); }
 
 :root[data-mode="codex"] .titlebar,
 :root[data-mode="chat"] .titlebar,
 :root[data-mode="data"] .titlebar,
-:root[data-mode="research"] .titlebar {
+:root[data-mode="research"] .titlebar,
+:root[data-mode="study"] .titlebar {
   grid-row: 1; grid-column: 2;
   display: flex; flex-direction: column; align-items: center; gap: 14px;
   width: 40px; padding: 14px 0 8px;

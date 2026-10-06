@@ -1,7 +1,7 @@
 # Proton — architecture
 
 This document describes the implemented system and records its build history.
-All eight modes read real documents. Modeling includes a WebGL renderer;
+All nine modes read real documents. Modeling includes a WebGL renderer;
 Game and Video edit scenes and timelines but still need engine playback and
 media decoding. The design reference is [`DESIGN.md`](../design/DESIGN.md),
 and the tool choices are in [`STACK.md`](STACK.md).
@@ -1076,9 +1076,9 @@ trait Mode {
 }
 ```
 
-That is the whole contract. Chat, Codex, Design, Modeling, Game, Video, Data
-and Research are the eight that ship; nothing about them is privileged, and the
-eighth was an extension rather than a fork.
+That is the whole contract. Chat, Codex, Design, Modeling, Game, Video, Data,
+Research and Notebook are the nine that ship; nothing about them is
+privileged, and the eighth and ninth were extensions rather than forks.
 
 **It is built, in `proton-core::contract`, and it is a struct rather than a
 trait.** Every answer above is data: none of it needs to run, and a mode that

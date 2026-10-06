@@ -1,7 +1,7 @@
 //! The mode contract: four slots, a verb table, and a document.
 //!
 //! A mode is the unit of "which application am I in", and the claim the whole
-//! project rests on is that seven of them can share one editor because a mode
+//! project rests on is that nine of them can share one editor because a mode
 //! is a small, closed thing:
 //!
 //! ```text
@@ -69,6 +69,13 @@ pub enum Slot {
     Board,
     /// Runs of code, and what they drew.
     Lab,
+    /// A notebook's sources, ticked for the tutor to use, and its notes.
+    Sources,
+    /// The tutor: a conversation grounded in the sources, and what is open
+    /// beside it — a source, a note, something made.
+    Tutor,
+    /// What can be made from the sources, and what has been.
+    Studio,
 }
 
 /// How a mode's work persists.
@@ -98,6 +105,9 @@ pub enum DocumentKind {
     /// `research/<slug>/`: Markdown hypotheses and reviews, a JSON-lines
     /// tournament, the plan and the logs.
     Investigation,
+    /// `~/Github/Notebooks/<slug>/`: the notebook, its sources and notes in
+    /// JSON and Markdown, its chats, and what the studio made.
+    StudyNotebook,
 }
 
 /// The whole of a mode, as anything outside it needs to know.
@@ -180,6 +190,14 @@ impl Layout {
                 Slot::Lab,
                 DocumentKind::Investigation,
             ),
+            // The sources, the tutor that answers from them, and what can be
+            // made of them — Gemini Notebook's three columns.
+            ModeId::Study => (
+                Slot::Sources,
+                Slot::Tutor,
+                Slot::Studio,
+                DocumentKind::StudyNotebook,
+            ),
         };
         Layout {
             mode,
@@ -200,7 +218,7 @@ impl Layout {
         match self.mode {
             // The noun is prose, so the editing verbs belong to the composer
             // rather than to the mode.
-            ModeId::Chat | ModeId::Research => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
+            ModeId::Chat | ModeId::Research | ModeId::Study => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
             _ => true,
         }
     }
@@ -212,7 +230,7 @@ mod tests {
 
     #[test]
     fn every_mode_has_a_layout_and_a_document() {
-        // The contract is only a contract if it covers all eight. A mode
+        // The contract is only a contract if it covers all nine. A mode
         // added later fails to compile rather than falling through to a
         // default that puts an editor where its stage should be.
         for mode in ModeId::ALL {

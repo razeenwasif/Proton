@@ -465,7 +465,7 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["chat", "codex", "data", "research", "design", "modeling", "game", "video"];
+const MODES = ["chat", "codex", "data", "research", "study", "design", "modeling", "game", "video"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -491,9 +491,9 @@ function hexOf(css) {
 
 function renderWindowGround(again = false) {
   if (!HAS_SHELL) return;
-  // Chat, Data and Research are drawn as Codex is — every pixel the theme's
-  // ground — so they get the same opaque window.
-  const want = ["codex", "chat", "data", "research"].includes(activeMode) ? hexOf(token("--bg")) : null;
+  // Chat, Data, Research and Notebook are drawn as Codex is — every pixel
+  // the theme's ground — so they get the same opaque window.
+  const want = ["codex", "chat", "data", "research", "study"].includes(activeMode) ? hexOf(token("--bg")) : null;
   if (!again && want === groundAsked) return;
   groundAsked = want;
   setOpaque(want);
@@ -5109,7 +5109,7 @@ document.addEventListener("focusin", (e) => {
 });
 
 /* ── keys ─────────────────────────────────────────────────────────────
-   Two layers, and the split matters. Shell chords (⌘K, ⌘,, ⌃1-8) are the
+   Two layers, and the split matters. Shell chords (⌘K, ⌘,, ⌃1-9) are the
    window's own bindings and never reach the core. Everything else is a
    keystroke the core interprets — including the digits, which are vim
    counts, not mode switches. */
@@ -5181,13 +5181,13 @@ document.addEventListener("keydown", (e) => {
     }
   }
 
-  // ⌃1-8 and ⌘K/⌘, are deliberately two different modifiers, not
+  // ⌃1-9 and ⌘K/⌘, are deliberately two different modifiers, not
   // interchangeable ones — aliasing them here used to let ⌃K and ⌃,
   // trigger the shell chords too, which stole them from the modal engine
   // below (⌃-prefixed commands are exactly what a Vim keymap is made of,
   // and on macOS ⌃K in particular already means "kill to end of line"
   // everywhere else on the system).
-  if (e.ctrlKey && /^[1-8]$/.test(e.key)) {
+  if (e.ctrlKey && /^[1-9]$/.test(e.key)) {
     e.preventDefault();
     coreSetMode(MODES[Number(e.key) - 1]);
     return;
@@ -5226,7 +5226,7 @@ document.addEventListener("keydown", (e) => {
   // A document on screen takes the keyboard, as the picker does: its own keys
   // scroll, page and zoom it and Escape or q puts it away, and nothing else
   // reaches the buffer or the cell underneath — `dd` over a PDF must not
-  // delete a line nobody can see. ⌘ chords, ⌃1–8 and a focused shell are
+  // delete a line nobody can see. ⌘ chords, ⌃1–9 and a focused shell are
   // answered above, and the text it lays over each page can still be copied.
   if (documentShown() && !terminalFocused && !e.metaKey) {
     e.preventDefault();

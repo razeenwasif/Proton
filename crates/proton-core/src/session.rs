@@ -137,7 +137,7 @@ enum Side {
 impl Side {
     fn of(mode: ModeId) -> Side {
         match mode {
-            ModeId::Data | ModeId::Research => Side::Data,
+            ModeId::Data | ModeId::Research | ModeId::Study => Side::Data,
             _ => Side::Code,
         }
     }
