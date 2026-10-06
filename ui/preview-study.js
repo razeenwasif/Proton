@@ -51,6 +51,8 @@ export function createStudyPreview(deliver) {
     },
     next: /** @type {Record<string, number>} */ ({ "comp3670-exam": 4, "machine-learning": 1 }),
     roots: ["~/OnyxVault", "~/Courses", "~/Library/Mobile Documents/com~apple~CloudDocs/ANU"],
+    /** @type {Record<string, {id: string, title: string, body: string, updated: number, source: string | null}[]>} */
+    notes: { "comp3670-exam": [{ id: "N001", title: "What the exam asks", body: "Two questions on search every year: **optimality** and **heuristics**.\n\n- $h(n) \\le h^*(n)$", updated: now - 3600, source: null }] },
     paused: false,
   };
 
@@ -67,7 +69,8 @@ export function createStudyPreview(deliver) {
   function notebookEvent() {
     const n = state.notebooks.find((b) => b.slug === state.open);
     if (!n) return { type: "studyClosed" };
-    return { type: "studyNotebook", slug: n.slug, title: n.title, course: n.course, exam: n.exam, readOnly: null, sources: state.sources[n.slug], notes: [] };
+    const notes = (state.notes[n.slug] ?? []).map((x) => ({ id: x.id, title: x.title, updated: x.updated, preview: x.body.replace(/\s+/g, " ").slice(0, 140) }));
+    return { type: "studyNotebook", slug: n.slug, title: n.title, course: n.course, exam: n.exam, readOnly: null, sources: state.sources[n.slug], notes };
   }
 
   function kbEvent() {
@@ -209,6 +212,46 @@ export function createStudyPreview(deliver) {
         case "studySelect":
           for (const s of state.sources[state.open ?? ""] ?? []) s.selected = command.ids.includes(s.id);
           return [notebookEvent()];
+        case "studyShow": {
+          const source = (state.sources[state.open ?? ""] ?? []).find((s) => s.id === command.id);
+          if (!source) return [];
+          const view = source.units === "pages"
+            ? { shape: "pages", pages: ["Question 1\nExplain why uniform-cost search is optimal when every step costs at least ε > 0.", "", "Question 2\nGive an admissible heuristic for the 8-puzzle, and say why it is."] }
+            : source.units === "seconds"
+              ? { shape: "cues", cues: [{ start: 192, end: 200, text: "So the frontier is a priority queue," }, { start: 200, end: 207, text: "ordered by g of n, the cost so far." }] }
+              : { shape: "sections", sections: [{ from: 1, to: 6, text: "# Search\n\nBreadth-first search is complete, and optimal when every step costs the same: $O(b^d)$ time and space." },
+                { from: 7, to: 14, text: "## Uniform cost\n\nExpands the node with the lowest $g(n)$ first.\n\n```python\nfrontier = [(0, start)]\n```" }] };
+          return [{ type: "studySource", id: source.id, title: source.title, kind: source.kind, at: command.at ?? { from: 7, to: 9 },
+            said: source.origin.root === "ANU" ? "Its file is in iCloud: these are its words as they were read." : null, view }];
+        }
+        case "studyShowNote": {
+          const note = (state.notes[state.open ?? ""] ?? []).find((x) => x.id === command.id);
+          return note ? [{ type: "studyNote", ...note }] : [];
+        }
+        case "studyNote": {
+          const list = (state.notes[state.open ?? ""] ??= []);
+          let note = list.find((x) => x.id === command.id);
+          const title = command.title || command.body.split("\n")[0].replace(/^#+\s*/, "").slice(0, 80) || "Untitled note";
+          if (note) Object.assign(note, { title, body: command.body, updated: Math.floor(Date.now() / 1000) });
+          else {
+            note = { id: `N${String(list.length + 1).padStart(3, "0")}`, title, body: command.body, updated: Math.floor(Date.now() / 1000), source: null };
+            list.push(note);
+          }
+          return [notebookEvent(), { type: "studyNote", ...note }];
+        }
+        case "studyNoteDelete":
+          state.notes[state.open ?? ""] = (state.notes[state.open ?? ""] ?? []).filter((x) => x.id !== command.id);
+          return [notebookEvent()];
+        case "studyNoteSource": {
+          const note = (state.notes[state.open ?? ""] ?? []).find((x) => x.id === command.id);
+          if (!note) return [];
+          const slug = state.open ?? "";
+          const id = `S${String(state.next[slug]++).padStart(2, "0")}`;
+          state.sources[slug].push({ id, title: note.title, kind: "markdown", role: "notes", origin: { from: "note", note: note.id }, status: { state: "ready" },
+            units: "lines", count: note.body.split("\n").length + 2, size: note.body.length, thin: 0, selected: true, labels: [] });
+          note.source = id;
+          return [notebookEvent(), listEvent(), { type: "studyNote", ...note }];
+        }
         case "studyRole":
           for (const s of state.sources[state.open ?? ""] ?? []) if (s.id === command.id) s.role = command.role;
           return [notebookEvent()];

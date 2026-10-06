@@ -563,7 +563,7 @@ impl Session {
     /// A file some workspace here opened in the document viewer — the page
     /// may still be showing one from a project it has since left.
     pub fn document_file(&self, path: &str) -> Option<PathBuf> {
-        self.workspaces.iter().find_map(|w| w.document_file(Path::new(path)))
+        self.workspaces.iter().find_map(|w| w.document_file(Path::new(path))).or_else(|| self.study.document_file(Path::new(path)))
     }
 
     pub fn workspaces(&self) -> &[Workspace] {

@@ -1053,6 +1053,48 @@ ready. The tests read hand-written `lean --json` output
 and Lean, and run a whole round through `Live` with a stand-in `lean` in a
 stand-in home, in the sandbox; a real Lean is the scientist's to make.
 
+### Notebook
+
+Gemini Notebook, for studying from one's own files: notebooks of sources drawn
+from a knowledge base, a tutor that answers from them and cites them, and a
+studio that makes guides, cards, quizzes and exams of them. It is being built in
+milestones; what is here is the knowledge base, notebooks, sources, the reader
+and notes.
+
+**The knowledge base** is the folders the person names (`study.roots` in their
+own settings), less what `study.exclude` leaves out — `.gitignore` lines with
+the root's label first, `OnyxVault/Private/`, beside defaults for vendor
+folders and a rule for datasets (two thousand files with nothing to read).
+`proton-library::catalog` lists every root by `lstat` alone, never opening a
+file: 71,656 files under three roots in 0.63 s cold. What is left out is listed
+with its reason. A shelf in catalog mode then reads what the catalogue says it
+can: Markdown, text, PDFs, Jupyter notebooks read as Markdown, LaTeX cut at its
+sections, CSV by rows, and captions cited by time (`@ 3:12-3:40`). Its
+citations name the root (`Courses/COMP3670/Exam_2020.pdf p. 3`). Nothing is
+walked until Notebook is first opened.
+
+**iCloud** keeps an offloaded file's name and size on the disk and its bytes on
+Apple's servers; reading one downloads it. `proton-library::dataless` reads the
+`SF_DATALESS` flag from `lstat`, so such a file is listed under a cloud and
+never read, and every worker that reads refuses downloads on its thread
+(`setiopolicy_np` with `IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES` off) so a read
+that slipped past would fail rather than fetch. A file comes down only when the
+person asks for that file, having been told its size, on a thread that takes
+`Downloads` for itself. Measured on a 7,363-file archive: every file that was
+in iCloud before reading the whole knowledge base was in iCloud after.
+
+**A notebook** is a folder in `study.folder` (`~/Github/Notebooks`) of plain
+files — `notebook.json`, `sources.json`, `notes/N001.md` — with its machine
+state in a gitignored `.notebook/` (`proton-study`). A source is read once, on
+a worker, and its words are kept there, so a citation of `S07 p. 12` means the
+same thing after its file is edited, moved or evicted; source ids are never
+reused. A source's role (a past paper, a solution, slides, one's own work) is
+guessed from its path and corrected by hand. `proton-core::study` is one for
+the session, whichever project is open; a notebook another Proton holds open is
+read only, under the same lock an investigation has. The reader shows a
+source's words as kept — Markdown cut at its headings, pages, cues — or a PDF
+whose file is here in the document viewer, at a citation's place.
+
 ### Trace
 
 Code Visualizer, sidecar first and native second — [`CODE-VISUALIZER.md`](CODE-VISUALIZER.md)

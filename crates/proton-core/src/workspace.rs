@@ -1418,7 +1418,12 @@ impl Workspace {
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }
-            | Command::StudyRole { .. } => vec![notice("Notebook is the window's, not a project's.".into(), NoticeLevel::Warn)],
+            | Command::StudyRole { .. }
+            | Command::StudyShow { .. }
+            | Command::StudyShowNote { .. }
+            | Command::StudyNote { .. }
+            | Command::StudyNoteDelete { .. }
+            | Command::StudyNoteSource { .. } => vec![notice("Notebook is the window's, not a project's.".into(), NoticeLevel::Warn)],
             Command::ResearchNew { title, goal, discipline, literature } => self.research().create(&title, &goal, discipline, literature),
             Command::ResearchOpen { slug } => self.research().open(&slug),
             Command::ResearchShow { hypothesis } => self.research().show(hypothesis),

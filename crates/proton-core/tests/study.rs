@@ -225,6 +225,61 @@ fn session_named(scratch: &Scratch, settings: &Path) -> Session {
 }
 
 #[test]
+fn the_reader_shows_what_was_kept_and_notes_become_sources() {
+    let scratch = Scratch::new("reader");
+    let settings = scratch.knowledge_base();
+    let mut session = session(&scratch, &settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into(), "Courses/COMP3670/Exam_2020.pdf".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.iter().all(|s| s.status == SourceStatus::Ready) && sources.len() == 2 => Some(()),
+        _ => None,
+    });
+
+    // A PDF whose file is here opens in the document viewer at its page, and
+    // the shell may read it.
+    let events = session.apply(Command::StudyShow { id: "S02".into(), at: Some(proton_study::view::StudyPlace { from: 1, to: 1 }) });
+    let Some(Event::Document { path, page, .. }) = events.first() else { panic!("{events:?}") };
+    assert_eq!(*page, Some(1));
+    assert!(session.document_file(path).is_some(), "the shell would not read it");
+    assert!(session.document_file(&scratch.root.join("kb/Vault/notes.md").display().to_string()).is_none(), "nor anything else");
+
+    // A note is shown as kept, cut at its headings; and still, its file gone.
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: Some(proton_study::view::StudyPlace { from: 1, to: 2 }) });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Sections { sections }, said: None, .. }) = events.first() else { panic!("{events:?}") };
+    assert_eq!((sections[0].from, sections[0].to), (1, 2));
+    std::fs::remove_file(scratch.root.join("kb/Vault/notes.md")).unwrap();
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    let Some(Event::StudySource { said: Some(said), .. }) = events.first() else { panic!("{events:?}") };
+    assert!(said.contains("gone"), "{said}");
+
+    // A note: written, rewritten, made a source, and put in the bin.
+    let events = session.apply(Command::StudyNote { id: None, title: String::new(), body: "# Uniform cost\nOrders the frontier by $g(n)$.".into() });
+    let Some(Event::StudyNote { id, title, source: None, .. }) = events.iter().find(|e| matches!(e, Event::StudyNote { .. })) else { panic!("{events:?}") };
+    assert_eq!((id.as_str(), title.as_str()), ("N001", "Uniform cost"), "titled by its first line");
+    let events = session.apply(Command::StudyNoteSource { id: "N001".into() });
+    let Some(Event::StudyNote { source: Some(source), .. }) = events.iter().find(|e| matches!(e, Event::StudyNote { .. })) else { panic!("{events:?}") };
+    assert_eq!(source, "S03");
+    let events = session.apply(Command::StudyNote { id: Some("N001".into()), title: "Uniform cost search".into(), body: "Orders the frontier by path cost.".into() });
+    let rows = sources(&events).unwrap();
+    assert_eq!(rows.iter().find(|r| r.id == "S03").map(|r| r.title.as_str()), Some("Uniform cost search"), "the source follows its note");
+    let events = session.apply(Command::StudyShow { id: "S03".into(), at: None });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Sections { sections }, .. }) = events.first() else { panic!() };
+    assert!(sections.iter().any(|s| s.text.contains("path cost")), "the source reads what the note says now");
+    let events = session.apply(Command::StudyNoteDelete { id: "N001".into() });
+    assert!(said_of(&events).iter().any(|s| s.contains("bin")));
+    assert!(scratch.root.join("Notebooks/search/.notebook/bin/N001.md").is_file());
+    session.shutdown();
+}
+
+fn said_of(events: &[Event]) -> Vec<String> {
+    said(events)
+}
+
+#[test]
 fn a_folder_is_made_only_where_its_parent_is() {
     let scratch = Scratch::new("folder");
     let settings = scratch.knowledge_base();

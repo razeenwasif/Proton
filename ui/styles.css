@@ -4326,3 +4326,38 @@ button.st-badge:hover { color: var(--cc-text); border-color: var(--cc-accent); }
   color: var(--cc-text); font: var(--z-2xs)/1.6 var(--zed); resize: vertical; outline: none; }
 .st-roots-form textarea:focus { border-color: var(--cc-accent); }
 .workspace[data-ws="study"] { position: relative; }
+
+/* ── the reader, and notes ── */
+.st-source-name { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+button.st-source-name:hover { color: var(--cc-accent); }
+.st-notes-head { margin-top: 10px; border-top: 1px solid var(--cc-line); padding-top: 12px; }
+.st-note { display: grid; gap: 2px; width: 100%; padding: 6px 12px 6px 16px; border: 0; background: none; text-align: left; cursor: pointer;
+  font: var(--z-2xs)/1.35 var(--cc-font); color: var(--cc-text); }
+.st-note .st-faint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--z-2xs) * .92); }
+.st-note:hover, .st-note.on { background: var(--row-hover); }
+.st-reader-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.st-reader-head > div { flex: 1 1 auto; min-width: 0; }
+.st-reader-head h1 { margin: 0 0 4px; font: 600 calc(var(--z-sm) * 1.2)/1.25 var(--cc-font); color: var(--cc-text); overflow-wrap: anywhere; }
+.st-reader-head .st-faint { font: var(--z-2xs)/1.3 var(--cc-font); }
+.st-reader-head .cc-quiet { flex: 0 0 auto; padding: 4px 10px; font-size: var(--z-2xs); }
+.st-read { font: var(--z-sm)/1.65 var(--cc-font); color: var(--cc-text); }
+.st-sec { padding: 2px 12px; margin: 0 -12px; border-left: 2px solid transparent; border-radius: 0 6px 6px 0; }
+.st-sec.at, .st-page.at, .st-cue.at { border-left-color: var(--cc-accent); background: color-mix(in srgb, var(--cc-accent) 8%, transparent); }
+.st-lines { font: var(--z-2xs)/1.6 var(--zed); }
+.st-ln { display: flex; gap: 14px; padding: 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.st-ln > i { flex: 0 0 auto; width: 3.5em; text-align: right; font-style: normal; color: var(--cc-faint); user-select: none; }
+.st-ln.at { background: color-mix(in srgb, var(--cc-accent) 12%, transparent); }
+.st-page { margin: 0 0 18px; padding: 8px 12px 12px; border-left: 2px solid transparent; border-radius: 0 6px 6px 0; }
+.st-page > header { margin-bottom: 6px; font: 600 var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-faint); }
+.st-page pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--z-xs)/1.6 var(--cc-font); color: var(--cc-text); }
+.st-cue { display: flex; gap: 14px; padding: 4px 10px; border-left: 2px solid transparent; font: var(--z-xs)/1.55 var(--cc-font); }
+.st-cue time { flex: 0 0 auto; width: 4.5em; color: var(--cc-faint); font: var(--z-2xs)/1.9 var(--zed); }
+.st-note-form { gap: 12px; }
+.st-note-form .st-reader-head { align-items: center; margin: 0; }
+.st-note-form input[name="title"] { flex: 1 1 auto; min-width: 0; padding: 7px 10px; border: 1px solid var(--cc-line-2); border-radius: 7px; background: var(--bg);
+  color: var(--cc-text); font: 600 var(--z-sm)/1.3 var(--cc-font); outline: none; }
+.st-note-form textarea { min-height: 320px; padding: 12px; border: 1px solid var(--cc-line-2); border-radius: 8px; background: var(--bg);
+  color: var(--cc-text); font: var(--z-xs)/1.65 var(--zed); resize: vertical; outline: none; }
+.st-note-form input:focus, .st-note-form textarea:focus { border-color: var(--cc-accent); }
+.st-note-preview { min-height: 320px; padding: 4px 2px; font: var(--z-sm)/1.65 var(--cc-font); color: var(--cc-text); }
+.st-note-actions { align-items: center; justify-content: flex-start; }

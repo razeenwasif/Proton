@@ -67,9 +67,11 @@ import type { StudyKbFolder } from "./StudyKbFolder";
 import type { StudyKbHit } from "./StudyKbHit";
 import type { StudyKbLeft } from "./StudyKbLeft";
 import type { StudyNoteRow } from "./StudyNoteRow";
+import type { StudyPlace } from "./StudyPlace";
 import type { StudyRoot } from "./StudyRoot";
 import type { StudySourceRow } from "./StudySourceRow";
 import type { StudySummary } from "./StudySummary";
+import type { StudyView } from "./StudyView";
 import type { Summary } from "./Summary";
 import type { Task } from "./Task";
 import type { TermRun } from "./TermRun";
@@ -221,7 +223,15 @@ started: boolean,
 /**
  * Whether its catalogue is in, so the picker can browse.
  */
-ready: boolean, walking: boolean, done: number, total: number, paused: boolean, documents: number, passages: number, } | { "type": "studyKbFolder", root: string, dir: string, folders: Array<StudyKbFolder>, files: Array<StudyKbFile>, left: Array<StudyKbLeft>, } | { "type": "studyKbResults", query: string, files: Array<StudyKbFile>, passages: Array<StudyKbHit>, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+ready: boolean, walking: boolean, done: number, total: number, paused: boolean, documents: number, passages: number, } | { "type": "studyKbFolder", root: string, dir: string, folders: Array<StudyKbFolder>, files: Array<StudyKbFile>, left: Array<StudyKbLeft>, } | { "type": "studyKbResults", query: string, files: Array<StudyKbFile>, passages: Array<StudyKbHit>, } | { "type": "studySource", id: string, title: string, kind: string, at: StudyPlace | null, 
+/**
+ * Why its words are shown rather than its file, when they are.
+ */
+said: string | null, view: StudyView, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
+/**
+ * Whether it is a source of the notebook too.
+ */
+source: string | null, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
 /**
  * The round's search of the literature, if it has one.
  */

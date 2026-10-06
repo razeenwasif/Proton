@@ -212,3 +212,100 @@ mod tests {
         assert_eq!((view.path.as_str(), view.text.as_str()), ("Courses/a b.pdf", "some words"));
     }
 }
+
+/// A place in a source, as a citation names it: lines, pages or seconds,
+/// from and to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+pub struct StudyPlace {
+    pub from: usize,
+    pub to: usize,
+}
+
+/// A source's words as the reader shows them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(tag = "shape", rename_all = "camelCase")]
+pub enum StudyView {
+    /// Markdown — a note, a notebook read as Markdown — cut at its headings,
+    /// each section drawn as prose and found by the lines it spans.
+    Sections { sections: Vec<StudySection> },
+    /// Text shown as it is, line by line: LaTeX, a table, code, plain text.
+    Lines { text: String },
+    /// A PDF's pages, as their words were read.
+    Pages { pages: Vec<String> },
+    /// A lecture's captions.
+    Cues { cues: Vec<StudyCue> },
+}
+
+/// One section of a Markdown source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+pub struct StudySection {
+    /// 1-based and inclusive.
+    pub from: usize,
+    pub to: usize,
+    pub text: String,
+}
+
+/// One cue of a lecture's captions, in seconds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+pub struct StudyCue {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+}
+
+/// Markdown cut at its headings — never inside a code fence — past any front
+/// matter, each section with the lines it spans.
+pub fn sections(text: &str) -> Vec<StudySection> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut begin = 0;
+    if lines.first().map(|l| l.trim()) == Some("---") {
+        if let Some(end) = lines.iter().skip(1).position(|l| l.trim() == "---") {
+            begin = end + 2;
+        }
+    }
+    let mut out = Vec::new();
+    let mut start = begin;
+    let mut fenced = false;
+    let push = |out: &mut Vec<StudySection>, from: usize, to: usize| {
+        let body = lines[from..to].join("\n");
+        if !body.trim().is_empty() {
+            out.push(StudySection { from: from + 1, to, text: body });
+        }
+    };
+    for (at, line) in lines.iter().enumerate().skip(begin) {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        let heading = !fenced && trimmed.starts_with('#') && {
+            let hashes = trimmed.chars().take_while(|c| *c == '#').count();
+            (1..=6).contains(&hashes) && trimmed[hashes..].starts_with(' ')
+        };
+        if heading && at > start {
+            push(&mut out, start, at);
+            start = at;
+        }
+    }
+    push(&mut out, start, lines.len());
+    out
+}
+
+#[cfg(test)]
+mod reader {
+    use super::*;
+
+    #[test]
+    fn markdown_is_cut_at_its_headings_and_never_inside_a_fence() {
+        let text = "---\ntags: [a]\n---\nintro\n# One\nalpha\n```sh\n# a comment\n```\n## Two\nbeta\n";
+        let cut = sections(text);
+        let spans: Vec<(usize, usize)> = cut.iter().map(|s| (s.from, s.to)).collect();
+        assert_eq!(spans, [(4, 4), (5, 9), (10, 11)], "{cut:#?}");
+        assert!(cut[1].text.contains("# a comment"));
+        assert!(!cut.iter().any(|s| s.text.contains("tags:")), "front matter is not shown");
+    }
+}

@@ -23,8 +23,8 @@ use std::sync::Arc;
 use proton_library::extract::{Body, Pdfs, Unread};
 use proton_library::{dataless, Kind};
 use proton_study::lock::{self, Holder, Lock};
-use proton_study::model::{Origin, Role, Source, SourceStatus, Units};
-use proton_study::view::{StudyNoteRow, StudySourceRow, StudySummary};
+use proton_study::model::{Note, Origin, Role, Source, SourceStatus, Units};
+use proton_study::view::{StudyCue, StudyNoteRow, StudyPlace, StudySourceRow, StudySummary, StudyView};
 use proton_study::{role, snapshot, Book, Folder};
 use serde_json::Value;
 
@@ -61,6 +61,11 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudySelect { .. }
             | Command::StudyRefresh { .. }
             | Command::StudyRole { .. }
+            | Command::StudyShow { .. }
+            | Command::StudyShowNote { .. }
+            | Command::StudyNote { .. }
+            | Command::StudyNoteDelete { .. }
+            | Command::StudyNoteSource { .. }
     )
 }
 
@@ -114,6 +119,9 @@ pub struct Study {
     instance: String,
     /// Whether Notebook has been opened yet: nothing is walked until it is.
     entered: bool,
+    /// Sources' PDFs opened in the document viewer: the shell reads only
+    /// these, as it reads only what a workspace opened.
+    documents: std::collections::HashSet<PathBuf>,
 }
 
 impl std::fmt::Debug for Study {
@@ -134,6 +142,7 @@ impl Default for Study {
             kb: Kb::default(),
             open: None,
             batches: Vec::new(),
+            documents: Default::default(),
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -306,6 +315,11 @@ impl Study {
         !self.batches.is_empty()
     }
 
+    /// A source's PDF, if it was opened in the document viewer from here.
+    pub fn document_file(&self, path: &Path) -> Option<PathBuf> {
+        self.documents.contains(path).then(|| path.to_path_buf())
+    }
+
     /* ── commands ───────────────────────────────────────────────────── */
 
     pub fn apply(&mut self, command: Command) -> Vec<Event> {
@@ -338,6 +352,11 @@ impl Study {
             Command::StudySelect { ids } => self.select(&ids),
             Command::StudyRefresh { id } => self.refresh(&id),
             Command::StudyRole { id, role } => self.set_role(&id, role),
+            Command::StudyShow { id, at } => self.show(&id, at),
+            Command::StudyShowNote { id } => self.show_note(&id),
+            Command::StudyNote { id, title, body } => self.write_note(id, &title, &body),
+            Command::StudyNoteDelete { id } => self.delete_note(&id),
+            Command::StudyNoteSource { id } => self.note_source(&id),
             _ => Vec::new(),
         }
     }
@@ -836,6 +855,168 @@ impl Study {
             self.start_reading(vec![Item { id: id.to_string(), path, kind, download: false }]);
         }
         self.saved()
+    }
+
+    /* ── the reader ─────────────────────────────────────────────────── */
+
+    /// Show a source: a PDF whose file is here, unchanged and not in iCloud,
+    /// in the document viewer at the page; anything else as its words were
+    /// kept — never by reading a file in iCloud, which would bring it down.
+    fn show(&mut self, id: &str, at: Option<StudyPlace>) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        let Some(source) = open.book.sources.get(id) else {
+            return vec![notice(format!("{id}: no such source"), NoticeLevel::Warn)];
+        };
+        let file = match &source.origin {
+            Origin::File { root, rel } => self.kb.file(root, rel),
+            _ => None,
+        };
+        let meta = file.as_ref().and_then(|f| std::fs::symlink_metadata(f).ok());
+        let in_cloud = meta.as_ref().is_some_and(dataless::is_dataless);
+        if source.kind == Kind::Pdf.name() && source.status == SourceStatus::Ready && !in_cloud && meta.as_ref().is_some_and(|m| m.is_file()) {
+            if let Some(path) = file {
+                self.documents.insert(path.clone());
+                let page = at.and_then(|a| u32::try_from(a.from).ok());
+                return vec![Event::Document { path: path.display().to_string(), name: source.title.clone(), kind: crate::bus::ViewerKind::Pdf, page }];
+            }
+        }
+        let Some(body) = snapshot::words(&open.book, id, source.units) else {
+            let why = match &source.status {
+                SourceStatus::InCloud => "It is in iCloud and has not been read yet.".to_string(),
+                SourceStatus::Reading | SourceStatus::Downloading => "It is still being read.".to_string(),
+                SourceStatus::Failed { why } => format!("It could not be read: {why}"),
+                _ => "Its words are not kept here.".to_string(),
+            };
+            return vec![notice(format!("{}: {why}", source.title), NoticeLevel::Info)];
+        };
+        let gone = matches!(source.origin, Origin::File { .. }) && meta.is_none();
+        let said = match (&source.status, in_cloud) {
+            _ if gone => Some("Its file is gone: these are its words as they were read.".to_string()),
+            (SourceStatus::Missing, _) => Some("Its file is gone: these are its words as they were read.".to_string()),
+            (SourceStatus::Changed, _) => Some("Its file has changed since it was read: these are its words as they were.".to_string()),
+            (_, true) => Some("Its file is in iCloud: these are its words as they were read.".to_string()),
+            _ => None,
+        };
+        let view = match body {
+            Body::Lines(text) => match Kind::from_name(&source.kind) {
+                Kind::Markdown | Kind::Notebook => StudyView::Sections { sections: proton_study::view::sections(&text) },
+                _ => StudyView::Lines { text },
+            },
+            Body::Pages(pages) => StudyView::Pages { pages },
+            Body::Cues(cues) => StudyView::Cues { cues: cues.into_iter().map(|c| StudyCue { start: c.start, end: c.end, text: c.text }).collect() },
+        };
+        vec![Event::StudySource { id: id.to_string(), title: source.title.clone(), kind: source.kind.clone(), at, said, view }]
+    }
+
+    /* ── notes ──────────────────────────────────────────────────────── */
+
+    fn note_event(&self, id: &str) -> Option<Event> {
+        let open = self.open.as_ref()?;
+        let note = open.book.note(id)?;
+        let source = open.book.sources.sources.iter().find(|s| matches!(&s.origin, Origin::Note { note } if note == id)).map(|s| s.id.clone());
+        Some(Event::StudyNote { id: note.id, title: note.title, body: note.body, updated: note.updated, source })
+    }
+
+    fn show_note(&mut self, id: &str) -> Vec<Event> {
+        match self.note_event(id) {
+            Some(event) => vec![event],
+            None => vec![notice(format!("{id}: no such note"), NoticeLevel::Warn)],
+        }
+    }
+
+    /// Write a note, new or not. A note that is a source is read again, so
+    /// what the tutor reads is what was written.
+    fn write_note(&mut self, id: Option<String>, title: &str, body: &str) -> Vec<Event> {
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let now = proton_study::now();
+        let title = match title.trim() {
+            "" => body.lines().map(|l| l.trim_start_matches('#').trim()).find(|l| !l.is_empty()).unwrap_or("Untitled note").chars().take(80).collect(),
+            title => title.to_string(),
+        };
+        let note = match id.as_deref().and_then(|id| book.note(id)) {
+            Some(mut note) => {
+                note.title = title;
+                note.body = body.trim_end().to_string();
+                note.updated = now;
+                note
+            }
+            None => Note { id: book.new_note_id(), title, created: now, updated: now, from: None, body: body.trim_end().to_string() },
+        };
+        if let Err(why) = book.write_note(&note) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        // A note that is a source: its words, kept again.
+        let snapshots = book.snapshots();
+        if let Some(source) = book.sources.sources.iter_mut().find(|s| matches!(&s.origin, Origin::Note { note: n } if *n == note.id)) {
+            let text = format!("# {}\n\n{}\n", note.title, note.body);
+            if snapshot::keep_in(&snapshots, &source.id, &Body::Lines(text.clone())).is_ok() {
+                source.title = note.title.clone();
+                source.count = text.lines().count();
+                source.sha256 = snapshot::digest_text(&text);
+                source.mtime = now;
+            }
+        }
+        let id = note.id.clone();
+        let mut events = self.saved();
+        events.extend(self.note_event(&id));
+        events
+    }
+
+    fn delete_note(&mut self, id: &str) -> Vec<Event> {
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        if let Err(why) = book.bin_note(id) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        let mut events = self.saved();
+        events.push(notice(format!("{id} is in the notebook's bin, .notebook/bin/."), NoticeLevel::Info));
+        events
+    }
+
+    /// Make a note a source: its words kept as a source's are, ticked.
+    fn note_source(&mut self, id: &str) -> Vec<Event> {
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let Some(note) = book.note(id) else {
+            return vec![notice(format!("{id}: no such note"), NoticeLevel::Warn)];
+        };
+        if let Some(source) = book.sources.sources.iter().find(|s| matches!(&s.origin, Origin::Note { note: n } if n == id)) {
+            return vec![notice(format!("{} is already {}", note.title, source.id), NoticeLevel::Info)];
+        }
+        let source_id = book.sources.take_id();
+        let text = format!("# {}\n\n{}\n", note.title, note.body);
+        if let Err(why) = snapshot::keep(book, &source_id, &Body::Lines(text.clone())) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        let now = proton_study::now();
+        book.sources.sources.push(Source {
+            id: source_id.clone(),
+            title: note.title.clone(),
+            kind: Kind::Markdown.name().into(),
+            origin: Origin::Note { note: id.to_string() },
+            role: Role::Notes,
+            size: text.len() as u64,
+            mtime: now,
+            sha256: snapshot::digest_text(&text),
+            units: Units::Lines,
+            count: text.lines().count(),
+            thin: Vec::new(),
+            status: SourceStatus::Ready,
+            added: now,
+            labels: Vec::new(),
+        });
+        let _ = book.tick(&source_id);
+        let mut events = self.saved();
+        events.insert(0, self.list_event());
+        events.extend(self.note_event(id));
+        events
     }
 
     /// Note the open notebook's sources whose files have gone or changed

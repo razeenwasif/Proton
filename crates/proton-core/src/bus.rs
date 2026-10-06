@@ -541,6 +541,30 @@ pub enum Command {
         id: String,
         role: proton_study::Role,
     },
+    /// Show a source in the reader — at a place, a citation's — or, for a
+    /// PDF whose file is here, in the document viewer at its page.
+    StudyShow {
+        id: String,
+        at: Option<proton_study::view::StudyPlace>,
+    },
+    /// Show a note, to read and edit.
+    StudyShowNote {
+        id: String,
+    },
+    /// Write a note: a new one, given no id.
+    StudyNote {
+        id: Option<String>,
+        title: String,
+        body: String,
+    },
+    /// Put a note in the notebook's bin.
+    StudyNoteDelete {
+        id: String,
+    },
+    /// Make a note a source, so the tutor reads it too.
+    StudyNoteSource {
+        id: String,
+    },
     /* ── workspaces ───────────────────────────────────────────────── */
     /// Open a folder as a workspace, or focus it if it is already open.
     ///
@@ -1376,6 +1400,26 @@ pub enum Event {
         query: String,
         files: Vec<proton_study::view::StudyKbFile>,
         passages: Vec<proton_study::view::StudyKbHit>,
+    },
+    /// A source in the reader: its words as kept, and where to open it.
+    StudySource {
+        id: String,
+        title: String,
+        kind: String,
+        at: Option<proton_study::view::StudyPlace>,
+        /// Why its words are shown rather than its file, when they are.
+        said: Option<String>,
+        view: proton_study::view::StudyView,
+    },
+    /// A note, to read and edit.
+    StudyNote {
+        id: String,
+        title: String,
+        body: String,
+        #[ts(type = "number")]
+        updated: u64,
+        /// Whether it is a source of the notebook too.
+        source: Option<String>,
     },
     /// What one task said, drawn as Chat draws a conversation: live while
     /// it runs.

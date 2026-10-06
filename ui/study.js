@@ -10,13 +10,19 @@
  * answers, so a notebook edited by hand is what is drawn the next time. */
 
 import { escapeHtml as esc, icon } from "./html.js";
+import { markdown } from "./markdown.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
 
 /** @typedef {import("./bindings/StudySummary").StudySummary} Summary */
 /** @typedef {import("./bindings/StudySourceRow").StudySourceRow} SourceRow */
 /** @typedef {import("./bindings/StudyNoteRow").StudyNoteRow} NoteRow */
 /** @typedef {import("./bindings/StudyRole").StudyRole} Role */
+/** @typedef {import("./bindings/StudyView").StudyView} View */
+/** @typedef {import("./bindings/StudyPlace").StudyPlace} Place */
 /** @typedef {{notebooks: Summary[], open: string | null, folder: string | null}} ListEvent */
+/** @typedef {{id: string, title: string, kind: string, at: Place | null, said: string | null, view: View}} SourceEvent */
+/** @typedef {{id: string, title: string, body: string, updated: number, source: string | null}} NoteEvent */
+/** @typedef {{kind: "overview"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}} Shown */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
  *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
 
@@ -35,6 +41,14 @@ const count = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 /** Whether a source's words are in the notebook. @param {SourceRow} s */
 const hasWords = (s) => ["ready", "missing", "changed"].includes(s.status.state);
+
+/** Seconds as a video's clock reads them. @param {number} seconds */
+function clock(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, r = s % 60;
+  const two = (/** @type {number} */ n) => String(n).padStart(2, "0");
+  return h ? `${h}:${two(m)}:${two(r)}` : `${m}:${two(r)}`;
+}
 
 /** What a source's units count, in words. @param {SourceRow} s */
 function extent(s) {
@@ -61,7 +75,7 @@ export function createStudy(host) {
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: boolean, removing: string | null,
-   *   getting: string[] | null}} */
+   *   getting: string[] | null, shown: Shown}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -75,6 +89,8 @@ export function createStudy(host) {
     // whose taking out is being confirmed; sources whose download from
     // iCloud is being confirmed.
     editing: false, pasting: false, removing: null, getting: null,
+    // What the middle shows: the notebook, a source in the reader, a note.
+    shown: { kind: "overview" },
   };
 
   const readOnly = () => Boolean(state.notebook?.readOnly);
@@ -121,7 +137,7 @@ export function createStudy(host) {
     return `<div class="st-source${s.selected ? " on" : ""}" data-study-source="${esc(s.id)}" title="${esc(`${s.id} · ${origin}`)}">` +
       `<input type="checkbox" data-study-tick="${esc(s.id)}"${s.selected ? " checked" : ""}${hasWords(s) && !readOnly() ? "" : " disabled"} aria-label="Use ${esc(s.title)}">` +
       `${icon(KIND_ICON[s.kind] ?? "file")}` +
-      `<span class="st-source-text"><span class="st-source-name">${esc(s.title)}</span>` +
+      `<span class="st-source-text"><button class="st-source-name" data-study-show="${esc(s.id)}" title="Read it">${esc(s.title)}</button>` +
       `<span class="st-faint">${esc(s.id)}${extent(s) ? ` · ${esc(extent(s))}${esc(thin)}` : ""}</span></span>` +
       (confirm || statusHtml(s) +
         (readOnly() ? "" : `<button class="st-x" data-study-remove="${esc(s.id)}" title="Take it out of this notebook" aria-label="Take it out">${icon("close")}</button>`)) +
@@ -151,7 +167,15 @@ export function createStudy(host) {
     const rows = nb.sources.length
       ? nb.sources.map(sourceHtml).join("")
       : `<p class="st-faint st-pad">No sources yet.</p>`;
-    els.sources.innerHTML = `${head}${confirmHtml()}${tickAll}<div class="scroll st-source-list">${rows}</div>`;
+    const notes = nb.notes.map((n) => {
+      const on = state.shown.kind === "note" && state.shown.note?.id === n.id;
+      return `<button class="st-note${on ? " on" : ""}" data-study-show-note="${esc(n.id)}" title="${esc(n.id)}">` +
+        `<span class="st-source-name">${esc(n.title)}</span><span class="st-faint">${esc(n.preview)}</span></button>`;
+    }).join("");
+    const notesHead = `<header class="st-sources-head st-notes-head"><b>Notes</b><span class="st-faint">${nb.notes.length || ""}</span><span class="grow"></span>` +
+      (readOnly() ? "" : `<button class="cc-quiet" data-study-new-note title="Write a note">${icon("plus")}Note</button>`) + `</header>`;
+    els.sources.innerHTML = `${head}${confirmHtml()}${tickAll}<div class="scroll st-source-list">${rows}${notesHead}` +
+      `${notes || `<p class="st-faint st-pad">No notes yet.</p>`}</div>`;
   }
 
   /** Bringing sources down from iCloud is said before it is done: what
@@ -276,6 +300,60 @@ export function createStudy(host) {
     return `${held}${head}${cloud}<div class="st-groups">${groups}</div>${actions}`;
   }
 
+  /** A source, as its words were kept. @param {SourceEvent} src */
+  function readerHtml(src) {
+    const v = src.view;
+    let body = "";
+    if (v.shape === "sections") {
+      body = v.sections.map((s) => `<section class="st-sec md" data-from="${s.from}" data-to="${s.to}">${markdown(s.text)}</section>`).join("");
+    } else if (v.shape === "lines") {
+      body = `<div class="st-lines">${v.text.split("\n").map((line, i) =>
+        `<div class="st-ln" data-line="${i + 1}"><i>${i + 1}</i><span>${esc(line) || " "}</span></div>`).join("")}</div>`;
+    } else if (v.shape === "pages") {
+      body = v.pages.map((page, i) => `<section class="st-page" data-page="${i + 1}"><header>Page ${i + 1}</header>` +
+        (page.trim() ? `<pre>${esc(page.trim())}</pre>` : `<p class="st-faint">No words were read on this page — a picture, or a slide with only a title.</p>`) +
+        `</section>`).join("");
+    } else {
+      body = v.cues.map((c) => `<div class="st-cue" data-start="${c.start}" data-end="${c.end}"><time>${clock(c.start)}</time><span>${esc(c.text)}</span></div>`).join("");
+    }
+    const said = src.said ? `<div class="st-banner">${icon("clock")} ${esc(src.said)}</div>` : "";
+    return `<div class="st-reader"><div class="st-reader-head"><button class="cc-quiet" data-study-back title="Back to the notebook">← Back</button>` +
+      `<div><h1>${esc(src.title)}</h1><span class="st-faint">${esc(src.id)} · ${esc(src.kind)}</span></div></div>${said}<div class="st-read">${body}</div></div>`;
+  }
+
+  /** Mark and scroll to where a source was opened. @param {SourceEvent} src */
+  function reach(src) {
+    const at = src.at;
+    if (!at) return;
+    /** @type {HTMLElement[]} */
+    let marks = [];
+    const all = (/** @type {string} */ sel) => /** @type {HTMLElement[]} */ ([...els.stage.querySelectorAll(sel)]);
+    if (src.view.shape === "sections") marks = all(".st-sec").filter((e) => Number(e.dataset.from) <= at.to && Number(e.dataset.to) >= at.from);
+    else if (src.view.shape === "lines") marks = all(".st-ln").filter((e) => Number(e.dataset.line) >= at.from && Number(e.dataset.line) <= at.to);
+    else if (src.view.shape === "pages") marks = all(".st-page").filter((e) => Number(e.dataset.page) >= at.from && Number(e.dataset.page) <= at.to);
+    else marks = all(".st-cue").filter((e) => Number(e.dataset.start) < at.to + 1 && Number(e.dataset.end) > at.from);
+    marks.forEach((e) => e.classList.add("at"));
+    marks[0]?.scrollIntoView({ block: "center" });
+  }
+
+  /** A note, to write. @param {NoteEvent | null} note @param {boolean} preview */
+  function noteHtml(note, preview) {
+    const ro = readOnly() ? " disabled" : "";
+    const made = note?.source ? `<span class="st-faint">Used by the tutor as ${esc(note.source)}</span>`
+      : note && !readOnly() ? `<button type="button" class="cc-quiet" data-study-note-source title="Let the tutor read it too">Use as a source</button>` : "";
+    const remove = note && !readOnly() ? `<button type="button" class="cc-quiet" data-study-note-delete>Put in the bin</button>` : "";
+    const body = preview
+      ? `<div class="st-note-preview md">${markdown(note?.body ?? "")}</div>`
+      : `<textarea name="body" rows="18" spellcheck="true" placeholder="Markdown, and TeX between dollars: $O(b^d)$"${ro}>${esc(note?.body ?? "")}</textarea>`;
+    return `<form class="st-card st-note-form" data-study-note-form data-id="${esc(note?.id ?? "")}" novalidate>
+        <div class="st-reader-head"><button type="button" class="cc-quiet" data-study-back>← Back</button>
+          <input name="title" value="${esc(note?.title ?? "")}" placeholder="A title — or its first line" autocomplete="off"${ro}>
+          <button type="button" class="cc-quiet" data-study-note-preview>${preview ? "Write" : "Preview"}</button></div>
+        ${body}
+        <div class="rs-actions st-note-actions">${remove}${made}<span class="grow"></span>${readOnly() ? "" : `<button type="submit" class="cc-primary">Save</button>`}</div>
+      </form>`;
+  }
+
   function renderStage() {
     const nb = state.notebook;
     els.title.textContent = nb ? nb.title : "Notebook";
@@ -297,6 +375,17 @@ export function createStudy(host) {
     }
     // A form being typed into is left alone while its notebook is redrawn.
     if ((state.editing || state.pasting) && els.stage.querySelector("form")) return;
+    const shown = state.shown;
+    if (shown.kind === "source") {
+      els.stage.innerHTML = readerHtml(shown.source);
+      reach(shown.source);
+      return;
+    }
+    if (shown.kind === "note") {
+      if (!shown.preview && els.stage.querySelector("[data-study-note-form] textarea")) return;
+      els.stage.innerHTML = noteHtml(shown.note, shown.preview);
+      return;
+    }
     els.stage.innerHTML = notebookHtml();
   }
 
@@ -347,6 +436,37 @@ export function createStudy(host) {
       return render();
     }
     if (at("[data-study-pick]")) return picker.open();
+    const show = at("[data-study-show]");
+    if (show) return host.dispatch({ type: "studyShow", id: show.dataset.studyShow, at: null });
+    const showNote = at("[data-study-show-note]");
+    if (showNote) return host.dispatch({ type: "studyShowNote", id: showNote.dataset.studyShowNote });
+    if (at("[data-study-back]")) {
+      state.shown = { kind: "overview" };
+      return render();
+    }
+    if (at("[data-study-new-note]")) {
+      state.shown = { kind: "note", note: null, preview: false };
+      render();
+      /** @type {HTMLTextAreaElement | null} */ (els.stage.querySelector("textarea"))?.focus();
+      return;
+    }
+    if (at("[data-study-note-preview]") && state.shown.kind === "note") {
+      // What is typed goes into the preview, unsaved.
+      const form = /** @type {HTMLFormElement | null} */ (els.stage.querySelector("[data-study-note-form]"));
+      const typed = form ? String(new FormData(form).get("body") ?? state.shown.note?.body ?? "") : "";
+      const title = form ? String(new FormData(form).get("title") ?? "") : "";
+      const note = state.shown.note ?? { id: "", title, body: "", updated: 0, source: null };
+      state.shown = { kind: "note", note: state.shown.preview ? note : { ...note, title, body: typed }, preview: !state.shown.preview };
+      els.stage.innerHTML = "";
+      return renderStage();
+    }
+    const noteId = () => (state.shown.kind === "note" ? state.shown.note?.id : undefined);
+    if (at("[data-study-note-source]") && noteId()) return host.dispatch({ type: "studyNoteSource", id: noteId() });
+    if (at("[data-study-note-delete]") && noteId()) {
+      host.dispatch({ type: "studyNoteDelete", id: noteId() });
+      state.shown = { kind: "overview" };
+      return render();
+    }
     if (at("[data-study-details]")) {
       state.editing = true;
       return renderStage();
@@ -450,6 +570,13 @@ export function createStudy(host) {
       state.editing = false;
       return;
     }
+    if (form.matches("[data-study-note-form]")) {
+      const id = form.dataset.id || null;
+      const body = data.get("body") === null && state.shown.kind === "note" ? state.shown.note?.body ?? "" : field("body");
+      if (!body && !field("title")) return /** @type {HTMLTextAreaElement | null} */ (form.querySelector("textarea"))?.focus();
+      host.dispatch({ type: "studyNote", id, title: field("title"), body });
+      return;
+    }
     if (form.matches("[data-study-paste-form]")) {
       const text = field("text");
       if (!text) return /** @type {HTMLTextAreaElement | null} */ (form.querySelector("textarea"))?.focus();
@@ -486,10 +613,29 @@ export function createStudy(host) {
       state.pasting = false;
       state.removing = null;
       state.getting = null;
+      state.shown = { kind: "overview" };
     }
     state.notebook = event;
     state.open = event.slug;
     state.creating = false;
+    render();
+  }
+
+  /** A source, in the reader. @param {SourceEvent} event */
+  function source(event) {
+    state.shown = { kind: "source", source: event };
+    state.editing = false;
+    state.pasting = false;
+    els.stage.innerHTML = "";
+    render();
+  }
+
+  /** A note, to read and write. @param {NoteEvent} event */
+  function note(event) {
+    state.shown = { kind: "note", note: event, preview: false };
+    state.editing = false;
+    state.pasting = false;
+    els.stage.innerHTML = "";
     render();
   }
 
@@ -502,5 +648,5 @@ export function createStudy(host) {
 
   render();
 
-  return { list, notebook, closed, kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
+  return { list, notebook, closed, source, note, kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
 }

@@ -129,6 +129,42 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(picker.hidden, 'Escape did not put it away');
   });
 
+  await test('A source opens in the reader at the place asked for, and Back returns to the notebook', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01', {kind: 'markdown', units: 'lines', title: 'Search.md'})])]); await settle();
+    const before = win.commands.length;
+    ws().querySelector('[data-study-show="S01"]').click(); await settle();
+    assert(sent(before, 'studyShow')[0]?.id === 'S01', 'the reader was not asked for');
+    await win.pushEvents([{type: 'studySource', id: 'S01', title: 'Search.md', kind: 'markdown', at: {from: 7, to: 9}, said: 'Its file is in iCloud: these are its words as they were read.',
+      view: {shape: 'sections', sections: [{from: 1, to: 6, text: '# Search\n\nBFS is complete.'}, {from: 7, to: 12, text: '## Uniform cost\n\nOrders by $g(n)$.'}]}}]); await settle();
+    const marked = [...ws().querySelectorAll('.st-sec.at')];
+    assert(marked.length === 1 && marked[0].textContent.includes('Uniform cost'), 'the cited section is not marked');
+    assert(ws().querySelector('.st-reader .st-banner')?.textContent.includes('iCloud'), 'why its words are shown is not said');
+    await win.pushEvents([{type: 'studySource', id: 'S01', title: 'Exam.pdf', kind: 'pdf', at: {from: 2, to: 2}, said: null,
+      view: {shape: 'pages', pages: ['one', '', 'three']}}]); await settle();
+    assert(ws().querySelector('.st-page.at')?.dataset.page === '2', 'the cited page is not marked');
+    assert(ws().querySelector('.st-page[data-page="2"]')?.textContent.includes('No words'), 'an empty page is not said to be');
+    ws().querySelector('[data-study-back]').click(); await settle();
+    assert(!ws().querySelector('.st-reader') && ws().querySelector('.st-nb-head'), 'Back did not return to the notebook');
+  });
+
+  await test('A note is written, saved, and made a source', async () => {
+    ws().querySelector('[data-study-new-note]').click(); await settle();
+    const form = ws().querySelector('[data-study-note-form]');
+    assert(form, 'no note to write');
+    form.querySelector('textarea').value = '# Uniform cost\nOrders the frontier by $g(n)$.';
+    const before = win.commands.length;
+    form.requestSubmit(); await settle();
+    const wrote = sent(before, 'studyNote')[0];
+    assert(wrote && wrote.id === null && wrote.body.startsWith('# Uniform cost'), `wrong note: ${JSON.stringify(wrote)}`);
+    await win.pushEvents([{type: 'studyNote', id: 'N001', title: 'Uniform cost', body: wrote.body, updated: 1, source: null}]); await settle();
+    assert(ws().querySelector('[data-study-note-form]')?.dataset.id === 'N001', 'the saved note is not the one shown');
+    const made = win.commands.length;
+    ws().querySelector('[data-study-note-source]').click(); await settle();
+    assert(sent(made, 'studyNoteSource')[0]?.id === 'N001', 'it was not made a source');
+    ws().querySelector('[data-study-back]').click(); await settle();
+  });
+
   await test('A notebook another Proton has open is read only here', async () => {
     await win.pushEvents([notebook([row('S01')], 'another Proton (pid 4242)')]); await settle();
     assert(ws().querySelector('.st-banner')?.textContent.includes('read only'), 'nothing says it is read only');

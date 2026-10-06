@@ -151,10 +151,15 @@ twice like the Lab's Python.
 **Notebook** · Gemini Notebook for studying, being built: notebooks of your own
 sources — a vault, a courses folder, an iCloud archive — a tutor on Claude Code,
 Codex, Gemini or Antigravity that answers from them and cites them, and a
-studio that makes study guides, flashcards, quizzes and exams of them. The
-knowledge base is catalogued in under a second without opening a file, and a
-file still in iCloud is never read until you choose to download it. The tab is
-here and empty; the milestones are in the plan.
+studio that makes study guides, flashcards, quizzes and exams of them. So far:
+notebooks, each a folder in `~/Github/Notebooks`; sources chosen from your
+folders in a picker — browsed, searched by name and by word, with what is left
+out and why — and read once, their words kept in the notebook; a reader; and
+notes. Your folders are named in your own settings,
+`{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
+and catalogued in under a second without opening a file. A file still in
+iCloud is listed under a cloud and never read until you choose to download it,
+having been told its size.
 **Design** · a web builder with a layer tree and an artboard, two-way bound to
 real component source and design tokens.
 **Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a

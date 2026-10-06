@@ -4893,6 +4893,14 @@ function renderEvent(event) {
       study?.kbResults(event);
       break;
 
+    case "studySource":
+      study?.source(event);
+      break;
+
+    case "studyNote":
+      study?.note(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;
