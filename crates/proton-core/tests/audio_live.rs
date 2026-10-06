@@ -88,3 +88,53 @@ fn a_short_brief_is_written_spoken_and_joined() {
     assert!(file.metadata().map(|m| m.len()).unwrap_or(0) > 100_000, "the sound is there");
     session.shutdown();
 }
+
+/// A recording made here, of a sentence said by macOS's own voice, added
+/// as a source and transcribed by Fish: it costs a few seconds of sound,
+/// at 36 cents an hour.
+#[test]
+#[ignore = "sends a few seconds of speech to Fish Audio to be transcribed, which costs a little of its credit"]
+fn a_recording_is_transcribed_by_fish_and_kept_as_timed_cues() {
+    let root = std::env::temp_dir().join(format!("proton-heard-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("kb/Lectures");
+    std::fs::create_dir_all(&dir).unwrap();
+    let said = "Uniform cost search expands the frontier node with the cheapest path cost first.";
+    let made = std::process::Command::new("say").args(["-o"]).arg(dir.join("lecture.aiff")).arg(said).status();
+    if !made.is_ok_and(|s| s.success()) {
+        eprintln!("no `say` here to make a recording with");
+        return;
+    }
+    let converted = std::process::Command::new("ffmpeg").args(["-v", "error", "-y", "-i"]).arg(dir.join("lecture.aiff")).arg(dir.join("lecture.m4a")).status();
+    assert!(converted.is_ok_and(|s| s.success()), "ffmpeg");
+    std::fs::remove_file(dir.join("lecture.aiff")).unwrap();
+    std::fs::create_dir_all(root.join("Notebooks")).unwrap();
+    let settings = root.join("settings.json");
+    std::fs::write(&settings, serde_json::json!({"study": {"roots": [dir], "folder": root.join("Notebooks")}}).to_string()).unwrap();
+
+    let mut session = Session::new(&root).with_person_settings(settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    until(&mut session, Duration::from_secs(30), |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(())).expect("the knowledge base");
+    session.apply(Command::StudyNew { title: "Heard, live".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Lectures/lecture.m4a".into()] });
+    until(&mut session, Duration::from_secs(30), |e| match e {
+        Event::StudyNotebook { sources, .. } => sources.iter().find(|s| matches!(s.status, SourceStatus::Untranscribed { .. })).map(|_| ()),
+        _ => None,
+    })
+    .expect("measured");
+    session.apply(Command::StudyTranscribe { id: "S01".into() });
+    let status = until(&mut session, Duration::from_secs(5 * 60), |e| match e {
+        Event::StudyNotebook { sources, .. } => sources.iter().find(|s| matches!(s.status, SourceStatus::Ready | SourceStatus::Failed { .. })).map(|s| s.status.clone()),
+        _ => None,
+    })
+    .expect("transcribed within five minutes");
+    assert_eq!(status, SourceStatus::Ready, "{status:?}");
+    let events = session.apply(Command::StudyShow { id: "S01".into(), at: None });
+    let Some(Event::StudySource { view: proton_study::view::StudyView::Cues { cues }, .. }) = events.first() else { panic!("{events:?}") };
+    for cue in cues {
+        println!("{:>6.2}–{:<6.2} {}", cue.start, cue.end, cue.text);
+    }
+    let heard: String = cues.iter().map(|c| c.text.to_lowercase()).collect::<Vec<_>>().join(" ");
+    assert!(heard.contains("uniform") && heard.contains("cost"), "{heard}");
+    session.shutdown();
+}
