@@ -66,6 +66,16 @@ pub struct Kernel {
     /// Waited for, so that its pid — and its group's id with it — may be
     /// somebody else's by now.
     reaped: bool,
+    /// Whether a broadcast has been heard: the iopub subscription is live,
+    /// and what the kernel publishes from now on will arrive. See the slow
+    /// joiner, above.
+    heard: bool,
+    /// Requests held until then, sent in order once it is: run before, a
+    /// cell's output was published before anybody was listening, and lost.
+    held: Vec<Message>,
+    /// When the kernel was last asked what it is — asked until something is
+    /// heard, because each answer is broadcast as well as replied.
+    asked: Instant,
 }
 
 impl std::fmt::Debug for Kernel {
@@ -163,6 +173,9 @@ impl Kernel {
             next: 0,
             alive: true,
             reaped: false,
+            heard: false,
+            held: Vec::new(),
+            asked: Instant::now(),
         };
 
         let context = zmq::Context::new();
@@ -174,7 +187,19 @@ impl Kernel {
             found.clone(),
         )?;
         spawn_iopub(&context, &kernel.connection, signer, found)?;
+        let mut kernel = kernel;
+        kernel.ask();
         Ok(kernel)
+    }
+
+    /// Ask the kernel what it is: a request whose `status` broadcast, once
+    /// heard, says the subscription is live.
+    fn ask(&mut self) {
+        self.asked = Instant::now();
+        self.next += 1;
+        let msg_id = format!("{}-{}", self.session, self.next);
+        let message = Message::new("kernel_info_request", &self.session, msg_id, serde_json::json!({}));
+        let _ = self.outgoing.send(message);
     }
 
     /// Whether the kernel process is still there.
@@ -191,6 +216,9 @@ impl Kernel {
     }
 
     /// Whatever the kernel has said since last time.
+    ///
+    /// Until a broadcast has been heard, the kernel is asked again every
+    /// quarter second; once one is, what was held is sent.
     pub fn poll(&mut self) -> Vec<Message> {
         let mut all = Vec::new();
         loop {
@@ -203,6 +231,20 @@ impl Kernel {
                 }
             }
         }
+        if !self.heard {
+            // `status` is only ever broadcast.
+            if all.iter().any(|message| message.msg_type() == "status") {
+                self.heard = true;
+                for message in std::mem::take(&mut self.held) {
+                    if self.outgoing.send(message).is_err() {
+                        self.alive = false;
+                        break;
+                    }
+                }
+            } else if self.asked.elapsed() >= Duration::from_millis(250) {
+                self.ask();
+            }
+        }
         all
     }
 
@@ -210,6 +252,10 @@ impl Kernel {
         self.next += 1;
         let msg_id = format!("{}-{}", self.session, self.next);
         let message = Message::new(msg_type, &self.session, msg_id.clone(), content);
+        if !self.heard && msg_type != "kernel_info_request" {
+            self.held.push(message);
+            return Ok(msg_id);
+        }
         self.outgoing
             .send(message)
             .map_err(|_| "the kernel's shell thread has gone".to_string())?;
