@@ -97,6 +97,131 @@ pub fn cached(path: &Path, cache: &Path) -> Option<Extracted> {
     read_cache(cache, path).filter(|held| (held.size, held.mtime) == stamp)
 }
 
+/// What gets the text out of a PDF.
+///
+/// `pdf-extract` is the default, and measured to be: over the 328 PDFs of a
+/// real vault and courses folder, `pdftotext` took 56 seconds to its 135 —
+/// faster, but not by enough to change for — and read the same pages with a
+/// median of 98% of their words in common, yet under 90% of `pdf-extract`'s
+/// letters on thirteen slide decks, and two fewer files.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Extractor {
+    /// `pdf-extract`, in this process: always here, and slow on some files.
+    #[default]
+    PdfExtract,
+    /// Poppler's `pdftotext`, at this path: a separate process, so a file it
+    /// chokes on costs that file and is stopped after [`PDFTOTEXT_LONGEST`].
+    Pdftotext(PathBuf),
+}
+
+impl Extractor {
+    /// Its name in a cache file's header.
+    fn name(&self) -> &'static str {
+        match self {
+            Extractor::PdfExtract => "pdf-extract",
+            Extractor::Pdftotext(_) => "pdftotext",
+        }
+    }
+}
+
+/// How long `pdftotext` may take over one file before it is stopped. The
+/// slowest file in the measured corpus took pdf-extract thirty-nine seconds.
+pub const PDFTOTEXT_LONGEST: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Poppler's `pdftotext`, where Homebrew and the system put it, or on `PATH`.
+/// An app opened from the Dock has a `PATH` without Homebrew on it, so the
+/// usual places are tried first.
+pub fn find_pdftotext() -> Option<PathBuf> {
+    let usual = ["/opt/homebrew/bin/pdftotext", "/usr/local/bin/pdftotext", "/usr/bin/pdftotext"].map(PathBuf::from);
+    let on_path = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).map(|dir| dir.join(if cfg!(windows) { "pdftotext.exe" } else { "pdftotext" })).collect::<Vec<_>>())
+        .unwrap_or_default();
+    usual.into_iter().chain(on_path).find(|path| path.is_file())
+}
+
+/// Read a PDF's text with the extractor named, from the cache when it is
+/// still good. As [`text`], which is this with `pdf-extract`.
+pub fn text_with(path: &Path, cache: Option<&Path>, extractor: &Extractor) -> Option<Extracted> {
+    let Extractor::Pdftotext(exe) = extractor else {
+        return text(path, cache);
+    };
+    let stamp = stamp(path)?;
+    if stamp.0 > LARGEST {
+        return None;
+    }
+    if let Some(dir) = cache {
+        if let Some(held) = read_cache_v2(dir, path, extractor.name()) {
+            if (held.size, held.mtime) == stamp {
+                return Some(held);
+            }
+        }
+    }
+    let pages = pdftotext(exe, path, PDFTOTEXT_LONGEST)?;
+    let out = Extracted { size: stamp.0, mtime: stamp.1, pages };
+    if let Some(dir) = cache {
+        let _ = write_cache_v2(dir, path, extractor.name(), &out);
+    }
+    Some(out)
+}
+
+/// The pages of a PDF as `pdftotext` reads them, or `None` if it failed, ran
+/// past `longest`, or found no words. It ends each page with a form feed.
+pub fn pdftotext(exe: &Path, path: &Path, longest: std::time::Duration) -> Option<Vec<String>> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(exe)
+        .args(["-q", "-enc", "UTF-8"])
+        .arg(path)
+        .arg("-")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let reading = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = stdout.read_to_end(&mut out);
+        out
+    });
+    let deadline = std::time::Instant::now() + longest;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    let out = reading.join().ok()?;
+    if !status?.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out);
+    let mut pages: Vec<String> = text.split(BREAK).map(|page| page.lines().map(str::trim_end).collect::<Vec<_>>().join("\n")).collect();
+    // The form feed ends each page, the last one too: what follows it is not a page.
+    if pages.len() > 1 && pages.last().is_some_and(|p| p.trim().is_empty()) {
+        pages.pop();
+    }
+    words(pages)
+}
+
+/// The pages too thin to cite, 1-based: a slide of a picture and a title.
+/// They are still pages — page numbers are positions — and are what a
+/// vision model can be asked to read.
+pub fn thin(pages: &[String]) -> Vec<usize> {
+    pages
+        .iter()
+        .enumerate()
+        .filter(|(_, page)| page.chars().filter(|c| c.is_alphanumeric()).count() < crate::chunk::THINNEST)
+        .map(|(at, _)| at + 1)
+        .collect()
+}
+
 /// The pages of a PDF, or `None` if there are no words in it.
 ///
 /// Panics inside the extractor are caught here rather than left to kill the
@@ -104,8 +229,11 @@ pub fn cached(path: &Path, cache: &Path) -> Option<Extracted> {
 pub fn extract(path: &Path) -> Option<Vec<String>> {
     let path = path.to_path_buf();
     let out = std::panic::catch_unwind(move || pdf_extract::extract_text_by_pages(&path));
-    let pages = out.ok()?.ok()?;
+    words(out.ok()?.ok()?)
+}
 
+/// The pages, if there are words on them; `None` for a scan.
+fn words(pages: Vec<String>) -> Option<Vec<String>> {
     // A scan is pages of images with no text layer at all, and comes back
     // empty or with a handful of stray glyphs. Indexing that is indexing
     // nothing.
@@ -225,6 +353,37 @@ fn read_cache(dir: &Path, path: &Path) -> Option<Extracted> {
         mtime,
         pages: body.split(BREAK).map(str::to_string).collect(),
     })
+}
+
+/// The cache file for an extractor other than `pdf-extract`: beside its
+/// file, not over it, so two libraries reading the same PDF two ways do not
+/// take turns re-extracting it.
+fn cache_path_v2(dir: &Path, path: &Path, extractor: &str) -> PathBuf {
+    dir.join(format!("{:016x}.{extractor}.txt", hash(&path.to_string_lossy())))
+}
+
+/// As [`write_cache`], with the extractor named in the header:
+/// `proton-library 2 <extractor> <size> <mtime> <path>`. `pdf-extract`'s
+/// files stay version 1, which earlier builds read.
+fn write_cache_v2(dir: &Path, path: &Path, extractor: &str, out: &Extracted) -> std::io::Result<()> {
+    let mut text = format!("proton-library 2 {extractor} {} {} {}\n", out.size, out.mtime, path.display());
+    text.push_str(&out.pages.join(&BREAK.to_string()));
+    std::fs::write(cache_path_v2(dir, path, extractor), text)
+}
+
+fn read_cache_v2(dir: &Path, path: &Path, extractor: &str) -> Option<Extracted> {
+    let text = std::fs::read_to_string(cache_path_v2(dir, path, extractor)).ok()?;
+    let (header, body) = text.split_once('\n')?;
+    let mut parts = header.split(' ');
+    if parts.next() != Some("proton-library") || parts.next() != Some("2") || parts.next() != Some(extractor) {
+        return None;
+    }
+    let size = parts.next()?.parse().ok()?;
+    let mtime = parts.next()?.parse().ok()?;
+    if parts.collect::<Vec<_>>().join(" ") != path.display().to_string() {
+        return None;
+    }
+    Some(Extracted { size, mtime, pages: body.split(BREAK).map(str::to_string).collect() })
 }
 
 /// Build a small real PDF, for tests.
@@ -478,6 +637,59 @@ mod tests {
         std::fs::write(&doc, fixture(&["The second version, about sparsity"])).unwrap();
         let after = text(&doc, Some(&base)).unwrap();
         assert!(after.pages[0].contains("sparsity"), "{:?}", after.pages[0]);
+    }
+
+    #[test]
+    fn pdftotext_reads_each_page_as_its_page() {
+        let Some(exe) = find_pdftotext() else {
+            eprintln!("no pdftotext here — skipping");
+            return;
+        };
+        let base = dir("pdftotext");
+        let doc = base.join("paper.pdf");
+        std::fs::write(
+            &doc,
+            fixture(&["The Memory Hierarchy\na cache line is sixty-four bytes", "", "Sparse Attention\nsparsity reduces the quadratic cost"]),
+        )
+        .unwrap();
+        let pages = pdftotext(&exe, &doc, PDFTOTEXT_LONGEST).expect("it reads");
+        assert_eq!(pages.len(), 3, "{pages:#?}");
+        assert!(pages[0].contains("cache line") && !pages[0].contains("sparsity"));
+        assert!(pages[1].trim().is_empty(), "a blank page keeps its place");
+        assert!(pages[2].contains("quadratic cost"));
+        assert_eq!(thin(&pages), [2]);
+
+        // Cached beside pdf-extract's, not over it.
+        let one = text_with(&doc, Some(&base), &Extractor::Pdftotext(exe.clone())).unwrap();
+        assert!(cache_path_v2(&base, &doc, "pdftotext").is_file());
+        assert!(!cache_path(&base, &doc).exists());
+        let stamp = std::fs::metadata(&doc).unwrap();
+        std::fs::write(&doc, vec![b'x'; stamp.len() as usize]).unwrap();
+        filetime(&doc, &stamp);
+        assert_eq!(text_with(&doc, Some(&base), &Extractor::Pdftotext(exe)), Some(one), "answered from its cache");
+    }
+
+    #[test]
+    fn pdftotext_that_cannot_run_or_read_is_none() {
+        let base = dir("pdftotext-bad");
+        let doc = base.join("paper.pdf");
+        std::fs::write(&doc, "not a pdf").unwrap();
+        assert_eq!(pdftotext(&base.join("no-such-program"), &doc, PDFTOTEXT_LONGEST), None);
+        if let Some(exe) = find_pdftotext() {
+            assert_eq!(pdftotext(&exe, &doc, PDFTOTEXT_LONGEST), None);
+        }
+    }
+
+    #[test]
+    fn a_v2_cache_names_its_extractor() {
+        let base = dir("v2");
+        let doc = base.join("paper.pdf");
+        std::fs::write(&doc, "x").unwrap();
+        let out = Extracted { size: 1, mtime: 2, pages: vec!["one".into(), "two".into()] };
+        write_cache_v2(&base, &doc, "pdftotext", &out).unwrap();
+        assert_eq!(read_cache_v2(&base, &doc, "pdftotext"), Some(out));
+        assert_eq!(read_cache_v2(&base, &doc, "pandoc"), None);
+        assert_eq!(read_cache(&base, &doc), None, "version 1 is pdf-extract's alone");
     }
 
     /// Put a file's modification time back to what it was, so a cache hit can

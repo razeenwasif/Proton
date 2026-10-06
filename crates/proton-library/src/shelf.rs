@@ -23,15 +23,32 @@
 //!   not pull in `target/` or `node_modules/`.
 //! - A file bigger than [`LARGEST`] is skipped: a megabyte of prose is not
 //!   prose, it is a log or a dump, and indexing it buries everything else.
+//! - A file whose contents are in iCloud is never read: the worker refuses
+//!   downloads on its thread, and passes over a file the flag marks.
+//!
+//! ## Reading through a catalog
+//!
+//! A knowledge base — a notebook's sources are chosen from one — is read
+//! through a [`Catalog`] instead ([`Shelf::read_catalog`]): the roots are
+//! labelled, so a citation says which one it came from; the person's rules
+//! decide what is left out rather than `.gitignore`; and every kind the
+//! library can read is read, notebooks, LaTeX and captions as well as notes and
+//! PDFs. What the picker lists and what a search finds are then the same
+//! files, because they come from the same walk.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::{Hit, Library};
+use crate::catalog::{Catalog, Root};
+use crate::extract::{self, Body, Pdfs};
+use crate::kind::Kind;
+use crate::obsidian::Meta;
+use crate::rules::Rules;
+use crate::{dataless, pdf, Hit, Library};
 
 /// What a text document may weigh before it is passed over.
 const LARGEST: u64 = 1 << 20;
@@ -107,6 +124,10 @@ struct Built {
     /// Carried rather than only printed, because the panel is where somebody
     /// is looking when they wonder.
     trouble: Option<String>,
+    /// The catalog the walk read through, in catalog mode.
+    catalog: Option<Arc<Catalog>>,
+    /// What each note says of itself, by its labelled name, in catalog mode.
+    notes: Arc<HashMap<String, Meta>>,
 }
 
 /// How far a walk has got, shared with the thread doing it.
@@ -160,6 +181,24 @@ pub struct Shelf {
     read_ignored: bool,
     /// Where citations are written from, when not the roots themselves.
     cite_from: Option<PathBuf>,
+    /// Read through a catalog with these rules, rather than walked for notes.
+    rules: Option<Rules>,
+    /// What reads PDFs.
+    extractor: pdf::Extractor,
+    /// The last walk's catalog, in catalog mode.
+    catalog: Option<Arc<Catalog>>,
+    notes: Arc<HashMap<String, Meta>>,
+    /// Set to hold the walk between one document and the next.
+    paused: Arc<AtomicBool>,
+    /// Set to end the walk in flight: the roots changed, or the shelf went.
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for Shelf {
+    fn drop(&mut self) {
+        // A walk can have minutes of PDFs ahead of it, for nobody.
+        self.stop.store(true, Ordering::Relaxed);
+    }
 }
 
 impl std::fmt::Debug for Shelf {
@@ -303,6 +342,48 @@ impl Shelf {
         self.cite_from = base;
     }
 
+    /// Read through a catalog with these rules: the roots labelled, every
+    /// readable kind, nothing in iCloud — see the module's notes. `None` goes
+    /// back to walking for notes and PDFs. A change starts a fresh walk.
+    pub fn read_catalog(&mut self, rules: Option<Rules>) {
+        if self.rules == rules {
+            return;
+        }
+        self.rules = rules;
+        self.restart();
+    }
+
+    /// Read PDFs with this. A change starts a fresh walk; what each has read
+    /// is cached apart, so going back costs nothing.
+    pub fn extract_with(&mut self, extractor: pdf::Extractor) {
+        if self.extractor == extractor {
+            return;
+        }
+        self.extractor = extractor;
+        self.restart();
+    }
+
+    /// The last walk's catalog, in catalog mode: every file, and what was left
+    /// out and why.
+    pub fn catalog(&self) -> Option<&Catalog> {
+        self.catalog.as_deref()
+    }
+
+    /// What each note says of itself — tags, other names, links — by its
+    /// labelled name, in catalog mode. Only notes that say something.
+    pub fn notes(&self) -> &HashMap<String, Meta> {
+        &self.notes
+    }
+
+    /// Hold the walk between one document and the next, or let it go on.
+    pub fn pause(&self, on: bool) {
+        self.paused.store(on, Ordering::Relaxed);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
     /// Point the shelf at a set of roots. `true` if they changed.
     ///
     /// Changing them starts a fresh walk rather than adding to what is there:
@@ -328,8 +409,13 @@ impl Shelf {
         self.checking = None;
         self.looked = None;
         self.trouble = None;
-        // A walk already running was for the old roots, or the old setting.
+        self.catalog = None;
+        self.notes = Arc::default();
+        // A walk already running was for the old roots, or the old setting:
+        // told to stop, it answers with what it has, which is dropped.
         self.stale = self.building.is_some();
+        self.stop.store(true, Ordering::Relaxed);
+        self.stop = Arc::default();
         self.start();
     }
 
@@ -365,26 +451,32 @@ impl Shelf {
         let (done, waiting) = mpsc::channel();
         let roots = self.roots.clone();
         let pdfs = self.pdfs;
-        let cache = self.cache.clone();
+        let extract = Pdfs { extractor: self.extractor.clone(), cache: self.cache.clone() };
         let embedder = self.embedder.clone();
         let counted = Arc::clone(&self.counted);
         let gitignore = !self.read_ignored;
         let cite_from = self.cite_from.clone();
+        let rules = self.rules.clone();
+        let (paused, stop) = (Arc::clone(&self.paused), Arc::clone(&self.stop));
         // Detached, like the picker's walk: it holds nothing the editor needs,
         // and if the window closes first the send fails and the thread ends.
         let _ = std::thread::Builder::new()
             .name("proton-library".into())
             .spawn(move || {
-                // Before reading, so a note written *during* the walk is not
-                // stamped as already read and then never picked up.
-                let stamp = fingerprint(&roots, gitignore);
+                let _no_downloads = dataless::NoDownloads::on_this_thread();
                 read(
                     &roots,
-                    Reading { pdfs, gitignore, cite_from: cite_from.as_deref() },
-                    cache.as_deref(),
+                    Reading {
+                        pdfs,
+                        gitignore,
+                        cite_from: cite_from.as_deref(),
+                        rules: rules.as_ref(),
+                        extract,
+                        paused: &paused,
+                        stop: &stop,
+                    },
                     &counted,
                     &done,
-                    stamp,
                     embedder.as_ref(),
                 )
             });
@@ -436,10 +528,12 @@ impl Shelf {
         let (done, waiting) = mpsc::channel();
         let roots = self.roots.clone();
         let gitignore = !self.read_ignored;
+        let rules = self.rules.clone();
         let _ = std::thread::Builder::new()
             .name("proton-library-watch".into())
             .spawn(move || {
-                let _ = done.send(fingerprint(&roots, gitignore));
+                let _no_downloads = dataless::NoDownloads::on_this_thread();
+                let _ = done.send(fingerprint(&roots, gitignore, rules.as_ref()));
             });
         self.checking = Some(waiting);
     }
@@ -480,6 +574,8 @@ impl Shelf {
                 self.missing = built.missing;
                 self.stamp = Some(built.stamp);
                 self.trouble = built.trouble;
+                self.catalog = built.catalog;
+                self.notes = built.notes;
                 true
             }
             Err(TryRecvError::Empty) => false,
@@ -499,8 +595,8 @@ impl Shelf {
     }
 
     /// The library itself, for whoever wants to add vectors to it.
-    pub fn into_library(self) -> Library {
-        self.library
+    pub fn into_library(mut self) -> Library {
+        std::mem::take(&mut self.library)
     }
 
     pub fn library(&self) -> &Library {
@@ -535,6 +631,7 @@ impl Shelf {
     /// wrote, so `../../.ssh/id_rsa` is a thing it can say, and clicking it
     /// must not open that file.
     pub fn locate(&self, rel: &str) -> Option<PathBuf> {
+        let named = rel;
         let rel = Path::new(rel);
         if rel.components().any(|part| {
             !matches!(
@@ -543,6 +640,19 @@ impl Shelf {
             )
         }) {
             return None;
+        }
+        // Read through a catalog: the first part is a root's label, and what
+        // the rules leave out, or hide, is not opened however it is named.
+        if let Some(rules) = &self.rules {
+            let (label, rest) = named.split_once('/')?;
+            let roots = Root::labelled(self.roots.clone());
+            let root = roots.iter().find(|root| root.label == label)?;
+            if rest.split('/').any(|part| part.starts_with('.')) || rules.under(&root.label).why_anywhere(rest, false).is_some() {
+                return None;
+            }
+            let path = root.path.join(rest);
+            let file = std::fs::symlink_metadata(&path).ok()?;
+            return file.is_file().then_some(path);
         }
         // Written from a base: found there, and only inside a root.
         if let Some(base) = &self.cite_from {
@@ -558,6 +668,33 @@ impl Shelf {
     }
 }
 
+/// How a walk reads: PDFs or not, `.gitignore` or not, citations from where;
+/// through a catalog or not; and whether it should wait, or stop.
+struct Reading<'a> {
+    pdfs: bool,
+    gitignore: bool,
+    cite_from: Option<&'a Path>,
+    rules: Option<&'a Rules>,
+    extract: Pdfs,
+    paused: &'a AtomicBool,
+    stop: &'a AtomicBool,
+}
+
+impl Reading<'_> {
+    /// Wait out a pause. `false` once the walk is told to stop.
+    fn go_on(&self) -> bool {
+        loop {
+            if self.stop.load(Ordering::Relaxed) {
+                return false;
+            }
+            if !self.paused.load(Ordering::Relaxed) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
 /// Read every root, answering twice: the text documents, then the PDFs.
 ///
 /// Runs on the worker; touches nothing the editor owns. The two answers exist
@@ -565,60 +702,98 @@ impl Shelf {
 /// second and two hundred PDFs took three and a half minutes the first time —
 /// and holding the fast half hostage to the slow one would mean a library that
 /// is unusable for the length of the slow one.
-/// How a walk reads: PDFs or not, `.gitignore` or not, citations from where.
-struct Reading<'a> {
-    pdfs: bool,
-    gitignore: bool,
-    cite_from: Option<&'a Path>,
-}
-
 fn read(
     roots: &[PathBuf],
     reading: Reading,
-    cache: Option<&Path>,
     counted: &Counted,
     done: &mpsc::Sender<Built>,
-    stamp: (usize, u64),
     embedder: Option<&crate::Embedder>,
 ) {
     let started = Instant::now();
-    let Reading { pdfs, gitignore, cite_from } = reading;
     let mut library = Library::new();
-    if let Some(base) = cite_from {
+    if let Some(base) = reading.cite_from {
         library.cite_from(base);
     }
     let mut missing = Vec::new();
+    // Each text document with its kind, and its labelled name in catalog mode.
+    let mut text: Vec<(PathBuf, Kind, String)> = Vec::new();
     let mut papers = Vec::new();
-    // One root inside another is an ordinary thing to write — a courses
-    // folder and one course in it — and without this every document under the
-    // inner one is read twice and answers twice, from two different citations
-    // for the same words.
-    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut catalog = None;
 
-    for root in roots {
-        if !root.is_dir() {
-            missing.push(root.clone());
-            continue;
-        }
-        library.add_root(root);
-        let (text, pdf) = documents(root, pdfs, gitignore);
-        let text: Vec<PathBuf> = text
-            .into_iter()
-            .filter(|p| seen.insert(p.clone()))
-            .collect();
-        let pdf: Vec<PathBuf> = pdf.into_iter().filter(|p| seen.insert(p.clone())).collect();
-        counted
-            .total
-            .fetch_add(text.len() + pdf.len(), Ordering::Relaxed);
-
-        for path in text {
-            if let Ok(body) = std::fs::read_to_string(&path) {
-                library.add(&path, &body);
+    // Before reading, so a note written *during* the walk is not stamped as
+    // already read and then never picked up.
+    let stamp = match reading.rules {
+        Some(rules) => {
+            let walked = Catalog::walk(&Root::labelled(roots.to_vec()), rules);
+            for root in walked.roots() {
+                if root.path.is_dir() {
+                    library.add_labelled_root(&root.path, &root.label);
+                }
             }
-            counted.done.fetch_add(1, Ordering::Relaxed);
+            missing = walked.missing().into_iter().map(|root| root.path.clone()).collect();
+            for entry in walked.readable() {
+                match entry.kind {
+                    Kind::Pdf if !reading.pdfs => {}
+                    Kind::Pdf => papers.push(walked.path(entry)),
+                    kind => text.push((walked.path(entry), kind, walked.labelled(entry))),
+                }
+            }
+            let stamp = walked.stamp();
+            catalog = Some(Arc::new(walked));
+            stamp
         }
-        papers.extend(pdf);
+        None => {
+            let stamp = fingerprint(roots, reading.gitignore, None);
+            // One root inside another is an ordinary thing to write — a courses
+            // folder and one course in it — and without this every document
+            // under the inner one is read twice and answers twice, from two
+            // different citations for the same words.
+            let mut seen: HashSet<PathBuf> = HashSet::new();
+            for root in roots {
+                if !root.is_dir() {
+                    missing.push(root.clone());
+                    continue;
+                }
+                library.add_root(root);
+                let (notes, pdf) = documents(root, reading.pdfs, reading.gitignore);
+                for path in notes.into_iter().filter(|p| seen.insert(p.clone())) {
+                    let kind = Kind::of(&path);
+                    text.push((path, kind, String::new()));
+                }
+                papers.extend(pdf.into_iter().filter(|p| seen.insert(p.clone())));
+            }
+            stamp
+        }
+    };
+    counted.total.fetch_add(text.len() + papers.len(), Ordering::Relaxed);
+
+    let mut notes = HashMap::new();
+    for (path, kind, name) in text {
+        if !reading.go_on() {
+            break;
+        }
+        if let Ok(body) = extract::read(&path, kind, &reading.extract) {
+            if let (Kind::Markdown, Body::Lines(words), true) = (kind, &body, catalog.is_some()) {
+                let meta = Meta::of(words);
+                if meta != Meta::default() {
+                    notes.insert(name, meta);
+                }
+            }
+            library.add_body(&path, kind, &body);
+        }
+        counted.done.fetch_add(1, Ordering::Relaxed);
     }
+    let notes = Arc::new(notes);
+    let answer = |library: Library, whole: bool, trouble: Option<String>| Built {
+        library,
+        elapsed: started.elapsed(),
+        missing: missing.clone(),
+        whole,
+        stamp,
+        trouble,
+        catalog: catalog.clone(),
+        notes: Arc::clone(&notes),
+    };
 
     // The text half, now. Cloned rather than rebuilt: one copy of a few
     // megabytes against reading a thousand files twice.
@@ -628,22 +803,18 @@ fn read(
     // meant a vault of notes with no PDFs in it never reached the embedder at
     // all: the walk announced itself finished and stopped one phase early.
     // A library of pure Markdown is the ordinary case, not the exotic one.
-    let more = !papers.is_empty() || embedder.is_some();
-    let sent = done.send(Built {
-        library: library.clone(),
-        elapsed: started.elapsed(),
-        missing: missing.clone(),
-        whole: !more,
-        stamp,
-        trouble: None,
-    });
-    if sent.is_err() || !more {
+    let more = (!papers.is_empty() || embedder.is_some()) && !reading.stop.load(Ordering::Relaxed);
+    if done.send(answer(library.clone(), !more, None)).is_err() || !more {
         return;
     }
 
     for path in papers {
-        if let Some(out) = crate::pdf::text(&path, cache) {
-            library.add_pages(&path, &out.pages);
+        if !reading.go_on() {
+            let _ = done.send(answer(library, true, None));
+            return;
+        }
+        if let Ok(body) = extract::read(&path, Kind::Pdf, &reading.extract) {
+            library.add_body(&path, Kind::Pdf, &body);
         }
         counted.done.fetch_add(1, Ordering::Relaxed);
     }
@@ -654,25 +825,11 @@ fn read(
     // A failure here loses the vectors and keeps the index, which is the right
     // way round: lexical search is a complete answer.
     let Some(embedder) = embedder else {
-        let _ = done.send(Built {
-            library,
-            elapsed: started.elapsed(),
-            missing,
-            whole: true,
-            stamp,
-            trouble: None,
-        });
+        let _ = done.send(answer(library, true, None));
         return;
     };
 
-    let _ = done.send(Built {
-        library: library.clone(),
-        elapsed: started.elapsed(),
-        missing: missing.clone(),
-        whole: false,
-        stamp,
-        trouble: None,
-    });
+    let _ = done.send(answer(library.clone(), false, None));
 
     // Said out loud when it fails. It was silent for one afternoon, and the
     // symptom — searches answering in a tenth of a second instead of two —
@@ -689,14 +846,7 @@ fn read(
     if let Some(why) = &trouble {
         eprintln!("proton-library: no vectors ({why}); searching by word only");
     }
-    let _ = done.send(Built {
-        library,
-        elapsed: started.elapsed(),
-        missing,
-        whole: true,
-        stamp,
-        trouble,
-    });
+    let _ = done.send(answer(library, true, trouble));
 }
 
 /// What the roots look like right now: how many files, and the newest
@@ -710,7 +860,10 @@ fn read(
 /// time alone misses a deletion. Together they miss only the case where a
 /// document is deleted and another added, older than the newest, inside one
 /// interval — and anything else changing picks that up on the next check.
-fn fingerprint(roots: &[PathBuf], gitignore: bool) -> (usize, u64) {
+fn fingerprint(roots: &[PathBuf], gitignore: bool, rules: Option<&Rules>) -> (usize, u64) {
+    if let Some(rules) = rules {
+        return Catalog::walk(&Root::labelled(roots.to_vec()), rules).stamp();
+    }
     let mut files = 0usize;
     let mut newest = 0u64;
     for root in roots {
@@ -769,7 +922,12 @@ fn documents(root: &Path, pdfs: bool, gitignore: bool) -> (Vec<PathBuf>, Vec<Pat
         if !entry.file_type().is_some_and(|kind| kind.is_file()) {
             continue;
         }
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(u64::MAX);
+        let Ok(meta) = entry.metadata() else { continue };
+        // In iCloud: reading it would download it.
+        if dataless::is_dataless(&meta) {
+            continue;
+        }
+        let size = meta.len();
         let path = entry.into_path();
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
             continue;
@@ -1580,6 +1738,91 @@ ferromagnetic
         assert!(shelf.meaning().say().contains("by word only"));
         // And the library still answers.
         assert_eq!(shelf.search("sparsity", 1).len(), 1);
+    }
+
+    /// A small knowledge base of two roots, as a person's might be.
+    fn knowledge_base(name: &str) -> (PathBuf, PathBuf) {
+        let vault = root(&format!("{name}-vault")).join("OnyxVault");
+        let courses = root(&format!("{name}-courses")).join("Courses");
+        write(&vault, "00 - ML/Attention.md", "---\ntags: [ml, attention]\n---\n# Attention\nsparsity reduces the quadratic cost\nSee [[Transformers]].\n");
+        write(&vault, "07 - Business/05 - Finance/Tax.md", "# Tax\nthe refund was ferromagnetic\n");
+        write(&courses, "COMP3670/lab2.ipynb", "{\"cells\": [{\"cell_type\": \"markdown\", \"source\": \"# Lab 2\\nuniform cost search orders the frontier\"}]}");
+        write(&courses, "COMP3670/notes.tex", "\\section{Heuristics}\nan admissible heuristic never overestimates\n");
+        write(&courses, "COMP3670/lecture.srt", "1\n00:01:00,000 --> 00:01:05,000\nthe frontier is a priority queue.\n");
+        write(&courses, "COMP3670/site/node_modules/pkg/README.md", "# Vendor\nthe refund was ferromagnetic\n");
+        write(&courses, "COMP3670/helper.py", "# the frontier, in code\nfrontier = []\n");
+        std::fs::write(courses.join("COMP3670/Exam_2020.pdf"), crate::pdf::fixture(&["Question 1\nexplain why breadth first search is complete"])).unwrap();
+        (vault, courses)
+    }
+
+    fn catalogued(vault: &Path, courses: &Path) -> Shelf {
+        let mut shelf = Shelf::new();
+        shelf.set_pdfs(true);
+        shelf.read_catalog(Some(Rules::new(["OnyxVault/07 - Business/05 - Finance/"])));
+        shelf.set_roots(vec![vault.to_path_buf(), courses.to_path_buf()]);
+        shelf
+    }
+
+    #[test]
+    fn a_knowledge_base_is_read_through_its_catalog_and_cited_by_root() {
+        let (vault, courses) = knowledge_base("kb");
+        let mut shelf = catalogued(&vault, &courses);
+        settle_fully(&mut shelf);
+
+        let cite = |query: &str| shelf.search(query, 1).first().map(|h| h.cite.clone());
+        assert_eq!(cite("sparsity quadratic").as_deref(), Some("OnyxVault/00 - ML/Attention.md § Attention L4-6"));
+        assert_eq!(cite("uniform cost frontier").as_deref(), Some("Courses/COMP3670/lab2.ipynb § Lab 2 L1-2"));
+        assert_eq!(cite("admissible heuristic").as_deref(), Some("Courses/COMP3670/notes.tex § Heuristics L1-2"));
+        assert_eq!(cite("priority queue").as_deref(), Some("Courses/COMP3670/lecture.srt @ 1:00-1:05"));
+        assert_eq!(cite("breadth complete").as_deref(), Some("Courses/COMP3670/Exam_2020.pdf § Question 1 p. 1"));
+        // The person's folder and the vendor's are listed as left out, and
+        // nothing in them is searched; code is listed, and not searched.
+        assert!(shelf.search("ferromagnetic", 5).is_empty(), "{:#?}", shelf.search("ferromagnetic", 5));
+        assert!(shelf.search("frontier in code", 5).iter().all(|h| !h.cite.contains("helper.py")));
+
+        let catalog = shelf.catalog().expect("a catalog");
+        assert!(catalog.get("Courses/COMP3670/helper.py").is_some());
+        let left: Vec<&str> = catalog.skipped().iter().map(|s| s.rel.as_str()).collect();
+        assert_eq!(left, ["07 - Business/05 - Finance", "COMP3670/site/node_modules"]);
+        let note = &shelf.notes()["OnyxVault/00 - ML/Attention.md"];
+        assert_eq!((note.tags.as_slice(), note.links.as_slice()), (&["ml".to_string(), "attention".to_string()][..], &["Transformers".to_string()][..]));
+    }
+
+    #[test]
+    fn a_labelled_citation_opens_only_inside_the_rules() {
+        let (vault, courses) = knowledge_base("kb-locate");
+        let mut shelf = catalogued(&vault, &courses);
+        settle(&mut shelf);
+        assert_eq!(shelf.locate("Courses/COMP3670/notes.tex"), Some(courses.join("COMP3670/notes.tex")));
+        assert_eq!(shelf.locate("OnyxVault/07 - Business/05 - Finance/Tax.md"), None, "left out by a rule");
+        assert_eq!(shelf.locate("Courses/COMP3670/site/node_modules/pkg/README.md"), None, "left out by default");
+        assert_eq!(shelf.locate("Elsewhere/COMP3670/notes.tex"), None, "no such root");
+        assert_eq!(shelf.locate("Courses/../Courses/COMP3670/notes.tex"), None);
+        write(&courses, "COMP3670/.secret/key.md", "# hidden\n");
+        assert_eq!(shelf.locate("Courses/COMP3670/.secret/key.md"), None, "hidden");
+    }
+
+    #[test]
+    fn a_paused_walk_waits_and_a_change_of_roots_while_paused_is_still_read() {
+        let (vault, courses) = knowledge_base("kb-pause");
+        let mut shelf = Shelf::new();
+        shelf.read_catalog(Some(Rules::default()));
+        shelf.pause(true);
+        shelf.set_roots(vec![vault.clone()]);
+        for _ in 0..40 {
+            shelf.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!shelf.is_built(), "it read while paused");
+        assert!(shelf.is_paused());
+
+        // The roots change under the paused walk: it is told to stop, and the
+        // walk after it reads the new roots once let go.
+        shelf.set_roots(vec![courses.clone()]);
+        shelf.pause(false);
+        settle_fully(&mut shelf);
+        assert!(shelf.search("sparsity", 3).is_empty(), "the old roots were read");
+        assert!(!shelf.search("admissible heuristic", 3).is_empty());
     }
 
     #[test]

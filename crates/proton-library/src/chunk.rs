@@ -25,13 +25,15 @@ use std::path::{Path, PathBuf};
 ///
 /// A markdown file is read in lines and a PDF is read in pages, and a citation
 /// has to say which — `L124-143` of a PDF is a number about the extracted text
-/// nobody can see, and `p. 4` of a note is a page that does not exist. Two
-/// units rather than pretending everything is one.
+/// nobody can see, and `p. 4` of a note is a page that does not exist. A
+/// lecture's captions are read in seconds, because the place to send somebody
+/// is a moment in the video.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Place {
     #[default]
     Lines,
     Pages,
+    Seconds,
 }
 
 /// One passage: a stretch of a document under a heading, or a page of a PDF.
@@ -60,6 +62,12 @@ impl Passage {
             .unwrap_or(&self.path)
             .to_string_lossy()
             .replace('\\', "/");
+        self.cite_as(&name)
+    }
+
+    /// The citation, naming the document as given: a root's label and the
+    /// path under it, or a notebook's source id.
+    pub fn cite_as(&self, name: &str) -> String {
         let where_ = self.where_();
         match self.title.is_empty() {
             true => format!("{name} {where_}"),
@@ -76,8 +84,34 @@ impl Passage {
             // parsed by anything.
             (Place::Pages, true) => format!("p. {}", self.from),
             (Place::Pages, false) => format!("pp. {}-{}", self.from, self.to),
+            // `@ 3:12-3:40`, as a video's own clock reads.
+            (Place::Seconds, _) => format!("@ {}-{}", clock(self.from), clock(self.to)),
         }
     }
+}
+
+/// Seconds as a clock: `3:07`, or `1:02:07` past the hour.
+pub fn clock(seconds: usize) -> String {
+    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    match h {
+        0 => format!("{m}:{s:02}"),
+        h => format!("{h}:{m:02}:{s:02}"),
+    }
+}
+
+/// A clock read back into seconds: `3:07`, `03:07` or `1:02:07`.
+pub fn seconds(clock: &str) -> Option<usize> {
+    let parts: Vec<&str> = clock.trim().split(':').collect();
+    if !(2..=3).contains(&parts.len()) || parts.iter().any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    let n: Vec<usize> = parts.iter().map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    let (h, m, s) = match n[..] {
+        [m, s] => (0, m, s),
+        [h, m, s] => (h, m, s),
+        _ => return None,
+    };
+    (s < 60 && (parts.len() == 2 || m < 60)).then_some(h * 3600 + m * 60 + s)
 }
 
 /// A citation read back: which file it names, and where in it.
@@ -111,7 +145,13 @@ pub fn parse_cite(cite: &str) -> Option<Cited> {
 
     // Split from the right in every case: a heading is free to contain " L"
     // or " p. ", and the part that says where is always last.
-    let (head, from, to, place) = if let Some((head, pages)) = text.rsplit_once(" pp. ") {
+    let timed = text.rsplit_once(" @ ").and_then(|(head, span)| {
+        let (from, to) = span.split_once('-')?;
+        Some((head, seconds(from)?, seconds(to)?))
+    });
+    let (head, from, to, place) = if let Some((head, from, to)) = timed {
+        (head, from, to, Place::Seconds)
+    } else if let Some((head, pages)) = text.rsplit_once(" pp. ") {
         let (from, to) = pages.split_once('-')?;
         (head, num(from)?, num(to)?, Place::Pages)
     } else if let Some((head, page)) = text.rsplit_once(" p. ") {
@@ -125,7 +165,10 @@ pub fn parse_cite(cite: &str) -> Option<Cited> {
 
     // The heading is for the reader; the path is the part that opens.
     let path = head.split(" § ").next()?.trim();
-    (!path.is_empty() && from >= 1 && to >= from).then(|| Cited {
+    // Second zero is the start of a video, where line zero and page zero are
+    // nothing.
+    let first = if place == Place::Seconds { 0 } else { 1 };
+    (!path.is_empty() && from >= first && to >= from).then(|| Cited {
         path: path.to_string(),
         from,
         to,
@@ -147,22 +190,68 @@ const LONGEST: usize = 60;
 
 /// Cut a markdown document into passages.
 pub fn markdown(path: &Path, text: &str) -> Vec<Passage> {
+    sections(path, text, &MARKDOWN)
+}
+
+/// Cut a LaTeX document into passages, at its `\section`s.
+///
+/// The same cut as Markdown's, with LaTeX's own headings: `\chapter`,
+/// `\section` and the rest are the author saying where an idea ends. The
+/// preamble — packages and macros — is passed over as front matter is.
+pub fn tex(path: &Path, text: &str) -> Vec<Passage> {
+    sections(path, text, &TEX)
+}
+
+/// Cut text with no headings — source code, where `#` is a comment — into
+/// passages of [`LONGEST`] lines.
+pub fn plain(path: &Path, text: &str) -> Vec<Passage> {
+    sections(path, text, &PLAIN)
+}
+
+/// How a kind of document marks its headings.
+struct Grammar {
+    /// A heading line → its depth and title.
+    heading: fn(&str) -> Option<(usize, String)>,
+    /// Whether a line opens or closes a block — code, verbatim — in which
+    /// nothing is a heading, given whether one is open.
+    fence: fn(&str, bool) -> bool,
+    /// The first line that is the document rather than its metadata.
+    begin: fn(&[&str]) -> usize,
+}
+
+const MARKDOWN: Grammar = Grammar {
+    heading: heading_of,
+    // A `#` inside a code fence is a comment in somebody's shell script, not
+    // a heading. Without this a Python snippet full of comments shatters the
+    // document into passages of one line each.
+    fence: |line, _| line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~"),
+    begin: front_matter,
+};
+
+const PLAIN: Grammar = Grammar { heading: |_| None, fence: |_, _| false, begin: |_| 0 };
+
+const TEX: Grammar = Grammar {
+    heading: crate::formats::tex::heading,
+    fence: crate::formats::tex::fence,
+    begin: crate::formats::tex::begin,
+};
+
+/// Cut a document into passages at its headings.
+fn sections(path: &Path, text: &str, grammar: &Grammar) -> Vec<Passage> {
     let mut out = Vec::new();
     let mut stack: Vec<(usize, String)> = Vec::new();
     let mut body: Vec<&str> = Vec::new();
-    let mut start = 1usize;
     let mut fenced = false;
 
     let lines: Vec<&str> = text.lines().collect();
-    let begin = front_matter(&lines);
+    let begin = (grammar.begin)(&lines);
+    // 1-based: the first line after any front matter.
+    let mut start = begin + 1;
 
     for (index, line) in lines.iter().enumerate().skip(begin) {
         let number = index + 1;
 
-        // A `#` inside a code fence is a comment in somebody's shell script,
-        // not a heading. Without this a Python snippet full of comments
-        // shatters the document into passages of one line each.
-        if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+        if (grammar.fence)(line, fenced) {
             fenced = !fenced;
             body.push(line);
             continue;
@@ -170,19 +259,19 @@ pub fn markdown(path: &Path, text: &str) -> Vec<Passage> {
 
         let heading = match fenced {
             true => None,
-            false => heading_of(line),
+            false => (grammar.heading)(line),
         };
 
         let Some((depth, title)) = heading else {
             body.push(line);
             // Split a section that has run long, keeping its heading.
             if body.len() >= LONGEST {
-                flush(&mut out, path, &stack, &mut body, &mut start, number + 1);
+                flush(&mut out, path, &stack, &mut body, &mut start, number + 1, grammar);
             }
             continue;
         };
 
-        flush(&mut out, path, &stack, &mut body, &mut start, number);
+        flush(&mut out, path, &stack, &mut body, &mut start, number, grammar);
         // Pop to the level this heading belongs at, then push it.
         while stack.last().is_some_and(|(d, _)| *d >= depth) {
             stack.pop();
@@ -201,7 +290,73 @@ pub fn markdown(path: &Path, text: &str) -> Vec<Passage> {
         &mut body,
         &mut start,
         lines.len() + 1,
+        grammar,
     );
+    out
+}
+
+/// Cut a table — CSV or TSV — into passages of rows.
+///
+/// Its lines are its rows, so it is cited by line like a note; each passage
+/// after the first starts with the header row, so a row is searched with the
+/// names of its columns beside it.
+pub fn table(path: &Path, text: &str) -> Vec<Passage> {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(header) = lines.first() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut from = 1;
+    while from <= lines.len() {
+        let to = (from + LONGEST - 1).min(lines.len());
+        let rows = lines[from - 1..to].join("\n");
+        if !rows.trim().is_empty() {
+            let text = match from {
+                1 => rows,
+                _ => format!("{header}\n{rows}"),
+            };
+            out.push(Passage { path: path.to_path_buf(), title: String::new(), from, to, place: Place::Lines, text });
+        }
+        from = to + 1;
+    }
+    out
+}
+
+/// How long a stretch of captions one passage may run to.
+const LONGEST_SPEECH: f64 = 60.0;
+
+/// Cut a lecture's captions into passages of about a minute of speech.
+///
+/// Cited by the moment they are spoken — `@ 3:12-3:40` — since that is where
+/// somebody can be sent. A passage ends at the end of a sentence once it has
+/// run half a minute, or wherever it is after a minute.
+pub fn cues(path: &Path, cues: &[crate::formats::captions::Cue]) -> Vec<Passage> {
+    let mut out = Vec::new();
+    let mut taken: Vec<&crate::formats::captions::Cue> = Vec::new();
+    let mut push = |taken: &mut Vec<&crate::formats::captions::Cue>| {
+        let (Some(first), Some(last)) = (taken.first(), taken.last()) else { return };
+        let text = taken.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join("\n");
+        if !text.trim().is_empty() {
+            out.push(Passage {
+                path: path.to_path_buf(),
+                title: String::new(),
+                from: first.start.max(0.0).floor() as usize,
+                to: last.end.max(first.start).max(0.0).ceil() as usize,
+                place: Place::Seconds,
+                text,
+            });
+        }
+        taken.clear();
+    };
+    for cue in cues {
+        taken.push(cue);
+        let span = cue.end - taken[0].start;
+        let sentence = cue.text.trim_end().ends_with(['.', '?', '!']);
+        if span >= LONGEST_SPEECH || (span >= LONGEST_SPEECH / 2.0 && sentence) {
+            push(&mut taken);
+        }
+    }
+    push(&mut taken);
     out
 }
 
@@ -210,7 +365,7 @@ pub fn markdown(path: &Path, text: &str) -> Vec<Passage> {
 /// A slide saying "Questions?" is a page, not a passage: citing it wastes a
 /// result and tells the reader nothing. Deliberately low, because a slide with
 /// four words on it can still be the one that answers a question.
-const THINNEST: usize = 40;
+pub const THINNEST: usize = 40;
 
 /// Cut a PDF, already extracted to one string per page, into passages.
 ///
@@ -313,6 +468,7 @@ fn flush(
     body: &mut Vec<&str>,
     start: &mut usize,
     next: usize,
+    grammar: &Grammar,
 ) {
     let text = body.join("\n");
     body.clear();
@@ -326,7 +482,7 @@ fn flush(
     // something.
     let readable = text
         .lines()
-        .filter(|line| heading_of(line).is_none())
+        .filter(|line| (grammar.heading)(line).is_none())
         .collect::<Vec<_>>()
         .join("");
     if readable.trim().is_empty() {

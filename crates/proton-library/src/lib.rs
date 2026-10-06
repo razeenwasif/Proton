@@ -30,17 +30,27 @@
 //! can put a medical record in a prompt by accident. Roots are listed
 //! explicitly and the walker refuses anything outside them.
 
+pub mod catalog;
 pub mod chunk;
+pub mod dataless;
 pub mod embed;
+pub mod extract;
+pub mod formats;
+pub mod kind;
+pub mod obsidian;
 pub mod pdf;
+pub mod rules;
 pub mod scope;
 pub mod score;
 pub mod shelf;
 
 use std::path::{Path, PathBuf};
 
+pub use catalog::{Catalog, Root};
 pub use chunk::Passage;
 pub use embed::Embedder;
+pub use kind::Kind;
+pub use rules::{Rules, Why};
 pub use scope::{Scope, Source};
 pub use shelf::{Meaning, Shelf};
 
@@ -99,6 +109,8 @@ pub struct Library {
     doc_of: Vec<usize>,
     /// Where citations are written from, when not each document's root.
     cite_from: Option<PathBuf>,
+    /// The label each labelled root's citations start with.
+    labels: Vec<(PathBuf, String)>,
     /// One vector per passage, when they have been made. Empty otherwise, and
     /// then a search is BM25 alone \u2014 which is a complete answer, just a
     /// narrower one.
@@ -181,9 +193,23 @@ impl Library {
         }
     }
 
+    /// Note a root whose citations start with its label —
+    /// `Courses/COMP3670/Exam_2020.pdf p. 3` — so a citation says which root it
+    /// came from when two roots hold the same path.
+    pub fn add_labelled_root(&mut self, root: &Path, label: &str) {
+        self.add_root(root);
+        self.labels.retain(|(held, _)| held != root);
+        self.labels.push((root.to_path_buf(), label.to_string()));
+    }
+
     /// Read one text document into the library.
     pub fn add(&mut self, path: &Path, text: &str) {
         self.take(path, chunk::markdown(path, text));
+    }
+
+    /// Read one document of any kind whose words are already read.
+    pub fn add_body(&mut self, path: &Path, kind: Kind, body: &extract::Body) {
+        self.take(path, extract::passages(path, kind, body));
     }
 
     /// Read one PDF, already extracted to a string per page.
@@ -204,17 +230,21 @@ impl Library {
             return;
         }
         let doc = self.docs.len();
-        self.docs.push(
-            path.strip_prefix(&root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .replace('\\', "/"),
-        );
+        let rel = path.strip_prefix(&root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+        let label = self.labels.iter().find(|(held, _)| *held == root).map(|(_, label)| label.clone());
+        let name = match &label {
+            Some(label) => format!("{label}/{rel}"),
+            None => rel,
+        };
+        self.docs.push(name.clone());
 
         let base = self.cite_from.clone().filter(|base| path.starts_with(base)).unwrap_or(root);
         for passage in passages {
             self.index.add(&passage.text, &passage.title);
-            let cite = passage.cite(&base);
+            let cite = match label {
+                Some(_) => passage.cite_as(&name),
+                None => passage.cite(&base),
+            };
             self.passages.push(passage);
             // Kept beside the passage rather than computed on the way out: the
             // root a document came from is known now and would have to be
