@@ -70,6 +70,7 @@ const PHASES = /** @type {[string, string][]} */ ([
   ["generate", "Generate"],
   ["reflect", "Review"],
   ["verify", "Verify"],
+  ["prove", "Proof"],
   ["rank", "Tournament"],
   ["evolve", "Evolve"],
   ["meta", "Overview"],
@@ -87,7 +88,7 @@ const KINDS = /** @type {Record<string, string>} */ ({
 
 /** What a task's state is called. */
 const STATES = /** @type {Record<string, string>} */ ({
-  ready: "Waiting", running: "Working", repairing: "Mending its answer", done: "Done",
+  ready: "Waiting", running: "Working", repairing: "Mending its answer", checking: "Checking with Lean", done: "Done",
   failed: "Failed", skipped: "Skipped", cancelled: "Stopped",
 });
 
@@ -248,7 +249,7 @@ export function createResearch(host) {
     els.count.textContent = n ? String(n) : "";
     const papers = board ? literature()?.papers.length ?? 0 : 0;
     els.papers.textContent = papers ? String(papers) : "";
-    const out = round()?.tasks.filter((t) => t.state === "running" || t.state === "repairing").length ?? 0;
+    const out = round()?.tasks.filter((t) => ["running", "repairing", "checking"].includes(t.state)).length ?? 0;
     els.busy.textContent = out ? String(out) : "";
     els.dock.hidden = !board;
     renderRun();

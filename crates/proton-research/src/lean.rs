@@ -13,6 +13,7 @@
 //! is refused before it is checked, and checks run in the Lab's sandbox
 //! besides.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::model::{FormalOutcome, LeanMessage, ProofKind};
@@ -267,7 +268,7 @@ pub fn vet(lean: &str, theorem: &str) -> Result<(), String> {
 
 /// The file Lean is given: the prover's, then Proton's two questions about
 /// `theorem`, on lines it knows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Assembled {
     pub text: String,
     pub theorem: String,

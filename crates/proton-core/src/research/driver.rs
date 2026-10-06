@@ -175,6 +175,8 @@ fn turns(phase: Phase) -> u32 {
         Phase::Frame | Phase::Meta | Phase::SimReview => 10,
         Phase::Generate | Phase::Reflect | Phase::Evolve => 16,
         Phase::Verify => 20,
+        // A file written, and mended as Lean answers: room for each.
+        Phase::Prove => 30,
     }
 }
 
@@ -278,7 +280,11 @@ impl Driver {
                     enabled: config.enabled,
                     why,
                     cooling: state.cooling.get(&config.seat).copied(),
-                    running: state.tasks.iter().filter(|t| t.seat == config.seat && matches!(t.state, TaskState::Running | TaskState::Repairing)).count() as u32,
+                    running: state
+                        .tasks
+                        .iter()
+                        .filter(|t| t.seat == config.seat && matches!(t.state, TaskState::Running | TaskState::Repairing | TaskState::Checking))
+                        .count() as u32,
                     model,
                 }
             })
@@ -343,6 +349,7 @@ impl Driver {
         // What was cited and could not be found, for every task to be told.
         let unverified =
             proton_research::view::Board::from(hypotheses.clone(), reviews.clone(), Vec::new(), Vec::new()).with_citations(f.citations()).unverified();
+        let proofs = f.proofs();
         let snap = Snapshot {
             investigation: Some(f.investigation().clone()),
             brief: f.brief(),
@@ -359,6 +366,9 @@ impl Driver {
             paper_stems: f.paper_stems(),
             unavailable: self.unavailable.clone(),
             models,
+            lean: None,
+            proof_files: proofs.iter().filter_map(|p| Some((p.hypothesis.clone(), f.proof_file(&p.hypothesis)?))).collect(),
+            proofs,
         };
         self.snap = Some((snap.clone(), now));
         snap
@@ -829,6 +839,14 @@ impl Driver {
                         }
                         moved.and(self.apply(effects));
                     }
+                    // Lean comes with the machine's Lean: until then the
+                    // snapshot never says it is made, and no proof is asked for.
+                    Answered::Check(_) => {
+                        if let Some(live) = self.live.remove(id) {
+                            self.close(id, live, now, "failed");
+                        }
+                        moved.and(self.failed(id, Failure::Unparseable { why: "Proton cannot check Lean proofs here yet.".into() }, now));
+                    }
                 }
             }
             None => {
@@ -979,6 +997,7 @@ impl Driver {
                 Effect::Verdict(text) => f.add_verdict(&text),
                 Effect::SandboxLog(text) => f.add_sandbox_log(&text),
                 Effect::RoundReport { round, text } => f.write_round(round, &text),
+                Effect::Proof(kept) => f.write_proof(&kept.record, &kept.lean),
             };
             match written {
                 Ok(()) => moved.wrote = true,

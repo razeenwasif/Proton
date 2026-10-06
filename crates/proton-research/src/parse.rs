@@ -10,8 +10,9 @@
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use crate::model::ProofKind;
 use crate::schema::{
-    EvolveAnswer, FrameAnswer, GenerateAnswer, MetaAnswer, Proposal, RankAnswer, ReflectAnswer, SimReviewAnswer, VerifyAnswer,
+    EvolveAnswer, FrameAnswer, GenerateAnswer, MetaAnswer, Proposal, ProveAnswer, RankAnswer, ReflectAnswer, SimReviewAnswer, VerifyAnswer,
 };
 
 /// The answer as JSON: the structured output, else the last JSON object
@@ -178,6 +179,25 @@ impl Check for VerifyAnswer {
         bound(&mut self.derivation, FIELD * 2);
         self.issues = bound_all(&mut self.issues, 1_000, 20);
         self.experiment.check(&[])
+    }
+}
+
+impl Check for ProveAnswer {
+    fn check(&mut self, labels: &[String]) -> Result<(), String> {
+        named(&self.label, labels)?;
+        self.label = self.label.trim().to_string();
+        if self.kind != ProofKind::Unstatable && self.lean.trim().is_empty() {
+            return Err("The Lean file was empty: give the whole file, or answer `none` if the hypothesis has no faithful statement in Lean.".into());
+        }
+        // Refused past its limit rather than cut: a cut file is not the proof.
+        if self.lean.len() > crate::lean::MAX_BYTES {
+            return Err(format!("The Lean file is over {} KB: give a shorter proof.", crate::lean::MAX_BYTES / 1000));
+        }
+        if self.notes.trim().is_empty() {
+            return Err("The notes were empty: say how the statement is the hypothesis's, or why it has none.".into());
+        }
+        bound(&mut self.notes, FIELD);
+        Ok(())
     }
 }
 

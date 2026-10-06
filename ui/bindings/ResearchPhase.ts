@@ -3,4 +3,4 @@
 /**
  * The co-scientist's steps, as Research runs them.
  */
-export type ResearchPhase = "frame" | "generate" | "reflect" | "verify" | "rank" | "evolve" | "meta" | "simReview";
+export type ResearchPhase = "frame" | "generate" | "reflect" | "verify" | "prove" | "rank" | "evolve" | "meta" | "simReview";

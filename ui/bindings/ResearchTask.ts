@@ -8,7 +8,7 @@ import type { ResearchSeat } from "./ResearchSeat";
  */
 export type ResearchTask = { id: string, round: number, phase: ResearchPhase, seat: ResearchSeat, role: ResearchRole, targets: Array<string>, 
 /**
- * `ready`, `running`, `repairing`, `done`, `failed`, `skipped`, `cancelled`.
+ * `ready`, `running`, `repairing`, `checking`, `done`, `failed`, `skipped`, `cancelled`.
  */
 state: string, 
 /**

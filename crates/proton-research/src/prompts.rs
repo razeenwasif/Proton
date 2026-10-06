@@ -17,6 +17,7 @@ const FRAME: &str = include_str!("prompts/frame.md");
 const GENERATE: &str = include_str!("prompts/generate.md");
 const REFLECT: &str = include_str!("prompts/reflect.md");
 const VERIFY: &str = include_str!("prompts/verify.md");
+const PROVE: &str = include_str!("prompts/prove.md");
 const RANK: &str = include_str!("prompts/rank.md");
 const EVOLVE: &str = include_str!("prompts/evolve.md");
 const META: &str = include_str!("prompts/meta.md");
@@ -293,6 +294,38 @@ pub fn verify(ctx: &Context, hypothesis: &str, reviews: &str) -> String {
     render(VERIFY, &[("context", &ctx.render()), ("hypothesis", hypothesis), ("reviews", &clip(reviews, 4_000))])
 }
 
+/// What a prover is told: the hypothesis, its verification, where Lean is,
+/// and the attempt before this one, if there was one.
+pub struct Proving<'a> {
+    pub hypothesis: &'a str,
+    pub verification: &'a str,
+    /// The previous attempt — its file, and what Lean said — or nothing.
+    pub previous: &'a str,
+    pub theorem: &'a str,
+    pub lean: &'a str,
+    pub mathlib: &'a str,
+    /// Where Mathlib's sources are, if the prover may read them.
+    pub sources: Option<&'a str>,
+    pub calls: u32,
+}
+
+pub fn prove(ctx: &Context, p: &Proving) -> String {
+    let verification = if p.verification.trim().is_empty() { "_None yet._" } else { p.verification };
+    let sources = p.sources.map(|s| format!(" — Mathlib's sources are in `{s}`, to read")).unwrap_or_default();
+    let calls = if p.calls == 1 { "one answer".to_string() } else { format!("{} answers", p.calls) };
+    render(PROVE, &[
+        ("context", &ctx.render()),
+        ("hypothesis", p.hypothesis),
+        ("verification", &clip(verification, 6_000)),
+        ("previous", &clip(p.previous, 10_000)),
+        ("theorem", p.theorem),
+        ("lean", p.lean),
+        ("mathlib", p.mathlib),
+        ("sources", &sources),
+        ("calls", &calls),
+    ])
+}
+
 /// `pairs` are each `(pair label, A, B)`, the hypotheses already shown.
 pub fn rank(ctx: &Context, pairs: &[(String, String, String)]) -> String {
     let pairs: Vec<String> = pairs.iter().map(|(label, a, b)| format!("## Pair {label}\n\n{a}\n{b}")).collect();
@@ -385,6 +418,16 @@ mod tests {
             evolve(&ctx(), &[shown.clone()], Evolution::Combine),
             meta(&ctx(), &[shown.clone()], "", ""),
             sim_review(&ctx(), &shown, "purpose", "exit 0"),
+            prove(&ctx(), &Proving {
+                hypothesis: &shown,
+                verification: "",
+                previous: "",
+                theorem: "H007",
+                lean: "v4.34.1",
+                mathlib: "v4.34.1",
+                sources: Some("/h/.proton/lean/project/.lake/packages/mathlib"),
+                calls: 3,
+            }),
         ];
         for prompt in &prompts {
             assert!(!prompt.contains("{{"), "{prompt}");

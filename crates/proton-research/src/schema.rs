@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ts_rs::TS;
 
-use crate::model::Verdict;
+use crate::model::{ProofKind, Verdict};
 
 /// The co-scientist's steps, as Research runs them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
@@ -25,6 +25,8 @@ pub enum Phase {
     Reflect,
     /// A derivation checked step by step.
     Verify,
+    /// The leader stated in Lean and proved, or its negation: mathematics only.
+    Prove,
     /// Tournament matches, judged blind.
     Rank,
     Evolve,
@@ -41,6 +43,7 @@ impl Phase {
             Phase::Generate => "Generate",
             Phase::Reflect => "Review",
             Phase::Verify => "Verify",
+            Phase::Prove => "Proof",
             Phase::Rank => "Tournament",
             Phase::Evolve => "Evolve",
             Phase::Meta => "Overview",
@@ -117,6 +120,17 @@ pub struct VerifyAnswer {
     pub derivation: String,
     pub issues: Vec<String>,
     pub experiment: Proposal,
+}
+
+/// A hypothesis stated in Lean: proved, its negation proved, or neither.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProveAnswer {
+    pub label: String,
+    pub kind: ProofKind,
+    /// The whole Lean file; empty for `none`.
+    pub lean: String,
+    /// Why the statement is the hypothesis's — or why it has none.
+    pub notes: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -265,6 +279,7 @@ pub fn schema(phase: Phase) -> Value {
             ("issues", strings()),
             ("experiment", proposal()),
         ]),
+        Phase::Prove => object(&[("label", string()), ("kind", one_of(&["proof", "disproof", "none"])), ("lean", string()), ("notes", string())]),
         Phase::Rank => object(&[("matches", array(object(&[("pair", string()), ("winner", one_of(&["A", "B"])), ("rationale", string())])))]),
         Phase::Evolve => object(&[("hypotheses", array(hypothesis(true)))]),
         Phase::Meta => object(&[("overview", string()), ("plan", string()), ("guidance", strings()), ("retire", strings()), ("queries", strings())]),
@@ -277,7 +292,8 @@ pub fn schema(phase: Phase) -> Value {
     }
 }
 
-pub const PHASES: [Phase; 8] = [Phase::Frame, Phase::Generate, Phase::Reflect, Phase::Verify, Phase::Rank, Phase::Evolve, Phase::Meta, Phase::SimReview];
+pub const PHASES: [Phase; 9] =
+    [Phase::Frame, Phase::Generate, Phase::Reflect, Phase::Verify, Phase::Prove, Phase::Rank, Phase::Evolve, Phase::Meta, Phase::SimReview];
 
 #[cfg(test)]
 mod tests {
@@ -331,6 +347,8 @@ mod tests {
         serde_json::from_value::<MetaAnswer>(json!({ "overview": "o", "plan": "p", "guidance": [], "retire": ["C"] })).unwrap();
         serde_json::from_value::<VerifyAnswer>(json!({ "label": "A", "verdict": "strong", "derivation": "d", "issues": [], "experiment": proposal })).unwrap();
         serde_json::from_value::<FrameAnswer>(json!({ "plan": "p", "criteria": [], "questions": [] })).unwrap();
+        let proved = serde_json::from_value::<ProveAnswer>(json!({ "label": "A", "kind": "none", "lean": "", "notes": "n" })).unwrap();
+        assert_eq!(proved.kind, ProofKind::Unstatable);
         // What the literature added is required of an engine, but one that leaves it out is still read.
         let frame = serde_json::from_value::<FrameAnswer>(json!({ "plan": "p", "criteria": [], "questions": [], "queries": ["rayleigh sky"] })).unwrap();
         assert_eq!(frame.queries, ["rayleigh sky"]);

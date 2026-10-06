@@ -19,8 +19,12 @@
 //! 3. **Review** — each new hypothesis by a seat of another model family, two to a call.
 //! 4. **Verify** and **Tournament**, once the reviews are in: the Lab Engineer checks the
 //!    leader step by step; matches are judged blind, by a family that wrote neither side.
+//!    **Proof** — in mathematics, once Lean is made and the leader verified: a seat of
+//!    another family states it in Lean and proves it, or its negation. Lean checks each
+//!    file in the Lab's sandbox, for no call; its errors go back to the prover.
 //! 5. **Evolve** — the Investigator refines the leader, the Engineer combines the top two.
-//! 6. **Overview** — the meta-review, the plan rewritten, guidance for the next round.
+//! 6. **Overview** — the meta-review, the plan rewritten, guidance for the next round,
+//!    once the proof is settled.
 //!
 //! A run in the Lab that finishes is reviewed by the Validation Sandbox.
 //!
@@ -36,16 +40,17 @@ use ts_rs::TS;
 
 use crate::classify::Failure;
 use crate::elo;
+use crate::lean::{self, Assembled, Ended, LeanVerdict};
 use crate::literature::{self, Candidate};
 use crate::model::{
-    AddedBy, Author, Experiment, ExperimentStatus, Family, Hypothesis, HypothesisStatus, Investigation, LiteratureSource, Match, Paper, Review, ReviewKind,
-    Role, Seat, Verdict,
+    AddedBy, Author, Discipline, Experiment, ExperimentStatus, Family, FormalOutcome, Hypothesis, HypothesisStatus, Investigation, LeanFacts,
+    LiteratureSource, Match, Paper, ProofKind, ProofRecord, Review, ReviewKind, Role, Seat, Verdict,
 };
 use crate::parse;
 use crate::prompts::{self, Context, Evolution};
 use crate::proximity::Index;
 use crate::schema::{
-    self, EvolveAnswer, FrameAnswer, GenerateAnswer, MetaAnswer, Phase, Proposal, RankAnswer, ReflectAnswer, SimReviewAnswer, VerifyAnswer,
+    self, EvolveAnswer, FrameAnswer, GenerateAnswer, MetaAnswer, Phase, Proposal, ProveAnswer, RankAnswer, ReflectAnswer, SimReviewAnswer, VerifyAnswer,
 };
 
 /// Hypotheses each seat proposes in a round.
@@ -71,6 +76,8 @@ pub enum TaskState {
     Running,
     /// Its answer would not read; it has been asked again.
     Repairing,
+    /// Its answer is a proof Lean is checking; the conversation stays open.
+    Checking,
     Done,
     Failed { failure: Failure },
     Skipped { why: String },
@@ -131,6 +138,48 @@ pub struct Task {
     /// Labels it was shown, and the hypothesis each stands for.
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
+    /// A proving task's work so far.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<ProofWork>,
+}
+
+/// What a proving task has done: what Lean is checking, what the checks
+/// said, and the best it has come to.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ProofWork {
+    /// The answer Lean is checking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checking: Option<Submitted>,
+    /// The checks made.
+    #[serde(default)]
+    pub checks: u32,
+    /// The last file the prover gave, and what it was told of it.
+    #[serde(default)]
+    pub last: String,
+    #[serde(default)]
+    pub told: String,
+    /// A statement Lean accepted, its proof open: kept should the calls run out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub best: Option<Kept>,
+    /// What it came to, once done, as the round's report says it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+}
+
+/// A prover's answer, as Lean is given it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Submitted {
+    pub kind: ProofKind,
+    pub lean: String,
+    pub notes: String,
+    pub assembled: Assembled,
+}
+
+/// What proving a hypothesis came to, and the file Lean checked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Kept {
+    pub record: ProofRecord,
+    pub lean: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -172,6 +221,9 @@ pub struct RoundState {
     /// This round's search of the literature, if it has one.
     #[serde(default)]
     pub literature: Option<LiteratureStep>,
+    /// Why the leader was not proved this round, when there was a reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unproved: Option<String>,
     pub next_task: u32,
     pub rng: u64,
 }
@@ -253,6 +305,9 @@ pub enum Effect {
     SandboxLog(String),
     RoundReport { round: u32, text: String },
     Notice(String),
+    /// What proving a hypothesis came to: `proofs/H004.json`, and the file
+    /// Lean checked, `proofs/H004.lean`.
+    Proof(Kept),
 }
 
 /// A task refused as it started: why, and what the round did next —
@@ -269,6 +324,31 @@ pub enum Answered {
     Effects(Vec<Effect>),
     /// It would not read: ask again, saying this.
     Repair(String),
+    /// A proof, for Lean to check before the answer means anything: the
+    /// conversation stays open, and what Lean said comes back through
+    /// [`Supervisor::lean_checked`].
+    Check(ProofCheck),
+}
+
+/// A proof for Lean to check.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProofCheck {
+    pub hypothesis: String,
+    /// The file Lean is given, and where Proton's questions are in it.
+    pub assembled: Assembled,
+    pub timeout_s: u32,
+}
+
+/// What a check of a proof gave, as the core tells it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LeanRun {
+    /// Lean's messages, one JSON object a line.
+    pub lines: Vec<String>,
+    pub ended: Ended,
+    /// What it printed besides.
+    pub err: String,
+    /// Its folder's number: `proofs/H004/attempt-N`.
+    pub attempt: u32,
 }
 
 /// A finished Lab run, as a simulation review sees it.
@@ -305,6 +385,11 @@ pub struct Snapshot {
     pub unavailable: BTreeMap<Seat, String>,
     /// The model each seat reports by default, for independence before it has started.
     pub models: BTreeMap<Seat, String>,
+    /// The machine's Lean, when it is made.
+    pub lean: Option<LeanFacts>,
+    /// What proving hypotheses has come to, and the files Lean checked.
+    pub proofs: Vec<ProofRecord>,
+    pub proof_files: BTreeMap<String, String>,
 }
 
 impl Snapshot {
@@ -314,6 +399,10 @@ impl Snapshot {
 
     fn hypothesis(&self, id: &str) -> Option<&Hypothesis> {
         self.hypotheses.iter().find(|h| h.id == id)
+    }
+
+    fn proof(&self, id: &str) -> Option<&ProofRecord> {
+        self.proofs.iter().find(|p| p.hypothesis == id)
     }
 
     fn context(&self) -> Context<'_> {
@@ -398,6 +487,7 @@ impl Supervisor {
                 guidance: Vec::new(),
                 queries: Vec::new(),
                 literature: None,
+                unproved: None,
                 next_task,
                 rng: seed | 1,
             },
@@ -411,9 +501,13 @@ impl Supervisor {
     pub fn restore(mut state: RoundState) -> Supervisor {
         let mut interrupted = false;
         for task in &mut state.tasks {
-            if matches!(task.state, TaskState::Running | TaskState::Repairing) {
+            if matches!(task.state, TaskState::Running | TaskState::Repairing | TaskState::Checking) {
                 task.state = TaskState::Ready;
                 task.attempts = task.attempts.saturating_add(1);
+                // A check is lost with the process that ran it; its file is not.
+                if let Some(work) = task.proof.as_mut() {
+                    work.checking = None;
+                }
                 interrupted = true;
             }
         }
@@ -506,6 +600,7 @@ impl Supervisor {
             started: None,
             ended: None,
             labels: BTreeMap::new(),
+            proof: None,
         });
         self.state.tasks.last_mut().expect("just pushed")
     }
@@ -524,6 +619,7 @@ impl Supervisor {
         self.state.used = 0;
         self.state.out.clear();
         self.state.planned.clear();
+        self.state.unproved = None;
         self.state.tasks.retain(|t| !t.state.terminal());
         // What was planned between rounds — a run's review — is this round's.
         let round = self.state.round;
@@ -562,10 +658,11 @@ impl Supervisor {
     }
 
     /// Whether a phase's tasks wait: the hypotheses for the plan, and for
-    /// the literature until its deadline.
+    /// the literature until its deadline; the overview for the proof.
     fn waits_on(&self, phase: Phase, now: u64) -> bool {
         match phase {
             Phase::Generate => !self.settled(Phase::Frame) || self.literature_holds(now),
+            Phase::Meta => !self.settled(Phase::Prove),
             _ => false,
         }
     }
@@ -693,13 +790,25 @@ impl Supervisor {
             if self.state.cooling.get(&task.seat).is_some_and(|until| *until > now) {
                 continue;
             }
-            let running = self.state.tasks.iter().filter(|t| t.seat == task.seat && matches!(t.state, TaskState::Running | TaskState::Repairing)).count();
+            let running = self
+                .state
+                .tasks
+                .iter()
+                .filter(|t| t.seat == task.seat && matches!(t.state, TaskState::Running | TaskState::Repairing | TaskState::Checking))
+                .count();
             if running >= per_engine {
                 continue;
             }
             if self.state.used >= cap {
                 if let Some(t) = self.task_mut(&id) {
                     t.state = TaskState::Skipped { why: "the round's budget was spent".into() };
+                }
+                continue;
+            }
+            if task.phase == Phase::Prove && (snap.lean.is_none() || self.prove_spent(snap)) {
+                let why = if snap.lean.is_none() { "Lean is not made on this machine" } else { "the proof's calls were spent" };
+                if let Some(t) = self.task_mut(&id) {
+                    t.state = TaskState::Skipped { why: why.into() };
                 }
                 continue;
             }
@@ -751,12 +860,35 @@ impl Supervisor {
                     snap.reviews.iter().filter(|r| r.hypothesis == *id).map(|r| format!("- **{:?}**: {}", r.verdict, r.summary)).collect();
                 prompts::verify(&ctx, &prompts::shown("A", h, &self.lab_notes(snap, id)), &reviews.join("\n"))
             }
+            Phase::Prove => {
+                let id = task.targets.first()?;
+                let h = snap.hypothesis(id)?;
+                let facts = snap.lean.as_ref()?;
+                labels.insert("A".into(), id.clone());
+                let verification = snap
+                    .reviews
+                    .iter()
+                    .rfind(|r| r.hypothesis == *id && r.kind == ReviewKind::Verification)
+                    .map(|r| format!("**{:?}.** {}\n\n{}", r.verdict, r.summary.trim(), r.critique.trim()))
+                    .unwrap_or_default();
+                let previous = Self::previous_attempt(task, snap, id);
+                prompts::prove(&ctx, &prompts::Proving {
+                    hypothesis: &prompts::shown("A", h, ""),
+                    verification: &verification,
+                    previous: &previous,
+                    theorem: id,
+                    lean: &facts.lean,
+                    mathlib: &facts.mathlib,
+                    sources: facts.sources.as_deref(),
+                    calls: snap.investigation().lean.calls.max(1),
+                })
+            }
             Phase::Rank => {
                 let mut pairs = Vec::new();
                 for pair in &task.pairs {
                     let (first, second) = if pair.swapped { (&pair.b, &pair.a) } else { (&pair.a, &pair.b) };
-                    let a = prompts::shown("A", snap.hypothesis(first)?, "");
-                    let b = prompts::shown("B", snap.hypothesis(second)?, "");
+                    let a = prompts::shown("A", snap.hypothesis(first)?, &Self::settled_by_lean(snap, first));
+                    let b = prompts::shown("B", snap.hypothesis(second)?, &Self::settled_by_lean(snap, second));
                     pairs.push((pair.label.clone(), a, b));
                     labels.insert(pair.label.clone(), pair.label.clone());
                 }
@@ -828,14 +960,57 @@ impl Supervisor {
         if let Some(r) = ratings.get(id) {
             out.push(format!("**Tournament.** Elo {:.0}, {}–{}.", r.elo, r.wins, r.losses));
         }
-        for review in snap.reviews.iter().filter(|r| r.hypothesis == id) {
+        // A formal review is Lean's line below, said once.
+        for review in snap.reviews.iter().filter(|r| r.hypothesis == id && r.kind != ReviewKind::Formal) {
             out.push(format!("**{:?} ({:?}).** {}", review.kind, review.verdict, review.summary));
+        }
+        if let Some(proof) = snap.proof(id) {
+            out.push(Self::lean_note(proof));
         }
         let lab = self.lab_notes(snap, id);
         if !lab.is_empty() {
             out.push(lab);
         }
         out.join("\n\n")
+    }
+
+    /// What Lean has said of a hypothesis, for whoever weighs it next.
+    fn lean_note(p: &ProofRecord) -> String {
+        let statement = p.statement.as_deref().map(|s| format!("`{}`", s.trim())).unwrap_or_default();
+        match p.outcome {
+            FormalOutcome::Proved => format!("**Lean.** Proved, as {statement}."),
+            FormalOutcome::Disproved => format!("**Lean.** Its negation is proved: {statement}."),
+            FormalOutcome::Open => format!("**Lean.** Stated as {statement}; the proof is still open."),
+            FormalOutcome::Unformalized => "**Lean.** No faithful statement of it in Lean was found.".into(),
+        }
+    }
+
+    /// What a judge is told besides a hypothesis: only what Lean has settled.
+    fn settled_by_lean(snap: &Snapshot, id: &str) -> String {
+        snap.proof(id).filter(|p| matches!(p.outcome, FormalOutcome::Proved | FormalOutcome::Disproved)).map(Self::lean_note).unwrap_or_default()
+    }
+
+    /// The attempt before this one, for a prover starting afresh: the task's
+    /// own last file — it was interrupted — or an earlier round's, left open.
+    fn previous_attempt(task: &Task, snap: &Snapshot, id: &str) -> String {
+        let (file, said) = match &task.proof {
+            Some(work) if !work.last.trim().is_empty() => {
+                let said = if work.told.trim().is_empty() {
+                    "_It was being checked when Proton closed; what Lean said of it is not known._".to_string()
+                } else {
+                    work.told.clone()
+                };
+                (work.last.clone(), said)
+            }
+            _ => match (snap.proof(id), snap.proof_files.get(id)) {
+                (Some(record), Some(file)) if record.outcome == FormalOutcome::Open => {
+                    let messages: Vec<String> = record.messages.iter().take(6).map(|m| format!("- line {}: {}", m.line, m.text.trim())).collect();
+                    (file.clone(), format!("Lean accepted its statement in round {}; the proof is still open.\n\n{}", record.round, messages.join("\n")))
+                }
+                _ => return String::new(),
+            },
+        };
+        format!("## The last attempt\n\n```lean\n{}\n```\n\n**What Lean said of it.** {}\n", prompts::clip(&file, 8_000), said.trim())
     }
 
     /// The investigation's papers most like a hypothesis, for a reviewer
@@ -871,7 +1046,7 @@ impl Supervisor {
         let family = Author::new(task.seat, model).family();
         let task = task.clone();
         let conflicts = match task.phase {
-            Phase::Reflect | Phase::Verify | Phase::SimReview => task.targets.iter().any(|t| Self::author_family(snap, t) == family),
+            Phase::Reflect | Phase::Verify | Phase::Prove | Phase::SimReview => task.targets.iter().any(|t| Self::author_family(snap, t) == family),
             Phase::Rank => task.pairs.iter().any(|p| Self::author_family(snap, &p.a) == family || Self::author_family(snap, &p.b) == family),
             _ => false,
         };
@@ -896,7 +1071,7 @@ impl Supervisor {
     fn reassign(&mut self, task: &Task, snap: &Snapshot, now: u64) -> bool {
         let families: Vec<Family> = match task.phase {
             Phase::Rank => task.pairs.iter().flat_map(|p| [Self::author_family(snap, &p.a), Self::author_family(snap, &p.b)]).collect(),
-            Phase::Reflect | Phase::Verify | Phase::SimReview => task.targets.iter().map(|t| Self::author_family(snap, t)).collect(),
+            Phase::Reflect | Phase::Verify | Phase::Prove | Phase::SimReview => task.targets.iter().map(|t| Self::author_family(snap, t)).collect(),
             _ => Vec::new(),
         };
         let mut not = families;
@@ -912,6 +1087,8 @@ impl Supervisor {
         fresh.pairs = copy.pairs;
         fresh.combine = copy.combine;
         fresh.run = copy.run;
+        // A prover taking over carries on from what was done.
+        fresh.proof = copy.proof.map(|work| ProofWork { checking: None, ..work });
         true
     }
 
@@ -929,6 +1106,7 @@ impl Supervisor {
             Phase::Generate => parse::read::<GenerateAnswer>(structured, text, &labels).map(|a| self.generated(&task, a, &author, snap, now)),
             Phase::Reflect => parse::read::<ReflectAnswer>(structured, text, &labels).map(|a| self.reviewed(&task, a, &author, snap)),
             Phase::Verify => parse::read::<VerifyAnswer>(structured, text, &labels).map(|a| self.verified(&task, a, &author, snap)),
+            Phase::Prove => return self.answered_proof(&task, structured, text, &labels, snap, now),
             Phase::Rank => parse::read::<RankAnswer>(structured, text, &labels).map(|a| self.judged(&task, a, &author, now)),
             Phase::Evolve => parse::read::<EvolveAnswer>(structured, text, &labels).map(|a| self.evolved(&task, a, &author, snap)),
             Phase::Meta => parse::read::<MetaAnswer>(structured, text, &labels).map(|a| self.reviewed_round(&task, a, snap)),
@@ -1184,6 +1362,264 @@ impl Supervisor {
         effects
     }
 
+    /// Whether this round's proving has had all its calls, whichever seats made them.
+    fn prove_spent(&self, snap: &Snapshot) -> bool {
+        let round = self.state.round;
+        let calls: u32 = self.state.tasks.iter().filter(|t| t.round == round && t.phase == Phase::Prove).map(|t| t.calls).sum();
+        calls >= snap.investigation().lean.calls.max(1)
+    }
+
+    /// Calls the proving may take: what is free, less what the steps not
+    /// yet planned will need — two for the evolution, one for the overview.
+    fn prove_free(&self, snap: &Snapshot) -> u32 {
+        let keep = if self.state.planned.contains(&Phase::Evolve) { 0 } else { 2 } + if self.state.planned.contains(&Phase::Meta) { 0 } else { 1 };
+        self.free(snap).saturating_sub(keep)
+    }
+
+    /// A prover's answer: read and vetted, then given to Lean — or, with no
+    /// faithful statement, recorded as such.
+    fn answered_proof(&mut self, task: &Task, structured: Option<&Value>, text: &str, labels: &[String], snap: &Snapshot, now: u64) -> Answered {
+        let theorem = task.targets.first().cloned().unwrap_or_default();
+        let read = parse::read::<ProveAnswer>(structured, text, labels).map_err(|why| parse::repair(&why)).and_then(|a| match a.kind {
+            ProofKind::Unstatable => Ok(a),
+            _ => lean::vet(&a.lean, &theorem).map(|()| a).map_err(|why| format!("{why}\n\nAnswer again with the whole corrected file in `lean`.")),
+        });
+        let a = match read {
+            Ok(a) => a,
+            Err(told) => return self.prove_again(task, told, snap, now),
+        };
+        if a.kind == ProofKind::Unstatable {
+            let record = self.proof_record(task, snap, ProofKind::Unstatable, FormalOutcome::Unformalized, a.notes, 0, now);
+            return self.prove_finished(task, Some(Kept { record, lean: String::new() }), snap, now);
+        }
+        let assembled = lean::assemble(&a.lean, &theorem);
+        if let Some(t) = self.task_mut(&task.id) {
+            t.state = TaskState::Checking;
+            let work = t.proof.get_or_insert_with(ProofWork::default);
+            work.last = a.lean.clone();
+            work.told.clear();
+            work.checking = Some(Submitted { kind: a.kind, lean: a.lean, notes: a.notes, assembled: assembled.clone() });
+        }
+        Answered::Check(ProofCheck { hypothesis: theorem, assembled, timeout_s: snap.investigation().lean.timeout_s })
+    }
+
+    /// Ask the prover again, telling it `told` — a call, while the proving
+    /// and the round can spare one; done with the best it came to otherwise.
+    fn prove_again(&mut self, task: &Task, told: String, snap: &Snapshot, now: u64) -> Answered {
+        if !self.prove_spent(snap) && self.prove_free(snap) > 0 && self.state.used < Self::cap(snap) {
+            if let Some(t) = self.task_mut(&task.id) {
+                t.state = TaskState::Repairing;
+                t.repairs = t.repairs.saturating_add(1);
+                t.calls += 1;
+            }
+            self.state.used += 1;
+            return Answered::Repair(told);
+        }
+        let best = self.task(&task.id).and_then(|t| t.proof.as_ref()).and_then(|w| w.best.clone());
+        self.prove_finished(task, best, snap, now)
+    }
+
+    /// A proof record for what `task` came to, before its file is known.
+    #[allow(clippy::too_many_arguments)]
+    fn proof_record(&self, task: &Task, snap: &Snapshot, kind: ProofKind, outcome: FormalOutcome, notes: String, attempt: u32, now: u64) -> ProofRecord {
+        let checks = self.task(&task.id).and_then(|t| t.proof.as_ref()).map(|w| w.checks).unwrap_or(0);
+        let model = self.task(&task.id).map(|t| t.model.clone()).unwrap_or_default();
+        ProofRecord {
+            hypothesis: task.targets.first().cloned().unwrap_or_default(),
+            outcome,
+            kind,
+            statement: None,
+            axioms: Vec::new(),
+            notes: notes.trim().to_string(),
+            prover: Author::new(task.seat, &model),
+            round: self.state.round,
+            task: Some(task.id.clone()),
+            attempts: checks,
+            attempt,
+            lean: snap.lean.as_ref().map(|l| l.lean.clone()).unwrap_or_default(),
+            mathlib: snap.lean.as_ref().map(|l| l.mathlib.clone()).unwrap_or_default(),
+            messages: Vec::new(),
+            at: now,
+        }
+    }
+
+    /// What Lean said of a proof: done, if it proved the hypothesis or its
+    /// negation; else what it said goes back to the prover, while it can be
+    /// asked again — a statement Lean accepted kept meanwhile, its proof open.
+    pub fn lean_checked(&mut self, id: &str, run: &LeanRun, snap: &Snapshot, now: u64) -> Answered {
+        let Some(task) = self.task(id).cloned().filter(|t| t.state == TaskState::Checking) else { return Answered::Effects(Vec::new()) };
+        let Some(submitted) = task.proof.as_ref().and_then(|w| w.checking.clone()) else { return Answered::Effects(Vec::new()) };
+        let checked = lean::read(&run.lines, run.ended, &run.err, &submitted.assembled);
+        if checked.verdict == LeanVerdict::Stopped {
+            // Stopped from outside: nothing was learnt, and nothing more is spent.
+            if let Some(t) = self.task_mut(id) {
+                t.state = TaskState::Cancelled;
+                t.ended = Some(now);
+            }
+            return Answered::Effects(self.advance(snap, now));
+        }
+        let told = lean::feedback(&checked, &submitted.assembled, snap.investigation().lean.timeout_s);
+        let outcome = lean::outcome(submitted.kind, &checked);
+        if let Some(t) = self.task_mut(id) {
+            let work = t.proof.get_or_insert_with(ProofWork::default);
+            work.checks += 1;
+            work.checking = None;
+            work.told = told.clone();
+        }
+        let settled = matches!(outcome, Some(FormalOutcome::Proved | FormalOutcome::Disproved));
+        let mut record = self.proof_record(&task, snap, submitted.kind, outcome.unwrap_or(FormalOutcome::Open), submitted.notes.clone(), run.attempt, now);
+        record.statement = checked.statement.clone();
+        record.axioms = checked.axioms.clone();
+        if !settled {
+            record.messages = checked.messages.clone();
+        }
+        let kept = Kept { record, lean: submitted.lean.clone() };
+        if settled {
+            return self.prove_finished(&task, Some(kept), snap, now);
+        }
+        let theorem = &submitted.assembled.theorem;
+        let again = if outcome == Some(FormalOutcome::Open) {
+            if let Some(work) = self.task_mut(id).and_then(|t| t.proof.as_mut()) {
+                work.best = Some(kept);
+            }
+            format!("{told}\n\nFinish the proof: answer again with the whole file, `{theorem}` proved without `sorry`.")
+        } else {
+            format!("{told}\n\nAnswer again with the whole corrected file in `lean`, the theorem still named `{theorem}`.")
+        };
+        self.prove_again(&task, again, snap, now)
+    }
+
+    /// The proving is done: what it came to written, and the round goes on.
+    fn prove_finished(&mut self, task: &Task, kept: Option<Kept>, snap: &Snapshot, now: u64) -> Answered {
+        let mut effects = self.proof_effects(task, kept, snap);
+        if let Some(t) = self.task_mut(&task.id) {
+            t.state = TaskState::Done;
+            t.ended = Some(now);
+        }
+        let snap = applied(snap, &effects);
+        effects.extend(self.advance(&snap, now));
+        Answered::Effects(effects)
+    }
+
+    /// What a proving came to, as files: the file and its record, a verdict,
+    /// and — for a proof or a disproof — a formal review, which an open
+    /// proof or no statement does not earn.
+    fn proof_effects(&mut self, task: &Task, kept: Option<Kept>, snap: &Snapshot) -> Vec<Effect> {
+        let id = task.targets.first().cloned().unwrap_or_default();
+        let checks = self.task(&task.id).and_then(|t| t.proof.as_ref()).map(|w| w.checks).unwrap_or(0);
+        let model = self.task(&task.id).map(|t| t.model.clone()).unwrap_or_default();
+        let author = Author::new(task.seat, &model);
+        let Some(Kept { mut record, lean }) = kept else {
+            if let Some(work) = self.task_mut(&task.id).and_then(|t| t.proof.as_mut()) {
+                work.outcome = Some("not stated: Lean accepted none of its files".into());
+            }
+            return vec![
+                Effect::Verdict(format!(
+                    "## {id}, round {} — Lean: not stated\n\n_{} ({}), in {checks} check{}._ Lean accepted none of its files; each is kept in `proofs/{id}/`.\n",
+                    self.state.round,
+                    author.seat.name(),
+                    author.model,
+                    if checks == 1 { "" } else { "s" },
+                )),
+                Effect::Notice(format!("{id} was not stated in Lean this round: Lean accepted none of {}'s files.", author.seat.name())),
+            ];
+        };
+        record.attempts = checks;
+        let said = match record.outcome {
+            FormalOutcome::Proved => "proved",
+            FormalOutcome::Disproved => "disproved",
+            FormalOutcome::Open => "stated, the proof open",
+            FormalOutcome::Unformalized => "no faithful statement",
+        };
+        if let Some(work) = self.task_mut(&task.id).and_then(|t| t.proof.as_mut()) {
+            work.outcome = Some(said.into());
+        }
+        let mut effects = vec![Effect::Verdict(Self::verdict_entry(&record, said))];
+        if let FormalOutcome::Proved | FormalOutcome::Disproved = record.outcome {
+            let proved = record.outcome == FormalOutcome::Proved;
+            let mut review = self.review(task, snap, &id, &author, ReviewKind::Formal);
+            review.verdict = if proved { Verdict::Strong } else { Verdict::Flawed };
+            review.correctness = if proved { 5 } else { 1 };
+            let statement = record.statement.as_deref().unwrap_or("").trim();
+            review.summary = if proved { format!("Lean proves it, as `{statement}`.") } else { format!("Lean proves its negation: `{statement}`.") };
+            review.critique = format!(
+                "{}\n\nChecked by Lean {} with Mathlib {}, on {}. The file is `proofs/{id}.lean`.",
+                record.notes.trim(),
+                record.lean,
+                record.mathlib,
+                if record.axioms.is_empty() { "no axioms".to_string() } else { record.axioms.join(", ") }
+            );
+            effects.push(Effect::Review(review));
+        }
+        effects.push(Effect::Proof(Kept { record, lean }));
+        effects
+    }
+
+    /// `VERDICT.md`'s entry for what proving a hypothesis came to.
+    fn verdict_entry(r: &ProofRecord, said: &str) -> String {
+        let checks = if r.attempts == 1 { "1 check".to_string() } else { format!("{} checks", r.attempts) };
+        let mut entry = format!(
+            "## {}, round {} — Lean: {said}\n\n_{} ({}), in {checks}; Lean {}, Mathlib {}._\n",
+            r.hypothesis,
+            r.round,
+            r.prover.seat.name(),
+            r.prover.model,
+            r.lean,
+            r.mathlib
+        );
+        if let Some(statement) = &r.statement {
+            let what = if matches!(r.outcome, FormalOutcome::Proved | FormalOutcome::Disproved) { "proved" } else { "accepted as stated" };
+            entry.push_str(&format!("\n**What Lean {what}.**\n\n```lean\n{}\n```\n", statement.trim()));
+        }
+        entry.push_str(&format!("\n**The prover's notes.** {}\n", r.notes.trim()));
+        if matches!(r.outcome, FormalOutcome::Proved | FormalOutcome::Disproved) {
+            entry.push_str(&format!("\n**Axioms.** {}\n", if r.axioms.is_empty() { "none".to_string() } else { r.axioms.join(", ") }));
+        }
+        if r.outcome != FormalOutcome::Unformalized {
+            entry.push_str(&format!("\nThe file is `proofs/{}.lean`.\n", r.hypothesis));
+        }
+        entry
+    }
+
+    /// The proof, once the leader is verified: in mathematics, with Lean
+    /// made, by a seat of another family than the leader's author — unless
+    /// Lean has already settled it, or found no statement of it.
+    fn plan_prove(&mut self, snap: &Snapshot, now: u64) -> Vec<Effect> {
+        let i = snap.investigation();
+        if i.discipline != Discipline::Mathematics || !i.lean.enabled {
+            return Vec::new();
+        }
+        let round = self.state.round;
+        let verified = self.state.tasks.iter().rev().find(|t| t.round == round && t.phase == Phase::Verify).and_then(|t| t.targets.first().cloned());
+        let Some(target) = verified.or_else(|| self.leader(snap)) else { return Vec::new() };
+        if snap.proof(&target).is_some_and(|p| p.outcome != FormalOutcome::Open) {
+            return Vec::new();
+        }
+        let why = if snap.lean.is_none() {
+            Some(format!("Lean is not made on this machine, so {target} was not stated and proved in Lean: make it in the Lab pane."))
+        } else if self.prove_free(snap) == 0 {
+            Some(format!("The round's budget is spent; {target} is not proved in Lean this round."))
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            self.state.unproved = Some(why.clone());
+            return vec![Effect::Notice(why)];
+        }
+        let family = Self::author_family(snap, &target);
+        match self.pick(snap, &[family], &[Role::Engineer, Role::Investigator, Role::Sandbox]) {
+            Some((seat, role)) => {
+                self.add(Phase::Prove, seat, role, now).targets = vec![target];
+                Vec::new()
+            }
+            None => {
+                let why = format!("No seat of another model family can prove {target} in Lean.");
+                self.state.unproved = Some(why.clone());
+                vec![Effect::Notice(why)]
+            }
+        }
+    }
+
     /// The next steps, as what they need comes in.
     fn advance(&mut self, snap: &Snapshot, now: u64) -> Vec<Effect> {
         let mut effects = Vec::new();
@@ -1229,6 +1665,11 @@ impl Supervisor {
             self.state.planned.insert(Phase::Rank);
             effects.extend(self.plan_verify(snap, now));
             effects.extend(self.plan_rank(snap, now));
+        }
+        let verified = self.state.planned.contains(&Phase::Verify) && self.settled(Phase::Verify);
+        if verified && !self.state.planned.contains(&Phase::Prove) {
+            self.state.planned.insert(Phase::Prove);
+            effects.extend(self.plan_prove(snap, now));
         }
         let ranked = self.state.planned.contains(&Phase::Rank) && self.settled(Phase::Rank) && self.settled(Phase::Verify);
         if ranked && !self.state.planned.contains(&Phase::Evolve) {
@@ -1393,6 +1834,25 @@ impl Supervisor {
             let result = if t.calls > 1 { format!("{result}, in {} calls", t.calls) } else { result };
             text.push_str(&format!("| {} | {} | {} | {} | {result} |\n", t.id, t.phase.name(), t.seat.name(), t.model));
         }
+        let proving: Vec<&&Task> = tasks.iter().filter(|t| t.phase == Phase::Prove).collect();
+        if !proving.is_empty() || self.state.unproved.is_some() {
+            text.push_str("\n## Proof\n\n");
+            for t in proving {
+                let checks = t.proof.as_ref().map(|w| w.checks).unwrap_or(0);
+                let came = match (&t.state, t.proof.as_ref().and_then(|w| w.outcome.clone())) {
+                    (_, Some(outcome)) => outcome,
+                    (TaskState::Skipped { why }, None) => format!("not tried: {why}"),
+                    (TaskState::Failed { failure }, None) => format!("failed: {}", failure.describe()),
+                    (TaskState::Cancelled, None) => "stopped".into(),
+                    (_, None) => "unfinished".into(),
+                };
+                let checks = if checks == 1 { "1 check".to_string() } else { format!("{checks} checks") };
+                text.push_str(&format!("- {}: {came} — {}, in {checks}.\n", t.targets.join(", "), t.seat.name()));
+            }
+            if let Some(why) = &self.state.unproved {
+                text.push_str(&format!("- {why}\n"));
+            }
+        }
         if let Some(step) = &self.state.literature {
             let asked = step.queries.iter().map(|q| format!("“{q}”")).collect::<Vec<_>>().join(", ");
             let came = match &step.state {
@@ -1430,7 +1890,7 @@ impl Supervisor {
                 self.reroute(task.seat, snap, now);
                 // A seat's own hypotheses are not written by another: the
                 // point of three seats is three kinds of idea.
-                if !matches!(task.phase, Phase::Generate) {
+                if !matches!(task.phase, Phase::Generate) && !(task.phase == Phase::Prove && self.prove_spent(snap)) {
                     self.reassign(&task, snap, now);
                 }
             }
@@ -1439,15 +1899,20 @@ impl Supervisor {
                 self.state.cooling.insert(task.seat, until);
                 effects.push(Effect::Notice(format!("{} hit its limit and waits until it resets: {why}", task.seat.name())));
                 terminal(self, failure.clone());
-                if !matches!(task.phase, Phase::Generate) {
+                if !matches!(task.phase, Phase::Generate) && !(task.phase == Phase::Prove && self.prove_spent(snap)) {
                     self.reassign(&task, snap, now);
                 }
             }
-            Failure::TimedOut | Failure::Crashed { .. } if task.attempts + 1 < ATTEMPTS && self.free(snap) > 0 => {
+            Failure::TimedOut | Failure::Crashed { .. }
+                if task.attempts + 1 < ATTEMPTS && self.free(snap) > 0 && !(task.phase == Phase::Prove && self.prove_spent(snap)) =>
+            {
                 if let Some(t) = self.task_mut(id) {
                     t.state = TaskState::Ready;
                     t.attempts += 1;
                     t.started = None;
+                    if let Some(work) = t.proof.as_mut() {
+                        work.checking = None;
+                    }
                 }
                 // Said, not done quietly: it costs the round a call.
                 let why = failure.describe();
@@ -1457,6 +1922,18 @@ impl Supervisor {
             _ => {
                 effects.push(Effect::Notice(format!("{} {}: {}", task.seat.name(), task.phase.name(), failure.describe())));
                 terminal(self, failure.clone());
+            }
+        }
+        // A prover that is done for keeps the statement Lean accepted, if
+        // nobody carries on from it.
+        let carried = self.state.tasks.iter().any(|t| t.phase == Phase::Prove && t.targets == task.targets && !t.state.terminal());
+        if task.phase == Phase::Prove && !carried {
+            if let Some(best) = self.task(id).and_then(|t| t.proof.as_ref()).and_then(|w| w.best.clone()) {
+                let kept = self.proof_effects(&task, Some(best), snap);
+                let snap = applied(snap, &kept);
+                effects.extend(kept);
+                effects.extend(self.advance(&snap, now));
+                return effects;
             }
         }
         effects.extend(self.advance(snap, now));
@@ -1517,7 +1994,7 @@ impl Supervisor {
         let mut running = Vec::new();
         for t in &mut self.state.tasks {
             match t.state {
-                TaskState::Running | TaskState::Repairing => {
+                TaskState::Running | TaskState::Repairing | TaskState::Checking => {
                     running.push(t.id.clone());
                     t.state = TaskState::Cancelled;
                     t.ended = Some(now);
@@ -1564,6 +2041,11 @@ pub fn applied(snap: &Snapshot, effects: &[Effect]) -> Snapshot {
             Effect::Plan(p) => snap.plan = p.clone(),
             Effect::Verdict(v) => snap.verdicts.push_str(v),
             Effect::SandboxLog(s) => snap.sandbox.push_str(s),
+            Effect::Proof(Kept { record, lean }) => {
+                snap.proofs.retain(|p| p.hypothesis != record.hypothesis);
+                snap.proofs.push(record.clone());
+                snap.proof_files.insert(record.hypothesis.clone(), lean.clone());
+            }
             _ => {}
         }
     }
@@ -1612,7 +2094,7 @@ pub struct TaskRow {
     pub seat: Seat,
     pub role: Role,
     pub targets: Vec<String>,
-    /// `ready`, `running`, `repairing`, `done`, `failed`, `skipped`, `cancelled`.
+    /// `ready`, `running`, `repairing`, `checking`, `done`, `failed`, `skipped`, `cancelled`.
     pub state: String,
     /// Why it failed or was skipped.
     pub why: Option<String>,
@@ -1630,6 +2112,7 @@ impl From<&Task> for TaskRow {
             TaskState::Ready => ("ready", None),
             TaskState::Running => ("running", None),
             TaskState::Repairing => ("repairing", None),
+            TaskState::Checking => ("checking", None),
             TaskState::Done => ("done", None),
             TaskState::Failed { failure } => ("failed", Some(failure.describe())),
             TaskState::Skipped { why } => ("skipped", Some(why.clone())),

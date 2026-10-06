@@ -145,6 +145,11 @@ fn answer(phase: Phase, prompt: &str, seat: Seat, n: usize, code: &str, referenc
         Phase::Meta => json!({ "overview": "# Overview\n\nRayleigh leads.", "plan": "Next: polarisation.", "guidance": ["Polarisation."], "retire": [],
             "queries": ["skylight polarisation"] }),
         Phase::SimReview => json!({ "finding": "supports", "summary": "It peaks below 500 nm.", "issues": [], "follow_up": proposal() }),
+        Phase::Prove => {
+            let theorem = prompt.split("Name the theorem `").nth(1).and_then(|rest| rest.split('`').next()).unwrap_or("H001");
+            json!({ "label": "A", "kind": "proof", "lean": format!("import Mathlib\n\ntheorem {theorem} (n : ℕ) : n + 0 = n := by simp\n"),
+                "notes": "It is the hypothesis, for every n." })
+        }
     }
 }
 
