@@ -1060,7 +1060,7 @@ from a knowledge base, a tutor that answers from them and cites them, and a
 studio that makes guides, cards, quizzes and exams of them. It is being built in
 milestones; what is here is the knowledge base, notebooks, sources, the reader,
 notes, the tutor, the studio, flashcards, quizzes with their marking, exams,
-progress by learning objective, and audio overviews.
+progress by learning objective, audio overviews, slide decks and infographics.
 
 **The knowledge base** is the folders the person names (`study.roots` in their
 own settings), less what `study.exclude` leaves out — `.gitignore` lines with
@@ -1217,6 +1217,19 @@ that serves a notebook's audio and a voice's sample and nothing else, answering
 a player's seek with the range it asked for (`proton-core::study::media`); the
 window's policy allows media from it alone. The transcript follows the voice,
 and a turn or a chapter clicked is where it plays from.
+
+**Slide decks** are a lecture's slides — a title, points that are phrases, two
+columns to compare, a quote — each with speaker notes citing the sources
+(`proton-study::slides`, `studio/slides/P001.json`). A slide is revised on its
+own, by a call held to one slide's schema that puts it back in its place. A deck
+is presented in the window, and written out as Markdown that pandoc makes a
+PowerPoint of, its TeX as Office's own mathematics. **Infographics** are a page
+at a glance — blocks of a heading, a figure and a sentence or two, and a
+takeaway (`proton-study::infographic`) — drawn by the window from one of three
+templates as plain SVG; it, and a mind map drawn as a tree, are saved as PNG by
+drawing that SVG on a canvas and handing the picture back to be written into the
+notebook's `exports/`. PDFs and video overviews wait on rendering the window's
+own HTML natively, which is not built yet.
 
 ### Trace
 

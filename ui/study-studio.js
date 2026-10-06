@@ -30,6 +30,8 @@ export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["practice", "Practice problems", "bulb", "Problems to work through, with hints and worked solutions"],
   ["overview", "Learning overview", "layers", "The course topic by topic: taught, mapped, carded and checked"],
   ["audio", "Audio overview", "audio", "Two hosts talking the sources through, spoken by Fish Audio"],
+  ["slides", "Slide deck", "desktop", "A lecture's slides, with speaker notes, for PowerPoint"],
+  ["infographic", "Infographic", "chart", "A page of it at a glance, saved as a picture"],
   ["exam", "Practice exam", "files", "A new paper like the past papers, to sit against the clock"],
   ["pastPaper", "Past paper", "file", "A past paper itself, to sit again, marked by its solutions"],
   ["objectives", "Learning objectives", "target", "What you must be able to do in the exam"],
@@ -46,6 +48,7 @@ const TILE = /** @type {Record<string, string>} */ ({ ...Object.fromEntries(TILE
 /** How many of a thing can be asked for, by kind. */
 const AMOUNTS = /** @type {Record<string, [string, string][]>} */ ({
   flashcards: [["fewer", "Fewer — about 10"], ["standard", "About 20"], ["more", "More — about 40"]],
+  slides: [["fewer", "Fewer — about 6"], ["standard", "About 10"], ["more", "More — about 16"]],
   quiz: [["fewer", "Fewer — about 5"], ["standard", "About 10"], ["more", "More — about 20"]],
   practice: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
 });
@@ -95,7 +98,7 @@ export function madeHtml(e, readOnly) {
     // Its own title is the head's.
     content = `<div class="st-answer st-doc md" data-turn="made">${answerHtml(body.markdown.replace(/^#\s+.*\n+/, ""), citations)}</div>`;
   } else if (body.shape === "map") {
-    content = mapHtml(body.nodes, citations);
+    content = `${readOnly ? "" : `<div class="st-deck-tools"><span class="grow"></span><button class="cc-quiet" data-study-picture="${esc(made.id)}">${icon("image")}Save as PNG</button></div>`}${mapHtml(body.nodes, citations)}`;
   } else if (body.shape === "table") {
     content = `<div class="st-table-box" data-turn="made"><table class="st-table"><thead><tr>${body.columns.map((c) => `<th>${esc(c)}</th>`).join("")}<th></th></tr></thead>` +
       `<tbody>${body.rows.map((r) => `<tr>${r.cells.map((cell) => `<td>${markdown(cell).replace(/^<p>|<\/p>\s*$/g, "")}</td>`).join("")}<td>${chips(r.cites)}</td></tr>`).join("")}</tbody></table>` +
@@ -104,6 +107,9 @@ export function madeHtml(e, readOnly) {
     // A deck opens as a deck (study-cards.js); this is only its cards, read.
     content = `<ol class="st-cards" data-turn="made">${body.cards.map((c) => `<li class="st-card-row"><div class="st-card-sides">` +
       `<div class="st-card-front md">${answerHtml(c.front, citations)}</div><div class="st-card-back md">${answerHtml(c.back, citations)}</div></div></li>`).join("")}</ol>`;
+  } else if (body.shape === "slides" || body.shape === "slide" || body.shape === "graphic") {
+    // Each opens as its own (study-slides.js, study-graphic.js).
+    content = "";
   } else if (body.shape === "audio") {
     // An audio overview opens as one (study-audio.js); this is only its words.
     content = `<div class="st-transcript" data-turn="made">${body.segments.map((s) => `<p>${answerHtml(s.display, citations)}</p>`).join("")}</div>`;
@@ -242,6 +248,8 @@ export function createStudio(host) {
       count: null,
       format: data.get("format") ? String(data.get("format")) : null,
       language: String(data.get("language") ?? "").trim(),
+      slides: null,
+      slide: null,
     };
     if (kind === "pastPaper" && !options.source) return true;
     if ((kind === "table" && !options.columns.length) || (kind === "report" && !options.ask)) {

@@ -718,6 +718,19 @@ pub enum Command {
     StudyAudioVoice {
         id: String,
     },
+    /// Write a deck of slides out into the notebook's `exports/`: as
+    /// Markdown, and as a PowerPoint pandoc makes of it.
+    StudySlidesExport {
+        id: String,
+        pptx: bool,
+    },
+    /// Save a picture the window drew of something made — an infographic, a
+    /// mind map — as PNG into the notebook's `exports/`.
+    StudySaveImage {
+        id: String,
+        /// The PNG, base64, as a data URL or bare.
+        png: String,
+    },
     /// A lesson on a learning objective: a new chat with the tutor as a
     /// learning guide, begun on the objective and the passages it cites.
     StudyLesson {
@@ -1605,6 +1618,21 @@ pub enum Event {
         url: Option<String>,
         citations: Vec<proton_study::cite::StudyCitation>,
         voice: proton_study::view::StudyVoiceState,
+    },
+    /// A deck of slides: each slide, and its citations resolved.
+    StudySlides {
+        made: proton_study::studio::StudyMade,
+        slides: Vec<proton_study::slides::StudySlide>,
+        citations: Vec<proton_study::cite::StudyCitation>,
+    },
+    /// An infographic: what it says, and how it is laid out.
+    StudyGraphic {
+        made: proton_study::studio::StudyMade,
+        style: proton_study::infographic::Style,
+        subtitle: String,
+        blocks: Vec<proton_study::infographic::StudyBlock>,
+        takeaway: String,
+        citations: Vec<proton_study::cite::StudyCitation>,
     },
     /// Whether Fish's key is set, its terms agreed to, and the voices chosen.
     StudyVoiceState {

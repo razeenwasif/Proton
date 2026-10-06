@@ -172,7 +172,9 @@ progress by learning objective, with a diagnostic quiz, a lesson on any gap
 with the tutor as a guide, and a Learning Overview that takes the course topic by
 topic; and audio overviews — a deep dive, a brief, a critique, a debate or a
 lecture — spoken by Fish Audio in voices you choose, with a transcript that
-follows along. Your folders are named in your own settings,
+follows along; slide decks with speaker notes, revised a slide at a time,
+presented, and written out for PowerPoint; and infographics and mind maps saved
+as pictures. Your folders are named in your own settings,
 `{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,

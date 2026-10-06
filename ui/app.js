@@ -4958,6 +4958,14 @@ function renderEvent(event) {
       study?.voiceSample(event);
       break;
 
+    case "studySlides":
+      study?.slides(event);
+      break;
+
+    case "studyGraphic":
+      study?.graphic(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

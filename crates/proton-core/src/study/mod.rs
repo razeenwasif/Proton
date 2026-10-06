@@ -19,6 +19,7 @@ pub mod media;
 mod quizzes;
 mod review;
 pub mod tutor;
+mod visual;
 pub mod voice;
 
 use std::collections::HashMap;
@@ -106,6 +107,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyVoiceSample { .. }
             | Command::StudyVoiceKey
             | Command::StudyAudioVoice { .. }
+            | Command::StudySlidesExport { .. }
+            | Command::StudySaveImage { .. }
     )
 }
 
@@ -538,6 +541,8 @@ impl Study {
                 events
             }
             Command::StudyAudioVoice { id } => self.voice_audio(&id),
+            Command::StudySlidesExport { id, pptx } => self.export_slides(&id, pptx),
+            Command::StudySaveImage { id, png } => self.save_image(&id, &png),
             Command::StudyLesson { objective } => self.lesson(&objective),
             _ => Vec::new(),
         }
@@ -1206,6 +1211,12 @@ impl Study {
         if kind == proton_study::studio::Make::Marking {
             return vec![notice("A mark is asked for by answering.".into(), NoticeLevel::Warn)];
         }
+        if kind == proton_study::studio::Make::Slides && options.slide.is_some() {
+            let deck = options.slides.as_deref().and_then(|d| self.open.as_ref()?.book.slides(d));
+            if !deck.is_some_and(|d| d.slides.iter().any(|s| Some(&s.id) == options.slide.as_ref())) || options.ask.trim().is_empty() {
+                return vec![notice("Say how the slide is to change.".into(), NoticeLevel::Warn)];
+            }
+        }
         if kind == proton_study::studio::Make::Diagnostic && self.open.as_ref().is_some_and(|o| learning::objectives(&o.book).is_empty()) {
             return vec![notice("Make the learning objectives first: a diagnostic asks a question of each.".into(), NoticeLevel::Warn)];
         }
@@ -1240,6 +1251,12 @@ impl Study {
         if id.starts_with('A') {
             return self.audio_shown(id);
         }
+        if id.starts_with('P') {
+            return self.show_slides(id);
+        }
+        if id.starts_with('G') {
+            return self.show_graphic(id);
+        }
         if id.starts_with('D') {
             return match self.deck_event(id) {
                 Some(event) => vec![event],
@@ -1260,6 +1277,9 @@ impl Study {
             StudyMadeBody::Questions { questions } | StudyMadeBody::Paper { questions, .. } => questions.iter().flat_map(|q| q.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Overview { topics, .. } => topics.iter().map(|t| t.summary.clone()).collect::<Vec<_>>().join("\n"),
             StudyMadeBody::Audio { segments, .. } => segments.iter().flat_map(|s| s.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            StudyMadeBody::Slides { slides, .. } => slides.iter().flat_map(|s| s.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            StudyMadeBody::Slide { slide } => slide.cites.iter().map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            StudyMadeBody::Graphic { blocks, .. } => blocks.iter().flat_map(|b| b.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
         };
         let citations = proton_study::cite::resolve(&open.book, &text);
         vec![Event::StudyMadeOpen { made, body, citations }]

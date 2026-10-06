@@ -13,11 +13,13 @@ import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
 import { createAudio } from "./study-audio.js";
 import { createCards } from "./study-cards.js";
+import { graphicHtml, mapSvg, pictureOf } from "./study-graphic.js";
 import { createChat } from "./study-chat.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
 import { overviewClick, overviewHtml as learningHtml } from "./study-overview.js";
 import { progressClick, progressHtml } from "./study-progress.js";
 import { createQuiz } from "./study-quiz.js";
+import { createSlides } from "./study-slides.js";
 import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 
 /** @typedef {import("./bindings/StudySummary").StudySummary} Summary */
@@ -33,7 +35,8 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
 /** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "progress"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
  *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}
- *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent} | {kind: "audio"}} Shown */
+ *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent} | {kind: "audio"} | {kind: "slides"}
+ *   | {kind: "graphic", graphic: import("./study-graphic.js").GraphicEvent}} Shown */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
  *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
 
@@ -94,6 +97,8 @@ export function createStudy(host) {
       if (shown.kind === "quiz") return quizzes.citations();
       if (shown.kind === "learning") return shown.learning.citations;
       if (shown.kind === "audio") return sounds.citations();
+      if (shown.kind === "slides") return decks.citations();
+      if (shown.kind === "graphic") return shown.graphic.citations;
       return shown.kind === "deck" || shown.kind === "review" ? cards.citations(shown.kind) : [];
     },
   });
@@ -110,6 +115,7 @@ export function createStudy(host) {
   const cards = createCards({ dispatch: host.dispatch, readOnly: () => readOnly(), explain: askTutor });
   const quizzes = createQuiz({ dispatch: host.dispatch, readOnly: () => readOnly(), ask: askTutor });
   const sounds = createAudio({ dispatch: host.dispatch, readOnly: () => readOnly() });
+  const decks = createSlides({ dispatch: host.dispatch, readOnly: () => readOnly() });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: boolean, removing: string | null,
@@ -489,6 +495,14 @@ export function createStudy(host) {
       sounds.render(els.stage);
       return;
     }
+    if (shown.kind === "slides") {
+      decks.render(els.stage);
+      return;
+    }
+    if (shown.kind === "graphic") {
+      els.stage.innerHTML = graphicHtml(shown.graphic, readOnly());
+      return;
+    }
     if (shown.kind === "progress") {
       const nbox = /** @type {NotebookEvent} */ (nb);
       const held = nbox.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nbox.readOnly)} has this notebook open: it is read only here.</div>` : "";
@@ -536,6 +550,20 @@ export function createStudy(host) {
     if (els.stage.contains(t) && quizzes.click(t, () => renderStage())) return;
     if (els.stage.contains(t) && state.shown.kind === "learning" && overviewClick(t, state.shown.learning)) return;
     if (els.stage.contains(t) && state.shown.kind === "audio" && sounds.click(t, els.stage, () => { els.stage.innerHTML = ""; renderStage(); })) return;
+    if (els.stage.contains(t) && state.shown.kind === "slides" && decks.click(t, () => renderStage())) return;
+    const picture = /** @type {HTMLElement | null} */ (t.closest("[data-study-picture]"));
+    if (picture && els.stage.contains(picture)) {
+      const shown = state.shown;
+      const svg = shown.kind === "graphic" ? els.stage.querySelector("[data-study-graphic] svg")?.outerHTML
+        : shown.kind === "made" && shown.made.body.shape === "map" ? mapSvg(shown.made.made.title, shown.made.body.nodes) : undefined;
+      if (svg) {
+        picture.textContent = "Saving…";
+        pictureOf(svg).then((png) => host.dispatch({ type: "studySaveImage", id: picture.dataset.studyPicture, png }))
+          .catch(() => host.dispatch({ type: "studySaveImage", id: picture.dataset.studyPicture, png: "" }))
+          .finally(() => { picture.textContent = "Save as PNG"; });
+      }
+      return;
+    }
     if (els.stage.contains(t) && progressClick(t, host.dispatch)) return;
     const at_ = (/** @type {string} */ sel) => /** @type {HTMLElement | null} */ (t.closest(sel));
     // Something made, opened from the middle: a deck or a quiz an overview
@@ -727,6 +755,7 @@ export function createStudy(host) {
 
   ws.addEventListener("keydown", (e) => {
     if (state.shown.kind === "review" && cards.key(e, () => renderStage())) return;
+    if (state.shown.kind === "slides" && decks.key(e, () => renderStage())) return;
     if (state.shown.kind === "quiz" && quizzes.key(e, () => renderStage())) return;
     chat.key(e);
   });
@@ -740,7 +769,7 @@ export function createStudy(host) {
       studio.submit(form);
       return;
     }
-    if (els.stage.contains(form) && (cards.submit(form) || quizzes.submit(form) || sounds.submit(form))) {
+    if (els.stage.contains(form) && (cards.submit(form) || quizzes.submit(form) || sounds.submit(form) || decks.submit(form, () => renderStage()))) {
       e.preventDefault();
       return;
     }
@@ -895,6 +924,27 @@ export function createStudy(host) {
     if (state.shown.kind === "audio") renderStage();
   }
 
+  /** A deck of slides: drawn again where it is shown, or opened when asked
+   *  for. @param {import("./study-slides.js").SlidesEvent} event */
+  function slidesEvent(event) {
+    const showing = state.shown.kind === "slides" && decks.open() === event.made.id;
+    decks.slides(event);
+    if (showing) return renderStage();
+    if (state.want === event.made.id) {
+      state.want = null;
+      state.shown = { kind: "slides" };
+      els.stage.innerHTML = "";
+      render();
+    }
+  }
+
+  /** An infographic, opened. @param {import("./study-graphic.js").GraphicEvent} event */
+  function graphicEvent(event) {
+    state.shown = { kind: "graphic", graphic: event };
+    els.stage.innerHTML = "";
+    render();
+  }
+
   /** A Learning Overview, opened. @param {import("./study-overview.js").OverviewEvent} event */
   function learningEvent(event) {
     state.shown = { kind: "learning", learning: event };
@@ -958,6 +1008,7 @@ export function createStudy(host) {
     cards.clear();
     quizzes.clear();
     sounds.clear();
+    decks.clear();
     picker.close();
     render();
   }
@@ -966,6 +1017,6 @@ export function createStudy(host) {
 
   return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
     deck: deckEvent, reviewing: reviewingEvent, quiz: quizEvent, progress: progressEvent, learning: learningEvent,
-    audio: audioEvent, voiceState: voiceStateEvent, voices: voicesEvent, voiceSample: sampleEvent,
+    audio: audioEvent, voiceState: voiceStateEvent, voices: voicesEvent, voiceSample: sampleEvent, slides: slidesEvent, graphic: graphicEvent,
     kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, pick: picker.open };
 }

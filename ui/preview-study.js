@@ -182,7 +182,9 @@ export function createStudyPreview(deliver) {
       { id: "Q002", kind: "exam", title: "COMP3670 practice final", made: now - 1000, by: "Codex · gpt-6.1-sol", task: "J0005" },
       { id: "L001", kind: "overview", title: "Search, an overview", made: now - 500, by: "Claude Code · claude-opus-5-5", task: "J0006" },
       { id: "A001", kind: "audio", title: "Search, talked through", made: now - 300, by: "Claude Code · claude-opus-5-5", task: "J0007" },
-      { id: "A002", kind: "audio", title: "Heuristics, a debate", made: now - 200, by: "Codex · gpt-6.1-sol", task: "J0008" }],
+      { id: "A002", kind: "audio", title: "Heuristics, a debate", made: now - 200, by: "Codex · gpt-6.1-sol", task: "J0008" },
+      { id: "P001", kind: "slides", title: "Search, in ten slides", made: now - 150, by: "Claude Code · claude-opus-5-5", task: "J0009" },
+      { id: "G001", kind: "infographic", title: "Search, at a glance", made: now - 100, by: "Claude Code · claude-opus-5-5", task: "J0010" }],
   };
   /** A quiz, and a stand-in for its marking: the real one is by rule, or by a model of another family, in the core. */
   const question = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {Record<string, any>} */ more) => ({ id, kind, prompt: "", options: [], correct: [], rationales: [], blanks: [],
@@ -459,6 +461,20 @@ export function createStudyPreview(deliver) {
           if (command.id === "Q001") return [quizEvent()];
           if (command.id === "Q002") return [paperEvent()];
           if (command.id === "A001" || command.id === "A002") return [audioEvent(command.id)];
+          if (command.id === "P001") return [{ type: "studySlides", made: studio.made.find((m) => m.id === "P001"), citations: cites, slides: [
+            { id: "s01", layout: "title", title: "Search", points: ["How an agent finds its way"], right: [], notes: "", cites: [] },
+            { id: "s02", layout: "points", title: "Breadth-first search", points: ["Expands the shallowest node first", "Complete when $b$ is finite", "Optimal with unit step costs"], right: [],
+              notes: "Draw the layers on the board, then ask why depth-first search can miss a goal [[S02 § Search › Uniform cost L40-58]].", cites: ["S02 § Search › Uniform cost L40-58"] },
+            { id: "s03", layout: "two", title: "Breadth-first or depth-first?", points: ["Complete", "Memory $O(b^d)$"], right: ["Not complete", "Memory $O(bm)$"], notes: "Compare them side by side.", cites: [] },
+            { id: "s04", layout: "quote", title: "The rule for A*", points: ["A heuristic that never overestimates keeps A* optimal."], right: [], notes: "", cites: ["S01 p. 3"] },
+          ] }];
+          if (command.id === "G001") return [{ type: "studyGraphic", made: studio.made.find((m) => m.id === "G001"), style: "columns", subtitle: "Four ways through a search space", citations: cites,
+            takeaway: "Order the frontier by what a path really costs, and an honest guess of what remains.", blocks: [
+              { heading: "Breadth-first", figure: "O(b^d)", text: "Layer by layer: complete when the branching factor is finite.", cites: ["S02 § Search › Uniform cost L40-58"] },
+              { heading: "Depth-first", figure: "O(bm)", text: "One branch at a time: little memory, but it can miss a goal.", cites: [] },
+              { heading: "Uniform-cost", figure: "g(n)", text: "Cheapest path first: optimal when every step costs something.", cites: ["S01 p. 3"] },
+              { heading: "A*", figure: "f = g + h", text: "Adds a guess of what is left; optimal when the guess never overestimates.", cites: ["S01 p. 1"] },
+            ] }];
           if (command.id === "L001") return [{ type: "studyOverview", made: studio.made.find((m) => m.id === "L001"), deck: "D001", quiz: "Q001", citations: cites, topics: [
             { title: "Uninformed search", summary: "Breadth-first search expands every node at depth $d$ before any at $d + 1$, so it is complete when the branching factor is finite [[S02 § Search › Uniform cost L40-58]].\n\nUniform-cost search orders the frontier by path cost $g(n)$ instead [[S01 p. 3]].",
               map: [{ id: "1", parent: null, label: "Uninformed", cites: [] }, { id: "2", parent: "1", label: "BFS", cites: [] }, { id: "3", parent: "1", label: "UCS: by $g(n)$", cites: ["S01 p. 3"] }],
@@ -551,6 +567,10 @@ export function createStudyPreview(deliver) {
           return [{ type: "studyVoiceState", voice }];
         case "studyAudioVoice":
           return [audioEvent(command.id)];
+        case "studySlidesExport":
+          return [{ type: "notice", level: "info", text: `Written to ~/Github/Notebooks/comp3670-exam/exports/P001-search-in-ten-slides.${command.pptx ? "pptx: open it in PowerPoint or Keynote." : "md."}` }];
+        case "studySaveImage":
+          return [{ type: "notice", level: "info", text: command.png.startsWith("data:image/png;base64,iVBOR") ? `Saved as ~/Github/Notebooks/comp3670-exam/exports/${command.id}.png.` : "That picture is not a PNG." }];
         case "studyProgress":
           return [{ type: "studyProgress", due: 3, objectives: [
             { objective: "O002", text: "Explain why uniform-cost search is optimal", topic: "Search", level: 0.35, evidence: 3, state: "focus" },

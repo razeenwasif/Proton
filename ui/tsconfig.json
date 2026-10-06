@@ -46,6 +46,8 @@
     "study-quiz.js",
     "study-progress.js",
     "study-overview.js",
-    "study-audio.js"
+    "study-audio.js",
+    "study-slides.js",
+    "study-graphic.js"
   ]
 }

@@ -4777,3 +4777,38 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .st-sample { height: 30px; max-width: 220px; }
 .st-picked { display: flex; flex-wrap: wrap; gap: 6px; }
 .st-picked .st-x .i { width: 10px; height: 10px; }
+
+/* ── slides and pictures ── */
+.st-slide-frame { position: relative; display: grid; gap: 8px; }
+/* A slide is drawn to its own width: its padding is a share of the width it
+   is laid out in, and everything in it a share of its own (cqw). */
+.st-slide { container-type: inline-size; aspect-ratio: 16 / 9; overflow: hidden; display: flex; flex-direction: column; justify-content: center;
+  padding: 5% 7%; border-radius: 12px; background: #ffffff; color: #1d1f24; box-shadow: 0 8px 26px rgb(0 0 0 / .22);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+.st-slide h1 { margin: 0 0 2.5cqw; font-size: 6cqw; line-height: 1.1; font-weight: 800; }
+.st-slide h2 { margin: 0 0 3cqw; font-size: 4.2cqw; line-height: 1.15; font-weight: 750; color: #3f3fb0; }
+.st-slide ul { margin: 0; padding-left: 4cqw; display: grid; gap: 1.6cqw; font-size: 2.8cqw; line-height: 1.35; }
+.st-slide.points, .st-slide.two { justify-content: flex-start; }
+.st-slide .st-slide-sub { margin: 0; font-size: 3cqw; color: #5c6270; }
+.st-slide blockquote { margin: 0; padding-left: 3cqw; border-left: 0.8cqw solid #5b5bd6; font-size: 3.6cqw; line-height: 1.35; font-style: italic; }
+.st-slide-two { display: grid; grid-template-columns: 1fr 1fr; gap: 4cqw; }
+.st-slide .katex { font-size: 1em; }
+.st-slide-nav { display: flex; align-items: center; justify-content: center; gap: 10px; font: var(--z-2xs)/1 var(--zed); color: var(--cc-muted); }
+.st-slide-nav .st-x .i { width: 14px; height: 14px; }
+.st-slide-nav .st-x:first-child .i { transform: rotate(180deg); }
+.st-slide-frame.presenting { position: fixed; inset: 0; z-index: 60; place-content: center; padding: 3vh 3vw; background: #0b0c10; }
+.st-slide-frame.presenting .st-slide { width: min(94vw, calc(88vh * 16 / 9)); cursor: pointer; }
+.st-slide-strip { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0; }
+.st-slide-thumb { flex: 0 0 auto; display: grid; gap: 4px; width: 132px; min-height: 64px; padding: 8px; border: 1px solid var(--cc-line); border-radius: 8px;
+  background: var(--cc-raise); color: var(--cc-text); font: var(--z-2xs)/1.3 var(--cc-font); text-align: left; cursor: pointer; overflow: hidden; }
+.st-slide-thumb span { font: 600 var(--z-2xs)/1 var(--zed); color: var(--cc-faint); }
+.st-slide-thumb.on { border-color: var(--cc-accent); }
+.st-slides-view > .st-link { font: var(--z-2xs)/1.3 var(--cc-font); }
+.st-slides-view:focus-visible { outline: none; }
+.st-slide-notes h3 { margin: 14px 0 6px; font: 600 var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.st-slide-notes .md { font: var(--z-xs)/1.6 var(--cc-font); color: var(--cc-text); }
+.st-graphic { overflow: hidden; border-radius: 12px; box-shadow: 0 8px 26px rgb(0 0 0 / .22); }
+.st-graphic svg { display: block; width: 100%; height: auto; }
+.st-graphic-sources h3 { margin: 16px 0 6px; font: 600 var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.st-graphic-sources p { margin: 0 0 4px; font: var(--z-xs)/1.5 var(--cc-font); color: var(--cc-text); }
+.st-deck-tools .cc-quiet .i { width: 12px; height: 12px; }

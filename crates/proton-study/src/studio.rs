@@ -28,6 +28,8 @@ use ts_rs::TS;
 use crate::audio::{self, AudioFormat, StudyChapter, StudySegment};
 use crate::deck::{self, StudyCard};
 use crate::exam;
+use crate::infographic::{self, StudyBlock};
+use crate::slides::{self, StudySlide};
 use crate::overview::{self, StudyOverviewTopic};
 use crate::quiz::{self, StudyPaperSection, StudyQuestion};
 use crate::store::Book;
@@ -62,6 +64,10 @@ pub enum Make {
     Overview,
     /// Two hosts talking the sources through, spoken by Fish Audio.
     Audio,
+    /// A lecture's slides, with speaker notes; or one of them, revised.
+    Slides,
+    /// A page of what the sources say, at a glance.
+    Infographic,
     /// A written answer marked: a call of the studio's, but not a thing it
     /// makes for the list.
     Marking,
@@ -85,6 +91,10 @@ pub enum Shape {
     Overview,
     /// An audio overview's script, in `studio/audio/`.
     Audio,
+    /// A slide deck, in `studio/slides/`.
+    Slides,
+    /// An infographic, in `studio/graphics/`.
+    Graphic,
     /// A mark, in its quiz's attempts.
     Mark,
 }
@@ -109,6 +119,8 @@ impl Make {
             Make::Diagnostic => "Diagnostic quiz",
             Make::Overview => "Learning overview",
             Make::Audio => "Audio overview",
+            Make::Slides => "Slide deck",
+            Make::Infographic => "Infographic",
             Make::Marking => "Marking",
         }
     }
@@ -122,6 +134,8 @@ impl Make {
             Make::Quiz | Make::Practice | Make::Diagnostic => Shape::Questions,
             Make::Overview => Shape::Overview,
             Make::Audio => Shape::Audio,
+            Make::Slides => Shape::Slides,
+            Make::Infographic => Shape::Graphic,
             Make::Exam | Make::PastPaper => Shape::Paper,
             Make::Marking => Shape::Mark,
             _ => Shape::Prose,
@@ -147,12 +161,14 @@ impl Make {
             Make::Diagnostic => "diagnostic",
             Make::Overview => "overview",
             Make::Audio => "audio",
+            Make::Slides => "slides",
+            Make::Infographic => "infographic",
             Make::Marking => "marking",
         }
     }
 
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -196,6 +212,11 @@ pub struct Options {
     /// The language it is in; empty for the sources'.
     #[serde(default)]
     pub language: String,
+    /// A deck of slides, and a slide of it, to revise as `ask` says.
+    #[serde(default)]
+    pub slides: Option<String>,
+    #[serde(default)]
+    pub slide: Option<String>,
 }
 
 /// How many cards or questions to make.
@@ -324,6 +345,8 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
         ),
         Make::Overview => overview::prompt(&course, &options.focus),
         Make::Audio => audio::prompt(options.format.unwrap_or_default(), options.amount, &options.language, &options.focus, &course),
+        Make::Slides => slides::prompt(options.amount, &options.focus, &options.language, &course),
+        Make::Infographic => infographic::prompt(&options.focus, &course),
         // An exam's asking needs the notebook: [`prompt_for`].
         Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking => String::new(),
         Make::Flashcards => format!(
@@ -358,6 +381,11 @@ pub fn prompt_for(book: &Book, make: Make, options: &Options) -> Result<String, 
         Make::PastPaper => {
             let source = options.source.as_deref().ok_or("say which past paper to sit")?;
             Ok(format!("{}{shape}", exam::prompt_past_paper(book, source)?))
+        }
+        Make::Slides if options.slide.is_some() => {
+            let (deck, id) = (options.slides.as_deref().unwrap_or_default(), options.slide.as_deref().unwrap_or_default());
+            let slide = book.slides(deck).and_then(|d| d.slides.into_iter().find(|s| s.id == id)).ok_or_else(|| format!("{deck} has no slide {id}"))?;
+            Ok(slides::revise(&slide, &options.ask))
         }
         Make::Diagnostic => {
             let Some((_, StudyMadeBody::Objectives { objectives })) = book.made_one("objectives") else { return Err("make the learning objectives first".into()) };
@@ -404,7 +432,7 @@ pub fn known(book: &Book, make: Make, options: &Options) -> String {
 }
 
 /// The JSON a structured thing must be.
-pub fn schema(make: Make) -> Option<Value> {
+pub fn schema(make: Make, options: &Options) -> Option<Value> {
     let cites = json!({ "type": "array", "items": { "type": "string" }, "description": "Citations, as written between the brackets: S07 p. 12" });
     Some(match make.shape() {
         Shape::Prose => return None,
@@ -412,6 +440,8 @@ pub fn schema(make: Make) -> Option<Value> {
         Shape::Paper => exam::schema(),
         Shape::Overview => overview::schema(),
         Shape::Audio => audio::schema(),
+        Shape::Slides => slides::schema(options.slide.is_some()),
+        Shape::Graphic => infographic::schema(),
         Shape::Mark => quiz::marking_schema(),
         Shape::Map => json!({
             "type": "object", "additionalProperties": false, "required": ["title", "nodes"],
@@ -503,6 +533,10 @@ pub enum StudyMadeBody {
     Questions { questions: Vec<StudyQuestion> },
     Paper { title: String, minutes: Option<u32>, blueprint: String, sections: Vec<StudyPaperSection>, questions: Vec<StudyQuestion> },
     Audio { title: String, format: AudioFormat, segments: Vec<StudySegment>, chapters: Vec<StudyChapter> },
+    Slides { title: String, slides: Vec<StudySlide> },
+    /// One slide, revised, for the deck it is of.
+    Slide { slide: StudySlide },
+    Graphic { title: String, style: infographic::Style, subtitle: String, blocks: Vec<StudyBlock>, takeaway: String },
     /// The deck and the quiz it was kept with, once it is kept.
     Overview {
         topics: Vec<StudyOverviewTopic>,
@@ -571,6 +605,17 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
         }
         Shape::Deck => Ok(StudyMadeBody::Cards { cards: deck::read_cards(&value)? }),
         Shape::Questions => Ok(StudyMadeBody::Questions { questions: quiz::read_questions(&value)? }),
+        Shape::Slides => match options.slide.as_deref() {
+            Some(id) => Ok(StudyMadeBody::Slide { slide: slides::read_one(&value, id)? }),
+            None => {
+                let (title, slides) = slides::read(&value)?;
+                Ok(StudyMadeBody::Slides { title, slides })
+            }
+        },
+        Shape::Graphic => {
+            let (title, style, subtitle, blocks, takeaway) = infographic::read(&value)?;
+            Ok(StudyMadeBody::Graphic { title, style, subtitle, blocks, takeaway })
+        }
         Shape::Audio => {
             let format = options.format.unwrap_or_default();
             let (title, segments, chapters) = audio::read(&value, format)?;
@@ -634,6 +679,8 @@ impl Book {
             Shape::Questions | Shape::Paper | Shape::Mark => self.dir().join("studio/quizzes"),
             Shape::Overview => self.dir().join("studio/overviews"),
             Shape::Audio => self.dir().join("studio/audio"),
+            Shape::Slides => self.dir().join("studio/slides"),
+            Shape::Graphic => self.dir().join("studio/graphics"),
             Shape::Objectives => self.dir().to_path_buf(),
         }
     }
@@ -648,6 +695,20 @@ impl Book {
             let deck = deck::Deck { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string(), next: cards.len() as u32 + 1, cards };
             self.save_deck(&id, &deck)?;
             return Ok(StudyMade { id, kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() });
+        }
+        if let StudyMadeBody::Slides { slides, .. } = body {
+            let id = self.new_slides_id();
+            self.save_slides(&id, &slides::Slides { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string(), slides: slides.clone() })?;
+            return Ok(StudyMade { id, kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() });
+        }
+        if let StudyMadeBody::Graphic { style, subtitle, blocks, takeaway, .. } = body {
+            let id = self.new_graphic_id();
+            let kept = infographic::Graphic { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string(), style: *style, subtitle: subtitle.clone(), blocks: blocks.clone(), takeaway: takeaway.clone() };
+            self.save_graphic(&id, &kept)?;
+            return Ok(StudyMade { id, kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() });
+        }
+        if let StudyMadeBody::Slide { .. } = body {
+            return Err("a slide is kept in its deck".into());
         }
         if let StudyMadeBody::Audio { format, segments, chapters, .. } = body {
             let id = self.new_audio_id();
@@ -706,6 +767,8 @@ impl Book {
             Shape::Questions | Shape::Paper | Shape::Mark => ('Q', "json"),
             Shape::Overview => ('L', "json"),
             Shape::Audio => ('A', "json"),
+            Shape::Slides => ('P', "json"),
+            Shape::Graphic => ('G', "json"),
             Shape::Objectives => ('O', "json"),
         };
         let header = Header { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() };
@@ -748,7 +811,7 @@ impl Book {
     /// Everything made, the latest first.
     pub fn made(&self) -> Vec<StudyMade> {
         let mut out: Vec<StudyMade> = Vec::new();
-        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json"), (Shape::Audio, "json")] {
+        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json"), (Shape::Audio, "json"), (Shape::Slides, "json"), (Shape::Graphic, "json")] {
             for entry in std::fs::read_dir(self.studio(shape)).into_iter().flat_map(|e| e.flatten()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let Some(id) = name.strip_suffix(&format!(".{ext}")) else { continue };
@@ -776,6 +839,8 @@ impl Book {
                 "Q" => (self.studio(Shape::Questions).join(format!("{id}.json")), false),
                 "L" => (self.studio(Shape::Overview).join(format!("{id}.json")), false),
                 "A" => (self.studio(Shape::Audio).join(format!("{id}.json")), false),
+                "P" => (self.studio(Shape::Slides).join(format!("{id}.json")), false),
+                "G" => (self.studio(Shape::Graphic).join(format!("{id}.json")), false),
                 _ => return None,
             },
             _ => return None,
@@ -814,6 +879,14 @@ impl Book {
                 format: serde_json::from_value(value["format"].clone()).unwrap_or_default(),
                 segments: serde_json::from_value(value["segments"].clone()).ok()?,
                 chapters: serde_json::from_value(value["chapters"].clone()).unwrap_or_default(),
+            },
+            Shape::Slides => StudyMadeBody::Slides { title: header.title.clone(), slides: serde_json::from_value(value["slides"].clone()).ok()? },
+            Shape::Graphic => StudyMadeBody::Graphic {
+                title: header.title.clone(),
+                style: serde_json::from_value(value["style"].clone()).unwrap_or_default(),
+                subtitle: value["subtitle"].as_str().unwrap_or_default().to_string(),
+                blocks: serde_json::from_value(value["blocks"].clone()).ok()?,
+                takeaway: value["takeaway"].as_str().unwrap_or_default().to_string(),
             },
             Shape::Prose | Shape::Mark => return None,
         };
@@ -886,7 +959,7 @@ mod tests {
         let table = prompt(Make::Table, &Options { columns: vec!["Algorithm".into(), "Complete?".into()], ..Default::default() }, "");
         assert!(table.contains("\"Algorithm\", \"Complete?\"") && table.contains("JSON"));
         assert!(rules(false).contains("search_sources") && rules(true).contains("given to you below") && rules(true).contains("[[S07 p. 12]]"));
-        assert!(schema(Make::Faq).is_none() && schema(Make::MindMap).is_some());
+        assert!(schema(Make::Faq, &Options::default()).is_none() && schema(Make::MindMap, &Options::default()).is_some());
     }
 
     #[test]

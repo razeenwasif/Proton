@@ -1396,3 +1396,83 @@ fn an_audio_overview_is_written_then_spoken_only_once_agreed_and_voiced_and_goes
     assert_eq!(proton_core::study::media::serve(None, Some(&scratch.root.join("voices")), "/_voices/v1.mp3", None).status, 200);
     session.shutdown();
 }
+
+#[test]
+fn a_deck_of_slides_is_made_revised_a_slide_at_a_time_and_written_out_and_an_infographic_saved_as_a_picture() {
+    use proton_study::studio::{Make, Options};
+    let scratch = Scratch::new("visual");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+    let done = |session: &mut Session, id: &str| {
+        until(session, |e| match e {
+            Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.id == id && matches!(j.state.as_str(), "done" | "failed")).cloned(),
+            _ => None,
+        })
+    };
+    log.lock().unwrap().answers.push_back(
+        r#"{"title": "Search", "slides": [
+            {"layout": "title", "title": "Search", "points": ["How an agent finds its way"], "right": [], "notes": "", "cites": []},
+            {"layout": "points", "title": "Breadth-first search", "points": ["Layer by layer", "Complete when $b$ is finite"], "right": [], "notes": "Say why [[S01 § Search L1-2]].", "cites": ["S01 § Search L1-2"]},
+            {"layout": "two", "title": "BFS or DFS", "points": ["Complete"], "right": ["Not complete"], "notes": "", "cites": []}
+        ]}"#
+            .into(),
+    );
+    session.apply(Command::StudyMake { kind: Make::Slides, options: Options::default() });
+    assert_eq!(done(&mut session, "J0001").made.as_deref(), Some("P001"));
+    let events = session.apply(Command::StudyShowMade { id: "P001".into() });
+    let Some(Event::StudySlides { slides, citations, .. }) = events.first() else { panic!("{events:?}") };
+    assert_eq!((slides.len(), citations.len()), (3, 1));
+    // A slide revised: asked of it alone, put back in its place.
+    let refused = session.apply(Command::StudyMake { kind: Make::Slides, options: Options { slides: Some("P001".into()), slide: Some("s02".into()), ..Options::default() } });
+    assert!(said(&refused).iter().any(|s| s.contains("how the slide is to change")));
+    log.lock().unwrap().answers.push_back(r#"{"layout": "points", "title": "BFS, in short", "points": ["Shallowest first"], "right": [], "notes": "Brief.", "cites": []}"#.into());
+    session.apply(Command::StudyMake { kind: Make::Slides, options: Options { slides: Some("P001".into()), slide: Some("s02".into()), ask: "make it shorter".into(), ..Options::default() } });
+    let job = done(&mut session, "J0002");
+    assert_eq!((job.state.as_str(), job.made.as_deref()), ("done", Some("P001")));
+    {
+        let log = log.lock().unwrap();
+        let schema = log.started.last().unwrap().2.schema.clone().unwrap();
+        assert!(schema["properties"]["layout"].is_object(), "a revision is held to one slide's schema");
+        assert!(log.sent.last().unwrap().contains("Rewrite it as asked: make it shorter") && log.sent.last().unwrap().contains("Breadth-first search"));
+    }
+    let Some(Event::StudySlides { slides, .. }) = session.apply(Command::StudyShowMade { id: "P001".into() }).first().cloned() else { panic!() };
+    assert_eq!((slides[1].id.as_str(), slides[1].title.as_str(), slides.len()), ("s02", "BFS, in short", 3));
+    // Out, as Markdown — and as a PowerPoint, if pandoc is here.
+    let events = session.apply(Command::StudySlidesExport { id: "P001".into(), pptx: true });
+    let book = scratch.root.join("Notebooks/search");
+    assert!(book.join("exports/P001-search.md").is_file());
+    if std::process::Command::new("pandoc").arg("--version").output().is_ok_and(|o| o.status.success()) {
+        assert!(std::fs::read(book.join("exports/P001-search.pptx")).unwrap().starts_with(b"PK"), "{:?}", said(&events));
+    }
+
+    // An infographic, and a picture of it the window drew, saved.
+    log.lock().unwrap().answers.push_back(
+        r#"{"title": "Search, at a glance", "subtitle": "Three ways through", "style": "columns", "takeaway": "Order by cost.", "blocks": [
+            {"heading": "BFS", "figure": "O(b^d)", "text": "Layer by layer.", "cites": ["S01 § Search L1-2"]},
+            {"heading": "UCS", "figure": "g(n)", "text": "Cheapest first.", "cites": []}
+        ]}"#
+            .into(),
+    );
+    session.apply(Command::StudyMake { kind: Make::Infographic, options: Options::default() });
+    assert_eq!(done(&mut session, "J0003").made.as_deref(), Some("G001"));
+    let events = session.apply(Command::StudyShowMade { id: "G001".into() });
+    let Some(Event::StudyGraphic { blocks, takeaway, .. }) = events.first() else { panic!("{events:?}") };
+    assert_eq!((blocks.len(), takeaway.as_str()), (2, "Order by cost."));
+    let png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    let events = session.apply(Command::StudySaveImage { id: "G001".into(), png: png.into() });
+    assert!(said(&events).iter().any(|s| s.contains("G001-search-at-a-glance.png")), "{:?}", said(&events));
+    assert!(std::fs::read(book.join("exports/G001-search-at-a-glance.png")).unwrap().starts_with(b"\x89PNG"));
+    let refused = session.apply(Command::StudySaveImage { id: "G001".into(), png: "data:image/png;base64,aGVsbG8=".into() });
+    assert!(said(&refused).iter().any(|s| s.contains("not a PNG")));
+    session.shutdown();
+}

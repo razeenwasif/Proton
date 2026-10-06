@@ -41,7 +41,11 @@ card: string | null, kind: StudyCardKind, front: string, back: string, topic: st
 /**
  * Whether its hint was looked at first.
  */
-hinted: boolean, } | { "type": "studyQuizDispute", quiz: string, attempt: number, question: string, why: string, } | { "type": "studyQuizMarkAgain", quiz: string, attempt: number, question: string, } | { "type": "studyQuizFinish", quiz: string, attempt: number, } | { "type": "studyExamSit", quiz: string, minutes: number, } | { "type": "studyExamExport", quiz: string, html: boolean, scheme: boolean, } | { "type": "studyProgress" } | { "type": "studyVoiceSetup", consent: boolean, hosts: Array<StudyHost>, } | { "type": "studyVoiceFind", query: string, language: string, } | { "type": "studyVoiceSample", id: string, } | { "type": "studyVoiceKey" } | { "type": "studyAudioVoice", id: string, } | { "type": "studyLesson", objective: string, } | { "type": "openWorkspace", path: string, } | { "type": "focusWorkspace", index: number, } | { "type": "closeWorkspace", index: number, } | { "type": "cycleWorkspace", by: bigint, } | { "type": "openWorkspacePicker" } | { "type": "toggleBreakpoint", 
+hinted: boolean, } | { "type": "studyQuizDispute", quiz: string, attempt: number, question: string, why: string, } | { "type": "studyQuizMarkAgain", quiz: string, attempt: number, question: string, } | { "type": "studyQuizFinish", quiz: string, attempt: number, } | { "type": "studyExamSit", quiz: string, minutes: number, } | { "type": "studyExamExport", quiz: string, html: boolean, scheme: boolean, } | { "type": "studyProgress" } | { "type": "studyVoiceSetup", consent: boolean, hosts: Array<StudyHost>, } | { "type": "studyVoiceFind", query: string, language: string, } | { "type": "studyVoiceSample", id: string, } | { "type": "studyVoiceKey" } | { "type": "studyAudioVoice", id: string, } | { "type": "studySlidesExport", id: string, pptx: boolean, } | { "type": "studySaveImage", id: string, 
+/**
+ * The PNG, base64, as a data URL or bare.
+ */
+png: string, } | { "type": "studyLesson", objective: string, } | { "type": "openWorkspace", path: string, } | { "type": "focusWorkspace", index: number, } | { "type": "closeWorkspace", index: number, } | { "type": "cycleWorkspace", by: bigint, } | { "type": "openWorkspacePicker" } | { "type": "toggleBreakpoint", 
 /**
  * The line the cursor is on when absent.
  */

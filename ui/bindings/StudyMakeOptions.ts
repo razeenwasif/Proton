@@ -50,4 +50,8 @@ format: StudyAudioFormat | null,
 /**
  * The language it is in; empty for the sources'.
  */
-language: string, };
+language: string, 
+/**
+ * A deck of slides, and a slide of it, to revise as `ask` says.
+ */
+slides: string | null, slide: string | null, };

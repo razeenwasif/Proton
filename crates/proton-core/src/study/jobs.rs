@@ -135,6 +135,7 @@ impl Jobs {
         let engine = Engine::parse(&settings.engine).unwrap_or(Engine::Claude);
         let title = match (make, options.focus.trim()) {
             (Make::Report, _) => options.ask.trim().chars().take(60).collect::<String>(),
+            (Make::Slides, _) if options.slide.is_some() => format!("Revising slide {} of {}", options.slide.as_deref().unwrap_or_default().trim_start_matches('s'), options.slides.as_deref().unwrap_or_default()),
             (Make::Flashcards, _) if options.deck.is_some() => format!("More cards for {}", options.deck.as_deref().and_then(|d| book.deck(d)).map_or_else(String::new, |d| d.title)),
             (_, "") => make.title().to_string(),
             (_, focus) => format!("{}: {focus}", make.title()),
@@ -318,7 +319,7 @@ fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)], fai
     };
     let how = Unattended {
         instructions: asking.instructions.clone(),
-        schema: studio::schema(asked.make),
+        schema: studio::schema(asked.make, &asked.options),
         mcp: asking.mcp,
         no_tools: true,
         max_turns: Some(60),
@@ -502,9 +503,17 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
     // A document's own title, when it gave one.
     let title = match body {
         StudyMadeBody::Prose { markdown } => markdown.lines().find_map(|l| l.strip_prefix("# ")).map(|t| t.trim().to_string()).unwrap_or_else(|| asked.title.clone()),
-        StudyMadeBody::Paper { title, .. } if !title.trim().is_empty() => title.trim().to_string(),
+        StudyMadeBody::Paper { title, .. } | StudyMadeBody::Slides { title, .. } | StudyMadeBody::Graphic { title, .. } | StudyMadeBody::Audio { title, .. } if !title.trim().is_empty() => {
+            title.trim().to_string()
+        }
         _ => asked.title.clone(),
     };
+    // A slide revised goes into its deck, in place of what it was.
+    if let StudyMadeBody::Slide { slide } = body {
+        let deck = asked.options.slides.as_deref().ok_or("a slide with no deck")?;
+        book.replace_slide(deck, slide.clone())?;
+        return Ok(deck.to_string());
+    }
     // Cards asked for a deck there is go into it.
     if let (Some(deck), StudyMadeBody::Cards { cards }) = (asked.options.deck.as_deref(), body) {
         return match book.add_cards(deck, cards.clone(), &asked.id)? {

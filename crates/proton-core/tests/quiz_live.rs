@@ -220,3 +220,57 @@ fn objectives_a_diagnostic_and_a_learning_overview_are_made_from_the_sources() {
     assert!(!citations.is_empty() && citations.iter().all(|c| c.resolved), "citations: {:?}", citations.iter().map(|c| &c.raw).collect::<Vec<_>>());
     session.shutdown();
 }
+
+#[test]
+#[ignore = "asks a real engine for a slide deck, a slide's revision and an infographic, which costs a little of its plan"]
+fn a_deck_is_made_and_a_slide_revised_and_an_infographic_made_from_the_sources() {
+    let root = std::env::temp_dir().join(format!("proton-visual-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let kb = root.join("kb/Notes");
+    std::fs::create_dir_all(&kb).unwrap();
+    std::fs::write(kb.join("search.md"), "# Search\n\nBreadth-first search expands the shallowest node first and is complete when b is finite. Depth-first search uses O(bm) memory but can miss a goal. Uniform-cost search orders by g(n); A* by f(n) = g(n) + h(n), optimal with an admissible h.\n").unwrap();
+    std::fs::create_dir_all(root.join("Notebooks")).unwrap();
+    let settings = root.join("settings.json");
+    std::fs::write(&settings, serde_json::json!({"study": {"roots": [kb], "folder": root.join("Notebooks")}}).to_string()).unwrap();
+    let mut session = Session::new(&root).with_person_settings(settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    until(&mut session, Duration::from_secs(30), |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(())).expect("the knowledge base");
+    session.apply(Command::StudyNew { title: "Visual, live".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Notes/search.md".into()] });
+    until(&mut session, Duration::from_secs(30), |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.iter().any(|s| s.status == SourceStatus::Ready) => Some(()),
+        _ => None,
+    })
+    .expect("the source read");
+    let engine = std::env::var("PROTON_QUIZ_SETTER").unwrap_or_else(|_| "claude".into());
+    session.apply(Command::StudyTutor { settings: TutorSettings { engine, ..TutorSettings::default() } });
+    let wait = |session: &mut Session, make: Make| {
+        until(session, Duration::from_secs(16 * 60), |e| match e {
+            Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.kind == make && matches!(j.state.as_str(), "done" | "failed")).cloned(),
+            _ => None,
+        })
+        .expect("made within sixteen minutes")
+    };
+    session.apply(Command::StudyMake { kind: Make::Slides, options: Options { amount: Amount::Fewer, ..Options::default() } });
+    let job = wait(&mut session, Make::Slides);
+    let deck = job.made.unwrap_or_else(|| panic!("{:?}", job.why));
+    let Some(Event::StudySlides { slides, .. }) = session.apply(Command::StudyShowMade { id: deck.clone() }).first().cloned() else { panic!() };
+    for s in &slides {
+        println!("  [{:?}] {} — {:?}", s.layout, s.title, s.points);
+    }
+    assert!(slides.len() >= 4);
+    let before = slides[1].title.clone();
+    session.apply(Command::StudyMake { kind: Make::Slides, options: Options { slides: Some(deck.clone()), slide: Some(slides[1].id.clone()), ask: "Make it a two-column comparison".into(), ..Options::default() } });
+    until(&mut session, Duration::from_secs(16 * 60), |e| match e {
+        Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.title.starts_with("Revising") && matches!(j.state.as_str(), "done" | "failed")).cloned(),
+        _ => None,
+    })
+    .expect("revised");
+    let Some(Event::StudySlides { slides, .. }) = session.apply(Command::StudyShowMade { id: deck.clone() }).first().cloned() else { panic!() };
+    println!("  revised: {before} → [{:?}] {}", slides[1].layout, slides[1].title);
+    session.apply(Command::StudySlidesExport { id: deck, pptx: true });
+    session.apply(Command::StudyMake { kind: Make::Infographic, options: Options::default() });
+    let job = wait(&mut session, Make::Infographic);
+    assert_eq!(job.state, "done", "{:?}", job.why);
+    session.shutdown();
+}

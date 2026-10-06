@@ -246,7 +246,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 16, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 18, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -730,6 +730,66 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     // Drawn again while it plays, the same sound is kept.
     await win.pushEvents([audioEvent({state: 'ready', url: 'search/A001.mp3', duration: 30, timings: [[0, 10], [10, 20], [20, 30]], voice: {key: true, consented: '2026-10-06', hosts}})]); await settle();
     assert(ws().querySelector('[data-study-sound]') === sound, 'the sound was drawn over');
+    ws().querySelector('[data-study-back]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('A deck shows a slide at a time with its notes, moves with the keys, revises a slide, presents, and goes out for PowerPoint', async () => {
+    const deckMade = {id: 'P001', kind: 'slides', title: 'Search', made: 1, by: 'Claude Code', task: 'J0009'};
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: [deckMade]}]); await settle();
+    ws().querySelector('[data-study-made="P001"]').click(); await settle();
+    const slide = (/** @type {string} */ id, /** @type {string} */ layout, /** @type {string} */ title, /** @type {string[]} */ points, /** @type {Partial<any>} */ more = {}) =>
+      ({id, layout, title, points, right: [], notes: '', cites: [], ...more});
+    await win.pushEvents([{type: 'studySlides', made: deckMade, citations: [cite(1, 'S01 p. 3')], slides: [
+      slide('s01', 'title', 'Search', ['How agents find their way']),
+      slide('s02', 'points', 'BFS', ['Layer by layer', 'Complete when $b$ is finite [[S01 p. 3]]'], {notes: 'Say why [[S01 p. 3]].', cites: ['S01 p. 3']}),
+      slide('s03', 'two', 'BFS or DFS', ['Complete'], {right: ['Not complete']})]}]); await settle();
+    assert(ws().querySelector('.st-slide.title h1')?.textContent === 'Search' && ws().querySelectorAll('.st-slide-thumb').length === 3, 'the deck is not drawn');
+    assert(ws().contains(doc.activeElement), 'the deck does not have the keys');
+    key('ArrowRight'); await settle();
+    assert(ws().querySelector('.st-slide.points li:nth-child(2)')?.textContent.includes('Complete when') && !ws().querySelector('.st-slide')?.textContent.includes('S01'), 'the next slide is not shown, or shows its citation');
+    assert(ws().querySelector('.st-slide-notes')?.textContent.includes('Say why') && ws().querySelector('.st-slide-notes .st-cite'), 'its notes are not shown with their citation');
+    ws().querySelector('[data-study-slide-revise-open]').click(); await settle();
+    const form = ws().querySelector('[data-study-slide-revise="s02"]');
+    form.querySelector('textarea').value = 'fewer words';
+    const revise = win.commands.length;
+    form.requestSubmit(); await settle();
+    const asked = sent(revise, 'studyMake')[0];
+    assert(asked?.kind === 'slides' && asked.options.slides === 'P001' && asked.options.slide === 's02' && asked.options.ask === 'fewer words', `not revised: ${JSON.stringify(asked)}`);
+    ws().querySelector('[data-study-slide-go="2"]').click(); await settle();
+    assert(ws().querySelectorAll('.st-slide.two ul').length === 2, 'two columns are not two');
+    ws().querySelector('[data-study-present]').click(); await settle();
+    assert(ws().querySelector('.st-slide-frame.presenting'), 'it does not present');
+    key('Escape'); await settle();
+    assert(!ws().querySelector('.st-slide-frame.presenting'), 'Escape does not stop presenting');
+    const out = win.commands.length;
+    ws().querySelector('[data-study-slides-out="pptx"]').click(); await settle();
+    assert(JSON.stringify(sent(out, 'studySlidesExport')[0]) === JSON.stringify({type: 'studySlidesExport', id: 'P001', pptx: true}), 'not written out');
+  });
+
+  await test('An infographic is drawn from its template and saved as a PNG drawn here; so is a mind map', async () => {
+    const graphicMade = {id: 'G001', kind: 'infographic', title: 'Search, at a glance', made: 1, by: 'Claude Code', task: 'J0010'};
+    await win.pushEvents([{type: 'studyStudio', jobs: [], made: [graphicMade]}]); await settle();
+    ws().querySelector('[data-study-made="G001"]').click(); await settle();
+    await win.pushEvents([{type: 'studyGraphic', made: graphicMade, style: 'numbers', subtitle: 'Four ways through', takeaway: 'Order by cost.', citations: [cite(1, 'S01 p. 3')], blocks: [
+      {heading: 'BFS', figure: 'O(b^d)', text: 'Layer by layer, complete when b is finite.', cites: ['S01 p. 3']},
+      {heading: 'UCS', figure: 'g(n)', text: 'Cheapest path first.', cites: []}]}]); await settle();
+    const svg = ws().querySelector('[data-study-graphic] svg');
+    assert(svg && svg.textContent.includes('Search, at a glance') && svg.textContent.includes('O(b^d)') && svg.textContent.includes('Order by cost.'), 'the infographic is not drawn');
+    assert(ws().querySelector('.st-graphic-sources .st-cite'), 'where a block is from is not said');
+    const save = win.commands.length;
+    ws().querySelector('[data-study-picture="G001"]').click();
+    await new Promise((r) => setTimeout(r, 600)); await settle();
+    const png = sent(save, 'studySaveImage')[0];
+    assert(png?.id === 'G001' && png.png.startsWith('data:image/png;base64,iVBOR'), `no PNG was drawn: ${String(png?.png).slice(0, 40)}`);
+    // A mind map, drawn as a tree and saved the same way.
+    await win.pushEvents([{type: 'studyMadeOpen', made: {id: 'M001', kind: 'mindMap', title: 'Search', made: 1, by: 'Claude Code', task: 'J0001'},
+      body: {shape: 'map', nodes: [{id: '1', parent: null, label: 'Search', cites: []}, {id: '2', parent: '1', label: 'BFS', cites: []}, {id: '3', parent: '1', label: 'UCS', cites: []}]}, citations: []}]); await settle();
+    const map = win.commands.length;
+    ws().querySelector('[data-study-picture="M001"]').click();
+    await new Promise((r) => setTimeout(r, 600)); await settle();
+    assert(sent(map, 'studySaveImage')[0]?.png.startsWith('data:image/png;base64,'), 'the map was not drawn');
     ws().querySelector('[data-study-back]').click(); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });

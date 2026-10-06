@@ -64,12 +64,14 @@ import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
 import type { StudyAttempt } from "./StudyAttempt";
 import type { StudyAudioFormat } from "./StudyAudioFormat";
+import type { StudyBlock } from "./StudyBlock";
 import type { StudyCardRow } from "./StudyCardRow";
 import type { StudyChapter } from "./StudyChapter";
 import type { StudyChatSummary } from "./StudyChatSummary";
 import type { StudyCitation } from "./StudyCitation";
 import type { StudyCounts } from "./StudyCounts";
 import type { StudyDrafted } from "./StudyDrafted";
+import type { StudyGraphicStyle } from "./StudyGraphicStyle";
 import type { StudyJob } from "./StudyJob";
 import type { StudyKbFile } from "./StudyKbFile";
 import type { StudyKbFolder } from "./StudyKbFolder";
@@ -90,6 +92,7 @@ import type { StudyResult } from "./StudyResult";
 import type { StudyReview } from "./StudyReview";
 import type { StudyRoot } from "./StudyRoot";
 import type { StudySegment } from "./StudySegment";
+import type { StudySlide } from "./StudySlide";
 import type { StudySourceRow } from "./StudySourceRow";
 import type { StudySummary } from "./StudySummary";
 import type { StudyTurn } from "./StudyTurn";
@@ -269,7 +272,7 @@ state: string, why: string | null, done: number, of: number,
 /**
  * Its sound, as `study://localhost/` names it: `search/A001.mp3`.
  */
-url: string | null, citations: Array<StudyCitation>, voice: StudyVoiceState, } | { "type": "studyVoiceState", voice: StudyVoiceState, } | { "type": "studyVoices", query: string, voices: Array<StudyVoice>, total: number, error: string | null, } | { "type": "studyVoiceSample", id: string, url: string | null, error: string | null, } | { "type": "studyProgress", objectives: Array<StudyMastery>, due: number, quizzes: Array<StudyQuizRow>, } | { "type": "studyOverview", made: StudyMade, topics: Array<StudyOverviewTopic>, deck: string | null, quiz: string | null, citations: Array<StudyCitation>, } | { "type": "studyStudio", jobs: Array<StudyJob>, made: Array<StudyMade>, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyDeck", made: StudyMade, cards: Array<StudyCardRow>, counts: StudyCounts, citations: Array<StudyCitation>, } | { "type": "studyReviewing", review: StudyReview | null, } | { "type": "studyQuiz", made: StudyMade, questions: Array<StudyQuestion>, attempts: Array<StudyAttempt>, 
+url: string | null, citations: Array<StudyCitation>, voice: StudyVoiceState, } | { "type": "studySlides", made: StudyMade, slides: Array<StudySlide>, citations: Array<StudyCitation>, } | { "type": "studyGraphic", made: StudyMade, style: StudyGraphicStyle, subtitle: string, blocks: Array<StudyBlock>, takeaway: string, citations: Array<StudyCitation>, } | { "type": "studyVoiceState", voice: StudyVoiceState, } | { "type": "studyVoices", query: string, voices: Array<StudyVoice>, total: number, error: string | null, } | { "type": "studyVoiceSample", id: string, url: string | null, error: string | null, } | { "type": "studyProgress", objectives: Array<StudyMastery>, due: number, quizzes: Array<StudyQuizRow>, } | { "type": "studyOverview", made: StudyMade, topics: Array<StudyOverviewTopic>, deck: string | null, quiz: string | null, citations: Array<StudyCitation>, } | { "type": "studyStudio", jobs: Array<StudyJob>, made: Array<StudyMade>, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyDeck", made: StudyMade, cards: Array<StudyCardRow>, counts: StudyCounts, citations: Array<StudyCitation>, } | { "type": "studyReviewing", review: StudyReview | null, } | { "type": "studyQuiz", made: StudyMade, questions: Array<StudyQuestion>, attempts: Array<StudyAttempt>, 
 /**
  * Answers being marked now: `2/q03`, the attempt and the question.
  */
