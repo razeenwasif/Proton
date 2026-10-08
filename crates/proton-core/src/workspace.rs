@@ -1513,6 +1513,8 @@ impl Workspace {
             | Command::StudyTutor { .. }
             | Command::StudySaveAnswer { .. }
             | Command::StudyMake { .. }
+            | Command::StudyCodeRun { .. }
+            | Command::StudyCodeSave { .. }
             | Command::StudyCancelJob { .. }
             | Command::StudyShowMade { .. }
             | Command::StudyBinMade { .. }

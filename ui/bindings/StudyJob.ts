@@ -10,7 +10,7 @@ export type StudyJob = {
  */
 id: string, kind: StudyMakeKind, title: string, 
 /**
- * `waiting`, `running`, `repairing`, `done` or `failed`.
+ * `waiting`, `running`, `repairing`, `checking`, `done` or `failed`.
  */
 state: string, why: string | null, 
 /**

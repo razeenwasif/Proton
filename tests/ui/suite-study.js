@@ -461,7 +461,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 20, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 21, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -1081,6 +1081,99 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     ws().querySelector('[data-study-picture="M001"]').click();
     await new Promise((r) => setTimeout(r, 600)); await settle();
     assert(sent(map, 'studySaveImage')[0]?.png.startsWith('data:image/png;base64,'), 'the map was not drawn');
+    ws().querySelector('[data-study-back]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('Coding practice opens in an editor: its keys follow the code, what is written is saved as it is, and ⌘⏎ runs it against its tests', async () => {
+    const codingMade = {id: 'K001', kind: 'coding', title: 'Search, in code', made: 1, by: 'Claude Code', task: 'J0011'};
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: [codingMade], languages: ['python', 'c']}]); await settle();
+    // Asked for in a language this machine can run.
+    ws().querySelector('[data-study-tile="coding"]').click(); await settle();
+    const offered = [...ws().querySelectorAll('[data-study-make-form="coding"] select[name="code"] option')].map((o) => o.textContent);
+    assert(JSON.stringify(offered) === JSON.stringify(['The language the course uses', 'Python', 'C']), `it offers ${offered}`);
+    ws().querySelector('[data-study-make-form="coding"] select[name="code"]').value = 'c';
+    const asked = win.commands.length;
+    ws().querySelector('[data-study-make-form="coding"]').requestSubmit(); await settle();
+    const make = sent(asked, 'studyMake')[0];
+    assert(make?.kind === 'coding' && make.options.code === 'c', `not asked for in C: ${JSON.stringify(make)}`);
+
+    ws().querySelector('[data-study-made="K001"]').click(); await settle();
+    const problem = (/** @type {string} */ id, /** @type {string} */ title, /** @type {string} */ language, /** @type {string} */ starter) => ({id, title,
+      prompt: 'Write it [[S01 p. 3]].', language, starter, solution: starter.replace('return 0', 'return 1'), tests: 'check("one", lambda: total([1]), 1)',
+      hints: ['First hint.', 'Second hint.'], explanation: 'Why it is $O(n)$.', difficulty: 'easy', topic: 'Search', cites: ['S01 p. 3'], checked: true});
+    const saved = (/** @type {any} */ more = {}) => ({type: 'studyCoding', made: 'K001', running: [], saved: [
+      {problem: 'p1', code: 'def total(xs):\n    pass\n', passed: 1, of: 2, solved: false}, {problem: 'p2', code: null, passed: 0, of: 0, solved: false}], ...more});
+    await win.pushEvents([{type: 'studyMadeOpen', made: codingMade, citations: [cite(1, 'S01 p. 3')], body: {shape: 'coding', title: 'Search, in code', problems: [
+      problem('p1', 'Total', 'python', 'def total(xs):\n    return 0\n'), problem('p2', 'Half', 'c', 'int half(int n) {\n    return 0;\n}\n')]}}, saved()]); await settle();
+    const editor = () => /** @type {HTMLTextAreaElement} */ (ws().querySelector('[data-study-code-input]'));
+    assert(editor()?.value === 'def total(xs):\n    pass\n', `it does not open with what was saved: ${JSON.stringify(editor()?.value)}`);
+    assert(ws().querySelector('[data-study-code-hl] .k')?.textContent === 'def', 'the code is not coloured');
+    assert(ws().querySelector('[data-study-code-go="0"]')?.textContent.includes('1/2'), 'the best run is not on its tab');
+    assert(ws().querySelector('.st-code-problem .st-cite'), 'the prompt does not cite its source');
+
+    // Enter keeps the indent; a bracket closes itself and is stepped over;
+    // Backspace takes an empty pair; Shift-Tab takes a step off.
+    const ta = editor();
+    ta.focus();
+    const end = ta.value.indexOf('pass') + 4;
+    ta.setSelectionRange(end, end);
+    key('Enter');
+    assert(ta.value === 'def total(xs):\n    pass\n    \n' && ta.selectionStart === end + 5, `Enter did not keep the indent: ${JSON.stringify(ta.value)}`);
+    key('(');
+    assert(ta.value.includes('\n    ()\n') && ta.value[ta.selectionStart] === ')', `the bracket did not close itself: ${JSON.stringify(ta.value)}`);
+    key(')');
+    assert(ta.value.includes('\n    ()\n') && ta.value[ta.selectionStart - 1] === ')', 'the closer was typed again rather than stepped over');
+    ta.setSelectionRange(ta.selectionStart - 1, ta.selectionStart - 1);
+    key('Backspace');
+    assert(ta.value === 'def total(xs):\n    pass\n    \n', `the empty pair was not taken whole: ${JSON.stringify(ta.value)}`);
+    key('Tab', {shiftKey: true});
+    assert(ta.value === 'def total(xs):\n    pass\n\n', `Shift-Tab did not outdent: ${JSON.stringify(ta.value)}`);
+    assert(ws().querySelector('[data-study-code-gutter]').textContent === '1\n2\n3\n4', 'the line numbers did not follow');
+    // Saved a moment after it is written, or at once with ⌘S.
+    const wrote = win.commands.length;
+    key('s', {metaKey: true}); await settle();
+    const save = sent(wrote, 'studyCodeSave').at(-1);
+    assert(save?.made === 'K001' && save.problem === 'p1' && save.code === 'def total(xs):\n    pass\n\n', `not saved: ${JSON.stringify(save)}`);
+
+    // ⌘⏎ runs it: under way, then what it came to.
+    ta.value = 'def total(xs):\n    return len(xs)\n';
+    ta.dispatchEvent(new win.Event('input', {bubbles: true}));
+    const ran = win.commands.length;
+    key('Enter', {metaKey: true}); await settle();
+    const run = sent(ran, 'studyCodeRun')[0];
+    assert(run?.problem === 'p1' && run.code === 'def total(xs):\n    return len(xs)\n', `not run: ${JSON.stringify(run)}`);
+    assert(ws().querySelector('[data-study-code-results] .lab-spin') && ws().querySelector('[data-study-code-run]').disabled, 'the run is not shown under way');
+    await win.pushEvents([saved({running: ['p1']}), {type: 'studyCodeRan', made: 'K001', problem: 'p1', outcome: {built: true, compiler: '', output: 'hello\n', errors: '', stopped: null, seconds: 0.08,
+      results: [{name: 'empty', passed: true, message: ''}, {name: 'three', passed: false, message: 'expected 6, got 3'}]}}, saved()]); await settle();
+    const results = ws().querySelector('[data-study-code-results]');
+    assert(results.textContent.includes('1 of 2 tests passed') && results.querySelector('li.fail')?.textContent.includes('expected 6, got 3'), `the results are not said: ${results.textContent}`);
+    assert(results.textContent.includes('hello'), 'what it printed is not shown');
+    assert(editor() === ta && ta.value === 'def total(xs):\n    return len(xs)\n', 'the editor was drawn over');
+    await win.pushEvents([{type: 'studyCodeRan', made: 'K001', problem: 'p1', outcome: {built: true, compiler: '', output: '', errors: '', stopped: null, seconds: 0.08,
+      results: [{name: 'empty', passed: true, message: ''}, {name: 'three', passed: true, message: ''}]}},
+      saved({saved: [{problem: 'p1', code: 'def total(xs):\n    return sum(xs)\n', passed: 2, of: 2, solved: true}, {problem: 'p2', code: null, passed: 0, of: 0, solved: false}]})]); await settle();
+    assert(ws().querySelector('[data-study-code-results] .st-code-verdict.pass')?.textContent.includes('All 2 tests passed'), 'a pass is not said');
+    assert(ws().querySelector('[data-study-code-go="0"]').classList.contains('solved') && ws().querySelector('[data-study-code-tally]').textContent.includes('1 of 2 solved'), 'solved is not shown');
+
+    // Hints a step at a time, and a solution when asked for.
+    ws().querySelector('[data-study-code-hint]').click();
+    assert(ws().querySelector('.st-code-hints')?.textContent.includes('First hint.') && !ws().querySelector('.st-code-hints').textContent.includes('Second hint.'), 'hints are not one at a time');
+    ws().querySelector('[data-study-code-solution]').click();
+    assert(ws().querySelector('.st-code-solution')?.textContent.includes('return 1') && ws().querySelector('.st-code-solution .st-code-read .k'), 'the solution is not shown, coloured');
+
+    // The next problem: its own language and its starter; the first's code kept.
+    ws().querySelector('[data-study-code-go="1"]').click();
+    assert(editor().value === 'int half(int n) {\n    return 0;\n}\n' && ws().querySelector('.st-code-file')?.textContent.includes('solution.c'), 'the second problem does not open with its starter');
+    ws().querySelector('[data-study-code-go="0"]').click();
+    assert(editor().value === 'def total(xs):\n    return len(xs)\n', 'what was written for the first was lost');
+    // Read only while another Proton has the notebook: said, and not run.
+    await win.pushEvents([notebook([row('S01')], 'another Proton (pid 4242)')]); await settle();
+    assert(ws().querySelector('.st-code-view .st-banner')?.textContent.includes('not saved or run'), 'nothing says it is read only');
+    assert(editor().readOnly && ws().querySelector('[data-study-code-run]').disabled && editor().value === 'def total(xs):\n    return len(xs)\n', 'it can still be run, or its code was lost');
+    await win.pushEvents([notebook([row('S01')])]); await settle();
+    assert(!editor().readOnly && !ws().querySelector('.st-code-view .st-banner'), 'it stayed read only');
     ws().querySelector('[data-study-back]').click(); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });

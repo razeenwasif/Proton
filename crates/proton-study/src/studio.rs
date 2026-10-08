@@ -27,6 +27,7 @@ use serde_json::{json, Value};
 use ts_rs::TS;
 
 use crate::audio::{self, AudioFormat, StudyChapter, StudySegment};
+use crate::code;
 use crate::deck::{self, StudyCard};
 use crate::exam;
 use crate::found::{self, StudyFound};
@@ -57,6 +58,8 @@ pub enum Make {
     Quiz,
     /// Problems worked through, with hints and worked solutions.
     Practice,
+    /// Programs to write, each with tests run on the student's code.
+    Coding,
     /// A paper like the past papers, to be sat against the clock.
     Exam,
     /// A past paper itself, transcribed, marked by its solutions.
@@ -109,6 +112,8 @@ pub enum Shape {
     Slides,
     /// An infographic, in `studio/graphics/`.
     Graphic,
+    /// Coding problems, in `studio/coding/`.
+    Coding,
     /// What was found on the web, in `studio/found/`.
     Found,
     /// A source's guide, in `.notebook/guides/`.
@@ -136,6 +141,7 @@ impl Make {
             Make::Flashcards => "Flashcards",
             Make::Quiz => "Quiz",
             Make::Practice => "Practice problems",
+            Make::Coding => "Coding practice",
             Make::Exam => "Practice exam",
             Make::PastPaper => "Past paper",
             Make::Diagnostic => "Diagnostic quiz",
@@ -163,6 +169,7 @@ impl Make {
             Make::Audio => Shape::Audio,
             Make::Slides => Shape::Slides,
             Make::Infographic => Shape::Graphic,
+            Make::Coding => Shape::Coding,
             Make::Discover | Make::DeepResearch => Shape::Found,
             Make::SourceGuide => Shape::Guide,
             Make::Labels => Shape::Labels,
@@ -187,6 +194,7 @@ impl Make {
             Make::Flashcards => "flashcards",
             Make::Quiz => "quiz",
             Make::Practice => "practice",
+            Make::Coding => "coding",
             Make::Exam => "exam",
             Make::PastPaper => "pastPaper",
             Make::Diagnostic => "diagnostic",
@@ -216,7 +224,7 @@ impl Make {
     }
 
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch, Make::SourceGuide, Make::Labels, Make::Readable]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Coding, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch, Make::SourceGuide, Make::Labels, Make::Readable]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -260,6 +268,15 @@ pub struct Options {
     /// The language it is in; empty for the sources'.
     #[serde(default)]
     pub language: String,
+    /// The programming language coding problems are set in: `python`,
+    /// `c`… — empty for the one the course uses.
+    #[serde(default)]
+    pub code: String,
+    /// The programming languages this machine can run, by key: told the
+    /// model by Proton rather than asked by the person.
+    #[serde(default)]
+    #[ts(skip)]
+    pub languages: Vec<String>,
     /// A deck of slides, and a slide of it, to revise as `ask` says.
     #[serde(default)]
     pub slides: Option<String>,
@@ -398,6 +415,14 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
         Make::Audio => audio::prompt(options.format.unwrap_or_default(), options.amount, &options.language, &options.focus, &course),
         Make::Slides => slides::prompt(options.amount, &options.focus, &options.language, &course),
         Make::Infographic => infographic::prompt(&options.focus, &course),
+        Make::Coding => code::prompt(
+            options.count.map_or(options.amount.problems(), |c| c as usize),
+            options.level.says(),
+            code::Language::from_key(&options.code),
+            &runnable(options),
+            &options.focus,
+            &course,
+        ),
         // An exam's asking needs the notebook, and so does the web's, to
         // find what it has not: [`prompt_for`].
         Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking | Make::Discover | Make::DeepResearch | Make::SourceGuide | Make::Labels | Make::Readable => String::new(),
@@ -558,6 +583,15 @@ pub fn known(book: &Book, make: Make, options: &Options) -> String {
     out
 }
 
+/// The programming languages coding problems may be set in: those this
+/// machine can run, as Proton told it; every one, when it did not say.
+fn runnable(options: &Options) -> Vec<code::Language> {
+    match options.languages.is_empty() {
+        true => code::LANGUAGES.to_vec(),
+        false => options.languages.iter().filter_map(|k| code::Language::from_key(k)).collect(),
+    }
+}
+
 /// The JSON a structured thing must be.
 pub fn schema(make: Make, options: &Options) -> Option<Value> {
     let cites = json!({ "type": "array", "items": { "type": "string" }, "description": "Citations, as written between the brackets: S07 p. 12" });
@@ -569,6 +603,7 @@ pub fn schema(make: Make, options: &Options) -> Option<Value> {
         Shape::Audio => audio::schema(),
         Shape::Slides => slides::schema(options.slide.is_some()),
         Shape::Graphic => infographic::schema(),
+        Shape::Coding => code::schema(),
         Shape::Found => found::schema(),
         Shape::Guide => guide::schema(),
         Shape::Labels => guide::labels_schema(),
@@ -703,6 +738,8 @@ pub enum StudyMadeBody {
     /// One slide, revised, for the deck it is of.
     Slide { slide: StudySlide },
     Graphic { title: String, style: infographic::Style, subtitle: String, blocks: Vec<StudyBlock>, takeaway: String },
+    /// Programs to write: each its prompt, starter, solution and tests.
+    Coding { title: String, problems: Vec<code::StudyCodingProblem> },
     /// What was found on the web: a report of it, for Deep Research, and
     /// the sources.
     Found { title: String, report: String, found: Vec<StudyFound> },
@@ -754,7 +791,10 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
         Some(value) => value,
         None => serde_json::from_str(strip_fence(answer).trim()).map_err(|e| format!("it is not JSON: {e}"))?,
     };
-    crate::tex::mend_json(&mut value);
+    match make.shape() {
+        Shape::Coding => code::mend(&mut value),
+        _ => crate::tex::mend_json(&mut value),
+    }
     match make.shape() {
         Shape::Map => {
             let nodes: Vec<StudyMapNode> = serde_json::from_value(value["nodes"].clone()).map_err(|e| format!("its nodes: {e}"))?;
@@ -790,6 +830,10 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
         Shape::Graphic => {
             let (title, style, subtitle, blocks, takeaway) = infographic::read(&value)?;
             Ok(StudyMadeBody::Graphic { title, style, subtitle, blocks, takeaway })
+        }
+        Shape::Coding => {
+            let (title, problems) = code::read(&value, &runnable(options))?;
+            Ok(StudyMadeBody::Coding { title, problems })
         }
         Shape::Found => {
             let (title, report, found) = found::read(&value, make == Make::DeepResearch)?;
@@ -869,6 +913,7 @@ impl Book {
             Shape::Audio => self.dir().join("studio/audio"),
             Shape::Slides => self.dir().join("studio/slides"),
             Shape::Graphic => self.dir().join("studio/graphics"),
+            Shape::Coding => self.dir().join("studio/coding"),
             Shape::Found => self.dir().join("studio/found"),
             Shape::Guide | Shape::Labels | Shape::Pages => self.dir().join(".notebook"),
             Shape::Objectives => self.dir().to_path_buf(),
@@ -983,6 +1028,7 @@ impl Book {
             Shape::Audio => ('A', "json"),
             Shape::Slides => ('P', "json"),
             Shape::Graphic => ('G', "json"),
+            Shape::Coding => ('K', "json"),
             Shape::Found => ('W', "json"),
             Shape::Objectives => ('O', "json"),
             Shape::Guide | Shape::Labels | Shape::Pages => return Err("kept beside the sources".into()),
@@ -1030,7 +1076,7 @@ impl Book {
     /// Everything made, the latest first.
     pub fn made(&self) -> Vec<StudyMade> {
         let mut out: Vec<StudyMade> = Vec::new();
-        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json"), (Shape::Audio, "json"), (Shape::Slides, "json"), (Shape::Graphic, "json"), (Shape::Found, "json")] {
+        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json"), (Shape::Audio, "json"), (Shape::Slides, "json"), (Shape::Graphic, "json"), (Shape::Coding, "json"), (Shape::Found, "json")] {
             for entry in std::fs::read_dir(self.studio(shape)).into_iter().flat_map(|e| e.flatten()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let Some(id) = name.strip_suffix(&format!(".{ext}")) else { continue };
@@ -1060,6 +1106,7 @@ impl Book {
                 "A" => (self.studio(Shape::Audio).join(format!("{id}.json")), false),
                 "P" => (self.studio(Shape::Slides).join(format!("{id}.json")), false),
                 "G" => (self.studio(Shape::Graphic).join(format!("{id}.json")), false),
+                "K" => (self.studio(Shape::Coding).join(format!("{id}.json")), false),
                 "W" => (self.studio(Shape::Found).join(format!("{id}.json")), false),
                 _ => return None,
             },
@@ -1113,6 +1160,7 @@ impl Book {
                 report: value["report"].as_str().unwrap_or_default().to_string(),
                 found: serde_json::from_value(value["found"].clone()).ok()?,
             },
+            Shape::Coding => StudyMadeBody::Coding { title: header.title.clone(), problems: serde_json::from_value(value["problems"].clone()).ok()? },
             Shape::Prose | Shape::Mark | Shape::Guide | Shape::Labels | Shape::Pages => return None,
         };
         Some((made_of(id, header), body))
@@ -1137,8 +1185,16 @@ impl Book {
         }
         let bin = self.dir().join(".notebook/bin");
         std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
+        let now = crate::now();
         for path in paths {
-            std::fs::rename(&path, bin.join(path.file_name().unwrap_or_default())).map_err(|e| e.to_string())?;
+            // An id is used again once its thing is binned: what the bin
+            // has of the first is kept, beside the second.
+            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let mut to = bin.join(&name);
+            if to.exists() {
+                to = bin.join(format!("{name}.{now}"));
+            }
+            std::fs::rename(&path, to).map_err(|e| e.to_string())?;
         }
         Ok(())
     }

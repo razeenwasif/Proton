@@ -5081,6 +5081,14 @@ function renderEvent(event) {
       study?.graphic(event);
       break;
 
+    case "studyCoding":
+      study?.coding(event);
+      break;
+
+    case "studyCodeRan":
+      study?.codeRan(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

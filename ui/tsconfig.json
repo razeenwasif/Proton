@@ -48,6 +48,7 @@
     "study-overview.js",
     "study-audio.js",
     "study-slides.js",
-    "study-graphic.js"
+    "study-graphic.js",
+    "study-code.js"
   ]
 }

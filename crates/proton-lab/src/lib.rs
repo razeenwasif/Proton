@@ -8,6 +8,7 @@
 
 pub mod conda;
 pub mod env;
+pub mod exec;
 pub mod job;
 pub mod lean;
 pub mod pip;

@@ -68,8 +68,16 @@ fn between(home: &Path, path: &Path) -> Vec<PathBuf> {
 /// The Seatbelt profile for a run in `run`, with the Lab's Python (or
 /// Proton's Lean) in `env`, for a person whose home is `home`.
 pub fn seatbelt(run: &Path, env: &Path, home: &Path) -> String {
-    let (run, env, home) = (real(run), real(env), real(home));
-    let mut ways: Vec<PathBuf> = between(&home, &run).into_iter().chain(between(&home, &env)).collect();
+    seatbelt_reading(run, &[env.to_path_buf()], home)
+}
+
+/// The same, reading each of `reads` besides the run's own folder: a
+/// compiler or an interpreter kept in the home folder, as conda's Python,
+/// nvm's Node and rustup's Rust are.
+pub fn seatbelt_reading(run: &Path, reads: &[PathBuf], home: &Path) -> String {
+    let (run, home) = (real(run), real(home));
+    let reads: Vec<PathBuf> = reads.iter().map(|p| real(p)).collect();
+    let mut ways: Vec<PathBuf> = between(&home, &run).into_iter().chain(reads.iter().flat_map(|r| between(&home, r))).collect();
     ways.sort();
     ways.dedup();
     let look = if ways.is_empty() {
@@ -77,12 +85,13 @@ pub fn seatbelt(run: &Path, env: &Path, home: &Path) -> String {
     } else {
         format!("(allow file-read-metadata {})\n", ways.iter().map(|p| format!("(literal {})", quoted(p))).collect::<Vec<_>>().join(" "))
     };
-    let (run, env, home) = (quoted(&run), quoted(&env), quoted(&home));
+    let readable: String = reads.iter().map(|r| format!(" (subpath {})", quoted(r))).collect();
+    let (run, home) = (quoted(&run), quoted(&home));
     format!(
         "(version 1)\n(allow default)\n(deny network*)\n(deny file-write*)\n\
          (allow file-write* (subpath {run}) (literal \"/dev/null\") (literal \"/dev/dtracehelper\") (regex #\"^/dev/tty\"))\n\
          (deny file-read* (subpath {home}))\n\
-         (allow file-read* (subpath {run}) (subpath {env}) (literal {home}))\n{look}"
+         (allow file-read* (subpath {run}){readable} (literal {home}))\n{look}"
     )
 }
 
@@ -90,14 +99,25 @@ pub fn seatbelt(run: &Path, env: &Path, home: &Path) -> String {
 /// the home folder hidden, the Lab's Python read only and the run's folder
 /// writable over it, and no network.
 pub fn bubblewrap(run: &Path, env: &Path, home: &Path) -> Vec<String> {
-    let (run, env, home) = (real(run).display().to_string(), real(env).display().to_string(), real(home).display().to_string());
-    [
+    bubblewrap_reading(run, &[env.to_path_buf()], home)
+}
+
+/// The same, each of `reads` bound read only over the hidden home folder.
+pub fn bubblewrap_reading(run: &Path, reads: &[PathBuf], home: &Path) -> Vec<String> {
+    let (run, home) = (real(run).display().to_string(), real(home).display().to_string());
+    let mut out: Vec<String> = [
         "--die-with-parent", "--new-session", "--unshare-net", "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-        "--tmpfs", "/tmp", "--tmpfs", &home, "--ro-bind", &env, &env, "--bind", &run, &run, "--chdir", &run,
+        "--tmpfs", "/tmp", "--tmpfs", &home,
     ]
     .iter()
     .map(|s| s.to_string())
-    .collect()
+    .collect();
+    for read in reads {
+        let read = real(read).display().to_string();
+        out.extend(["--ro-bind".to_string(), read.clone(), read]);
+    }
+    out.extend(["--bind".to_string(), run.clone(), run.clone(), "--chdir".to_string(), run]);
+    out
 }
 
 fn bwrap() -> Option<PathBuf> {
@@ -106,15 +126,20 @@ fn bwrap() -> Option<PathBuf> {
 
 /// `program args` as started inside the sandbox.
 pub fn wrap(kind: Kind, run: &Path, env: &Path, home: &Path, program: &Path, args: &[String]) -> (PathBuf, Vec<String>) {
+    wrap_reading(kind, run, &[env.to_path_buf()], home, program, args)
+}
+
+/// The same, reading each of `reads` besides the run's folder.
+pub fn wrap_reading(kind: Kind, run: &Path, reads: &[PathBuf], home: &Path, program: &Path, args: &[String]) -> (PathBuf, Vec<String>) {
     let tail = || std::iter::once(program.display().to_string()).chain(args.iter().cloned());
     match kind {
         Kind::Seatbelt => {
-            let mut out = vec!["-p".to_string(), seatbelt(run, env, home)];
+            let mut out = vec!["-p".to_string(), seatbelt_reading(run, reads, home)];
             out.extend(tail());
             (PathBuf::from(SANDBOX_EXEC), out)
         }
         Kind::Bubblewrap => {
-            let mut out = bubblewrap(run, env, home);
+            let mut out = bubblewrap_reading(run, reads, home);
             out.push("--".into());
             out.extend(tail());
             (bwrap().unwrap_or_else(|| PathBuf::from("bwrap")), out)

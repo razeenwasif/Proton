@@ -901,7 +901,7 @@ fn with_no_server_every_engine_is_given_passages() {
 
 fn studio(events: &[Event]) -> Option<(Vec<proton_core::study::jobs::StudyJob>, Vec<proton_study::studio::StudyMade>)> {
     events.iter().rev().find_map(|e| match e {
-        Event::StudyStudio { jobs, made } => Some((jobs.clone(), made.clone())),
+        Event::StudyStudio { jobs, made, .. } => Some((jobs.clone(), made.clone())),
         _ => None,
     })
 }
@@ -934,7 +934,7 @@ fn the_studio_makes_from_the_sources_mends_what_will_not_read_and_keeps_every_ca
     let (jobs, _) = studio(&events).expect("the studio");
     assert_eq!((jobs[0].id.as_str(), jobs[0].state.as_str()), ("J0001", "running"));
     let made = until(&mut session, |e| match e {
-        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        Event::StudyStudio { jobs, made, .. } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
         _ => None,
     });
     assert_eq!((made[0].id.as_str(), made[0].title.as_str()), ("R001", "Search, a study guide"), "titled by its own heading");
@@ -957,7 +957,7 @@ fn the_studio_makes_from_the_sources_mends_what_will_not_read_and_keeps_every_ca
     // A mind map whose first answer will not read: sent back once, then kept.
     session.apply(Command::StudyMake { kind: Make::MindMap, options: Options { focus: "uniform cost".into(), ..Default::default() } });
     let made = until(&mut session, |e| match e {
-        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0002" && j.state == "done") => Some(made.clone()),
+        Event::StudyStudio { jobs, made, .. } if jobs.iter().any(|j| j.id == "J0002" && j.state == "done") => Some(made.clone()),
         _ => None,
     });
     assert!(made.iter().any(|m| m.id == "M001"));
@@ -1029,7 +1029,7 @@ fn discover_and_deep_research_search_the_web_through_claude_code_alone_and_keep_
     }
     session.apply(Command::StudyMake { kind: Make::Discover, options: Options::default() });
     let made = until(&mut session, |e| match e {
-        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        Event::StudyStudio { jobs, made, .. } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
         Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.id == "J0001" && j.state == "failed") => panic!("{jobs:?}"),
         _ => None,
     });
@@ -1058,7 +1058,7 @@ fn discover_and_deep_research_search_the_web_through_claude_code_alone_and_keep_
     );
     session.apply(Command::StudyMake { kind: Make::DeepResearch, options: Options { focus: "uniform-cost search".into(), ..Default::default() } });
     let made = until(&mut session, |e| match e {
-        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0002" && j.state == "done") => Some(made.clone()),
+        Event::StudyStudio { jobs, made, .. } if jobs.iter().any(|j| j.id == "J0002" && j.state == "done") => Some(made.clone()),
         _ => None,
     });
     assert_eq!((made[0].id.as_str(), made[0].title.as_str()), ("W002", "Uniform-cost search"), "titled by its report's heading");
@@ -1276,7 +1276,7 @@ fn flashcards_are_made_reviewed_and_their_log_is_their_schedule() {
     // Made: the repeat left out, held to its schema.
     session.apply(Command::StudyMake { kind: Make::Flashcards, options: Options::default() });
     let made = until(&mut session, |e| match e {
-        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        Event::StudyStudio { jobs, made, .. } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
         _ => None,
     });
     assert_eq!((made[0].id.as_str(), made[0].kind), ("D001", Make::Flashcards));
@@ -1406,7 +1406,7 @@ fn a_quiz_is_marked_by_rule_and_by_another_family_and_a_dispute_by_a_third() {
     );
     session.apply(Command::StudyMake { kind: Make::Quiz, options: Options::default() });
     let made = until(&mut session, |e| match e {
-        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        Event::StudyStudio { jobs, made, .. } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
         _ => None,
     });
     assert_eq!((made[0].id.as_str(), made[0].kind), ("Q001", Make::Quiz));
@@ -1555,7 +1555,7 @@ fn an_exam_is_set_like_the_past_papers_sat_against_the_clock_and_marked_when_han
     }
     session.apply(Command::StudyMake { kind: Make::Exam, options: Options::default() });
     let made = until(&mut session, |e| match e {
-        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
+        Event::StudyStudio { jobs, made, .. } if jobs.iter().any(|j| j.id == "J0001" && j.state == "done") => Some(made.clone()),
         _ => None,
     });
     assert_eq!((made[0].id.as_str(), made[0].kind, made[0].title.as_str()), ("Q001", Make::Exam, "COMP3670 practice final"));
@@ -1609,7 +1609,7 @@ fn an_exam_is_set_like_the_past_papers_sat_against_the_clock_and_marked_when_han
     assert!(said(&refused).iter().any(|s| s.contains("Choose a past paper")));
     session.apply(Command::StudyMake { kind: Make::PastPaper, options: Options { source: Some("S02".into()), ..Options::default() } });
     let made = until(&mut session, |e| match e {
-        Event::StudyStudio { jobs, made } if jobs.iter().any(|j| j.kind == Make::PastPaper && j.state == "done") => Some(made.clone()),
+        Event::StudyStudio { jobs, made, .. } if jobs.iter().any(|j| j.kind == Make::PastPaper && j.state == "done") => Some(made.clone()),
         _ => None,
     });
     let past = made.iter().find(|m| m.kind == Make::PastPaper).unwrap();
@@ -2124,5 +2124,145 @@ fn a_deck_of_slides_is_made_revised_a_slide_at_a_time_and_written_out_and_an_inf
     assert!(std::fs::read(book.join("exports/G001-search-at-a-glance.png")).unwrap().starts_with(b"\x89PNG"));
     let refused = session.apply(Command::StudySaveImage { id: "G001".into(), png: "data:image/png;base64,aGVsbG8=".into() });
     assert!(said(&refused).iter().any(|s| s.contains("not a PNG")));
+    session.shutdown();
+}
+
+/* ── coding practice ──────────────────────────────────────────────── */
+
+fn coding_of(events: &[Event]) -> Option<(Vec<proton_study::code::StudyCodeSaved>, Vec<String>)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::StudyCoding { saved, running, .. } => Some((saved.clone(), running.clone())),
+        _ => None,
+    })
+}
+
+/// A Python problem as a model writes one.
+fn python_problem(title: &str, function: &str, solution: &str, checks: &[(&str, &str, &str)]) -> serde_json::Value {
+    let mut tests = "from solution import *\nfrom proton_check import check\n".to_string();
+    for (name, call, expected) in checks {
+        tests.push_str(&format!("check({name:?}, lambda: {call}, {expected})\n"));
+    }
+    serde_json::json!({
+        "title": title, "prompt": format!("Write `{function}(xs)` [[S01 § Search L1-2]]."), "language": "python",
+        "starter": format!("def {function}(xs):\n    # TODO\n    return None\n"), "solution": solution, "tests": tests,
+        "hints": ["Look at each in turn.", "Keep the best so far."], "explanation": "One pass: O(n).",
+        "difficulty": "easy", "topic": "Lists", "cites": ["S01 § Search L1-2"],
+    })
+}
+
+#[test]
+fn coding_problems_are_built_and_run_before_they_are_shown_and_a_students_code_is_run_against_their_tests() {
+    use proton_core::study::code::Tools;
+    use proton_study::code::Language;
+    use proton_study::studio::{Make, Options, StudyMadeBody};
+    if proton_lab::sandbox::available() == proton_lab::sandbox::Kind::None || !Tools::here().languages().contains(&Language::Python) {
+        eprintln!("skipped: this machine has no sandbox or no Python");
+        return;
+    }
+    let scratch = Scratch::new("coding");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Lists".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+    let total = python_problem("Total", "total", "def total(xs):\n    return sum(xs)\n", &[("empty", "total([])", "0"), ("three", "total([1, 2, 3])", "6")]);
+    let wrong = python_problem("Largest", "largest", "def largest(xs):\n    return min(xs)\n", &[("three", "largest([1, 3, 2])", "3")]);
+    let mended = python_problem("Largest", "largest", "def largest(xs):\n    return max(xs)\n", &[("three", "largest([1, 3, 2])", "3")]);
+    {
+        let mut log = log.lock().unwrap();
+        log.answers.push_back(serde_json::json!({ "title": "Lists", "problems": [total, wrong] }).to_string());
+        log.answers.push_back(serde_json::json!({ "title": "Lists", "problems": [total, mended] }).to_string());
+    }
+
+    // Asked for: told the languages this machine can run, and held to them.
+    let events = session.apply(Command::StudyMake { kind: Make::Coding, options: Options { code: "python".into(), count: Some(2), ..Default::default() } });
+    assert!(said(&events).is_empty(), "{:?}", said(&events));
+    let mut checking = false;
+    let made = until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, made, .. } => {
+            checking |= jobs.iter().any(|j| j.state == "checking");
+            if let Some(failed) = jobs.iter().find(|j| j.state == "failed") {
+                panic!("{failed:?}");
+            }
+            jobs.iter().any(|j| j.id == "J0001" && j.state == "done").then(|| made.clone())
+        }
+        _ => None,
+    });
+    assert!(checking, "the problems were built and run before they were kept");
+    {
+        let log = log.lock().unwrap();
+        assert!(log.started[0].2.schema.is_some(), "a set of problems is held to its schema");
+        assert!(log.sent[0].contains("Set every problem in Python") && log.sent[0].contains("tests.py"), "{}", log.sent[0]);
+        let mend = log.sent.iter().find(|s| s.starts_with("Proton built and ran them")).expect("the broken solution was sent back");
+        assert!(mend.contains("p2 (Largest)") && mend.contains("expected 3, got 1") && !mend.contains("p1 (Total)"), "{mend}");
+    }
+    assert!(made.iter().any(|m| m.id == "K001" && m.title == "Lists"), "{made:?}");
+    let book = scratch.root.join("Notebooks/lists");
+    assert!(book.join("studio/coding/K001.json").is_file());
+
+    // Shown with the student's state: nothing written, nothing run.
+    let events = session.apply(Command::StudyShowMade { id: "K001".into() });
+    let Some(Event::StudyMadeOpen { body: StudyMadeBody::Coding { problems, .. }, citations, .. }) = events.first() else { panic!("{events:?}") };
+    assert_eq!(problems.iter().map(|p| (p.id.as_str(), p.checked)).collect::<Vec<_>>(), [("p1", true), ("p2", true)]);
+    assert!(problems[1].solution.contains("max(xs)"), "the mended solution was kept");
+    assert!(citations.iter().any(|c| c.source == "S01" && c.resolved));
+    let (saved, running) = coding_of(&events).expect("the student's state");
+    assert!(running.is_empty() && saved.iter().all(|s| s.code.is_none() && s.of == 0 && !s.solved));
+
+    // A wrong answer: built, run, and what failed said.
+    let events = session.apply(Command::StudyCodeRun { made: "K001".into(), problem: "p1".into(), code: "def total(xs):\n    return len(xs)\n".into() });
+    assert_eq!(coding_of(&events).expect("running").1, ["p1"]);
+    let outcome = until(&mut session, |e| match e {
+        Event::StudyCodeRan { problem, outcome, .. } if problem == "p1" => Some(outcome.clone()),
+        _ => None,
+    });
+    assert!(outcome.built && !outcome.passed() && outcome.stopped.is_none(), "{outcome:?}");
+    assert_eq!(outcome.results.iter().map(|r| (r.name.as_str(), r.passed)).collect::<Vec<_>>(), [("empty", true), ("three", false)]);
+    assert_eq!(outcome.results[1].message, "expected 6, got 3");
+    assert_eq!(std::fs::read_to_string(book.join("studio/coding/K001/p1.py")).unwrap(), "def total(xs):\n    return len(xs)\n", "what is run is kept");
+
+    // Code that cannot run says why, and the student's own prints are kept apart.
+    session.apply(Command::StudyCodeRun { made: "K001".into(), problem: "p1".into(), code: "print('trying')\ndef total(xs):\n    return sum(xs) +\n".into() });
+    let outcome = until(&mut session, |e| match e {
+        Event::StudyCodeRan { outcome, .. } => Some(outcome.clone()),
+        _ => None,
+    });
+    assert!(outcome.results.is_empty() && outcome.stopped.is_some() && outcome.errors.contains("SyntaxError"), "{outcome:?}");
+
+    // Right: every test passes, and the set says it is solved.
+    session.apply(Command::StudyCodeRun { made: "K001".into(), problem: "p1".into(), code: "def total(xs):\n    print('adding', xs)\n    return sum(xs)\n".into() });
+    let outcome = until(&mut session, |e| match e {
+        Event::StudyCodeRan { outcome, .. } => Some(outcome.clone()),
+        _ => None,
+    });
+    assert!(outcome.passed() && outcome.output.contains("adding [1, 2, 3]"), "{outcome:?}");
+    let events = session.apply(Command::StudyShowMade { id: "K001".into() });
+    let (saved, _) = coding_of(&events).unwrap();
+    assert_eq!((saved[0].passed, saved[0].of, saved[0].solved), (2, 2, true), "the best run is the one kept");
+    assert!(saved[1].code.is_none() && !saved[1].solved);
+
+    // Saved without running, and there after the notebook is opened again.
+    session.apply(Command::StudyCodeSave { made: "K001".into(), problem: "p2".into(), code: "def largest(xs):\n    best = xs[0]\n".into() });
+    let events = session.apply(Command::StudyShowMade { id: "K001".into() });
+    assert_eq!(coding_of(&events).unwrap().0[1].code.as_deref(), Some("def largest(xs):\n    best = xs[0]\n"));
+    let refused = session.apply(Command::StudyCodeRun { made: "K009".into(), problem: "p1".into(), code: String::new() });
+    assert!(said(&refused).iter().any(|s| s.contains("no such set")), "{refused:?}");
+
+    // A second Proton may only read it: a run is refused, and the window
+    // told it is not under way.
+    let mut other = session_named(&scratch, &settings);
+    other.apply(Command::SetMode { mode: ModeId::Study });
+    let refused = other.apply(Command::StudyCodeRun { made: "K001".into(), problem: "p1".into(), code: "def total(xs):\n    return 0\n".into() });
+    assert!(said(&refused).iter().any(|s| s.contains("read only")), "{refused:?}");
+    assert_eq!(coding_of(&refused).map(|(_, running)| running), Some(Vec::new()), "{refused:?}");
+    assert!(std::fs::read_to_string(book.join("studio/coding/K001/p1.py")).unwrap().contains("sum(xs)"), "what was written was not touched");
+    other.shutdown();
     session.shutdown();
 }

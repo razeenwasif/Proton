@@ -14,8 +14,8 @@ left of the plan, and what came of building it.
   credit, so each is run by hand: `tutor_live` (all four engines answering
   from the sources through `proton-mcp --notebook`), `cards_live`,
   `quiz_live` (a quiz, a mark by another family, an exam, a past paper,
-  objectives, a diagnostic, a learning overview, slides and an
-  infographic), `audio_live` (a brief spoken by Fish, with
+  objectives, a diagnostic, a learning overview, slides, an infographic,
+  and coding problems checked by building and running them), `audio_live` (a brief spoken by Fish, with
   `FISH_API_KEY` and `PROTON_FISH_VOICES`; and a recording transcribed),
   `sources_live` (pages of the web, Discover and Deep Research, a guide,
   labels, and a slide read from its picture), and `study_live` over the

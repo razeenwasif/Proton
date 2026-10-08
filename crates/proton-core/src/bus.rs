@@ -622,6 +622,19 @@ pub enum Command {
         kind: proton_study::studio::Make,
         options: proton_study::studio::Options,
     },
+    /// Build a coding problem's solution as written and run its tests on
+    /// it, sandboxed; it is saved first.
+    StudyCodeRun {
+        made: String,
+        problem: String,
+        code: String,
+    },
+    /// Keep what has been written for a coding problem.
+    StudyCodeSave {
+        made: String,
+        problem: String,
+        code: String,
+    },
     /// Stop a call of the studio's, or take it off the queue.
     StudyCancelJob {
         id: String,
@@ -1753,6 +1766,23 @@ pub enum Event {
     StudyStudio {
         jobs: Vec<crate::study::jobs::StudyJob>,
         made: Vec<proton_study::studio::StudyMade>,
+        /// The programming languages coding problems can be set in here:
+        /// those whose compilers this machine has. Empty until they are
+        /// found.
+        languages: Vec<String>,
+    },
+    /// A set of coding problems as the student has it: what they have
+    /// written for each and how their best run went, and which are running.
+    StudyCoding {
+        made: String,
+        saved: Vec<proton_study::code::StudyCodeSaved>,
+        running: Vec<String>,
+    },
+    /// What a run of a coding problem came to.
+    StudyCodeRan {
+        made: String,
+        problem: String,
+        outcome: proton_study::code::StudyCodeOutcome,
     },
     /// Something the studio made, whole, its citations resolved.
     StudyMadeOpen {

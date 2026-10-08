@@ -1062,7 +1062,7 @@ studio that makes guides, cards, quizzes and exams of them. It is being built in
 milestones; what is here is the knowledge base, notebooks, sources — files,
 pages of the web and videos' captions — the reader, notes, the tutor, the
 studio, flashcards, quizzes with their marking, exams, progress by learning
-objective, audio overviews, slide decks and infographics.
+objective, audio overviews, slide decks, infographics and coding practice.
 
 **The knowledge base** is the folders the person names (`study.roots` in their
 own settings), less what `study.exclude` leaves out — `.gitignore` lines with
@@ -1288,6 +1288,33 @@ templates as plain SVG; it, and a mind map drawn as a tree, are saved as PNG by
 drawing that SVG on a canvas and handing the picture back to be written into the
 notebook's `exports/`. PDFs and video overviews wait on rendering the window's
 own HTML natively, which is not built yet.
+
+**Coding practice** is a set of problems (`proton-study::code`,
+`studio/coding/K001.json`), each a prompt citing the sources, the code a student
+starts from, a solution, hints, an explanation, and tests: a program of their
+own in the problem's language that uses Proton's checks, a small library per
+language that prints one line per test — `PROTON-TEST`, its name, `PASS` or
+`FAIL` and why — which is all Proton reads of a run. Python, C, C++, Java,
+JavaScript and Rust are offered as far as this machine has their compilers,
+found once on the login shell's PATH (`proton-core::study::code::Tools`); a
+compiler installed in the home folder — conda's Python, nvm's Node, rustup's
+toolchain, past its proxy — is given its own folder to read. Every build and
+run is the Lab's (`proton-lab::exec`): Seatbelt or bubblewrap with no network,
+writes only to the run's folder, the home folder unreadable but for the run and
+the compiler, a clean environment, `ulimit`s on CPU and file size, 90 s to
+build and 10 s to run, its process group killed at the deadline, and what it
+prints kept to 64 KiB. Where there is no sandbox, nothing is run. Before a set
+is kept, each problem's solution is built and run against its tests and its
+starter must build and fail them; what does not is sent back once to be mended,
+then left out. What a student writes is kept beside the set
+(`studio/coding/K001/p1.py`), saved as it is written, and each run of it logged
+to `K001.runs.jsonl`, which gives each problem its best run. The editor is a
+textarea under highlight.js's colouring, keeping the browser's own undo and
+input methods, with the Codex editor's typing rules: Tab to the code's own
+step, Enter keeping the indent and opening a block, brackets and quotes that
+close themselves, ⌘/ to comment and ⌘⏎ to run. TeX JSON ate is mended in what
+is written about a problem, never in its code, where a tab before `out` is a
+tab.
 
 ### Trace
 

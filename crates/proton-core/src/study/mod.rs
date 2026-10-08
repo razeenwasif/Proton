@@ -13,6 +13,7 @@
 //! for exactly that file, having been told how big it is.
 
 pub mod jobs;
+pub mod code;
 mod kb;
 mod learning;
 pub mod media;
@@ -90,6 +91,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyTutor { .. }
             | Command::StudySaveAnswer { .. }
             | Command::StudyMake { .. }
+            | Command::StudyCodeRun { .. }
+            | Command::StudyCodeSave { .. }
             | Command::StudyCancelJob { .. }
             | Command::StudyShowMade { .. }
             | Command::StudyBinMade { .. }
@@ -208,6 +211,20 @@ pub struct Study {
     web: Option<proton_literature::http::Http>,
     /// Sources' pages being drawn, to be read from their pictures.
     drawing: Vec<Drawing>,
+    /// Coding problems' solutions being built and run.
+    runs: Vec<CodeRun>,
+    /// Whether the studio has been told which languages can be run here,
+    /// once the compilers were found.
+    languages_told: bool,
+}
+
+/// A student's solution being built and run on a worker: the notebook, the
+/// set of problems, the problem, and what it came to, once it has.
+struct CodeRun {
+    dir: PathBuf,
+    made: String,
+    problem: String,
+    outcome: std::sync::mpsc::Receiver<proton_study::code::StudyCodeOutcome>,
 }
 
 /// A source's pages being drawn on a worker: the notebook, the source, the
@@ -247,6 +264,8 @@ impl Default for Study {
             audio: None,
             web: None,
             drawing: Vec::new(),
+            runs: Vec::new(),
+            languages_told: false,
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -403,6 +422,11 @@ impl Study {
         if !self.entered {
             self.entered = true;
             self.kb.start();
+            // Which compilers are here, looked for before coding problems
+            // are asked for, so the studio can say which languages it offers.
+            std::thread::spawn(|| {
+                code::Tools::here();
+            });
             if self.open.is_none() {
                 if let Some((folder, _)) = &self.folder {
                     if let Some((slug, _)) = folder.list().into_iter().find(|(_, n)| !n.archived) {
@@ -460,6 +484,7 @@ impl Study {
             }
         }
         events.extend(self.poll_drawing());
+        events.extend(self.poll_code());
         events.extend(self.poll_voices());
         events.extend(self.poll_review());
         events.extend(self.poll_sitting());
@@ -567,6 +592,8 @@ impl Study {
             Command::StudyTutor { settings } => self.set_tutor(settings),
             Command::StudySaveAnswer { turn } => self.save_answer(turn),
             Command::StudyMake { kind, options } => self.make(kind, options),
+            Command::StudyCodeRun { made, problem, code } => self.code_run(&made, &problem, &code),
+            Command::StudyCodeSave { made, problem, code } => self.code_save(&made, &problem, &code),
             Command::StudyCancelJob { id } => {
                 if !self.cancel_voicing(&id) {
                     if let Some(open) = &self.open {
@@ -1650,10 +1677,119 @@ impl Study {
         let open = self.open.as_ref()?;
         let mut jobs = self.voicing_rows(open.book.dir());
         jobs.extend(self.jobs.rows(open.book.dir()));
-        Some(Event::StudyStudio { jobs, made: open.book.made() })
+        let languages = code::Tools::found().map(|tools| tools.languages().iter().map(|l| l.key().to_string()).collect()).unwrap_or_default();
+        Some(Event::StudyStudio { jobs, made: open.book.made(), languages })
     }
 
-    fn make(&mut self, kind: proton_study::studio::Make, options: proton_study::studio::Options) -> Vec<Event> {
+    /// A set of coding problems, as the student has it.
+    fn coding_event(&self, made: &str) -> Option<Event> {
+        let open = self.open.as_ref()?;
+        let Some((_, proton_study::studio::StudyMadeBody::Coding { problems, .. })) = open.book.made_one(made) else { return None };
+        let running = self.runs.iter().filter(|r| r.dir == open.book.dir() && r.made == made).map(|r| r.problem.clone()).collect();
+        Some(Event::StudyCoding { made: made.to_string(), saved: open.book.code_state(made, &problems), running })
+    }
+
+    /// The problem and its language, of a set in the notebook open.
+    fn coding_problem(&self, made: &str, problem: &str) -> Result<proton_study::code::StudyCodingProblem, Vec<Event>> {
+        let open = self.open.as_ref().ok_or_else(|| vec![notice("Open a notebook first.".into(), NoticeLevel::Warn)])?;
+        match open.book.made_one(made) {
+            Some((_, proton_study::studio::StudyMadeBody::Coding { problems, .. })) => problems
+                .into_iter()
+                .find(|p| p.id == problem)
+                .ok_or_else(|| vec![notice(format!("{made} has no problem {problem}"), NoticeLevel::Warn)]),
+            _ => Err(vec![notice(format!("{made}: no such set of coding problems"), NoticeLevel::Warn)]),
+        }
+    }
+
+    /// Keep what has been written for a problem.
+    fn code_save(&mut self, made: &str, problem: &str, code: &str) -> Vec<Event> {
+        let found = match self.coding_problem(made, problem) {
+            Ok(found) => found,
+            Err(events) => return events,
+        };
+        let language = proton_study::code::Language::from_key(&found.language).unwrap_or(proton_study::code::Language::Python);
+        match self.writable() {
+            Ok(book) => match book.save_code(made, problem, language, code) {
+                Ok(()) => Vec::new(),
+                Err(why) => vec![notice(why, NoticeLevel::Error)],
+            },
+            Err(events) => events,
+        }
+    }
+
+    /// Save what has been written, then build it and run its tests on a
+    /// worker: its outcome comes on a later beat.
+    fn code_run(&mut self, made: &str, problem: &str, code: &str) -> Vec<Event> {
+        let found = match self.coding_problem(made, problem) {
+            Ok(found) => found,
+            Err(events) => return events,
+        };
+        // Not run unless kept: what is run is what was written. The window,
+        // which shows the run under way as it asks, is told it is not.
+        let mut refused = self.code_save(made, problem, code);
+        if !refused.is_empty() {
+            refused.extend(self.coding_event(made));
+            return refused;
+        }
+        let Some(open) = &self.open else { return Vec::new() };
+        let dir = open.book.dir().to_path_buf();
+        if self.runs.iter().any(|r| r.dir == dir && r.made == made && r.problem == problem) {
+            return Vec::new();
+        }
+        let at = dir.join(".notebook").join("code").join(made).join(problem);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let code = code.to_string();
+        std::thread::spawn(move || {
+            let _ = tx.send(code::run(&at, &found, &code, code::Tools::here()));
+        });
+        self.runs.push(CodeRun { dir, made: made.to_string(), problem: problem.to_string(), outcome: rx });
+        self.coding_event(made).into_iter().collect()
+    }
+
+    /// What runs have come to: each logged, and said.
+    fn poll_code(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        if !self.languages_told && code::Tools::found().is_some() {
+            self.languages_told = true;
+            events.extend(self.studio_event());
+        }
+        let mut finished = Vec::new();
+        self.runs.retain(|run| match run.outcome.try_recv() {
+            Ok(outcome) => {
+                finished.push((run.dir.clone(), run.made.clone(), run.problem.clone(), outcome));
+                false
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+        });
+        for (dir, made, problem, outcome) in finished {
+            if let Ok(book) = Book::read(&dir) {
+                let _ = book.log_code_run(&made, &problem, &outcome);
+            }
+            if self.open.as_ref().is_some_and(|o| o.book.dir() == dir) {
+                events.extend(self.coding_event(&made));
+                events.push(Event::StudyCodeRan { made, problem, outcome });
+            }
+        }
+        events
+    }
+
+    fn make(&mut self, kind: proton_study::studio::Make, mut options: proton_study::studio::Options) -> Vec<Event> {
+        if kind == proton_study::studio::Make::Coding {
+            if proton_lab::sandbox::available() == proton_lab::sandbox::Kind::None {
+                return vec![notice("Proton runs code only in a sandbox, and this machine has none: on Linux, install bubblewrap.".into(), NoticeLevel::Warn)];
+            }
+            let here = code::Tools::here().languages();
+            if here.is_empty() {
+                return vec![notice("No compiler or interpreter Proton can run was found: install Python, a C compiler, Java, Node or Rust.".into(), NoticeLevel::Warn)];
+            }
+            if let Some(wanted) = proton_study::code::Language::from_key(&options.code) {
+                if !here.contains(&wanted) {
+                    return vec![notice(format!("{} cannot be run here: its compiler was not found.", wanted.name()), NoticeLevel::Warn)];
+                }
+            }
+            options.languages = here.iter().map(|l| l.key().to_string()).collect();
+        }
         if kind == proton_study::studio::Make::Table && options.columns.iter().all(|c| c.trim().is_empty()) {
             return vec![notice("Name the table's columns.".into(), NoticeLevel::Warn)];
         }
@@ -1726,12 +1862,22 @@ impl Study {
         if id.starts_with('G') {
             return self.show_graphic(id);
         }
+        if id.starts_with('K') {
+            let mut events = self.show_made_generic(id);
+            events.extend(self.coding_event(id));
+            return events;
+        }
         if id.starts_with('D') {
             return match self.deck_event(id) {
                 Some(event) => vec![event],
                 None => vec![notice(format!("{id}: nothing made has that id"), NoticeLevel::Warn)],
             };
         }
+        self.show_made_generic(id)
+    }
+
+    /// Something made, whole, its citations resolved.
+    fn show_made_generic(&mut self, id: &str) -> Vec<Event> {
         let Some(open) = &self.open else { return Vec::new() };
         let Some((made, body)) = open.book.made_one(id) else {
             return vec![notice(format!("{id}: nothing made has that id"), NoticeLevel::Warn)];
@@ -1749,6 +1895,7 @@ impl Study {
             StudyMadeBody::Slides { slides, .. } => slides.iter().flat_map(|s| s.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Slide { slide } => slide.cites.iter().map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Graphic { blocks, .. } => blocks.iter().flat_map(|b| b.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
+            StudyMadeBody::Coding { problems, .. } => problems.iter().map(|p| format!("{}\n{}", p.prompt, p.cites.iter().map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n"),
             // What the web gave cites the web, by number, not the notebook;
             // a guide and labels are shown with their sources.
             StudyMadeBody::Found { .. } | StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } | StudyMadeBody::Pages { .. } => String::new(),

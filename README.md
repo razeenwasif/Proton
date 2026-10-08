@@ -194,8 +194,12 @@ topic; and audio overviews — a deep dive, a brief, a critique, a debate or a
 lecture — spoken by Fish Audio in voices you choose from its library, your own
 clones, or one by its link (with `FISH_API_KEY` exported in your shell, which
 Proton reads and never keeps), with a transcript that follows along; slide decks with speaker notes, revised a slide at a time,
-presented, and written out for PowerPoint; and infographics and mind maps saved
-as pictures. Your folders are named in your own settings,
+presented, and written out for PowerPoint; infographics and mind maps saved
+as pictures; and coding practice — problems in Python, C, C++, Java,
+JavaScript or Rust, whichever this machine has the compilers for, each solved in
+an editor beside it and built and run against its tests, sandboxed, with hints
+and a solution when you ask; every problem's own solution is run against its
+tests before you see it. Your folders are named in your own settings,
 `{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,

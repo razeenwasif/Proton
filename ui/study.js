@@ -13,6 +13,7 @@ import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
 import { createAudio } from "./study-audio.js";
 import { createCards } from "./study-cards.js";
+import { createCoding } from "./study-code.js";
 import { graphicHtml, mapSvg, pictureOf } from "./study-graphic.js";
 import { answerHtml, createChat } from "./study-chat.js";
 import { createPicker, KIND_ICON, size } from "./study-kb.js";
@@ -40,7 +41,7 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
  *   | {kind: "artifact", source: SourceEvent, id: string, seq: number, file: string} | {kind: "voices"}
  *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}
  *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent} | {kind: "audio"} | {kind: "slides"}
- *   | {kind: "graphic", graphic: import("./study-graphic.js").GraphicEvent}} Shown */
+ *   | {kind: "graphic", graphic: import("./study-graphic.js").GraphicEvent} | {kind: "coding"}} Shown */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
  *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
 
@@ -114,6 +115,7 @@ export function createStudy(host) {
       if (shown.kind === "audio") return sounds.citations();
       if (shown.kind === "slides") return decks.citations();
       if (shown.kind === "graphic") return shown.graphic.citations;
+      if (shown.kind === "coding") return coder.citations();
       if (shown.kind === "source") return shown.source.citations ?? [];
       return shown.kind === "deck" || shown.kind === "review" ? cards.citations(shown.kind) : [];
     },
@@ -132,6 +134,7 @@ export function createStudy(host) {
   const quizzes = createQuiz({ dispatch: host.dispatch, readOnly: () => readOnly(), ask: askTutor });
   const sounds = createAudio({ dispatch: host.dispatch, readOnly: () => readOnly() });
   const decks = createSlides({ dispatch: host.dispatch, readOnly: () => readOnly() });
+  const coder = createCoding({ dispatch: host.dispatch, readOnly: () => readOnly(), stage: els.stage });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web" | "artifacts", removing: string | null,
@@ -574,6 +577,8 @@ export function createStudy(host) {
     // A form being typed into is left alone while its notebook is redrawn.
     if ((state.editing || state.pasting) && els.stage.querySelector("form")) return;
     const shown = state.shown;
+    // Code being written is saved before something else is shown.
+    if (shown.kind !== "coding") coder.flush();
     if (shown.kind === "chat" && !state.editing && !state.pasting) {
       const nbox = /** @type {NotebookEvent} */ (nb);
       const held = nbox.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nbox.readOnly)} has this notebook open: it is read only here.</div>` : "";
@@ -647,6 +652,10 @@ export function createStudy(host) {
       els.stage.innerHTML = graphicHtml(shown.graphic, readOnly());
       return;
     }
+    if (shown.kind === "coding") {
+      coder.render();
+      return;
+    }
     if (shown.kind === "progress") {
       const nbox = /** @type {NotebookEvent} */ (nb);
       const held = nbox.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nbox.readOnly)} has this notebook open: it is read only here.</div>` : "";
@@ -695,6 +704,7 @@ export function createStudy(host) {
     if (els.stage.contains(t) && state.shown.kind === "learning" && overviewClick(t, state.shown.learning)) return;
     if (els.stage.contains(t) && (state.shown.kind === "audio" || state.shown.kind === "voices") && sounds.click(t, els.stage, () => { els.stage.innerHTML = ""; renderStage(); })) return;
     if (els.stage.contains(t) && state.shown.kind === "slides" && decks.click(t, () => renderStage())) return;
+    if (els.stage.contains(t) && state.shown.kind === "coding" && coder.click(t)) return;
     const picture = /** @type {HTMLElement | null} */ (t.closest("[data-study-picture]"));
     if (picture && els.stage.contains(picture)) {
       const shown = state.shown;
@@ -1005,12 +1015,14 @@ export function createStudy(host) {
   // What is written in a sitting is saved as it is written.
   ws.addEventListener("input", (e) => {
     if (state.shown.kind === "quiz") quizzes.input(/** @type {HTMLElement} */ (e.target));
+    if (state.shown.kind === "coding") coder.typed(/** @type {HTMLElement} */ (e.target));
   });
 
   ws.addEventListener("keydown", (e) => {
     if (state.shown.kind === "review" && cards.key(e, () => renderStage())) return;
     if (state.shown.kind === "slides" && decks.key(e, () => renderStage())) return;
     if (state.shown.kind === "quiz" && quizzes.key(e, () => renderStage())) return;
+    if (state.shown.kind === "coding" && coder.key(e)) return;
     chat.key(e);
   });
 
@@ -1156,6 +1168,13 @@ export function createStudy(host) {
 
   /** Something made, opened in the middle. @param {MadeEvent} event */
   function made(event) {
+    // Coding problems open in an editor of their own.
+    if (event.body.shape === "coding") {
+      coder.open(/** @type {import("./study-code.js").CodingOpen} */ (event));
+      state.shown = { kind: "coding" };
+      els.stage.innerHTML = "";
+      return render();
+    }
     if (state.shown.kind !== "made" || state.shown.made.made.id !== event.made.id) state.unpicked = new Set();
     state.shown = { kind: "made", made: event };
     els.stage.innerHTML = "";
@@ -1230,6 +1249,17 @@ export function createStudy(host) {
       els.stage.innerHTML = "";
       render();
     }
+  }
+
+  /** What has been written for a set of coding problems, and what is
+   *  running. @param {import("./study-code.js").CodingEvent} event */
+  function codingEvent(event) {
+    if (coder.coding(event) && state.shown.kind === "coding") renderStage();
+  }
+
+  /** What running a coding problem came to. @param {import("./study-code.js").RanEvent} event */
+  function codeRanEvent(event) {
+    if (coder.ran(event) && state.shown.kind === "coding") renderStage();
   }
 
   /** An infographic, opened. @param {import("./study-graphic.js").GraphicEvent} event */
@@ -1317,6 +1347,7 @@ export function createStudy(host) {
     quizzes.clear();
     sounds.clear();
     decks.clear();
+    coder.clear();
     picker.close();
     render();
   }
@@ -1326,5 +1357,6 @@ export function createStudy(host) {
   return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
     deck: deckEvent, reviewing: reviewingEvent, quiz: quizEvent, progress: progressEvent, learning: learningEvent,
     audio: audioEvent, voiceState: voiceStateEvent, voices: voicesEvent, voiceSample: sampleEvent, slides: slidesEvent, graphic: graphicEvent,
+    coding: codingEvent, codeRan: codeRanEvent,
     kb: picker.kb, kbFolder: picker.folder, kbResults: picker.results, kbAll: picker.all, pick: picker.open, artifacts: artifactsEvent };
 }

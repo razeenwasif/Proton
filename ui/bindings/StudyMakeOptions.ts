@@ -52,6 +52,11 @@ format: StudyAudioFormat | null,
  */
 language: string, 
 /**
+ * The programming language coding problems are set in: `python`,
+ * `c`… — empty for the one the course uses.
+ */
+code: string, 
+/**
  * A deck of slides, and a slide of it, to revise as `ask` says.
  */
 slides: string | null, slide: string | null, 

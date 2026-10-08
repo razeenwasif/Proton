@@ -197,7 +197,50 @@ export function createStudyPreview(deliver) {
       { id: "A001", kind: "audio", title: "Search, talked through", made: now - 300, by: "Claude Code · claude-opus-5-5", task: "J0007" },
       { id: "A002", kind: "audio", title: "Heuristics, a debate", made: now - 200, by: "Codex · gpt-6.1-sol", task: "J0008" },
       { id: "P001", kind: "slides", title: "Search, in ten slides", made: now - 150, by: "Claude Code · claude-opus-5-5", task: "J0009" },
-      { id: "G001", kind: "infographic", title: "Search, at a glance", made: now - 100, by: "Claude Code · claude-opus-5-5", task: "J0010" }],
+      { id: "G001", kind: "infographic", title: "Search, at a glance", made: now - 100, by: "Claude Code · claude-opus-5-5", task: "J0010" },
+      { id: "K001", kind: "coding", title: "Search, in code", made: now - 50, by: "Claude Code · claude-opus-5-5", task: "J0011" }],
+    /** The languages this machine could run, as the core would find them. */
+    languages: ["python", "c", "cpp", "java", "javascript", "rust"],
+  };
+  /** A set of coding problems, and a stand-in for running them: the real
+   *  runs are built and run in the Lab's sandbox, in the core. */
+  const coding = {
+    problems: [
+      { id: "p1", title: "Breadth-first order", language: "python", difficulty: "easy", topic: "Uninformed search", cites: ["S02 § Search › Uniform cost L40-58"], checked: true,
+        prompt: "Write `bfs_order(graph, start)`: the nodes breadth-first search visits from `start`, in the order it visits them [[S02 § Search › Uniform cost L40-58]].\n\n" +
+          "`graph` maps each node to its neighbours, in the order they are tried.\n\n```python\nbfs_order({'A': ['B', 'C'], 'B': ['D'], 'C': [], 'D': []}, 'A')  # ['A', 'B', 'C', 'D']\n```\n\nEach node is visited once, even when two paths reach it.",
+        starter: "def bfs_order(graph, start):\n    # TODO: visit the nodes layer by layer\n    return []\n",
+        solution: "from collections import deque\n\ndef bfs_order(graph, start):\n    seen, order, frontier = {start}, [], deque([start])\n    while frontier:\n        node = frontier.popleft()\n        order.append(node)\n        for next_node in graph.get(node, []):\n            if next_node not in seen:\n                seen.add(next_node)\n                frontier.append(next_node)\n    return order\n",
+        tests: "from solution import *\nfrom proton_check import check\n\ncheck(\"one node\", lambda: bfs_order({'A': []}, 'A'), ['A'])\ncheck(\"layer by layer\", lambda: bfs_order({'A': ['B', 'C'], 'B': ['D'], 'C': [], 'D': []}, 'A'), ['A', 'B', 'C', 'D'])\ncheck(\"a node reached twice is visited once\", lambda: bfs_order({'A': ['B', 'C'], 'B': ['C'], 'C': []}, 'A'), ['A', 'B', 'C'])\n",
+        hints: ["A queue gives the order: first in, first out.", "Mark a node seen when it joins the queue, not when it leaves it."],
+        explanation: "Each node joins the queue once, when first seen, so the order is by depth: $O(V + E)$ [[S02 § Search › Uniform cost L40-58]]." },
+      { id: "p2", title: "Is the heuristic admissible?", language: "c", difficulty: "medium", topic: "Heuristics", cites: ["S01 p. 3"], checked: true,
+        prompt: "Write `int admissible(const int *h, const int *cost, int n)`: 1 if $h(i) \\le h^*(i)$ for every one of the `n` states — the heuristic never overestimates the true cost — and 0 if not [[S01 p. 3]].",
+        starter: "int admissible(const int *h, const int *cost, int n) {\n    (void)h; (void)cost; (void)n;\n    return 0;\n}\n",
+        solution: "int admissible(const int *h, const int *cost, int n) {\n    for (int i = 0; i < n; i++) {\n        if (h[i] > cost[i]) return 0;\n    }\n    return 1;\n}\n",
+        tests: "#include \"proton_check.h\"\n#include \"solution.c\"\n\nint main(void) {\n    int h[] = {0, 2, 3}, cost[] = {0, 2, 5}, over[] = {0, 1, 5};\n    CHECK_INT(\"never over\", admissible(h, cost, 3), 1);\n    CHECK_INT(\"over once\", admissible(h, over, 3), 0);\n    CHECK_INT(\"no states\", admissible(h, cost, 0), 1);\n    return 0;\n}\n",
+        hints: ["One state that overestimates is enough to say no."], explanation: "One pass over the states: $O(n)$." },
+    ],
+    /** @type {Record<string, string>} */
+    code: {},
+    /** @type {Record<string, {passed: number, of: number, solved: boolean}>} */
+    best: {},
+    /** @type {Set<string>} */
+    running: new Set(),
+  };
+  const codingEvent = () => ({ type: "studyCoding", made: "K001", running: [...coding.running],
+    saved: coding.problems.map((p) => ({ problem: p.id, code: coding.code[p.id] ?? null, passed: coding.best[p.id]?.passed ?? 0, of: coding.best[p.id]?.of ?? 0, solved: coding.best[p.id]?.solved ?? false })) });
+  /** What a run would come to: the right idea passes, the starter fails, a C
+   *  file with no return does not build. @param {string} id @param {string} code */
+  const ranOutcome = (id, code) => {
+    const p = coding.problems.find((x) => x.id === id);
+    const names = p?.id === "p1" ? ["one node", "layer by layer", "a node reached twice is visited once"] : ["never over", "over once", "no states"];
+    if (p?.language === "c" && !code.includes("return")) {
+      return { built: false, compiler: "solution.c:3:1: error: non-void function does not return a value [-Werror,-Wreturn-type]\n}\n^", results: [], output: "", errors: "", stopped: null, seconds: 0.4 };
+    }
+    const right = p?.id === "p1" ? /popleft|pop\(0\)/.test(code) : />\s*cost|cost\[i\]\s*</.test(code);
+    const results = names.map((name, i) => ({ name, passed: right || (p?.id === "p1" ? false : i === 1), message: right || (p?.id !== "p1" && i === 1) ? "" : p?.id === "p1" ? `expected ${i ? "['A', 'B', 'C', 'D']" : "['A']"}, got []` : "expected 1, got 0" }));
+    return { built: true, compiler: "", results, output: code.includes("print(") ? "visiting A\n" : "", errors: "", stopped: null, seconds: p?.language === "c" ? 0.62 : 0.08 };
   };
   /** A quiz, and a stand-in for its marking: the real one is by rule, or by a model of another family, in the core. */
   const question = (/** @type {string} */ id, /** @type {string} */ kind, /** @type {Record<string, any>} */ more) => ({ id, kind, prompt: "", options: [], correct: [], rationales: [], blanks: [],
@@ -324,6 +367,7 @@ export function createStudyPreview(deliver) {
   const cites = state.chat.turns[0].citations;
   const BODIES = /** @type {Record<string, any>} */ ({
     R001: { shape: "prose", markdown: "# COMP3670 — Search, a study guide\n\n## Uninformed search\n\nBreadth-first search is complete and, with unit costs, optimal [[S02 § Search › Uniform cost L40-58]].\n\n## Informed search\n\nA* orders the frontier by $f(n) = g(n) + h(n)$ [[S01 p. 3]].\n\n## Practice questions\n\n1. Why is uniform-cost search optimal? [[S01 p. 1]]" },
+    K001: { shape: "coding", title: "Search, in code", problems: coding.problems },
     M001: { shape: "map", nodes: [
       { id: "1", parent: null, label: "Search", cites: [] },
       { id: "2", parent: "1", label: "Uninformed", cites: [] }, { id: "3", parent: "1", label: "Informed", cites: [] },
@@ -610,7 +654,26 @@ export function createStudyPreview(deliver) {
               map: [], cards: [], check: [question("k01", "blanks", { prompt: "A heuristic that never overestimates is ___.", blanks: [["admissible"]], explanation: "That is what admissible means." })] },
           ] }];
           const made = studio.made.find((m) => m.id === command.id);
+          if (made && command.id === "K001") return [{ type: "studyMadeOpen", made, body: BODIES.K001, citations: cites }, codingEvent()];
           return made ? [{ type: "studyMadeOpen", made, body: BODIES[command.id], citations: cites }] : [];
+        }
+        case "studyCodeSave":
+          coding.code[command.problem] = command.code;
+          return [];
+        case "studyCodeRun": {
+          coding.code[command.problem] = command.code;
+          coding.running.add(command.problem);
+          setTimeout(() => {
+            coding.running.delete(command.problem);
+            const outcome = ranOutcome(command.problem, command.code);
+            const passed = outcome.results.filter((r) => r.passed).length;
+            const best = coding.best[command.problem];
+            const solved = outcome.built && passed === outcome.results.length && passed > 0;
+            if (!best || solved || passed > best.passed) coding.best[command.problem] = { passed, of: outcome.results.length, solved: solved || !!best?.solved };
+            deliver(codingEvent());
+            deliver({ type: "studyCodeRan", made: "K001", problem: command.problem, outcome });
+          }, 900);
+          return [codingEvent()];
         }
         case "studyReview": {
           const all = deck.cards.map((r) => r.card.id);

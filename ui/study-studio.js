@@ -11,6 +11,7 @@ import { escapeHtml as esc, icon } from "./html.js";
 import { markdown } from "./markdown.js";
 import { FORMATS } from "./study-audio.js";
 import { answerHtml } from "./study-chat.js";
+import { LANGUAGES } from "./study-code.js";
 
 /** @typedef {import("./bindings/StudyMakeKind").StudyMakeKind} Kind */
 /** @typedef {import("./bindings/StudyJob").StudyJob} Job */
@@ -18,7 +19,7 @@ import { answerHtml } from "./study-chat.js";
 /** @typedef {import("./bindings/StudyMadeBody").StudyMadeBody} Body */
 /** @typedef {import("./bindings/StudyCitation").StudyCitation} Citation */
 /** @typedef {import("./bindings/StudyMapNode").StudyMapNode} Node */
-/** @typedef {{jobs: Job[], made: Made[]}} StudioEvent */
+/** @typedef {{jobs: Job[], made: Made[], languages: string[]}} StudioEvent */
 /** @typedef {{made: Made, body: Body, citations: Citation[]}} MadeEvent */
 /** @typedef {{id: string, title: string, engine: string, model: string, state: string, why: string | null, instructions: string, prompt: string}} TaskEvent */
 
@@ -28,6 +29,7 @@ export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["flashcards", "Flashcards", "cards", "Cards to learn by, each brought back as it is about to be forgotten"],
   ["quiz", "Quiz", "check", "Questions of every kind, each marked as you answer it"],
   ["practice", "Practice problems", "bulb", "Problems to work through, with hints and worked solutions"],
+  ["coding", "Coding practice", "code", "Problems to solve in code here, each run against its tests as you go"],
   ["overview", "Learning overview", "layers", "The course topic by topic: taught, mapped, carded and checked"],
   ["audio", "Audio overview", "audio", "Two hosts talking the sources through, spoken by Fish Audio"],
   ["slides", "Slide deck", "desktop", "A lecture's slides, with speaker notes, for PowerPoint"],
@@ -53,9 +55,11 @@ const AMOUNTS = /** @type {Record<string, [string, string][]>} */ ({
   slides: [["fewer", "Fewer — about 6"], ["standard", "About 10"], ["more", "More — about 16"]],
   quiz: [["fewer", "Fewer — about 5"], ["standard", "About 10"], ["more", "More — about 20"]],
   practice: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
+  coding: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
 });
 
-const STATES = /** @type {Record<string, string>} */ ({ waiting: "Waiting its turn", running: "Being made", repairing: "Being mended", done: "Made", failed: "Not made" });
+const STATES = /** @type {Record<string, string>} */ ({ waiting: "Waiting its turn", running: "Being made", repairing: "Being mended",
+  checking: "Its solutions being built and run against their tests", done: "Made", failed: "Not made" });
 
 /** A time, said as long ago as it was. @param {number} s */
 function ago(s) {
@@ -140,8 +144,8 @@ export function madeHtml(e, readOnly, found = { have: new Map(), unpicked: new S
     // A deck opens as a deck (study-cards.js); this is only its cards, read.
     content = `<ol class="st-cards" data-turn="made">${body.cards.map((c) => `<li class="st-card-row"><div class="st-card-sides">` +
       `<div class="st-card-front md">${answerHtml(c.front, citations)}</div><div class="st-card-back md">${answerHtml(c.back, citations)}</div></div></li>`).join("")}</ol>`;
-  } else if (body.shape === "slides" || body.shape === "slide" || body.shape === "graphic") {
-    // Each opens as its own (study-slides.js, study-graphic.js).
+  } else if (body.shape === "slides" || body.shape === "slide" || body.shape === "graphic" || body.shape === "coding") {
+    // Each opens as its own (study-slides.js, study-graphic.js, study-code.js).
     content = "";
   } else if (body.shape === "audio") {
     // An audio overview opens as one (study-audio.js); this is only its words.
@@ -202,12 +206,29 @@ export function createStudio(host) {
           ? (host.pastPapers().length
             ? `<select name="source" aria-label="Which past paper">${host.pastPapers().map((p) => `<option value="${esc(p.id)}">${esc(p.id)} · ${esc(p.title)}</option>`).join("")}</select>`
             : `<p class="st-faint">No source is a past paper yet. Add one, or mark one as a past paper in Sources.</p>`)
+        : kind === "coding"
+          ? codingOptions()
         : kind in AMOUNTS
           ? `<div class="st-card-form-row"><select name="amount" aria-label="How many">${AMOUNTS[kind].map(([value, said]) => `<option value="${value}"${value === "standard" ? " selected" : ""}>${said}</option>`).join("")}</select>` +
             `<select name="level" aria-label="How hard"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></div>${focus}`
           : focus;
     return `<form class="st-make-form" data-study-make-form="${kind}" novalidate>${field}
         <div class="rs-actions"><button type="button" class="cc-quiet" data-study-make-cancel>Cancel</button><button type="submit" class="cc-primary">Make</button></div></form>`;
+  }
+
+  /** What coding problems are asked in: a language this machine can build
+   *  and run, or the one the course uses; how many, and how hard. */
+  function codingOptions() {
+    const here = state.studio?.languages ?? [];
+    const named = LANGUAGES.filter(([key]) => here.includes(key));
+    const which = here.length
+      ? `<select name="code" aria-label="In what language"><option value="">The language the course uses</option>` +
+        `${named.map(([key, name]) => `<option value="${key}">${esc(name)}</option>`).join("")}</select>`
+      : `<span class="st-faint">Looking for the compilers this machine has…</span>`;
+    return `<div class="st-card-form-row">${which}<select name="amount" aria-label="How many">${AMOUNTS.coding.map(([value, said]) => `<option value="${value}"${value === "standard" ? " selected" : ""}>${said}</option>`).join("")}</select>` +
+      `<select name="level" aria-label="How hard"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></div>` +
+      `<input name="focus" placeholder="A topic to centre them on — or leave it to cover everything ticked" autocomplete="off">` +
+      `<p class="st-faint">Each is checked before you see it: its solution built and run against its tests, here, in a sandbox.</p>`;
   }
 
   function render() {
@@ -296,6 +317,7 @@ export function createStudio(host) {
       count: null,
       format: data.get("format") ? String(data.get("format")) : null,
       language: String(data.get("language") ?? "").trim(),
+      code: String(data.get("code") ?? ""),
       slides: null,
       slide: null,
     };

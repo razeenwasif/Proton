@@ -274,3 +274,60 @@ fn a_deck_is_made_and_a_slide_revised_and_an_infographic_made_from_the_sources()
     assert_eq!(job.state, "done", "{:?}", job.why);
     session.shutdown();
 }
+
+#[test]
+#[ignore = "asks a real engine for coding problems, which costs a little of its plan"]
+fn coding_problems_are_made_from_the_sources_checked_and_a_starter_run_against_its_tests() {
+    let root = std::env::temp_dir().join(format!("proton-coding-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let kb = root.join("kb/Notes");
+    std::fs::create_dir_all(&kb).unwrap();
+    std::fs::write(
+        kb.join("search.md"),
+        "# Search\n\nBreadth-first search keeps its frontier in a FIFO queue and marks a node seen when it joins the queue, so each \
+         node is visited once, in order of depth: O(V + E). Uniform-cost search keeps a min-heap keyed by path cost g(n) and is \
+         optimal when every step costs at least some epsilon > 0. A heuristic h is admissible when h(n) <= h*(n) for every n.\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("Notebooks")).unwrap();
+    let settings = root.join("settings.json");
+    std::fs::write(&settings, serde_json::json!({"study": {"roots": [kb], "folder": root.join("Notebooks")}}).to_string()).unwrap();
+    let mut session = Session::new(&root).with_person_settings(settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    until(&mut session, Duration::from_secs(30), |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(())).expect("the knowledge base");
+    session.apply(Command::StudyNew { title: "Coding, live".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Notes/search.md".into()] });
+    until(&mut session, Duration::from_secs(30), |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.iter().any(|s| s.status == SourceStatus::Ready) => Some(()),
+        _ => None,
+    })
+    .expect("the source read");
+    let engine = std::env::var("PROTON_QUIZ_SETTER").unwrap_or_else(|_| "claude".into());
+    session.apply(Command::StudyTutor { settings: TutorSettings { engine, ..TutorSettings::default() } });
+    // `PROTON_CODE_LANGUAGE=c` asks for C; Python by default.
+    let language = std::env::var("PROTON_CODE_LANGUAGE").unwrap_or_else(|_| "python".into());
+    session.apply(Command::StudyMake { kind: Make::Coding, options: Options { amount: Amount::Fewer, code: language, ..Options::default() } });
+    let job = until(&mut session, Duration::from_secs(16 * 60), |e| match e {
+        Event::StudyStudio { jobs, .. } => jobs.iter().find(|j| j.kind == Make::Coding && matches!(j.state.as_str(), "done" | "failed")).cloned(),
+        _ => None,
+    })
+    .expect("made within sixteen minutes");
+    let set = job.made.unwrap_or_else(|| panic!("no problems: {:?}", job.why));
+    let events = session.apply(Command::StudyShowMade { id: set.clone() });
+    let Some(Event::StudyMadeOpen { body: proton_study::studio::StudyMadeBody::Coding { problems, .. }, .. }) = events.first() else { panic!("{set} did not open") };
+    for p in problems {
+        println!("  [{} {}] {} — checked {}", p.language, p.difficulty, p.title, p.checked);
+    }
+    assert!(problems.iter().all(|p| p.checked), "every problem kept was checked");
+    // The starter is run as a student's first try would be: it builds, and fails.
+    let first = problems[0].clone();
+    session.apply(Command::StudyCodeRun { made: set.clone(), problem: first.id.clone(), code: first.starter.clone() });
+    let outcome = until(&mut session, Duration::from_secs(120), |e| match e {
+        Event::StudyCodeRan { outcome, .. } => Some(outcome.clone()),
+        _ => None,
+    })
+    .expect("run within two minutes");
+    println!("  starter: built {}, {} of {} passed", outcome.built, outcome.passing(), outcome.results.len());
+    assert!(outcome.built && !outcome.passed());
+    session.shutdown();
+}

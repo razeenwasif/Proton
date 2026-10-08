@@ -54,7 +54,7 @@ pub struct StudyJob {
     pub id: String,
     pub kind: Make,
     pub title: String,
-    /// `waiting`, `running`, `repairing`, `done` or `failed`.
+    /// `waiting`, `running`, `repairing`, `checking`, `done` or `failed`.
     pub state: String,
     pub why: Option<String>,
     /// What it made, once it has: `R003`.
@@ -103,6 +103,10 @@ struct Running {
     repaired: bool,
     /// Where this turn's rows begin.
     from: usize,
+    /// Coding problems being built and run on a thread of their own, before
+    /// they are kept: what was made, each problem marked checked or not, and
+    /// what failed.
+    checking: Option<std::sync::mpsc::Receiver<(StudyMadeBody, Vec<String>)>>,
 }
 
 /// The studio's calls.
@@ -281,11 +285,49 @@ impl Jobs {
         // Read what has answered.
         let mut ended: Vec<(usize, Result<String, String>)> = Vec::new();
         let mut repaired: Vec<(PathBuf, String)> = Vec::new();
+        let mut checking: Vec<(PathBuf, String)> = Vec::new();
         for (at, running) in self.running.iter_mut().enumerate() {
             let longest = if running.asked.make.web() { LONGEST_WEB } else { LONGEST };
             if running.since.elapsed() > longest {
                 running.conversation.stop();
                 ended.push((at, Err("It ran out of time.".into())));
+                continue;
+            }
+            // Coding problems built and run: kept, or sent back once to be
+            // mended, or kept without those that still fail.
+            if let Some(checked) = &running.checking {
+                let (body, failed) = match checked.try_recv() {
+                    Ok(answer) => answer,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => continue,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        running.checking = None;
+                        ended.push((at, Err("Checking its problems stopped.".into())));
+                        continue;
+                    }
+                };
+                running.checking = None;
+                changed = true;
+                if failed.is_empty() {
+                    ended.push((at, keep(&running.asked, Read::Made(body), running.conversation.as_ref())));
+                } else if !running.repaired {
+                    running.repaired = true;
+                    running.from = running.conversation.fold().items().len();
+                    let mend = format!(
+                        "Proton built and ran them. These need mending: {}. Mend those problems — keep the rest as they were — and \
+                         answer again with the JSON alone, as the schema says.",
+                        failed.join("; ")
+                    );
+                    match running.conversation.send(&mend, &[]) {
+                        Ok(()) => repaired.push((running.asked.dir.clone(), running.asked.id.clone())),
+                        Err(why) => ended.push((at, Err(why))),
+                    }
+                } else if let StudyMadeBody::Coding { title, problems } = body {
+                    let kept: Vec<_> = problems.into_iter().filter(|p| p.checked).collect();
+                    match kept.is_empty() {
+                        true => ended.push((at, Err(format!("None of its problems passed its own tests: {}", failed.join("; "))))),
+                        false => ended.push((at, keep(&running.asked, Read::Made(StudyMadeBody::Coding { title, problems: kept }), running.conversation.as_ref()))),
+                    }
+                }
                 continue;
             }
             if !running.conversation.poll() {
@@ -303,6 +345,12 @@ impl Jobs {
                 None => studio::read(running.asked.make, &running.asked.options, &answer, structured).and_then(|body| novel(&running.asked, body, !running.repaired)).map(Read::Made),
             };
             match read {
+                // Built and run before they are kept, on a thread of their
+                // own: a build takes seconds.
+                Ok(Read::Made(body @ StudyMadeBody::Coding { .. })) => {
+                    running.checking = Some(check_coding(&running.asked, body));
+                    checking.push((running.asked.dir.clone(), running.asked.id.clone()));
+                }
                 Ok(read) => ended.push((at, keep(&running.asked, read, running.conversation.as_ref()))),
                 Err(why) if !running.repaired => {
                     running.repaired = true;
@@ -322,6 +370,9 @@ impl Jobs {
         }
         for (dir, id) in repaired {
             self.set(&dir, &id, "repairing", None, None);
+        }
+        for (dir, id) in checking {
+            self.set(&dir, &id, "checking", None, None);
         }
         // Remove from the end, so the places stay true.
         ended.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
@@ -386,7 +437,7 @@ fn start(asked: Asked, tutors: &mut dyn Tutors, roots: &[(String, PathBuf)], fai
     let mut conversation = tutors.start(asked.engine, book.snapshots(), Settings { model, mode: "default".into(), effort: None }, &how)?;
     record(&asked, json!({ "state": "running", "instructions": asking.instructions, "prompt": asking.prompt }));
     conversation.send(&asking.prompt, &asking.images)?;
-    Ok(Running { asked, conversation, since: Instant::now(), repaired: false, from: 0 })
+    Ok(Running { asked, conversation, since: Instant::now(), repaired: false, from: 0, checking: None })
 }
 
 /// The pictures of the pages a call is to read, drawn before it was asked.
@@ -452,6 +503,19 @@ fn asking(book: &Book, asked: &Asked, tutors: &mut dyn Tutors, roots: &[(String,
     }
     let mcp = vec![McpServer { name: "proton-notebook".into(), command, args, tools: TOOLS.iter().map(|t| t.to_string()).collect() }];
     Ok(Asking { instructions: studio::rules(false), prompt, mcp, images: Vec::new() })
+}
+
+/// Build and run coding problems on a thread of their own: what was made,
+/// each problem marked checked or not, and what failed, when it is done.
+fn check_coding(asked: &Asked, body: StudyMadeBody) -> std::sync::mpsc::Receiver<(StudyMadeBody, Vec<String>)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let dir = asked.dir.join(".notebook").join("code").join("check").join(&asked.id);
+    std::thread::spawn(move || {
+        let StudyMadeBody::Coding { title, mut problems } = body else { return };
+        let failed = super::code::check(&dir, &mut problems, super::code::Tools::here());
+        let _ = tx.send((StudyMadeBody::Coding { title, problems }, failed));
+    });
+    rx
 }
 
 /// A paper set like the past papers, held against them: a question that is
@@ -600,6 +664,7 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
         StudyMadeBody::Paper { title, .. }
         | StudyMadeBody::Slides { title, .. }
         | StudyMadeBody::Graphic { title, .. }
+        | StudyMadeBody::Coding { title, .. }
         | StudyMadeBody::Audio { title, .. }
         | StudyMadeBody::Found { title, .. }
             if !title.trim().is_empty() =>
