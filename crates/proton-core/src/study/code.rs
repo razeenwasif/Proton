@@ -13,12 +13,13 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use proton_lab::exec::{self, Limits};
 use proton_lab::sandbox::{self, Kind};
-use proton_study::code::{self, Language, StudyCodeOutcome, StudyCodingProblem};
+use proton_study::code::{self, Language, StudyCodeOutcome, StudyCodingProblem, StudyPythonUsed};
 
 /// How long a build may take.
 pub const BUILD: Duration = Duration::from_secs(90);
@@ -43,6 +44,15 @@ pub struct Tools {
 /// The tools, once they have been looked for.
 static TOOLS: OnceLock<Tools> = OnceLock::new();
 
+/// Counts each time what is known of this machine's compilers and Pythons
+/// changes, so the studio is told again.
+static FOUND: AtomicU64 = AtomicU64::new(0);
+
+/// How many times what the studio offers has been found anew.
+pub fn generation() -> u64 {
+    FOUND.load(Ordering::Relaxed)
+}
+
 impl Tools {
     /// Found once, on the login shell's PATH and this process's: an app
     /// opened from the Dock has neither conda's Python nor nvm's Node on
@@ -53,13 +63,21 @@ impl Tools {
             let mut found = HashMap::new();
             for language in code::LANGUAGES {
                 for name in language.tools() {
-                    if let Some(tool) = locate(name) {
+                    if let Some(tool) = search(name).and_then(|path| describe(name, path)) {
                         found.insert(*name, tool);
                     }
                 }
             }
+            FOUND.fetch_add(1, Ordering::Relaxed);
             Tools { found }
         })
+    }
+
+    /// The same tools, with this Python for Python's problems.
+    pub fn with_python(&self, python: Tool) -> Tools {
+        let mut found = self.found.clone();
+        found.insert("python3", python);
+        Tools { found }
     }
 
     /// The tools if they have been found already, without waiting.
@@ -77,10 +95,18 @@ impl Tools {
     }
 }
 
-/// Where a tool is: the first on the login shell's PATH or this process's,
-/// and what it needs to read.
-fn locate(name: &str) -> Option<Tool> {
-    let path = search(name)?;
+/// The tools a set of problems is run with: this machine's, with `python`
+/// for Python when it is one that is still there.
+pub fn tools_with(python: Option<&Path>) -> Tools {
+    let tools = Tools::here();
+    match python.filter(|p| p.is_file()).and_then(|p| describe("python3", p.to_path_buf())) {
+        Some(python) => tools.with_python(python),
+        None => tools.clone(),
+    }
+}
+
+/// A tool at `path`, known by `name`, and what it needs to read.
+fn describe(name: &str, path: PathBuf) -> Option<Tool> {
     let home = crate::folder::home();
     let inside = |p: &Path| home.as_deref().is_some_and(|h| sandbox::real(p).starts_with(sandbox::real(h)));
     match name {
@@ -111,6 +137,127 @@ fn locate(name: &str) -> Option<Tool> {
             Some(Tool { path, reads })
         }
     }
+}
+
+/* ── the Pythons problems can be run with ─────────────────────────── */
+
+/// A Python, and what it has.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FoundPython {
+    pub path: PathBuf,
+    /// Its installation: two paths with one prefix are one Python.
+    pub prefix: PathBuf,
+    pub version: String,
+    /// Which of the libraries problems might use it has, with versions.
+    pub libraries: Vec<String>,
+    /// Whether it is the one problems are run with unless another is chosen:
+    /// the first `python3` on the login shell's PATH.
+    pub default: bool,
+}
+
+impl FoundPython {
+    pub fn used(&self) -> StudyPythonUsed {
+        StudyPythonUsed { path: self.path.display().to_string(), version: self.version.clone(), libraries: self.libraries.clone() }
+    }
+}
+
+/// The Pythons found, once they have been looked for.
+static PYTHONS: Mutex<Option<Vec<FoundPython>>> = Mutex::new(None);
+
+/// What a Python says it is and has, asked outside the sandbox with a few
+/// seconds to answer — or `None`, for what is not a Python that runs.
+pub fn probe(path: &Path) -> Option<FoundPython> {
+    let dir = std::env::temp_dir();
+    let home = crate::folder::home().unwrap_or_else(|| PathBuf::from("/nonexistent"));
+    let limits = Limits {
+        sandbox: Kind::None,
+        reads: Vec::new(),
+        home: home.clone(),
+        env: vec![("PATH".into(), "/usr/bin:/bin".into()), ("HOME".into(), home.display().to_string()), ("LANG".into(), "en_US.UTF-8".into())],
+        wall: Duration::from_secs(15),
+    };
+    let args = ["-s".to_string(), "-E".to_string(), "-c".to_string(), code::probe_script()];
+    let ran = exec::run(&dir, path, &args, &limits).ok().filter(|ran| ran.ok())?;
+    let said: serde_json::Value = serde_json::from_str(ran.stdout.lines().last()?).ok()?;
+    let libraries = said["libraries"].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    Some(FoundPython { path: path.to_path_buf(), prefix: PathBuf::from(said["prefix"].as_str()?), version: said["version"].as_str()?.to_string(), libraries, default: false })
+}
+
+/// Where Pythons are, as someone would look: the `python3` on the login
+/// shell's PATH first, then every environment conda knows of, Jupyter's
+/// kernels and pyenv's versions. Apple's own, which offers to install the
+/// developer tools rather than answer, and environments in temporary
+/// folders are passed over.
+fn candidates() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = search("python3").into_iter().collect();
+    let home = crate::folder::home();
+    if let Some(home) = &home {
+        let conda = std::fs::read_to_string(home.join(".conda/environments.txt")).unwrap_or_default();
+        out.extend(conda.lines().map(str::trim).filter(|l| !l.is_empty()).map(|prefix| Path::new(prefix).join("bin/python")));
+    }
+    out.extend(crate::data::kernel_pythons());
+    if let Some(home) = &home {
+        let mut pyenv: Vec<PathBuf> = std::fs::read_dir(home.join(".pyenv/versions")).into_iter().flatten().flatten().map(|e| e.path().join("bin/python")).collect();
+        pyenv.sort();
+        out.extend(pyenv);
+    }
+    let temporary = [std::env::temp_dir(), PathBuf::from("/tmp"), PathBuf::from("/private/tmp"), PathBuf::from("/private/var/folders"), PathBuf::from("/var/folders")];
+    out.retain(|p| p.is_file() && !p.starts_with("/usr/bin") && !temporary.iter().any(|t| p.starts_with(t)));
+    let mut seen = Vec::new();
+    out.retain(|p| {
+        let new = !seen.contains(p);
+        seen.push(p.clone());
+        new
+    });
+    out
+}
+
+/// Look for every Python, and `also` — the one chosen, wherever it is —
+/// asking each what it has. It blocks, a second or so, so the Study does it
+/// on a thread; what it finds is [`pythons`].
+pub fn look_for_pythons(also: Option<PathBuf>) {
+    let mut paths = candidates();
+    if let Some(also) = also.filter(|p| !paths.contains(p)) {
+        paths.push(also);
+    }
+    let default = search("python3");
+    let mut found: Vec<FoundPython> = Vec::new();
+    for path in paths {
+        let Some(mut python) = probe(&path) else { continue };
+        python.default = Some(&path) == default.as_ref();
+        if !found.iter().any(|f| f.prefix == python.prefix) {
+            found.push(python);
+        }
+    }
+    *PYTHONS.lock().unwrap_or_else(|e| e.into_inner()) = Some(found);
+    FOUND.fetch_add(1, Ordering::Relaxed);
+}
+
+/// The Python problems are run with unless another is chosen: the first
+/// `python3` on the login shell's PATH, then this process's.
+pub fn default_python() -> Option<PathBuf> {
+    search("python3")
+}
+
+/// The Pythons found, if they have been looked for, without waiting.
+pub fn pythons() -> Option<Vec<FoundPython>> {
+    PYTHONS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// What a Python has now, kept in place of what it had: asked again when
+/// problems are made, so a library installed since is offered.
+pub fn remember(python: &FoundPython) {
+    let mut pythons = PYTHONS.lock().unwrap_or_else(|e| e.into_inner());
+    let list = pythons.get_or_insert_with(Vec::new);
+    match list.iter_mut().find(|p| p.path == python.path || p.prefix == python.prefix) {
+        Some(known) => {
+            let default = known.default;
+            *known = FoundPython { default, path: known.path.clone(), ..python.clone() };
+        }
+        None => list.push(python.clone()),
+    }
+    drop(pythons);
+    FOUND.fetch_add(1, Ordering::Relaxed);
 }
 
 /// The first `name` on the login shell's PATH, then this process's.
@@ -329,6 +476,95 @@ mod tests {
         }
         let failed = check(&dir.join("check"), &mut problems, tools);
         assert!(failed.is_empty() && problems.iter().all(|p| p.checked), "{failed:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A virtual environment made from this machine's Python, with a stand-in
+    /// for PuLP in it: a package with a version that solves by starting a
+    /// solver program of its own on files in a temporary folder, as PuLP's
+    /// CBC is started.
+    fn venv_with_a_solver(at: &Path) -> Option<PathBuf> {
+        let base = default_python()?;
+        let _ = std::fs::remove_dir_all(at);
+        let made = std::process::Command::new(&base).args(["-m", "venv", "--without-pip"]).arg(at).output().ok()?;
+        if !made.status.success() {
+            return None;
+        }
+        let python = at.join("bin/python");
+        let purelib = asked(&python, &["-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"])?;
+        let site = PathBuf::from(purelib.trim());
+        let package = site.join("pulp");
+        std::fs::create_dir_all(package.join("solverdir")).ok()?;
+        std::fs::write(
+            package.join("__init__.py"),
+            "import os, subprocess, tempfile\n\ndef solve(x):\n    with tempfile.TemporaryDirectory() as tmp:\n        model, answer = os.path.join(tmp, 'model.lp'), os.path.join(tmp, 'answer.sol')\n        with open(model, 'w') as f:\n            f.write(str(x))\n        subprocess.run([os.path.join(os.path.dirname(__file__), 'solverdir', 'cbc'), model, answer], check=True)\n        with open(answer) as f:\n            return int(f.read())\n",
+        )
+        .ok()?;
+        let solver = package.join("solverdir/cbc");
+        std::fs::write(&solver, "#!/bin/sh\necho $(( $(cat \"$1\") * 2 )) > \"$2\"\n").ok()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&solver, std::fs::Permissions::from_mode(0o755)).ok()?;
+        }
+        let info = site.join("PuLP-2.9.0.dist-info");
+        std::fs::create_dir_all(&info).ok()?;
+        std::fs::write(info.join("METADATA"), "Metadata-Version: 2.1\nName: PuLP\nVersion: 2.9.0\n").ok()?;
+        Some(python)
+    }
+
+    #[test]
+    fn a_python_chosen_says_what_it_has_and_its_problems_run_with_its_libraries_and_their_solver() {
+        if sandbox::available() == Kind::None {
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("proton-code-venv-{}", std::process::id()));
+        let Some(python) = venv_with_a_solver(&base.join("env")) else { return };
+        let found = probe(&python).expect("the venv answers");
+        assert!(found.version.starts_with("3.") && found.libraries.contains(&"pulp 2.9.0".to_string()), "{found:?}");
+        assert!(found.prefix.ends_with("env"), "a venv is its own prefix: {found:?}");
+        assert!(probe(&base.join("nothing")).is_none(), "what is not there is not a Python");
+
+        let problem = problem(
+            Language::Python,
+            "import pulp\n\ndef double(x):\n    return 0\n",
+            "import pulp\n\ndef double(x):\n    return pulp.solve(x)\n",
+            "from solution import *\nfrom proton_check import check\ncheck(\"twenty-one\", lambda: double(21), 42)\n",
+        );
+        let chosen = tools_with(Some(&python));
+        let solved = run(&base.join("run"), &problem, &problem.solution, &chosen);
+        assert!(solved.passed(), "the solver ran in the sandbox: {solved:?}");
+        let mut problems = vec![problem.clone()];
+        assert!(check(&base.join("check"), &mut problems, &chosen).is_empty() && problems[0].checked);
+        // Without it, the library is not there.
+        if !probe(&default_python().unwrap()).is_some_and(|p| p.libraries.iter().any(|l| l.starts_with("pulp "))) {
+            let without = run(&base.join("run"), &problem, &problem.solution, Tools::here());
+            assert!(!without.passed() && without.errors.contains("No module named 'pulp'"), "{without:?}");
+        }
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_python_installed_in_the_home_folder_reads_its_own_libraries_in_the_sandbox() {
+        if sandbox::available() == Kind::None {
+            return;
+        }
+        look_for_pythons(None);
+        let home = crate::folder::home().unwrap();
+        let Some(python) = pythons().unwrap_or_default().into_iter().find(|p| p.prefix.starts_with(&home) && p.libraries.iter().any(|l| l.starts_with("numpy "))) else {
+            println!("no Python in the home folder with numpy");
+            return;
+        };
+        println!("{} {} {:?}", python.path.display(), python.version, python.libraries);
+        let problem = problem(
+            Language::Python,
+            "import numpy as np\n\ndef total(xs):\n    return 0\n",
+            "import numpy as np\n\ndef total(xs):\n    return int(np.sum(np.array(xs, dtype=np.int64)))\n",
+            "from solution import *\nfrom proton_check import check\ncheck(\"empty\", lambda: total([]), 0)\ncheck(\"three\", lambda: total([1, 2, 3]), 6)\n",
+        );
+        let dir = std::env::temp_dir().join(format!("proton-code-home-{}", std::process::id()));
+        let ran = run(&dir, &problem, &problem.solution, &tools_with(Some(&python.path)));
+        assert!(ran.passed(), "{ran:?}");
         let _ = std::fs::remove_dir_all(dir);
     }
 

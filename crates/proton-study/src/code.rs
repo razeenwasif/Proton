@@ -35,6 +35,75 @@ pub const LANGUAGES: [Language; 6] = [Language::Python, Language::C, Language::C
 /// The marker that begins each line a check prints.
 pub const MARK: &str = "PROTON-TEST";
 
+/// Python's libraries a course's problems might use, by the name each is
+/// imported by and the distribution its version is kept under: looked for
+/// in the Python problems run with, and offered to the model when found.
+pub const PYTHON_LIBRARIES: &[(&str, &str)] = &[
+    ("numpy", "numpy"),
+    ("scipy", "scipy"),
+    ("pandas", "pandas"),
+    ("sympy", "sympy"),
+    ("networkx", "networkx"),
+    ("pulp", "PuLP"),
+    ("cvxpy", "cvxpy"),
+    ("ortools", "ortools"),
+    ("pyomo", "pyomo"),
+    ("sklearn", "scikit-learn"),
+    ("statsmodels", "statsmodels"),
+    ("torch", "torch"),
+];
+
+/// What a Python is asked, to say what it is: one line of JSON with its
+/// prefix, its version and which of [`PYTHON_LIBRARIES`] it has. A library
+/// is looked for, never imported — importing torch takes seconds.
+pub fn probe_script() -> String {
+    let wanted: Vec<String> = PYTHON_LIBRARIES.iter().map(|(module, dist)| format!("({module:?}, {dist:?})")).collect();
+    format!(
+        "import importlib.util, importlib.metadata, json, sys\n\
+         found = []\n\
+         for module, dist in [{}]:\n\
+         \x20   try:\n\
+         \x20       if importlib.util.find_spec(module) is None:\n\
+         \x20           continue\n\
+         \x20   except Exception:\n\
+         \x20       continue\n\
+         \x20   try:\n\
+         \x20       version = importlib.metadata.version(dist)\n\
+         \x20   except Exception:\n\
+         \x20       version = \"\"\n\
+         \x20   found.append((module + \" \" + version).strip())\n\
+         print(json.dumps({{\"prefix\": sys.prefix, \"version\": \"%d.%d.%d\" % sys.version_info[:3], \"libraries\": found}}))\n",
+        wanted.join(", ")
+    )
+}
+
+/// A Python problems could be run with, as the studio offers it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyPython {
+    /// The interpreter.
+    pub path: String,
+    /// Its installation, as a person would know it: `~/miniconda3/envs/opt`.
+    pub name: String,
+    pub version: String,
+    /// Which of the libraries problems might use it has: `pulp 2.9.0`.
+    pub libraries: Vec<String>,
+    /// Whether problems are run with it.
+    pub chosen: bool,
+}
+
+/// The Python a set of problems was made for and is run with, and what it
+/// had when they were made.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyPythonUsed {
+    pub path: String,
+    pub version: String,
+    pub libraries: Vec<String>,
+}
+
 impl Language {
     pub fn key(self) -> &'static str {
         match self {
@@ -380,8 +449,9 @@ pub fn results(stdout: &str) -> (Vec<StudyTestResult>, String) {
 
 /// What a model is asked for coding problems: about `count` of them, on
 /// what the sources teach, in `language` — or, given none, in one of
-/// `languages` the course uses — at `level`.
-pub fn prompt(count: usize, level: &str, language: Option<Language>, languages: &[Language], focus: &str, course: &str) -> String {
+/// `languages` the course uses — at `level`; Python's problems told what
+/// `python` has.
+pub fn prompt(count: usize, level: &str, language: Option<Language>, languages: &[Language], python: Option<&StudyPythonUsed>, focus: &str, course: &str) -> String {
     let in_what = match language {
         Some(language) => format!("Set every problem in {}.", language.name()),
         None => format!(
@@ -389,9 +459,13 @@ pub fn prompt(count: usize, level: &str, language: Option<Language>, languages: 
             languages.iter().map(|l| l.name()).collect::<Vec<_>>().join(", ")
         ),
     };
+    let guide = |l: Language| match (l, python) {
+        (Language::Python, Some(python)) => format!("- {}: {} {}\n", l.name(), l.guide(), python_says(python)),
+        _ => format!("- {}: {}\n", l.name(), l.guide()),
+    };
     let guides: String = match language {
-        Some(language) => format!("- {}: {}\n", language.name(), language.guide()),
-        None => languages.iter().map(|l| format!("- {}: {}\n", l.name(), l.guide())).collect(),
+        Some(language) => guide(language),
+        None => languages.iter().map(|l| guide(*l)).collect(),
     };
     let focus = match focus.trim() {
         "" => String::new(),
@@ -417,6 +491,19 @@ pub fn prompt(count: usize, level: &str, language: Option<Language>, languages: 
          Proton builds and runs every solution against its tests, and the starter too, before the student sees a problem: a \
          solution that fails its own tests, or a starter that passes them, is sent back.{focus}"
     )
+}
+
+/// What a model is told of the Python its problems run with.
+fn python_says(python: &StudyPythonUsed) -> String {
+    let version = python.version.split('.').take(2).collect::<Vec<_>>().join(".");
+    match python.libraries.is_empty() {
+        true => format!("Python here is {version}, with its standard library alone: a problem imports nothing else."),
+        false => format!(
+            "Python here is {version} and has, besides its standard library, {}. A problem may use one of those where the course's own \
+             work would — a linear programme in PuLP, arrays in NumPy — and no library not listed, which would fail to import.",
+            python.libraries.join(", ")
+        ),
+    }
 }
 
 /// The JSON a set of problems must be.
@@ -828,7 +915,8 @@ mod tests {
             solution: "def total(xs):\n    return sum(xs)\n".into(), tests: String::new(), hints: Vec::new(), explanation: String::new(),
             difficulty: "easy".into(), topic: String::new(), cites: Vec::new(), checked: true,
         };
-        let body = || StudyMadeBody::Coding { title: "Lists".into(), problems: vec![problem("p1"), problem("p2")] };
+        let python = StudyPythonUsed { path: "/env/bin/python".into(), version: "3.12.9".into(), libraries: vec!["pulp 2.9.0".into()] };
+        let body = || StudyMadeBody::Coding { title: "Lists".into(), problems: vec![problem("p1"), problem("p2")], python: Some(python.clone()) };
         let made = book.keep_made(Make::Coding, "Lists", "Claude Code", "J0001", &body()).unwrap();
         assert_eq!(made.id, "K001");
         let outcome = |passed: &[bool]| StudyCodeOutcome {
@@ -840,7 +928,8 @@ mod tests {
         book.log_code_run("K001", "p1", &outcome(&[true, false])).unwrap();
         book.log_code_run("K001", "p1", &outcome(&[true, true])).unwrap();
         book.log_code_run("K001", "p1", &outcome(&[false, false])).unwrap();
-        let Some((_, StudyMadeBody::Coding { problems, .. })) = book.made_one("K001") else { panic!() };
+        let Some((_, StudyMadeBody::Coding { problems, python: kept, .. })) = book.made_one("K001") else { panic!() };
+        assert_eq!(kept, Some(python.clone()), "the Python it is run with is kept with it");
         let state = book.code_state("K001", &problems);
         assert_eq!((state[0].code.as_deref(), state[0].passed, state[0].of, state[0].solved), (Some("def total(xs):\n    return len(xs)\n"), 2, 2, true), "the best run is kept");
         assert_eq!((state[1].code.as_deref(), state[1].of, state[1].solved), (None, 0, false));
@@ -871,7 +960,20 @@ mod tests {
             }
             assert!(!language.checks().1.is_empty() && language.guide().contains(language.tests_file()));
         }
-        let prompt = prompt(5, "Middling.", None, &[Language::Python, Language::C], "", "COMP3600");
+        let prompt = prompt(5, "Middling.", None, &[Language::Python, Language::C], None, "", "COMP3600");
         assert!(prompt.contains("one of: Python, C") && prompt.contains("tests.py") && prompt.contains("tests.c"));
+    }
+
+    #[test]
+    fn python_problems_are_told_the_libraries_they_may_use_and_that_there_are_no_others() {
+        let with = StudyPythonUsed { path: "/env/bin/python".into(), version: "3.12.9".into(), libraries: vec!["numpy 2.5.3".into(), "pulp 2.9.0".into()] };
+        let asked = prompt(3, "", Some(Language::Python), &LANGUAGES, Some(&with), "", "COMP3670");
+        assert!(asked.contains("Python here is 3.12 and has, besides its standard library, numpy 2.5.3, pulp 2.9.0"), "{asked}");
+        let bare = StudyPythonUsed { libraries: Vec::new(), ..with.clone() };
+        assert!(prompt(3, "", Some(Language::Python), &LANGUAGES, Some(&bare), "", "").contains("standard library alone"));
+        assert!(!prompt(3, "", Some(Language::C), &LANGUAGES, Some(&with), "", "").contains("numpy"), "C is not told Python's libraries");
+        // The probe names every library, and is Python.
+        let script = probe_script();
+        assert!(PYTHON_LIBRARIES.iter().all(|(module, _)| script.contains(&format!("{module:?}"))) && script.starts_with("import importlib.util"));
     }
 }

@@ -1298,7 +1298,18 @@ language that prints one line per test — `PROTON-TEST`, its name, `PASS` or
 JavaScript and Rust are offered as far as this machine has their compilers,
 found once on the login shell's PATH (`proton-core::study::code::Tools`); a
 compiler installed in the home folder — conda's Python, nvm's Node, rustup's
-toolchain, past its proxy — is given its own folder to read. Every build and
+toolchain, past its proxy — is given its own folder to read. Python's problems
+run with a Python the person chooses (`study.code.python`), from those found on
+the login shell's PATH, in conda's `environments.txt`, among Jupyter's kernels
+and pyenv's versions, or named by its path or its environment's folder; each is
+asked, without importing anything, which of a list of libraries a course might
+use it has (NumPy, SciPy, pandas, SymPy, NetworkX, PuLP, CVXPY, OR-Tools,
+Pyomo, scikit-learn, statsmodels, PyTorch). The model is told that Python's
+version and libraries and that nothing else will import; the set keeps the
+Python it was checked with, and is run with it after another is chosen. A
+library that starts a solver of its own, as PuLP starts CBC, runs it from
+inside its installation and writes to the run's temporary folder, both of
+which the sandbox allows. Every build and
 run is the Lab's (`proton-lab::exec`): Seatbelt or bubblewrap with no network,
 writes only to the run's folder, the home folder unreadable but for the run and
 the compiler, a clean environment, `ulimit`s on CPU and file size, 90 s to

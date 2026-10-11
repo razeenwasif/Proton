@@ -19,7 +19,8 @@ import { LANGUAGES } from "./study-code.js";
 /** @typedef {import("./bindings/StudyMadeBody").StudyMadeBody} Body */
 /** @typedef {import("./bindings/StudyCitation").StudyCitation} Citation */
 /** @typedef {import("./bindings/StudyMapNode").StudyMapNode} Node */
-/** @typedef {{jobs: Job[], made: Made[], languages: string[]}} StudioEvent */
+/** @typedef {import("./bindings/StudyPython").StudyPython} Python */
+/** @typedef {{jobs: Job[], made: Made[], languages: string[], pythons: Python[]}} StudioEvent */
 /** @typedef {{made: Made, body: Body, citations: Citation[]}} MadeEvent */
 /** @typedef {{id: string, title: string, engine: string, model: string, state: string, why: string | null, instructions: string, prompt: string}} TaskEvent */
 
@@ -179,8 +180,8 @@ export function taskHtml(t) {
 
 /** @param {{box: HTMLElement, dispatch: (command: any) => unknown, readOnly: () => boolean, pastPapers: () => {id: string, title: string}[], voices: () => void}} host */
 export function createStudio(host) {
-  /** @type {{studio: StudioEvent | null, asking: Kind | null}} */
-  const state = { studio: null, asking: null };
+  /** @type {{studio: StudioEvent | null, asking: Kind | null, otherPython: boolean, lookingAgain: boolean}} */
+  const state = { studio: null, asking: null, otherPython: false, lookingAgain: false };
 
   function optionsHtml(/** @type {Kind} */ kind) {
     const focus = `<input name="focus" placeholder="A topic to centre it on — or leave it to cover everything ticked" autocomplete="off">`;
@@ -227,8 +228,48 @@ export function createStudio(host) {
       : `<span class="st-faint">Looking for the compilers this machine has…</span>`;
     return `<div class="st-card-form-row">${which}<select name="amount" aria-label="How many">${AMOUNTS.coding.map(([value, said]) => `<option value="${value}"${value === "standard" ? " selected" : ""}>${said}</option>`).join("")}</select>` +
       `<select name="level" aria-label="How hard"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></div>` +
+      `<div class="st-code-python" data-study-code-python-row>${pythonHtml()}</div>` +
       `<input name="focus" placeholder="A topic to centre them on — or leave it to cover everything ticked" autocomplete="off">` +
       `<p class="st-faint">Each is checked before you see it: its solution built and run against its tests, here, in a sandbox.</p>`;
+  }
+
+  /** The Python Python's problems are made for and run with, and what it
+   *  has: the libraries they may use. */
+  function pythonHtml() {
+    const pythons = state.studio?.pythons ?? [];
+    if (!pythons.length) {
+      return (state.studio?.languages ?? []).includes("python") ? `<span class="st-faint">Looking for the Pythons this machine has…</span>` : "";
+    }
+    const chosen = pythons.find((p) => p.chosen);
+    const short = (/** @type {string} */ version) => version.split(".").slice(0, 2).join(".");
+    const options = pythons.map((p) => `<option value="${esc(p.path)}"${p.chosen && !state.otherPython ? " selected" : ""}>${esc(p.name)} · Python ${esc(short(p.version))}</option>`).join("") +
+      `<option value="other"${state.otherPython || !chosen ? " selected" : ""}>Another Python…</option>`;
+    const has = state.lookingAgain ? "Looking again…"
+      : !chosen ? "Name the Python to run them with."
+        : chosen.libraries.length ? `Problems may use ${chosen.libraries.join(", ")}, besides Python's standard library.`
+          : "It has Python's standard library alone. Install a library into it — pip install pulp — and look again.";
+    const other = state.otherPython || !chosen
+      ? `<div class="st-code-python-other"><input data-study-code-python-path placeholder="A Python, or an environment's folder: ~/miniconda3/envs/opt" autocomplete="off" spellcheck="false">` +
+        `<button type="button" class="cc-quiet" data-study-code-python-use>Use</button></div>` : "";
+    return `<div class="st-code-python-pick"><label>Python <select data-study-code-python aria-label="The Python they are run with">${options}</select></label>` +
+      `<button type="button" class="st-link" data-study-code-pythons title="After installing a library">Look again</button></div>${other}<p class="st-faint">${esc(has)}</p>`;
+  }
+
+  /** The Python's row drawn again where it is, unless a path is being typed into it. */
+  function redrawPython() {
+    const row = host.box.querySelector("[data-study-code-python-row]");
+    if (!row || row.querySelector("[data-study-code-python-path]") === document.activeElement) return;
+    row.innerHTML = pythonHtml();
+  }
+
+  /** Run Python's problems with the Python whose path was typed. */
+  function usePython() {
+    const typed = /** @type {HTMLInputElement | null} */ (host.box.querySelector("[data-study-code-python-path]"));
+    const path = typed?.value.trim() ?? "";
+    if (!path) return typed?.focus();
+    state.otherPython = false;
+    typed?.blur();
+    host.dispatch({ type: "studyCodePython", path });
   }
 
   function render() {
@@ -251,6 +292,7 @@ export function createStudio(host) {
     // The form being typed into is kept.
     const typing = host.box.querySelector("[data-study-make-form]");
     if (typing && state.asking && typing.getAttribute("data-study-make-form") === state.asking) {
+      redrawPython();
       const list = host.box.querySelector("[data-study-studio-list]");
       if (list) list.innerHTML = `${jobs}${made || (live.length ? "" : `<p class="st-faint st-pad">Nothing made yet. Each thing is made from the sources ticked, and cites them.</p>`)}`;
       return;
@@ -276,6 +318,17 @@ export function createStudio(host) {
       host.voices();
       return true;
     }
+    if (at("[data-study-code-pythons]")) {
+      state.lookingAgain = true;
+      redrawPython();
+      host.dispatch({ type: "studyCodePythons" });
+      return true;
+    }
+    if (at("[data-study-code-python-use]")) {
+      usePython();
+      return true;
+    }
+    if (t.closest("[data-study-code-python-row]")) return true;
     if (at("[data-study-make-cancel]")) {
       state.asking = null;
       host.box.querySelector("[data-study-make-form]")?.remove();
@@ -333,11 +386,44 @@ export function createStudio(host) {
     return true;
   }
 
+  /** A choice in the studio's forms; `true` if it was the studio's. @param {HTMLElement} t */
+  function change(t) {
+    if (!host.box.contains(t)) return false;
+    if (t instanceof HTMLSelectElement && t.matches("[data-study-code-python]")) {
+      state.otherPython = t.value === "other";
+      if (state.otherPython) {
+        redrawPython();
+        /** @type {HTMLElement | null} */ (host.box.querySelector("[data-study-code-python-path]"))?.focus();
+      } else host.dispatch({ type: "studyCodePython", path: t.value });
+      return true;
+    }
+    // Which Python matters only to Python's problems.
+    if (t instanceof HTMLSelectElement && t.matches('[data-study-make-form="coding"] [name="code"]')) {
+      const row = /** @type {HTMLElement | null} */ (host.box.querySelector("[data-study-code-python-row]"));
+      if (row) row.hidden = !["", "python"].includes(t.value);
+      return true;
+    }
+    return false;
+  }
+
+  /** A key in the studio's forms; `true` if it was the studio's. @param {KeyboardEvent} e */
+  function key(e) {
+    const t = /** @type {HTMLElement} */ (e.target);
+    if (e.key === "Enter" && t.matches?.("[data-study-code-python-path]") && host.box.contains(t)) {
+      // Not the form's: Enter here names a Python, and makes nothing.
+      e.preventDefault();
+      usePython();
+      return true;
+    }
+    return false;
+  }
+
   /** @param {StudioEvent} event */
   function studio(event) {
     state.studio = event;
+    state.lookingAgain = false;
     render();
   }
 
-  return { studio, render, click, submit, jobs: () => state.studio?.jobs ?? [], clear: () => { state.studio = null; state.asking = null; render(); } };
+  return { studio, render, click, change, key, submit, jobs: () => state.studio?.jobs ?? [], clear: () => { state.studio = null; state.asking = null; render(); } };
 }

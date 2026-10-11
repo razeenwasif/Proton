@@ -199,7 +199,9 @@ as pictures; and coding practice — problems in Python, C, C++, Java,
 JavaScript or Rust, whichever this machine has the compilers for, each solved in
 an editor beside it and built and run against its tests, sandboxed, with hints
 and a solution when you ask; every problem's own solution is run against its
-tests before you see it. Your folders are named in your own settings,
+tests before you see it. Python's problems run with the Python you choose — a
+conda environment, a venv — and may use the libraries it has, NumPy, SciPy or
+PuLP and its solver among them. Your folders are named in your own settings,
 `{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,

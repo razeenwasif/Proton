@@ -201,6 +201,12 @@ export function createStudyPreview(deliver) {
       { id: "K001", kind: "coding", title: "Search, in code", made: now - 50, by: "Claude Code · claude-opus-5-5", task: "J0011" }],
     /** The languages this machine could run, as the core would find them. */
     languages: ["python", "c", "cpp", "java", "javascript", "rust"],
+    /** The Pythons it could run Python's problems with, and what each has. */
+    pythons: [
+      { path: "/opt/homebrew/bin/python3", name: "/opt/homebrew/bin/python3", version: "3.14.6", libraries: [], chosen: true },
+      { path: "/Users/you/miniconda3/bin/python", name: "~/miniconda3", version: "3.12.9", libraries: ["numpy 2.5.3", "scipy 1.18.1", "pandas 3.0.6"], chosen: false },
+      { path: "/Users/you/miniconda3/envs/opt/bin/python", name: "~/miniconda3/envs/opt", version: "3.12.9", libraries: ["numpy 2.5.3", "pulp 2.9.0", "networkx 3.4.2"], chosen: false },
+    ],
   };
   /** A set of coding problems, and a stand-in for running them: the real
    *  runs are built and run in the Lab's sandbox, in the core. */
@@ -367,7 +373,7 @@ export function createStudyPreview(deliver) {
   const cites = state.chat.turns[0].citations;
   const BODIES = /** @type {Record<string, any>} */ ({
     R001: { shape: "prose", markdown: "# COMP3670 — Search, a study guide\n\n## Uninformed search\n\nBreadth-first search is complete and, with unit costs, optimal [[S02 § Search › Uniform cost L40-58]].\n\n## Informed search\n\nA* orders the frontier by $f(n) = g(n) + h(n)$ [[S01 p. 3]].\n\n## Practice questions\n\n1. Why is uniform-cost search optimal? [[S01 p. 1]]" },
-    K001: { shape: "coding", title: "Search, in code", problems: coding.problems },
+    K001: { shape: "coding", title: "Search, in code", problems: coding.problems, python: { path: "/Users/you/miniconda3/bin/python", version: "3.12.9", libraries: ["numpy 2.5.3", "scipy 1.18.1"] } },
     M001: { shape: "map", nodes: [
       { id: "1", parent: null, label: "Search", cites: [] },
       { id: "2", parent: "1", label: "Uninformed", cites: [] }, { id: "3", parent: "1", label: "Informed", cites: [] },
@@ -659,6 +665,16 @@ export function createStudyPreview(deliver) {
         }
         case "studyCodeSave":
           coding.code[command.problem] = command.code;
+          return [];
+        case "studyCodePython": {
+          const typed = String(command.path ?? "").trim();
+          const known = studio.pythons.find((p) => p.path === typed || p.name === typed);
+          if (typed && !known) return [{ type: "notice", text: `${typed} is not a Python that Proton could run.`, level: "warn" }];
+          studio.pythons.forEach((p, i) => { p.chosen = known ? p === known : i === 0; });
+          return [studioEvent()];
+        }
+        case "studyCodePythons":
+          setTimeout(() => deliver(studioEvent()), 700);
           return [];
         case "studyCodeRun": {
           coding.code[command.problem] = command.code;

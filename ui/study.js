@@ -993,6 +993,7 @@ export function createStudy(host) {
       return renderStage();
     }
     if (chat.change(t)) return;
+    if (studio.change(t)) return;
     if (t instanceof HTMLInputElement && cards.change(t)) return;
     if (state.shown.kind === "quiz" && quizzes.input(t)) return;
     if (state.shown.kind === "audio" && sounds.change(t, els.stage)) return;
@@ -1023,6 +1024,7 @@ export function createStudy(host) {
     if (state.shown.kind === "slides" && decks.key(e, () => renderStage())) return;
     if (state.shown.kind === "quiz" && quizzes.key(e, () => renderStage())) return;
     if (state.shown.kind === "coding" && coder.key(e)) return;
+    if (studio.key(e)) return;
     chat.key(e);
   });
 

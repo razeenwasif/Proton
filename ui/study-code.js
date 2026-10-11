@@ -20,7 +20,8 @@ import { answerHtml } from "./study-chat.js";
 /** @typedef {import("./bindings/StudyCodingProblem").StudyCodingProblem} Problem */
 /** @typedef {import("./bindings/StudyCodeSaved").StudyCodeSaved} Saved */
 /** @typedef {import("./bindings/StudyCodeOutcome").StudyCodeOutcome} Outcome */
-/** @typedef {{made: Made, body: {shape: "coding", title: string, problems: Problem[]}, citations: Citation[]}} CodingOpen */
+/** @typedef {import("./bindings/StudyPythonUsed").StudyPythonUsed} PythonUsed */
+/** @typedef {{made: Made, body: {shape: "coding", title: string, problems: Problem[], python: PythonUsed | null}, citations: Citation[]}} CodingOpen */
 /** @typedef {{made: string, saved: Saved[], running: string[]}} CodingEvent */
 /** @typedef {{made: string, problem: string, outcome: Outcome}} RanEvent */
 
@@ -363,10 +364,14 @@ export function createCoding(host) {
     const lang = langOf(p.language);
     const banner = ro ? `<div class="st-banner">${icon("users")} Another Proton has this notebook open: what you write here is not saved or run.</div>` : "";
     const unit = unitOf(p);
+    // The Python it is run with, and what that has, for Python's problems.
+    const py = p.language === "python" ? state.open?.body.python : null;
+    const python = py ? `<span class="st-faint st-code-runtime" title="${esc(`${py.path}${py.libraries.length ? ` — ${py.libraries.join(", ")}` : ""}`)}">` +
+      `Python ${esc(py.version.split(".").slice(0, 2).join("."))}${py.libraries.length ? ` · ${esc(py.libraries.map((l) => l.split(" ")[0]).join(", "))}` : ""}</span>` : "";
     return `<div class="st-reader st-code-view" data-study-code-view="${esc(viewKey(p))}">${banner}${headHtml()}` +
       `<div class="st-code-tabs" role="tablist" data-study-code-tabs>${tabsHtml()}</div>` +
       `<div class="st-code-split"><div class="st-code-problem" data-turn="made" data-study-code-problem>${problemHtml(p)}</div>` +
-      `<div class="st-code-work"><div class="st-code-bar"><span class="st-code-file">${icon("file-code")}${esc(lang.file)}</span>` +
+      `<div class="st-code-work"><div class="st-code-bar"><span class="st-code-file">${icon("file-code")}${esc(lang.file)}</span>${python}` +
       `<span class="st-faint" data-study-code-said>${esc(state.said)}</span><span class="grow"></span>` +
       `<button class="cc-quiet" data-study-code-reset title="Begin again from the starter — ⌘Z brings yours back"${ro ? " disabled" : ""}>${icon("undo")}Starter</button>` +
       `<button class="cc-primary" data-study-code-run title="Build it and run the tests (⌘⏎)"${ro || state.running.has(p.id) ? " disabled" : ""}>${icon("play")}Run</button></div>` +

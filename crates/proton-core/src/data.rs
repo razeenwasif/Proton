@@ -1052,6 +1052,22 @@ fn registered(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
     })
 }
 
+/// The Pythons Jupyter's kernels start, in the order their folders are read.
+pub(crate) fn kernel_pythons() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for dir in kernel_dirs() {
+        let mut kernels: Vec<PathBuf> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+        kernels.sort();
+        for kernel in kernels {
+            let Some(name) = kernel.file_name().and_then(|n| n.to_str()) else { continue };
+            if let Some(python) = registered(name, std::slice::from_ref(&dir)) {
+                out.push(python);
+            }
+        }
+    }
+    out
+}
+
 /// The first Python on `path` that has ipykernel.
 ///
 /// Apple's `/usr/bin/python3` is passed over on a Mac: it never has

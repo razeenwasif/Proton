@@ -90,6 +90,7 @@ import type { StudyObjective } from "./StudyObjective";
 import type { StudyOverviewTopic } from "./StudyOverviewTopic";
 import type { StudyPaperSection } from "./StudyPaperSection";
 import type { StudyPlace } from "./StudyPlace";
+import type { StudyPython } from "./StudyPython";
 import type { StudyQuestion } from "./StudyQuestion";
 import type { StudyQuizRow } from "./StudyQuizRow";
 import type { StudyResult } from "./StudyResult";
@@ -306,7 +307,12 @@ url: string | null, citations: Array<StudyCitation>, voice: StudyVoiceState, } |
  * those whose compilers this machine has. Empty until they are
  * found.
  */
-languages: Array<string>, } | { "type": "studyCoding", made: string, saved: Array<StudyCodeSaved>, running: Array<string>, } | { "type": "studyCodeRan", made: string, problem: string, outcome: StudyCodeOutcome, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyDeck", made: StudyMade, cards: Array<StudyCardRow>, counts: StudyCounts, citations: Array<StudyCitation>, } | { "type": "studyReviewing", review: StudyReview | null, } | { "type": "studyQuiz", made: StudyMade, questions: Array<StudyQuestion>, attempts: Array<StudyAttempt>, 
+languages: Array<string>, 
+/**
+ * The Pythons Python's problems could be run with, and what each
+ * has; the one they are run with is chosen.
+ */
+pythons: Array<StudyPython>, } | { "type": "studyCoding", made: string, saved: Array<StudyCodeSaved>, running: Array<string>, } | { "type": "studyCodeRan", made: string, problem: string, outcome: StudyCodeOutcome, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyDeck", made: StudyMade, cards: Array<StudyCardRow>, counts: StudyCounts, citations: Array<StudyCitation>, } | { "type": "studyReviewing", review: StudyReview | null, } | { "type": "studyQuiz", made: StudyMade, questions: Array<StudyQuestion>, attempts: Array<StudyAttempt>, 
 /**
  * Answers being marked now: `2/q03`, the attempt and the question.
  */

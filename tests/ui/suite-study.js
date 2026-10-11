@@ -1088,11 +1088,39 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
   await test('Coding practice opens in an editor: its keys follow the code, what is written is saved as it is, and ⌘⏎ runs it against its tests', async () => {
     const codingMade = {id: 'K001', kind: 'coding', title: 'Search, in code', made: 1, by: 'Claude Code', task: 'J0011'};
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
-    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: [codingMade], languages: ['python', 'c']}]); await settle();
+    const pythons = [{path: '/opt/homebrew/bin/python3', name: '/opt/homebrew/bin/python3', version: '3.14.6', libraries: [], chosen: true},
+      {path: '/Users/you/miniconda3/envs/opt/bin/python', name: '~/miniconda3/envs/opt', version: '3.12.9', libraries: ['numpy 2.5.3', 'pulp 2.9.0'], chosen: false}];
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: [codingMade], languages: ['python', 'c'], pythons}]); await settle();
     // Asked for in a language this machine can run.
     ws().querySelector('[data-study-tile="coding"]').click(); await settle();
     const offered = [...ws().querySelectorAll('[data-study-make-form="coding"] select[name="code"] option')].map((o) => o.textContent);
     assert(JSON.stringify(offered) === JSON.stringify(['The language the course uses', 'Python', 'C']), `it offers ${offered}`);
+    // Python's problems are run with a Python chosen here, which says what it has.
+    const pythonRow = () => ws().querySelector('[data-study-code-python-row]');
+    const which = () => /** @type {HTMLSelectElement} */ (pythonRow().querySelector('[data-study-code-python]'));
+    assert(JSON.stringify([...which().options].map((o) => o.textContent)) === JSON.stringify(['/opt/homebrew/bin/python3 · Python 3.14', '~/miniconda3/envs/opt · Python 3.12', 'Another Python…']),
+      `it offers ${[...which().options].map((o) => o.textContent)}`);
+    assert(pythonRow().textContent.includes("standard library alone"), 'what the chosen Python lacks is not said');
+    const chose = win.commands.length;
+    which().value = '/Users/you/miniconda3/envs/opt/bin/python';
+    which().dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(sent(chose, 'studyCodePython')[0]?.path === '/Users/you/miniconda3/envs/opt/bin/python', 'the Python was not chosen');
+    await win.pushEvents([{type: 'studyStudio', jobs: [], made: [codingMade], languages: ['python', 'c'], pythons: pythons.map((p, i) => ({...p, chosen: i === 1}))}]); await settle();
+    assert(pythonRow().textContent.includes('Problems may use numpy 2.5.3, pulp 2.9.0'), `its libraries are not said: ${pythonRow().textContent}`);
+    // Another, named by its path: Enter uses it, and makes nothing.
+    which().value = 'other';
+    which().dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const path = /** @type {HTMLInputElement} */ (pythonRow().querySelector('[data-study-code-python-path]'));
+    path.focus();
+    path.value = '~/venvs/or';
+    const typed = win.commands.length;
+    key('Enter'); await settle();
+    assert(sent(typed, 'studyCodePython')[0]?.path === '~/venvs/or' && !sent(typed, 'studyMake').length, 'Enter did not name the Python, or made something');
+    // It matters only to Python's problems.
+    const language = /** @type {HTMLSelectElement} */ (ws().querySelector('[data-study-make-form="coding"] select[name="code"]'));
+    language.value = 'c';
+    language.dispatchEvent(new win.Event('change', {bubbles: true}));
+    assert(pythonRow().hidden, 'the Python is offered for C');
     ws().querySelector('[data-study-make-form="coding"] select[name="code"]').value = 'c';
     const asked = win.commands.length;
     ws().querySelector('[data-study-make-form="coding"]').requestSubmit(); await settle();

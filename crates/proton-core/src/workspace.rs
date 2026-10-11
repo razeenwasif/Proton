@@ -1515,6 +1515,8 @@ impl Workspace {
             | Command::StudyMake { .. }
             | Command::StudyCodeRun { .. }
             | Command::StudyCodeSave { .. }
+            | Command::StudyCodePython { .. }
+            | Command::StudyCodePythons
             | Command::StudyCancelJob { .. }
             | Command::StudyShowMade { .. }
             | Command::StudyBinMade { .. }

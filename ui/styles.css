@@ -4923,6 +4923,16 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .st-code-tests li.fail .i { color: var(--err); }
 .st-code-tests li b { font: 500 var(--z-2xs)/1.4 var(--zed); }
 .st-code-tests li span { color: var(--cc-muted); font: var(--z-2xs)/1.4 var(--zed); overflow-wrap: anywhere; }
+.st-code-runtime { font: var(--z-2xs)/1 var(--cc-font); }
+.st-code-python { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
+.st-code-python[hidden] { display: none; }
+.st-code-python-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.st-code-python-pick label { display: flex; flex: 1 1 220px; align-items: center; gap: 8px; min-width: 0; font: var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.st-code-python-pick select { flex: 1 1 auto; min-width: 0; }
+.st-code-python-pick .st-link { font-size: var(--z-2xs); }
+.st-code-python-other { display: flex; gap: 6px; }
+.st-code-python-other input { flex: 1 1 auto; min-width: 0; }
+.st-code-python p { margin: 0; }
 
 /* ── Data's side: the table and the agent, in one place ─────────────── */
 .data-side { display: flex; flex-direction: column; min-height: 0; }

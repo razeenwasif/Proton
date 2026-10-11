@@ -93,6 +93,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyMake { .. }
             | Command::StudyCodeRun { .. }
             | Command::StudyCodeSave { .. }
+            | Command::StudyCodePython { .. }
+            | Command::StudyCodePythons
             | Command::StudyCancelJob { .. }
             | Command::StudyShowMade { .. }
             | Command::StudyBinMade { .. }
@@ -213,9 +215,12 @@ pub struct Study {
     drawing: Vec<Drawing>,
     /// Coding problems' solutions being built and run.
     runs: Vec<CodeRun>,
-    /// Whether the studio has been told which languages can be run here,
-    /// once the compilers were found.
-    languages_told: bool,
+    /// What the studio was last told of this machine's compilers and
+    /// Pythons: told again when more is found.
+    told: u64,
+    /// The Python coding problems are run with, when the person chose one
+    /// (`study.code.python`); otherwise the first on the login shell's PATH.
+    code_python: Option<PathBuf>,
 }
 
 /// A student's solution being built and run on a worker: the notebook, the
@@ -265,7 +270,8 @@ impl Default for Study {
             web: None,
             drawing: Vec::new(),
             runs: Vec::new(),
-            languages_told: false,
+            told: 0,
+            code_python: None,
             instance: {
                 // Unique to this Study, so two in one process — a test's —
                 // are two holders of a lock, as two Protons are.
@@ -407,6 +413,7 @@ impl Study {
         let pdfs = settings.get("study.pdfs").and_then(Value::as_bool).unwrap_or(true);
         let pdftotext = settings.get("study.pdftotext").and_then(Value::as_bool).unwrap_or(false);
         self.kb.configure(roots, exclude, pdfs, pdftotext);
+        self.code_python = settings.get("study.code.python").and_then(Value::as_str).filter(|p| !p.trim().is_empty()).map(folder::expand);
     }
 
     fn save_setting(&self, key: &str, value: Value) -> Option<Event> {
@@ -422,10 +429,12 @@ impl Study {
         if !self.entered {
             self.entered = true;
             self.kb.start();
-            // Which compilers are here, looked for before coding problems
-            // are asked for, so the studio can say which languages it offers.
-            std::thread::spawn(|| {
+            // Which compilers and Pythons are here, looked for before coding
+            // problems are asked for, so the studio can say what it offers.
+            let chosen = self.code_python.clone();
+            std::thread::spawn(move || {
                 code::Tools::here();
+                code::look_for_pythons(chosen);
             });
             if self.open.is_none() {
                 if let Some((folder, _)) = &self.folder {
@@ -594,6 +603,12 @@ impl Study {
             Command::StudyMake { kind, options } => self.make(kind, options),
             Command::StudyCodeRun { made, problem, code } => self.code_run(&made, &problem, &code),
             Command::StudyCodeSave { made, problem, code } => self.code_save(&made, &problem, &code),
+            Command::StudyCodePython { path } => self.choose_python(&path),
+            Command::StudyCodePythons => {
+                let chosen = self.code_python.clone();
+                std::thread::spawn(move || code::look_for_pythons(chosen));
+                Vec::new()
+            }
             Command::StudyCancelJob { id } => {
                 if !self.cancel_voicing(&id) {
                     if let Some(open) = &self.open {
@@ -1677,8 +1692,77 @@ impl Study {
         let open = self.open.as_ref()?;
         let mut jobs = self.voicing_rows(open.book.dir());
         jobs.extend(self.jobs.rows(open.book.dir()));
-        let languages = code::Tools::found().map(|tools| tools.languages().iter().map(|l| l.key().to_string()).collect()).unwrap_or_default();
-        Some(Event::StudyStudio { jobs, made: open.book.made(), languages })
+        // Said without asking any program: this is drawn often.
+        let languages = match code::Tools::found() {
+            Some(tools) => {
+                let mut here = tools.languages();
+                if self.code_python.as_ref().is_some_and(|p| p.is_file()) && !here.contains(&proton_study::code::Language::Python) {
+                    here.insert(0, proton_study::code::Language::Python);
+                }
+                here.iter().map(|l| l.key().to_string()).collect()
+            }
+            None => Vec::new(),
+        };
+        Some(Event::StudyStudio { jobs, made: open.book.made(), languages, pythons: self.pythons_offered() })
+    }
+
+    /// The Pythons coding problems could be run with, the chosen one marked.
+    fn pythons_offered(&self) -> Vec<proton_study::code::StudyPython> {
+        let found = code::pythons().unwrap_or_default();
+        let chosen = match &self.code_python {
+            Some(path) => found.iter().position(|p| &p.path == path),
+            None => found.iter().position(|p| p.default),
+        };
+        found
+            .iter()
+            .enumerate()
+            .map(|(at, p)| proton_study::code::StudyPython {
+                path: p.path.display().to_string(),
+                // A framework build's prefix is a long way from anything a
+                // person would recognise; its interpreter's path is not.
+                name: folder::tilde(if p.prefix.to_string_lossy().contains(".framework") { &p.path } else { &p.prefix }),
+                version: p.version.clone(),
+                libraries: p.libraries.clone(),
+                chosen: Some(at) == chosen,
+            })
+            .collect()
+    }
+
+    /// The Python coding problems are made for now: the one chosen, or the
+    /// first on the login shell's PATH — asked again what it has, so a
+    /// library installed since is offered.
+    fn python_now(&self) -> Option<code::FoundPython> {
+        let path = self.code_python.clone().filter(|p| p.is_file()).or_else(|| code::default_python())?;
+        let python = code::probe(&path)?;
+        code::remember(&python);
+        Some(python)
+    }
+
+    /// Choose the Python coding problems are run with: a path to one, or
+    /// nothing for the first on the login shell's PATH.
+    fn choose_python(&mut self, typed: &str) -> Vec<Event> {
+        let typed = typed.trim();
+        if typed.is_empty() {
+            self.code_python = None;
+            let mut events: Vec<Event> = self.save_setting("study.code.python", Value::Null).into_iter().collect();
+            events.extend(self.studio_event());
+            return events;
+        }
+        let mut path = folder::expand(typed);
+        // An environment's folder means its Python.
+        if path.is_dir() {
+            if let Some(python) = ["bin/python3", "bin/python", "python.exe"].iter().map(|p| path.join(p)).find(|p| p.is_file()) {
+                path = python;
+            }
+        }
+        let Some(python) = code::probe(&path) else {
+            return vec![notice(format!("{} is not a Python that Proton could run.", folder::tilde(&path)), NoticeLevel::Warn)];
+        };
+        code::remember(&python);
+        self.code_python = Some(path.clone());
+        let mut events: Vec<Event> = self.save_setting("study.code.python", Value::from(path.display().to_string())).into_iter().collect();
+        events.extend(self.studio_event());
+        events
     }
 
     /// A set of coding problems, as the student has it.
@@ -1689,13 +1773,15 @@ impl Study {
         Some(Event::StudyCoding { made: made.to_string(), saved: open.book.code_state(made, &problems), running })
     }
 
-    /// The problem and its language, of a set in the notebook open.
-    fn coding_problem(&self, made: &str, problem: &str) -> Result<proton_study::code::StudyCodingProblem, Vec<Event>> {
+    /// The problem, of a set in the notebook open, and the Python the set
+    /// was made for.
+    fn coding_problem(&self, made: &str, problem: &str) -> Result<(proton_study::code::StudyCodingProblem, Option<PathBuf>), Vec<Event>> {
         let open = self.open.as_ref().ok_or_else(|| vec![notice("Open a notebook first.".into(), NoticeLevel::Warn)])?;
         match open.book.made_one(made) {
-            Some((_, proton_study::studio::StudyMadeBody::Coding { problems, .. })) => problems
+            Some((_, proton_study::studio::StudyMadeBody::Coding { problems, python, .. })) => problems
                 .into_iter()
                 .find(|p| p.id == problem)
+                .map(|p| (p, python.map(|py| PathBuf::from(py.path))))
                 .ok_or_else(|| vec![notice(format!("{made} has no problem {problem}"), NoticeLevel::Warn)]),
             _ => Err(vec![notice(format!("{made}: no such set of coding problems"), NoticeLevel::Warn)]),
         }
@@ -1704,7 +1790,7 @@ impl Study {
     /// Keep what has been written for a problem.
     fn code_save(&mut self, made: &str, problem: &str, code: &str) -> Vec<Event> {
         let found = match self.coding_problem(made, problem) {
-            Ok(found) => found,
+            Ok((found, _)) => found,
             Err(events) => return events,
         };
         let language = proton_study::code::Language::from_key(&found.language).unwrap_or(proton_study::code::Language::Python);
@@ -1720,10 +1806,13 @@ impl Study {
     /// Save what has been written, then build it and run its tests on a
     /// worker: its outcome comes on a later beat.
     fn code_run(&mut self, made: &str, problem: &str, code: &str) -> Vec<Event> {
-        let found = match self.coding_problem(made, problem) {
+        let (found, python) = match self.coding_problem(made, problem) {
             Ok(found) => found,
             Err(events) => return events,
         };
+        // The set's own Python, which has the libraries it was made for;
+        // the one chosen now, if that has gone.
+        let python = python.filter(|p| p.is_file()).or_else(|| self.code_python.clone());
         // Not run unless kept: what is run is what was written. The window,
         // which shows the run under way as it asks, is told it is not.
         let mut refused = self.code_save(made, problem, code);
@@ -1740,7 +1829,7 @@ impl Study {
         let (tx, rx) = std::sync::mpsc::channel();
         let code = code.to_string();
         std::thread::spawn(move || {
-            let _ = tx.send(code::run(&at, &found, &code, code::Tools::here()));
+            let _ = tx.send(code::run(&at, &found, &code, &code::tools_with(python.as_deref())));
         });
         self.runs.push(CodeRun { dir, made: made.to_string(), problem: problem.to_string(), outcome: rx });
         self.coding_event(made).into_iter().collect()
@@ -1749,8 +1838,9 @@ impl Study {
     /// What runs have come to: each logged, and said.
     fn poll_code(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
-        if !self.languages_told && code::Tools::found().is_some() {
-            self.languages_told = true;
+        let found = code::generation();
+        if found != self.told {
+            self.told = found;
             events.extend(self.studio_event());
         }
         let mut finished = Vec::new();
@@ -1779,7 +1869,8 @@ impl Study {
             if proton_lab::sandbox::available() == proton_lab::sandbox::Kind::None {
                 return vec![notice("Proton runs code only in a sandbox, and this machine has none: on Linux, install bubblewrap.".into(), NoticeLevel::Warn)];
             }
-            let here = code::Tools::here().languages();
+            let python = self.python_now();
+            let here = code::tools_with(python.as_ref().map(|p| p.path.as_path())).languages();
             if here.is_empty() {
                 return vec![notice("No compiler or interpreter Proton can run was found: install Python, a C compiler, Java, Node or Rust.".into(), NoticeLevel::Warn)];
             }
@@ -1789,6 +1880,7 @@ impl Study {
                 }
             }
             options.languages = here.iter().map(|l| l.key().to_string()).collect();
+            options.python = python.filter(|_| here.contains(&proton_study::code::Language::Python)).map(|p| p.used());
         }
         if kind == proton_study::studio::Make::Table && options.columns.iter().all(|c| c.trim().is_empty()) {
             return vec![notice("Name the table's columns.".into(), NoticeLevel::Warn)];

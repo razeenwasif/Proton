@@ -10,6 +10,7 @@ import type { StudyMapNode } from "./StudyMapNode";
 import type { StudyObjective } from "./StudyObjective";
 import type { StudyOverviewTopic } from "./StudyOverviewTopic";
 import type { StudyPaperSection } from "./StudyPaperSection";
+import type { StudyPythonUsed } from "./StudyPythonUsed";
 import type { StudyQuestion } from "./StudyQuestion";
 import type { StudySegment } from "./StudySegment";
 import type { StudySlide } from "./StudySlide";
@@ -18,4 +19,8 @@ import type { StudyTableRow } from "./StudyTableRow";
 /**
  * Something made, whole, as it is kept.
  */
-export type StudyMadeBody = { "shape": "prose", markdown: string, } | { "shape": "map", nodes: Array<StudyMapNode>, } | { "shape": "table", columns: Array<string>, rows: Array<StudyTableRow>, } | { "shape": "objectives", objectives: Array<StudyObjective>, } | { "shape": "cards", cards: Array<StudyCard>, } | { "shape": "questions", questions: Array<StudyQuestion>, } | { "shape": "paper", title: string, minutes: number | null, blueprint: string, sections: Array<StudyPaperSection>, questions: Array<StudyQuestion>, } | { "shape": "audio", title: string, format: StudyAudioFormat, segments: Array<StudySegment>, chapters: Array<StudyChapter>, } | { "shape": "slides", title: string, slides: Array<StudySlide>, } | { "shape": "slide", slide: StudySlide, } | { "shape": "graphic", title: string, style: StudyGraphicStyle, subtitle: string, blocks: Array<StudyBlock>, takeaway: string, } | { "shape": "coding", title: string, problems: Array<StudyCodingProblem>, } | { "shape": "found", title: string, report: string, found: Array<StudyFound>, } | { "shape": "guide", summary: string, topics: Array<string>, questions: Array<string>, } | { "shape": "labels", labels: { [key in string]?: Array<string> }, } | { "shape": "pages", pages: Array<[number, string]>, } | { "shape": "overview", topics: Array<StudyOverviewTopic>, quiz: Array<StudyQuestion>, deckId: string | null, quizId: string | null, };
+export type StudyMadeBody = { "shape": "prose", markdown: string, } | { "shape": "map", nodes: Array<StudyMapNode>, } | { "shape": "table", columns: Array<string>, rows: Array<StudyTableRow>, } | { "shape": "objectives", objectives: Array<StudyObjective>, } | { "shape": "cards", cards: Array<StudyCard>, } | { "shape": "questions", questions: Array<StudyQuestion>, } | { "shape": "paper", title: string, minutes: number | null, blueprint: string, sections: Array<StudyPaperSection>, questions: Array<StudyQuestion>, } | { "shape": "audio", title: string, format: StudyAudioFormat, segments: Array<StudySegment>, chapters: Array<StudyChapter>, } | { "shape": "slides", title: string, slides: Array<StudySlide>, } | { "shape": "slide", slide: StudySlide, } | { "shape": "graphic", title: string, style: StudyGraphicStyle, subtitle: string, blocks: Array<StudyBlock>, takeaway: string, } | { "shape": "coding", title: string, problems: Array<StudyCodingProblem>, 
+/**
+ * The Python its problems were checked with, and are run with.
+ */
+python: StudyPythonUsed | null, } | { "shape": "found", title: string, report: string, found: Array<StudyFound>, } | { "shape": "guide", summary: string, topics: Array<string>, questions: Array<string>, } | { "shape": "labels", labels: { [key in string]?: Array<string> }, } | { "shape": "pages", pages: Array<[number, string]>, } | { "shape": "overview", topics: Array<StudyOverviewTopic>, quiz: Array<StudyQuestion>, deckId: string | null, quizId: string | null, };

@@ -19,7 +19,7 @@
 //! written to the quiz's attempts — or, when it cannot be made, why not.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use proton_claude::chat::Settings;
@@ -321,11 +321,11 @@ impl Jobs {
                         Ok(()) => repaired.push((running.asked.dir.clone(), running.asked.id.clone())),
                         Err(why) => ended.push((at, Err(why))),
                     }
-                } else if let StudyMadeBody::Coding { title, problems } = body {
+                } else if let StudyMadeBody::Coding { title, problems, python } = body {
                     let kept: Vec<_> = problems.into_iter().filter(|p| p.checked).collect();
                     match kept.is_empty() {
                         true => ended.push((at, Err(format!("None of its problems passed its own tests: {}", failed.join("; "))))),
-                        false => ended.push((at, keep(&running.asked, Read::Made(StudyMadeBody::Coding { title, problems: kept }), running.conversation.as_ref()))),
+                        false => ended.push((at, keep(&running.asked, Read::Made(StudyMadeBody::Coding { title, problems: kept, python }), running.conversation.as_ref()))),
                     }
                 }
                 continue;
@@ -505,15 +505,17 @@ fn asking(book: &Book, asked: &Asked, tutors: &mut dyn Tutors, roots: &[(String,
     Ok(Asking { instructions: studio::rules(false), prompt, mcp, images: Vec::new() })
 }
 
-/// Build and run coding problems on a thread of their own: what was made,
-/// each problem marked checked or not, and what failed, when it is done.
+/// Build and run coding problems on a thread of their own, with the Python
+/// they were asked for: what was made, each problem marked checked or not,
+/// and what failed, when it is done.
 fn check_coding(asked: &Asked, body: StudyMadeBody) -> std::sync::mpsc::Receiver<(StudyMadeBody, Vec<String>)> {
     let (tx, rx) = std::sync::mpsc::channel();
     let dir = asked.dir.join(".notebook").join("code").join("check").join(&asked.id);
     std::thread::spawn(move || {
-        let StudyMadeBody::Coding { title, mut problems } = body else { return };
-        let failed = super::code::check(&dir, &mut problems, super::code::Tools::here());
-        let _ = tx.send((StudyMadeBody::Coding { title, problems }, failed));
+        let StudyMadeBody::Coding { title, mut problems, python } = body else { return };
+        let tools = super::code::tools_with(python.as_ref().map(|p| Path::new(&p.path)));
+        let failed = super::code::check(&dir, &mut problems, &tools);
+        let _ = tx.send((StudyMadeBody::Coding { title, problems, python }, failed));
     });
     rx
 }

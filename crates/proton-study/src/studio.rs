@@ -277,6 +277,11 @@ pub struct Options {
     #[serde(default)]
     #[ts(skip)]
     pub languages: Vec<String>,
+    /// The Python Python's problems are checked and run with, and the
+    /// libraries it has: told the model by Proton too.
+    #[serde(default)]
+    #[ts(skip)]
+    pub python: Option<code::StudyPythonUsed>,
     /// A deck of slides, and a slide of it, to revise as `ask` says.
     #[serde(default)]
     pub slides: Option<String>,
@@ -420,6 +425,7 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
             options.level.says(),
             code::Language::from_key(&options.code),
             &runnable(options),
+            options.python.as_ref(),
             &options.focus,
             &course,
         ),
@@ -739,7 +745,13 @@ pub enum StudyMadeBody {
     Slide { slide: StudySlide },
     Graphic { title: String, style: infographic::Style, subtitle: String, blocks: Vec<StudyBlock>, takeaway: String },
     /// Programs to write: each its prompt, starter, solution and tests.
-    Coding { title: String, problems: Vec<code::StudyCodingProblem> },
+    Coding {
+        title: String,
+        problems: Vec<code::StudyCodingProblem>,
+        /// The Python its problems were checked with, and are run with.
+        #[serde(default)]
+        python: Option<code::StudyPythonUsed>,
+    },
     /// What was found on the web: a report of it, for Deep Research, and
     /// the sources.
     Found { title: String, report: String, found: Vec<StudyFound> },
@@ -833,7 +845,7 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
         }
         Shape::Coding => {
             let (title, problems) = code::read(&value, &runnable(options))?;
-            Ok(StudyMadeBody::Coding { title, problems })
+            Ok(StudyMadeBody::Coding { title, problems, python: options.python.clone() })
         }
         Shape::Found => {
             let (title, report, found) = found::read(&value, make == Make::DeepResearch)?;
@@ -1160,7 +1172,11 @@ impl Book {
                 report: value["report"].as_str().unwrap_or_default().to_string(),
                 found: serde_json::from_value(value["found"].clone()).ok()?,
             },
-            Shape::Coding => StudyMadeBody::Coding { title: header.title.clone(), problems: serde_json::from_value(value["problems"].clone()).ok()? },
+            Shape::Coding => StudyMadeBody::Coding {
+                title: header.title.clone(),
+                problems: serde_json::from_value(value["problems"].clone()).ok()?,
+                python: serde_json::from_value(value["python"].clone()).ok().flatten(),
+            },
             Shape::Prose | Shape::Mark | Shape::Guide | Shape::Labels | Shape::Pages => return None,
         };
         Some((made_of(id, header), body))

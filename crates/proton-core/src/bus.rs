@@ -635,6 +635,15 @@ pub enum Command {
         problem: String,
         code: String,
     },
+    /// Run Python's coding problems with this Python — an interpreter, or
+    /// an environment's folder — or, given nothing, the first on the login
+    /// shell's PATH.
+    StudyCodePython {
+        path: String,
+    },
+    /// Look again for the Pythons coding problems could be run with, and
+    /// what each has: after a library is installed.
+    StudyCodePythons,
     /// Stop a call of the studio's, or take it off the queue.
     StudyCancelJob {
         id: String,
@@ -1770,6 +1779,9 @@ pub enum Event {
         /// those whose compilers this machine has. Empty until they are
         /// found.
         languages: Vec<String>,
+        /// The Pythons Python's problems could be run with, and what each
+        /// has; the one they are run with is chosen.
+        pythons: Vec<proton_study::code::StudyPython>,
     },
     /// A set of coding problems as the student has it: what they have
     /// written for each and how their best run went, and which are running.

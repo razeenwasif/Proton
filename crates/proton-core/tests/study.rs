@@ -2266,3 +2266,102 @@ fn coding_problems_are_built_and_run_before_they_are_shown_and_a_students_code_i
     other.shutdown();
     session.shutdown();
 }
+
+/// A virtual environment made from the Python on the PATH, with a stand-in
+/// for PuLP that starts a solver program of its own, as PuLP starts CBC.
+fn venv_with_a_solver(at: &Path) -> Option<PathBuf> {
+    let base = proton_core::study::code::default_python()?;
+    let _ = std::fs::remove_dir_all(at);
+    let made = std::process::Command::new(&base).args(["-m", "venv", "--without-pip"]).arg(at).output().ok()?;
+    if !made.status.success() {
+        return None;
+    }
+    let python = at.join("bin/python");
+    let purelib = std::process::Command::new(&python).args(["-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"]).output().ok()?;
+    let site = PathBuf::from(String::from_utf8_lossy(&purelib.stdout).trim());
+    std::fs::create_dir_all(site.join("pulp/solverdir")).ok()?;
+    std::fs::write(
+        site.join("pulp/__init__.py"),
+        "import os, subprocess, tempfile\n\ndef solve(x):\n    with tempfile.TemporaryDirectory() as tmp:\n        model, answer = os.path.join(tmp, 'm.lp'), os.path.join(tmp, 'a.sol')\n        open(model, 'w').write(str(x))\n        subprocess.run([os.path.join(os.path.dirname(__file__), 'solverdir', 'cbc'), model, answer], check=True)\n        return int(open(answer).read())\n",
+    )
+    .ok()?;
+    let solver = site.join("pulp/solverdir/cbc");
+    std::fs::write(&solver, "#!/bin/sh\necho $(( $(cat \"$1\") * 2 )) > \"$2\"\n").ok()?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&solver, std::fs::Permissions::from_mode(0o755)).ok()?;
+    }
+    std::fs::create_dir_all(site.join("PuLP-2.9.0.dist-info")).ok()?;
+    std::fs::write(site.join("PuLP-2.9.0.dist-info/METADATA"), "Metadata-Version: 2.1\nName: PuLP\nVersion: 2.9.0\n").ok()?;
+    Some(python)
+}
+
+#[test]
+fn the_python_problems_run_with_is_chosen_its_libraries_told_the_model_and_the_set_run_with_it() {
+    use proton_study::studio::{Make, Options, StudyMadeBody};
+    if proton_lab::sandbox::available() == proton_lab::sandbox::Kind::None {
+        return;
+    }
+    let scratch = Scratch::new("pythons");
+    let Some(python) = venv_with_a_solver(&scratch.root.join("envs/opt")) else {
+        eprintln!("skipped: no Python here makes a venv");
+        return;
+    };
+    // The environment's folder is taken to mean its `python3`.
+    let python = python.with_file_name("python3");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Optimisation".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+
+    // What is not a Python is refused; an environment's folder means its Python.
+    let refused = session.apply(Command::StudyCodePython { path: scratch.root.join("envs/none").display().to_string() });
+    assert!(said(&refused).iter().any(|s| s.contains("not a Python")), "{refused:?}");
+    let events = session.apply(Command::StudyCodePython { path: scratch.root.join("envs/opt").display().to_string() });
+    let Some(Event::StudyStudio { pythons, .. }) = events.iter().find(|e| matches!(e, Event::StudyStudio { .. })) else { panic!("{events:?}") };
+    let chosen = pythons.iter().find(|p| p.chosen).expect("one is chosen");
+    assert_eq!(chosen.path, python.display().to_string());
+    assert!(chosen.libraries.contains(&"pulp 2.9.0".to_string()), "{chosen:?}");
+    let kept: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(kept["study"]["code"]["python"].as_str(), Some(python.display().to_string().as_str()), "kept in the person's settings");
+
+    // Asked for: the model is told what that Python has.
+    let solved = "import pulp\n\ndef double(x):\n    return pulp.solve(x)\n";
+    let problem = serde_json::json!({
+        "title": "Double it", "prompt": "Write `double(x)` with the solver [[S01 § Search L1-2]].", "language": "python",
+        "starter": "import pulp\n\ndef double(x):\n    return 0\n", "solution": solved,
+        "tests": "from solution import *\nfrom proton_check import check\ncheck(\"twenty-one\", lambda: double(21), 42)\ncheck(\"nought\", lambda: double(0), 0)\n",
+        "hints": [], "explanation": "", "difficulty": "easy", "topic": "LP", "cites": [],
+    });
+    log.lock().unwrap().answers.push_back(serde_json::json!({ "title": "Solvers", "problems": [problem] }).to_string());
+    session.apply(Command::StudyMake { kind: Make::Coding, options: Options { code: "python".into(), ..Default::default() } });
+    until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.state == "failed") => panic!("{jobs:?}"),
+        Event::StudyStudio { jobs, .. } => jobs.iter().any(|j| j.id == "J0001" && j.state == "done").then_some(()),
+        _ => None,
+    });
+    let asked = log.lock().unwrap().sent[0].clone();
+    assert!(asked.contains("besides its standard library, pulp 2.9.0"), "{asked}");
+    let events = session.apply(Command::StudyShowMade { id: "K001".into() });
+    let Some(Event::StudyMadeOpen { body: StudyMadeBody::Coding { problems, python: used, .. }, .. }) = events.first() else { panic!("{events:?}") };
+    assert!(problems[0].checked, "the solver ran when it was checked");
+    assert_eq!(used.as_ref().map(|u| u.path.as_str()), Some(python.display().to_string().as_str()), "the set keeps its Python");
+
+    // Run with the set's Python, even once another is chosen.
+    session.apply(Command::StudyCodePython { path: String::new() });
+    session.apply(Command::StudyCodeRun { made: "K001".into(), problem: "p1".into(), code: solved.into() });
+    let outcome = until(&mut session, |e| match e {
+        Event::StudyCodeRan { outcome, .. } => Some(outcome.clone()),
+        _ => None,
+    });
+    assert!(outcome.passed(), "{outcome:?}");
+    session.shutdown();
+}
