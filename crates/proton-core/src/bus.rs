@@ -470,6 +470,21 @@ pub enum Command {
     TexCancel,
     /// Take TeX away, and every project's builds with it.
     TexRemove,
+    /// Typeset the project now, from the file being edited.
+    TexCompile,
+    /// Stop the build under way.
+    TexStop,
+    /// Ask CTAN which packages have the files a document lacks: the first
+    /// say-so of installing them.
+    TexFindPackages {
+        files: Vec<String>,
+    },
+    /// The second: install these packages, then typeset again.
+    TexInstallPackages {
+        packages: Vec<String>,
+    },
+    /// Put what was found, installed or failed away.
+    TexForgetPackages,
     /* ── notebook ─────────────────────────────────────────────────── */
     /// Keep notebooks in this folder — typed as a path is, `~` and all.
     /// Saved in the person's own settings.
@@ -1620,6 +1635,22 @@ pub enum Event {
     /// it needs), planned, being installed, installed, or failed.
     TexEnv {
         env: proton_lab::tex::TexState,
+    },
+    /// Packages a document lacks: being found, found, being installed,
+    /// installed, or failed.
+    TexPackages {
+        packages: proton_lab::tex::tlmgr::Packages,
+    },
+    /// Where the project's build stands: under way, or what it came to.
+    TexBuild {
+        build: crate::tex::TexBuild,
+    },
+    /// What the last build's log said: its errors, warnings and bad boxes,
+    /// each where it is, and what TeX lacked. `root` is the project's, which
+    /// the entries' files are relative to.
+    TexLog {
+        log: proton_tex::log::Log,
+        root: String,
     },
     LeanEnv {
         env: proton_lab::LeanState,

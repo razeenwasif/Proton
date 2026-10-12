@@ -69,6 +69,53 @@ export async function texChecks({test, assert, win, doc, $, settle, key, shown})
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('A build is said in the pane\'s header, its log read into errors a click from their line, and a missing package found and installed', async () => {
+    await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
+    const pane = $('#tex-pane');
+    await win.pushEvents([{type: 'texEnv', env: {state: 'ready', tinytex: 'v2026.10', texlab: 'v5.26.0', bundle: 'full', size: 812_000_000, home: '/Users/you/.proton/tex'}}]); await settle();
+    let at = win.commands.length;
+    pane.querySelector('[data-tex-compile]').click(); await settle();
+    assert(sent(at, 'texCompile').length === 1, 'the play button did not typeset');
+    const build = (more) => ({type: 'texBuild', build: {state: 'running', main: 'main.tex', engine: 'pdfLaTeX', seconds: 0, pdf: null, version: 0, errors: 0, warnings: 0, boxes: 0, pages: null, said: null, ...more}});
+    await win.pushEvents([build({})]); await settle();
+    assert(pane.querySelector('[data-tex-build]').textContent.includes('Typesetting') && pane.querySelector('[data-tex-stop]'), 'a build under way is not said, or cannot be stopped');
+    at = win.commands.length;
+    pane.querySelector('[data-tex-stop]').click(); await settle();
+    assert(sent(at, 'texStop').length === 1, 'Stop did not ask');
+
+    const entry = (kind, file, line, message, context = null) => ({kind, file, line, message, context});
+    await win.pushEvents([build({state: 'failed', errors: 1, seconds: 1.4}), {type: 'texLog', root: '/Users/you/paper', log: {pages: null, missing: ['tikz-cd.sty'], entries: [
+      entry('error', 'chapters/intro.tex', 12, 'Undefined control sequence.', 'We use \\foo'),
+      entry('warning', 'main.tex', 31, "Reference `fig:loop' on page 3 undefined on input line 31."),
+      entry('box', 'chapters/intro.tex', 14, 'Overfull \\hbox (12.0pt too wide) in paragraph at lines 14--15'),
+      entry('warning', '/Users/you/.proton/tex/TinyTeX/texmf-dist/tex/latex/hyperref/hyperref.sty', null, 'hyperref: a package\'s own')]}}]); await settle();
+    assert(!pane.querySelector('[data-tex-body="log"]').hidden, 'an error does not bring the log forward');
+    assert(pane.querySelector('[data-tex-build]').classList.contains('bad') && pane.querySelector('[data-tex-log-count]').textContent === '1', 'the error is not counted');
+    const groups = [...pane.querySelectorAll('.tex-group h4')].map((h) => h.textContent.replace(/\s+/g, ' ').trim());
+    assert(JSON.stringify(groups) === JSON.stringify(['Errors 1', 'Warnings 2', 'Bad boxes 1']), `the groups: ${groups}`);
+    const error = pane.querySelector('.tex-entry.error');
+    assert(error.textContent.includes('chapters/intro.tex:12') && error.querySelector('.tex-context')?.textContent === 'We use \\foo', 'the error does not say where, or what TeX was reading');
+    at = win.commands.length;
+    error.click(); await settle();
+    assert(JSON.stringify(sent(at, 'jumpTo')[0]) === JSON.stringify({type: 'jumpTo', mode: 'tex', path: 'chapters/intro.tex', line: 11, column: 0}), `not taken to its line: ${JSON.stringify(sent(at, 'jumpTo'))}`);
+    assert(pane.querySelector('.tex-entry.warning[disabled]'), 'a package\'s own file is not offered to open');
+
+    // What it lacks: found, then installed, each when asked.
+    at = win.commands.length;
+    pane.querySelector('[data-tex-packages="find"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'texFindPackages')[0]?.files) === JSON.stringify(['tikz-cd.sty']), 'the package was not looked for');
+    await win.pushEvents([{type: 'texPackages', packages: {state: 'found', packages: [{name: 'tikz-cd', files: ['tikz-cd.sty']}], unknown: []}}]); await settle();
+    assert(!sent(at, 'texInstallPackages').length, 'installed before the second say-so');
+    pane.querySelector('[data-tex-packages="install"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'texInstallPackages')[0]?.packages) === JSON.stringify(['tikz-cd']), 'Install did not ask for tikz-cd');
+    await win.pushEvents([{type: 'texPackages', packages: {state: 'idle'}}, build({state: 'done', pdf: '/Users/you/.proton/tex/builds/paper-1/main_tex/view/main.pdf', version: 1, seconds: 0.6, pages: 3}),
+      {type: 'texLog', root: '/Users/you/paper', log: {pages: 3, missing: [], entries: []}}]); await settle();
+    assert(pane.querySelector('[data-tex-build]').textContent.includes('Typeset in under a second · 3 pages'), pane.querySelector('[data-tex-build]').textContent);
+    assert(pane.querySelector('[data-tex-log]').textContent.includes('Nothing to say'), 'a clean log does not say so');
+    pane.querySelector('[data-tex-tab="pdf"]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('LaTeX\'s dock shows the PDF, the log or the agent, and the agent\'s staged changes are there too', async () => {
     await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
     const pane = $('#tex-pane');

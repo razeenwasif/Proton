@@ -14,6 +14,7 @@
 pub mod build;
 pub mod github;
 mod make;
+pub mod tlmgr;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
@@ -254,6 +255,10 @@ pub struct TexEnv {
     clearing: Option<Receiver<()>>,
     /// Whether what a Proton gone mid-making left has been looked for.
     reaped: bool,
+    /// Packages a document lacks, being found or installed.
+    packages: tlmgr::Packages,
+    packages_version: u64,
+    packages_asking: Option<tlmgr::Asked>,
 }
 
 impl std::fmt::Debug for TexEnv {
@@ -281,6 +286,9 @@ impl TexEnv {
             making: None,
             clearing: None,
             reaped: false,
+            packages: tlmgr::Packages::Idle,
+            packages_version: 0,
+            packages_asking: None,
         }
     }
 
@@ -333,6 +341,12 @@ impl TexEnv {
 
     pub fn busy(&self) -> bool {
         self.planning.is_some() || self.making.is_some() || self.clearing.is_some()
+    }
+
+    /// Whether anything at all is under way: busy, or packages being found
+    /// or installed.
+    pub fn working(&self) -> bool {
+        self.busy() || self.packages_asking.is_some()
     }
 
     fn set(&mut self, state: TexState) {
@@ -455,7 +469,8 @@ impl TexEnv {
         let planned = self.poll_planning();
         let made = self.poll_making();
         let cleared = self.poll_clearing();
-        planned || made || cleared
+        let packages = self.poll_packages();
+        planned || made || cleared || packages
     }
 
     fn poll_planning(&mut self) -> bool {

@@ -1650,9 +1650,21 @@ impl Workspace {
 
             Command::Poll => {
                 let mut events = self.poll_servers();
-                events.extend(self.tex.poll());
+                let (built, readable) = self.tex.poll();
+                // The PDF and the log a build made, for the window to read.
+                self.documents.extend(readable);
+                events.extend(built);
                 events
             }
+
+            Command::TexCompile => self.tex_compile(),
+            Command::TexStop => self.tex.stop(),
+            Command::TexFindPackages { files } => self.tex.packages_do(|env| env.find_packages(files)),
+            Command::TexInstallPackages { packages } => self.tex.packages_do(|env| env.install_packages(packages)),
+            Command::TexForgetPackages => self.tex.packages_do(|env| {
+                env.forget_packages();
+                Ok(())
+            }),
 
             Command::TexPlan { bundle } => self.tex.plan(bundle),
             Command::TexCreate => self.tex.env_do(|env| env.create()),
@@ -2690,13 +2702,27 @@ impl Workspace {
                 // On by default: a formatter configured and not run is the
                 // surprise, not the other way round. Off is for a project
                 // whose formatter disagrees with its own history.
-                if self.settings.bool("editor.formatOnSave", true) {
+                // Not a LaTeX file: texlab formats with latexindent, which
+                // TinyTeX does not have, and a save is typeset instead.
+                let tex = self.editor.buffer().path().is_some_and(crate::tex::is_source);
+                if self.settings.bool("editor.formatOnSave", true) && !tex {
                     events.extend(self.request_format(true));
+                }
+                if tex && (self.mode == ModeId::Tex || self.tex.used()) && self.settings.bool("tex.compileOnSave", true) {
+                    events.extend(self.tex_compile());
                 }
                 events
             }
             Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
         }
+    }
+
+    /// Typeset the project from the file being edited.
+    fn tex_compile(&mut self) -> Vec<Event> {
+        let root = self.pickers.root().to_path_buf();
+        let active = self.editor.buffer().path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) });
+        let engine = self.settings.get("tex.engine").and_then(|v| v.as_str()).map(str::to_string);
+        self.tex.compile(&root, active.as_deref(), engine.as_deref())
     }
 
     /// Ask the server to format the active buffer.
@@ -5943,9 +5969,11 @@ impl Workspace {
             events.extend(self.research().sync());
         }
 
-        // LaTeX says where TeX stands: installed, or what installing it is.
+        // LaTeX says where TeX stands — installed, or what installing it
+        // is — and what the last build came to.
         if mode == ModeId::Tex {
             events.extend(self.tex.env_event(true));
+            events.extend(self.tex.last_event());
         }
 
         // Design with nothing open goes looking, once. Asking somebody to

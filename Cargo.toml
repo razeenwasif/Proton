@@ -23,6 +23,7 @@ members = [
     "crates/proton-study",
     "crates/proton-syntax",
     "crates/proton-term",
+    "crates/proton-tex",
     "crates/proton-text",
     "crates/proton-trace",
     "crates/proton-vcs",
@@ -41,6 +42,7 @@ repository = "https://github.com/razeenwasif/Proton"
 proton-agent = { path = "crates/proton-agent" }
 proton-claude = { path = "crates/proton-claude" }
 proton-voice = { path = "crates/proton-voice" }
+proton-tex = { path = "crates/proton-tex" }
 proton-council = { path = "crates/proton-council" }
 proton-core = { path = "crates/proton-core" }
 proton-dap = { path = "crates/proton-dap" }

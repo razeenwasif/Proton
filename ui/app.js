@@ -5107,6 +5107,18 @@ function renderEvent(event) {
       tex?.env(event);
       break;
 
+    case "texBuild":
+      tex?.build(event);
+      break;
+
+    case "texLog":
+      tex?.log(event);
+      break;
+
+    case "texPackages":
+      tex?.packages(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

@@ -234,6 +234,9 @@ impl Build {
             std::fs::create_dir_all(dir.join(sub)).map_err(|e| format!("{}: {e}", dir.display()))?;
         }
         mirror(&spec.root, &dir.join("out"));
+        // The PDF an earlier build made goes: one there after this build is
+        // this build's.
+        let _ = std::fs::remove_file(spec.pdf());
         let stdout = File::create(dir.join("latexmk.out")).map_err(|e| e.to_string())?;
         let stderr = File::create(dir.join("latexmk.err")).map_err(|e| e.to_string())?;
 

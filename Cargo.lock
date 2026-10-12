@@ -4360,6 +4360,7 @@ dependencies = [
  "proton-study",
  "proton-syntax",
  "proton-term",
+ "proton-tex",
  "proton-text",
  "proton-trace",
  "proton-vcs",
@@ -4576,6 +4577,15 @@ version = "0.0.1"
 dependencies = [
  "portable-pty",
  "vt100",
+]
+
+[[package]]
+name = "proton-tex"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
 ]
 
 [[package]]
