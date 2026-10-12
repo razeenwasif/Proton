@@ -510,6 +510,17 @@ function renderWindowGround(again = false) {
   setOpaque(want);
 }
 
+/** Which ends of the title bar's mode list have more past them, for the bar
+ *  to fade there. */
+function modeEdges() {
+  const list = $(".titlebar .tb-modes");
+  if (!list) return;
+  list.classList.toggle("more-above", list.scrollTop > 1);
+  list.classList.toggle("more-below", list.scrollTop + list.clientHeight < list.scrollHeight - 1);
+}
+$(".titlebar .tb-modes")?.addEventListener("scroll", modeEdges, { passive: true });
+window.addEventListener("resize", modeEdges);
+
 function renderMode(mode) {
   activeMode = mode;
   // Codex, and the modes drawn as it is, wear a different chrome from the
@@ -524,6 +535,7 @@ function renderMode(mode) {
   // On a window too short for every mode, the title bar's list scrolls: the
   // one you are in is kept in sight.
   $('.titlebar .tb-modes .mode[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
+  modeEdges();
   $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === wsOf(mode)));
   // LaTeX shows its own dock in Codex's section; Codex its own again.
   const code = $('.workspace[data-ws="codex"]');

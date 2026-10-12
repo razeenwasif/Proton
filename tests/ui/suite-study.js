@@ -217,6 +217,27 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(!ws().querySelector('[data-study-lab-form]'), 'the form stayed up');
   });
 
+  await test('Many sources squeeze neither the notebooks above them nor their buttons, and the title bar\'s words have the bar\'s width', async () => {
+    const nb = (slug, title) => ({slug, title, course: 'COMP4691', exam: null, sources: 66, opened: 1, archived: false});
+    const many = Array.from({length: 66}, (_, i) => row(`S${String(i + 1).padStart(2, '0')}`, {title: `0${i} - Optimization notes.md`, kind: 'markdown', units: 'lines', count: 380}));
+    await win.pushEvents([{type: 'studyList', notebooks: [nb('exam', 'COMP3670 exam'), nb('opt', 'Optimisation')], open: 'exam', folder: '~/Github/Notebooks'}, notebook(many)]); await settle();
+    const list = ws().querySelector('[data-study-list]');
+    const box = list.getBoundingClientRect();
+    const cut = [...list.children].filter((r) => r.getBoundingClientRect().bottom > box.bottom + 1);
+    assert(!cut.length && box.height >= 50, `the notebooks were squeezed to ${box.height}px, cutting ${cut.length}`);
+    // The side as narrow as it is by default: Label and Add stay whole.
+    const head = ws().querySelector('.st-sources-head');
+    head.querySelector('.st-faint').textContent = '66 of 66 used';
+    const add = head.querySelector('[data-study-pick]').getBoundingClientRect();
+    const label = head.querySelector('[data-study-label-all]')?.getBoundingClientRect();
+    assert(add.height < 30 && (!label || Math.abs(label.top - add.top) < 2), `a button's words broke: Add is ${add.height}px tall`);
+    // WebKit measures words turned on their side as no width: the list is
+    // given the bar's, so its scrolling never cuts them.
+    const bar = $('.titlebar').getBoundingClientRect(), modes = $('.titlebar .tb-modes').getBoundingClientRect();
+    assert(Math.abs(modes.width - bar.width) < 1, `the modes are ${modes.width}px of the bar's ${bar.width}px`);
+    assert([...doc.querySelectorAll('.titlebar .tb-modes .mode')].every((m) => m.getBoundingClientRect().width === 30), 'a mode is not the width it is given');
+  });
+
   await test('Like this notebook finds what in the folders is like it and not in it yet, by words it shows in the box', async () => {
     ws().querySelector('[data-study-pick]').click(); await settle();
     const picker = ws().querySelector('[data-study-picker]');

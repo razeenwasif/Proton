@@ -2559,7 +2559,21 @@ body { font-size: calc(13px * var(--ui-scale)); }
    on a short window its words sit closer. */
 .titlebar .tb-modes { flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; }
 .titlebar .tb-modes::-webkit-scrollbar { display: none; }
-@media (max-height: 860px) { .titlebar .tb-modes .mode { padding: 6px 5px; } }
+/* WebKit — the app's engine — measures a word turned on its side as having
+   no width, so the list and its buttons are given their widths rather than
+   asked for them: the list the bar's, each button most of it. Asked, the
+   list came out as narrow as a button's padding, and scrolling cut every
+   word down the middle. */
+.titlebar .tb-modes { align-self: stretch; }
+/* What the list has past an end is faded there, so the word at that edge
+   reads as more to scroll to rather than as a word cut short. */
+.titlebar .tb-modes.more-below { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); }
+.titlebar .tb-modes.more-above { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 36px), transparent); }
+.titlebar .tb-modes.more-above.more-below {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 36px, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 36px, #000 calc(100% - 36px), transparent);
+}
+@media (max-height: 860px) { .titlebar .tb-modes .mode { padding: 4px 5px; } }
 /* Text buttons, like the items Zed keeps in its title bar, turned to read
    down the bar as a side panel's labels do. Quiet until one is the mode you
    are in. The words turn rather than the buttons, so the boxes stay boxes
@@ -2569,7 +2583,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
    text-only button's macOS bezel through a cleared border and background. */
 .titlebar .mode {
   -webkit-appearance: none; appearance: none;
-  width: auto; display: block; padding: 8px 6px;
+  width: 30px; display: flex; justify-content: center; padding: 6px 6px;
   border: 0; border-radius: 5px; background: none; box-shadow: none;
   color: var(--faint); font: inherit; letter-spacing: 0;
 }
@@ -2586,6 +2600,8 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .titlebar .tb-projects {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   max-height: 30vh; overflow-y: auto; scrollbar-width: none; margin-top: 4px;
+  /* Its own height, up to its cap: the modes below give way first. */
+  flex: 0 0 auto;
 }
 .titlebar .tb-projects::-webkit-scrollbar { display: none; }
 .titlebar .ws {
@@ -4205,7 +4221,10 @@ body { font-size: calc(13px * var(--ui-scale)); }
    right; and the picker sources are chosen from, over all three.
    ═══════════════════════════════════════════════════════════════════ */
 .st-side { display: flex; flex-direction: column; min-height: 0; }
-.st-list { flex: 0 1 auto; max-height: 34%; }
+/* The notebooks keep their own height, up to a third of the pane, and scroll
+   past it: shrunk with the sources below, a long list of those squeezed them
+   to half a row. */
+.st-list { flex: 0 0 auto; max-height: 34%; }
 .st-main { display: flex; flex-direction: column; min-height: 0; }
 .st-stage { flex: 1 1 auto; min-height: 0; padding: 22px clamp(14px, 3vw, 28px) 40px; }
 .st-stage > * { max-width: 760px; margin-left: auto; margin-right: auto; }
@@ -4247,7 +4266,9 @@ body { font-size: calc(13px * var(--ui-scale)); }
 
 /* ── the sources, down the left ── */
 .st-sources { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--cc-line); }
-.st-sources-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 6px 16px; font: var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-text); }
+.st-sources-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px 12px 6px 16px; font: var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-text); }
+.st-sources-head > * { white-space: nowrap; }
+.st-sources-acts { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .st-sources-head .cc-quiet { padding: 3px 9px; font-size: var(--z-2xs); }
 .st-all { display: flex; align-items: center; gap: 8px; padding: 2px 16px 6px; font: var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-faint); }
 .st-source-list { flex: 1 1 auto; min-height: 0; padding-bottom: 8px; }

@@ -272,8 +272,10 @@ export function createStudy(host) {
     const label = readOnly() || usable.length < 2 ? ""
       : labelling ? `<span class="st-faint"><span class="lab-spin"></span> Labelling</span>`
         : `<button class="cc-quiet" data-study-label-all title="Label every source with its topics, in one call, to tick them by topic">Label</button>`;
-    const head = `<header class="st-sources-head"><b>Sources</b><span class="st-faint">${ticked} of ${usable.length} used</span><span class="grow"></span>${label}` +
-      (readOnly() ? "" : `<button class="cc-quiet" data-study-pick title="Add sources from your folders">${icon("plus")}Add</button>`) + `</header>`;
+    // Its buttons kept together: on a narrow pane they go under the count,
+    // rather than a button's words breaking inside it.
+    const head = `<header class="st-sources-head"><b>Sources</b><span class="st-faint">${ticked} of ${usable.length} used</span><span class="st-sources-acts">${label}` +
+      (readOnly() ? "" : `<button class="cc-quiet" data-study-pick title="Add sources from your folders">${icon("plus")}Add</button>`) + `</span></header>`;
     // Every topic a source is labelled with: each ticks the sources about it.
     const topics = [...new Set(usable.flatMap((s) => s.labels))].sort((a, b) => a.localeCompare(b));
     const labelBar = topics.length && !readOnly()
