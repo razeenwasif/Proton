@@ -87,7 +87,8 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-claude` | Claude Code, Codex and Antigravity as engines: interactive, and unattended with structured answers |
 | `proton-research` | Investigations as files, and the co-scientist round as a pure state machine |
 | `proton-literature` | The literature's sources — arXiv, Semantic Scholar, OpenAlex, Crossref — each host asked no oftener than it asks, on a worker the core polls; open PDFs downloaded, capped and checked |
-| `proton-lab` | The Lab's Python — a conda environment, or a venv where there is no conda — planned, made and removed on the scientist's say-so, and the jobs that run for it |
+| `proton-lab` | The Lab's Python — a conda environment, or a venv where there is no conda — planned, made and removed on the scientist's say-so, and the jobs that run for it; Lean and Mathlib, and TeX (TinyTeX, latexmk, texlab), made the same way, and the sandboxed builds |
+| `proton-tex` | LaTeX with no processes and no network: the log, the main file and engine, SyncTeX, the outline, BibTeX, templates, Markdown to LaTeX, and the visual editor's blocks |
 | `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
 | `proton-data` | Notebook documents and kernel integration |
 | `proton-design` | Theme tokens and component markup |
@@ -1053,6 +1054,72 @@ ready. The tests read hand-written `lean --json` output
 (`crates/proton-research/fixtures/lean`), play rounds with a scripted prover
 and Lean, and run a whole round through `Live` with a stand-in `lean` in a
 stand-in home, in the sandbox; a real Lean is the scientist's to make.
+
+### LaTeX
+
+The tenth mode (`ModeId::Tex`, ⌃0) is Codex's section drawn with a dock of
+its own: `data-dock="typeset"` swaps `#codex-dock` for `#tex-pane` (PDF, Log,
+Agent), so the editor beside it is Codex's — vim, splits, highlighting,
+language servers — and `ModeId::edits_text()` lets every gate that was
+Codex's take LaTeX too. The pane keeps a width of its own
+(`proton.panes.codex.typeset`).
+
+**TeX** is the machine's, made as Lean is (`proton-lab::tex`), in
+`~/.proton/tex` on two say-sos: the plan asks GitHub for TinyTeX's release
+(the full bundle, 210 MB, or TinyTeX-1) and texlab's, with the SHA-256
+digests GitHub publishes; making it downloads and checks both, unpacks them,
+installs latexmk with tlmgr if the bundle lacks it, and typesets a page in
+the sandbox before `ready.json` is written. A package a document lacks is
+found with `tlmgr search --global --file` and installed with `tlmgr install`,
+each on a say-so; a new project's classes and packages are checked with
+kpsewhich before its first build.
+
+**A build** (`proton-lab::tex::build`) is `latexmk -cd -pdf|-pdfxe|-pdflua
+-synctex=1 -interaction=nonstopmode -file-line-error` in the sandbox, which
+reads the project and TeX and writes only the build's folder,
+`~/.proton/tex/builds/<project>-<hash>/<main>/` — never the project, so Git
+stays clean and a document cannot rewrite its own sources. `HOME`, `TMPDIR`
+and TeX's `TEXMF*` caches are inside that folder, `max_print_line` is wide
+enough that the log does not wrap, and shell escape is off. A save typesets
+again (a build under way is stopped first); the PDF is copied atomically to
+`view/` and allow-listed for the window, which draws it with `ui/pdf-view.js`
+and reads it again in place, page and zoom kept. Save PDF is the one write a
+build makes in the project, and only when asked.
+
+**`proton-tex`** is the pure half. `log` reads TeX's log by its file stack
+into errors, warnings and bad boxes, each with its file and line, and what
+TeX lacked; `project` finds the main file (`.proton/tex.json`, `% !TEX
+root`, the file being edited, a conventional name, the include graph) and
+the engine; `synctex` reads the `.synctex.gz` both ways, in PDF points;
+`outline` gives the headings and words across the include graph; `bib` reads
+`.bib` files tolerantly, keeping each entry's span, and writes entries with
+`lastnameYEARword` keys; `templates` holds six with `include_str!`;
+`markdown` turns Research's Markdown into LaTeX, `P003` into `\cite`; and
+`blocks` cuts a file into the visual editor's blocks, which join back into
+the source exactly.
+
+**The agent** reads the last build with `@log` or the read-only `latex_log`
+tool: up to twenty errors, each with the three source lines either side as
+the editor has them, unsaved or not. **Research** is a cite picker away —
+the document's `.bib`, every investigation's papers, and a search online
+only when asked, through Research's own literature source; the entry is
+added to the `.bib` once, and `\cite{key}` goes in at the cursor as one undo
+step — and `TexWriteUp` gathers an investigation into `paper/<slug>/`: its
+brief, hypotheses as the tournament ranked them, experiments, the runs'
+figures copied in, verdicts, overview, and a `references.bib` of its
+literature.
+
+**The visual editor** (`ui/tex-visual.js`) covers the panes as the
+document viewer does. The core sends the file being edited as blocks
+(`Event::TexBlocks`) whenever the buffer changes while it is on; the window
+draws paragraphs and headings as editable text — marks as elements, every
+command it does not draw as a locked chip that goes back as it came — and
+equations with KaTeX, and draws any block that would not come back exactly
+as its source instead. An edit is sent as the block's new text with the
+version and the text it replaced; the core applies the smallest replacement
+only if the span still holds that text, as one undo step, and the window
+leaves the block being typed in alone when the core's answer is what it
+already shows.
 
 ### Notebook
 

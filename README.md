@@ -220,11 +220,19 @@ process, and wait on one.
 captions from the `.srt` beside it. Both files are spliced, never re-printed.
 There is no program monitor: a frame of the programme is a decoded frame of
 video, and decoding needs ffmpeg.
-**LaTeX** · Overleaf's editor, in Proton: Codex's own editor over a project's
-`.tex` files — vim, splits and the agent — beside a pane for the PDF they
-typeset to, the build's log and the agent, on ⌃0. Still being built: TeX
-itself (TinyTeX, installed by Proton when you agree), compiling on save,
-SyncTeX, templates, citations from Research and a visual editor come next.
+**LaTeX** · Overleaf's editor, in Proton, on ⌃0: Codex's own editor over a
+project's `.tex` files — vim, splits, texlab's completion — beside a pane for
+the PDF, the build's log and the agent. TeX is Proton's own (TinyTeX, latexmk
+and texlab in `~/.proton/tex`, installed on two say-sos), and a save
+typesets the document in the sandbox, its builds kept outside the project.
+Errors are a click from their line, a missing package is found and installed
+when you agree, and SyncTeX goes both ways (⌘⏎, and a double-click on the
+PDF). The outline and word count sit under the tree. New projects start from
+six templates; the agent reads the log with `@log`, and Fix asks it about an
+error. The cite picker finds papers in the `.bib`, in Research's literature
+or online, and an investigation can be written up as a paper. The visual
+editor edits paragraphs, headings and equations as they read, one undo step
+at a time.
 
 ## The three things that hold it together
 
