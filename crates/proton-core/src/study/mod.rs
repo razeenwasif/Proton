@@ -68,6 +68,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyDetails { .. }
             | Command::StudyArchive { .. }
             | Command::StudyAdd { .. }
+            | Command::StudyAddFolder { .. }
             | Command::StudyDownload { .. }
             | Command::StudyPaste { .. }
             | Command::StudyAddUrls { .. }
@@ -166,6 +167,18 @@ struct Item {
     path: PathBuf,
     kind: Kind,
     download: bool,
+    /// A folder's: what its walk passes over.
+    scope: Option<proton_library::folder::Scope>,
+}
+
+/// Where a folder source's folder is, and what a walk of it passes over:
+/// its root's rules, for one of the knowledge base; the defaults otherwise.
+fn folder_at(kb: &kb::Kb, origin: &Origin) -> Option<(PathBuf, proton_library::folder::Scope)> {
+    let Origin::Folder { root, path } = origin else { return None };
+    match root {
+        Some(label) => Some((kb.file(label, path)?, proton_library::folder::Scope::within(kb.rules(), label, path))),
+        None => Some((folder::expand(path), proton_library::folder::Scope::anywhere())),
+    }
 }
 
 /// Notebook, for the session.
@@ -340,7 +353,11 @@ fn read_all(items: Vec<Item>, snapshots: PathBuf, pdfs: Pdfs, media: Arc<dyn voi
             }
             continue;
         }
-        let answer = match snapshot::read(&item.path, item.kind, &pdfs) {
+        let read = match &item.scope {
+            Some(scope) => snapshot::read_folder(&item.path, scope, &pdfs),
+            None => snapshot::read(&item.path, item.kind, &pdfs),
+        };
+        let answer = match read {
             Ok(read) => match snapshot::keep_in(&snapshots, &item.id, &read.body) {
                 Ok(()) => Answer::Read(Box::new(read)),
                 Err(why) => Answer::Failed(why),
@@ -573,6 +590,7 @@ impl Study {
             Command::StudyDetails { title, course, exam } => self.details(&title, &course, exam.as_deref()),
             Command::StudyArchive { slug, archived } => self.archive(&slug, archived),
             Command::StudyAdd { paths } => self.add(paths, false),
+            Command::StudyAddFolder { path } => self.add_folder(&path),
             Command::StudyDownload { paths } => self.add(paths, true),
             Command::StudyPaste { title, text } => self.paste(&title, &text),
             Command::StudyAddUrls { urls } => self.add_urls(&urls),
@@ -993,7 +1011,7 @@ impl Study {
             if let Some(source) = book.sources.sources.iter_mut().find(|s| s.origin.labelled().as_deref() == Some(path.as_str())) {
                 if download && source.status == SourceStatus::InCloud {
                     source.status = SourceStatus::Downloading;
-                    items.push(Item { id: source.id.clone(), path: file, kind: entry.kind, download: true });
+                    items.push(Item { id: source.id.clone(), path: file, kind: entry.kind, download: true, scope: None });
                 } else {
                     said.push(format!("{} is already {}", source.title, source.id));
                 }
@@ -1013,7 +1031,7 @@ impl Study {
                 (false, _) => SourceStatus::Reading,
             };
             if status != SourceStatus::InCloud {
-                items.push(Item { id: id.clone(), path: file, kind: entry.kind, download: entry.dataless });
+                items.push(Item { id: id.clone(), path: file, kind: entry.kind, download: entry.dataless, scope: None });
             }
             book.sources.sources.push(Source {
                 id: id.clone(),
@@ -1039,6 +1057,83 @@ impl Study {
         let mut events = self.saved();
         events.insert(0, self.list_event());
         events.extend(said.into_iter().map(|s| notice(s, NoticeLevel::Info)));
+        events
+    }
+
+    /// Add a folder as one source — a lab, its files read together, cited by
+    /// file and line: one of the knowledge base as the picker names it,
+    /// `Courses/COMP2310/lab1`, or any folder by its path. One inside a root
+    /// of the knowledge base is kept as the picker would name it, and its
+    /// rules apply.
+    fn add_folder(&mut self, typed: &str) -> Vec<Event> {
+        let typed = typed.trim().trim_end_matches('/');
+        if typed.is_empty() {
+            return vec![notice("Say which folder to add.".into(), NoticeLevel::Info)];
+        }
+        let origin = if typed.starts_with('~') || typed.starts_with('/') {
+            let dir = folder::normalise(&folder::expand(typed));
+            let within = self.kb.labelled_roots().into_iter().find_map(|(label, root)| {
+                let rel = dir.strip_prefix(folder::normalise(&root)).ok()?;
+                Some((label, rel.to_string_lossy().replace('\\', "/")))
+            });
+            match within {
+                Some((_, rel)) if rel.is_empty() => {
+                    return vec![notice(format!("{} is a whole folder of the knowledge base: add a folder inside it.", folder::tilde(&dir)), NoticeLevel::Info)];
+                }
+                Some((label, rel)) => Origin::Folder { root: Some(label), path: rel },
+                None => Origin::Folder { root: None, path: folder::tilde(&dir) },
+            }
+        } else {
+            match typed.split_once('/') {
+                Some((label, rel)) if self.kb.root_path(label).is_some() && !rel.trim_matches('/').is_empty() => {
+                    Origin::Folder { root: Some(label.to_string()), path: rel.trim_matches('/').to_string() }
+                }
+                _ => return vec![notice(format!("{typed}: not a folder of the knowledge base. Give a folder's path: ~/… or /…"), NoticeLevel::Info)],
+            }
+        };
+        let Some((dir, scope)) = folder_at(&self.kb, &origin) else {
+            return vec![notice(format!("{typed}: not a folder of the knowledge base"), NoticeLevel::Info)];
+        };
+        if dir == folder::expand("~") || dir.parent().is_none() {
+            return vec![notice(format!("{} is too much to be one source: add a lab's folder.", folder::tilde(&dir)), NoticeLevel::Info)];
+        }
+        if !std::fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir()) {
+            return vec![notice(format!("{}: not a folder", folder::tilde(&dir)), NoticeLevel::Warn)];
+        }
+        if let Some(why) = scope.refused() {
+            return vec![notice(format!("{} is left out of the knowledge base: {why}", folder::tilde(&dir)), NoticeLevel::Info)];
+        }
+        if let Some(open) = &self.open {
+            let same = open.book.sources.sources.iter().find(|s| folder_at(&self.kb, &s.origin).is_some_and(|(d, _)| d == dir));
+            if let Some(source) = same {
+                return vec![notice(format!("{} is already {}.", source.title, source.id), NoticeLevel::Info)];
+            }
+        }
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let id = book.sources.take_id();
+        book.sources.sources.push(Source {
+            id: id.clone(),
+            title: folder::name_of(&dir),
+            kind: Kind::Folder.name().to_string(),
+            origin,
+            role: Role::Lab,
+            size: 0,
+            mtime: 0,
+            sha256: String::new(),
+            units: Units::Lines,
+            count: 0,
+            thin: Vec::new(),
+            status: SourceStatus::Reading,
+            added: proton_study::now(),
+            labels: Vec::new(),
+        });
+        let _ = book.tick(&id);
+        self.start_reading(vec![Item { id, path: dir, kind: Kind::Folder, download: false, scope: Some(scope) }]);
+        let mut events = self.saved();
+        events.insert(0, self.list_event());
         events
     }
 
@@ -1439,7 +1534,7 @@ impl Study {
                 labels: Vec::new(),
             });
             let _ = book.tick(&source);
-            items.push(Item { id: source, path, kind: Kind::Artifact, download: false });
+            items.push(Item { id: source, path, kind: Kind::Artifact, download: false, scope: None });
         }
         if !items.is_empty() {
             self.start_reading(items);
@@ -1500,7 +1595,11 @@ impl Study {
                 return vec![notice(format!("{id}: no such source"), NoticeLevel::Warn)];
             };
             match &source.origin {
-                Origin::File { root, rel } => self.kb.file(root, rel).map(|path| (path, Kind::from_name(&source.kind))),
+                Origin::File { root, rel } => self.kb.file(root, rel).map(|path| (path, Kind::from_name(&source.kind), None)),
+                Origin::Folder { .. } => match folder_at(&self.kb, &source.origin) {
+                    Some((dir, _)) if !dir.is_dir() => return vec![notice(format!("{}'s folder is gone: {}", source.title, folder::tilde(&dir)), NoticeLevel::Warn)],
+                    found => found.map(|(dir, scope)| (dir, Kind::Folder, Some(scope))),
+                },
                 Origin::Artifact { id: artifact, .. } => {
                     let store = proton_claude::artifacts::Store::open();
                     let latest = store.list().iter().find(|a| &a.id == artifact).and_then(|a| a.versions.iter().rev().find(|v| !v.file.is_empty()).cloned());
@@ -1517,7 +1616,7 @@ impl Study {
                         source.origin = Origin::Artifact { id: artifact, seq: version.seq, file: version.file.clone() };
                         source.status = SourceStatus::Reading;
                     }
-                    self.start_reading(vec![Item { id: id.to_string(), path, kind: Kind::Artifact, download: false }]);
+                    self.start_reading(vec![Item { id: id.to_string(), path, kind: Kind::Artifact, download: false, scope: None }]);
                     return self.saved();
                 }
                 Origin::Web { url, .. } => {
@@ -1535,7 +1634,7 @@ impl Study {
                 _ => return vec![notice(format!("{} has no file to read again.", source.title), NoticeLevel::Info)],
             }
         };
-        let Some((path, kind)) = file else {
+        let Some((path, kind, scope)) = file else {
             return vec![notice("Its folder is no longer in the knowledge base.".into(), NoticeLevel::Warn)];
         };
         let in_cloud = std::fs::symlink_metadata(&path).is_ok_and(|m| dataless::is_dataless(&m));
@@ -1547,7 +1646,7 @@ impl Study {
             source.status = if in_cloud { SourceStatus::InCloud } else { SourceStatus::Reading };
         }
         if !in_cloud {
-            self.start_reading(vec![Item { id: id.to_string(), path, kind, download: false }]);
+            self.start_reading(vec![Item { id: id.to_string(), path, kind, download: false, scope }]);
         }
         self.saved()
     }
@@ -2051,10 +2150,11 @@ impl Study {
             return vec![notice(format!("{}: {why}", source.title), NoticeLevel::Info)];
         };
         let gone = matches!(source.origin, Origin::File { .. }) && meta.is_none();
+        let what = if matches!(source.origin, Origin::Folder { .. }) { "folder" } else { "file" };
         let said = match (&source.status, in_cloud) {
             _ if gone => Some("Its file is gone: these are its words as they were read.".to_string()),
-            (SourceStatus::Missing, _) => Some("Its file is gone: these are its words as they were read.".to_string()),
-            (SourceStatus::Changed, _) => Some("Its file has changed since it was read: these are its words as they were.".to_string()),
+            (SourceStatus::Missing, _) => Some(format!("Its {what} is gone: these are its words as they were read.")),
+            (SourceStatus::Changed, _) => Some(format!("Its {what} has changed since it was read: these are its words as they were.")),
             (_, true) => Some("Its file is in iCloud: these are its words as they were read.".to_string()),
             _ => None,
         };
@@ -2200,19 +2300,30 @@ impl Study {
         let Some(open) = &mut self.open else { return };
         let mut changed = false;
         for source in &mut open.book.sources.sources {
-            let Origin::File { root, rel } = &source.origin else { continue };
             if !source.status.has_words() {
                 continue;
             }
-            let now = match self.kb.file(root, rel).and_then(|p| std::fs::symlink_metadata(p).ok()) {
-                None => SourceStatus::Missing,
-                Some(meta) => {
-                    let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
-                    match (meta.len(), mtime) == (source.size, source.mtime) {
-                        true => SourceStatus::Ready,
-                        false => SourceStatus::Changed,
+            let now = match &source.origin {
+                Origin::File { root, rel } => match self.kb.file(root, rel).and_then(|p| std::fs::symlink_metadata(p).ok()) {
+                    None => SourceStatus::Missing,
+                    Some(meta) => {
+                        let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+                        match (meta.len(), mtime) == (source.size, source.mtime) {
+                            true => SourceStatus::Ready,
+                            false => SourceStatus::Changed,
+                        }
                     }
-                }
+                },
+                // A folder by its files' sizes together and its newest change.
+                Origin::Folder { .. } => match folder_at(&self.kb, &source.origin) {
+                    Some((dir, scope)) if dir.is_dir() => match proton_library::folder::stamp(&dir, &scope) {
+                        Ok(stamp) if (stamp.size, stamp.mtime) == (source.size, source.mtime) => SourceStatus::Ready,
+                        Ok(_) => SourceStatus::Changed,
+                        Err(_) => continue,
+                    },
+                    _ => SourceStatus::Missing,
+                },
+                _ => continue,
             };
             if now != source.status {
                 source.status = now;

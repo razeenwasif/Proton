@@ -27,6 +27,9 @@ pub enum Kind {
     Web,
     /// A page Claude published as an artifact, as Proton keeps it.
     Artifact,
+    /// A folder read as one text, a lab its files together: never a file
+    /// of the knowledge base ([`crate::folder`]).
+    Folder,
     Other,
 }
 
@@ -139,13 +142,14 @@ impl Kind {
             Kind::Code => "code",
             Kind::Web => "web",
             Kind::Artifact => "artifact",
+            Kind::Folder => "folder",
             Kind::Other => "other",
         }
     }
 }
 
 /// Every kind, for reading one back by name.
-const ALL: [Kind; 16] = [
+const ALL: [Kind; 17] = [
     Kind::Markdown,
     Kind::Text,
     Kind::Pdf,
@@ -161,6 +165,7 @@ const ALL: [Kind; 16] = [
     Kind::Code,
     Kind::Web,
     Kind::Artifact,
+    Kind::Folder,
     Kind::Other,
 ];
 

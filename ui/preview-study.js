@@ -485,6 +485,18 @@ export function createStudyPreview(deliver) {
             status: { state: "ready" }, units: "lines", count: command.text.split("\n").length, size: command.text.length, thin: 0, selected: true, labels: [] });
           return [notebookEvent(), listEvent()];
         }
+        case "studyAddFolder": {
+          // A lab folder, read whole: the preview has no folders to read, so
+          // it is listed as read.
+          const slug = state.open ?? "";
+          const typed = String(command.path ?? "").replace(/\/+$/, "");
+          const id = `S${String(state.next[slug]++).padStart(2, "0")}`;
+          const kb = !/^[~/]/.test(typed) && typed.includes("/");
+          const origin = kb ? { from: "folder", root: typed.split("/")[0], path: typed.split("/").slice(1).join("/") } : { from: "folder", root: null, path: typed };
+          state.sources[slug].push({ id, title: typed.split("/").pop() || typed, kind: "folder", role: "lab", origin,
+            status: { state: "ready" }, units: "lines", count: 240, size: 18_000, thin: 0, selected: true, labels: [] });
+          return [notebookEvent(), listEvent()];
+        }
         case "studyAddUrls": {
           const slug = state.open ?? "";
           const have = new Set((state.sources[slug] ?? []).map((s) => (s.origin.from === "web" ? s.origin.url : "")));

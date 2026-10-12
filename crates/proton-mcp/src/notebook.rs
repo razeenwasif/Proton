@@ -99,6 +99,9 @@ fn role(role: Role) -> &'static str {
 
 fn extent(source: &Source) -> String {
     match source.units {
+        // A folder read whole: its first lines list its files, and each
+        // file's lines follow `==> path <==`, which its citations name.
+        Units::Lines if source.kind == "folder" => format!("a folder of files read together, {} lines: its first lines list them, and each follows a line ==> its/path <==", source.count),
         Units::Pages => format!("{} pages", source.count),
         Units::Lines => format!("{} lines", source.count),
         Units::Seconds => format!("{} minutes", source.count.div_ceil(60)),

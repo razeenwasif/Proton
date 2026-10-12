@@ -2365,3 +2365,81 @@ fn the_python_problems_run_with_is_chosen_its_libraries_told_the_model_and_the_s
     assert!(outcome.passed(), "{outcome:?}");
     session.shutdown();
 }
+
+#[test]
+fn a_lab_folder_is_one_source_its_files_read_together_cited_by_file_and_read_again_when_it_changes() {
+    let scratch = Scratch::new("lab-folder");
+    let settings = scratch.knowledge_base();
+    scratch.write("kb/Courses/COMP2310/lab1/README.md", "# Lab 1\nWrite strlen without the C library.\n");
+    scratch.write("kb/Courses/COMP2310/lab1/Makefile", "# Build it\nstrlen: strlen.c\n\tcc -o strlen strlen.c\n");
+    scratch.write("kb/Courses/COMP2310/lab1/src/strlen.c", "size_t my_strlen(const char *s) {\n    size_t n = 0;\n    while (s[n]) n++;\n    return n;\n}\n");
+    std::fs::write(scratch.root.join("kb/Courses/COMP2310/lab1/strlen"), b"\x7fELF\0\0a program").unwrap();
+    scratch.write("elsewhere/labs/lab2/main.c", "int main(void) { return 2; }\n");
+    let mut session = session(&scratch, &settings);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    let notebooks = scratch.root.join("Notebooks");
+    session.apply(Command::StudyFolder { folder: notebooks.display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "COMP2310".into() });
+    let book = notebooks.join("comp2310");
+
+    // A folder of the knowledge base, as the picker names it: one source, a lab.
+    let events = session.apply(Command::StudyAddFolder { path: "Courses/COMP2310/lab1".into() });
+    let rows = sources(&events).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].title.as_str(), rows[0].kind.as_str(), rows[0].role, &rows[0].status), ("lab1", "folder", Role::Lab, &SourceStatus::Reading));
+    assert!(rows[0].selected, "ticked, as a source added is");
+    let rows = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(sources.clone()),
+        _ => None,
+    });
+    let text = std::fs::read_to_string(book.join(".notebook/sources/S01.txt")).unwrap();
+    assert!(text.starts_with("lab1: a folder of 3 files, read together."), "{text}");
+    for part in ["==> README.md <==\n# Lab 1", "==> Makefile <==\n# Build it\n", "==> src/strlen.c <==\nsize_t my_strlen", "  strlen — not text"] {
+        assert!(text.contains(part), "{part:?} in {text}");
+    }
+    assert_eq!(rows[0].count, text.lines().count(), "counted in lines");
+
+    // What the tutor searches cites the file the words are in.
+    let library = proton_study::snapshot::library(&proton_study::Book::read(&book).unwrap());
+    let hits = library.search("my_strlen", 3);
+    assert!(hits.first().is_some_and(|h| h.cite.starts_with("S01 § src/strlen.c L")), "{:?}", hits.iter().map(|h| &h.cite).collect::<Vec<_>>());
+
+    // The picker shows it added; adding it again, by name or by path, says so.
+    let events = session.apply(Command::StudyKbBrowse { root: "Courses".into(), dir: "COMP2310".into() });
+    let Some(Event::StudyKbFolder { folders, .. }) = events.first() else { panic!("{events:?}") };
+    assert_eq!(folders.iter().find(|f| f.name == "lab1").and_then(|f| f.source.clone()).as_deref(), Some("S01"));
+    let typed = scratch.root.join("kb/Courses/COMP2310/lab1/").display().to_string();
+    assert!(said(&session.apply(Command::StudyAddFolder { path: typed })).iter().any(|s| s == "lab1 is already S01."));
+
+    // Any folder by its path; not a whole root, a file, or what is not there.
+    let elsewhere = scratch.root.join("elsewhere/labs/lab2");
+    let rows = sources(&session.apply(Command::StudyAddFolder { path: elsewhere.display().to_string() })).unwrap();
+    assert!(matches!(&rows[1].origin, proton_study::model::Origin::Folder { root: None, .. }), "{:?}", rows[1].origin);
+    let refused = |session: &mut Session, path: String| said(&session.apply(Command::StudyAddFolder { path }));
+    assert!(refused(&mut session, scratch.root.join("kb/Courses").display().to_string()).iter().any(|s| s.contains("a whole folder of the knowledge base")));
+    assert!(refused(&mut session, scratch.root.join("kb/Vault/notes.md").display().to_string()).iter().any(|s| s.contains("not a folder")));
+    assert!(refused(&mut session, "Courses/nowhere".into()).iter().any(|s| s.contains("not a folder")));
+    assert!(refused(&mut session, scratch.root.join("kb/Vault/Private").display().to_string()).iter().any(|s| s.contains("left out of the knowledge base")), "the person's rule holds");
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 2 && sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(()),
+        _ => None,
+    });
+
+    // A file changed: opening the notebook notes it, and Read again reads it anew.
+    std::fs::write(scratch.root.join("kb/Courses/COMP2310/lab1/src/strlen.c"), "size_t my_strlen(const char *s) { return __builtin_strlen(s); }\n").unwrap();
+    let rows = sources(&session.apply(Command::StudyOpen { slug: "comp2310".into() })).unwrap();
+    assert_eq!(rows[0].status, SourceStatus::Changed);
+    assert_eq!(rows[1].status, SourceStatus::Ready);
+    session.apply(Command::StudyRefresh { id: "S01".into() });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+    assert!(std::fs::read_to_string(book.join(".notebook/sources/S01.txt")).unwrap().contains("__builtin_strlen"));
+    // Gone: said to be, its words kept.
+    std::fs::remove_dir_all(&elsewhere).unwrap();
+    let rows = sources(&session.apply(Command::StudyOpen { slug: "comp2310".into() })).unwrap();
+    assert_eq!(rows[1].status, SourceStatus::Missing);
+    assert!(book.join(".notebook/sources/S02.txt").is_file());
+}

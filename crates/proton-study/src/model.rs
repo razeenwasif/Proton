@@ -77,6 +77,14 @@ pub enum Origin {
     /// An artifact Claude published, as Proton keeps it: its id, the
     /// version read, and its page in that version's folder.
     Artifact { id: String, seq: u32, file: String },
+    /// A folder read as one source — a lab, its README, code and Makefiles
+    /// together: one of the knowledge base, by its root's label and its path
+    /// under it, or any other by its path, `~` for home.
+    Folder {
+        #[serde(default)]
+        root: Option<String>,
+        path: String,
+    },
 }
 
 impl Origin {
@@ -84,6 +92,7 @@ impl Origin {
     pub fn labelled(&self) -> Option<String> {
         match self {
             Origin::File { root, rel } => Some(format!("{root}/{rel}")),
+            Origin::Folder { root: Some(root), path } => Some(format!("{root}/{path}")),
             _ => None,
         }
     }
@@ -229,6 +238,12 @@ mod tests {
         assert_eq!(failed, serde_json::json!({"state": "failed", "why": "a scan"}));
         let file = serde_json::to_value(Origin::File { root: "Courses".into(), rel: "a.pdf".into() }).unwrap();
         assert_eq!(file, serde_json::json!({"from": "file", "root": "Courses", "rel": "a.pdf"}));
+        let lab = Origin::Folder { root: Some("Courses".into()), path: "COMP2310/lab1".into() };
+        assert_eq!(serde_json::to_value(&lab).unwrap(), serde_json::json!({"from": "folder", "root": "Courses", "path": "COMP2310/lab1"}));
+        assert_eq!(lab.labelled().as_deref(), Some("Courses/COMP2310/lab1"), "as the picker names the folder");
+        let elsewhere = Origin::Folder { root: None, path: "~/Github/labs".into() };
+        assert_eq!(serde_json::to_value(&elsewhere).unwrap(), serde_json::json!({"from": "folder", "root": null, "path": "~/Github/labs"}));
+        assert_eq!(elsewhere.labelled(), None);
         assert_eq!(serde_json::to_value(Role::PastPaper).unwrap(), "pastPaper");
         assert!(SourceStatus::Missing.has_words() && !SourceStatus::InCloud.has_words());
     }

@@ -211,7 +211,11 @@ impl Kb {
             dir => format!("{root}/{dir}/{name}"),
         };
         if let Event::StudyKbFolder { folders, files, left, .. } = &mut out {
-            *folders = listing.folders.iter().map(|f| StudyKbFolder { name: f.name.clone(), path: under(&f.name), files: f.files, readable: f.readable, in_cloud: f.dataless }).collect();
+            *folders = listing
+                .folders
+                .iter()
+                .map(|f| StudyKbFolder { name: f.name.clone(), path: under(&f.name), files: f.files, readable: f.readable, in_cloud: f.dataless, source: sources.get(&under(&f.name)).cloned() })
+                .collect();
             *files = listing.files.iter().map(|e| StudyKbFile::of(catalog, e, sources.get(&catalog.labelled(e)).cloned())).collect();
             *left = listing
                 .skipped

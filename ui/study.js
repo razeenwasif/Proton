@@ -101,7 +101,10 @@ export function createStudy(host) {
     stage: q("[data-study-stage]"),
     studio: q("[data-study-studio-body]"),
   };
-  const picker = createPicker({ root: host.root, dispatch: host.dispatch, ws, discoverable: () => !readOnly() && !!state.notebook?.sources.some(hasWords) });
+  const picker = createPicker({
+    root: host.root, dispatch: host.dispatch, ws, discoverable: () => !readOnly() && !!state.notebook?.sources.some(hasWords),
+    folderSource: (path) => state.notebook?.sources.find((s) => s.origin.from === "folder" && s.origin.root && `${s.origin.root}/${s.origin.path}` === path)?.id ?? null,
+  });
   const chat = createChat({
     dispatch: host.dispatch, ws, readOnly: () => readOnly(),
     show: (id, at) => host.dispatch({ type: "studyShow", id, at }),
@@ -137,7 +140,7 @@ export function createStudy(host) {
   const coder = createCoding({ dispatch: host.dispatch, readOnly: () => readOnly(), stage: els.stage });
 
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
-   *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web" | "artifacts", removing: string | null,
+   *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web" | "artifacts" | "folder", removing: string | null,
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
    *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null,
    *   artifacts: ArtifactRow[] | null, picked: Set<string>}} */
@@ -218,8 +221,10 @@ export function createStudy(host) {
       case "failed": return s.kind === "audio" || s.kind === "video"
         ? `<button class="st-badge bad" data-study-transcribe="${esc(s.id)}" title="${esc(st.why)} — transcribe it again">Not transcribed</button>`
         : `<span class="st-badge bad" title="${esc(st.why)}">Not read</span>`;
-      case "missing": return `<span class="st-badge" title="Its file is gone; what was read of it is kept">File gone</span>`;
-      case "changed": return `<button class="st-badge" data-study-refresh="${esc(s.id)}" title="Its file has changed since it was read">Read again</button>`;
+      case "missing": return s.kind === "folder"
+        ? `<span class="st-badge" title="Its folder is gone; what was read of it is kept">Folder gone</span>`
+        : `<span class="st-badge" title="Its file is gone; what was read of it is kept">File gone</span>`;
+      case "changed": return `<button class="st-badge" data-study-refresh="${esc(s.id)}" title="${s.kind === "folder" ? "A file in its folder has changed, come or gone since it was read" : "Its file has changed since it was read"}">Read again</button>`;
       case "untranscribed": return `<button class="st-badge" data-study-transcribe="${esc(s.id)}" title="Transcribe it with Fish Audio: you are told what it costs first">` +
         `${icon("mic")}Transcribe${st.seconds ? ` · ${esc(minutes(st.seconds))}` : ""}</button>`;
       case "transcribing": return `<span class="st-badge busy"><span class="lab-spin"></span>Transcribing</span>`;
@@ -230,7 +235,8 @@ export function createStudy(host) {
   /** @param {SourceRow} s */
   function sourceHtml(s) {
     const origin = s.origin.from === "file" ? `${s.origin.root}/${s.origin.rel}` : s.origin.from === "note" ? `Note ${s.origin.note}`
-      : s.origin.from === "web" ? s.origin.url : s.origin.from === "artifact" ? `Artifact, version ${s.origin.seq}` : "Pasted";
+      : s.origin.from === "web" ? s.origin.url : s.origin.from === "artifact" ? `Artifact, version ${s.origin.seq}`
+        : s.origin.from === "folder" ? `The folder ${s.origin.root ? `${s.origin.root}/${s.origin.path}` : s.origin.path}` : "Pasted";
     const confirm = state.removing === s.id
       ? `<span class="st-confirm">Take out? <button class="st-link" data-study-remove-yes="${esc(s.id)}">Yes</button> <button class="st-link" data-study-remove-no>No</button></span>`
       : "";
@@ -401,6 +407,19 @@ export function createStudy(host) {
       </form>`;
   }
 
+  /** A folder, a lab's, to add whole by its path. */
+  function folderHtml() {
+    return `<form class="st-card st-paste" data-study-lab-form novalidate>
+        <h2>Add a lab folder</h2>
+        <label class="rs-field"><span>Folder</span><input name="path" autocomplete="off" spellcheck="false" placeholder="~/Courses/COMP2310/lab-pack-1"></label>
+        <p class="st-faint">The whole folder becomes one source, a lab: its README, code, Makefiles and other text read together, each file
+          under its path, and cited by file and line. Programs, pictures and documents in it are left out, and listed. A folder of your
+          knowledge base can be added the same way from Add sources, with its Add as a lab.</p>
+        <div class="rs-actions"><button type="button" class="cc-quiet" data-study-paste-cancel>Cancel</button>
+          <button type="submit" class="cc-primary">Add as a source</button></div>
+      </form>`;
+  }
+
   /** The artifacts Proton keeps, to tick and add as sources. */
   function artifactsHtml() {
     const list = state.artifacts;
@@ -427,7 +446,7 @@ export function createStudy(host) {
     const nb = /** @type {NotebookEvent} */ (state.notebook);
     const held = nb.readOnly ? `<div class="st-banner">${icon("users")} ${esc(nb.readOnly)} has this notebook open: it is read only here.</div>` : "";
     if (state.editing) return held + detailsHtml();
-    if (state.pasting) return held + (state.pasting === "web" ? webHtml() : state.pasting === "artifacts" ? artifactsHtml() : pasteHtml());
+    if (state.pasting) return held + (state.pasting === "web" ? webHtml() : state.pasting === "artifacts" ? artifactsHtml() : state.pasting === "folder" ? folderHtml() : pasteHtml());
     const head = headHtml();
     if (!nb.sources.length) {
       return `${held}${head}<div class="st-card st-empty">
@@ -436,6 +455,7 @@ export function createStudy(host) {
             and everything the studio makes is drawn from them, and cites them.</p>
           ${readOnly() ? "" : `<div class="rs-actions"><button class="cc-quiet" data-study-paste>Paste text</button>
             <button class="cc-quiet" data-study-web>${icon("globe")}From the web</button>
+            <button class="cc-quiet" data-study-lab>${icon("folder")}A lab folder</button>
             <button class="cc-quiet" data-study-artifacts>${icon("layers")}Your artifacts</button>
             <button class="cc-primary" data-study-pick>${icon("plus")}Add sources</button></div>`}
         </div>`;
@@ -455,6 +475,7 @@ export function createStudy(host) {
           <button class="st-link" data-study-get-all>Download ${waiting.length === 1 ? "it" : "them"}</button></div>` : "";
     const actions = readOnly() ? "" : `<div class="rs-actions st-nb-actions"><button class="cc-quiet" data-study-paste>Paste text</button>
         <button class="cc-quiet" data-study-web>${icon("globe")}From the web</button>
+        <button class="cc-quiet" data-study-lab>${icon("folder")}A lab folder</button>
         <button class="cc-quiet" data-study-artifacts>${icon("layers")}Your artifacts</button>
         <button class="cc-quiet" data-study-pick>${icon("plus")}Add sources</button></div>`;
     return `${held}${head}${cloud}<div class="st-groups">${groups}</div>${actions}`;
@@ -846,6 +867,12 @@ export function createStudy(host) {
       /** @type {HTMLTextAreaElement | null} */ (els.stage.querySelector("textarea"))?.focus();
       return;
     }
+    if (at("[data-study-lab]")) {
+      state.pasting = "folder";
+      renderStage();
+      /** @type {HTMLInputElement | null} */ (els.stage.querySelector("[data-study-lab-form] input"))?.focus();
+      return;
+    }
     if (at("[data-study-artifacts]")) {
       state.pasting = "artifacts";
       state.artifacts = null;
@@ -1081,6 +1108,13 @@ export function createStudy(host) {
       host.dispatch({ type: "studyAddArtifacts", ids });
       state.pasting = false;
       state.picked = new Set();
+      renderStage();
+    }
+    if (form.matches("[data-study-lab-form]")) {
+      const path = field("path");
+      if (!path) return /** @type {HTMLInputElement | null} */ (form.querySelector("input"))?.focus();
+      host.dispatch({ type: "studyAddFolder", path });
+      state.pasting = false;
       renderStage();
     }
     if (form.matches("[data-study-web-form]")) {

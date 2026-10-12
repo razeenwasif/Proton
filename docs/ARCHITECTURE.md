@@ -1210,6 +1210,19 @@ thousand at most) less what cannot be read or is a source already; a file in
 iCloud among them is added and left there, as one ticked by hand is, until the
 person asks for it to be downloaded.
 
+**A lab folder** is one source (`StudyAddFolder`, `Origin::Folder`, kind
+`folder`, role Lab): a folder of the knowledge base by its root's label and
+path, its rules applying, or any folder by its path. `proton-library::folder`
+walks it as the catalogue walks — hidden files, links and the rules' folders
+passed over, nothing in iCloud brought down — and reads it as one text: the
+files it holds and what it left out with why, then each file under
+`==> lab1/main.c <==`, its README first, Makefiles and other text sniffed for
+NULs, a PDF's pages marked; at most 400 files and 6 MB, and a folder of more
+than 5,000 entries is refused. `chunk::folder` makes each file a section, so
+the tutor's citations name it — `S07 § lab1/main.c L12-40`. Its stamp is its
+files' sizes together and the newest change, checked on opening the notebook
+like a file's.
+
 **iCloud** keeps an offloaded file's name and size on the disk and its bytes on
 Apple's servers; reading one downloads it. `proton-library::dataless` reads the
 `SF_DATALESS` flag from `lstat`, so such a file is listed under a cloud and

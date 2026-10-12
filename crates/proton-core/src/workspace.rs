@@ -1549,6 +1549,7 @@ impl Workspace {
             | Command::StudyDetails { .. }
             | Command::StudyArchive { .. }
             | Command::StudyAdd { .. }
+            | Command::StudyAddFolder { .. }
             | Command::StudyDownload { .. }
             | Command::StudyPaste { .. }
             | Command::StudyAddUrls { .. }

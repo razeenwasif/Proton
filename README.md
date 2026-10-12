@@ -166,7 +166,9 @@ studio that makes study guides, flashcards, quizzes and exams of them. So far:
 notebooks, each a folder in `~/Github/Notebooks`; sources chosen from your
 folders in a picker — browsed, searched by name and by word, a folder's files
 ticked all at once (its subfolders' too, if you like), with what is left
-out and why, or found for you as what is like the notebook, or found on the
+out and why; a lab folder added whole as one source — its README, code and
+Makefiles read together and cited by file and line, from the picker or by its
+path, read again when it changes — or found for you as what is like the notebook, or found on the
 web by Discover or Deep Research, which writes a report of what it read — and read once,
 their words kept in the notebook: notes, PDFs, notebooks, LaTeX, captions, Word
 documents and EPUBs (with pandoc), PowerPoints, pictures' words (with

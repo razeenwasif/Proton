@@ -74,6 +74,14 @@ pub fn read(path: &Path, kind: Kind, pdfs: &Pdfs) -> Result<Read, Unread> {
     Ok(Read { body, size: meta.len(), mtime, sha256: digest(path).map_err(Unread::Failed)? })
 }
 
+/// A folder read to be one source: its files' words, each under its path
+/// ([`proton_library::folder`]), stamped as the folder is — its files'
+/// sizes together and the newest change — and digested as the text.
+pub fn read_folder(dir: &Path, scope: &proton_library::folder::Scope, pdfs: &Pdfs) -> Result<Read, Unread> {
+    let folder = proton_library::folder::read(dir, scope, pdfs)?;
+    Ok(Read { sha256: digest_text(&folder.text), size: folder.stamp.size, mtime: folder.stamp.mtime, body: Body::Lines(folder.text) })
+}
+
 /// Some text's SHA-256: a pasted source's digest.
 pub fn digest_text(text: &str) -> String {
     Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()

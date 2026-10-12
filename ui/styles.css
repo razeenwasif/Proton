@@ -4347,6 +4347,13 @@ button.st-badge:hover { color: var(--cc-text); border-color: var(--cc-accent); }
 .st-hide { flex: 0 0 auto; padding: 2px 8px; border: 0; border-radius: 5px; background: none; color: var(--cc-faint); font: var(--z-2xs)/1.3 var(--cc-font);
   cursor: pointer; opacity: 0; }
 .st-folder-row:hover .st-hide, .st-hide:focus-visible { opacity: 1; }
+/* A folder added whole, as a lab: offered on a row when it is pointed at,
+   and always for the folder being looked in. */
+.st-folder-row .st-whole { flex: 0 0 auto; margin: 0 8px; font: var(--z-2xs)/1.3 var(--cc-font); opacity: 0; }
+.st-folder-row:hover .st-whole, .st-folder-row .st-whole:focus-visible { opacity: 1; }
+.st-folder-row > .st-tag { flex: 0 0 auto; margin: 0 8px; }
+.st-crumbs .grow { flex: 1 1 auto; }
+.st-crumbs .st-whole { font: inherit; }
 .st-hide:hover { color: var(--cc-text); background: var(--row-hover); }
 .st-left { color: var(--cc-faint); }
 .st-left .st-file-name { flex: 0 1 auto; }

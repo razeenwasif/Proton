@@ -41,10 +41,14 @@ const count = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 export const KIND_ICON = /** @type {Record<string, string>} */ ({
   pdf: "file-doc", markdown: "file", text: "file", notebook: "file-code", tex: "file-code", captions: "film",
   table: "table", code: "file-code", document: "file-doc", slides: "file-doc", image: "image", audio: "audio", video: "film", web: "globe",
-  artifact: "layers",
+  artifact: "layers", folder: "folder",
 });
 
-/** @param {{root: Document, dispatch: (command: any) => unknown, ws: HTMLElement, discoverable: () => boolean}} host */
+/**
+ * @param {{root: Document, dispatch: (command: any) => unknown, ws: HTMLElement, discoverable: () => boolean,
+ *   folderSource?: (path: string) => string | null}} host
+ *   `folderSource`: the source a folder of the knowledge base is, added whole, if it is one
+ */
 export function createPicker(host) {
   const box = document.createElement("div");
   box.className = "st-picker";
@@ -143,11 +147,17 @@ export function createPicker(host) {
     const crumbs = [`<button class="st-crumb" data-study-dir="">${esc(folder.root)}</button>`]
       .concat(parts.map((p, i) => `<button class="st-crumb" data-study-dir="${esc(parts.slice(0, i + 1).join("/"))}">${esc(p)}</button>`))
       .join(`<span class="st-faint">/</span>`);
+    // A folder added whole — a lab, its files read together as one source.
+    const whole = (/** @type {string} */ path, /** @type {string | null} */ source, /** @type {string} */ label) => source
+      ? `<span class="st-tag" title="In this notebook, the whole folder as one source">${esc(source)}</span>`
+      : `<button class="st-link st-whole" data-study-add-folder="${esc(path)}" title="The whole folder as one source, a lab: its README, code, Makefiles and other text read together, cited by file and line">${esc(label)}</button>`;
+    const here = folder.dir ? whole(`${folder.root}/${folder.dir}`, host.folderSource?.(`${folder.root}/${folder.dir}`) ?? null, "Add this folder as a lab") : "";
     const folders = folder.folders.map((f) => {
       const dir = folder.dir ? `${folder.dir}/${f.name}` : f.name;
       const cloud = f.inCloud ? ` · ${f.inCloud === f.files ? "in iCloud" : `${f.inCloud} in iCloud`}` : "";
       return `<div class="st-folder-row"><button class="st-folder" data-study-dir="${esc(dir)}">${icon("folder")}<span class="st-file-name">${esc(f.name)}</span>` +
         `<span class="st-faint">${esc(count(f.readable, "to read", "to read"))}${esc(cloud)}</span></button>` +
+        (f.files ? whole(`${folder.root}/${dir}`, f.source ?? null, "Add as a lab") : "") +
         `<button class="st-hide" data-study-leave="${esc(`${folder.root}/${dir}/`)}" title="Leave this folder out of the knowledge base">Leave out</button></div>`;
     }).join("");
     // Every file here that can be added, ticked or unticked at once; and
@@ -169,7 +179,7 @@ export function createPicker(host) {
       `<span class="st-faint">${esc(l.why)}</span>` +
       (l.rule ? `<button class="st-link" data-study-let="${esc(l.rule)}">Let back in</button>` : "") + `</div>`).join("");
     const empty = !folders && !files && !left ? `<p class="st-faint st-pad">Nothing here.</p>` : "";
-    return `<nav class="st-crumbs">${crumbs}</nav>${folders}${files}${left}${empty}`;
+    return `<nav class="st-crumbs">${crumbs}${here ? `<span class="grow"></span>${here}` : ""}</nav>${folders}${files}${left}${empty}`;
   }
 
   function resultsHtml() {
@@ -267,6 +277,11 @@ export function createPicker(host) {
       if (search) search.value = "";
       browse(root.dataset.studyRoot ?? "", "");
       return render();
+    }
+    const lab = at("[data-study-add-folder]");
+    if (lab) {
+      host.dispatch({ type: "studyAddFolder", path: lab.dataset.studyAddFolder ?? "" });
+      return close();
     }
     const dir = at("[data-study-dir]");
     if (dir) {

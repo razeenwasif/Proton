@@ -3,4 +3,8 @@
 /**
  * A folder inside the one the picker shows.
  */
-export type StudyKbFolder = { name: string, path: string, files: number, readable: number, inCloud: number, };
+export type StudyKbFolder = { name: string, path: string, files: number, readable: number, inCloud: number, 
+/**
+ * The source it is in the open notebook, added whole: `S07`.
+ */
+source: string | null, };

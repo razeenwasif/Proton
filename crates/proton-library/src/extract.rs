@@ -123,6 +123,7 @@ pub fn passages(path: &Path, kind: Kind, body: &Body) -> Vec<Passage> {
         (Kind::Tex, Body::Lines(text)) => chunk::tex(path, text),
         (Kind::Table, Body::Lines(text)) => chunk::table(path, text),
         (Kind::Code, Body::Lines(text)) => chunk::plain(path, text),
+        (Kind::Folder, Body::Lines(text)) => chunk::folder(path, text),
         (_, Body::Lines(text)) => chunk::markdown(path, text),
     }
 }

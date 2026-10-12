@@ -208,6 +208,14 @@ pub fn plain(path: &Path, text: &str) -> Vec<Passage> {
     sections(path, text, &PLAIN)
 }
 
+/// Cut a folder read as one text ([`crate::folder`]) into passages: each
+/// file a section of its own, named by its path, so a citation says which
+/// file — `S07 § lab1/main.c L12-40` — and nothing inside one is a heading,
+/// a `#` in a Makefile included.
+pub fn folder(path: &Path, text: &str) -> Vec<Passage> {
+    sections(path, text, &FOLDER)
+}
+
 /// How a kind of document marks its headings.
 struct Grammar {
     /// A heading line → its depth and title.
@@ -229,6 +237,8 @@ const MARKDOWN: Grammar = Grammar {
 };
 
 const PLAIN: Grammar = Grammar { heading: |_| None, fence: |_, _| false, begin: |_| 0 };
+
+const FOLDER: Grammar = Grammar { heading: |line| crate::folder::headed(line).map(|rel| (1, rel.to_string())), fence: |_, _| false, begin: |_| 0 };
 
 const TEX: Grammar = Grammar {
     heading: crate::formats::tex::heading,
@@ -542,6 +552,14 @@ mod tests {
         let out = at("# Real\n```bash\n# not a heading\n# nor this\n```\ntail\n");
         assert_eq!(out.len(), 1, "{out:#?}");
         assert!(out[0].text.contains("not a heading"));
+    }
+
+    #[test]
+    fn a_folders_files_are_its_sections_named_by_their_paths() {
+        let text = "lab: a folder of 2 files, read together.\n\n==> Makefile <==\n# Build\nmain: main.c\n\n==> src/main.c <==\nint main(void) {}\n";
+        let out = folder(Path::new("S07.txt"), text);
+        let cites: Vec<String> = out.iter().map(|p| p.cite_as("S07")).collect();
+        assert_eq!(cites, ["S07 L1-2", "S07 § Makefile L3-6", "S07 § src/main.c L7-8"], "a `#` in a Makefile is not a heading");
     }
 
     #[test]

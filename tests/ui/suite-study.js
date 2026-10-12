@@ -164,6 +164,59 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
       `wrong paths: ${JSON.stringify(sent(add, 'studyAdd'))}`);
   });
 
+  await test('A lab folder is added whole, as one source: from a row of the picker, the folder being looked in, or its path typed', async () => {
+    await win.pushEvents([notebook([row('S01')])]); await settle();
+    ws().querySelector('[data-study-pick]').click(); await settle();
+    const picker = ws().querySelector('[data-study-picker]');
+    const search = picker.querySelector('[data-study-search]');
+    search.value = ''; search.dispatchEvent(new win.Event('input', {bubbles: true}));
+    await new Promise((done) => setTimeout(done, 300));
+    const lab = (name, more = {}) => ({name, path: `Courses/COMP2310/${name}`, files: 12, readable: 9, inCloud: 0, source: null, ...more});
+    await win.pushEvents([{type: 'studyKbFolder', root: 'Courses', dir: 'COMP2310', left: [], files: [],
+      folders: [lab('lab1', {source: 'S04'}), lab('lab2'), lab('empty', {files: 0, readable: 0})]}]); await settle();
+    const rows = [...picker.querySelectorAll('.st-folder-row')];
+    assert(rows[0].querySelector('.st-tag')?.textContent === 'S04' && !rows[0].querySelector('[data-study-add-folder]'), 'a folder added whole is not said to be');
+    assert(rows[1].querySelector('[data-study-add-folder]')?.textContent === 'Add as a lab' && !rows[2].querySelector('[data-study-add-folder]'), 'a lab is not offered whole, or an empty folder is');
+    let before = win.commands.length;
+    rows[1].querySelector('[data-study-add-folder]').click(); await settle();
+    assert(JSON.stringify(sent(before, 'studyAddFolder')) === JSON.stringify([{type: 'studyAddFolder', path: 'Courses/COMP2310/lab2'}]), `not added whole: ${JSON.stringify(sent(before, 'studyAddFolder'))}`);
+    assert(!sent(before, 'studyKbBrowse').length && !picker.querySelector('.st-picker-card')?.checkVisibility?.(), 'it opened the folder, or the picker stayed up');
+
+    // The folder being looked in, added whole from its crumbs; once it is a source, its tag.
+    ws().querySelector('[data-study-pick]').click(); await settle();
+    await win.pushEvents([{type: 'studyKbFolder', root: 'Courses', dir: 'COMP2310/lab3', left: [], folders: [],
+      files: [{name: 'main.c', path: 'Courses/COMP2310/lab3/main.c', kind: 'code', size: 300, mtime: 1, inCloud: false, readable: true, source: null}]}]); await settle();
+    const crumbs = picker.querySelector('.st-crumbs');
+    assert(crumbs.querySelector('[data-study-add-folder]')?.textContent === 'Add this folder as a lab', `not offered here: ${crumbs.textContent}`);
+    before = win.commands.length;
+    crumbs.querySelector('[data-study-add-folder]').click(); await settle();
+    assert(sent(before, 'studyAddFolder')[0]?.path === 'Courses/COMP2310/lab3', 'the folder looked in was not added');
+    const folderRow = row('S05', {kind: 'folder', role: 'lab', title: 'lab3', units: 'lines', count: 240, origin: {from: 'folder', root: 'Courses', path: 'COMP2310/lab3'}});
+    await win.pushEvents([notebook([row('S01'), folderRow])]); await settle();
+    ws().querySelector('[data-study-pick]').click(); await settle();
+    await win.pushEvents([{type: 'studyKbFolder', root: 'Courses', dir: 'COMP2310/lab3', left: [], folders: [], files: []}]); await settle();
+    assert(picker.querySelector('.st-crumbs .st-tag')?.textContent === 'S05', 'the folder looked in is not said to be a source');
+    picker.querySelector('[data-study-picker-close]').click(); await settle();
+
+    // In the notebook: a folder, a lab, said to be from its folder.
+    ws().querySelector('[data-study-view="chat"]')?.click(); await settle();
+    const source = ws().querySelector('.st-source[data-study-source="S05"]');
+    assert(source?.title.includes('The folder Courses/COMP2310/lab3') && source.querySelector('use')?.getAttribute('href') === '#i-folder', `not drawn as a folder: ${source?.title}`);
+
+    // Any folder by its path, from the notebook's own buttons.
+    ws().querySelector('[data-study-view="overview"]').click(); await settle();
+    ws().querySelector('[data-study-lab]').click(); await settle();
+    const form = ws().querySelector('[data-study-lab-form]');
+    assert(form && doc.activeElement === form.querySelector('input'), 'no path to type');
+    before = win.commands.length;
+    form.requestSubmit(); await settle();
+    assert(!sent(before, 'studyAddFolder').length, 'an empty path was sent');
+    form.querySelector('input').value = '~/Github/comp2310-labs/lab4';
+    form.requestSubmit(); await settle();
+    assert(JSON.stringify(sent(before, 'studyAddFolder')) === JSON.stringify([{type: 'studyAddFolder', path: '~/Github/comp2310-labs/lab4'}]), `not sent: ${JSON.stringify(sent(before, 'studyAddFolder'))}`);
+    assert(!ws().querySelector('[data-study-lab-form]'), 'the form stayed up');
+  });
+
   await test('Like this notebook finds what in the folders is like it and not in it yet, by words it shows in the box', async () => {
     ws().querySelector('[data-study-pick]').click(); await settle();
     const picker = ws().querySelector('[data-study-picker]');

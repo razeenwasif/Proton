@@ -766,6 +766,13 @@ pub enum Command {
     StudyAdd {
         paths: Vec<String>,
     },
+    /// Add a folder as one source — a lab, its README, code and Makefiles
+    /// read together, cited by file and line: one of the knowledge base as
+    /// the picker names it, `Courses/COMP2310/lab1`, or any folder by its
+    /// path, `~/Github/labs/lab1`.
+    StudyAddFolder {
+        path: String,
+    },
     /// Bring files down from iCloud and add them: the person has been told
     /// how much that is.
     StudyDownload {

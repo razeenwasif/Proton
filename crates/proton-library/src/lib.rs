@@ -35,6 +35,7 @@ pub mod chunk;
 pub mod dataless;
 pub mod embed;
 pub mod extract;
+pub mod folder;
 pub mod formats;
 pub mod kind;
 pub mod obsidian;

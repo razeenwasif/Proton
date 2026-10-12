@@ -186,6 +186,8 @@ pub struct StudyKbFolder {
     pub files: usize,
     pub readable: usize,
     pub in_cloud: usize,
+    /// The source it is in the open notebook, added whole: `S07`.
+    pub source: Option<String>,
 }
 
 /// Something left out of the folder the picker shows, and why.
