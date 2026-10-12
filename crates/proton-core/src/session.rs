@@ -137,7 +137,7 @@ enum Side {
 impl Side {
     fn of(mode: ModeId) -> Side {
         match mode {
-            ModeId::Data | ModeId::Research | ModeId::Study => Side::Data,
+            ModeId::Data | ModeId::Research | ModeId::Study | ModeId::Pdf => Side::Data,
             _ => Side::Code,
         }
     }
@@ -230,6 +230,8 @@ pub struct Session {
     /// The TeX every workspace here shares, given for a test; the machine's
     /// otherwise.
     tex: Option<std::sync::Arc<std::sync::Mutex<proton_lab::tex::TexEnv>>>,
+    /// The PDF mode's open PDFs: the person's, one set for every project here.
+    pdf: crate::pdf::Pdfs,
 }
 
 impl Session {
@@ -255,6 +257,7 @@ impl Session {
             make_research: crate::research::Research::kept_in,
             study: crate::study::Study::new(),
             tex: None,
+            pdf: crate::pdf::Pdfs::new(),
         }
     }
 
@@ -499,6 +502,11 @@ impl Session {
         // next time against wherever the app was launched from — which from
         // the Dock is `/`.
         let mut session = Session::new(folder::normalise(&start));
+        // The PDFs opened before are kept beside the session, and only where
+        // it is kept: a test's session remembers none.
+        if let Some(dir) = store.as_deref().and_then(Path::parent) {
+            session.pdf = crate::pdf::Pdfs::kept_in(dir.join("pdf.json"));
+        }
         session.store = store;
         session.recents = saved
             .as_ref()
@@ -630,6 +638,11 @@ impl Session {
 
     /// A file some workspace here opened in the document viewer — the page
     /// may still be showing one from a project it has since left.
+    /// The bytes of a view the PDF mode holds, by its key — never on disk.
+    pub fn document_bytes(&self, key: &str) -> Option<std::sync::Arc<Vec<u8>>> {
+        self.pdf.view_bytes(key)
+    }
+
     pub fn document_file(&self, path: &str) -> Option<PathBuf> {
         self.workspaces.iter().find_map(|w| w.document_file(Path::new(path))).or_else(|| self.study.document_file(Path::new(path)))
     }
@@ -704,12 +717,19 @@ impl Session {
                 if mode == ModeId::Study {
                     events.extend(self.study.enter());
                 }
+                if mode == ModeId::Pdf {
+                    let root = self.active().root().to_path_buf();
+                    let pdfs = self.active_mut().pdf_files();
+                    events.extend(self.pdf.enter(&root, pdfs));
+                }
                 events
             }
             Command::ResearchFolder { folder } => self.set_research_folder(&folder),
             Command::TexNew { template, parent, name } => self.tex_new(&template, &parent, &name),
             // Notebook's are the session's: a notebook is the person's, not a project's.
             command if crate::study::handles(&command) => self.study.apply(command),
+            // As are PDF's: a PDF is the person's wherever it lives.
+            command if crate::pdf::handles(&command) => self.pdf.apply(command),
 
             // While the workspace picker is open it owns the keyboard, exactly
             // as Telescope does inside a workspace — and for the same reason.

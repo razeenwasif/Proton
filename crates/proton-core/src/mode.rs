@@ -33,13 +33,18 @@ pub enum ModeId {
     /// `.tex` files, beside the PDF they make, the build's log and the agent.
     /// "LaTeX" on the rail.
     Tex,
+    /// PDFs, read and edited as Acrobat does: pages, comments, forms,
+    /// passwords, combining and splitting, OCR — held until saved. The
+    /// person's, whichever project is open. "PDF" on the rail.
+    Pdf,
 }
 
 impl ModeId {
     /// Ordered as the rail shows them, which is also the `1`–`9` binding,
-    /// and `0` for the tenth: Data and Research beside Codex, the three a
-    /// working day moves between, Notebook after Research, and LaTeX last.
-    pub const ALL: [ModeId; 10] = [
+    /// `0` for the tenth and `-` for the eleventh: Data and Research beside
+    /// Codex, the three a working day moves between, Notebook after Research,
+    /// then LaTeX and PDF.
+    pub const ALL: [ModeId; 11] = [
         ModeId::Chat,
         ModeId::Codex,
         ModeId::Data,
@@ -50,6 +55,7 @@ impl ModeId {
         ModeId::Game,
         ModeId::Video,
         ModeId::Tex,
+        ModeId::Pdf,
     ];
 
     pub fn slug(self) -> &'static str {
@@ -64,6 +70,7 @@ impl ModeId {
             ModeId::Research => "research",
             ModeId::Study => "study",
             ModeId::Tex => "tex",
+            ModeId::Pdf => "pdf",
         }
     }
 
@@ -77,7 +84,8 @@ impl ModeId {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`10`, one-indexed as the user sees them — `10` is `0` on the keys.
+    /// `1`–`11`, one-indexed as the user sees them — `10` is `0` on the keys
+    /// and `11` is `-`.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }

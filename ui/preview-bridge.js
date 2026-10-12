@@ -6,6 +6,7 @@ import {createClaudePreview} from './preview-claude.js';
 import {createResearchPreview} from './preview-research.js';
 import {createStudyPreview} from './preview-study.js';
 import {createTexPreview} from './preview-tex.js';
+import {createPdfPreview} from './preview-pdf.js';
 
 export function createPreview(deliver, mockLatency) {
   let mockMesh = () => null;
@@ -14,6 +15,7 @@ export function createPreview(deliver, mockLatency) {
   const research = createResearchPreview(deliver);
   const study = createStudyPreview(deliver);
   const tex = createTexPreview(deliver);
+  const pdfs = createPdfPreview(deliver);
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
@@ -910,6 +912,7 @@ FCM: NON-DROP FRAME
     if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
     if (command.type.startsWith("study")) return study.command(command);
     if (command.type.startsWith("tex")) return tex.command(command);
+    if (command.type.startsWith("pdf")) return pdfs.command(command);
     if (command.type === "runCell") {
       // The shape of a real run: the cell goes busy, and the answer arrives
       // later on its own — which is what the panel has to survive.
@@ -1447,7 +1450,7 @@ FCM: NON-DROP FRAME
     }
     if (command.type === "setMode") {
       state.mode = command.mode;
-      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "tex" ? tex.entered() : [])];
+      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "tex" ? tex.entered() : []), ...(state.mode === "pdf" ? pdfs.entered() : [])];
     }
     // A real traced step, dumped from the core by
     // `crates/proton-core/tests/dump_step.rs`. Real rather than invented,

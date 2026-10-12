@@ -16,7 +16,7 @@ import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
 import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, readGeometry, readLab, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, wireWindowChrome, quitApp } from "./bridge.js";
-import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, zoomDocument } from "./document.js";
+import { closeDocument, documentIsOpen, documentKey, documentOpened, documentShown, fitDocument, openDocument, zoomDocument } from "./document.js";
 import { decodeMesh } from "./meshbytes.js";
 import { createOverlays } from "./overlays.js";
 import { createPanels } from "./panels.js";
@@ -36,6 +36,7 @@ import { createLab } from "./lab.js";
 import { createLean } from "./lean.js";
 import { createTex } from "./tex.js";
 import { createTexVisual } from "./tex-visual.js";
+import { createPdf } from "./pdf.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -468,7 +469,7 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["chat", "codex", "data", "research", "study", "design", "modeling", "game", "video", "tex"];
+const MODES = ["chat", "codex", "data", "research", "study", "design", "modeling", "game", "video", "tex", "pdf"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -503,7 +504,7 @@ function renderWindowGround(again = false) {
   if (!HAS_SHELL) return;
   // Chat, Data, Research and Notebook are drawn as Codex is — every pixel
   // the theme's ground — so they get the same opaque window.
-  const want = ["codex", "chat", "data", "research", "study", "tex"].includes(activeMode) ? hexOf(token("--bg")) : null;
+  const want = ["codex", "chat", "data", "research", "study", "tex", "pdf"].includes(activeMode) ? hexOf(token("--bg")) : null;
   if (!again && want === groundAsked) return;
   groundAsked = want;
   setOpaque(want);
@@ -520,6 +521,9 @@ function renderMode(mode) {
   renderWindowGround();
   termGL?.restyle();
   $$(".mode").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
+  // On a window too short for every mode, the title bar's list scrolls: the
+  // one you are in is kept in sight.
+  $('.titlebar .tb-modes .mode[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
   $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === wsOf(mode)));
   // LaTeX shows its own dock in Codex's section; Codex its own again.
   const code = $('.workspace[data-ws="codex"]');
@@ -881,6 +885,7 @@ const lab = createLab({ root: document, dispatch, readLab });
 const lean = createLean({ root: document, dispatch });
 const tex = createTex({ root: document, dispatch });
 const texVisual = createTexVisual({ root: document, dispatch });
+const pdf = createPdf({ root: document, dispatch });
 /* Notebook: notebooks of your own sources, and the knowledge base they are
    chosen from. Drawn from what the core reads of them. */
 const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
@@ -4027,6 +4032,16 @@ document.addEventListener("click", (e) => {
     closeDocument();
     return;
   }
+  // The file on screen, taken over by the PDF mode, at the page it was at.
+  if (e.target.closest("[data-doc-in-pdf]")) {
+    const opened = documentOpened();
+    closeDocument();
+    if (opened) {
+      coreSetMode("pdf");
+      dispatch({ type: "pdfOpen", path: opened.path, page: opened.page });
+    }
+    return;
+  }
   if (e.target.closest("[data-doc-fit]")) {
     fitDocument();
     return;
@@ -5226,7 +5241,18 @@ function renderEvent(event) {
       break;
 
     case "document":
-      openDocument(event);
+      // In the PDF mode a PDF opened anywhere — a citation, the tree — is
+      // one of its tabs, not a viewer over it.
+      if (activeMode === "pdf") dispatch({ type: "pdfOpen", path: event.path, page: event.page ?? null });
+      else openDocument(event);
+      break;
+
+    case "pdfTabs":
+      pdf?.tabs(event);
+      break;
+
+    case "pdfView":
+      void pdf?.show(event);
       break;
 
     case "debug":
@@ -5469,6 +5495,13 @@ document.addEventListener("keydown", (e) => {
     coreSetMode(MODES[e.key === "0" ? 9 : Number(e.key) - 1]);
     return;
   }
+  // ⌃- is the eleventh, PDF: the key after 0 on the row. By where it is, not
+  // what it types, so it is the same key on every layout.
+  if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Minus") {
+    e.preventDefault();
+    coreSetMode("pdf");
+    return;
+  }
 
   // ⌃` is Zed's terminal toggle. It means nothing to a Vim keymap, and it has
   // to work from inside the shell too, or the pane could not be put away from
@@ -5508,6 +5541,13 @@ document.addEventListener("keydown", (e) => {
   if (documentShown() && !terminalFocused && !e.metaKey) {
     e.preventDefault();
     documentKey(e);
+    return;
+  }
+
+  // The PDF mode's pages take their own keys — j and k, pages, zoom — when
+  // nothing typed into has the keyboard; the rest go on to the core.
+  if (activeMode === "pdf" && !terminalFocused && pdf?.key(e)) {
+    e.preventDefault();
     return;
   }
 

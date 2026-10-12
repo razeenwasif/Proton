@@ -904,6 +904,12 @@ impl Pickers {
     }
 
     /// Paths, fuzzy-matched the way the file picker matches them.
+    /// The files listed so far that end in `extension` — `.pdf` — as many
+    /// as `limit`, in the index's order.
+    pub fn ending(&self, extension: &str, limit: usize) -> Vec<String> {
+        self.index.paths().iter().filter(|p| p.to_ascii_lowercase().ends_with(extension)).take(limit).cloned().collect()
+    }
+
     pub fn find(&self, query: &str, limit: usize) -> Vec<String> {
         let paths = self.index.paths();
         Matcher::new()

@@ -1,7 +1,7 @@
 //! The mode contract: four slots, a verb table, and a document.
 //!
 //! A mode is the unit of "which application am I in", and the claim the whole
-//! project rests on is that nine of them can share one editor because a mode
+//! project rests on is that eleven of them can share one editor because a mode
 //! is a small, closed thing:
 //!
 //! ```text
@@ -78,14 +78,25 @@ pub enum Slot {
     Studio,
     /// What the source typesets to: the PDF, the build's log, the agent.
     Typeset,
+    /// A PDF's pages small, its bookmarks, its comments and what a search
+    /// found in it.
+    Thumbnails,
+    /// A PDF's pages, to read, mark and fill in.
+    Pages,
+    /// What can be done to a PDF — its pages, its forms, its security, OCR —
+    /// and the agent.
+    PdfTools,
 }
 
 /// How a mode's work persists.
 ///
-/// **Every one of these is a text file that diffs in Git.** That is the
-/// load-bearing rule of the project rather than a matter of taste: it is what
-/// lets the agent edit a scene or a timeline by writing a patch instead of
-/// driving a GUI, and what makes any of it reviewable.
+/// **Every one of these is a text file that diffs in Git** — but one. That
+/// is the load-bearing rule of the project rather than a matter of taste: it
+/// is what lets the agent edit a scene or a timeline by writing a patch
+/// instead of driving a GUI, and what makes any of it reviewable. The one is
+/// the PDF, which is the person's to read and mark rather than the project's
+/// to write: it is changed through the core's own operations, each undoable,
+/// and saved as an update appended to the file, its first bytes kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
@@ -112,6 +123,8 @@ pub enum DocumentKind {
     StudyNotebook,
     /// `.tex` and `.bib`: a LaTeX project, whose PDF is built outside it.
     Manuscript,
+    /// A `.pdf`, anywhere: the one document that is not text.
+    Pdf,
 }
 
 /// The whole of a mode, as anything outside it needs to know.
@@ -209,6 +222,13 @@ impl Layout {
                 Slot::Typeset,
                 DocumentKind::Manuscript,
             ),
+            // Acrobat's: the pages small, the pages, and the tools.
+            ModeId::Pdf => (
+                Slot::Thumbnails,
+                Slot::Pages,
+                Slot::PdfTools,
+                DocumentKind::Pdf,
+            ),
         };
         Layout {
             mode,
@@ -229,7 +249,9 @@ impl Layout {
         match self.mode {
             // The noun is prose, so the editing verbs belong to the composer
             // rather than to the mode.
-            ModeId::Chat | ModeId::Research | ModeId::Study => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
+            // A PDF's pages are moved through and its changes undone; what is
+            // done to them is done with the PDF's own tools.
+            ModeId::Chat | ModeId::Research | ModeId::Study | ModeId::Pdf => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
             _ => true,
         }
     }
@@ -241,7 +263,7 @@ mod tests {
 
     #[test]
     fn every_mode_has_a_layout_and_a_document() {
-        // The contract is only a contract if it covers all ten. A mode
+        // The contract is only a contract if it covers all eleven. A mode
         // added later fails to compile rather than falling through to a
         // default that puts an editor where its stage should be.
         for mode in ModeId::ALL {

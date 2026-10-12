@@ -2456,6 +2456,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="chat"],
 :root[data-mode="data"],
 :root[data-mode="research"],
+:root[data-mode="pdf"],
 :root[data-mode="study"] {
   --z-ui:  calc(17.5px * var(--ui-scale));  /* tree, breadcrumb, headers */
   --z-sm:  calc(15px * var(--ui-scale));    /* the agent's prose */
@@ -2488,23 +2489,29 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .statusline,
 :root[data-mode="data"] .hint,
 :root[data-mode="research"] .chrome-rail,
+:root[data-mode="pdf"] .chrome-rail,
 :root[data-mode="study"] .chrome-rail,
 :root[data-mode="research"] .rail,
+:root[data-mode="pdf"] .rail,
 :root[data-mode="study"] .rail,
 :root[data-mode="research"] .statusline,
+:root[data-mode="pdf"] .statusline,
 :root[data-mode="study"] .statusline,
 :root[data-mode="research"] .hint,
+:root[data-mode="pdf"] .hint,
 :root[data-mode="study"] .hint,
 /* The terminal is Codex's; in Chat, Data, Research and Notebook its toggle
    would open something that is not on screen. */
 :root[data-mode="chat"] .titlebar [data-term-toggle],
 :root[data-mode="data"] .titlebar [data-term-toggle],
 :root[data-mode="research"] .titlebar [data-term-toggle],
+:root[data-mode="pdf"] .titlebar [data-term-toggle],
 :root[data-mode="study"] .titlebar [data-term-toggle] { display: none; }
 :root:is([data-mode="codex"], [data-mode="tex"]) .app,
 :root[data-mode="chat"] .app,
 :root[data-mode="data"] .app,
 :root[data-mode="research"] .app,
+:root[data-mode="pdf"] .app,
 :root[data-mode="study"] .app {
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2513,6 +2520,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="chat"] .body,
 :root[data-mode="data"] .body,
 :root[data-mode="research"] .body,
+:root[data-mode="pdf"] .body,
 :root[data-mode="study"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
 
 /* Opaque, as Zed is. The window's own fill may be a veil over the desktop;
@@ -2522,6 +2530,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="chat"] .titlebar,
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
+:root[data-mode="pdf"] .titlebar,
 :root[data-mode="study"] .titlebar,
 .workspace[data-ws="codex"],
 .workspace[data-ws="data"] { background: var(--bg); }
@@ -2530,6 +2539,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="chat"] .titlebar,
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
+:root[data-mode="pdf"] .titlebar,
 :root[data-mode="study"] .titlebar {
   grid-row: 1; grid-column: 2;
   display: flex; flex-direction: column; align-items: center; gap: 14px;
@@ -2541,6 +2551,12 @@ body { font-size: calc(13px * var(--ui-scale)); }
    rail stacks them; 14px in from the corner either way. */
 .titlebar .lights i { width: 12px; height: 12px; }
 .titlebar .tb-modes { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 10px; }
+/* Eleven modes are more than a short window holds: the list gives way and
+   scrolls, rather than pushing the toggles below it out of the window, and
+   on a short window its words sit closer. */
+.titlebar .tb-modes { flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.titlebar .tb-modes::-webkit-scrollbar { display: none; }
+@media (max-height: 860px) { .titlebar .tb-modes .mode { padding: 6px 5px; } }
 /* Text buttons, like the items Zed keeps in its title bar, turned to read
    down the bar as a side panel's labels do. Quiet until one is the mode you
    are in. The words turn rather than the buttons, so the boxes stay boxes
@@ -5147,3 +5163,41 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .tex-v-preamble summary { cursor: pointer; }
 .tex-v-preamble pre { margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); white-space: pre-wrap; }
 .tex-v-note { color: var(--muted); font: var(--z-xs) var(--zed); }
+
+/* ── the PDF mode ──────────────────────────────────────────────────────
+   Drawn as Notebook is, on Codex's ground: tabs of open PDFs over the
+   pages, the pages small and the bookmarks on the left, the tools on the
+   right. The pages are pdf-view.js's, as the document viewer's are. */
+.workspace[data-ws="pdf"] { background: var(--bg); }
+.pdf-side-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 8px; }
+.pdf-side-tabs .dock-tab { font: var(--z-2xs) var(--zed); }
+.pdf-side-body { padding: 4px 8px 12px; font: var(--z-xs) var(--zed); color: var(--muted); }
+.pdf-main { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.pdf-bar { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 4px 10px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+.pdf-bar .grow { flex: 1 1 auto; }
+.pdf-bar .chip { font: var(--z-2xs) var(--zed); color: var(--faint); background: none; box-shadow: none; }
+.pdf-tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.pdf-tab { display: flex; align-items: center; gap: 6px; max-width: 220px; padding: 4px 6px 4px 10px; border-radius: 7px; color: var(--muted); font: var(--z-xs) var(--zed); cursor: pointer; white-space: nowrap; }
+.pdf-tab:hover { background: var(--row-hover); color: var(--text); }
+.pdf-tab.on { background: var(--row-on); color: var(--text); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
+.pdf-tab-name { overflow: hidden; text-overflow: ellipsis; }
+.pdf-tab .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.pdf-tab-close { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--faint); font: 14px/1 var(--zed); cursor: pointer; flex: none; }
+.pdf-tab-close:hover { background: var(--row-hover); color: var(--text); }
+.pdf-stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex; background: color-mix(in srgb, var(--text) 4%, var(--bg-deep)); }
+.pdf-pages { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; align-items: safe center; gap: 16px; outline: none; }
+.pdf-pages[hidden] { display: none; }
+.pdf-open { position: absolute; inset: 0; z-index: 2; overflow: auto; background: var(--bg); }
+.pdf-open[hidden] { display: none; }
+.pdf-open-in { max-width: 640px; margin: 10vh auto 40px; padding: 0 20px; display: grid; gap: 10px; }
+.pdf-open-in h3 { margin: 0; font: 600 var(--z-sm) var(--zed); color: var(--text); }
+.pdf-open-path { width: 100%; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 7px; background: var(--bg-deep); color: var(--text); font: var(--z-xs) var(--zed); }
+.pdf-open-path:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pdf-open-list { display: grid; gap: 2px; }
+.pdf-open-list .lab-faint { margin: 6px 2px; font: var(--z-2xs)/1.5 var(--zed); }
+.pdf-open-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font: var(--z-xs) var(--zed); text-align: left; cursor: pointer; }
+.pdf-open-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-open-row:hover { background: var(--row-hover); }
+.pdf-open-row.on { background: var(--row-on); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
+.pdf-tools > header { font: 620 calc(10.5px * var(--ui-scale))/1 var(--sans); letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
+.pdf-tools-body { padding: 8px 12px; font: var(--z-xs)/1.5 var(--zed); color: var(--muted); }

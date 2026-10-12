@@ -33,6 +33,7 @@
     "term-gl.js",
     "markdown.js",
     "tex-visual.js",
+    "pdf.js",
     "highlight.js",
     "claude.js",
     "research.js",

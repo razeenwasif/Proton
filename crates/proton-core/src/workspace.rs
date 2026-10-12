@@ -343,6 +343,13 @@ impl Workspace {
         self
     }
 
+    /// The PDFs in the project, as far as it has been listed: for the PDF
+    /// mode's Open box. Listing is started if it has not been.
+    pub fn pdf_files(&mut self) -> Vec<String> {
+        self.pickers.warm();
+        self.pickers.ending(".pdf", 400)
+    }
+
     /// A TeX shared with other workspaces: the session's, for a test.
     pub fn share_tex(&mut self, env: &std::sync::Arc<std::sync::Mutex<proton_lab::tex::TexEnv>>) {
         self.tex = crate::tex::Tex::sharing(env.clone());
@@ -1488,6 +1495,8 @@ impl Workspace {
             Command::ResearchFolder { .. } => {
                 vec![notice("Where investigations are kept is set for the whole window.".into(), NoticeLevel::Warn)]
             }
+            // PDF is the window's too: the session answers it.
+            Command::PdfOpen { .. } | Command::PdfClose { .. } | Command::PdfFocus { .. } => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }

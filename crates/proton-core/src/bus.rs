@@ -550,6 +550,23 @@ pub enum Command {
     },
     /// Put what was found, installed or failed away.
     TexForgetPackages,
+    /* ── pdf ──────────────────────────────────────────────────────── */
+    /// Open a PDF in the PDF mode — typed as a path is, `~` and all, or
+    /// relative to the project on screen — at `page`, counting from one; or
+    /// bring it forward if it is open.
+    PdfOpen {
+        path: String,
+        #[serde(default)]
+        page: Option<u32>,
+    },
+    /// Close a tab.
+    PdfClose {
+        tab: u32,
+    },
+    /// Bring a tab forward.
+    PdfFocus {
+        tab: u32,
+    },
     /* ── notebook ─────────────────────────────────────────────────── */
     /// Keep notebooks in this folder — typed as a path is, `~` and all.
     /// Saved in the person's own settings.
@@ -1752,6 +1769,25 @@ pub enum Event {
     TexOutline {
         main: Option<String>,
         outline: proton_tex::outline::Outline,
+    },
+    /// The PDF mode's tabs, which is on top, the files opened before, and
+    /// the PDFs in the project on screen, as it names them, with its root.
+    PdfTabs {
+        tabs: Vec<crate::pdf::TabView>,
+        active: Option<u32>,
+        recent: Vec<String>,
+        project: Vec<String>,
+        root: String,
+    },
+    /// A tab to draw: its bytes are `key`'s, for `read_document`. At `page`
+    /// (counting from one), or where it was; `quiet` when the window made
+    /// the change itself and has it drawn already.
+    PdfView {
+        tab: u32,
+        key: String,
+        version: u64,
+        page: Option<u32>,
+        quiet: bool,
     },
     /// Where Lean and Mathlib stand: one for the machine, whichever project
     /// is open.

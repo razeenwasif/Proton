@@ -3,9 +3,12 @@
 /**
  * How a mode's work persists.
  *
- * **Every one of these is a text file that diffs in Git.** That is the
- * load-bearing rule of the project rather than a matter of taste: it is what
- * lets the agent edit a scene or a timeline by writing a patch instead of
- * driving a GUI, and what makes any of it reviewable.
+ * **Every one of these is a text file that diffs in Git** — but one. That
+ * is the load-bearing rule of the project rather than a matter of taste: it
+ * is what lets the agent edit a scene or a timeline by writing a patch
+ * instead of driving a GUI, and what makes any of it reviewable. The one is
+ * the PDF, which is the person's to read and mark rather than the project's
+ * to write: it is changed through the core's own operations, each undoable,
+ * and saved as an update appended to the file, its first bytes kept.
  */
-export type DocumentKind = "conversation" | "source" | "notebook" | "component" | "scene" | "level" | "timeline" | "investigation" | "studyNotebook" | "manuscript";
+export type DocumentKind = "conversation" | "source" | "notebook" | "component" | "scene" | "level" | "timeline" | "investigation" | "studyNotebook" | "manuscript" | "pdf";
