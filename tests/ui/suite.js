@@ -1,8 +1,9 @@
 import {orderingChecks} from './ordering.js';
 import {studyChecks} from './suite-study.js';
+import {texChecks} from './suite-tex.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
-const layoutKeys = [...['chat', 'codex', 'design', 'modeling', 'game', 'video', 'data', 'research', 'study'].map((mode) => `proton.panes.${mode}`),
+const layoutKeys = [...['chat', 'codex', 'codex.typeset', 'design', 'modeling', 'game', 'video', 'data', 'research', 'study'].map((mode) => `proton.panes.${mode}`),
   // Which artifact each conversation had open.
   'proton.chat.panes'];
 const savedLayouts = layoutKeys.map((key) => [key, localStorage.getItem(key)]);
@@ -145,7 +146,7 @@ await test('Narrow windows show the requested panel without squeezing out the ed
   assert(!section.querySelector('aside').hidden, 'wide layout did not restore sidebar');
 });
 await test('Each mode keeps a usable stage, and every one has a right panel to toggle', async () => {
-  for (const mode of ['chat', 'design', 'modeling', 'game', 'video', 'data', 'research', 'study', 'codex']) {
+  for (const mode of ['chat', 'design', 'modeling', 'game', 'video', 'data', 'research', 'study', 'tex', 'codex']) {
     await win.dispatch({type: 'setMode', mode}); await settle();
     const section = $('.workspace.on'), stage = section.querySelector('main');
     assert(stage.clientWidth >= 320, `${mode} lost its stage`);
@@ -1584,7 +1585,7 @@ await test('Research sits beside Data after Codex: ⌃4 opens it, in Codex\'s ch
   // Codex, Data and Research side by side, in the title bar and on the rail.
   for (const list of ['.tb-modes', '.mode-rail']) {
     const order = [...doc.querySelectorAll(`${list} [data-mode]`)].map((b) => b.dataset.mode).join();
-    assert(order === 'chat,codex,data,research,study,design,modeling,game,video', `${list} is not in the new order: ${order}`);
+    assert(order === 'chat,codex,data,research,study,design,modeling,game,video,tex', `${list} is not in the new order: ${order}`);
   }
   assert(asked().slice(opaque).at(-1) === ground, `Research did not ask for the ground: ${JSON.stringify(asked().slice(opaque))}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
@@ -2223,6 +2224,7 @@ await test('A long name in the project panel scrolls sideways instead of being c
   if (was) space.style.setProperty('--col-l', was); else space.style.removeProperty('--col-l');
 });
 await studyChecks({test, assert, win, doc, $, settle, key, shown});
+await texChecks({test, assert, win, doc, $, settle, key, shown});
 await orderingChecks(test, assert);
 document.querySelector('#status').textContent = `${passed} passed · ${failed} failed`;
 document.title = `Proton UI tests: ${passed} passed, ${failed} failed`;

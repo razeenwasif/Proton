@@ -29,13 +29,17 @@ pub enum ModeId {
     Modeling,
     Game,
     Video,
+    /// LaTeX, as Overleaf has it: Codex's own editor over the project's
+    /// `.tex` files, beside the PDF they make, the build's log and the agent.
+    /// "LaTeX" on the rail.
+    Tex,
 }
 
 impl ModeId {
-    /// Ordered as the rail shows them, which is also the `1`–`9` binding:
-    /// Data and Research beside Codex, the three a working day moves between,
-    /// and Notebook after Research.
-    pub const ALL: [ModeId; 9] = [
+    /// Ordered as the rail shows them, which is also the `1`–`9` binding,
+    /// and `0` for the tenth: Data and Research beside Codex, the three a
+    /// working day moves between, Notebook after Research, and LaTeX last.
+    pub const ALL: [ModeId; 10] = [
         ModeId::Chat,
         ModeId::Codex,
         ModeId::Data,
@@ -45,6 +49,7 @@ impl ModeId {
         ModeId::Modeling,
         ModeId::Game,
         ModeId::Video,
+        ModeId::Tex,
     ];
 
     pub fn slug(self) -> &'static str {
@@ -58,14 +63,21 @@ impl ModeId {
             ModeId::Data => "data",
             ModeId::Research => "research",
             ModeId::Study => "study",
+            ModeId::Tex => "tex",
         }
+    }
+
+    /// Whether text is typed here into the editor's buffers: Codex's, and
+    /// LaTeX's, which is Codex's editor beside a PDF.
+    pub fn edits_text(self) -> bool {
+        matches!(self, ModeId::Codex | ModeId::Tex)
     }
 
     pub fn from_slug(s: &str) -> Option<Self> {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`9`, one-indexed as the user sees them.
+    /// `1`–`10`, one-indexed as the user sees them — `10` is `0` on the keys.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }

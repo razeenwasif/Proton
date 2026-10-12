@@ -1864,7 +1864,7 @@ impl Workspace {
                 // Insert-mode editing keys that are text entry rather than
                 // commands, so the modal engine never sees them as actions.
                 if matches!(before, VimMode::Insert | VimMode::Replace)
-                    && self.mode == ModeId::Codex
+                    && self.mode.edits_text()
                 {
                     match key.key.as_str() {
                         "Enter" => {
@@ -1883,7 +1883,7 @@ impl Workspace {
                 let outcomes = self.vim.keys(&key);
                 // Only dot and macro replay fan out from one key. Keep that
                 // invocation together, including its initial change action.
-                let replay = outcomes.len() > 1 && self.mode == ModeId::Codex;
+                let replay = outcomes.len() > 1 && self.mode.edits_text();
                 if replay {
                     self.editor.buffer_mut().begin_group(false);
                 }
@@ -1908,7 +1908,7 @@ impl Workspace {
                             VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock
                         )
                     };
-                    if visual(before) && !visual(self.vim.mode()) && self.mode == ModeId::Codex {
+                    if visual(before) && !visual(self.vim.mode()) && self.mode.edits_text() {
                         if let Some((buffer, cursor)) = held {
                             self.last_visual = Some((buffer, cursor.anchor, cursor.offset, before));
                         }
@@ -1922,7 +1922,7 @@ impl Workspace {
                     // one you just typed.
                     if matches!(before, VimMode::Insert | VimMode::Replace)
                         && self.vim.mode() == VimMode::Normal
-                        && self.mode == ModeId::Codex
+                        && self.mode.edits_text()
                     {
                         // A block insert types on one line and lands on all of
                         // them, and this is the moment it lands: before the
@@ -2138,7 +2138,11 @@ impl Workspace {
                     let text_opened = opened.iter().any(|event| matches!(event, Event::Buffers { .. }));
                     events.extend(opened);
                     if text_opened {
-                        events.extend(self.set_mode(ModeId::Codex));
+                        // Text is edited in Codex — or here, in LaTeX, whose
+                        // editor is Codex's.
+                        if !self.mode.edits_text() {
+                            events.extend(self.set_mode(ModeId::Codex));
+                        }
                         if let Some(line) = line {
                             let buf = self.editor.buffer_mut();
                             let at = buf.offset_of(proton_text::Position {
@@ -2878,7 +2882,7 @@ impl Workspace {
 
     /// Tell whichever server owns the active buffer what it now says.
     fn resync(&mut self) {
-        if self.mode == ModeId::Codex {
+        if self.mode.edits_text() {
             self.servers.sync(self.editor.buffer());
         }
     }
@@ -3095,7 +3099,7 @@ impl Workspace {
     /// closes it. The alternative — asking on every character — makes a
     /// language server the busiest thing in the process for no visible gain.
     fn completion_after(&mut self, typed: Option<char>) -> Vec<Event> {
-        if self.mode != ModeId::Codex || self.vim.mode() != VimMode::Insert {
+        if !self.mode.edits_text() || self.vim.mode() != VimMode::Insert {
             return Vec::new();
         }
         let Some(c) = typed else {
@@ -6050,7 +6054,7 @@ impl Workspace {
             return (events, false);
         }
 
-        if self.mode == ModeId::Codex
+        if self.mode.edits_text()
             && !replay
             && action.verb == Verb::Move
             && matches!(was, VimMode::Insert | VimMode::Replace)
@@ -6065,7 +6069,7 @@ impl Workspace {
             let unit = self.indent().unit();
             self.editor.set_indent(&unit);
         }
-        let changed = self.mode == ModeId::Codex && self.editor.execute(action, was);
+        let changed = self.mode.edits_text() && self.editor.execute(action, was);
 
         // An action that opens insert mode starts an undo group, so the typing
         // that follows is part of the same change: `ciwfoo<Esc>` is one thing
@@ -6074,7 +6078,7 @@ impl Workspace {
         // This keys off the verb rather than off a mode transition, because by
         // the time an action reaches here the engine has *already* switched to
         // insert — the operator sets the mode as it resolves.
-        if self.mode == ModeId::Codex
+        if self.mode.edits_text()
             && !replay
             && matches!(action.verb, Verb::Change | Verb::Insert)
             && self.vim.mode() == VimMode::Insert
@@ -6115,7 +6119,7 @@ impl Workspace {
                 let Some((buffer, anchor, offset, kind)) = self.last_visual else {
                     return (Vec::new(), false);
                 };
-                if buffer != self.editor.active() || self.mode != ModeId::Codex {
+                if buffer != self.editor.active() || !self.mode.edits_text() {
                     return (Vec::new(), false);
                 }
                 let buf = self.editor.buffer_mut();
@@ -6129,7 +6133,7 @@ impl Workspace {
                 (Vec::new(), false)
             }
             Outcome::Indent => {
-                if self.mode != ModeId::Codex {
+                if !self.mode.edits_text() {
                     return (Vec::new(), false);
                 }
                 let indent = self.indent_here();
@@ -6140,7 +6144,7 @@ impl Workspace {
                 (Vec::new(), true)
             }
             Outcome::Input(c) => {
-                if self.mode == ModeId::Codex {
+                if self.mode.edits_text() {
                     self.editor.buffer_mut().ensure_group();
                     match was {
                         VimMode::Insert => self.type_char(c),

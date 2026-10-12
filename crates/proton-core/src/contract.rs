@@ -76,6 +76,8 @@ pub enum Slot {
     Tutor,
     /// What can be made from the sources, and what has been.
     Studio,
+    /// What the source typesets to: the PDF, the build's log, the agent.
+    Typeset,
 }
 
 /// How a mode's work persists.
@@ -108,6 +110,8 @@ pub enum DocumentKind {
     /// `~/Github/Notebooks/<slug>/`: the notebook, its sources and notes in
     /// JSON and Markdown, its chats, and what the studio made.
     StudyNotebook,
+    /// `.tex` and `.bib`: a LaTeX project, whose PDF is built outside it.
+    Manuscript,
 }
 
 /// The whole of a mode, as anything outside it needs to know.
@@ -198,6 +202,13 @@ impl Layout {
                 Slot::Studio,
                 DocumentKind::StudyNotebook,
             ),
+            // Overleaf's: the files, the source, and what it typesets to.
+            ModeId::Tex => (
+                Slot::Explorer,
+                Slot::Editor,
+                Slot::Typeset,
+                DocumentKind::Manuscript,
+            ),
         };
         Layout {
             mode,
@@ -230,7 +241,7 @@ mod tests {
 
     #[test]
     fn every_mode_has_a_layout_and_a_document() {
-        // The contract is only a contract if it covers all nine. A mode
+        // The contract is only a contract if it covers all ten. A mode
         // added later fails to compile rather than falling through to a
         // default that puts an editor where its stage should be.
         for mode in ModeId::ALL {

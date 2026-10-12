@@ -49,6 +49,7 @@
     "study-audio.js",
     "study-slides.js",
     "study-graphic.js",
-    "study-code.js"
+    "study-code.js",
+    "tex.js"
   ]
 }

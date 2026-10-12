@@ -7,7 +7,7 @@ measurement, resize handling, metadata, and corner styling without reading or
 writing a real workspace. Results appear at the top of the page.
 
 The second batch adds panel collapse/restoration, narrow and wide layouts,
-all nine modes, dock shortcuts, keyboard resizing, display-setting persistence,
+all ten modes, dock shortcuts, keyboard resizing, display-setting persistence,
 font-size viewport measurement, and default restoration on workspace changes.
 The harness temporarily resets browser panel preferences and restores them
 after its run. Settings writes use an in-memory transport.

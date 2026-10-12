@@ -1,7 +1,7 @@
 # Proton — architecture
 
 This document describes the implemented system and records its build history.
-All nine modes read real documents. Modeling includes a WebGL renderer;
+All ten modes read real documents. Modeling includes a WebGL renderer;
 Game and Video edit scenes and timelines but still need engine playback and
 media decoding. The design reference is [`DESIGN.md`](../design/DESIGN.md),
 and the tool choices are in [`STACK.md`](STACK.md).
@@ -52,7 +52,7 @@ dependency, and the front end is replaceable.**
       ╭─────────▼──────────╮        ╭────────────▼───────────╮
       │  proton-shell      │        │  GPU editor surface    │
       │  webview · chrome  │  ────▶ │  later, only if the    │
-      │  all nine modes    │        │  latency budget fails  │
+      │  all ten modes     │        │  latency budget fails  │
       ╰────────────────────╯        ╰────────────────────────╯
 ```
 
@@ -65,7 +65,7 @@ Two rules keep that seam honest:
    (`Delete·Line`, count 2), which is exactly the boundary that lets a different
    front end reuse it verbatim.
 
-The webview ships first because nine modes demand it. The GPU surface is held
+The webview ships first because ten modes demand it. The GPU surface is held
 in reserve for the editor pane alone, and only once a measured
 input-to-photon number justifies it. See STACK.md § "The actual decision".
 

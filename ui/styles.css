@@ -2452,7 +2452,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
    hangs off `data-mode` or the workspace rather than replacing a rule.
    ═══════════════════════════════════════════════════════════════════ */
 
-:root[data-mode="codex"],
+:root:is([data-mode="codex"], [data-mode="tex"]),
 :root[data-mode="chat"],
 :root[data-mode="data"],
 :root[data-mode="research"],
@@ -2475,10 +2475,10 @@ body { font-size: calc(13px * var(--ui-scale)); }
    the top, so the code keeps every pixel of the window's height — the
    dimension an editor is always short of. One row, two columns: the body,
    then the bar. */
-:root[data-mode="codex"] .chrome-rail,
-:root[data-mode="codex"] .rail,
-:root[data-mode="codex"] .statusline,
-:root[data-mode="codex"] .hint,
+:root:is([data-mode="codex"], [data-mode="tex"]) .chrome-rail,
+:root:is([data-mode="codex"], [data-mode="tex"]) .rail,
+:root:is([data-mode="codex"], [data-mode="tex"]) .statusline,
+:root:is([data-mode="codex"], [data-mode="tex"]) .hint,
 :root[data-mode="chat"] .chrome-rail,
 :root[data-mode="chat"] .rail,
 :root[data-mode="chat"] .statusline,
@@ -2501,7 +2501,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .titlebar [data-term-toggle],
 :root[data-mode="research"] .titlebar [data-term-toggle],
 :root[data-mode="study"] .titlebar [data-term-toggle] { display: none; }
-:root[data-mode="codex"] .app,
+:root:is([data-mode="codex"], [data-mode="tex"]) .app,
 :root[data-mode="chat"] .app,
 :root[data-mode="data"] .app,
 :root[data-mode="research"] .app,
@@ -2509,7 +2509,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr) auto;
 }
-:root[data-mode="codex"] .body,
+:root:is([data-mode="codex"], [data-mode="tex"]) .body,
 :root[data-mode="chat"] .body,
 :root[data-mode="data"] .body,
 :root[data-mode="research"] .body,
@@ -2518,7 +2518,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 /* Opaque, as Zed is. The window's own fill may be a veil over the desktop;
    these two cover it, and the veils the backdrop puts on the panes are the
    ground's colour over the ground's colour — the same colour. */
-:root[data-mode="codex"] .titlebar,
+:root:is([data-mode="codex"], [data-mode="tex"]) .titlebar,
 :root[data-mode="chat"] .titlebar,
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
@@ -2526,7 +2526,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .workspace[data-ws="codex"],
 .workspace[data-ws="data"] { background: var(--bg); }
 
-:root[data-mode="codex"] .titlebar,
+:root:is([data-mode="codex"], [data-mode="tex"]) .titlebar,
 :root[data-mode="chat"] .titlebar,
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
@@ -2741,11 +2741,11 @@ body { font-size: calc(13px * var(--ui-scale)); }
   color: var(--text); font: var(--z-xs)/1.3 var(--zed);
 }
 :is(.workspace[data-ws="codex"], .workspace[data-ws="data"]) .btn:hover { background: var(--row-on); box-shadow: none; }
-:root[data-mode="codex"] .editor-message {
+:root:is([data-mode="codex"], [data-mode="tex"]) .editor-message {
   border-radius: 6px; background: var(--bg-deep); font: var(--z-xs)/1.5 var(--zed);
   box-shadow: 0 16px 40px -12px rgba(0, 0, 0, .7);
 }
-:root[data-mode="codex"] .editor-message button {
+:root:is([data-mode="codex"], [data-mode="tex"]) .editor-message button {
   border-radius: 5px; border-color: var(--row-on-edge); background: var(--row-hover);
   color: var(--text); font: inherit;
 }
@@ -3045,42 +3045,42 @@ body { font-size: calc(13px * var(--ui-scale)); }
 /* Zed's popovers are flat: the deep ground, a hairline, a shadow, no blur
    and no dimmed window behind. Settings keeps its glass — it is the whole
    app's, not Codex's. */
-:root:is([data-mode="codex"], [data-mode="data"]) .scrim { background: rgba(0, 0, 0, .18); -webkit-backdrop-filter: none; backdrop-filter: none; }
-:root:is([data-mode="codex"], [data-mode="data"]) .float:not(#settings) {
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .scrim { background: rgba(0, 0, 0, .18); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .float:not(#settings) {
   background: var(--bg-deep);
   -webkit-backdrop-filter: none; backdrop-filter: none;
   border: 1px solid color-mix(in srgb, var(--text) 10%, var(--bg-deep));
   border-radius: 8px; box-shadow: 0 24px 60px -18px rgba(0, 0, 0, .75);
 }
-:root:is([data-mode="codex"], [data-mode="data"]) #telescope { width: min(900px, 88vw); font-family: var(--zed); }
-:root:is([data-mode="codex"], [data-mode="data"]) #telescope .prompt {
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope { width: min(900px, 88vw); font-family: var(--zed); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .prompt {
   padding: 12px 16px; font: var(--z-ui) var(--zed);
   border-bottom-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep));
 }
-:root:is([data-mode="codex"], [data-mode="data"]) #telescope .prompt .caret { color: var(--muted); }
-:root:is([data-mode="codex"], [data-mode="data"]) #telescope .results { border-right-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); padding: 4px; }
-:root:is([data-mode="codex"], [data-mode="data"]) #telescope .res {
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .prompt .caret { color: var(--muted); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .results { border-right-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); padding: 4px; }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .res {
   padding: 7px 10px; border-radius: 4px; font: var(--z-xs) var(--zed); color: var(--muted);
 }
-:root:is([data-mode="codex"], [data-mode="data"]) #telescope .res.on {
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .res.on {
   background: var(--row-on); color: var(--text); box-shadow: inset 0 0 0 1px var(--row-on-edge);
 }
-:root:is([data-mode="codex"], [data-mode="data"]) #telescope .res mark { color: var(--accent); }
-:root:is([data-mode="codex"], [data-mode="data"]) #telescope .preview { font: var(--z-2xs)/1.6 var(--zed); color: var(--code); }
-:root:is([data-mode="codex"], [data-mode="data"]) #telescope .chip { background: none; box-shadow: none; color: var(--faint); font: var(--z-2xs) var(--zed); }
-:root:is([data-mode="codex"], [data-mode="data"]) #whichkey .wk-head,
-:root:is([data-mode="codex"], [data-mode="data"]) #whichkey .wk-grid,
-:root:is([data-mode="codex"], [data-mode="data"]) #cmdline { font-family: var(--zed); }
-:root:is([data-mode="codex"], [data-mode="data"]) #whichkey .wk-head { border-bottom-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
-:root:is([data-mode="codex"], [data-mode="data"]) #cmdline .chip { background: none; box-shadow: none; color: var(--faint); }
-:root:is([data-mode="codex"], [data-mode="data"]) .cmp,
-:root:is([data-mode="codex"], [data-mode="data"]) .hov-body { font: var(--z-xs) var(--zed); }
-:root:is([data-mode="codex"], [data-mode="data"]) .cmp-row.on { background: var(--row-on); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
-:root:is([data-mode="codex"], [data-mode="data"]) .cmp-foot { font-family: var(--zed); border-top-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
-:root:is([data-mode="codex"], [data-mode="data"]) .hov { border-left: 0; }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .res mark { color: var(--accent); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .preview { font: var(--z-2xs)/1.6 var(--zed); color: var(--code); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .chip { background: none; box-shadow: none; color: var(--faint); font: var(--z-2xs) var(--zed); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #whichkey .wk-head,
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #whichkey .wk-grid,
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #cmdline { font-family: var(--zed); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #whichkey .wk-head { border-bottom-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #cmdline .chip { background: none; box-shadow: none; color: var(--faint); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .cmp,
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .hov-body { font: var(--z-xs) var(--zed); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .cmp-row.on { background: var(--row-on); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .cmp-foot { font-family: var(--zed); border-top-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .hov { border-left: 0; }
 /* The search field's own clear button is the browser's, in the browser's
    blue. Esc and ⌫ already clear it. */
-:root:is([data-mode="codex"], [data-mode="data"]) [data-picker-query]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) [data-picker-query]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 /* The code and the shell say they have the keyboard with their caret — a
    solid block rather than an outline — so neither also wears a ring. */
 .workspace[data-ws="codex"] [data-editor]:focus-visible,
@@ -4975,3 +4975,25 @@ button.st-source-name:hover { color: var(--cc-accent); }
 /* Streaming prose, drawn a settled block at a time: the two parts lay out as
    one answer. */
 .cc-prose.live > [data-settled], .cc-prose.live > [data-tail] { display: contents; }
+
+/* ── LaTeX: Codex's section, with its own dock ─────────────────────────
+   The mode is drawn in Codex's section — the editor beside the pane is
+   Codex's own — and the dock column shows this pane rather than Codex's. */
+.workspace[data-ws="codex"]:not([data-dock="typeset"]) #tex-pane,
+.workspace[data-ws="codex"][data-dock="typeset"] #codex-dock { display: none; }
+.tex-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.tex-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+.tex-tabs { display: flex; gap: 2px; }
+.tex-head .dock-tab { font: var(--z-xs) var(--zed); }
+.tex-head .grow { flex: 1 1 auto; }
+.tex-build { font: var(--z-2xs) var(--zed); color: var(--faint); }
+.tex-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.tex-body[hidden] { display: none; }
+.tex-pdf { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; background: color-mix(in srgb, var(--text) 4%, var(--bg-deep)); }
+.tex-empty { display: grid; justify-items: center; gap: 8px; max-width: 360px; margin: 18vh auto 0; padding: 0 20px; text-align: center; color: var(--muted); font: var(--z-xs)/1.6 var(--zed); }
+.tex-empty .i { width: 30px; height: 30px; opacity: .55; }
+.tex-empty h3 { margin: 0; font: 600 var(--z-sm) var(--zed); color: var(--text); }
+.tex-empty p { margin: 0; }
+.tex-log { flex: 1 1 auto; padding: 8px 10px; font: var(--z-2xs)/1.6 var(--zed); }
+.tex-agent { min-height: 0; }
+.tex-agent > [data-agent-thread] { flex: 1 1 auto; min-height: 0; }

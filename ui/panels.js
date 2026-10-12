@@ -1,16 +1,43 @@
 // Local layout preferences. Core mode/document state remains in app.js.
 export function createPanels(root, changed) {
   const sections = [...root.querySelectorAll('.workspace')];
+  /** Each section's widths, and a second set for a section that shows another
+   *  dock in its right column: LaTeX's PDF wants half the window where
+   *  Codex's agent wants a column. */
   const states = new Map();
+  const defaultsOf = new Map();
   const minPane = 172, minStage = 320;
   let drag = null;
   const active = () => root.querySelector('.workspace.on');
-  const key = (section) => `proton.panes.${section.dataset.ws}`;
+  const variant = (section) => section.dataset.dock === 'typeset' ? `${section.dataset.ws}.typeset` : section.dataset.ws;
+  const key = (section) => `proton.panes.${variant(section)}`;
+  /** The widest a right pane may be dragged. */
+  const capOf = (section) => section.dataset.dock === 'typeset' ? 1600 : 800;
+  /** The widths in use, made from the defaults and what was kept the first
+   *  time a variant is shown. */
+  function stateOf(section) {
+    const name = variant(section);
+    if (!states.has(name)) {
+      const defaults = { ...defaultsOf.get(section) };
+      if (section.dataset.dock === 'typeset') defaults['--col-r'] = Math.max(420, Math.round((section.clientWidth || 1200) * 0.45));
+      let saved;
+      try { saved = JSON.parse(localStorage.getItem(key(section))); } catch { /* defaults */ }
+      const state = { ...defaults, defaults };
+      for (const prop of ['--col-l', '--col-r']) {
+        if (Number.isFinite(saved?.[prop])) state[prop] = Math.max(minPane, Math.min(saved[prop], capOf(section)));
+      }
+      for (const prop of ['leftHidden', 'rightHidden']) if (typeof saved?.[prop] === 'boolean') state[prop] = saved[prop];
+      if (saved?.preferred === 'right') state.preferred = 'right';
+      states.set(name, state);
+    }
+    return states.get(name);
+  }
   function save(section) {
-    try { localStorage.setItem(key(section), JSON.stringify(states.get(section))); } catch { /* optional cache */ }
+    const { defaults, ...kept } = stateOf(section);
+    try { localStorage.setItem(key(section), JSON.stringify(kept)); } catch { /* optional cache */ }
   }
   function paint(section) {
-    const state = states.get(section);
+    const state = stateOf(section);
     const panes = [...section.querySelectorAll(':scope > aside')];
     const hasRight = panes.length > 1;
     const fixed = section.dataset.ws === 'design' ? 66 : 0;
@@ -68,30 +95,27 @@ export function createPanels(root, changed) {
   }
   function show(side, section = active()) {
     if (!section) return;
-    const state = states.get(section);
+    const state = stateOf(section);
     state[`${side}Hidden`] = false;
     state.preferred = side;
     save(section); refresh();
   }
   sections.forEach((section) => {
-    const defaults = {
+    defaultsOf.set(section, {
       '--col-l': parseFloat(section.style.getPropertyValue('--col-l')) || 232,
       '--col-r': parseFloat(section.style.getPropertyValue('--col-r')) || 280,
       // A pane can start closed: Chat's artifacts pane opens on the first
       // thing published rather than standing empty beside every session.
       leftHidden: false, rightHidden: section.dataset.rightStart === 'hidden', preferred: 'left',
-    };
-    let saved;
-    try { saved = JSON.parse(localStorage.getItem(key(section))); } catch { /* defaults */ }
-    const state = { ...defaults };
-    for (const prop of ['--col-l', '--col-r']) {
-      if (Number.isFinite(saved?.[prop])) state[prop] = Math.max(minPane, Math.min(saved[prop], 800));
-    }
-    for (const prop of ['leftHidden', 'rightHidden']) if (typeof saved?.[prop] === 'boolean') state[prop] = saved[prop];
-    if (saved?.preferred === 'right') state.preferred = 'right';
-    states.set(section, state);
+    });
     // Explicit columns keep hidden children from shifting their neighbours.
-    [...section.children].forEach((child, i) => { child.style.gridColumn = String(i + 1); child.style.gridRow = '1'; });
+    // A pane that takes another's place shares its column.
+    let column = 0;
+    [...section.children].forEach((child) => {
+      if (!child.hasAttribute('data-shares-column')) column += 1;
+      child.style.gridColumn = String(column);
+      child.style.gridRow = '1';
+    });
     section.querySelectorAll(':scope > aside').forEach((pane, i) => {
       pane.id ||= `${section.dataset.ws}-${i ? 'right' : 'left'}-panel`;
     });
@@ -110,21 +134,22 @@ export function createPanels(root, changed) {
         drag = { section, gutter };
         root.documentElement.classList.add('resizing');
       });
-      const reset = () => { state[prop] = defaults[prop]; save(section); refresh(); };
+      const reset = () => { const state = stateOf(section); state[prop] = state.defaults[prop]; save(section); refresh(); };
       gutter.addEventListener('dblclick', reset);
       gutter.addEventListener('keydown', (event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) return;
         event.preventDefault();
         if (event.key === 'Home') return reset();
         const direction = (event.key === 'ArrowRight' ? 1 : -1) * (prop === '--col-l' ? 1 : -1);
-        state[prop] = Math.max(minPane, Math.min(800, state[prop] + direction * 20));
+        const state = stateOf(section);
+        state[prop] = Math.max(minPane, Math.min(capOf(section), state[prop] + direction * 20));
         save(section); refresh();
       });
     });
   });
   root.querySelectorAll('[data-panel-toggle]').forEach((button) => button.addEventListener('click', () => {
     const section = active(), side = button.dataset.panelToggle;
-    const state = states.get(section);
+    const state = stateOf(section);
     state[`${side}Hidden`] = section.dataset[`${side}Open`] === 'true';
     state.preferred = side;
     save(section); refresh();
@@ -135,7 +160,7 @@ export function createPanels(root, changed) {
     const box = section.getBoundingClientRect();
     const left = gutter.dataset.resize === '--col-l';
     const raw = left ? event.clientX - box.left - (section.dataset.ws === 'design' ? 66 : 0) : box.right - event.clientX;
-    states.get(section)[gutter.dataset.resize] = Math.max(minPane, Math.min(800, Math.round(raw)));
+    stateOf(section)[gutter.dataset.resize] = Math.max(minPane, Math.min(capOf(section), Math.round(raw)));
     refresh();
   });
   const finish = () => {
@@ -146,7 +171,7 @@ export function createPanels(root, changed) {
   new ResizeObserver(refresh).observe(root.querySelector('.body'));
   function hide(side, section = active()) {
     if (!section) return;
-    states.get(section)[`${side}Hidden`] = true;
+    stateOf(section)[`${side}Hidden`] = true;
     save(section); refresh();
   }
   return { refresh, show, hide };

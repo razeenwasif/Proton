@@ -34,6 +34,7 @@ import { createResearch } from "./research.js";
 import { createStudy } from "./study.js";
 import { createLab } from "./lab.js";
 import { createLean } from "./lean.js";
+import { createTex } from "./tex.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -466,11 +467,18 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["chat", "codex", "data", "research", "study", "design", "modeling", "game", "video"];
+const MODES = ["chat", "codex", "data", "research", "study", "design", "modeling", "game", "video", "tex"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
 let activeMode = "codex";
+
+/** Whether the mode on screen types into the editor: Codex, and LaTeX, whose
+ *  editor is Codex's. */
+const editsText = (mode = activeMode) => mode === "codex" || mode === "tex";
+
+/** The section a mode is drawn in: LaTeX is Codex's, with its own dock. */
+const wsOf = (mode) => (mode === "tex" ? "codex" : mode);
 
 /* ── the window's ground ───────────────────────────────────────────────
    Codex paints every pixel of its own, so the window under it need not be
@@ -494,7 +502,7 @@ function renderWindowGround(again = false) {
   if (!HAS_SHELL) return;
   // Chat, Data, Research and Notebook are drawn as Codex is — every pixel
   // the theme's ground — so they get the same opaque window.
-  const want = ["codex", "chat", "data", "research", "study"].includes(activeMode) ? hexOf(token("--bg")) : null;
+  const want = ["codex", "chat", "data", "research", "study", "tex"].includes(activeMode) ? hexOf(token("--bg")) : null;
   if (!again && want === groundAsked) return;
   groundAsked = want;
   setOpaque(want);
@@ -511,7 +519,10 @@ function renderMode(mode) {
   renderWindowGround();
   termGL?.restyle();
   $$(".mode").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
-  $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === mode));
+  $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === wsOf(mode)));
+  // LaTeX shows its own dock in Codex's section; Codex its own again.
+  const code = $('.workspace[data-ws="codex"]');
+  if (code && (mode === "tex" || mode === "codex")) code.dataset.dock = mode === "tex" ? "typeset" : "panels";
   closeAll();
   panels.refresh();
   // The container that was just revealed is empty — the splits were drawn
@@ -542,7 +553,7 @@ function setDock(panel) {
   // The terminal left the dock for the stage, beside the code. Asking the
   // dock for it still gets it — that is where it is now.
   if (panel === "term") {
-    if (activeMode !== "codex") coreSetMode("codex");
+    if (!editsText()) coreSetMode("codex");
     showTerminal(true, { focus: true });
     return;
   }
@@ -702,7 +713,7 @@ function focusedCells() {
 function splitHtml(view, focused) {
   const actions =
     `<span class="split-actions">` +
-    (activeMode === "codex" ? `<button data-history="undo" title="Undo" aria-label="Undo"><svg class="i" aria-hidden="true"><use href="#i-undo"/></svg></button><button data-history="redo" title="Redo" aria-label="Redo"><svg class="i" aria-hidden="true"><use href="#i-redo"/></svg></button>` : "") +
+    (editsText() ? `<button data-history="undo" title="Undo" aria-label="Undo"><svg class="i" aria-hidden="true"><use href="#i-undo"/></svg></button><button data-history="redo" title="Redo" aria-label="Redo"><svg class="i" aria-hidden="true"><use href="#i-redo"/></svg></button>` : "") +
     `<button data-split="v" title="Split right — :vsplit or ␣wv"><svg class="i"><use href="#i-split-v"/></svg></button>` +
     `<button data-split="s" title="Split down — :split or ␣ws"><svg class="i"><use href="#i-split-h"/></svg></button>` +
     `<button data-split="close" title="Close this split — :close or ␣wq"><svg class="i"><use href="#i-close"/></svg></button>` +
@@ -845,7 +856,7 @@ const displaySettings = createDisplaySettings(document, keep, () => {
   renderTerminalRenderer();
   requestAnimationFrame(() => {
     measureLineHeight();
-    if (activeMode === "codex") $$(".workspace.on [data-editor]").forEach((pane) => renderEditor(Number(pane.dataset.view)));
+    if (editsText()) $$(".workspace.on [data-editor]").forEach((pane) => renderEditor(Number(pane.dataset.view)));
     panels.refresh();
   });
 });
@@ -867,6 +878,7 @@ const research = createResearch({ root: document, dispatch });
 const lab = createLab({ root: document, dispatch, readLab });
 /* Lean and Mathlib, in which a mathematics investigation's proofs are checked. */
 const lean = createLean({ root: document, dispatch });
+const tex = createTex({ root: document, dispatch });
 /* Notebook: notebooks of your own sources, and the knowledge base they are
    chosen from. Drawn from what the core reads of them. */
 const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
@@ -3851,8 +3863,10 @@ function renderLayout(layout) {
   document.documentElement.dataset.document = layout.document;
   // A mode with nothing for its dock gets the space back rather than an
   // empty panel — Chat is the one that means it.
-  const workspace = $(`.workspace[data-ws="${layout.mode}"]`);
+  const workspace = $(`.workspace[data-ws="${wsOf(layout.mode)}"]`);
   if (workspace) workspace.dataset.dock = layout.dock;
+  // The right column's width is the dock's own: LaTeX's PDF is wider.
+  panels.refresh();
 }
 
 // The artboard's palette chooser and its breakpoints. Both only change what
@@ -4103,7 +4117,7 @@ function showTerminal(on, { focus = false } = {}) {
 }
 
 function toggleTerminal() {
-  if (activeMode !== "codex") coreSetMode("codex");
+  if (!editsText()) coreSetMode("codex");
   const on = Boolean(termPane?.hidden);
   showTerminal(on, { focus: on });
 }
@@ -4319,7 +4333,7 @@ document.addEventListener(
 
 document.addEventListener("click", (e) => {
   const history = e.target.closest("[data-history]");
-  if (history && activeMode === "codex") {
+  if (history && editsText()) {
     const index = Number(history.closest("[data-view]").dataset.view);
     dispatchMany([{ type: "focusSplit", index }, historyCommand(history.dataset.history === "redo")]);
     return;
@@ -4729,7 +4743,7 @@ $(".stage-code")?.append(messageLine);
 let messageTimer;
 
 function flashMessage(text, level = "info") {
-  if (activeMode !== "codex" || !text) return;
+  if (!editsText() || !text) return;
   messageLine.textContent = text;
   messageLine.dataset.level = level;
   messageLine.hidden = false;
@@ -5333,7 +5347,7 @@ document.addEventListener("focusin", (e) => {
 });
 
 /* ── keys ─────────────────────────────────────────────────────────────
-   Two layers, and the split matters. Shell chords (⌘K, ⌘,, ⌃1-9) are the
+   Two layers, and the split matters. Shell chords (⌘K, ⌘,, ⌃0-9) are the
    window's own bindings and never reach the core. Everything else is a
    keystroke the core interprets — including the digits, which are vim
    counts, not mode switches. */
@@ -5405,15 +5419,16 @@ document.addEventListener("keydown", (e) => {
     }
   }
 
-  // ⌃1-9 and ⌘K/⌘, are deliberately two different modifiers, not
+  // ⌃0-9 and ⌘K/⌘, are deliberately two different modifiers, not
   // interchangeable ones — aliasing them here used to let ⌃K and ⌃,
   // trigger the shell chords too, which stole them from the modal engine
   // below (⌃-prefixed commands are exactly what a Vim keymap is made of,
   // and on macOS ⌃K in particular already means "kill to end of line"
   // everywhere else on the system).
-  if (e.ctrlKey && /^[1-9]$/.test(e.key)) {
+  if (e.ctrlKey && /^[0-9]$/.test(e.key)) {
     e.preventDefault();
-    coreSetMode(MODES[Number(e.key) - 1]);
+    // ⌃0 is the tenth, as it is on a keyboard's row of digits.
+    coreSetMode(MODES[e.key === "0" ? 9 : Number(e.key) - 1]);
     return;
   }
 
@@ -5450,7 +5465,7 @@ document.addEventListener("keydown", (e) => {
   // A document on screen takes the keyboard, as the picker does: its own keys
   // scroll, page and zoom it and Escape or q puts it away, and nothing else
   // reaches the buffer or the cell underneath — `dd` over a PDF must not
-  // delete a line nobody can see. ⌘ chords, ⌃1–9 and a focused shell are
+  // delete a line nobody can see. ⌘ chords, ⌃0–9 and a focused shell are
   // answered above, and the text it lays over each page can still be copied.
   if (documentShown() && !terminalFocused && !e.metaKey) {
     e.preventDefault();
@@ -5472,7 +5487,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  if (activeMode === "codex" && !terminalFocused && !overlays.active && !documentIsOpen()
+  if (editsText() && !terminalFocused && !overlays.active && !documentIsOpen()
       && historyShortcut(e, dispatch, /Mac/.test(navigator.platform))) return;
 
   if (e.metaKey) return; // leave the rest of the browser/OS chords alone
@@ -6139,17 +6154,20 @@ document.addEventListener("click", (e) => {
    this redraws whole on every change — there is no stored list of them a
    delta could describe. */
 function renderReview(event) {
-  const box = $("[data-staged]");
-  if (!box) return;
+  // Every box: Codex's dock and LaTeX's pane each have one.
+  const boxes = $$("[data-staged]");
+  if (!boxes.length) return;
 
   if (!event.files.length) {
-    box.hidden = true;
-    box.innerHTML = "";
+    for (const box of boxes) {
+      box.hidden = true;
+      box.innerHTML = "";
+    }
     return;
   }
 
   const total = event.files.reduce((n, f) => n + f.hunks.length, 0);
-  box.innerHTML =
+  const html =
     `<div class="head">${total} hunk${total === 1 ? "" : "s"} staged` +
     `<span class="acts">` +
     `<button data-staged-reject>Discard all</button>` +
@@ -6172,7 +6190,10 @@ function renderReview(event) {
           .join(""),
       )
       .join("");
-  box.hidden = false;
+  for (const box of boxes) {
+    box.innerHTML = html;
+    box.hidden = false;
+  }
 }
 
 const DIFF_MARK = { added: "p", removed: "m", context: "c" };
@@ -6194,7 +6215,7 @@ document.addEventListener("click", (e) => {
   // Refer goes to the change in its file — it does not answer it.
   const refer = e.target.closest("[data-refer]");
   if (refer) {
-    dispatch({ type: "jumpTo", mode: "codex", path: refer.dataset.path, line: Math.max(0, Number(refer.dataset.refer) - 1), column: 0 });
+    dispatch({ type: "jumpTo", mode: editsText() ? activeMode : "codex", path: refer.dataset.path, line: Math.max(0, Number(refer.dataset.refer) - 1), column: 0 });
     return;
   }
   const reject = e.target.closest("[data-reject]");
@@ -6414,6 +6435,8 @@ function renderAgent(event) {
   // Working where it cannot be seen: a dot on Data's Agent tab says so.
   const dot = $("[data-data-agent-dot]");
   if (dot && $(".data-side")?.dataset.showing !== "agent") dot.hidden = event.activity === "idle";
+  const texDot = $("[data-tex-agent-dot]");
+  if (texDot && $("#tex-pane")?.dataset.showing !== "agent") texDot.hidden = event.activity === "idle";
   // Every thread: Codex's dock and Chat's stage show the same conversation,
   // and one of them is always off screen. Painting only the visible one would
   // leave the other showing whatever it had when it was last looked at.
@@ -6468,7 +6491,7 @@ function renderAgent(event) {
     send.classList.toggle("stop", event.activity !== "idle");
     send.setAttribute("aria-label", event.activity === "idle" ? "Send" : "Stop");
     // Codex's composer sends with Zed's paper plane; Chat keeps its arrow.
-    const idle = send.closest("#codex-dock") ? "send" : "arrow-up";
+    const idle = send.closest("#codex-dock, #tex-pane") ? "send" : "arrow-up";
     send.innerHTML = `<svg class="i"><use href="#i-${
       event.activity === "idle" ? idle : "stop"
     }"/></svg>`;

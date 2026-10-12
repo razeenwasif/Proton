@@ -1,6 +1,6 @@
 # Proton — design
 
-Proton is one workspace with nine modes, a modal editor underneath all of them,
+Proton is one workspace with ten modes, a modal editor underneath all of them,
 and an agent that can act in any of them. It is not a code editor with extra
 tabs bolted on; the tabs are the point.
 
@@ -324,7 +324,7 @@ agent's darker header.
 **What the setup turns off stays off.** No rails, no file tabs, no statusline,
 no scrollbars, no git gutter, no current-line wash, no borders. What the rails
 held that Codex still needs moved to a title bar: the window controls, the
-modes as quiet words — mouse users need a way out of Codex, and ⌃1–9 is not
+modes as quiet words — mouse users need a way out of Codex, and ⌃1–9 and ⌃0 are not
 discoverable — and the panel toggles a hidden statusline would otherwise have
 taken with it.
 

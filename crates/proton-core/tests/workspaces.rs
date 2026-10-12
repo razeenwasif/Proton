@@ -447,6 +447,20 @@ fn study_works_in_the_project_data_has() {
 }
 
 #[test]
+fn latex_works_in_the_project_codex_has() {
+    // A paper is the project's, as its code is: LaTeX sits with Codex, and
+    // moving between them is no change of project.
+    let scratch = Scratch::new("tex-side");
+    let mut session = Session::new(scratch.at("alpha"));
+    mode(&mut session, ModeId::Data);
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    mode(&mut session, ModeId::Tex);
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Tex));
+    mode(&mut session, ModeId::Codex);
+    assert_eq!(here(&session), "alpha", "LaTeX to Codex is not a change of project");
+}
+
+#[test]
 fn the_switcher_numbers_the_projects_of_the_side_on_screen() {
     // The front end sends a tile's place in the list it was given, and each
     // side is given its own list.

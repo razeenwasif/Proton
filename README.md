@@ -4,7 +4,7 @@
 
 A code editor that is also a chat client, a data notebook, a research
 workbench, a design tool, a 3D workspace, a game editor and a video editor —
-one window, nine modes, a shared Vim-style modal engine underneath all of
+one window, ten modes, a shared Vim-style modal engine underneath all of
 them, and an agent that can act in any of them.
 
 **M0 through M7 are built**, and every mode in the window now reads and writes
@@ -64,14 +64,14 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-game/` | Godot `.tscn` scenes, for Game mode |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
-| `ui/` | The front end — the app's real chrome, and the interactive prototype — all nine modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
+| `ui/` | The front end — the app's real chrome, and the interactive prototype — all ten modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
 | `design/DESIGN.md` | The design system, the mode-by-mode spec, and which reference each idea came from |
 | `docs/ARCHITECTURE.md` | The build document — crate layout, the core/UI seam, the mode contract, milestones |
 | `docs/STACK.md` | Language, renderer, parser, plugin runtime — what is settled and what is still a real decision |
 | `docs/CODE-VISUALIZER.md` | Integration plan for [Code-Visualizer](https://github.com/razeenwasif/Code-Visualizer) |
 | `assets/` | The reference designs the whole thing was drawn from |
 
-## The nine modes
+## The ten modes
 
 See the [current capability matrix](docs/ARCHITECTURE.md) for implemented documents and runtime limitations.
 
@@ -220,6 +220,11 @@ process, and wait on one.
 captions from the `.srt` beside it. Both files are spliced, never re-printed.
 There is no program monitor: a frame of the programme is a decoded frame of
 video, and decoding needs ffmpeg.
+**LaTeX** · Overleaf's editor, in Proton: Codex's own editor over a project's
+`.tex` files — vim, splits and the agent — beside a pane for the PDF they
+typeset to, the build's log and the agent, on ⌃0. Still being built: TeX
+itself (TinyTeX, installed by Proton when you agree), compiling on save,
+SyncTeX, templates, citations from Research and a visual editor come next.
 
 ## The three things that hold it together
 

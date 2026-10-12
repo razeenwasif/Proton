@@ -60,6 +60,7 @@
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
     <symbol id="i-term" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M13 15h4"/></symbol>
     <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="3"/><path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3"/></symbol>
+    <symbol id="i-tex" viewBox="0 0 24 24"><path d="M14 3.5H7a2 2 0 00-2 2v13a2 2 0 002 2h10a2 2 0 002-2V8.5zM14 3.5V8.5h5"/><path d="M8.5 12.5h4M10.5 12.5v5M13 14.5h3l-1.5 3"/></symbol>
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 4.5h6a3 3 0 013 3V20a2.5 2.5 0 00-2.5-2.5H4zM20 4.5h-6a3 3 0 00-3 3V20a2.5 2.5 0 012.5-2.5H20z"/></symbol>
     <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5L16 13h5M3 13l3-8h12l3 8v6a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 01-8 8H8l-4 2 1-4.2A8 8 0 1121 12z"/></symbol>
@@ -208,6 +209,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="modeling"><svg class="i"><use href="#i-cube"/></svg><span>Model</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="game"><svg class="i"><use href="#i-game"/></svg><span>Game</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="video"><svg class="i"><use href="#i-video"/></svg><span>Video</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="tex"><svg class="i"><use href="#i-tex"/></svg><span>LaTeX</span></button>
       </div>
 
       <div class="rail-drag" aria-hidden="true"></div>
@@ -597,6 +599,41 @@
             <span class="chip" data-git-count>0</span>
           </header>
           <div class="scroll tree" data-git-files></div>
+        </div>
+      </aside>
+
+      <!-- LaTeX's dock, in place of Codex's when the mode is LaTeX: the
+           section is Codex's, so the editor beside it is Codex's own. What
+           the source typesets to, the build's log, and the agent. -->
+      <aside class="pane tex-pane" id="tex-pane" data-shares-column data-showing="pdf">
+        <header class="tex-head">
+          <div class="tex-tabs" role="tablist" aria-label="LaTeX">
+            <button class="dock-tab on" role="tab" aria-selected="true" data-tex-tab="pdf">PDF</button>
+            <button class="dock-tab" role="tab" aria-selected="false" data-tex-tab="log">Log <span class="chip" data-tex-log-count hidden></span></button>
+            <button class="dock-tab" role="tab" aria-selected="false" data-tex-tab="agent">Agent <span class="dot" data-tex-agent-dot hidden></span></button>
+          </div>
+          <span class="grow"></span>
+          <span class="tex-build" data-tex-build></span>
+        </header>
+        <div class="tex-body" data-tex-body="pdf"><div class="tex-pdf" data-tex-pdf></div></div>
+        <div class="tex-body" data-tex-body="log" hidden><div class="scroll tex-log" data-tex-log></div></div>
+        <div class="tex-body tex-agent" data-tex-body="agent" hidden>
+          <div class="scroll" data-agent-thread></div>
+          <div class="staged" data-staged hidden></div>
+          <div class="composer">
+            <div class="box">
+              <div class="txt" contenteditable="plaintext-only" role="textbox"
+                   aria-label="Ask about this document" data-agent-input
+                   data-placeholder="Ask about this document, @selection to include context"></div>
+              <div class="foot">
+                <span class="select" data-mention="@selection" title="Send the selected text with the question">@selection</span>
+                <span class="grow"></span>
+                <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
+                <span class="send" data-agent-send role="button" tabindex="0"
+                      aria-label="Send"><svg class="i"><use href="#i-send"/></svg></span>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
     </section>
@@ -1155,6 +1192,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="modeling" title="Model  ⌃7"><span>Model</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="game" title="Game  ⌃8"><span>Game</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="video" title="Video  ⌃9"><span>Video</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="tex" title="LaTeX  ⌃0"><span>LaTeX</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
     <div class="tb-actions">

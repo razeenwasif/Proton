@@ -8,4 +8,4 @@
  * lets the agent edit a scene or a timeline by writing a patch instead of
  * driving a GUI, and what makes any of it reviewable.
  */
-export type DocumentKind = "conversation" | "source" | "notebook" | "component" | "scene" | "level" | "timeline" | "investigation" | "studyNotebook";
+export type DocumentKind = "conversation" | "source" | "notebook" | "component" | "scene" | "level" | "timeline" | "investigation" | "studyNotebook" | "manuscript";
