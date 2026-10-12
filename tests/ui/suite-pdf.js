@@ -618,12 +618,42 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     lib.querySelector('[data-pdf-book$="mml-book.pdf"]').click(); await settle();
     assert(JSON.stringify(sent(at, 'pdfOpen')) === JSON.stringify([{type: 'pdfOpen', path: '~/Documents/Books/Machine Learning/mml-book.pdf'}]), `not opened: ${JSON.stringify(sent(at, 'pdfOpen'))}`);
 
-    // The folders, changed; looked through again.
-    $('[data-pdf-lib-edit]').click(); await settle();
-    const form = lib.querySelector('[data-pdf-lib-folders-form]');
-    form.querySelector('textarea').value = '~/Documents/Books\n~/Papers';
+    // Renamed in the library only: ✎ opens its form, Save sends the name and draws it at once.
+    const bishop = '~/Documents/Books/Machine Learning/bishop.pdf';
+    lib.querySelector(`[data-pdf-rename="${bishop}"]`).click(); await settle();
+    let form = lib.querySelector('[data-pdf-rename-form]');
+    const titleField = form?.querySelector('[name=title]');
+    assert(form?.dataset.path === bishop && doc.activeElement === titleField && titleField.value === 'Pattern Recognition', 'its form is not ready to type in');
+    assert(!form.querySelector('[data-pdf-rename-own]'), 'a book never renamed offers its own title back');
+    titleField.value = 'PRML'; titleField.dispatchEvent(new Event('input', {bubbles: true}));
+    form.querySelector('[name=author]').value = 'Bishop';
     at = win.commands.length;
     form.requestSubmit(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfRenameBook')) === JSON.stringify([{type: 'pdfRenameBook', path: bishop, title: 'PRML', author: 'Bishop'}]), `not renamed: ${JSON.stringify(sent(at, 'pdfRenameBook'))}`);
+    assert(!lib.querySelector('[data-pdf-rename-form]') && lib.querySelector(`[data-pdf-book="${bishop}"] .pdf-book-title`).textContent === 'PRML', 'the new name is not drawn');
+    assert(doc.activeElement === lib.querySelector(`[data-pdf-book="${bishop}"]`), 'the book did not get the keyboard back');
+    // F2 on a book renames it; Escape leaves it as it was.
+    const ed3 = lib.querySelector('[data-pdf-book="~/Documents/Books/ed3book.pdf"]');
+    ed3.focus();
+    ed3.dispatchEvent(new KeyboardEvent('keydown', {key: 'F2', bubbles: true, cancelable: true})); await settle();
+    form = lib.querySelector('[data-pdf-rename-form]');
+    assert(form?.dataset.path === '~/Documents/Books/ed3book.pdf', 'F2 did not rename it');
+    form.querySelector('[name=title]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+    assert(!lib.querySelector('[data-pdf-rename-form]') && shown($('[data-pdf-open]')), 'Escape did not put the form away, or put the library away too');
+    // Renamed, it can have its own title back.
+    await win.pushEvents([{type: 'pdfLibrary', folders: ['~/Documents/Books'], walking: false, missing: [],
+      books: books.map((b) => (b.path === bishop ? {...b, title: 'PRML', author: 'Bishop', renamed: true} : {...b, renamed: false}))}]); await settle();
+    lib.querySelector(`[data-pdf-rename="${bishop}"]`).click(); await settle();
+    at = win.commands.length;
+    lib.querySelector('[data-pdf-rename-own]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfRenameBook')[0]) === JSON.stringify({type: 'pdfRenameBook', path: bishop, title: '', author: ''}), 'its own title was not asked for');
+
+    // The folders, changed; looked through again.
+    $('[data-pdf-lib-edit]').click(); await settle();
+    const folders = lib.querySelector('[data-pdf-lib-folders-form]');
+    folders.querySelector('textarea').value = '~/Documents/Books\n~/Papers';
+    at = win.commands.length;
+    folders.requestSubmit(); await settle();
     assert(JSON.stringify(sent(at, 'pdfLibraryFolders')[0]?.folders) === '["~/Documents/Books","~/Papers"]', `not set: ${JSON.stringify(sent(at, 'pdfLibraryFolders'))}`);
     $('[data-pdf-lib-scan]').click(); await settle();
     assert(sent(at, 'pdfLibraryScan').length === 1, 'not looked through again');

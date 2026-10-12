@@ -67,6 +67,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::PdfLibraryScan
             | Command::PdfLibraryFolders { .. }
             | Command::PdfCovers { .. }
+            | Command::PdfRenameBook { .. }
     )
 }
 
@@ -334,6 +335,10 @@ impl Pdfs {
                 vec![self.library_event()]
             }
             Command::PdfLibraryFolders { folders } => self.set_library(folders),
+            Command::PdfRenameBook { path, title, author } => match self.library.rename(&path, &title, &author) {
+                Ok(()) => vec![self.library_event()],
+                Err(why) => vec![notice(why, NoticeLevel::Info)],
+            },
             Command::PdfCovers { paths } => match self.library.covers(&paths) {
                 covers if covers.is_empty() => Vec::new(),
                 covers => vec![Event::PdfCovers { covers }],

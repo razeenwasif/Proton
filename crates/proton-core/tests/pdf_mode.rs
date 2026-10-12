@@ -586,6 +586,31 @@ fn the_library_shelves_the_books_in_its_folders_draws_their_covers_and_opens_eac
     let events = session.apply(Command::PdfOpen { path: vision.clone(), page: None, password: None });
     assert_eq!(view(&events).unwrap().2, Some(3), "not opened where it was left");
 
+    // Renamed in the library only, kept through a walk; its file untouched.
+    let before = std::fs::read(books.join("foundations-of-computer-vision.pdf")).unwrap();
+    let book = |events: &[Event], path: &str| {
+        events.iter().find_map(|e| match e {
+            Event::PdfLibrary { books, .. } => books.iter().find(|b| b.path == path).cloned(),
+            _ => None,
+        })
+    };
+    let events = session.apply(Command::PdfRenameBook { path: vision.clone(), title: "  Vision, Torralba et al.  ".into(), author: "Antonio Torralba".into() });
+    let renamed = book(&events, &vision).unwrap();
+    assert_eq!((renamed.title.as_str(), renamed.author.as_str(), renamed.renamed), ("Vision, Torralba et al.", "Antonio Torralba", true));
+    session.apply(Command::PdfLibraryScan);
+    let mut walked = None;
+    for _ in 0..500 {
+        walked = book(&session.apply(Command::Poll), &vision);
+        if walked.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(walked.unwrap().title, "Vision, Torralba et al.", "a walk forgot the name");
+    assert_eq!(std::fs::read(books.join("foundations-of-computer-vision.pdf")).unwrap(), before, "the file was changed");
+    let refused = session.apply(Command::PdfRenameBook { path: "~/elsewhere/not-a-book.pdf".into(), title: "No".into(), author: String::new() });
+    assert!(refused.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("is not a book of the library"))), "{refused:?}");
+
     // Another session: the books at once, where they were left, before any walk.
     let mut later = Session::new(&s.0).with_pdf_library(vec![books.display().to_string()], None, Some(kept));
     let events = later.apply(Command::SetMode { mode: ModeId::Pdf });
@@ -596,6 +621,11 @@ fn the_library_shelves_the_books_in_its_folders_draws_their_covers_and_opens_eac
     let first = first.unwrap();
     assert_eq!(first.len(), 2, "the books were not kept");
     assert_eq!(first.iter().find(|b| b.path == vision).and_then(|b| b.page), Some(3));
+    assert_eq!(first.iter().find(|b| b.path == vision).map(|b| b.title.as_str()), Some("Vision, Torralba et al."), "the name was not kept");
+    // Both empty: its own title again.
+    let events = later.apply(Command::PdfRenameBook { path: vision.clone(), title: String::new(), author: String::new() });
+    let own = book(&events, &vision).unwrap();
+    assert_eq!((own.title.as_str(), own.author.as_str(), own.renamed), ("Foundations of Computer Vision", "", false));
 }
 
 fn folder_of(path: &std::path::Path) -> String {

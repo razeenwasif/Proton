@@ -52,6 +52,8 @@ pub struct Book {
     /// When it was last read, in seconds since the epoch.
     #[ts(type = "number | null")]
     pub read: Option<u64>,
+    /// Its title or author is the person's, not the book's own.
+    pub renamed: bool,
 }
 
 /// A book's cover, drawn.
@@ -80,6 +82,25 @@ struct Shelved {
 /// Where a book was left, and when.
 pub type Read = HashMap<PathBuf, (u32, u64)>;
 
+/// What the person calls a book, in place of what it calls itself: kept
+/// apart from what the walk reads, so reading it again changes neither. An
+/// empty one is the book's own.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct Named {
+    title: String,
+    author: String,
+}
+
+/// `pdf-library.json`: the books as walked, and what the person calls them.
+/// Once only the books, as a list.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Kept {
+    #[serde(default)]
+    books: Vec<Shelved>,
+    #[serde(default)]
+    names: Vec<(PathBuf, Named)>,
+}
+
 /// The library.
 #[derive(Default)]
 pub struct Library {
@@ -99,6 +120,8 @@ pub struct Library {
     drawing: HashSet<PathBuf>,
     /// Covers this session has, as the window takes them.
     drawn: HashMap<PathBuf, Option<String>>,
+    /// What the person calls books, by path.
+    names: HashMap<PathBuf, Named>,
 }
 
 impl std::fmt::Debug for Library {
@@ -111,8 +134,11 @@ impl Library {
     /// Kept in `dir`: the books as last walked, and their covers.
     pub fn kept_in(dir: &Path) -> Library {
         let store = dir.join("pdf-library.json");
-        let shelved = std::fs::read_to_string(&store).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-        Library { shelved, store: Some(store), covers_dir: Some(dir.join("pdf-covers")), ..Library::default() }
+        let text = std::fs::read_to_string(&store).unwrap_or_default();
+        let kept = serde_json::from_str::<Kept>(&text)
+            .or_else(|_| serde_json::from_str::<Vec<Shelved>>(&text).map(|books| Kept { books, names: Vec::new() }))
+            .unwrap_or_default();
+        Library { shelved: kept.books, names: kept.names.into_iter().collect(), store: Some(store), covers_dir: Some(dir.join("pdf-covers")), ..Library::default() }
     }
 
     /// Covers drawn by this program: Poppler's, or a test's stand-in.
@@ -159,11 +185,14 @@ impl Library {
             .iter()
             .map(|s| {
                 let left = read.get(&s.path);
+                let named = self.names.get(&s.path);
+                let title = named.map(|n| n.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| s.title.clone());
+                let author = named.map(|n| n.author.clone()).filter(|a| !a.is_empty()).unwrap_or_else(|| s.author.clone());
                 Book {
                     path: folder::tilde(&s.path),
                     file: folder::name_of(&s.path),
-                    title: s.title.clone(),
-                    author: s.author.clone(),
+                    title,
+                    author,
                     pages: s.pages,
                     size: s.size,
                     shelf: s.shelf.clone(),
@@ -171,6 +200,7 @@ impl Library {
                     in_cloud: s.in_cloud,
                     page: left.map(|l| l.0),
                     read: left.map(|l| l.1),
+                    renamed: named.is_some(),
                 }
             })
             .collect();
@@ -277,13 +307,38 @@ impl Library {
         self.drawer.as_ref()
     }
 
-    /// The books as walked, kept for the next session.
+    /// Call a book of the library by another title and author, in the
+    /// library only: its file and what it says of itself are left as they
+    /// are. Both empty, it is called by its own again.
+    pub fn rename(&mut self, typed: &str, title: &str, author: &str) -> Result<(), String> {
+        let path = resolved(typed);
+        let book = self.shelved.iter().find(|s| s.path == path).ok_or_else(|| format!("{typed} is not a book of the library"))?;
+        let (title, author) = (title.trim(), author.trim());
+        if title.chars().count() > 300 || author.chars().count() > 300 {
+            return Err("A title or an author is three hundred letters at most.".into());
+        }
+        // What it calls itself already is no renaming.
+        let title = if title == book.title { "" } else { title };
+        let author = if author == book.author { "" } else { author };
+        match title.is_empty() && author.is_empty() {
+            true => self.names.remove(&path),
+            false => self.names.insert(path, Named { title: title.to_string(), author: author.to_string() }),
+        };
+        self.keep();
+        Ok(())
+    }
+
+    /// The books as walked, and what the person calls them, kept for the
+    /// next session.
     fn keep(&self) {
         if let Some(file) = &self.store {
             if let Some(dir) = file.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            let _ = proton_research::store::atomic_write(file, serde_json::to_string(&self.shelved).unwrap_or_default().as_bytes());
+            let mut names: Vec<(PathBuf, Named)> = self.names.iter().map(|(p, n)| (p.clone(), n.clone())).collect();
+            names.sort_by(|a, b| a.0.cmp(&b.0));
+            let kept = Kept { books: self.shelved.clone(), names };
+            let _ = proton_research::store::atomic_write(file, serde_json::to_string(&kept).unwrap_or_default().as_bytes());
         }
     }
 }

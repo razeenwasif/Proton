@@ -28,4 +28,8 @@ page: number | null,
 /**
  * When it was last read, in seconds since the epoch.
  */
-read: number | null, };
+read: number | null, 
+/**
+ * Its title or author is the person's, not the book's own.
+ */
+renamed: boolean, };

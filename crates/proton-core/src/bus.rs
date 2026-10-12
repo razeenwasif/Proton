@@ -708,6 +708,13 @@ pub enum Command {
     PdfCovers {
         paths: Vec<String>,
     },
+    /// Call a book of the library by another title and author, in the
+    /// library only — its file is left as it is. Both empty: its own again.
+    PdfRenameBook {
+        path: String,
+        title: String,
+        author: String,
+    },
     /* ── notebook ─────────────────────────────────────────────────── */
     /// Keep notebooks in this folder — typed as a path is, `~` and all.
     /// Saved in the person's own settings.

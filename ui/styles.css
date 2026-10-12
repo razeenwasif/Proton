@@ -5249,7 +5249,7 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .pdf-cover img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
 .pdf-cover-title { padding: 12px; color: rgba(255, 255, 255, .88); font: 600 var(--z-2xs)/1.35 var(--zed); text-align: center;
   display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
-.pdf-cover-cloud { position: absolute; top: 6px; right: 6px; padding: 1px 5px; border-radius: 9px; background: rgba(0, 0, 0, .55); color: #fff; font-size: 11px; }
+.pdf-cover-cloud { position: absolute; top: 6px; left: 6px; padding: 1px 5px; border-radius: 9px; background: rgba(0, 0, 0, .55); color: #fff; font-size: 11px; }
 .pdf-book:hover .pdf-cover, .pdf-book:focus-visible .pdf-cover { transform: translateY(-3px); box-shadow: 0 2px 4px rgba(0, 0, 0, .35), 0 10px 24px rgba(0, 0, 0, .34); }
 .pdf-book:focus-visible { outline: none; }
 .pdf-book:focus-visible .pdf-cover { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -5258,6 +5258,19 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .pdf-book-left { display: grid; gap: 3px; color: var(--muted); font-size: calc(var(--z-2xs) * .92); }
 .pdf-book-bar { height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--text) 12%, transparent); overflow: hidden; }
 .pdf-book-bar i { display: block; height: 100%; background: var(--accent); }
+/* A book renamed in the library: ✎ on its cover when it is pointed at, and
+   its form in its place. */
+.pdf-book-cell { position: relative; display: grid; align-content: start; }
+.pdf-book-rename { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, .58); color: #fff; font: 13px/26px var(--sans); cursor: pointer; opacity: 0; transition: opacity .12s; }
+.pdf-book-cell:hover .pdf-book-rename, .pdf-book-cell:focus-within .pdf-book-rename { opacity: 1; }
+.pdf-book-renaming { gap: 6px; font: var(--z-2xs)/1.35 var(--zed); }
+.pdf-book-renaming input { min-width: 0; padding: 4px 6px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 5px; background: var(--bg-deep); color: var(--text); font: var(--z-2xs) var(--zed); }
+.pdf-book-renaming input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.pdf-rename-acts { display: flex; flex-wrap: wrap; gap: 4px; }
+.pdf-rename-acts button { padding: 2px 8px; font: var(--z-2xs) var(--zed); }
+.pdf-rename-own { border: 0; background: none; color: var(--muted); text-decoration: underline; cursor: pointer; }
+.pdf-book-renaming .lab-faint { font-size: calc(var(--z-2xs) * .9); }
 .pdf-lib-folders { display: grid; gap: 8px; max-width: 560px; font: var(--z-2xs)/1.5 var(--zed); color: var(--muted); }
 .pdf-lib-folders p { margin: 0; }
 .pdf-lib-folders textarea { padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 7px; background: var(--bg-deep); color: var(--text); font: var(--z-xs) var(--zed); resize: vertical; }

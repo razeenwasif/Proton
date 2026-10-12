@@ -24,8 +24,11 @@ function hue(text) {
 /** @param {{box: HTMLElement, root: HTMLElement, dispatch: (command: any) => unknown, open: (path: string) => void}} host
  *  `box`: where the library is drawn; `root`: what scrolls it, for knowing which covers are on screen */
 export function createPdfLibrary(host) {
-  /** @type {{library: LibraryEvent | null, query: string, editing: boolean}} */
-  const state = { library: null, query: "", editing: false };
+  /** @type {{library: LibraryEvent | null, query: string, editing: boolean, renaming: string | null,
+   *   draft: {title: string, author: string} | null}} */
+  const state = { library: null, query: "", editing: false, renaming: null, draft: null };
+  /** Whether this drawing has its renaming form yet: a book on two shelves has it once. */
+  let formed = false;
   /** Covers given, by path: a picture's address, or null when there is none to draw. @type {Map<string, string | null>} */
   const covers = new Map();
   /** Covers asked for, not given yet. */
@@ -67,8 +70,27 @@ export function createPdfLibrary(host) {
       (b.inCloud ? `<span class="pdf-cover-cloud" title="In iCloud: opening it brings it down">☁</span>` : "") + `</span>`;
   }
 
-  /** A book, to open where it was left. @param {Book} b */
+  /** A book being renamed: its cover, and what to call it. @param {Book} b */
+  function renameHtml(b) {
+    formed = true;
+    const d = state.draft ?? { title: b.title, author: b.author };
+    return `<form class="pdf-book-cell pdf-book-renaming" data-pdf-rename-form data-path="${esc(b.path)}" novalidate>${coverHtml(b)}` +
+      `<input name="title" value="${esc(d.title)}" placeholder="${esc(b.file)}" aria-label="Title" spellcheck="false" autocomplete="off">` +
+      `<input name="author" value="${esc(d.author)}" placeholder="Author" aria-label="Author" spellcheck="false" autocomplete="off">` +
+      `<span class="pdf-rename-acts"><button type="submit" class="cc-primary">Save</button><button type="button" class="cc-quiet" data-pdf-rename-cancel>Cancel</button>` +
+      (b.renamed ? `<button type="button" class="pdf-rename-own" data-pdf-rename-own title="Its title and author as the book says them">Its own</button>` : "") +
+      `</span><span class="lab-faint">In your library only: ${esc(b.file)} is left as it is.</span></form>`;
+  }
+
+  /** A book, to open where it was left, and to rename. @param {Book} b */
   function bookHtml(b) {
+    if (state.renaming === b.path && !formed) return renameHtml(b);
+    return `<div class="pdf-book-cell">${cardHtml(b)}<button type="button" class="pdf-book-rename" data-pdf-rename="${esc(b.path)}" ` +
+      `title="Rename it in your library  F2 — its file is left as it is" aria-label="Rename ${esc(b.title)}">✎</button></div>`;
+  }
+
+  /** @param {Book} b */
+  function cardHtml(b) {
     // Who wrote it; or, said nowhere else, how long it is.
     const by = b.author || (b.pages && !b.page ? `${b.pages} pages` : "");
     const left = b.page && b.pages ? Math.min(100, Math.round((b.page / b.pages) * 100)) : 0;
@@ -99,6 +121,7 @@ export function createPdfLibrary(host) {
 
   function render() {
     const lib = state.library;
+    formed = false;
     if (!lib) {
       host.box.innerHTML = "";
       return;
@@ -165,8 +188,40 @@ export function createPdfLibrary(host) {
     return state.library?.books.find(named) ?? null;
   }
 
+  /** Rename a book: its form, ready to type in. @param {string} path */
+  function startRenaming(path) {
+    state.renaming = path;
+    state.draft = null;
+    render();
+    const field = /** @type {HTMLInputElement | null} */ (host.box.querySelector("[data-pdf-rename-form] [name=title]"));
+    field?.focus();
+    field?.select();
+  }
+
+  /** Done renaming: back to the book, its card focused. */
+  function stopRenaming() {
+    const path = state.renaming;
+    state.renaming = null;
+    state.draft = null;
+    render();
+    if (path) /** @type {HTMLElement | null} */ (host.box.querySelector(`[data-pdf-book="${CSS.escape(path)}"]`))?.focus();
+  }
+
+  /** Call a book by another title and author: drawn so at once, as the
+   *  core will say. @param {string} path @param {string} title @param {string} author */
+  function rename(path, title, author) {
+    host.dispatch({ type: "pdfRenameBook", path, title, author });
+    const book = state.library?.books.find((b) => b.path === path);
+    if (book && title.trim()) Object.assign(book, { title: title.trim(), author: author.trim(), renamed: true });
+    stopRenaming();
+  }
+
   host.box.addEventListener("click", (e) => {
     const t = /** @type {HTMLElement} */ (e.target);
+    const renaming = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-rename]"));
+    if (renaming) return startRenaming(renaming.dataset.pdfRename ?? "");
+    if (t.closest("[data-pdf-rename-cancel]")) return stopRenaming();
+    if (t.closest("[data-pdf-rename-own]")) return rename(state.renaming ?? "", "", "");
     const book = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-book]"));
     if (book) return host.open(book.dataset.pdfBook ?? "");
     if (t.closest("[data-pdf-lib-cancel]")) {
@@ -174,8 +229,36 @@ export function createPdfLibrary(host) {
       render();
     }
   });
+  host.box.addEventListener("input", (e) => {
+    const form = /** @type {HTMLElement} */ (e.target).closest("[data-pdf-rename-form]");
+    if (!form) return;
+    const field = (/** @type {string} */ name) => /** @type {HTMLInputElement} */ (form.querySelector(`[name=${name}]`)).value;
+    // Kept across the library being drawn again while it is typed.
+    state.draft = { title: field("title"), author: field("author") };
+  });
+  host.box.addEventListener("keydown", (e) => {
+    const t = /** @type {HTMLElement} */ (e.target);
+    if (e.key === "Escape" && t.closest("[data-pdf-rename-form]")) {
+      e.preventDefault();
+      e.stopPropagation();
+      return stopRenaming();
+    }
+    const book = /** @type {HTMLElement | null} */ (t.closest?.("[data-pdf-book]"));
+    if (e.key === "F2" && book) {
+      e.preventDefault();
+      e.stopPropagation();
+      startRenaming(book.dataset.pdfBook ?? "");
+    }
+  });
   host.box.addEventListener("submit", (e) => {
     const form = /** @type {HTMLFormElement} */ (e.target);
+    if (form.matches("[data-pdf-rename-form]")) {
+      e.preventDefault();
+      const data = new FormData(form);
+      const title = String(data.get("title") ?? "").trim();
+      // A book is called something: an emptied title is its own.
+      return rename(form.dataset.path ?? "", title, title ? String(data.get("author") ?? "") : "");
+    }
     if (!form.matches("[data-pdf-lib-folders-form]")) return;
     e.preventDefault();
     const folders = String(new FormData(form).get("folders") ?? "").split("\n").map((l) => l.trim()).filter(Boolean);

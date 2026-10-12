@@ -1534,7 +1534,8 @@ impl Workspace {
             | Command::PdfAt { .. }
             | Command::PdfLibraryScan
             | Command::PdfLibraryFolders { .. }
-            | Command::PdfCovers { .. } => Vec::new(),
+            | Command::PdfCovers { .. }
+            | Command::PdfRenameBook { .. } => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }
