@@ -1172,6 +1172,24 @@ a form XObject, turned and scaled to the page as it is shown
 (`proton_pdf::ocr::placing`), as one change to undo. The window finds the
 pages with no text with pdf.js's `getTextContent` and offers to read them.
 
+**The library** (`pdf::library`) is the mode's home page: the PDFs in the
+folders named in the person's settings (`pdf.library`), `~/Documents/Books`
+when none are named and it is there. A worker walks them — hidden files,
+links and vendor folders passed over, a folder or file in iCloud never read —
+and reads each book's title, author and pages with lopdf's metadata-only
+loader (`proton_pdf::library::about`), cleaning what downloads and word
+processors leave in a title and falling back on the file's name. What it
+found is kept in `pdf-library.json` beside the session, so the next session's
+shelves are on screen while it walks again. Covers are asked for as their
+books come on screen (`PdfCovers`) and drawn on a worker by `pdftoppm` in the
+sandbox (`proton_lab::cover`), kept in `pdf-covers/` by the book's path, size
+and change, and sent as `data:` JPEGs — the window's CSP allows no other
+image a page did not ship. Where each PDF was left is kept with the files
+opened before (`pdf.json`, `PdfAt`), and opening one goes there.
+
+The rail and the title bar draw LaTeX and PDF beside Notebook; their keys
+stay ⌃0 and ⌃-, as `ModeId::ALL` keeps the order the keys bind.
+
 **The agent** has five tools on the PDF on top: `pdf_info`, `pdf_read`,
 `pdf_search`, `pdf_annotate` and `pdf_pages`. The agent lives in a
 workspace and the PDFs in the session, so `Workspace::call_tool` defers any

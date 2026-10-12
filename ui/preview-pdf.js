@@ -6,6 +6,14 @@
 /** The PDFs the preview's "project" has. */
 const PROJECT = ["tests/ui/fixtures/three-pages.pdf", "tests/ui/fixtures/outline.pdf", "tests/ui/fixtures/scan.pdf", "tests/ui/fixtures/cjk.pdf"];
 
+/** The preview's library: the fixtures, shelved as a person's books would be. */
+const BOOKS = [
+  { path: "/tests/ui/fixtures/three-pages.pdf", title: "Three Pages", author: "A. Fixture", pages: 3, shelf: "" },
+  { path: "/tests/ui/fixtures/outline.pdf", title: "Preface to the Work", author: "", pages: 3, shelf: "Papers", page: 2, read: 1_790_000_000 },
+  { path: "/tests/ui/fixtures/scan.pdf", title: "A Scanned Lab", author: "", pages: 2, shelf: "Papers" },
+  { path: "/tests/ui/fixtures/cjk.pdf", title: "CJK Sample", author: "", pages: 1, shelf: "Languages" },
+];
+
 /** What the preview only reads, and does not answer, of the core's commands. */
 const QUIET = new Set(["pdfAt", "pdfOcrStop"]);
 
@@ -21,6 +29,9 @@ export function createPdfPreview(_deliver) {
   /** Whether it has said that changes are the app's. */
   let said = false;
 
+  let folders = ["~/Documents/Books"];
+  const libraryEvent = () => ({ type: "pdfLibrary", folders, walking: false, missing: [],
+    books: BOOKS.map((b) => ({ file: b.path.split("/").pop(), size: 4096, folder: folders[0] ?? "", inCloud: false, page: null, read: null, ...b })) });
   const tabsEvent = () => ({ type: "pdfTabs", tabs: tabs.map((t) => ({ ...t, path: t.path })), active, recent: [...recent], project: PROJECT, root: "/" });
   const viewEvent = (/** @type {{id: number, path: string}} */ t, /** @type {number | null} */ page) =>
     ({ type: "pdfView", tab: t.id, key: `/${t.path.replace(/^\//, "")}`, version: 1, page, quiet: false });
@@ -29,7 +40,7 @@ export function createPdfPreview(_deliver) {
     /** What the window sees on entering the mode. */
     entered() {
       const on = tabs.find((t) => t.id === active);
-      return on ? [tabsEvent(), viewEvent(on, null)] : [tabsEvent()];
+      return on ? [tabsEvent(), libraryEvent(), viewEvent(on, null)] : [tabsEvent(), libraryEvent()];
     },
     /** @param {any} command */
     command(command) {
@@ -60,6 +71,14 @@ export function createPdfPreview(_deliver) {
           const on = tabs.find((t) => t.id === active);
           return on ? [tabsEvent(), viewEvent(on, null)] : [tabsEvent()];
         }
+        case "pdfLibraryScan":
+          return [libraryEvent()];
+        case "pdfLibraryFolders":
+          folders = command.folders;
+          return [libraryEvent()];
+        case "pdfCovers":
+          // No Poppler in a browser: each book keeps its title for a cover.
+          return [{ type: "pdfCovers", covers: command.paths.map((/** @type {string} */ path) => ({ path, data: null })) }];
         case "pdfOcrLangs":
           // No tesseract in a browser: OCR says what it would need.
           return [{ type: "pdfOcrLangs", langs: [] }];

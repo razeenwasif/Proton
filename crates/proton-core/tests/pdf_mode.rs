@@ -499,3 +499,105 @@ fn the_agent_reads_searches_marks_and_rearranges_the_pdf_on_top_each_change_held
     assert!(info.contains("Saved: nothing changed since.") && !info.contains("comment"), "{info}");
     assert_eq!(std::fs::read(s.0.join("paper.pdf")).unwrap(), pdf(&["Abstract\nWe study the speed of light.", "Methods\nThe speed of light was measured twice.", "Results"]), "the file was written before it was saved");
 }
+
+#[test]
+fn the_library_shelves_the_books_in_its_folders_draws_their_covers_and_opens_each_where_it_was_left() {
+    let s = scratch("library");
+    let books = s.0.join("Books");
+    std::fs::create_dir_all(books.join("Machine Learning")).unwrap();
+    std::fs::create_dir_all(books.join(".hidden")).unwrap();
+    std::fs::write(books.join("foundations-of-computer-vision.pdf"), pdf(&["Chapter one", "Two", "Three"])).unwrap();
+    let mut doc = lopdf::Document::load_mem(&pdf(&["Bayes"])).unwrap();
+    proton_pdf::clean::set_info(&mut doc, "Pattern Recognition (z-lib.org)", "Christopher M. Bishop", "", "", "D:20261012").unwrap();
+    doc.save(books.join("Machine Learning/bishop.pdf")).unwrap();
+    std::fs::write(books.join(".hidden/secret.pdf"), pdf(&["Hidden"])).unwrap();
+    std::fs::write(books.join("notes.txt"), "not a book").unwrap();
+    // A stand-in Poppler: a cover is the page it was asked for, as bytes.
+    let bin = s.0.join("poppler/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let tool = bin.join("pdftoppm");
+    std::fs::write(&tool, "#!/bin/sh\nfor last; do :; done\nprintf 'JPEG page %s' \"$2\" > \"$last.jpg\"\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let kept = s.0.join("state/pdf.json");
+    let mut session = Session::new(&s.0).with_pdf_library(vec![books.display().to_string()], Some(tool.clone()), Some(kept.clone()));
+
+    // Entered: the library, walked on a worker.
+    let events = session.apply(Command::SetMode { mode: ModeId::Pdf });
+    assert!(events.iter().any(|e| matches!(e, Event::PdfLibrary { walking: true, .. })), "{events:?}");
+    let library = |events: &[Event]| {
+        events.iter().find_map(|e| match e {
+            Event::PdfLibrary { books, walking: false, .. } => Some(books.clone()),
+            _ => None,
+        })
+    };
+    let mut shelved = None;
+    for _ in 0..500 {
+        if let Some(found) = library(&session.apply(Command::Poll)) {
+            shelved = Some(found);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let shelved = shelved.expect("the library was never walked");
+    let rows: Vec<(&str, &str, &str, u32)> = shelved.iter().map(|b| (b.shelf.as_str(), b.title.as_str(), b.author.as_str(), b.pages)).collect();
+    assert_eq!(rows, [("", "Foundations of Computer Vision", "", 3), ("Machine Learning", "Pattern Recognition", "Christopher M. Bishop", 1)]);
+    assert!(shelved.iter().all(|b| b.page.is_none() && b.folder == folder_of(&books.canonicalize().unwrap())), "{shelved:?}");
+
+    // Covers: drawn when asked for, on a worker; kept, so asked again they come at once.
+    let vision = shelved[0].path.clone();
+    assert!(session.apply(Command::PdfCovers { paths: vec![vision.clone()] }).is_empty(), "drawn on a worker, not here");
+    let mut drawn = None;
+    for _ in 0..500 {
+        drawn = session.apply(Command::Poll).into_iter().find_map(|e| match e {
+            Event::PdfCovers { covers } => Some(covers),
+            _ => None,
+        });
+        if drawn.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let drawn = drawn.expect("no cover came");
+    use base64::Engine as _;
+    let data = drawn[0].data.clone().unwrap();
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.strip_prefix("data:image/jpeg;base64,").unwrap()).unwrap();
+    assert_eq!(String::from_utf8(bytes).unwrap(), "JPEG page 1");
+    let again = session.apply(Command::PdfCovers { paths: vec![vision.clone(), "~/elsewhere/not-a-book.pdf".into()] });
+    let Some(Event::PdfCovers { covers }) = again.first() else { panic!("{again:?}") };
+    assert!(covers[0].data.is_some() && covers[1].data.is_none(), "a file not in the library is never drawn: {covers:?}");
+    assert_eq!(std::fs::read_dir(s.0.join("state/pdf-covers")).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "jpg")).count(), 1);
+
+    // Read to page 3 and closed: the shelf says so, and opening it again goes there.
+    let events = session.apply(Command::PdfOpen { path: vision.clone(), page: None, password: None });
+    let (id, _, page) = view(&events).unwrap();
+    assert_eq!(page, None, "a book never read opens at its start");
+    session.apply(Command::PdfAt { tab: id, page: 3 });
+    let events = session.apply(Command::PdfClose { tab: id, discard: false });
+    let books_now = events.iter().find_map(|e| match e {
+        Event::PdfLibrary { books, .. } => Some(books.clone()),
+        _ => None,
+    });
+    let left = books_now.unwrap().into_iter().find(|b| b.path == vision).unwrap();
+    assert!(left.page == Some(3) && left.read.is_some(), "{left:?}");
+    let events = session.apply(Command::PdfOpen { path: vision.clone(), page: None, password: None });
+    assert_eq!(view(&events).unwrap().2, Some(3), "not opened where it was left");
+
+    // Another session: the books at once, where they were left, before any walk.
+    let mut later = Session::new(&s.0).with_pdf_library(vec![books.display().to_string()], None, Some(kept));
+    let events = later.apply(Command::SetMode { mode: ModeId::Pdf });
+    let first = events.iter().find_map(|e| match e {
+        Event::PdfLibrary { books, .. } => Some(books.clone()),
+        _ => None,
+    });
+    let first = first.unwrap();
+    assert_eq!(first.len(), 2, "the books were not kept");
+    assert_eq!(first.iter().find(|b| b.path == vision).and_then(|b| b.page), Some(3));
+}
+
+fn folder_of(path: &std::path::Path) -> String {
+    proton_core::folder::tilde(path)
+}

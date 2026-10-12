@@ -40,10 +40,11 @@ pub enum ModeId {
 }
 
 impl ModeId {
-    /// Ordered as the rail shows them, which is also the `1`–`9` binding,
-    /// `0` for the tenth and `-` for the eleventh: Data and Research beside
-    /// Codex, the three a working day moves between, Notebook after Research,
-    /// then LaTeX and PDF.
+    /// Ordered as the keys bind them, `1`–`9`, `0` for the tenth and `-` for
+    /// the eleventh: Data and Research beside Codex, the three a working day
+    /// moves between, Notebook after Research, then LaTeX and PDF. The rail
+    /// and the title bar draw LaTeX and PDF beside Notebook, the reading and
+    /// writing modes together, without moving their keys.
     pub const ALL: [ModeId; 11] = [
         ModeId::Chat,
         ModeId::Codex,

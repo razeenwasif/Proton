@@ -697,6 +697,17 @@ pub enum Command {
         tab: u32,
         page: u32,
     },
+    /// Walk the library's folders again.
+    PdfLibraryScan,
+    /// The folders books are kept in, typed as paths are: kept in the
+    /// person's own settings.
+    PdfLibraryFolders {
+        folders: Vec<String>,
+    },
+    /// Covers for these books of the library, as their paths are written.
+    PdfCovers {
+        paths: Vec<String>,
+    },
     /* ── notebook ─────────────────────────────────────────────────── */
     /// Keep notebooks in this folder — typed as a path is, `~` and all.
     /// Saved in the person's own settings.
@@ -1945,6 +1956,18 @@ pub enum Event {
     /// The languages OCR can read here; none when it cannot read at all.
     PdfOcrLangs {
         langs: Vec<String>,
+    },
+    /// The library: its folders as typed, its books shelved and each where
+    /// it was left, whether it is being walked, and folders not found.
+    PdfLibrary {
+        folders: Vec<String>,
+        books: Vec<crate::pdf::library::Book>,
+        walking: bool,
+        missing: Vec<String>,
+    },
+    /// Books' covers, drawn.
+    PdfCovers {
+        covers: Vec<crate::pdf::library::Cover>,
     },
     /// The fields of a tab's form, as it is now.
     PdfFields {

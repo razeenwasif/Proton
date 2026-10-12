@@ -316,6 +316,17 @@ impl Session {
         self
     }
 
+    /// A PDF library of these folders, its covers drawn by `covers`, kept in
+    /// `kept` when given: for a test.
+    pub fn with_pdf_library(mut self, folders: Vec<String>, covers: Option<PathBuf>, kept: Option<PathBuf>) -> Session {
+        let pdf = match kept {
+            Some(file) => crate::pdf::Pdfs::kept_in(file),
+            None => std::mem::take(&mut self.pdf),
+        };
+        self.pdf = pdf.with_library(folders, covers);
+        self
+    }
+
     /// One of the agent's PDF tools, run on the PDF on top, as the session
     /// answers them when a workspace's agent calls one: the answer, and what
     /// the window draws again.
@@ -369,6 +380,7 @@ impl Session {
     pub fn with_person_settings(mut self, file: PathBuf) -> Session {
         let folder = crate::settings::Settings::at(file.clone()).research_folder();
         self.study = std::mem::take(&mut self.study).with_person_settings(&file);
+        self.pdf = std::mem::take(&mut self.pdf).with_person_settings(&file);
         self.person = Some(file);
         match folder {
             Some(folder) => self.with_research_in(&folder),

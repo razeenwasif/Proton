@@ -206,12 +206,12 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="data"><svg class="i"><use href="#i-chart"/></svg><span>Data</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="research"><svg class="i"><use href="#i-flask"/></svg><span>Research</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="study"><svg class="i"><use href="#i-book"/></svg><span>Notebook</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="tex"><svg class="i"><use href="#i-tex"/></svg><span>LaTeX</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="pdf"><svg class="i"><use href="#i-pdf"/></svg><span>PDF</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="design"><svg class="i"><use href="#i-pen"/></svg><span>Design</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="modeling"><svg class="i"><use href="#i-cube"/></svg><span>Model</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="game"><svg class="i"><use href="#i-game"/></svg><span>Game</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="video"><svg class="i"><use href="#i-video"/></svg><span>Video</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="tex"><svg class="i"><use href="#i-tex"/></svg><span>LaTeX</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="pdf"><svg class="i"><use href="#i-pdf"/></svg><span>PDF</span></button>
       </div>
 
       <div class="rail-drag" aria-hidden="true"></div>
@@ -1110,7 +1110,7 @@
       <main class="pane pdf-main">
         <div class="pdf-bar">
           <div class="pdf-tabs" role="tablist" aria-label="Open PDFs" data-pdf-tabs></div>
-          <button class="hbtn" data-pdf-open-box title="Open a PDF" aria-label="Open a PDF"><svg class="i"><use href="#i-plus"/></svg></button>
+          <button class="hbtn" data-pdf-open-box title="Your library — or a PDF by its path" aria-label="Your library, or open a PDF"><svg class="i"><use href="#i-book"/></svg></button>
           <span class="chip pdf-readonly" data-pdf-readonly hidden>Read only</span>
           <button class="chip pdf-ocr-offer" data-pdf-ocr-offer hidden></button>
           <div class="pdf-seg pdf-palette" role="group" aria-label="Comment tools" data-pdf-palette></div>
@@ -1139,13 +1139,18 @@
           <div class="scroll pdf-pages" data-pdf-pages tabindex="0" aria-label="The PDF" hidden></div>
           <!-- The pages, small, to choose and rearrange (pdf-pages.js). -->
           <div class="pdf-grid" data-pdf-grid tabindex="0" aria-label="The pages" hidden></div>
-          <!-- What to open: a path, typed; the project's PDFs; those opened before. -->
+          <!-- The library, and what else to open: the books in the folders
+               the person keeps them in (pdf-library.js); a path, typed; the
+               project's PDFs; those opened before. -->
           <div class="pdf-open" data-pdf-open>
             <div class="pdf-open-in">
               <div class="pdf-locked" data-pdf-locked hidden></div>
-              <h3>Open a PDF</h3>
-              <input class="pdf-open-path" data-pdf-open-path placeholder="~/Papers/paper.pdf, or a name to find in this project" spellcheck="false" autocomplete="off" aria-label="Which PDF">
+              <header class="pdf-lib-head"><h3>Library</h3><span class="grow"></span>
+                <button class="hbtn" data-pdf-lib-scan title="Look through the folders again for books added or taken away" aria-label="Look again"><svg class="i"><use href="#i-redo"/></svg></button>
+                <button class="hbtn" data-pdf-lib-edit title="The folders your books are in">Folders</button></header>
+              <input class="pdf-open-path" data-pdf-open-path placeholder="Search your books — or open a PDF by its path, ~/Papers/paper.pdf" spellcheck="false" autocomplete="off" aria-label="Which PDF">
               <div class="pdf-open-list" data-pdf-open-list role="listbox" aria-label="PDFs"></div>
+              <div class="pdf-library" data-pdf-library></div>
             </div>
           </div>
         </div>
@@ -1332,12 +1337,12 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="data" title="Data  ⌃3"><span>Data</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="research" title="Research  ⌃4"><span>Research</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="study" title="Notebook  ⌃5"><span>Notebook</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="tex" title="LaTeX  ⌃0"><span>LaTeX</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="pdf" title="PDF  ⌃-"><span>PDF</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="design" title="Design  ⌃6"><span>Design</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="modeling" title="Model  ⌃7"><span>Model</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="game" title="Game  ⌃8"><span>Game</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="video" title="Video  ⌃9"><span>Video</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="tex" title="LaTeX  ⌃0"><span>LaTeX</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="pdf" title="PDF  ⌃-"><span>PDF</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
     <div class="tb-actions">

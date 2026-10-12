@@ -572,6 +572,67 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('The library shelves your books by folder, the ones being read first where they were left, covers as they come, narrowed by what is typed', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    await win.pushEvents([tabs([], null)]); await settle();
+    const book = (path, title, more = {}) => ({path, file: path.split('/').pop(), title, author: '', pages: 300, size: 1, shelf: '', folder: '~/Documents/Books', inCloud: false, page: null, read: null, ...more});
+    const books = [
+      book('~/Documents/Books/ed3book.pdf', 'Speech and Language Processing', {author: 'Daniel Jurafsky'}),
+      book('~/Documents/Books/Machine Learning/mml-book.pdf', 'Mathematics for Machine Learning', {shelf: 'Machine Learning', page: 120, pages: 400, read: 1_790_000_100}),
+      book('~/Documents/Books/Machine Learning/bishop.pdf', 'Pattern Recognition', {shelf: 'Machine Learning', author: 'Christopher M. Bishop'}),
+      book('~/Documents/Books/Computer Vision/mvg.pdf', 'Multiple View Geometry', {shelf: 'Computer Vision', inCloud: true}),
+    ];
+    let at = win.commands.length;
+    await win.pushEvents([{type: 'pdfLibrary', folders: ['~/Documents/Books'], books, walking: false, missing: []}]); await settle();
+    const lib = $('[data-pdf-library]');
+    const shelves = [...lib.querySelectorAll('.pdf-shelf h4')].map((h) => h.firstChild.textContent.trim());
+    assert(JSON.stringify(shelves) === JSON.stringify(['Continue reading', 'Books', 'Computer Vision', 'Machine Learning']), `shelves: ${shelves}`);
+    const reading = lib.querySelector('.pdf-shelf .pdf-book');
+    assert(reading.dataset.pdfBook.endsWith('mml-book.pdf') && reading.textContent.includes('page 120 of 400') && reading.querySelector('.pdf-book-bar i').style.width === '30%', 'not continued where it was left');
+    assert(!shown($('[data-pdf-open-list]')) && $('[data-pdf-open] h3').textContent === 'Library', 'the library is not the home page');
+    const ws = $('.workspace[data-ws="pdf"]');
+    assert(ws.classList.contains('pdf-home') && !shown(ws.querySelector('.pdf-tools')) && !shown(ws.querySelector('.pdf-side')) && !shown(ws.querySelector('.pdf-bar')),
+      'with nothing open, the library is not the whole page');
+    assert(lib.querySelector('[data-pdf-book$="mvg.pdf"] .pdf-cover-cloud'), 'a book in iCloud is not said to be');
+
+    // Covers asked for as they come on screen, once each; drawn, they take the titles' place.
+    assert(await wait(() => sent(at, 'pdfCovers').length > 0, 60), 'no covers asked for');
+    const asked = sent(at, 'pdfCovers').flatMap((c) => c.paths);
+    assert(asked.includes('~/Documents/Books/ed3book.pdf') && new Set(asked).size === asked.length, `covers asked: ${asked}`);
+    const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await win.pushEvents([{type: 'pdfCovers', covers: [{path: '~/Documents/Books/ed3book.pdf', data: pixel}, {path: '~/Documents/Books/Machine Learning/bishop.pdf', data: null}]}]); await settle();
+    assert(lib.querySelector('[data-pdf-cover="~/Documents/Books/ed3book.pdf"] img')?.getAttribute('src') === pixel, 'the cover was not drawn');
+    assert(lib.querySelector('[data-pdf-cover$="bishop.pdf"] .pdf-cover-title')?.textContent === 'Pattern Recognition', 'a book with no cover lost its title');
+
+    // What is typed narrows the shelves; Enter opens the first book it names.
+    const input = $('[data-pdf-open-path]');
+    input.value = 'bishop'; input.dispatchEvent(new Event('input', {bubbles: true})); await settle();
+    const narrowed = [...lib.querySelectorAll('.pdf-book')].map((b) => b.dataset.pdfBook);
+    assert(narrowed.length === 1 && narrowed[0].endsWith('bishop.pdf'), `not narrowed: ${narrowed}`);
+    at = win.commands.length;
+    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); await settle();
+    assert(sent(at, 'pdfOpen')[0]?.path === '~/Documents/Books/Machine Learning/bishop.pdf', `Enter did not open the book: ${JSON.stringify(sent(at, 'pdfOpen'))}`);
+    assert(lib.querySelectorAll('.pdf-book').length === 5, 'opening a book left the shelves narrowed');
+    // A book clicked opens: the core opens it where it was left.
+    at = win.commands.length;
+    lib.querySelector('[data-pdf-book$="mml-book.pdf"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfOpen')) === JSON.stringify([{type: 'pdfOpen', path: '~/Documents/Books/Machine Learning/mml-book.pdf'}]), `not opened: ${JSON.stringify(sent(at, 'pdfOpen'))}`);
+
+    // The folders, changed; looked through again.
+    $('[data-pdf-lib-edit]').click(); await settle();
+    const form = lib.querySelector('[data-pdf-lib-folders-form]');
+    form.querySelector('textarea').value = '~/Documents/Books\n~/Papers';
+    at = win.commands.length;
+    form.requestSubmit(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfLibraryFolders')[0]?.folders) === '["~/Documents/Books","~/Papers"]', `not set: ${JSON.stringify(sent(at, 'pdfLibraryFolders'))}`);
+    $('[data-pdf-lib-scan]').click(); await settle();
+    assert(sent(at, 'pdfLibraryScan').length === 1, 'not looked through again');
+    // With no folders, it asks for them.
+    await win.pushEvents([{type: 'pdfLibrary', folders: [], books: [], walking: false, missing: []}]); await settle();
+    assert(lib.querySelector('[data-pdf-lib-folders-form]') && shown($('[data-pdf-open-list]')), 'no folders, and nothing asking for them');
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('A PDF opened in the PDF mode is a tab, and the document viewer hands its PDF over at its page', async () => {
     await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
     let at = win.commands.length;

@@ -12,6 +12,7 @@ pub mod exec;
 pub mod github;
 pub mod job;
 pub mod lean;
+pub mod cover;
 pub mod ocr;
 pub mod pip;
 pub mod run;

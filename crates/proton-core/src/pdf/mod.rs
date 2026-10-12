@@ -18,6 +18,7 @@ use crate::folder;
 use crate::workspace::notice;
 
 mod agent;
+pub mod library;
 pub use agent::TOOLS;
 
 /// The largest PDF opened: the most the shell reads for the page.
@@ -63,6 +64,9 @@ pub fn handles(command: &Command) -> bool {
             | Command::PdfOcrStop
             | Command::PdfOcrLangs
             | Command::PdfAt { .. }
+            | Command::PdfLibraryScan
+            | Command::PdfLibraryFolders { .. }
+            | Command::PdfCovers { .. }
     )
 }
 
@@ -152,6 +156,22 @@ pub struct Pdfs {
     job: Option<(u32, proton_lab::ocr::OcrJob)>,
     /// How far they had got when the window was last told.
     told: (usize, usize),
+    /// The books in the folders the person keeps them in.
+    library: library::Library,
+    /// Where each PDF was left, and when: kept with those opened before.
+    read: library::Read,
+    /// The person's own settings, where the library's folders are kept.
+    person: Option<PathBuf>,
+}
+
+/// What is kept between sessions: the files opened before, and where each
+/// PDF was left. Once only the first, as a list.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Kept {
+    #[serde(default)]
+    recent: Vec<PathBuf>,
+    #[serde(default)]
+    read: Vec<(PathBuf, u32, u64)>,
 }
 
 impl Pdfs {
@@ -168,21 +188,77 @@ impl Pdfs {
 
     /// The files opened before, kept in `file`.
     pub fn kept_in(file: PathBuf) -> Pdfs {
-        let recent = std::fs::read_to_string(&file)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Vec<PathBuf>>(&text).ok())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|p| p.is_file())
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        let kept = serde_json::from_str::<Vec<PathBuf>>(&text)
+            .map(|recent| Kept { recent, read: Vec::new() })
+            .or_else(|_| serde_json::from_str::<Kept>(&text))
+            .unwrap_or_default();
+        let recent = kept.recent.into_iter().filter(|p| p.is_file()).collect();
+        let read = kept.read.into_iter().map(|(path, page, at)| (path, (page, at))).collect();
+        let mut library = file.parent().map(library::Library::kept_in).unwrap_or_default();
+        library.drawn_by(proton_library::pdf::find_pdftoppm());
+        Pdfs { recent, read, store: Some(file), library, ..Pdfs::default() }
+    }
+
+    /// The library's folders from the person's own settings, where changes
+    /// to them are written: `~/Documents/Books` when they name none and it
+    /// is there.
+    pub fn with_person_settings(mut self, file: &Path) -> Pdfs {
+        let settings = crate::settings::Settings::at(file.to_path_buf());
+        let named: Option<Vec<String>> = settings
+            .get("pdf.library")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_str()).map(str::to_string).collect());
+        let folders = named.unwrap_or_else(|| {
+            let books = "~/Documents/Books";
+            if folder::expand(books).is_dir() { vec![books.to_string()] } else { Vec::new() }
+        });
+        self.library.set_folders(folders);
+        self.person = Some(file.to_path_buf());
+        self
+    }
+
+    /// A library of these folders, its covers drawn by `covers`: for a test.
+    pub fn with_library(mut self, folders: Vec<String>, covers: Option<PathBuf>) -> Pdfs {
+        self.library.set_folders(folders);
+        self.library.drawn_by(covers);
+        self
+    }
+
+    /// The library as it is, each book where it was left.
+    fn library_event(&self) -> Event {
+        self.library.event(&self.read)
+    }
+
+    /// Set the library's folders, keep them in the person's settings, and
+    /// walk them.
+    fn set_library(&mut self, folders: Vec<String>) -> Vec<Event> {
+        let folders: Vec<String> = folders.into_iter().map(|f| f.trim().trim_end_matches(['/', '\\']).to_string()).filter(|f| !f.is_empty()).collect();
+        let mut events: Vec<Event> = folders
+            .iter()
+            .filter(|typed| !folder::expand(typed).is_dir())
+            .map(|typed| notice(format!("{typed}: no such folder"), NoticeLevel::Warn))
             .collect();
-        Pdfs { recent, store: Some(file), ..Pdfs::default() }
+        if let Some(file) = &self.person {
+            if let Err(why) = crate::settings::Settings::at(file.clone()).set("pdf.library", serde_json::Value::from(folders.clone())) {
+                events.push(notice(format!("The library's folders could not be saved: {why}"), NoticeLevel::Warn));
+            }
+        }
+        self.library.set_folders(folders);
+        self.library.walk();
+        events.push(self.library_event());
+        events
     }
 
     /// The mode entered, over the project at `root`, whose PDFs are `pdfs`:
     /// the tabs, and the one on top drawn.
     pub fn enter(&mut self, root: &Path, pdfs: Vec<String>) -> Vec<Event> {
         self.project = (pdfs, root.to_path_buf());
-        let mut events = vec![self.tabs_event()];
+        // The library as it was kept, while it is walked again.
+        if !self.library.walked() && !self.library.folders().is_empty() {
+            self.library.walk();
+        }
+        let mut events = vec![self.tabs_event(), self.library_event()];
         if let Some(tab) = self.active_tab() {
             events.push(view_event(tab, None, false));
             events.push(comments_event(tab));
@@ -244,11 +320,24 @@ impl Pdfs {
             }
             Command::PdfOcrLangs => vec![Event::PdfOcrLangs { langs: self.languages().0 }],
             Command::PdfAt { tab, page } => {
-                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab) {
-                    tab.at = page.max(1);
+                let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab) else { return Vec::new() };
+                tab.at = page.max(1);
+                let path = tab.path.clone();
+                if self.read.get(&path).map(|r| r.0) != Some(page.max(1)) {
+                    self.read.insert(path, (page.max(1), now()));
+                    self.keep();
                 }
                 Vec::new()
             }
+            Command::PdfLibraryScan => {
+                self.library.walk();
+                vec![self.library_event()]
+            }
+            Command::PdfLibraryFolders { folders } => self.set_library(folders),
+            Command::PdfCovers { paths } => match self.library.covers(&paths) {
+                covers if covers.is_empty() => Vec::new(),
+                covers => vec![Event::PdfCovers { covers }],
+            },
             _ => Vec::new(),
         }
     }
@@ -314,7 +403,11 @@ impl Pdfs {
             _ => file,
         };
         self.next += 1;
-        let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view, version: 1, doc, at: page.unwrap_or(1), read: Default::default() };
+        // Where it was left, unless a page is asked for.
+        let page = page.or_else(|| self.read.get(&path).map(|r| r.0).filter(|p| *p > 1));
+        let at = page.unwrap_or(1);
+        self.read.insert(path.clone(), (at, now()));
+        let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view, version: 1, doc, at, read: Default::default() };
         self.active = Some(tab.id);
         let view = view_event(&tab, page, false);
         let comments = comments_event(&tab);
@@ -342,6 +435,8 @@ impl Pdfs {
             events.push(fields_event(tab));
             events.push(info_event(tab));
         }
+        // How far it was read, on its shelf.
+        events.push(self.library_event());
         events
     }
 
@@ -641,6 +736,20 @@ impl Pdfs {
     /// Pages being read: how far they have got, and once read, laid over
     /// their pages — one change, to undo like any other.
     pub fn poll(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        let (changed, covers) = self.library.poll();
+        if changed {
+            events.push(self.library_event());
+        }
+        if !covers.is_empty() {
+            events.push(Event::PdfCovers { covers });
+        }
+        events.extend(self.poll_ocr());
+        events
+    }
+
+    /// The same, of pages being read with OCR.
+    fn poll_ocr(&mut self) -> Vec<Event> {
         let Some((id, job)) = &mut self.job else { return Vec::new() };
         let id = *id;
         if !job.poll() {
@@ -712,13 +821,27 @@ impl Pdfs {
         self.recent.retain(|p| p != path);
         self.recent.insert(0, path.to_path_buf());
         self.recent.truncate(RECENT);
-        if let Some(file) = &self.store {
-            if let Some(dir) = file.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(file, serde_json::to_string_pretty(&self.recent).unwrap_or_default());
-        }
+        self.keep();
     }
+
+    /// The files opened before, and where each PDF was left, kept.
+    fn keep(&self) {
+        let Some(file) = &self.store else { return };
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let mut read: Vec<(PathBuf, u32, u64)> = self.read.iter().map(|(p, (page, at))| (p.clone(), *page, *at)).collect();
+        // The most recent thousand: a reader's whole shelf, and no more.
+        read.sort_by(|a, b| b.2.cmp(&a.2));
+        read.truncate(1000);
+        let kept = Kept { recent: self.recent.clone(), read };
+        let _ = proton_research::store::atomic_write(file, serde_json::to_string_pretty(&kept).unwrap_or_default().as_bytes());
+    }
+}
+
+/// Seconds since the epoch.
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// A tab drawn: at `page`, or where the window has it.
@@ -768,6 +891,39 @@ fn read(path: &Path) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_librarys_folders_are_the_persons_own_setting_written_when_changed() {
+        let dir = std::env::temp_dir().join(format!("proton-pdf-settings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Books")).unwrap();
+        let file = dir.join("settings.json");
+        std::fs::write(&file, serde_json::json!({"pdf": {"library": [dir.join("Books")]}, "other": 1}).to_string()).unwrap();
+        let mut pdfs = Pdfs::new().with_person_settings(&file);
+        assert_eq!(pdfs.library.folders(), [dir.join("Books").display().to_string()]);
+        let events = pdfs.set_library(vec![format!("{}/", dir.join("Books").display()), "  ".into(), dir.join("Gone").display().to_string()]);
+        assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.ends_with("Gone: no such folder"))), "{events:?}");
+        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(written["pdf"]["library"], serde_json::json!([dir.join("Books").display().to_string(), dir.join("Gone").display().to_string()]));
+        assert_eq!(written["other"], 1, "the rest of the person's settings kept");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn what_is_kept_is_read_back_whether_written_as_a_list_once_or_with_where_each_was_left() {
+        let dir = std::env::temp_dir().join(format!("proton-pdf-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let book = dir.join("book.pdf");
+        std::fs::write(&book, b"%PDF").unwrap();
+        let file = dir.join("pdf.json");
+        std::fs::write(&file, serde_json::to_string(&vec![&book]).unwrap()).unwrap();
+        assert_eq!(Pdfs::kept_in(file.clone()).recent, [book.clone()], "the list it once was");
+        std::fs::write(&file, serde_json::json!({"recent": [&book], "read": [[&book, 42, 1_790_000_000u64]]}).to_string()).unwrap();
+        let kept = Pdfs::kept_in(file);
+        assert_eq!((kept.recent.clone(), kept.read.get(&book).copied()), (vec![book.clone()], Some((42, 1_790_000_000))));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn a_view_key_names_one_version_of_one_open_tab() {

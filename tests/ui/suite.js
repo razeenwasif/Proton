@@ -1583,10 +1583,11 @@ await test('Research sits beside Data after Codex: ⌃4 opens it, in Codex\'s ch
   assert(!shown($('.titlebar [data-term-toggle]')), 'Research offers a terminal it cannot show');
   const tab = $('.titlebar [data-mode="research"]');
   assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃4'), 'the title bar does not show Research');
-  // Codex, Data and Research side by side, in the title bar and on the rail.
+  // Codex, Data and Research side by side, in the title bar and on the rail;
+  // LaTeX and PDF beside Notebook, keeping their keys, ⌃0 and ⌃-.
   for (const list of ['.tb-modes', '.mode-rail']) {
     const order = [...doc.querySelectorAll(`${list} [data-mode]`)].map((b) => b.dataset.mode).join();
-    assert(order === 'chat,codex,data,research,study,design,modeling,game,video,tex,pdf', `${list} is not in the new order: ${order}`);
+    assert(order === 'chat,codex,data,research,study,tex,pdf,design,modeling,game,video', `${list} is not in the new order: ${order}`);
   }
   assert(asked().slice(opaque).at(-1) === ground, `Research did not ask for the ground: ${JSON.stringify(asked().slice(opaque))}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();

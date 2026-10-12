@@ -5323,6 +5323,14 @@ function renderEvent(event) {
       pdf?.ocrLangs(event);
       break;
 
+    case "pdfLibrary":
+      pdf?.libraryEvent(event);
+      break;
+
+    case "pdfCovers":
+      pdf?.covers(event);
+      break;
+
     case "debug":
       renderDebug(event);
       break;

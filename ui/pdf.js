@@ -13,6 +13,7 @@ import { find } from "./pdf-find.js";
 import { COLORS as INKS, TOOLS, createPdfAnnot } from "./pdf-annot.js";
 import { createPdfForms } from "./pdf-forms.js";
 import { createPdfOcr } from "./pdf-ocr.js";
+import { createPdfLibrary } from "./pdf-library.js";
 import { createPdfGrid } from "./pdf-pages.js";
 import { createPdfTools } from "./pdf-tools.js";
 import { createPdfView, drawSmall } from "./pdf-view.js";
@@ -63,6 +64,7 @@ export function createPdf(host) {
   const pages = q("[data-pdf-pages]");
   const openBox = q("[data-pdf-open]");
   const pathInput = /** @type {HTMLInputElement} */ (q("[data-pdf-open-path]"));
+  const library = createPdfLibrary({ box: q("[data-pdf-library]"), root: openBox, dispatch: host.dispatch, open: (path) => open(path) });
   const side = q("[data-pdf-side-body]");
   /** @type {{tabs: Tab[], active: number | null, recent: string[], project: string[], root: string,
    *   shown: {tab: number, key: string} | null, opening: boolean, at: number,
@@ -286,6 +288,8 @@ export function createPdf(host) {
   function renderOpen() {
     const showing = state.opening || !state.tabs.length || Boolean(state.locked);
     openBox.hidden = !showing;
+    // Nothing open: the library is the page, the whole width of it.
+    section.classList.toggle("pdf-home", !state.tabs.length);
     pages.hidden = showing || !state.shown;
     const lock = q("[data-pdf-locked]");
     lock.hidden = !state.locked;
@@ -296,12 +300,18 @@ export function createPdf(host) {
       /** @type {HTMLInputElement | null} */ (lock.querySelector("[data-pdf-unlock-password]"))?.focus();
     }
     if (!showing) return;
+    // The project's PDFs and those opened before, as rows: always with no
+    // library to show, and for what is typed otherwise.
+    const typed = pathInput.value.trim();
+    const rows = q("[data-pdf-open-list]");
+    rows.hidden = library.has() && !typed;
+    library.filter(/[/~]/.test(typed[0] ?? "") ? "" : typed);
     const list = choices();
     state.at = Math.min(state.at, Math.max(0, list.length - 1));
-    q("[data-pdf-open-list]").innerHTML = list.length
+    rows.innerHTML = list.length
       ? list.map((c, i) => `<button type="button" class="pdf-open-row${i === state.at ? " on" : ""}" role="option" aria-selected="${i === state.at}" data-pdf-open-pick="${esc(c.path)}">` +
           `<span>${esc(c.label)}</span><span class="lab-faint">${c.from}</span></button>`).join("")
-      : `<p class="lab-faint">${pathInput.value.trim() ? "Nothing here matches: Enter opens what is typed." : "No PDFs in this project yet, and none opened before. Type where one is."}</p>`;
+      : library.has() ? "" : `<p class="lab-faint">${typed ? "Nothing here matches: Enter opens what is typed." : "No PDFs in this project yet, and none opened before. Type where one is."}</p>`;
   }
 
   /** Ask the core for a PDF, and put the box away. @param {string} path */
@@ -310,6 +320,7 @@ export function createPdf(host) {
     host.dispatch({ type: "pdfOpen", path });
     state.opening = false;
     pathInput.value = "";
+    renderOpen();
   }
 
   /* ── the sidebar ─────────────────────────────────────────────────── */
@@ -592,6 +603,8 @@ export function createPdf(host) {
     }
     const pick = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-open-pick]"));
     if (pick) return open(pick.dataset.pdfOpenPick ?? "");
+    if (t.closest("[data-pdf-lib-edit]")) return library.editFolders();
+    if (t.closest("[data-pdf-lib-scan]")) return library.scan();
     const zoom = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-zoom]"));
     if (zoom) {
       const by = Number(zoom.dataset.pdfZoom);
@@ -702,10 +715,13 @@ export function createPdf(host) {
       state.at = Math.max(0, Math.min(list.length - 1, state.at + (e.key === "ArrowDown" ? 1 : -1)));
       renderOpen();
     } else if (e.key === "Enter") {
-      // What is chosen in the list, or else what is typed.
+      // What is chosen in the list, or the first book named, or else what
+      // is typed.
       const typed = pathInput.value.trim();
       const chosen = list[state.at];
-      open(chosen && (!typed || !/[/~.]/.test(typed[0])) ? chosen.path : typed);
+      const path = !/[/~.]/.test(typed[0] ?? "");
+      const book = path && typed ? library.first() : null;
+      open(chosen && (!typed || path) ? chosen.path : book ? book.path : typed);
     } else if (e.key === "Escape" && state.tabs.length) {
       state.opening = false;
       renderOpen();
@@ -810,5 +826,11 @@ export function createPdf(host) {
     reader.langs(event);
   }
 
-  return { tabs, show, key, comments, fields, password, info, ocrProgress, ocrLangs, view: () => view, search, state: () => state };
+  /** The library, as the core walked it. @param {any} event */
+  function libraryEvent(event) {
+    library.library(event);
+    renderOpen();
+  }
+
+  return { tabs, show, key, comments, fields, password, info, ocrProgress, ocrLangs, libraryEvent, covers: (/** @type {any} */ event) => library.drawn(event), view: () => view, search, state: () => state };
 }

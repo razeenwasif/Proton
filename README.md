@@ -238,6 +238,9 @@ editor edits paragraphs, headings and equations as they read, one undo step
 at a time.
 **PDF** · Acrobat's reader and editor, in Proton, on ⌃-: your PDFs in tabs,
 whichever project is open, drawn by pdf.js and changed by Proton's own core.
+It opens on your library — the books in `~/Documents/Books`, or the folders
+you name — a shelf for each folder, each book with its cover and title, the
+ones you are reading first; a book opens where you left it.
 Read them continuous, a page at a time or two up, turned, in sepia or at
 night; find as you type, and follow bookmarks, links and page labels.
 Highlight, underline and strike out what is selected; add notes, text boxes,
