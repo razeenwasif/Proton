@@ -284,6 +284,91 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('Comments are listed, ringed on their page, chosen, edited, recoloured, answered and deleted', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    const one = {id: 5, name: 'outline.pdf', path: '~/outline.pdf', dirty: false, readOnly: null, undo: null, redo: null};
+    await win.pushEvents([tabs([one], 5), {type: 'pdfView', tab: 5, key: '/tests/ui/fixtures/outline.pdf', version: 1, page: null, quiet: false}]); await settle();
+    const pages = $('[data-pdf-pages]');
+    assert(await wait(() => pages.querySelector('.doc-page[data-page="1"] canvas')), 'not drawn');
+    const note = {id: '40 0', page: 1, kind: 'Text', rect: [200, 300, 224, 324], color: '#4fa3ff', text: 'Check this', author: 'Ada', date: 'D:20261012101500Z', replyTo: null};
+    const answer = {id: '41 0', page: 1, kind: 'Text', rect: [200, 300, 224, 324], color: null, text: 'Done', author: 'Grace', date: 'D:20261012102000Z', replyTo: '40 0'};
+    await win.pushEvents([{type: 'pdfComments', tab: 5, comments: [note, answer]}]); await settle();
+    assert($('[data-pdf-side="comments"]').textContent === 'Comments 1', 'the tab does not count the comments');
+    assert(pages.querySelector('.doc-page[data-page="1"] .pdf-comment-box[data-comment="40 0"]'), 'the comment is not ringed on its page');
+    $('[data-pdf-side="comments"]').click(); await settle();
+    const row = doc.querySelector('[data-pdf-comment="40 0"]');
+    assert(row && row.textContent.includes('Check this') && row.textContent.includes('Grace: Done'), `the list: ${row?.textContent}`);
+    row.click();
+    assert(await wait(() => pages.querySelector('.pdf-pop')), 'choosing it did not open it');
+    const pop = pages.querySelector('.pdf-pop');
+    assert(pop.textContent.includes('Ada') && pop.textContent.includes('Grace') && pages.querySelector('.pdf-comment-box.on'), 'not shown as chosen, with its answer');
+    pop.querySelector('[data-pdf-pop-text]').value = 'Check this again';
+    pop.querySelector('[data-pdf-pop-reply]').value = 'Thanks';
+    let at = win.commands.length;
+    pop.querySelector('[data-pdf-swatch="#ff5a4f"]').click(); await settle();
+    pop.querySelector('[data-pdf-pop="save"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfEditComment')) === JSON.stringify([{type: 'pdfEditComment', id: '40 0', color: '#ff5a4f'}, {type: 'pdfEditComment', id: '40 0', text: 'Check this again'}]), `not edited: ${JSON.stringify(sent(at, 'pdfEditComment'))}`);
+    assert(JSON.stringify(sent(at, 'pdfReply')) === JSON.stringify([{type: 'pdfReply', id: '40 0', text: 'Thanks'}]), 'not answered');
+    // Chosen by clicking on it on the page, and deleted with ⌫.
+    const slot = pages.querySelector('.doc-page[data-page="1"]').getBoundingClientRect();
+    const ring = pages.querySelector('.pdf-comment-box[data-comment="40 0"]').getBoundingClientRect();
+    pages.dispatchEvent(new MouseEvent('click', {bubbles: true, clientX: ring.left + ring.width / 2, clientY: ring.top + ring.height / 2}));
+    assert(await wait(() => pages.querySelector('.pdf-pop')) && slot.width > 0, 'a click on it did not choose it');
+    pages.focus();
+    at = win.commands.length;
+    pages.dispatchEvent(new KeyboardEvent('keydown', {key: 'Backspace', bubbles: true, cancelable: true})); await settle();
+    assert(JSON.stringify(sent(at, 'pdfDeleteComment')) === JSON.stringify([{type: 'pdfDeleteComment', id: '40 0'}]), 'not deleted');
+  });
+
+  await test('Comments are made: text marked from a selection, a note clicked in, a rectangle and ink drawn', async () => {
+    const pages = $('[data-pdf-pages]');
+    const slot = pages.querySelector('.doc-page[data-page="1"]');
+    const span = [...slot.querySelectorAll('.textLayer span')].find((s) => s.textContent.includes('Preface'));
+    assert(span, 'no text to select');
+    const range = doc.createRange();
+    range.selectNodeContents(span);
+    win.getSelection().removeAllRanges(); win.getSelection().addRange(range);
+    pages.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+    assert(await wait(() => pages.querySelector('.pdf-selbar')), 'a selection is not offered a bar');
+    let at = win.commands.length;
+    pages.querySelector('[data-pdf-mark="highlight"]').click(); await settle();
+    const marked = sent(at, 'pdfComment')[0];
+    assert(marked?.page === 1 && marked.mark.kind === 'highlight' && marked.mark.boxes.length >= 1 && marked.mark.color === '#ffd400', `not highlighted: ${JSON.stringify(marked)}`);
+    const [x1, y1, x2, y2] = marked.mark.boxes[0];
+    assert(x2 > x1 && y2 > y1 && y1 > 300 && y2 < 380, `the box is not in the page's own points over the words: ${marked.mark.boxes[0]}`);
+
+    // A note, clicked in, written, added.
+    $('[data-pdf-tool-pick="note"]').click(); await settle();
+    const r = slot.getBoundingClientRect();
+    pages.dispatchEvent(new MouseEvent('click', {bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2}));
+    const pop = await wait(() => pages.querySelector('.pdf-pop [data-pdf-pop-text]')) && pages.querySelector('.pdf-pop');
+    assert(pop, 'no note to write');
+    pop.querySelector('[data-pdf-pop-text]').value = 'A thought';
+    at = win.commands.length;
+    pop.querySelector('[data-pdf-pop="add"]').click(); await settle();
+    const added = sent(at, 'pdfComment')[0];
+    assert(added?.mark.kind === 'note' && added.mark.text === 'A thought' && Math.abs(added.mark.rect[0] - 150) < 2 && Math.abs(added.mark.rect[1] - 200) < 2, `not a note in the middle: ${JSON.stringify(added?.mark)}`);
+
+    // A rectangle dragged, and ink drawn.
+    const drag = async (tool, points) => {
+      $(`[data-pdf-tool-pick="${tool}"]`).click(); await settle();
+      const [first, ...rest] = points;
+      pages.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, button: 0, pointerId: 1, clientX: r.left + first[0], clientY: r.top + first[1]}));
+      for (const [x, y] of rest) pages.dispatchEvent(new PointerEvent('pointermove', {bubbles: true, pointerId: 1, clientX: r.left + x, clientY: r.top + y}));
+      pages.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerId: 1})); await settle();
+    };
+    at = win.commands.length;
+    await drag('square', [[20, 20], [120, 90]]);
+    await drag('ink', [[30, 200], [50, 220], [70, 210], [90, 240]]);
+    const made = sent(at, 'pdfComment');
+    assert(made[0]?.mark.kind === 'square' && made[0].mark.rect.length === 4 && made[0].mark.rect[2] > made[0].mark.rect[0], `no rectangle: ${JSON.stringify(made[0]?.mark)}`);
+    assert(made[1]?.mark.kind === 'ink' && made[1].mark.strokes[0].length === 4, `no ink: ${JSON.stringify(made[1]?.mark)}`);
+    pages.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+    assert($('[data-pdf-tool-pick="select"]').getAttribute('aria-pressed') === 'true', 'Escape did not put the tool down');
+    await win.pushEvents([tabs([], null)]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('A PDF opened in the PDF mode is a tab, and the document viewer hands its PDF over at its page', async () => {
     await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
     let at = win.commands.length;

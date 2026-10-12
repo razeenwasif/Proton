@@ -7,6 +7,7 @@
 //! asked is asked inside `catch_unwind`, because a PDF is whatever its maker
 //! wrote, and one bad file must cost a tab, not the window.
 
+pub mod annot;
 pub mod combine;
 pub mod doc;
 pub mod ops;

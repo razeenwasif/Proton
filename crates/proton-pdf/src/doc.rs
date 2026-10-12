@@ -152,6 +152,11 @@ impl Doc {
     pub fn document(&self) -> &Document {
         &self.current
     }
+
+    /// Its comments, as it is now.
+    pub fn comments(&self) -> Vec<crate::annot::Comment> {
+        guarded("listing its comments", || Ok(crate::annot::list(&self.current))).unwrap_or_default()
+    }
 }
 
 #[cfg(test)]

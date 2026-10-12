@@ -35,6 +35,7 @@
     "tex-visual.js",
     "pdf.js",
     "pdf-pages.js",
+    "pdf-annot.js",
     "pdf-tools.js",
     "pdf-find.js",
     "highlight.js",

@@ -234,3 +234,41 @@ fn pages_are_moved_inserted_brought_in_taken_out_split_and_combined() {
     assert_eq!(page_count(&std::fs::read(s.0.join("both.pdf")).unwrap()), 8);
     assert!(tabs(&events).unwrap().0.iter().any(|t| t.1 == "both.pdf"));
 }
+
+fn comments(events: &[Event]) -> Option<Vec<(String, String, Option<String>)>> {
+    events.iter().rev().find_map(|e| match e {
+        Event::PdfComments { comments, .. } => Some(comments.iter().map(|c| (c.kind.clone(), c.text.clone(), c.reply_to.clone())).collect()),
+        _ => None,
+    })
+}
+
+#[test]
+fn comments_are_made_answered_edited_and_deleted_each_undoable_and_drawn_into_the_file() {
+    let s = scratch("comments");
+    std::fs::write(s.0.join("paper.pdf"), pdf(&["Words to mark.", "Two."])).unwrap();
+    let mut session = Session::new(&s.0);
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    assert_eq!(comments(&session.apply(Command::PdfOpen { path: "paper.pdf".into(), page: None })), Some(Vec::new()));
+
+    let mark = |kind: &str| proton_pdf::annot::Mark { kind: kind.into(), boxes: vec![[72.0, 716.0, 180.0, 732.0]], rect: Some([300.0, 700.0, 0.0, 0.0]), strokes: Vec::new(), color: "#ffd400".into(), text: String::new() };
+    let events = session.apply(Command::PdfComment { page: 1, mark: mark("highlight") });
+    assert_eq!(dirty(&events).unwrap().1.as_deref(), Some("highlight"));
+    let events = session.apply(Command::PdfComment { page: 2, mark: proton_pdf::annot::Mark { text: "Is this right?".into(), ..mark("note") } });
+    let listed = comments(&events).unwrap();
+    assert_eq!(listed.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["Highlight", "Text"]);
+    let note = match events.iter().rev().find_map(|e| match e { Event::PdfComments { comments, .. } => Some(comments[1].id.clone()), _ => None }) { Some(id) => id, None => unreachable!() };
+
+    session.apply(Command::PdfReply { id: note.clone(), text: "Yes.".into() });
+    let events = session.apply(Command::PdfEditComment { id: note.clone(), color: Some("#3366ff".into()), text: Some("Is this right? (checked)".into()) });
+    let listed = comments(&events).unwrap();
+    assert_eq!(listed[1].1, "Is this right? (checked)");
+    assert_eq!((listed[2].1.as_str(), listed[2].2.as_deref()), ("Yes.", Some(note.as_str())));
+
+    // Undone: as it was before the edit; deleted with its reply; saved into the file.
+    assert_eq!(comments(&session.apply(Command::PdfUndo)).unwrap()[1].1, "Is this right?");
+    let events = session.apply(Command::PdfDeleteComment { id: note });
+    assert_eq!(comments(&events).unwrap().len(), 1, "the note and its answer gone");
+    session.apply(Command::PdfSave);
+    let saved = lopdf::Document::load_mem(&std::fs::read(s.0.join("paper.pdf")).unwrap()).unwrap();
+    assert_eq!(proton_pdf::annot::list(&saved).iter().map(|c| c.kind.as_str()).collect::<Vec<_>>(), ["Highlight"]);
+}

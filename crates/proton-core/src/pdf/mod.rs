@@ -45,6 +45,10 @@ pub fn handles(command: &Command) -> bool {
             | Command::PdfExtract { .. }
             | Command::PdfSplit { .. }
             | Command::PdfCombine { .. }
+            | Command::PdfComment { .. }
+            | Command::PdfReply { .. }
+            | Command::PdfEditComment { .. }
+            | Command::PdfDeleteComment { .. }
     )
 }
 
@@ -115,6 +119,8 @@ pub struct Pdfs {
     store: Option<PathBuf>,
     /// The PDFs in the project on screen, as it names them, and its root.
     project: (Vec<String>, PathBuf),
+    /// Comments made here so far, for naming the next one.
+    made: u64,
 }
 
 impl Pdfs {
@@ -142,6 +148,7 @@ impl Pdfs {
         let mut events = vec![self.tabs_event()];
         if let Some(tab) = self.active_tab() {
             events.push(view_event(tab, None, false));
+            events.push(comments_event(tab));
         }
         events
     }
@@ -166,6 +173,19 @@ impl Pdfs {
             Command::PdfExtract { pages, path } => self.extract(&pages, &path),
             Command::PdfSplit { every, at } => self.split(every, &at),
             Command::PdfCombine { paths, path } => self.combine(&paths, &path),
+            Command::PdfComment { page, mark } => {
+                let (author, date, name) = self.signed();
+                self.change(proton_pdf::Op::Comment { page, mark, author, date, name })
+            }
+            Command::PdfReply { id, text } => {
+                let (author, date, name) = self.signed();
+                self.change(proton_pdf::Op::Reply { to: id, text, author, date, name })
+            }
+            Command::PdfEditComment { id, color, text } => {
+                let (_, date, _) = self.signed();
+                self.change(proton_pdf::Op::EditComment { id, color, text, date })
+            }
+            Command::PdfDeleteComment { id } => self.change(proton_pdf::Op::DeleteComment { id }),
             _ => Vec::new(),
         }
     }
@@ -205,7 +225,7 @@ impl Pdfs {
         let path = folder::normalise(&path);
         if let Some(tab) = self.tabs.iter().find(|t| t.path == path) {
             self.active = Some(tab.id);
-            return vec![self.tabs_event(), view_event(tab, page, false)];
+            return vec![self.tabs_event(), view_event(tab, page, false), comments_event(tab)];
         }
         let bytes = match read(&path) {
             Ok(bytes) => bytes,
@@ -220,9 +240,10 @@ impl Pdfs {
         let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view, version: 1, doc };
         self.active = Some(tab.id);
         let view = view_event(&tab, page, false);
+        let comments = comments_event(&tab);
         self.tabs.push(tab);
         self.remember(&path);
-        vec![self.tabs_event(), view]
+        vec![self.tabs_event(), view, comments]
     }
 
     fn close(&mut self, id: u32, discard: bool) -> Vec<Event> {
@@ -238,6 +259,7 @@ impl Pdfs {
         let mut events = vec![self.tabs_event()];
         if let Some(tab) = self.active_tab() {
             events.push(view_event(tab, None, false));
+            events.push(comments_event(tab));
         }
         events
     }
@@ -245,7 +267,7 @@ impl Pdfs {
     fn focus(&mut self, id: u32) -> Vec<Event> {
         let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return Vec::new() };
         self.active = Some(id);
-        vec![self.tabs_event(), view_event(tab, None, false)]
+        vec![self.tabs_event(), view_event(tab, None, false), comments_event(tab)]
     }
 
     /// The tab on top, to change; or why it cannot be.
@@ -270,7 +292,8 @@ impl Pdfs {
         tab.view = Arc::new(bytes);
         tab.version += 1;
         let view = view_event(tab, None, false);
-        vec![self.tabs_event(), view]
+        let comments = comments_event(tab);
+        vec![self.tabs_event(), view, comments]
     }
 
     /// Make a change to the tab on top: held until it is saved.
@@ -342,6 +365,15 @@ impl Pdfs {
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
         }
+    }
+
+    /// Who a comment is by, when, and a name for it no other has: the
+    /// person, as their account names them.
+    fn signed(&mut self) -> (String, String, String) {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        self.made += 1;
+        let author = std::env::var("USER").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| "Proton".into());
+        (author, proton_pdf::annot::date(secs), format!("proton-{secs}-{}", self.made))
     }
 
     /// Where a path typed — `~` and all, or relative to the project on
@@ -490,6 +522,11 @@ impl Pdfs {
 /// A tab drawn: at `page`, or where the window has it.
 fn view_event(tab: &Tab, page: Option<u32>, quiet: bool) -> Event {
     Event::PdfView { tab: tab.id, key: tab.key(), version: tab.version, page, quiet }
+}
+
+/// A tab's comments, as it is now.
+fn comments_event(tab: &Tab) -> Event {
+    Event::PdfComments { tab: tab.id, comments: tab.doc.as_ref().map(|d| d.comments()).unwrap_or_default() }
 }
 
 /// A file's bytes, if it is a PDF and not too large to open.

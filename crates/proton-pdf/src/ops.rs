@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use lopdf::{Document, Object, ObjectId};
 
+use crate::annot::{self, Mark};
 use crate::pages;
 
 /// One change.
@@ -22,6 +23,14 @@ pub enum Op {
     /// page `after`. Its bytes are kept with the change, so undoing and
     /// redoing it never reads the file again.
     InsertFrom { after: u32, name: String, bytes: Arc<Vec<u8>>, pages: Option<Vec<u32>> },
+    /// A comment on page `page`, by `author` on `date`, named `name`.
+    Comment { page: u32, mark: Mark, author: String, date: String, name: String },
+    /// An answer to a comment.
+    Reply { to: String, text: String, author: String, date: String, name: String },
+    /// A comment recoloured, or what it says changed.
+    EditComment { id: String, color: Option<String>, text: Option<String>, date: String },
+    /// A comment, and its replies, deleted.
+    DeleteComment { id: String },
 }
 
 impl Op {
@@ -34,6 +43,18 @@ impl Op {
             Op::InsertBlank { count, .. } => if *count == 1 { "insert a blank page".into() } else { format!("insert {count} blank pages") },
             Op::Move { pages: n, .. } => format!("move {}", pages(n)),
             Op::InsertFrom { name, .. } => format!("insert pages from {name}"),
+            Op::Comment { mark, .. } => match mark.kind.as_str() {
+                "highlight" => "highlight".into(),
+                "underline" => "underline".into(),
+                "strike" => "strike out".into(),
+                "note" => "add a note".into(),
+                "text" => "add a text box".into(),
+                "ink" => "draw".into(),
+                other => format!("add a {other}"),
+            },
+            Op::Reply { .. } => "reply".into(),
+            Op::EditComment { .. } => "edit a comment".into(),
+            Op::DeleteComment { .. } => "delete a comment".into(),
         }
     }
 
@@ -41,6 +62,7 @@ impl Op {
     pub fn incremental(&self) -> bool {
         match self {
             Op::Rotate { .. } | Op::Delete { .. } | Op::InsertBlank { .. } | Op::Move { .. } | Op::InsertFrom { .. } => true,
+            Op::Comment { .. } | Op::Reply { .. } | Op::EditComment { .. } | Op::DeleteComment { .. } => true,
         }
     }
 
@@ -77,6 +99,10 @@ impl Op {
             Op::InsertBlank { after, count } => pages::insert_blank(doc, *after, *count),
             Op::Move { pages: n, before } => pages::move_pages(doc, n, *before),
             Op::InsertFrom { after, bytes, pages: n, .. } => pages::insert_from(doc, bytes, n.as_deref(), *after).map(|_| ()),
+            Op::Comment { page, mark, author, date, name } => annot::add(doc, *page, mark, author, date, name).map(|_| ()),
+            Op::Reply { to, text, author, date, name } => annot::reply(doc, annot::object_of(to)?, text, author, date, name).map(|_| ()),
+            Op::EditComment { id, color, text, date } => annot::edit(doc, annot::object_of(id)?, color.as_deref(), text.as_deref(), date),
+            Op::DeleteComment { id } => annot::delete(doc, annot::object_of(id)?),
         }
     }
 }

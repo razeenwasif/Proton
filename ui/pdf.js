@@ -10,6 +10,7 @@
 import { readDocument } from "./bridge.js";
 import { escapeHtml as esc } from "./html.js";
 import { find } from "./pdf-find.js";
+import { COLORS as INKS, TOOLS, createPdfAnnot } from "./pdf-annot.js";
 import { createPdfGrid } from "./pdf-pages.js";
 import { createPdfTools } from "./pdf-tools.js";
 import { createPdfView, drawSmall } from "./pdf-view.js";
@@ -67,7 +68,10 @@ export function createPdf(host) {
   /** Thumbnails drawn for the document on screen, by page. @type {Map<number, HTMLCanvasElement>} */
   let thumbs = new Map();
 
+  /** The comments' tools and overlays, made once the view is. @type {ReturnType<typeof createPdfAnnot> | null} */
+  let annot = null;
   const view = createPdfView(pages, {
+    onDrawn: (page, slot, viewport) => annot?.drawn(page, slot, viewport),
     onWhere: (page, count, scale) => {
       state.page = page;
       state.count = count;
@@ -79,6 +83,22 @@ export function createPdf(host) {
     },
     onLink: ({ url }) => void host.dispatch({ type: "openLink", url }),
   });
+  annot = createPdfAnnot({
+    pages, dispatch: host.dispatch, editable: () => Boolean(state.shown) && !top()?.readOnly,
+    goTo: (page, offset) => view.goTo(page, offset),
+  });
+  const marks = annot;
+  q("[data-pdf-palette]").innerHTML = TOOLS.map(([id, title, glyph]) =>
+    `<button data-pdf-tool-pick="${id}" title="${title}" aria-label="${title}" aria-pressed="${id === "select"}">${glyph}</button>`).join("");
+  q("[data-pdf-colors-pick]").innerHTML = INKS.map((c, i) =>
+    `<button class="pdf-swatch${i ? "" : " on"}" data-pdf-ink="${c}" style="--swatch:${c}" title="${c}" aria-label="Colour ${c}"></button>`).join("");
+
+  /** The tool in hand. @param {string} tool */
+  function takeTool(tool) {
+    marks.tool(tool);
+    for (const b of section.querySelectorAll("[data-pdf-tool-pick]")) b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.pdfToolPick === tool));
+  }
+
   const gridBox = q("[data-pdf-grid]");
   const grid = createPdfGrid({
     box: gridBox, dispatch: host.dispatch, doc: () => view.doc(), turned: () => view.turned(),
@@ -223,7 +243,7 @@ export function createPdf(host) {
     if (which === "pages") return renderThumbs();
     if (which === "outline") return renderOutline();
     if (which === "search") return renderSearch();
-    side.innerHTML = `<p class="lab-faint">Comments are listed here.</p>`;
+    side.innerHTML = `<div class="pdf-comments">${marks.listHtml()}</div>`;
   }
 
   /** A slot for each page, drawn small as it comes into the sidebar's view. */
@@ -433,6 +453,16 @@ export function createPdf(host) {
     const close = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-close]"));
     if (close) return closeTab(Number(close.dataset.pdfClose));
     if (t.closest("[data-pdf-grid-toggle]")) return showGrid(!state.grid);
+    const toolPick = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-tool-pick]"));
+    if (toolPick) return takeTool(toolPick.dataset.pdfToolPick ?? "select");
+    const ink = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-ink]"));
+    if (ink) {
+      marks.color(ink.dataset.pdfInk ?? INKS[0]);
+      for (const b of section.querySelectorAll("[data-pdf-ink]")) b.classList.toggle("on", b === ink);
+      return;
+    }
+    const comment = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-comment]"));
+    if (comment) return marks.show(comment.dataset.pdfComment ?? "");
     if (t.closest("[data-pdf-undo]")) return void host.dispatch({ type: "pdfUndo" });
     if (t.closest("[data-pdf-redo]")) return void host.dispatch({ type: "pdfRedo" });
     if (t.closest("[data-pdf-save]")) return void host.dispatch({ type: "pdfSave" });
@@ -586,8 +616,12 @@ export function createPdf(host) {
   function key(e) {
     if (!state.shown || pages.hidden) return false;
     const typing = Boolean(/** @type {HTMLElement | null} */ (e.target instanceof HTMLElement ? e.target : null)?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])"));
-    // The grid's own keys first: ⌘A, ⌫, Escape.
+    // The grid's own keys first: ⌘A, ⌫, Escape; then a comment's.
     if (state.grid && !typing && grid.key(e)) return true;
+    if (!typing && !e.metaKey && marks.key(e)) {
+      if (e.key === "Escape") takeTool("select");
+      return true;
+    }
     if (e.metaKey && !e.altKey && !e.ctrlKey) {
       const k = e.key.toLowerCase();
       if (k === "f") return (focusFind(), true);
@@ -620,5 +654,14 @@ export function createPdf(host) {
   renderBar();
   renderOpen();
   renderSide();
-  return { tabs, show, key, view: () => view, search, state: () => state };
+  /** The comments of a tab, as the core lists them. @param {{tab: number, comments: any[]}} event */
+  function comments(event) {
+    if (event.tab !== state.active) return;
+    marks.comments(event);
+    if (state.side === "comments") renderSide();
+    const count = marks.count();
+    q('[data-pdf-side="comments"]').textContent = count ? `Comments ${count}` : "Comments";
+  }
+
+  return { tabs, show, key, comments, view: () => view, search, state: () => state };
 }

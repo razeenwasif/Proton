@@ -1510,7 +1510,11 @@ impl Workspace {
             | Command::PdfInsertFile { .. }
             | Command::PdfExtract { .. }
             | Command::PdfSplit { .. }
-            | Command::PdfCombine { .. } => Vec::new(),
+            | Command::PdfCombine { .. }
+            | Command::PdfComment { .. }
+            | Command::PdfReply { .. }
+            | Command::PdfEditComment { .. }
+            | Command::PdfDeleteComment { .. } => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }

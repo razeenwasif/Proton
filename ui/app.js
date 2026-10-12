@@ -5255,6 +5255,10 @@ function renderEvent(event) {
       void pdf?.show(event);
       break;
 
+    case "pdfComments":
+      pdf?.comments(event);
+      break;
+
     case "debug":
       renderDebug(event);
       break;

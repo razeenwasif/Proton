@@ -5297,3 +5297,40 @@ button.st-source-name:hover { color: var(--cc-accent); }
   --cc-font: var(--zed);
 }
 .pdf-tool-field:has(.pdf-tool-short) { display: block; line-height: 2.2; }
+/* Comments: the palette and colours, a selection's bar, the popover a
+   comment is written and edited in, rings round comments on the page, what
+   is being drawn, and the sidebar's list. */
+.pdf-palette button { width: 26px; font: 13px/1 var(--sans); color: var(--muted); }
+.pdf-colors { display: flex; gap: 3px; align-items: center; }
+.pdf-swatch { width: 14px; height: 14px; padding: 0; border: 0; border-radius: 50%; background: var(--swatch); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25); cursor: pointer; }
+.pdf-swatch.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--text); }
+.pdf-pages { position: relative; }
+.pdf-pages[data-tool="note"] .doc-page, .pdf-pages[data-tool="text"] .doc-page, .pdf-pages[data-tool="square"] .doc-page,
+.pdf-pages[data-tool="circle"] .doc-page, .pdf-pages[data-tool="arrow"] .doc-page { cursor: crosshair; }
+.pdf-pages[data-tool="ink"] .doc-page { cursor: crosshair; touch-action: none; }
+.pdf-pages:is([data-tool="ink"], [data-tool="square"], [data-tool="circle"], [data-tool="arrow"], [data-tool="text"]) .textLayer { pointer-events: none; }
+.doc-page .pdf-comment-box { position: absolute; z-index: 2; border-radius: 3px; pointer-events: none; }
+.doc-page .pdf-comment-box.on { box-shadow: 0 0 0 2px var(--accent); }
+.doc-page .pdf-drawing { position: absolute; inset: 0; z-index: 4; pointer-events: none; overflow: visible; }
+.doc-page .pdf-drawing * { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pdf-selbar { position: absolute; z-index: 6; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: var(--head, var(--bg)); box-shadow: 0 6px 22px rgba(0, 0, 0, .4); }
+.pdf-selbar button { padding: 4px 9px; border: 0; border-radius: 5px; background: none; color: var(--text); font: var(--z-2xs) var(--zed); cursor: pointer; }
+.pdf-selbar button:hover { background: var(--row-hover); }
+.pdf-pop { position: absolute; z-index: 7; display: grid; gap: 8px; width: 260px; padding: 10px; border-radius: 9px; background: var(--head, var(--bg)); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); color: var(--text); font: var(--z-xs)/1.45 var(--zed); }
+.pdf-pop-head { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.pdf-pop p { margin: 0; }
+.pdf-pop textarea, .pdf-pop input { width: 100%; padding: 6px 8px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-xs)/1.45 var(--zed); resize: vertical; }
+.pdf-swatches { display: flex; gap: 6px; }
+.pdf-replies { display: grid; gap: 4px; padding-left: 8px; border-left: 2px solid var(--cc-line-2); }
+.pdf-pop-acts { display: flex; gap: 6px; align-items: center; }
+.pdf-pop-acts .grow { flex: 1; }
+.pdf-pop-acts button { padding: 4px 10px; }
+.pdf-comments { display: grid; gap: 4px; }
+.pdf-comment-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: var(--z-2xs)/1.5 var(--zed); text-align: left; cursor: pointer; }
+.pdf-comment-row:hover { background: var(--row-hover); }
+.pdf-comment-row.on { background: var(--row-on); color: var(--text); }
+.pdf-comment-dot { width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: var(--swatch); }
+.pdf-comment-what { display: grid; gap: 2px; }
+.pdf-comment-what b { color: var(--text); font-weight: 600; }
+.pdf-comment-text { color: var(--text); overflow-wrap: anywhere; }
+.pdf-comment-reply { padding-left: 6px; overflow-wrap: anywhere; }

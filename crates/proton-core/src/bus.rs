@@ -624,6 +624,28 @@ pub enum Command {
         paths: Vec<String>,
         path: String,
     },
+    /// Comment on a page of the tab on top: a highlight, a note, ink…
+    PdfComment {
+        page: u32,
+        mark: proton_pdf::annot::Mark,
+    },
+    /// Answer a comment.
+    PdfReply {
+        id: String,
+        text: String,
+    },
+    /// Recolour a comment, or change what it says.
+    PdfEditComment {
+        id: String,
+        #[serde(default)]
+        color: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
+    },
+    /// Delete a comment, and its replies.
+    PdfDeleteComment {
+        id: String,
+    },
     /// Bring a tab forward.
     PdfFocus {
         tab: u32,
@@ -1839,6 +1861,11 @@ pub enum Event {
         recent: Vec<String>,
         project: Vec<String>,
         root: String,
+    },
+    /// The comments of a tab, as it is now.
+    PdfComments {
+        tab: u32,
+        comments: Vec<proton_pdf::annot::Comment>,
     },
     /// A tab to draw: its bytes are `key`'s, for `read_document`. At `page`
     /// (counting from one), or where it was; `quiet` when the window made
