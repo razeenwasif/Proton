@@ -108,6 +108,10 @@ pub struct Capable {
     pub format: bool,
     pub rename: bool,
     pub code_action: bool,
+    /// The characters after which it offers completions unasked — texlab's
+    /// `\\` and `{` — as a set of ASCII codes. Whitespace is left out: a
+    /// popup at every space is noise.
+    pub triggers: u128,
 }
 
 impl Capable {
@@ -120,11 +124,30 @@ impl Capable {
                 None | Some(Value::Null) | Some(Value::Bool(false))
             )
         };
+        let mut triggers = 0u128;
+        for c in result
+            .pointer("/capabilities/completionProvider/triggerCharacters")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter_map(|s| s.chars().next())
+        {
+            if c.is_ascii() && !c.is_ascii_whitespace() {
+                triggers |= 1u128 << (c as u32);
+            }
+        }
         Capable {
             format: has("documentFormattingProvider"),
             rename: has("renameProvider"),
             code_action: has("codeActionProvider"),
+            triggers,
         }
+    }
+
+    /// Whether typing `c` asks for completions.
+    pub fn triggers_on(&self, c: char) -> bool {
+        c.is_ascii() && self.triggers & (1u128 << (c as u32)) != 0
     }
 }
 
@@ -936,6 +959,17 @@ fn response(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_characters_a_server_completes_after_are_read_and_whitespace_is_not() {
+        let capable = Capable::read(&serde_json::json!({ "capabilities": {
+            "completionProvider": { "triggerCharacters": ["\\", "{", " ", "\n"] },
+            "documentFormattingProvider": true
+        }}));
+        assert!(capable.format && capable.triggers_on('\\') && capable.triggers_on('{'));
+        assert!(!capable.triggers_on(' ') && !capable.triggers_on('\n') && !capable.triggers_on('x') && !capable.triggers_on('é'));
+        assert!(!Capable::read(&serde_json::json!({})).triggers_on('.'), "none, when it names none");
+    }
+
     use super::*;
     use std::io::Cursor;
 

@@ -22,6 +22,7 @@ use std::time::Duration;
 use proton_lab::tex::build::{Build, BuildSpec, Engine};
 use proton_lab::tex::{Bundle, TexEnv, TexState};
 use proton_lab::RunState;
+use proton_tex::outline::Outline;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -111,6 +112,8 @@ pub struct Tex {
     again: Option<(PathBuf, Option<PathBuf>, Option<String>)>,
     /// SyncTeX's map of the last PDF made, and the project as TeX named it.
     synctex: Option<(proton_tex::synctex::Map, PathBuf)>,
+    /// The outline last drawn, and the main file it is of.
+    outline: Option<(Option<String>, Outline)>,
 }
 
 impl std::fmt::Debug for Tex {
@@ -221,6 +224,13 @@ impl Tex {
         events
     }
 
+    /// Proton's texlab, when TeX is installed.
+    pub fn texlab(&mut self) -> Option<PathBuf> {
+        let env = self.env();
+        let env = env.lock().unwrap_or_else(|e| e.into_inner());
+        env.marker().map(|m| m.texlab_bin).filter(|p| p.is_file())
+    }
+
     /// Whether this workspace has typeset anything yet.
     pub fn used(&self) -> bool {
         self.used
@@ -293,6 +303,20 @@ impl Tex {
             }
             Err(why) => vec![notice(format!("TeX could not be started: {why}"), NoticeLevel::Error)],
         }
+    }
+
+    /// The document's outline and word count, read from its files as saved:
+    /// drawn when it has changed since it was last drawn, or `always`.
+    pub fn outline_event(&mut self, root: &Path, active: Option<&Path>, always: bool) -> Vec<Event> {
+        let pinned = pinned_main(root);
+        let main = proton_tex::project::find_main(root, active, pinned.as_deref());
+        let outline = main.as_deref().map(|m| proton_tex::outline::outline(root, m)).unwrap_or_default();
+        let now = (main.as_deref().map(|m| relative(root, m)), outline);
+        if !always && self.outline.as_ref() == Some(&now) {
+            return Vec::new();
+        }
+        self.outline = Some(now.clone());
+        vec![Event::TexOutline { main: now.0, outline: now.1 }]
     }
 
     /// Copy the last PDF made beside its main file, in the project — the

@@ -1651,6 +1651,10 @@ impl Workspace {
             Command::Poll => {
                 let mut events = self.poll_servers();
                 let (built, readable) = self.tex.poll();
+                // TeX installed: the editor's LaTeX server is its texlab.
+                if built.iter().any(|e| matches!(e, Event::TexEnv { env: proton_lab::tex::TexState::Ready { .. } })) {
+                    self.use_texlab();
+                }
                 // The PDF and the log a build made, for the window to read.
                 self.documents.extend(readable);
                 events.extend(built);
@@ -2728,10 +2732,27 @@ impl Workspace {
                 if tex && (self.mode == ModeId::Tex || self.tex.used()) && self.settings.bool("tex.compileOnSave", true) {
                     events.extend(self.tex_compile());
                 }
+                if tex && self.mode == ModeId::Tex {
+                    events.extend(self.tex_outline(false));
+                }
                 events
             }
             Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
         }
+    }
+
+    /// The editor's LaTeX server is Proton's own texlab, once TeX is installed.
+    fn use_texlab(&mut self) {
+        if let Some(texlab) = self.tex.texlab() {
+            self.servers.set_program("latex", texlab);
+        }
+    }
+
+    /// The document's outline, from the file being edited.
+    fn tex_outline(&mut self, always: bool) -> Vec<Event> {
+        let root = self.pickers.root().to_path_buf();
+        let active = self.editor.buffer().path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) });
+        self.tex.outline_event(&root, active.as_deref(), always)
     }
 
     /// Typeset the project from the file being edited.
@@ -3170,7 +3191,11 @@ impl Workspace {
         let Some(c) = typed else {
             return Vec::new();
         };
-        let trigger = c == '.' || c == ':';
+        // `.` and `:` everywhere, and in a LaTeX file whatever texlab asks
+        // for — its `\`, `{` and `,`. Other servers' own characters (Rust's
+        // `(`, TypeScript's `"`) would open a list where none opened before.
+        let server = self.editor.buffer().path().is_some_and(|p| crate::tex::is_source(p) && self.servers.can(p).triggers_on(c));
+        let trigger = c == '.' || c == ':' || server;
         let feeding = self.popup.is_open() && (c.is_alphanumeric() || c == '_');
         if trigger || feeding {
             return self.request_completion();
@@ -5991,6 +6016,8 @@ impl Workspace {
         if mode == ModeId::Tex {
             events.extend(self.tex.env_event(true));
             events.extend(self.tex.last_event());
+            events.extend(self.tex_outline(true));
+            self.use_texlab();
         }
 
         // Design with nothing open goes looking, once. Asking somebody to

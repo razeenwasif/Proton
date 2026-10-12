@@ -5123,6 +5123,10 @@ function renderEvent(event) {
       tex?.sync(event);
       break;
 
+    case "texOutline":
+      tex?.outline(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

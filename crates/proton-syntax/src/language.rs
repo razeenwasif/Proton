@@ -65,7 +65,17 @@ const CPP: &[&str] = &[
     tree_sitter_cpp::HIGHLIGHT_QUERY,
 ];
 
+/// LaTeX's colours: the grammar ships none, so Proton's own.
+const LATEX: &str = include_str!("../queries/latex.scm");
+
 pub const LANGUAGES: &[Language] = &[
+    Language {
+        id: "latex",
+        extensions: &["tex", "sty", "cls", "ltx", "dtx"],
+        grammar: || codebook_tree_sitter_latex::LANGUAGE.into(),
+        queries: &[LATEX],
+        inline: None,
+    },
     Language {
         id: "rust",
         extensions: &["rs"],

@@ -5040,6 +5040,18 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .tex-where { color: var(--faint); white-space: nowrap; }
 .tex-message { overflow-wrap: anywhere; }
 .tex-context { grid-column: 2; color: var(--muted); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The outline, under the file tree: the LaTeX mode's alone, in Codex's
+   side pane, its headings stepped in by depth as the tree's rows are. */
+.tex-outline { display: flex; flex-direction: column; flex: 0 1 auto; max-height: 45%; min-height: 0; border-top: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+.tex-outline[hidden], :root:not([data-mode="tex"]) .tex-outline { display: none; }
+.tex-outline > header { display: flex; align-items: center; gap: 8px; padding: 10px 13px 6px; font: 620 calc(10.5px * var(--ui-scale))/1 var(--sans); letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
+.tex-outline > header .grow { flex: 1; }
+.tex-words { font: var(--z-2xs) var(--zed); letter-spacing: 0; text-transform: none; color: var(--faint); }
+.tex-heading { display: block; width: 100%; padding: 3px 10px 3px calc(13px + var(--depth, 0) * 12px); border: 0; background: none; color: var(--muted); font: var(--z-xs)/1.5 var(--zed);
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.tex-heading:hover { background: var(--row-hover); color: var(--text); }
+.tex-heading.top { color: var(--text); }
+.tex-outline .lab-faint { padding: 2px 13px 10px; margin: 0; font: var(--z-2xs)/1.5 var(--zed); }
 .tex-missing { display: grid; gap: 8px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--cc-line); border-radius: 8px; background: var(--cc-raise); font: var(--z-2xs)/1.6 var(--zed); }
 .tex-missing p { margin: 0; }
 /* The PDF, in LaTeX's pane: paper on the pane's own ground, a bar above it. */

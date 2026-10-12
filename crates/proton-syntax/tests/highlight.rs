@@ -475,3 +475,19 @@ fn an_exhausted_parse_budget_stays_plain_and_can_be_removed() {
     assert!(!syntax.is_limited());
     assert_eq!(syntax.spans(&buffer, 0, 10).len(), 10);
 }
+
+#[test]
+fn latex_colours_its_structure_its_environments_labels_mathematics_and_comments() {
+    let mut syntax = Syntax::for_path(std::path::Path::new("main.tex")).expect("a LaTeX grammar");
+    let text = "\\documentclass{article}\n\\section{Search}\n\\begin{itemize}\nSee \\cite{knuth84} and $x^2$.\n\\label{sec:one} % note\n\\end{itemize}\n";
+    let buffer = Buffer::from_text(text);
+    let lines = syntax.spans(&buffer, 0, 6);
+    let all: Vec<(String, Scope)> = (0..6).flat_map(|l| runs(&buffer, &lines[l], l)).collect();
+    let has = |text: &str, scope: Scope| all.iter().any(|(t, s)| t == text && *s == scope);
+    assert!(has("\\documentclass", Scope::Keyword) && has("{article}", Scope::Type), "{all:?}");
+    assert!(has("\\section", Scope::Keyword) && has("{Search}", Scope::Heading), "{all:?}");
+    assert!(has("\\begin", Scope::Keyword) && has("{itemize}", Scope::Type), "{all:?}");
+    assert!(has("\\cite", Scope::Keyword) && has("{knuth84}", Scope::Attribute), "{all:?}");
+    assert!(has("$x^2$", Scope::String), "mathematics: {all:?}");
+    assert!(has("% note", Scope::Comment), "{all:?}");
+}

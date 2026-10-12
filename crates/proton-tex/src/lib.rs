@@ -3,5 +3,6 @@
 //! which engine typesets it, and SyncTeX's map between the two.
 
 pub mod log;
+pub mod outline;
 pub mod project;
 pub mod synctex;

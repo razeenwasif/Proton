@@ -191,4 +191,26 @@ export async function texChecks({test, assert, win, doc, $, settle, key, shown})
     pane.querySelector('[data-tex-tab="pdf"]').click(); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
+
+  await test('The outline is under the file tree in LaTeX alone, stepped in by depth, its words counted, a heading a click from its line', async () => {
+    await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
+    await win.pushEvents([{type: 'texOutline', main: 'main.tex', outline: {words: 12345, headings: [
+      {level: 2, title: 'Introduction', file: 'main.tex', line: 3, label: 'sec:intro'},
+      {level: 3, title: 'Data', file: 'chapters/method.tex', line: 4, label: null},
+      {level: 2, title: 'Results', file: 'main.tex', line: 9, label: null}]}}]); await settle();
+    const box = $('.workspace.on [data-tex-outline]');
+    assert(shown(box), 'the outline is not shown');
+    assert(box.querySelector('[data-tex-words]').textContent === '12,345 words', `the words are not counted: ${box.querySelector('[data-tex-words]').textContent}`);
+    const rows = [...box.querySelectorAll('.tex-heading')];
+    assert(rows.map((r) => r.textContent).join('|') === 'Introduction|Data|Results', `not its headings: ${rows.map((r) => r.textContent)}`);
+    assert(rows[1].getBoundingClientRect().left === rows[0].getBoundingClientRect().left
+      && parseFloat(getComputedStyle(rows[1]).paddingLeft) > parseFloat(getComputedStyle(rows[0]).paddingLeft), 'a subsection is not stepped in');
+    assert(rows[0].title.includes('sec:intro'), 'the label is not said');
+    const at = win.commands.length;
+    rows[1].click(); await settle();
+    assert(JSON.stringify(sent(at, 'jumpTo')[0]) === JSON.stringify({type: 'jumpTo', mode: 'tex', path: 'chapters/method.tex', line: 3, column: 0}), `not taken to its line: ${JSON.stringify(sent(at, 'jumpTo'))}`);
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+    assert(!shown($('.workspace.on [data-tex-outline]')), 'Codex shows LaTeX\'s outline');
+    await win.pushEvents([{type: 'texOutline', main: null, outline: {words: 0, headings: []}}]); await settle();
+  });
 }

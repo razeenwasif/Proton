@@ -99,3 +99,36 @@ fn latex_says_where_tex_stands_and_asks_before_installing_anything() {
     assert!(matches!(tex_state(&events), Some(TexState::Missing { .. })));
     assert!(tex_state(&ws.apply(Command::Poll)).is_none(), "nothing new is drawn on a quiet beat");
 }
+
+fn outline(events: &[Event]) -> Option<(Option<String>, proton_tex::outline::Outline)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::TexOutline { main, outline } => Some((main.clone(), outline.clone())),
+        _ => None,
+    })
+}
+
+#[test]
+fn latex_draws_the_document_s_outline_and_words_on_entering_and_again_when_a_save_changes_them() {
+    let base = std::env::temp_dir().join(format!("proton-tex-outline-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("paper");
+    std::fs::create_dir_all(project.join("chapters")).unwrap();
+    std::fs::write(project.join("main.tex"), "\\documentclass{article}\n\\begin{document}\n\\section{Introduction}\\label{sec:intro}\nSome words.\n\\input{chapters/method}\n\\end{document}\n").unwrap();
+    std::fs::write(project.join("chapters/method.tex"), "\\section{Method}\nMore words here.\n").unwrap();
+    let mut ws = Workspace::rooted(&project).with_tex_env(offline_tex(&base.join("tex")));
+
+    let (main, drawn) = outline(&ws.apply(Command::SetMode { mode: ModeId::Tex })).expect("entering LaTeX draws the outline");
+    assert_eq!(main.as_deref(), Some("main.tex"));
+    let titles: Vec<(&str, &str, u32)> = drawn.headings.iter().map(|h| (h.title.as_str(), h.file.as_str(), h.line)).collect();
+    assert_eq!(titles, [("Introduction", "main.tex", 3), ("Method", "chapters/method.tex", 1)]);
+    assert_eq!(drawn.headings[0].label.as_deref(), Some("sec:intro"));
+    assert_eq!(drawn.words, 7, "the headings and the prose, in both files");
+
+    // A chapter saved with a new subsection: drawn again, from the chapter.
+    ws.apply(Command::JumpTo { mode: ModeId::Tex, path: project.join("chapters/method.tex").display().to_string(), line: 1, column: 0 });
+    keys(&mut ws, "o\\subsection{Data}<Esc>");
+    let (_, drawn) = outline(&ws.apply(Command::Save)).expect("a save that changes the outline draws it");
+    assert_eq!(drawn.headings.iter().map(|h| (h.level, h.title.as_str())).collect::<Vec<_>>(), [(2, "Introduction"), (2, "Method"), (3, "Data")]);
+    assert!(outline(&ws.apply(Command::Save)).is_none(), "a save that changes nothing draws nothing");
+    let _ = std::fs::remove_dir_all(base);
+}

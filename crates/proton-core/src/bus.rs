@@ -1640,8 +1640,6 @@ pub enum Event {
     LabEnv {
         env: proton_lab::EnvState,
     },
-    /// Where Lean and Mathlib stand: one for the machine, whichever project
-    /// is open.
     /// Where the LaTeX mode's TeX stands: not installed (and what installing
     /// it needs), planned, being installed, installed, or failed.
     TexEnv {
@@ -1667,6 +1665,15 @@ pub enum Event {
         log: proton_tex::log::Log,
         root: String,
     },
+    /// The document's shape — its headings, each where it is, across the
+    /// files its main file brings in — and its words. `main` is the main
+    /// file, as the project names it; `None`, none found.
+    TexOutline {
+        main: Option<String>,
+        outline: proton_tex::outline::Outline,
+    },
+    /// Where Lean and Mathlib stand: one for the machine, whichever project
+    /// is open.
     LeanEnv {
         env: proton_lab::LeanState,
     },

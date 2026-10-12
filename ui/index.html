@@ -356,6 +356,12 @@
         <!-- Rendered from Event::Tree. The core decides what is in it, what is
              open and where you are; this draws rows. -->
         <div class="scroll tree" data-tree></div>
+        <!-- LaTeX's outline, under the tree in the LaTeX mode only: drawn from
+             Event::TexOutline by tex.js, a heading a click from its line. -->
+        <section class="tex-outline" data-tex-outline hidden>
+          <header>Outline <span class="grow"></span><span class="tex-words" data-tex-words></span></header>
+          <div class="scroll" data-tex-headings></div>
+        </section>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>

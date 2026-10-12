@@ -17,6 +17,7 @@ import { commandOf, envHtml, readyHtml } from "./tex-env.js";
 /** @typedef {import("./bindings/TexLog").TexLog} Log */
 /** @typedef {import("./bindings/TexLogEntry").TexLogEntry} Entry */
 /** @typedef {import("./bindings/TexPackages").TexPackages} Packages */
+/** @typedef {import("./bindings/TexOutline").TexOutline} Outline */
 
 /** The log's groups, in the order they are shown. */
 const GROUPS = /** @type {[Entry["kind"], string][]} */ ([["error", "Errors"], ["warning", "Warnings"], ["box", "Bad boxes"]]);
@@ -276,14 +277,40 @@ export function createTex(host) {
     pdfView.reveal(page, { x, y, w: right - x, h: bottom - y });
   }
 
+  /** One element in another. @param {HTMLElement} box @param {string} sel */
+  const q2 = (box, sel) => /** @type {HTMLElement} */ (box.querySelector(sel));
+
+  /** The document's headings and its words, under the file tree, each
+   *  heading a click from its line. @param {{main: string | null, outline: Outline}} event */
+  function outline(event) {
+    const box = /** @type {HTMLElement | null} */ (host.root.querySelector("[data-tex-outline]"));
+    if (!box) return;
+    box.hidden = !event.main;
+    const { headings, words } = event.outline;
+    q2(box, "[data-tex-words]").textContent = event.main ? `${words.toLocaleString("en")} word${words === 1 ? "" : "s"}` : "";
+    // Stepped in from the shallowest heading there is: a paper's sections
+    // start at the edge, as a book's chapters do.
+    const top = Math.min(...headings.map((h) => h.level));
+    q2(box, "[data-tex-headings]").innerHTML = headings.length
+      ? headings.map((h) => `<button class="tex-heading${h.level === top ? " top" : ""}" style="--depth:${h.level - top}" data-tex-jump="${esc(h.file)}" data-line="${h.line}"` +
+          ` title="${esc(`${h.file}:${h.line}${h.label ? ` · ${h.label}` : ""}`)}">${esc(h.title || "(untitled)")}</button>`).join("")
+      : `<p class="lab-faint">No sections yet.</p>`;
+  }
+
   /** Finding or installing what a document lacks. @param {{packages: Packages}} event */
   function packages(event) {
     state.packages = event.packages;
     renderLog();
   }
 
+  // A heading in the outline goes to its line, as an entry in the log does.
+  host.root.querySelector("[data-tex-outline]")?.addEventListener("click", (e) => {
+    const jump = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-tex-jump]"));
+    if (jump) host.dispatch({ type: "jumpTo", mode: "tex", path: jump.dataset.texJump, line: Math.max(0, Number(jump.dataset.line) - 1), column: 0 });
+  });
+
   renderPdf();
   renderHead();
   renderLog();
-  return { show, env, build, log, packages, sync, pdf: () => pdfView };
+  return { show, env, build, log, packages, sync, outline, pdf: () => pdfView };
 }
