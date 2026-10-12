@@ -19,6 +19,8 @@ ts-rs = { workspace = true }
 lopdf = "0.42"
 # A new key for each PDF given passwords; already in the lock file.
 getrandom = "0.3"
+# Where a page's characters are, for the agent; on the same lopdf.
+pdf-extract = "0.12.0"
 
 [dev-dependencies]
 proton-library = { workspace = true, features = ["fixture"] }

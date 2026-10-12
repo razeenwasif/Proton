@@ -28,7 +28,7 @@ pub fn placing(rotate: i64, crop: [f32; 4], width: f32, height: f32) -> [f32; 6]
 }
 
 /// The page's crop box — its media box when it has none — and its turn.
-fn shown_as(doc: &Document, page: ObjectId) -> ([f32; 4], i64) {
+pub(crate) fn shown_as(doc: &Document, page: ObjectId) -> ([f32; 4], i64) {
     let numbers = |key: &[u8]| -> Option<[f32; 4]> {
         let mut at = page;
         for _ in 0..32 {

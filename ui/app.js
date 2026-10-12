@@ -6546,6 +6546,8 @@ function renderAgent(event) {
   if (dot && $(".data-side")?.dataset.showing !== "agent") dot.hidden = event.activity === "idle";
   const texDot = $("[data-tex-agent-dot]");
   if (texDot && $("#tex-pane")?.dataset.showing !== "agent") texDot.hidden = event.activity === "idle";
+  const pdfDot = $("[data-pdf-agent-dot]");
+  if (pdfDot && $("#pdf-pane")?.dataset.showing !== "agent") pdfDot.hidden = event.activity === "idle";
   // Every thread: Codex's dock and Chat's stage show the same conversation,
   // and one of them is always off screen. Painting only the visible one would
   // leave the other showing whatever it had when it was last looked at.
@@ -6600,7 +6602,7 @@ function renderAgent(event) {
     send.classList.toggle("stop", event.activity !== "idle");
     send.setAttribute("aria-label", event.activity === "idle" ? "Send" : "Stop");
     // Codex's composer sends with Zed's paper plane; Chat keeps its arrow.
-    const idle = send.closest("#codex-dock, #tex-pane") ? "send" : "arrow-up";
+    const idle = send.closest("#codex-dock, #tex-pane, #pdf-pane") ? "send" : "arrow-up";
     send.innerHTML = `<svg class="i"><use href="#i-${
       event.activity === "idle" ? idle : "stop"
     }"/></svg>`;

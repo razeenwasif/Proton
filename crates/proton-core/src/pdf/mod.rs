@@ -17,6 +17,9 @@ use crate::bus::{Command, Event, NoticeLevel};
 use crate::folder;
 use crate::workspace::notice;
 
+mod agent;
+pub use agent::TOOLS;
+
 /// The largest PDF opened: the most the shell reads for the page.
 pub const LARGEST: u64 = 128 * 1024 * 1024;
 
@@ -59,6 +62,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::PdfOcr { .. }
             | Command::PdfOcrStop
             | Command::PdfOcrLangs
+            | Command::PdfAt { .. }
     )
 }
 
@@ -94,6 +98,10 @@ struct Tab {
     version: u64,
     /// What is changed and saved; `None` for a file only read, with why.
     doc: Result<Box<proton_pdf::Doc>, String>,
+    /// The page the person is reading, from one, as the window last said.
+    at: u32,
+    /// The text of the pages the agent has read, and the version it is of.
+    read: (u64, std::collections::HashMap<u32, proton_pdf::text::PageText>),
 }
 
 impl Tab {
@@ -235,6 +243,12 @@ impl Pdfs {
                 Vec::new()
             }
             Command::PdfOcrLangs => vec![Event::PdfOcrLangs { langs: self.languages().0 }],
+            Command::PdfAt { tab, page } => {
+                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab) {
+                    tab.at = page.max(1);
+                }
+                Vec::new()
+            }
             _ => Vec::new(),
         }
     }
@@ -300,7 +314,7 @@ impl Pdfs {
             _ => file,
         };
         self.next += 1;
-        let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view, version: 1, doc };
+        let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view, version: 1, doc, at: page.unwrap_or(1), read: Default::default() };
         self.active = Some(tab.id);
         let view = view_event(&tab, page, false);
         let comments = comments_event(&tab);
@@ -502,13 +516,7 @@ impl Pdfs {
     /// Some pages of the tab on top, as it is now, written as a new PDF —
     /// then opened.
     fn extract(&mut self, pages: &[u32], typed: &str) -> Vec<Event> {
-        let made = self.fresh(typed).and_then(|path| {
-            let (doc, _) = self.current()?;
-            let bytes = proton_pdf::combine::extract(doc.document(), pages)?;
-            proton_pdf::save::atomically(&path, &bytes)?;
-            Ok(path)
-        });
-        match made {
+        match self.extract_to(pages, typed) {
             Ok(path) => {
                 let mut events = vec![notice(format!("wrote {}", folder::tilde(&path)), NoticeLevel::Info)];
                 events.extend(self.open(&path.display().to_string(), None));
@@ -516,6 +524,15 @@ impl Pdfs {
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
         }
+    }
+
+    /// The same, written: where.
+    fn extract_to(&mut self, pages: &[u32], typed: &str) -> Result<PathBuf, String> {
+        let path = self.fresh(typed)?;
+        let (doc, _) = self.current()?;
+        let bytes = proton_pdf::combine::extract(doc.document(), pages)?;
+        proton_pdf::save::atomically(&path, &bytes)?;
+        Ok(path)
     }
 
     /// The tab on top split into PDFs beside it, `name-1.pdf` and on.
@@ -755,7 +772,7 @@ mod tests {
     #[test]
     fn a_view_key_names_one_version_of_one_open_tab() {
         let mut pdfs = Pdfs::new();
-        pdfs.tabs.push(Tab { id: 3, path: PathBuf::from("/x.pdf"), name: "x.pdf".into(), view: Arc::new(b"%PDF-1.7".to_vec()), version: 2, doc: Err("a test".into()) });
+        pdfs.tabs.push(Tab { id: 3, path: PathBuf::from("/x.pdf"), name: "x.pdf".into(), view: Arc::new(b"%PDF-1.7".to_vec()), version: 2, doc: Err("a test".into()), at: 1, read: Default::default() });
         assert_eq!(pdfs.view_bytes("pdfview:3:2").as_deref().map(Vec::as_slice), Some(&b"%PDF-1.7"[..]));
         for stale in ["pdfview:3:1", "pdfview:4:2", "pdfview:3", "/x.pdf", "pdfview:a:b"] {
             assert!(pdfs.view_bytes(stale).is_none(), "{stale}");

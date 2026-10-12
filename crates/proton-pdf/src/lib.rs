@@ -17,6 +17,7 @@ pub mod ops;
 pub mod pages;
 pub mod save;
 pub mod security;
+pub mod text;
 
 pub use doc::{Doc, Opened};
 pub use ops::Op;

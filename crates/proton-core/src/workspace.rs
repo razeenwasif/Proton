@@ -153,6 +153,11 @@ pub struct Workspace {
     /// outstanding call has an answer — so deferring one is simply not
     /// answering it yet.
     waiting: Vec<Waiting>,
+    /// The agent's PDF tool calls, which the session answers: the PDFs are
+    /// its, not a project's. Deferred as a cell run is, and for as long.
+    pdf_calls: Vec<(String, String, serde_json::Value)>,
+    /// What `@pdf` says in the next question, as the session last told it.
+    pdf_about: Option<String>,
     /// The file the open conversation lives in. `None` until it has a
     /// question in it — a conversation with nothing said is not worth a file.
     chat_path: Option<PathBuf>,
@@ -1425,6 +1430,7 @@ impl Workspace {
                 // of it. Nothing is written for an empty conversation.
                 self.agent.clear();
                 self.waiting.clear();
+                self.pdf_calls.clear();
                 self.chat_path = None;
                 vec![self.agent_event(), self.chats_event()]
             }
@@ -1524,7 +1530,8 @@ impl Workspace {
             | Command::PdfCompress
             | Command::PdfOcr { .. }
             | Command::PdfOcrStop
-            | Command::PdfOcrLangs => Vec::new(),
+            | Command::PdfOcrLangs
+            | Command::PdfAt { .. } => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }
@@ -1687,6 +1694,7 @@ impl Workspace {
                 // code — but nothing is waiting on it any more. Leaving these
                 // would answer into a turn that no longer exists.
                 self.waiting.clear();
+                self.pdf_calls.clear();
                 vec![self.agent_event()]
             }
 
@@ -4433,7 +4441,9 @@ impl Workspace {
                 ToolOutcome::Deferred => {
                     // The cell is drawn as running straight away, so the
                     // notebook shows what the agent is doing to it.
-                    events.push(self.notebook_event());
+                    if call.name == "run_cell" {
+                        events.push(self.notebook_event());
+                    }
                     continue;
                 }
             };
@@ -4681,6 +4691,7 @@ impl Workspace {
                 crate::mention::Mention::Selection => self.selected_text(),
                 crate::mention::Mention::Dataframe => self.selected_frame(),
                 crate::mention::Mention::Log => self.tex_log_text(),
+                crate::mention::Mention::Pdf => self.pdf_about.clone().unwrap_or_else(|| "No PDF is open in the PDF mode.".into()),
             });
         }
         out
@@ -4767,6 +4778,11 @@ impl Workspace {
     /// question — "is there an answer yet?" — rather than knowing which tools
     /// are slow.
     pub fn call_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) -> ToolOutcome {
+        // The PDFs are the session's, which answers these after this poll.
+        if crate::pdf::TOOLS.contains(&name) {
+            self.pdf_calls.push((id.to_string(), name.to_string(), input.clone()));
+            return ToolOutcome::Deferred;
+        }
         if name == "search_library" {
             if let Some(deferred) = self.start_library_search(id, input) {
                 return deferred;
@@ -4789,6 +4805,23 @@ impl Workspace {
             // a cell that never began.
             Err(why) => ToolOutcome::Answered(Err(why)),
         }
+    }
+
+    /// The agent's PDF tool calls since the last time, for the session to
+    /// answer from its PDFs.
+    pub fn take_pdf_calls(&mut self) -> Vec<(String, String, serde_json::Value)> {
+        std::mem::take(&mut self.pdf_calls)
+    }
+
+    /// Answer a call the session ran. The turn goes on at the next poll,
+    /// once every call it made is answered.
+    pub fn answer_tool(&mut self, id: &str, answer: Result<String, String>) {
+        self.agent.answer(id, answer);
+    }
+
+    /// What `@pdf` says in the next question: the session's PDF on top.
+    pub fn set_pdf_about(&mut self, about: String) {
+        self.pdf_about = Some(about);
     }
 
     /// Begin embedding a question, if this search would be better for it.

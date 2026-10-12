@@ -89,6 +89,7 @@ export function createPdf(host) {
       side.querySelector(`.pdf-thumb[data-pdf-thumb="${page}"]`)?.classList.add("on");
       tools?.says();
       ocr?.offer();
+      tellPage();
     },
     onLink: ({ url }) => void host.dispatch({ type: "openLink", url }),
   });
@@ -143,6 +144,44 @@ export function createPdf(host) {
     if (form.toolClick(t) || reader.toolClick(t)) tools.render();
   }, true);
   q("[data-pdf-ocr-offer]").addEventListener("click", () => reader.offered());
+
+  /** The pane's tools, or the agent. @param {string} which */
+  function showPanel(which) {
+    const pane = q("#pdf-pane");
+    pane.dataset.showing = which;
+    for (const tab of pane.querySelectorAll("[data-pdf-panel]")) {
+      const on = /** @type {HTMLElement} */ (tab).dataset.pdfPanel === which;
+      tab.classList.toggle("on", on);
+      tab.setAttribute("aria-selected", String(on));
+    }
+    for (const body of pane.querySelectorAll("[data-pdf-body]")) /** @type {HTMLElement} */ (body).hidden = /** @type {HTMLElement} */ (body).dataset.pdfBody !== which;
+    keep("panel", which);
+    if (which === "agent") {
+      q("[data-pdf-agent-dot]").hidden = true;
+      const thread = q("[data-pdf-body=agent] [data-agent-thread]");
+      thread.scrollTop = thread.scrollHeight;
+      q("[data-pdf-body=agent] [data-agent-input]").focus();
+    }
+  }
+  q("#pdf-pane").addEventListener("click", (e) => {
+    const tab = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-pdf-panel]"));
+    if (tab) showPanel(tab.dataset.pdfPanel ?? "tools");
+  });
+  if (pref("panel", "tools") === "agent") showPanel("agent");
+
+  /** The page being read, told to the core once it rests: what `@pdf`
+   *  sends, and what the agent's tools call "this page". */
+  let telling = /** @type {ReturnType<typeof setTimeout> | undefined} */ (undefined);
+  let told = "";
+  function tellPage() {
+    clearTimeout(telling);
+    telling = setTimeout(() => {
+      const tab = state.shown?.tab;
+      if (tab == null || !state.count || `${tab}:${state.page}` === told) return;
+      told = `${tab}:${state.page}`;
+      host.dispatch({ type: "pdfAt", tab, page: state.page });
+    }, 300);
+  }
 
   /** The page grid, or the pages to read. @param {boolean} on */
   function showGrid(on) {
@@ -684,7 +723,8 @@ export function createPdf(host) {
       const k = e.key.toLowerCase();
       if (k === "f") return (focusFind(), true);
       if (k === "g") return (step(e.shiftKey ? -1 : 1), true);
-      if (k === "z") return (host.dispatch({ type: e.shiftKey ? "pdfRedo" : "pdfUndo" }), true);
+      // In a field — the search, a form's, the agent's — ⌘Z is the field's.
+      if (k === "z") return !typing && (host.dispatch({ type: e.shiftKey ? "pdfRedo" : "pdfUndo" }), true);
       if (k === "s" && e.shiftKey) {
         state.ask = { kind: "saveAs" };
         renderAsk();

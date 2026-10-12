@@ -174,7 +174,7 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     for (const [k, extra] of [['z', {metaKey: true}], ['z', {metaKey: true, shiftKey: true}], ['s', {metaKey: true}], ['u', {}], ['r', {ctrlKey: true}]]) {
       pages.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...extra})); await settle();
     }
-    const asked = win.commands.slice(at).map((c) => c.type).filter((t) => t.startsWith('pdf')).join(',');
+    const asked = win.commands.slice(at).map((c) => c.type).filter((t) => t.startsWith('pdf') && t !== 'pdfAt').join(',');
     assert(asked === 'pdfUndo,pdfRedo,pdfSave,pdfUndo,pdfRedo', `the keys asked: ${asked}`);
 
     // Closing a changed tab asks: save and close, or close letting them go.
@@ -501,6 +501,43 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     assert(tools.textContent.includes('brew install tesseract poppler') && offer.textContent === 'No text', 'what OCR needs is not said');
     await win.pushEvents([tabs([], null)]); await settle();
     assert(!shown(offer), 'the offer outlived its PDF');
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('The agent sits beside the tools: the page being read is told to the core, @pdf asks about it, and ⌘Z in its box is the box\'s', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    const one = {id: 10, name: 'outline.pdf', path: '~/outline.pdf', dirty: true, readOnly: null, undo: 'turn page 1', redo: null, protected: false};
+    let at = win.commands.length;
+    await win.pushEvents([tabs([one], 10), {type: 'pdfView', tab: 10, key: '/tests/ui/fixtures/outline.pdf', version: 1, page: 2, quiet: false}]); await settle();
+    assert(await wait(() => sent(at, 'pdfAt').some((c) => c.tab === 10 && c.page === 2), 120), `the page being read was not told: ${JSON.stringify(sent(at, 'pdfAt'))}`);
+
+    // A dot while the agent works out of sight; gone once it is looked at.
+    const pane = $('#pdf-pane');
+    const agent = (activity) => win.pushEvents([{type: 'agent', provider: 'claude', model: 'claude-opus-5-5', credential: '', activity, inputTokens: 0, outputTokens: 0, cachedTokens: 0,
+      transcript: [{speaker: 'you', text: 'what is on this page? @pdf', thinking: '', streaming: false, calls: []},
+        {speaker: 'proton', text: 'Chapter one begins here.', thinking: '', streaming: activity !== 'idle', calls: [{id: 'c1', name: 'pdf_read', detail: '', result: '--- page 2 of 3 ---', state: 'done'}]}]}]);
+    await agent('thinking'); await settle();
+    assert(!pane.querySelector('[data-pdf-agent-dot]').hidden, 'no dot on Agent while it works');
+    pane.querySelector('[data-pdf-panel="agent"]').click(); await settle();
+    assert(pane.dataset.showing === 'agent' && pane.querySelector('[data-pdf-agent-dot]').hidden && !shown(pane.querySelector('[data-pdf-tools]')), 'the agent is not shown in place of the tools');
+    assert(pane.querySelector('[data-agent-thread]').textContent.includes('Chapter one begins here.'), 'the conversation is not drawn here');
+    await agent('idle'); await settle();
+
+    // @pdf written by its chip, and asked.
+    const input = pane.querySelector('[data-agent-input]');
+    assert(doc.activeElement === input, 'the box is not ready to type in');
+    input.textContent = 'summarise';
+    pane.querySelector('[data-mention="@pdf"]').click(); await settle();
+    assert(input.textContent === 'summarise @pdf', `the chip did not write @pdf: ${input.textContent}`);
+    // ⌘Z in the box undoes typing, not the PDF's last change.
+    at = win.commands.length;
+    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'z', metaKey: true, bubbles: true, cancelable: true})); await settle();
+    assert(!sent(at, 'pdfUndo').length, '⌘Z in the agent\'s box undid a change to the PDF');
+    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); await settle();
+    assert(JSON.stringify(sent(at, 'ask')) === JSON.stringify([{type: 'ask', text: 'summarise @pdf'}]), `not asked: ${JSON.stringify(sent(at, 'ask'))}`);
+    pane.querySelector('[data-pdf-panel="tools"]').click(); await settle();
+    assert(pane.dataset.showing === 'tools' && shown(pane.querySelector('[data-pdf-tools]')), 'the tools did not come back');
+    await win.pushEvents([tabs([], null)]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 

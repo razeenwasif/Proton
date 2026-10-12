@@ -418,3 +418,84 @@ fn a_scanned_page_is_read_with_ocr_and_its_words_laid_over_it_one_change_to_undo
     let undone = lopdf::Document::load_mem(&session.document_bytes(&key).unwrap()).unwrap();
     assert!(!String::from_utf8_lossy(&undone.get_page_content(undone.get_pages()[&1]).unwrap()).contains("ProtonOCR"), "one undo takes it all back");
 }
+
+#[test]
+fn the_agent_reads_searches_marks_and_rearranges_the_pdf_on_top_each_change_held_and_undoable() {
+    use serde_json::json;
+    let s = scratch("agent");
+    std::fs::write(
+        s.0.join("paper.pdf"),
+        pdf(&["Abstract\nWe study the speed of light.", "Methods\nThe speed of light was measured twice.", "Results"]),
+    )
+    .unwrap();
+    let mut session = Session::new(&s.0);
+    let answer = |session: &mut Session, name: &str, input: serde_json::Value| session.pdf_tool(name, &input).0;
+    assert!(answer(&mut session, "pdf_info", json!({})).unwrap_err().contains("No PDF is open"));
+
+    // A workspace's agent asks; the session answers after the poll.
+    let outcome = session.active_mut().call_tool("t1", "pdf_info", &json!({}));
+    assert!(matches!(outcome, proton_core::workspace::ToolOutcome::Deferred), "a PDF tool was answered by the workspace");
+    let calls = session.active_mut().take_pdf_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!((calls[0].0.as_str(), calls[0].1.as_str()), ("t1", "pdf_info"));
+    assert!(session.active_mut().take_pdf_calls().is_empty());
+
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    let events = session.apply(Command::PdfOpen { path: "paper.pdf".into(), page: None, password: None });
+    let (id, _, _) = view(&events).unwrap();
+    session.apply(Command::PdfAt { tab: id, page: 2 });
+    let info = answer(&mut session, "pdf_info", json!({})).unwrap();
+    assert!(info.starts_with("paper.pdf (") && info.contains("3 pages; the person is reading page 2.") && info.contains("Saved: nothing changed since."), "{info}");
+
+    // Read: the page being read, a run of pages, or no page at all.
+    let read = answer(&mut session, "pdf_read", json!({})).unwrap();
+    assert_eq!(read, "--- page 2 of 3 ---\nMethods\nThe speed of light was measured twice.");
+    let all = answer(&mut session, "pdf_read", json!({"from": 1, "to": 9})).unwrap();
+    assert!(all.contains("--- page 1 of 3 ---\nAbstract") && all.contains("--- page 3 of 3 ---\nResults") && !all.contains("page 4"), "{all}");
+    assert!(answer(&mut session, "pdf_read", json!({"from": 7})).unwrap_err().contains("there is no page 7"));
+
+    // Search, case and line breaks ignored.
+    let found = answer(&mut session, "pdf_search", json!({"query": "SPEED of\nlight"})).unwrap();
+    assert!(found.starts_with("2 found on 2 pages:\npage 1: …Abstract We study the [speed of light].…\npage 2:"), "{found}");
+    assert_eq!(answer(&mut session, "pdf_search", json!({"query": "dark matter"})).unwrap(), "\"dark matter\" is not in it.");
+
+    // A passage highlighted by its words, signed as the agent's, and shown.
+    let (said, events) = session.pdf_tool("pdf_annotate", &json!({"page": 2, "quote": "speed of light", "text": "Which way?"}));
+    assert!(said.as_ref().unwrap().starts_with("Highlighted \"speed of light\" on page 2. Held until the person saves"), "{said:?}");
+    assert_eq!(view(&events).map(|v| v.2), Some(Some(2)), "not shown where it was made");
+    let comments = events.iter().find_map(|e| match e {
+        Event::PdfComments { comments, .. } => Some(comments.clone()),
+        _ => None,
+    });
+    let comments = comments.unwrap();
+    assert!(comments.len() == 1 && comments[0].kind == "Highlight" && comments[0].author.ends_with("(agent)") && comments[0].text == "Which way?", "{comments:?}");
+    let missing = answer(&mut session, "pdf_annotate", json!({"page": 1, "quote": "measured twice"})).unwrap_err();
+    assert!(missing.contains("is not on page 1 (it is on page 2)"), "{missing}");
+    assert!(answer(&mut session, "pdf_annotate", json!({"page": 1, "kind": "note"})).unwrap_err().contains("needs its `text`"));
+    let note = answer(&mut session, "pdf_annotate", json!({"page": 1, "kind": "note", "quote": "Abstract", "text": "Short."})).unwrap();
+    assert!(note.starts_with("Put a note beside \"Abstract\" on page 1."), "{note}");
+    let info = answer(&mut session, "pdf_info", json!({})).unwrap();
+    assert!(info.contains("Changed and not saved yet") && info.contains("2 comments:") && info.contains("over \"speed of light\": \"Which way?\""), "{info}");
+
+    // Pages moved; a PDF with none, or a page turned partway, refused.
+    let moved = answer(&mut session, "pdf_pages", json!({"action": "move", "pages": [3], "before": 1})).unwrap();
+    assert!(moved.starts_with("Moved page 3 before page 1."), "{moved}");
+    assert_eq!(answer(&mut session, "pdf_read", json!({"from": 1, "to": 1})).unwrap(), "--- page 1 of 3 ---\nResults");
+    assert!(answer(&mut session, "pdf_pages", json!({"action": "delete", "pages": [1, 2, 3]})).unwrap_err().contains("one page at least"));
+    assert!(answer(&mut session, "pdf_pages", json!({"action": "rotate", "pages": [1], "by": 45})).is_err());
+    assert!(answer(&mut session, "pdf_pages", json!({"action": "rotate", "pages": [9]})).unwrap_err().contains("no page 9"));
+
+    // Taken out into a new PDF, which is opened and on top.
+    let taken = answer(&mut session, "pdf_pages", json!({"action": "extract", "pages": [1], "path": "results.pdf"})).unwrap();
+    assert!(taken.contains("results.pdf") && s.0.join("results.pdf").is_file(), "{taken}");
+    assert!(answer(&mut session, "pdf_info", json!({})).unwrap().starts_with("results.pdf ("));
+
+    // Every change the agent made to the paper is undone as the person's are.
+    session.apply(Command::PdfOpen { path: "paper.pdf".into(), page: None, password: None });
+    for _ in 0..3 {
+        session.apply(Command::PdfUndo);
+    }
+    let info = answer(&mut session, "pdf_info", json!({})).unwrap();
+    assert!(info.contains("Saved: nothing changed since.") && !info.contains("comment"), "{info}");
+    assert_eq!(std::fs::read(s.0.join("paper.pdf")).unwrap(), pdf(&["Abstract\nWe study the speed of light.", "Methods\nThe speed of light was measured twice.", "Results"]), "the file was written before it was saved");
+}

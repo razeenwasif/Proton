@@ -316,6 +316,13 @@ impl Session {
         self
     }
 
+    /// One of the agent's PDF tools, run on the PDF on top, as the session
+    /// answers them when a workspace's agent calls one: the answer, and what
+    /// the window draws again.
+    pub fn pdf_tool(&mut self, name: &str, input: &serde_json::Value) -> (Result<String, String>, Vec<Event>) {
+        self.pdf.tool(name, input)
+    }
+
     /// Notebook's, made otherwise: for a test, one that says which of its
     /// files are in iCloud.
     pub fn with_study(mut self, study: crate::study::Study) -> Session {
@@ -785,6 +792,15 @@ impl Session {
                 events
             }
 
+            // What `@pdf` stands for is the session's to say: the PDFs are its.
+            Command::Ask { text } => {
+                if crate::mention::found(&text).contains(&crate::mention::Mention::Pdf) {
+                    let about = self.pdf.about();
+                    self.active_mut().set_pdf_about(about);
+                }
+                self.delegate(Command::Ask { text })
+            }
+
             other => self.delegate(other),
         }
     }
@@ -935,10 +951,18 @@ impl Session {
         let active = self.active;
         let side = self.side();
         let mut events = Vec::new();
+        let mut drawn = Vec::new();
         for (index, workspace) in self.workspaces.iter_mut().enumerate() {
             workspace.set_quiet(index != active);
             let produced = workspace.apply(Command::Poll);
             workspace.set_quiet(false);
+            // The agent's PDF tools, answered from the session's PDFs —
+            // whichever project's agent asked, since the PDFs are none's.
+            for (id, name, input) in workspace.take_pdf_calls() {
+                let (answer, events) = self.pdf.tool(&name, &input);
+                workspace.answer_tool(&id, answer);
+                drawn.extend(events);
+            }
             if index == active {
                 events = produced;
             }
@@ -953,6 +977,7 @@ impl Session {
         }
         events.extend(self.study.poll());
         events.extend(self.pdf.poll());
+        events.extend(drawn);
         events.extend(self.crossed(side));
         self.claim(events)
     }

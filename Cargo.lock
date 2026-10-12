@@ -4510,6 +4510,7 @@ version = "0.0.1"
 dependencies = [
  "getrandom 0.3.4",
  "lopdf",
+ "pdf-extract",
  "proton-library",
  "serde",
  "serde_json",

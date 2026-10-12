@@ -30,6 +30,8 @@ pub enum Mention {
     Dataframe,
     /// What the last LaTeX build said: its errors, with the source round them.
     Log,
+    /// The PDF on top in the PDF mode, and the page the person is reading.
+    Pdf,
 }
 
 impl Mention {
@@ -39,11 +41,12 @@ impl Mention {
             Mention::Selection => "@selection",
             Mention::Dataframe => "@dataframe",
             Mention::Log => "@log",
+            Mention::Pdf => "@pdf",
         }
     }
 
     /// Every mention this build understands, for the composer's chips.
-    pub const ALL: [Mention; 3] = [Mention::Selection, Mention::Dataframe, Mention::Log];
+    pub const ALL: [Mention; 4] = [Mention::Selection, Mention::Dataframe, Mention::Log, Mention::Pdf];
 }
 
 /// The mentions in a question, in the order they were written, without repeats.
@@ -107,6 +110,12 @@ mod tests {
     fn the_log_is_one_too() {
         assert_eq!(found("why does it not typeset? @log"), [Mention::Log]);
         assert!(found("see @logs").is_empty());
+    }
+
+    #[test]
+    fn the_pdf_is_one_too() {
+        assert_eq!(found("summarise @pdf, then @selection"), [Mention::Pdf, Mention::Selection]);
+        assert!(found("mail@pdf.org and @pdfs").is_empty());
     }
 
     #[test]

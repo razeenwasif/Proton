@@ -691,6 +691,12 @@ pub enum Command {
     PdfFocus {
         tab: u32,
     },
+    /// The page of a tab the person is reading, as the window last saw: what
+    /// `@pdf` sends and the agent's tools call "this page".
+    PdfAt {
+        tab: u32,
+        page: u32,
+    },
     /* ── notebook ─────────────────────────────────────────────────── */
     /// Keep notebooks in this folder — typed as a path is, `~` and all.
     /// Saved in the person's own settings.
