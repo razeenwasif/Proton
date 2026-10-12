@@ -109,6 +109,7 @@ import type { StudyVoiceState } from "./StudyVoiceState";
 import type { Summary } from "./Summary";
 import type { Task } from "./Task";
 import type { TermRun } from "./TermRun";
+import type { TexEnv } from "./TexEnv";
 import type { ThemeView } from "./ThemeView";
 import type { Token } from "./Token";
 import type { TraceState } from "./TraceState";
@@ -263,7 +264,7 @@ check: boolean,
 /**
  * Whether this Proton asks anybody at all.
  */
-live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "studyList", notebooks: Array<StudySummary>, open: string | null, folder: string | null, } | { "type": "studyNotebook", slug: string, title: string, course: string, exam: string | null, readOnly: string | null, sources: Array<StudySourceRow>, notes: Array<StudyNoteRow>, } | { "type": "studyClosed" } | { "type": "studyKb", roots: Array<StudyRoot>, rules: Array<string>, 
+live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "texEnv", env: TexEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "studyList", notebooks: Array<StudySummary>, open: string | null, folder: string | null, } | { "type": "studyNotebook", slug: string, title: string, course: string, exam: string | null, readOnly: string | null, sources: Array<StudySourceRow>, notes: Array<StudyNoteRow>, } | { "type": "studyClosed" } | { "type": "studyKb", roots: Array<StudyRoot>, rules: Array<string>, 
 /**
  * Whether it has been begun on: Notebook has been opened.
  */

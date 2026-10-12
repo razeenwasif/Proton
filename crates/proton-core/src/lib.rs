@@ -35,6 +35,7 @@ pub mod settings;
 pub mod split;
 pub mod study;
 pub mod tasks;
+pub mod tex;
 pub mod trace;
 pub mod tree;
 pub mod typing;

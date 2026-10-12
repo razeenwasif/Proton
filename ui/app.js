@@ -5103,6 +5103,10 @@ function renderEvent(event) {
       study?.codeRan(event);
       break;
 
+    case "texEnv":
+      tex?.env(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

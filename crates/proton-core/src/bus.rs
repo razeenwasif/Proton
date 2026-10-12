@@ -457,6 +457,19 @@ pub enum Command {
     LeanCancel,
     /// Take Lean and Mathlib away.
     LeanRemove,
+    /// The LaTeX mode's first say-so: ask GitHub what installing TeX — the
+    /// TinyTeX `bundle`, latexmk and texlab — would download and keep.
+    TexPlan {
+        #[serde(default)]
+        bundle: proton_lab::tex::Bundle,
+    },
+    /// The second: install exactly what was planned, in `~/.proton/tex`.
+    TexCreate,
+    /// Stop planning or installing — nothing installed is kept — or put a
+    /// plan or a failure away.
+    TexCancel,
+    /// Take TeX away, and every project's builds with it.
+    TexRemove,
     /* ── notebook ─────────────────────────────────────────────────── */
     /// Keep notebooks in this folder — typed as a path is, `~` and all.
     /// Saved in the person's own settings.
@@ -1603,6 +1616,11 @@ pub enum Event {
     },
     /// Where Lean and Mathlib stand: one for the machine, whichever project
     /// is open.
+    /// Where the LaTeX mode's TeX stands: not installed (and what installing
+    /// it needs), planned, being installed, installed, or failed.
+    TexEnv {
+        env: proton_lab::tex::TexState,
+    },
     LeanEnv {
         env: proton_lab::LeanState,
     },

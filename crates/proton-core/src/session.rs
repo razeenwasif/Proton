@@ -587,6 +587,7 @@ impl Session {
         // The machine's Lean, if it is being made: here, not in Research's
         // shutdown, which also runs when the investigations' folder moves.
         crate::research::quit_lean();
+        crate::tex::quit_tex();
     }
 
     /// Where a file a Lab run left is, in the workspace on screen.

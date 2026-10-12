@@ -4997,3 +4997,27 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .tex-log { flex: 1 1 auto; padding: 8px 10px; font: var(--z-2xs)/1.6 var(--zed); }
 .tex-agent { min-height: 0; }
 .tex-agent > [data-agent-thread] { flex: 1 1 auto; min-height: 0; }
+/* TeX's card, in the PDF tab, until TeX is installed: the Lab's card, on
+   the pane's own ground. */
+#tex-pane {
+  --cc-raise: color-mix(in srgb, var(--text) 6%, var(--bg));
+  --cc-raise-2: color-mix(in srgb, var(--text) 11%, var(--bg));
+  --cc-code: var(--bg-deep);
+  --cc-line: color-mix(in srgb, var(--text) 8%, var(--bg-deep));
+  --cc-line-2: var(--row-on-edge);
+  --cc-text: var(--text);
+  --cc-soft: color-mix(in srgb, var(--text) 74%, var(--bg));
+  --cc-muted: var(--muted);
+  --cc-faint: var(--faint);
+  --cc-accent: var(--accent);
+  --cc-ok: var(--ok);
+  --cc-err: var(--err);
+  --cc-font: var(--zed);
+}
+.tex-env-card { max-width: 560px; margin: 24px auto; border: 1px solid var(--cc-line); border-radius: 10px; background: var(--bg); }
+.tex-bundles { display: grid; gap: 8px; }
+.tex-bundle { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--cc-line); border-radius: 8px; cursor: pointer; }
+.tex-bundle:has(input:checked) { border-color: var(--cc-accent); }
+.tex-bundle input { margin-top: 3px; }
+.tex-ready { margin-top: 18px; }
+.tex-ready .st-link, .tex-confirm button { margin-left: 6px; }

@@ -50,6 +50,7 @@
     "study-slides.js",
     "study-graphic.js",
     "study-code.js",
-    "tex.js"
+    "tex.js",
+    "tex-env.js"
   ]
 }

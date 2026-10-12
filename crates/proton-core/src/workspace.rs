@@ -129,6 +129,8 @@ pub struct Workspace {
     /// `research/`, or the session's, where the person keeps them in a
     /// folder of their own and every project shows the same ones.
     research: Arc<Mutex<crate::research::Research>>,
+    /// The LaTeX mode: the machine's TeX as this workspace draws it.
+    tex: crate::tex::Tex,
     /// Whether `research` is the session's. The session polls and stops a
     /// shared one itself, once; were every workspace to poll it, what a
     /// round said could be drained by a project in the background and
@@ -300,6 +302,7 @@ impl Workspace {
             agent: Agent::new(&root.display().to_string()),
             claude: crate::claude::Claude::new(root),
             research: Arc::new(Mutex::new(crate::research::Research::new(root))),
+            tex: crate::tex::Tex::default(),
             research_shared: false,
             documents: std::collections::BTreeSet::new(),
             visualizer: Visualizer::new(root),
@@ -330,6 +333,13 @@ impl Workspace {
     /// eighty tests.
     pub fn with_language_servers(mut self) -> Self {
         self.enable_language_servers();
+        self
+    }
+
+    /// With this TeX rather than the machine's: for a test, which must not
+    /// look in `~/.proton/tex` or ask GitHub.
+    pub fn with_tex_env(mut self, env: proton_lab::tex::TexEnv) -> Self {
+        self.tex = crate::tex::Tex::with_env(env);
         self
     }
 
@@ -1638,7 +1648,19 @@ impl Workspace {
                 vec![self.agent_event()]
             }
 
-            Command::Poll => self.poll_servers(),
+            Command::Poll => {
+                let mut events = self.poll_servers();
+                events.extend(self.tex.poll());
+                events
+            }
+
+            Command::TexPlan { bundle } => self.tex.plan(bundle),
+            Command::TexCreate => self.tex.env_do(|env| env.create()),
+            Command::TexCancel => self.tex.env_do(|env| {
+                env.cancel();
+                Ok(())
+            }),
+            Command::TexRemove => self.tex.env_do(|env| env.remove()),
 
             Command::Complete => self.request_completion(),
 
@@ -5919,6 +5941,11 @@ impl Workspace {
         // by hand since is what the board should show.
         if mode == ModeId::Research {
             events.extend(self.research().sync());
+        }
+
+        // LaTeX says where TeX stands: installed, or what installing it is.
+        if mode == ModeId::Tex {
+            events.extend(self.tex.env_event(true));
         }
 
         // Design with nothing open goes looking, once. Asking somebody to

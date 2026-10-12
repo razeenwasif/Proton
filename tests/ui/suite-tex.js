@@ -28,6 +28,47 @@ export async function texChecks({test, assert, win, doc, $, settle, key, shown})
     assert(pane > $('#codex-dock').getBoundingClientRect().width + 40, `the PDF pane is no wider than Codex's dock: ${pane}`);
   });
 
+  await test('TeX is installed only after two say-sos: a plan of what it downloads, then Install; and it can be taken away', async () => {
+    await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
+    const card = () => $('#tex-pane [data-tex-pdf]');
+    await win.pushEvents([{type: 'texEnv', env: {state: 'missing', needs: [], free: 120_000_000_000, home: '/Users/you/.proton/tex'}}]); await settle();
+    assert(card().textContent.includes('TinyTeX') && card().textContent.includes('~/.proton/tex'), 'the card does not say what TeX is or where it goes');
+    const bundles = [...card().querySelectorAll('[data-tex-bundle]')].map((b) => [b.value, b.checked]);
+    assert(JSON.stringify(bundles) === JSON.stringify([['full', true], ['small', false]]), `the bundles offered: ${JSON.stringify(bundles)}`);
+    const small = card().querySelector('[data-tex-bundle][value="small"]');
+    small.checked = true;
+    small.dispatchEvent(new win.Event('change', {bubbles: true}));
+    let at = win.commands.length;
+    card().querySelector('[data-tex-env="plan"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'texPlan')) === JSON.stringify([{type: 'texPlan', bundle: 'small'}]), `not planned as chosen: ${JSON.stringify(sent(at, 'texPlan'))}`);
+    assert(!sent(at, 'texCreate').length, 'installed without the second say-so');
+
+    const plan = {bundle: 'small', tinytex: 'v2026.10', texlab: 'v5.26.0', home: '/Users/you/.proton/tex', free: 120_000_000_000, fits: true,
+      downloads: [{what: 'TinyTeX-1 v2026.10', host: 'github.com', bytes: 67_200_000, exact: true, verified: true},
+        {what: 'latexmk, by TeX\'s package manager', host: 'ctan.org', bytes: 1_000_000, exact: false, verified: false},
+        {what: 'texlab v5.26.0', host: 'github.com', bytes: 10_200_000, exact: true, verified: true}],
+      download: 78_400_000, disk: 400_000_000, kept: 260_000_000, tinytexUrl: '', tinytexSha256: null, texlabUrl: '', texlabSha256: null};
+    await win.pushEvents([{type: 'texEnv', env: {state: 'planned', plan}}]); await settle();
+    assert(card().querySelectorAll('tr').length === 3 && card().textContent.includes('about'), 'the plan does not say what it downloads, or which sizes are estimates');
+    at = win.commands.length;
+    card().querySelector('[data-tex-env="create"]').click(); await settle();
+    assert(sent(at, 'texCreate').length === 1, 'Install did not ask for the install');
+
+    await win.pushEvents([{type: 'texEnv', env: {state: 'making', stage: 'texlab', done: 0, total: 0, log: ['$ curl texlab']}}]); await settle();
+    const stages = [...card().querySelectorAll('.lean-stages li')].map((li) => li.className);
+    assert(JSON.stringify(stages) === JSON.stringify(['done', 'done', 'on', '', '']), `the stages: ${stages}`);
+    await win.pushEvents([{type: 'texEnv', env: {state: 'failed', step: 'texlab', why: 'curl stopped with exit status 22', log: []}}]); await settle();
+    assert(card().textContent.includes('Installing texlab failed') && card().querySelector('[data-tex-env="plan"]'), 'a failure does not say what failed, or offer to try again');
+
+    await win.pushEvents([{type: 'texEnv', env: {state: 'ready', tinytex: 'v2026.10', texlab: 'v5.26.0', bundle: 'full', size: 812_000_000, home: '/Users/you/.proton/tex'}}]); await settle();
+    assert(card().querySelector('.tex-empty') && card().textContent.includes('TinyTeX v2026.10'), 'installed TeX is not said beside the empty page');
+    card().querySelector('[data-tex-env="confirm"]').click(); await settle();
+    at = win.commands.length;
+    card().querySelector('[data-tex-env="remove"]').click(); await settle();
+    assert(sent(at, 'texRemove').length === 1, 'Remove did not ask');
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('LaTeX\'s dock shows the PDF, the log or the agent, and the agent\'s staged changes are there too', async () => {
     await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
     const pane = $('#tex-pane');
