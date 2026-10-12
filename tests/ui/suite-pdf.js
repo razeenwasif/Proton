@@ -81,6 +81,83 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('Reading: page labels, thumbnails and bookmarks', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    const one = {id: 7, name: 'outline.pdf', path: '~/outline.pdf', dirty: false};
+    await win.pushEvents([tabs([one], 7), {type: 'pdfView', tab: 7, key: '/tests/ui/fixtures/outline.pdf', version: 1, page: null, quiet: false}]); await settle();
+    const pages = $('[data-pdf-pages]'), chip = () => $('[data-pdf-page]').textContent;
+    assert(await wait(() => pages.querySelectorAll('.doc-page canvas').length > 0 && chip().startsWith('i · 1 / 3')), `not drawn with its label: ${chip()}`);
+
+    // The pages small, labelled as the document labels them.
+    $('[data-pdf-side="pages"]').click(); await settle();
+    const thumbs = [...doc.querySelectorAll('.pdf-thumb')];
+    assert(thumbs.map((t) => t.textContent.trim()).join(',') === 'i,1,2', `the thumbnails' labels: ${thumbs.map((t) => t.textContent)}`);
+    assert(await wait(() => doc.querySelectorAll('.pdf-thumb canvas').length === 3), 'the thumbnails were not drawn');
+    thumbs[2].click(); await settle();
+    assert(await wait(() => chip().startsWith('2 · 3 / 3')), `a thumbnail did not go to its page: ${chip()}`);
+
+    // Bookmarks, nested; one goes to its page.
+    $('[data-pdf-side="outline"]').click(); await settle();
+    const marks = [...doc.querySelectorAll('.pdf-mark-row')];
+    assert(marks.map((m) => `${m.textContent}${m.classList.contains('top') ? '' : '>'}`).join(',') === 'Preface,Chapter one,Appendix>', `the bookmarks: ${marks.map((m) => m.textContent)}`);
+    marks[0].click(); await settle();
+    assert(await wait(() => chip().startsWith('i · 1 / 3')), `a bookmark did not go to its page: ${chip()}`);
+  });
+
+  await test('Reading: links over the pages, and search as you type, marked and stepped through', async () => {
+    const pages = $('[data-pdf-pages]'), chip = () => $('[data-pdf-page]').textContent;
+    // Links: into the document, gone to; out of it, asked for.
+    const links = [...pages.querySelectorAll('.doc-page[data-page="1"] .pdf-link')];
+    assert(links.length === 2, `page 1's links are not laid over it: ${links.length}`);
+    const at = win.commands.length;
+    links.find((l) => l.dataset.url).click(); await settle();
+    assert(JSON.stringify(sent(at, 'openLink')) === JSON.stringify([{type: 'openLink', url: 'https://example.org/proton'}]), 'the web link was not opened');
+    links.find((l) => l.dataset.dest).click();
+    assert(await wait(() => chip().startsWith('2 · 3 / 3')), `the link into the document did not go: ${chip()}`);
+
+    // ⌘F, typed, found and marked; ⌘G steps; Escape clears.
+    pages.focus();
+    pages.dispatchEvent(new KeyboardEvent('keydown', {key: 'f', metaKey: true, bubbles: true, cancelable: true})); await settle();
+    const field = doc.querySelector('[data-pdf-find-query]');
+    assert(field && doc.activeElement === field, '⌘F did not take the keyboard to the search');
+    // "the" is on page i twice and page 2 once: three, in order.
+    field.value = 'the'; field.dispatchEvent(new Event('input', {bubbles: true}));
+    assert(await wait(() => doc.querySelectorAll('.pdf-hit-row').length === 3), `not found: ${doc.querySelector('.pdf-find-said')?.textContent}`);
+    assert([...doc.querySelectorAll('.pdf-hit-page')].map((p) => p.textContent).join(',') === 'i,i,2', 'the hits are not each on its labelled page');
+    assert(doc.activeElement === doc.querySelector('[data-pdf-find-query]') && doc.querySelector('[data-pdf-find-query]').value === 'the', 'the field lost what was typed');
+    assert(await wait(() => pages.querySelector('.pdf-hit.on')), 'the hit is not marked on its page');
+    field.dispatchEvent(new KeyboardEvent('keydown', {key: 'g', metaKey: true, bubbles: true, cancelable: true})); await settle();
+    assert(doc.querySelectorAll('.pdf-hit-row')[1].classList.contains('on'), '⌘G did not go to the next');
+    doc.querySelector('[data-pdf-find-query]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+    assert(!pages.querySelector('.pdf-hit'), 'Escape left the marks');
+  });
+
+  await test('Reading: two side by side, one at a time, and the view turned', async () => {
+    const pages = $('[data-pdf-pages]');
+    // Two side by side, one at a time (Space turns the page), and back.
+    $('[data-pdf-layout="two"]').click(); await settle();
+    assert(pages.dataset.layout === 'two', 'not two side by side');
+    $('[data-pdf-layout="single"]').click(); await settle();
+    const visible = () => [...pages.querySelectorAll('.doc-page')].filter((p) => !p.hidden).map((p) => p.dataset.page);
+    assert(visible().length === 1, `not one at a time: ${visible()}`);
+    const before = visible()[0];
+    pages.focus();
+    pages.dispatchEvent(new KeyboardEvent('keydown', {key: ' ', bubbles: true, cancelable: true})); await settle();
+    assert(Number(visible()[0]) === Math.min(3, Number(before) + 1), `Space did not turn the page: ${before} → ${visible()}`);
+    $('[data-pdf-layout="continuous"]').click(); await settle();
+    assert(visible().length === 3, 'not back to one after another');
+
+    // The view turned: page 1, taller than wide, is wider than tall.
+    const first = () => pages.querySelector('.doc-page[data-page="1"]').getBoundingClientRect();
+    assert(first().height > first().width, 'page 1 starts upright');
+    pages.dispatchEvent(new KeyboardEvent('keydown', {key: 'r', bubbles: true, cancelable: true})); await settle();
+    assert(first().width > first().height, 'r did not turn the view');
+    for (let i = 0; i < 3; i++) { pages.dispatchEvent(new KeyboardEvent('keydown', {key: 'r', bubbles: true, cancelable: true})); await settle(); }
+    assert(first().height > first().width, 'four turns are not a whole one');
+    await win.pushEvents([tabs([], null)]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('A PDF opened in the PDF mode is a tab, and the document viewer hands its PDF over at its page', async () => {
     await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
     let at = win.commands.length;

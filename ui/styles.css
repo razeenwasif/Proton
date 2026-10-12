@@ -1986,7 +1986,7 @@ table.df tr:hover td { background: var(--e1); }
    slot is its size before it is drawn, so the scrollbar is the document's. */
 .doc-page {
   position: relative; flex: none;
-  background: #fff; border-radius: 2px;
+  background: var(--page-ground, #fff); border-radius: 2px;
   box-shadow: 0 2px 14px rgba(0, 0, 0, .45);
   /* What pdf.js sizes the text over a page with: the scale is set per page
      as it is drawn; whole pixels, rounded down. */
@@ -5201,3 +5201,35 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .pdf-open-row.on { background: var(--row-on); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
 .pdf-tools > header { font: 620 calc(10.5px * var(--ui-scale))/1 var(--sans); letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
 .pdf-tools-body { padding: 8px 12px; font: var(--z-xs)/1.5 var(--zed); color: var(--muted); }
+
+/* Two pages side by side: the box's column becomes rows of two. */
+[data-layout="two"] { flex-direction: row !important; flex-wrap: wrap; justify-content: center; align-content: flex-start; align-items: flex-start !important; }
+/* A link over a page, invisible until pointed at; what a search found, marked. */
+.doc-page .pdf-link { position: absolute; z-index: 2; border-radius: 2px; }
+.doc-page .pdf-link:hover { background: rgba(80, 140, 255, .14); box-shadow: inset 0 -1px 0 rgba(80, 140, 255, .6); }
+.doc-page .pdf-hit { position: absolute; z-index: 1; border-radius: 2px; background: rgba(255, 200, 0, .32); mix-blend-mode: multiply; pointer-events: none; }
+.doc-page .pdf-hit.on { background: rgba(255, 130, 0, .55); box-shadow: 0 0 0 2px rgba(255, 130, 0, .7); }
+/* The PDF mode's toolbar controls, thumbnails, bookmarks and search. */
+.pdf-seg { display: flex; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.pdf-seg button { display: grid; place-items: center; width: 28px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--faint); cursor: pointer; }
+.pdf-seg button .i { width: 14px; height: 14px; }
+.pdf-seg button[aria-pressed="true"] { background: var(--row-on); color: var(--text); }
+.pdf-thumbs { display: grid; justify-items: center; gap: 10px; padding: 4px 0 20px; }
+.pdf-thumb { display: grid; justify-items: center; gap: 4px; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--faint); font: var(--z-2xs) var(--zed); cursor: pointer; }
+.pdf-thumb:hover { background: var(--row-hover); }
+.pdf-thumb.on { background: var(--row-on); color: var(--text); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
+.pdf-thumb-pic { display: block; min-width: 120px; min-height: 150px; background: var(--page-ground, #fff); box-shadow: 0 1px 6px rgba(0, 0, 0, .35); }
+.pdf-thumb-pic:has(canvas) { min-width: 0; min-height: 0; }
+.pdf-thumb-pic canvas { display: block; }
+.pdf-mark-row { display: block; width: 100%; padding: 4px 8px 4px calc(8px + var(--depth, 0) * 12px); border: 0; border-radius: 5px; background: none; color: var(--muted); font: var(--z-xs)/1.45 var(--zed); text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-mark-row.top { color: var(--text); }
+.pdf-mark-row:hover { background: var(--row-hover); color: var(--text); }
+.pdf-find input { width: 100%; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-xs) var(--zed); }
+.pdf-find input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pdf-find-said { margin: 6px 2px; font: var(--z-2xs) var(--zed); }
+.pdf-hits { display: grid; gap: 2px; }
+.pdf-hit-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; padding: 5px 8px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: var(--z-2xs)/1.5 var(--zed); text-align: left; cursor: pointer; }
+.pdf-hit-row:hover { background: var(--row-hover); }
+.pdf-hit-row.on { background: var(--row-on); color: var(--text); }
+.pdf-hit-row mark { background: rgba(255, 200, 0, .35); color: var(--text); border-radius: 2px; }
+.pdf-hit-page { color: var(--faint); min-width: 2ch; text-align: right; }

@@ -24,6 +24,15 @@ const NEAR = "1200px 0px";
 /** The space around the pages, matching the box's padding. */
 export const GUTTER = 32;
 
+/** A rectangle in a page's own points, `[x1, y1, x2, y2]` from its bottom
+ *  left, as `viewport` shows it: two opposite corners carried over, which
+ *  is enough for a page turned by quarters. @param {any} viewport @param {number[]} rect */
+export function toViewport(viewport, rect) {
+  const [a, b] = viewport.convertToViewportPoint(rect[0], rect[1]);
+  const [c, d] = viewport.convertToViewportPoint(rect[2], rect[3]);
+  return [a, b, c, d];
+}
+
 /** The loaded library, once something has needed it. */
 let pdfjs = /** @type {any} */ (null);
 
@@ -55,14 +64,25 @@ function assets() {
 }
 
 /** @typedef {{n: number, slot: HTMLElement, w: number, h: number, drawn: number, task: any}} Page */
+/** How the pages are laid out: one after another, one at a time, or two side by side.
+ *  @typedef {"continuous" | "single" | "two"} Layout */
+/** What a search found on a page: boxes in points from the page's top left.
+ *  @typedef {{page: number, rects: {x: number, y: number, w: number, h: number}[]}} Hit */
+/** Where a link goes: a web address, or somewhere in the document.
+ *  @typedef {{url: string} | {dest: any}} Link */
 /** @typedef {{doc: any, scale: number, pages: Page[], seen: IntersectionObserver}} Open */
 
 /**
  * @param {HTMLElement} box the element that scrolls, and holds the pages
  * @param {{onWhere?: (page: number, pages: number, scale: number) => void,
- *   onPoint?: (page: number, x: number, y: number) => void}} [hooks]
+ *   onPoint?: (page: number, x: number, y: number) => void,
+ *   onLink?: (link: {url: string}) => void,
+ *   onDrawn?: (page: number, slot: HTMLElement, viewport: any, pdfPage: any) => void}} [hooks]
  *   `onWhere`, as the page at the top changes; `onPoint`, on a double-click,
- *   with the point in PDF points from the page's top left
+ *   with the point in PDF points from the page's top left; `onLink`, for a
+ *   link out of the document — given, a page's links are drawn over it and
+ *   one into the document goes there; `onDrawn`, as each page is drawn, for
+ *   what a mode lays over it
  */
 export function createPdfView(box, hooks = {}) {
   /** @type {Open | null} */
@@ -73,16 +93,31 @@ export function createPdfView(box, hooks = {}) {
   let fitting = true;
   /** `g` pressed once, waiting for the second of `gg`. */
   let pendingG = 0;
+  /** How the pages are laid out, and the page shown when it is one at a time. */
+  let arrangement = /** @type {Layout} */ ("continuous");
+  let single = 1;
+  /** Degrees the view is turned by, on top of each page's own turn. */
+  let turned = 0;
+  /** Colours to read in — dark, sepia — or the document's own. @type {{background: string, foreground: string} | null} */
+  let colors = null;
+  /** What a search found, and which of it is the one being looked at. @type {Hit[]} */
+  let hits = [];
+  let hitOn = -1;
 
   const note = (/** @type {string} */ text) => {
     box.innerHTML = `<div class="doc-note">${text}</div>`;
   };
 
-  /** The scale at which a page `width` wide fills the box, within the steps' range. */
+  /** The scale at which a page `width` wide fills the box — two of them,
+   *  side by side — within the steps' range. */
   function fitted(/** @type {number} */ width) {
     const room = (box.clientWidth || 800) - GUTTER;
-    return Math.min(ZOOM[ZOOM.length - 1], Math.max(ZOOM[0], room / width));
+    const across = arrangement === "two" ? 2 * width + 16 : width;
+    return Math.min(ZOOM[ZOOM.length - 1], Math.max(ZOOM[0], room / across));
   }
+
+  /** A page's viewport, turned as the view is. @param {any} pdfPage @param {number} scale */
+  const viewportOf = (pdfPage, scale) => pdfPage.getViewport({ scale, rotation: (pdfPage.rotate + turned) % 360 });
 
   /** Each slot at its page's size, at the current scale. */
   function layout() {
@@ -110,7 +145,7 @@ export function createPdfView(box, hooks = {}) {
     const { doc, scale } = into;
     const pdfPage = await doc.getPage(page.n);
     if (into.scale !== scale) return;
-    const viewport = pdfPage.getViewport({ scale });
+    const viewport = viewportOf(pdfPage, scale);
     // Its own size, which a document of mixed pages need not share with the first.
     page.w = viewport.width / scale;
     page.h = viewport.height / scale;
@@ -121,7 +156,10 @@ export function createPdfView(box, hooks = {}) {
     const canvas = document.createElement("canvas");
     canvas.width = Math.floor(viewport.width * ratio);
     canvas.height = Math.floor(viewport.height * ratio);
-    const task = pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport, transform: ratio === 1 ? null : [ratio, 0, 0, ratio, 0, 0] });
+    const task = pdfPage.render({
+      canvasContext: canvas.getContext("2d"), viewport, transform: ratio === 1 ? null : [ratio, 0, 0, ratio, 0, 0],
+      ...(colors ? { pageColors: colors } : {}),
+    });
     page.task = task;
     try {
       await task.promise;
@@ -139,11 +177,63 @@ export function createPdfView(box, hooks = {}) {
     const mark = page.slot.querySelector(".pdf-mark");
     page.slot.replaceChildren(canvas, text, ...(mark ? [mark] : []));
     page.drawn = scale;
+    paint(page);
     try {
       await new pdfjs.TextLayer({ textContentSource: pdfPage.streamTextContent(), container: text, viewport }).render();
     } catch {
       // A page whose text cannot be read is still a picture of itself.
     }
+    if (hooks.onLink) await linksOver(page, pdfPage, viewport);
+    if (page.drawn === scale) hooks.onDrawn?.(page.n, page.slot, viewport, pdfPage);
+  }
+
+  /** A page's links, laid over it: each a box that goes where it says. */
+  async function linksOver(/** @type {Page} */ page, /** @type {any} */ pdfPage, /** @type {any} */ viewport) {
+    let annotations = [];
+    try {
+      annotations = await pdfPage.getAnnotations({ intent: "display" });
+    } catch {
+      return;
+    }
+    for (const a of annotations) {
+      if (a.subtype !== "Link" || (!a.url && !a.dest && !a.unsafeUrl)) continue;
+      const [x1, y1, x2, y2] = toViewport(viewport, a.rect);
+      const link = document.createElement("a");
+      link.className = "pdf-link";
+      link.href = "#";
+      link.style.left = `${Math.min(x1, x2)}px`;
+      link.style.top = `${Math.min(y1, y2)}px`;
+      link.style.width = `${Math.abs(x2 - x1)}px`;
+      link.style.height = `${Math.abs(y2 - y1)}px`;
+      const url = a.url ?? a.unsafeUrl;
+      if (url) {
+        link.dataset.url = url;
+        link.title = url;
+      } else {
+        link.dataset.dest = JSON.stringify(a.dest);
+      }
+      page.slot.append(link);
+    }
+  }
+
+  /** What a search found on a drawn page, marked over it — the one being
+   *  looked at more strongly. */
+  function paint(/** @type {Page} */ page) {
+    for (const old of page.slot.querySelectorAll(".pdf-hit")) old.remove();
+    if (!open || !page.drawn) return;
+    const s = open.scale;
+    hits.forEach((hit, i) => {
+      if (hit.page !== page.n) return;
+      for (const r of hit.rects) {
+        const mark = document.createElement("div");
+        mark.className = `pdf-hit${i === hitOn ? " on" : ""}`;
+        mark.style.left = `${r.x * s}px`;
+        mark.style.top = `${r.y * s}px`;
+        mark.style.width = `${Math.max(2, r.w * s)}px`;
+        mark.style.height = `${Math.max(2, r.h * s)}px`;
+        page.slot.append(mark);
+      }
+    });
   }
 
   /** Let a page's picture go, keeping its place. */
@@ -172,7 +262,7 @@ export function createPdfView(box, hooks = {}) {
 
   /** Slots for every page of `doc`, laid out at the first page's size. */
   async function slots(/** @type {any} */ doc, /** @type {number | null} */ scale) {
-    const first = (await doc.getPage(1)).getViewport({ scale: 1 });
+    const first = viewportOf(await doc.getPage(1), 1);
     /** @type {Page[]} */
     const pages = [];
     for (let n = 1; n <= doc.numPages; n++) {
@@ -218,6 +308,10 @@ export function createPdfView(box, hooks = {}) {
     }
     box.replaceChildren(...made.pages.map((p) => p.slot));
     open = made;
+    hits = [];
+    hitOn = -1;
+    single = 1;
+    arrange();
     layout();
     for (const page of made.pages) made.seen.observe(page.slot);
     if (at.page && at.page > 1) goTo(at.page);
@@ -262,6 +356,8 @@ export function createPdfView(box, hooks = {}) {
     const old = open;
     box.replaceChildren(...made.pages.map((p) => p.slot));
     open = made;
+    single = Math.min(single, made.pages.length);
+    arrange();
     layout();
     const page = was ? made.pages[Math.min(made.pages.length, was.n) - 1] : null;
     if (page && was) {
@@ -310,7 +406,135 @@ export function createPdfView(box, hooks = {}) {
   /** Show page `n`, `offset` points down it, at the top of the box. */
   function goTo(/** @type {number} */ n, offset = 0) {
     const page = open?.pages[Math.min(open.pages.length, Math.max(1, n)) - 1];
-    if (page && open) box.scrollTop = page.slot.offsetTop + offset * open.scale - GUTTER / 2;
+    if (!page || !open) return;
+    if (arrangement === "single" && single !== page.n) {
+      single = page.n;
+      arrange();
+    }
+    box.scrollTop = page.slot.offsetTop + offset * open.scale - GUTTER / 2;
+    if (arrangement === "single") where();
+  }
+
+  /** The slots shown as the layout has them: all, or the one page. */
+  function arrange() {
+    box.dataset.layout = arrangement;
+    if (!open) return;
+    for (const page of open.pages) page.slot.hidden = arrangement === "single" && page.n !== single;
+  }
+
+  /** Lay the pages out another way, keeping the page that was in view. @param {Layout} how */
+  function setLayout(how) {
+    if (how === arrangement) return;
+    const at = open ? currentPage() : 1;
+    arrangement = how;
+    single = at;
+    arrange();
+    if (!open) return;
+    if (fitting) {
+      const scale = fitted(open.pages[0].w);
+      if (Math.abs(scale - open.scale) > 1e-6) {
+        for (const page of open.pages) forget(page);
+        open.scale = scale;
+      }
+    }
+    layout();
+    open.seen.disconnect();
+    for (const p of open.pages) open.seen.observe(p.slot);
+    goTo(at);
+    where();
+  }
+
+  /** Turn the view by `by` degrees — not the document, which the core turns. */
+  function rotate(/** @type {number} */ by) {
+    turned = (((turned + by) % 360) + 360) % 360;
+    if (!open) return;
+    const at = currentPage();
+    for (const page of open.pages) {
+      forget(page);
+      if (Math.abs(by) % 180 === 90) [page.w, page.h] = [page.h, page.w];
+    }
+    if (fitting) open.scale = fitted(open.pages[0].w);
+    layout();
+    open.seen.disconnect();
+    for (const p of open.pages) open.seen.observe(p.slot);
+    goTo(at);
+  }
+
+  /** Read in other colours — or, given nothing, the document's own. @param {{background: string, foreground: string} | null} chosen */
+  function setColors(chosen) {
+    colors = chosen;
+    box.style.setProperty("--page-ground", chosen?.background ?? "#fff");
+    if (!open) return;
+    for (const page of open.pages) forget(page);
+    open.seen.disconnect();
+    for (const p of open.pages) open.seen.observe(p.slot);
+  }
+
+  /** Mark what a search found, `on` the one looked at — brought into view.
+   *  @param {Hit[]} found @param {number} on */
+  function mark(found, on = -1) {
+    hits = found;
+    hitOn = on;
+    if (!open) return;
+    for (const page of open.pages) paint(page);
+    const hit = hits[on];
+    if (!hit?.rects.length) return;
+    const xs = hit.rects.map((r) => r.x), ys = hit.rects.map((r) => r.y);
+    const right = Math.max(...hit.rects.map((r) => r.x + r.w)), bottom = Math.max(...hit.rects.map((r) => r.y + r.h));
+    show_(hit.page, { x: Math.min(...xs), y: Math.min(...ys), w: right - Math.min(...xs), h: bottom - Math.min(...ys) });
+  }
+
+  /** Bring a box on page `n` into view, without marking it. @param {number} n @param {{x: number, y: number, w: number, h: number}} rect */
+  function show_(n, rect) {
+    if (!open) return;
+    const page = open.pages[n - 1];
+    if (!page) return;
+    if (arrangement === "single" && single !== n) goTo(n);
+    const top = page.slot.offsetTop + rect.y * open.scale;
+    if (top < box.scrollTop + 40 || top + rect.h * open.scale > box.scrollTop + box.clientHeight - 40) {
+      box.scrollTop = top - box.clientHeight / 3;
+    }
+  }
+
+  /** Where a destination in the document is: its page, and how far down it,
+   *  in points — or nothing, for one that names nothing. @param {any} dest */
+  async function resolve(dest) {
+    if (!open) return null;
+    const doc = open.doc;
+    let explicit = dest;
+    try {
+      if (typeof dest === "string") explicit = await doc.getDestination(dest);
+      if (!Array.isArray(explicit)) return null;
+      const [ref, kind, ...args] = explicit;
+      const index = ref && typeof ref === "object" ? await doc.getPageIndex(ref) : Number(ref);
+      if (!Number.isInteger(index)) return null;
+      const n = index + 1;
+      const name = kind?.name;
+      const top = name === "XYZ" ? args[1] : name === "FitH" || name === "FitBH" ? args[0] : null;
+      let offset = 0;
+      if (typeof top === "number") {
+        const viewport = viewportOf(await doc.getPage(n), 1);
+        offset = Math.max(0, viewport.convertToViewportPoint(0, top)[1]);
+      }
+      return { page: n, offset };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Go to a destination in the document. @param {any} dest */
+  async function go(dest) {
+    const at = await resolve(dest);
+    if (at) goTo(at.page, at.offset);
+    return Boolean(at);
+  }
+
+  /** The page in view: the one a third of the way down the box. */
+  function currentPage() {
+    if (!open) return 1;
+    if (arrangement === "single") return single;
+    const line = box.scrollTop + box.clientHeight / 3;
+    return (open.pages.find((p) => p.slot.offsetTop + p.slot.offsetHeight >= line) ?? open.pages[open.pages.length - 1]).n;
   }
 
   /** Bring a box on page `n` — in points, from the page's top left — into
@@ -338,9 +562,7 @@ export function createPdfView(box, hooks = {}) {
   /** Which page is at the top of the box. */
   function where() {
     if (!open) return;
-    const line = box.scrollTop + box.clientHeight / 3;
-    const page = open.pages.find((p) => p.slot.offsetTop + p.slot.offsetHeight >= line) ?? open.pages[open.pages.length - 1];
-    hooks.onWhere?.(page.n, open.pages.length, open.scale);
+    hooks.onWhere?.(currentPage(), open.pages.length, open.scale);
   }
 
   /** Let the document go, and empty the box. */
@@ -359,6 +581,15 @@ export function createPdfView(box, hooks = {}) {
       wherePending = false;
       where();
     });
+  });
+
+  // A link: out of the document, said; into it, gone to.
+  box.addEventListener("click", (e) => {
+    const link = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest(".pdf-link"));
+    if (!link) return;
+    e.preventDefault();
+    if (link.dataset.url) hooks.onLink?.({ url: link.dataset.url });
+    else if (link.dataset.dest) void go(JSON.parse(link.dataset.dest));
   });
 
   // A double-click on a page says where, in the page's own points.
@@ -396,6 +627,20 @@ export function createPdfView(box, hooks = {}) {
     }
     const g = pendingG;
     pendingG = 0;
+    // One page at a time, the page keys turn the page.
+    if (arrangement === "single" && open) {
+      const turn = (/** @type {number} */ by) => {
+        goTo(single + by);
+        return true;
+      };
+      switch (e.key) {
+        case " ": return turn(e.shiftKey ? -1 : 1);
+        case "PageDown": case "n": case "ArrowRight": return turn(1);
+        case "PageUp": case "p": case "ArrowLeft": return turn(-1);
+        case "Home": return turn(1 - single);
+        case "End": case "G": return turn(open.pages.length - single);
+      }
+    }
     switch (e.key) {
       case "j": case "ArrowDown": return by(60);
       case "k": case "ArrowUp": return by(-60);
@@ -433,9 +678,15 @@ export function createPdfView(box, hooks = {}) {
 
   return {
     show, reload, close, zoom, fit, goTo, reveal, key, note,
+    setLayout, rotate, setColors, mark, go, resolve,
     isOpen: () => open !== null,
     scale: () => open?.scale ?? 1,
     pages: () => open?.pages.length ?? 0,
+    page: currentPage,
+    layout: () => arrangement,
+    turned: () => turned,
+    /** The pdf.js document on screen, for what a mode reads of it. */
+    doc: () => open?.doc ?? null,
   };
 }
 
