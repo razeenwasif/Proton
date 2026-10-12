@@ -5261,6 +5261,7 @@ button.st-source-name:hover { color: var(--cc-accent); }
 /* A book renamed in the library: ✎ on its cover when it is pointed at, and
    its form in its place. */
 .pdf-book-cell { position: relative; display: grid; align-content: start; }
+.pdf-book-cell[hidden], .pdf-shelf[hidden] { display: none; }
 .pdf-book-rename { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%;
   background: rgba(0, 0, 0, .58); color: #fff; font: 13px/26px var(--sans); cursor: pointer; opacity: 0; transition: opacity .12s; }
 .pdf-book-cell:hover .pdf-book-rename, .pdf-book-cell:focus-within .pdf-book-rename { opacity: 1; }

@@ -137,6 +137,15 @@ struct LiveRun {
     slug: String,
     experiment: String,
     run: Run,
+    /// How much it had printed, out and err, when its detail was last sent.
+    printed: (u64, u64),
+}
+
+/// How much a run has printed so far: its two logs' lengths, by their
+/// sizes alone.
+fn printed(dir: &Path) -> (u64, u64) {
+    let len = |name: &str| std::fs::metadata(dir.join(name)).map_or(0, |m| m.len());
+    (len("stdout.txt"), len("stderr.txt"))
 }
 
 /// The machine's Lab, made the first time it is asked for.
@@ -540,7 +549,7 @@ impl Research {
         experiment.status = ExperimentStatus::Running;
         experiment.run = Some(run_id.clone());
         let _ = folder.write_experiment(&experiment);
-        self.runs.push(LiveRun { slug: folder.slug().to_string(), experiment: id.to_string(), run });
+        self.runs.push(LiveRun { slug: folder.slug().to_string(), experiment: id.to_string(), run, printed: (0, 0) });
         Ok(run_id)
     }
 
@@ -556,7 +565,7 @@ impl Research {
     /// round has out is let go.
     pub fn shutdown(&mut self) {
         for live in std::mem::take(&mut self.runs) {
-            let LiveRun { slug, experiment, run } = live;
+            let LiveRun { slug, experiment, run, .. } = live;
             // Let go of, a run stops its whole group and says so in its record.
             drop(run);
             if let Ok(folder) = self.store.open(&slug) {
@@ -700,7 +709,14 @@ impl Research {
             if live.run.poll() {
                 ended.push(i);
             } else if self.showing_run.as_deref() == Some(live.run.id.as_str()) {
-                moved = true;
+                // Only once it has printed something more: sent on every
+                // heartbeat, a long run's whole log was read again sixty
+                // times a second.
+                let now = printed(live.run.dir());
+                if now != live.printed {
+                    live.printed = now;
+                    moved = true;
+                }
             }
         }
         let mut redraw = false;

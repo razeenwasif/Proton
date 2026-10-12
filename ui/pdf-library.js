@@ -103,9 +103,9 @@ export function createPdfLibrary(host) {
       `</button>`;
   }
 
-  /** @param {string} title @param {Book[]} books @param {string} [note] */
-  function shelfHtml(title, books, note = "") {
-    return `<section class="pdf-shelf"><h4>${esc(title)} <span class="lab-faint">${books.length}${note ? ` · ${esc(note)}` : ""}</span></h4>` +
+  /** @param {string} title @param {Book[]} books @param {string} [note] @param {boolean} [reading] */
+  function shelfHtml(title, books, note = "", reading = false) {
+    return `<section class="pdf-shelf"${reading ? " data-pdf-reading" : ""}><h4>${esc(title)} <span class="lab-faint">${books.length}${note ? ` · ${esc(note)}` : ""}</span></h4>` +
       `<div class="pdf-books">${books.map(bookHtml).join("")}</div></section>`;
   }
 
@@ -131,18 +131,15 @@ export function createPdfLibrary(host) {
       host.box.innerHTML = missing + foldersHtml();
       return;
     }
-    const books = lib.books.filter(named);
+    // Every book drawn, and what is typed hides those it does not name.
+    const books = lib.books;
     const walking = lib.walking ? `<p class="lab-faint"><span class="lab-spin"></span> Looking through ${esc(lib.folders.join(", "))}…</p>` : "";
     if (!lib.books.length) {
       host.box.innerHTML = missing + (walking || `<p class="lab-faint">No PDFs in ${esc(lib.folders.join(", "))} yet.</p>`);
       return;
     }
-    if (!books.length) {
-      host.box.innerHTML = `<p class="lab-faint">None of your books is called that.</p>`;
-      return;
-    }
     // Being read: the last read first.
-    const reading = state.query ? [] : books.filter((b) => b.read).sort((a, b) => (b.read ?? 0) - (a.read ?? 0)).slice(0, READING);
+    const reading = books.filter((b) => b.read).sort((a, b) => (b.read ?? 0) - (a.read ?? 0)).slice(0, READING);
     // A shelf for each folder, the library folder's own books first.
     /** @type {Map<string, Book[]>} */
     const shelves = new Map();
@@ -153,8 +150,31 @@ export function createPdfLibrary(host) {
     }
     const shelved = [...shelves.entries()].sort(([a], [b]) => a.localeCompare(b))
       .map(([key, of]) => shelfHtml(key.split("\u0000")[2], of.sort((a, b) => a.title.localeCompare(b.title)))).join("");
-    host.box.innerHTML = missing + walking + (reading.length ? shelfHtml("Continue reading", reading) : "") + shelved;
+    host.box.innerHTML = missing + walking + (reading.length ? shelfHtml("Continue reading", reading, "", true) : "") + shelved +
+      `<p class="lab-faint" data-pdf-lib-none hidden>None of your books is called that.</p>`;
+    narrow();
     for (const cover of host.box.querySelectorAll(".pdf-cover:not(.drawn)")) seen.observe(cover);
+  }
+
+  /** The books what is typed does not name hidden, and the shelves left
+   *  with none — nothing drawn again, every cover kept as it is. */
+  function narrow() {
+    const books = new Map((state.library?.books ?? []).map((b) => [b.path, b]));
+    let any = false;
+    for (const shelf of /** @type {NodeListOf<HTMLElement>} */ (host.box.querySelectorAll(".pdf-shelf"))) {
+      let shown = 0;
+      for (const cell of /** @type {NodeListOf<HTMLElement>} */ (shelf.querySelectorAll(".pdf-book-cell"))) {
+        const path = cell.dataset.path ?? /** @type {HTMLElement | null} */ (cell.querySelector("[data-pdf-book]"))?.dataset.pdfBook ?? "";
+        const book = books.get(path);
+        cell.hidden = !(book && named(book));
+        if (!cell.hidden) shown++;
+      }
+      // What is being read is for coming back to, not for looking things up.
+      shelf.hidden = shown === 0 || ("pdfReading" in shelf.dataset && Boolean(state.query));
+      any ||= !shelf.hidden;
+    }
+    const none = /** @type {HTMLElement | null} */ (host.box.querySelector("[data-pdf-lib-none]"));
+    if (none) none.hidden = any;
   }
 
   /** The library, as the core walked it. @param {LibraryEvent} event */
@@ -180,7 +200,7 @@ export function createPdfLibrary(host) {
   function filter(query) {
     if (query === state.query) return;
     state.query = query;
-    render();
+    narrow();
   }
 
   /** The first book what is typed names, to open with Enter. */

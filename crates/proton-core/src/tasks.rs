@@ -94,10 +94,15 @@ impl Queue {
     }
 
     /// Keep the running task's line up to date while it works.
-    pub fn progress(&mut self, note: &str, tools: usize) {
-        if let Some(task) = self.running_mut() {
-            task.note = note.to_string();
-            task.tools = tools;
+    /// Whether it changed: the same note and count again is nothing to say.
+    pub fn progress(&mut self, note: &str, tools: usize) -> bool {
+        match self.running_mut() {
+            Some(task) if task.note != note || task.tools != tools => {
+                task.note = note.to_string();
+                task.tools = tools;
+                true
+            }
+            _ => false,
         }
     }
 
@@ -164,6 +169,16 @@ mod tests {
         assert_eq!(queue.all()[0].state, TaskState::Running);
         assert_eq!(queue.all()[1].state, TaskState::Queued);
         assert_eq!(queue.running().unwrap().prompt, "first");
+    }
+
+    #[test]
+    fn progress_is_said_to_have_moved_only_when_it_did() {
+        let mut queue = Queue::default();
+        assert!(!queue.progress("nothing running", 0));
+        queue.push("first", false);
+        assert!(queue.progress("Reading main.rs", 1));
+        assert!(!queue.progress("Reading main.rs", 1), "the same again is no news");
+        assert!(queue.progress("Reading main.rs", 2));
     }
 
     #[test]

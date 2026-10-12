@@ -1995,6 +1995,9 @@ pub enum Event {
         version: u64,
         page: Option<u32>,
         quiet: bool,
+        /// Which layout of its pages it is in: the same across comments and
+        /// form values, so what was read of its pages' text still holds.
+        layout: u64,
     },
     /// Where Lean and Mathlib stand: one for the machine, whichever project
     /// is open.

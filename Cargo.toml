@@ -83,3 +83,11 @@ opt-level = 0
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.release]
+# Symbols were 16 MB of a 74 MB binary nobody debugs from the bundle; thin
+# LTO lets the crates be optimised across one another for a little time at
+# build. Unwinding stays: proton-pdf's `guarded` and the shell's recovery
+# from a poisoned lock catch panics, which `panic = "abort"` would end.
+strip = true
+lto = "thin"

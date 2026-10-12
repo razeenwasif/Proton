@@ -51,8 +51,10 @@ fn edge(text: &str, mut at: usize) -> usize {
 /// The text of a page of a tab, read once per version.
 fn page_text(tab: &mut Tab, page: u32) -> Result<&proton_pdf::text::PageText, String> {
     let doc = tab.doc.as_ref().map_err(|why| format!("{} can only be read ({why}), so its text cannot be taken apart here.", tab.name))?;
-    if tab.read.0 != tab.version {
-        tab.read = (tab.version, Default::default());
+    // Kept across comments and form values: only a change to the pages or
+    // what they draw changes their text.
+    if tab.read.0 != doc.layout() {
+        tab.read = (doc.layout(), Default::default());
     }
     if !tab.read.1.contains_key(&page) {
         let text = proton_pdf::text::page(doc.document(), page)?;

@@ -263,6 +263,17 @@ await test('An idle terminal is told its size once, not once a frame', async () 
   } finally { win.echoTerminalSize = false; }
   if (!wasOpen) { toggle.click(); await settle(); }
 });
+await test('The wheel looks back through the terminal over its screen, and scrolls everything else as the browser does', async () => {
+  const screen = $('[data-term-screen]');
+  const before = win.commands.length;
+  const up = new win.WheelEvent('wheel', {deltaY: -120, bubbles: true, cancelable: true});
+  screen.dispatchEvent(up); await settle();
+  assert(up.defaultPrevented && win.commands.slice(before).some((c) => c.type === 'terminalScroll' && c.lines === 3), 'the wheel over the screen did not look back');
+  // Anywhere else the wheel is the browser's, never held for this thread.
+  const elsewhere = new win.WheelEvent('wheel', {deltaY: 120, bubbles: true, cancelable: true});
+  $('.workspace.on')?.dispatchEvent(elsewhere); await settle();
+  assert(!elsewhere.defaultPrevented && !win.commands.slice(before).some((c) => c.type === 'terminalScroll' && c.lines === -3), 'the wheel was taken outside the terminal');
+});
 await test('Tab in the code goes to the editor and does not walk off to the next control', async () => {
   const editor = $('.workspace.on .split.on [data-editor]');
   editor.focus();
@@ -1300,6 +1311,12 @@ await test('Codex provider selection clears the previous model and displays Astr
   assert($('[data-model-pick]').value === 'gpt-6-astra', 'Astra is not selected');
   key('Escape'); await settle();
 });
+/** Codex's dock, showing the agent: only a thread on screen is painted as
+ *  an answer streams — one off screen is painted when it comes into view. */
+const showAgentDock = async () => {
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  $('#codex-dock [data-dockpanel="agent"]')?.click(); await settle();
+};
 await test('Antigravity is a provider, with its own models and its own tools named', async () => {
   $('.rail [data-open="settings"]').click(); await settle();
   $('[data-st-nav="models"]').click();
@@ -1309,6 +1326,7 @@ await test('Antigravity is a provider, with its own models and its own tools nam
   assert(writes.some(c => c.key === 'agent.provider' && c.value === 'antigravity'), 'Antigravity was not selected');
   assert($('[data-set-bool="agent.antigravityEdits"]') && !$('[data-set-bool="agent.antigravityEdits"]').checked, 'edits are not off by default');
   key('Escape'); await settle();
+  await showAgentDock();
   await win.pushEvents([{type: 'agent', provider: 'antigravity', model: 'gemini-3.8-flash-high',
     credential: 'Uses your Antigravity sign-in', activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0,
     transcript: [{speaker: 'you', text: 'what does main do?', thinking: '', streaming: false, calls: []},
@@ -1325,6 +1343,7 @@ await test('An answer in the agent panel colours its code, draws its TeX, keeps 
   const answer = ['Run it like this:', '', '```rust', '#[derive(Debug)]', 'fn main() { let n: u32 = 42; println!("{n}"); } // done', '```', '',
     'The energy is $E = mc^2$; $5 and $10 are prices, and \\$x\\$ is not TeX. Then', '$$', '\\int_0^1 x^2\\,dx = \\tfrac{1}{3}', '$$',
     'See [[notes/physics.md § Energy L1-4]] and [the docs](https://example.com/a).', '', '<img src=x onerror="window.pwned=1">'].join('\n');
+  await showAgentDock();
   await agent([{speaker: 'you', text: 'why is $x$ here?', thinking: '', streaming: false, calls: []},
     {speaker: 'proton', text: answer, thinking: 'Recall $a^2 + b^2 = c^2$.', streaming: false, calls: []}]);
   const thread = $('#codex-dock [data-agent-thread]');

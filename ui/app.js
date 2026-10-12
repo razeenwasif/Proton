@@ -3856,11 +3856,12 @@ const TERM_WHEEL_ROWS = 3;
 
 // The wheel over the screen looks back through the history. The panel renders
 // exactly the rows the core sent, so there is nothing here for the browser to
-// scroll — without this the wheel does nothing at all.
-document.addEventListener(
+// scroll — without this the wheel does nothing at all. On the screen alone:
+// a listener that may cancel the wheel, on the document, sends every scroll
+// in the window — the editor's, a PDF's, the chat's — through this thread.
+$("[data-term-screen]")?.addEventListener(
   "wheel",
   (e) => {
-    if (!e.target.closest("[data-term-screen]")) return;
     e.preventDefault();
     // Up the page is back in time, which is the direction a wheel already
     // means: deltaY is negative going up.
@@ -6591,6 +6592,19 @@ function showDataPanel(which) {
   }
 }
 
+/** The conversation as last painted, for a copy of it that comes into view stale. */
+let lastThread = null;
+const threadSeen = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    const thread = /** @type {HTMLElement} */ (entry.target);
+    if (!entry.isIntersecting || !("stale" in thread.dataset) || !lastThread) continue;
+    delete thread.dataset.stale;
+    paintThread(thread, lastThread.transcript, lastThread.keys);
+    thread.scrollTop = thread.scrollHeight;
+  }
+});
+for (const thread of $$("[data-agent-thread]")) threadSeen.observe(thread);
+
 function renderAgent(event) {
   answeringModel = event.model ?? "";
   // Working where it cannot be seen: a dot on Data's Agent tab says so.
@@ -6606,8 +6620,22 @@ function renderAgent(event) {
   // Entry by entry: what has not changed is not drawn again — while a turn
   // streams, only its last entry grows.
   const keys = event.transcript.map((entry) => `${answeringModel}\u0000${JSON.stringify(entry)}`);
-  for (const thread of $$("[data-agent-thread]")) {
-    const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60;
+  lastThread = { transcript: event.transcript, keys };
+  // Only the copies on screen are painted — each paint is the answer's
+  // markdown, code and TeX again, and there are four copies. The rest are
+  // marked stale and painted when they come into view. Every read before
+  // any write, so painting one does not make the next lay out again.
+  const threads = $$("[data-agent-thread]").map((thread) => ({
+    thread,
+    shown: thread.checkVisibility ? thread.checkVisibility() : thread.offsetParent !== null,
+    atBottom: thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60,
+  }));
+  for (const { thread, shown, atBottom } of threads) {
+    if (!shown) {
+      thread.dataset.stale = "";
+      continue;
+    }
+    delete thread.dataset.stale;
     paintThread(thread, event.transcript, keys);
     // Follow the answer only if the reader was already at the bottom —
     // yanking someone back down while they are reading is worse than

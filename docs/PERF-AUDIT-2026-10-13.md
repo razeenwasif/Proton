@@ -222,3 +222,22 @@ Take these in the installed app:
 - **Push size.** Log `serde_json::to_vec(&events).len()` before `app.emit` during a long agent stream.
 - **Memory.** Run `footprint $(pgrep proton-shell)` before and after opening a 100 MB PDF, and after one rotation.
 - **Window traces.** Record a Web Inspector timeline during an agent stream: expect four markdown passes and four forced layouts per event.
+
+## Done
+
+### The quick wins, 13 October
+
+- **PDF: no second serialisation for the size.** `info_event` takes the view's length when that is what saving writes (`Doc::view_is_saved`).
+- **PDF: rescanning only when the pages change.** A layout counter on `Doc` moves only with ops that change the pages or what they draw (`Op::reshapes`: delete, insert, move, insert-from, flatten, OCR), and with their undo or redo. `PdfView` carries it. The window looks for pages with no text again only when it moves, and the agent keeps its page text across comments and form values.
+  - Measured in release, on a copy of the same 38 MB book:
+    - an edit: 150 ms → 97 ms;
+    - the first highlight: 263 ms → 151 ms;
+    - undo: 164 ms → 109 ms.
+  - The window's 2 s rescan no longer follows a comment or a form value.
+- **Agent: the heartbeat can rest.** Tasks are sent only when their note or tool count moves (`Queue::progress` says whether), so the loop rests through a turn's silences.
+- **Agent: one painted copy.** Only copies of the conversation on screen are painted. The others are marked stale and painted when they come into view (an `IntersectionObserver`).
+- **Research: the Lab run read only when it grows.** The shown run's detail is sent only when its logs grow, by their sizes.
+- **Scrolling stays off the main thread.** The terminal's wheel listener is on the terminal's screen, not the document.
+- **PDF library: nothing redrawn while searching.** Its search hides books instead of drawing the shelves again.
+- **PDF: thumbnails capped.** The sidebar and the grid keep 150 thumbnails, the least lately drawn let go.
+- **`[profile.release]`:** `strip = true`, `lto = "thin"`.

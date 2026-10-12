@@ -607,12 +607,15 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     // What is typed narrows the shelves; Enter opens the first book it names.
     const input = $('[data-pdf-open-path]');
     input.value = 'bishop'; input.dispatchEvent(new Event('input', {bubbles: true})); await settle();
-    const narrowed = [...lib.querySelectorAll('.pdf-book')].map((b) => b.dataset.pdfBook);
+    const visible = () => [...lib.querySelectorAll('.pdf-book')].filter((b) => b.checkVisibility()).map((b) => b.dataset.pdfBook);
+    const covers = [...lib.querySelectorAll('.pdf-cover')];
+    const narrowed = visible();
     assert(narrowed.length === 1 && narrowed[0].endsWith('bishop.pdf'), `not narrowed: ${narrowed}`);
+    assert(covers.every((c) => c.isConnected), 'the shelves were drawn again for a key typed');
     at = win.commands.length;
     input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); await settle();
     assert(sent(at, 'pdfOpen')[0]?.path === '~/Documents/Books/Machine Learning/bishop.pdf', `Enter did not open the book: ${JSON.stringify(sent(at, 'pdfOpen'))}`);
-    assert(lib.querySelectorAll('.pdf-book').length === 5, 'opening a book left the shelves narrowed');
+    assert(visible().length === 5, 'opening a book left the shelves narrowed');
     // A book clicked opens: the core opens it where it was left.
     at = win.commands.length;
     lib.querySelector('[data-pdf-book$="mml-book.pdf"]').click(); await settle();

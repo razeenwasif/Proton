@@ -83,6 +83,13 @@ impl Op {
     }
 
     /// Whether it can be saved as an update appended to the file.
+    /// Whether it changes which pages there are, their order, or what their
+    /// own content draws: what text is read of the pages, and which have
+    /// none, depends on these and on no other change.
+    pub fn reshapes(&self) -> bool {
+        matches!(self, Op::Delete { .. } | Op::InsertBlank { .. } | Op::Move { .. } | Op::InsertFrom { .. } | Op::Flatten | Op::Ocr { .. })
+    }
+
     pub fn incremental(&self) -> bool {
         match self {
             Op::Rotate { .. } | Op::Delete { .. } | Op::InsertBlank { .. } | Op::Move { .. } | Op::InsertFrom { .. } => true,

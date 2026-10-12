@@ -631,3 +631,27 @@ fn the_library_shelves_the_books_in_its_folders_draws_their_covers_and_opens_eac
 fn folder_of(path: &std::path::Path) -> String {
     proton_core::folder::tilde(path)
 }
+
+#[test]
+fn a_comment_keeps_the_pages_layout_and_says_its_saved_size_without_writing_it_twice() {
+    let s = scratch("layout");
+    std::fs::write(s.0.join("paper.pdf"), pdf(&["One", "Two", "Three"])).unwrap();
+    let mut session = Session::new(&s.0);
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    session.apply(Command::PdfOpen { path: "paper.pdf".into(), page: None, password: None });
+    let layout = |events: &[Event]| events.iter().find_map(|e| match e {
+        Event::PdfView { layout, .. } => Some(*layout),
+        _ => None,
+    });
+    let mark: proton_pdf::annot::Mark = serde_json::from_value(serde_json::json!({"kind": "note", "rect": [100.0, 700.0, 0.0, 0.0], "color": "#ffd400", "text": "Hm"})).unwrap();
+    let events = session.apply(Command::PdfComment { page: 1, mark });
+    assert_eq!(layout(&events), Some(0), "a comment changed the pages' layout");
+    // The size it would be saved at is the view's, which it is.
+    let (key, now) = (
+        events.iter().find_map(|e| match e { Event::PdfView { key, .. } => Some(key.clone()), _ => None }).unwrap(),
+        events.iter().find_map(|e| match e { Event::PdfInfo { now, .. } => Some(*now), _ => None }).unwrap(),
+    );
+    assert_eq!(session.document_bytes(&key).unwrap().len() as u32, now);
+    let events = session.apply(Command::PdfDelete { pages: vec![2] });
+    assert_eq!(layout(&events), Some(1));
+}

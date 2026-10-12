@@ -33,6 +33,10 @@ pub struct Doc {
     /// The file on disk is encrypted: the keys it was read with, and the
     /// password that opened it — kept in memory, never said.
     sealed: Option<(EncryptionState, String)>,
+    /// Goes up with each change to which pages there are, their order, or
+    /// what their own content draws — made, undone or redone: what the text
+    /// read of the pages depends on, and nothing else.
+    layout: u64,
 }
 
 /// What opening said: the document, or why it opens only to be read, or
@@ -96,7 +100,7 @@ impl Doc {
             Err(Some(why)) => return Opened::ReadOnly(format!("it could not be read to change it — {why}")),
         };
         let sealed = state.map(|s| (s, password.unwrap_or("").to_string()));
-        Opened::Editable(Box::new(Doc { current: origin.clone(), on_disk: origin.clone(), origin, disk: bytes, log: Vec::new(), at: 0, saved: Some(0), sealed }))
+        Opened::Editable(Box::new(Doc { current: origin.clone(), on_disk: origin.clone(), origin, disk: bytes, log: Vec::new(), at: 0, saved: Some(0), sealed, layout: 0 }))
     }
 
     /// Make a change: what was undone past is let go of.
@@ -104,6 +108,7 @@ impl Doc {
         let mut next = self.current.clone();
         guarded("changing it", || op.apply(&mut next))?;
         self.current = next;
+        self.layout += u64::from(op.reshapes());
         self.log.truncate(self.at);
         if self.saved.is_some_and(|s| s > self.at) {
             // The file on disk is a state no longer in the log.
@@ -125,6 +130,7 @@ impl Doc {
         }
         self.current = replayed;
         self.at -= 1;
+        self.layout += u64::from(self.log[self.at].reshapes());
         Ok(Some(self.log[self.at].said()))
     }
 
@@ -135,7 +141,20 @@ impl Doc {
         guarded("redoing", || op.apply(&mut next))?;
         self.current = next;
         self.at += 1;
+        self.layout += u64::from(op.reshapes());
         Ok(Some(op.said()))
+    }
+
+    /// Which layout of its pages the document is in: changed only by a
+    /// change to which pages there are, their order, or what they draw.
+    pub fn layout(&self) -> u64 {
+        self.layout
+    }
+
+    /// Whether what the window draws is what saving writes, byte for byte:
+    /// nothing to encrypt. Then the view's length is the saved size.
+    pub fn view_is_saved(&self) -> bool {
+        self.sealed.is_none() && !self.protected()
     }
 
     /// What undo would undo, and redo redo.
@@ -351,6 +370,25 @@ mod tests {
         assert!(second.starts_with(&first), "appended to what was saved");
         assert_eq!(rotations(&second), [0, 180]);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_layout_moves_with_the_pages_and_what_they_draw_and_not_with_comments_or_rotations() {
+        let mut doc = editable(fixture(&["One", "Two", "Three"]));
+        let note = crate::annot::Mark { kind: "note".into(), boxes: Vec::new(), rect: Some([100.0, 700.0, 0.0, 0.0]), strokes: Vec::new(), color: "#ffd400".into(), text: "Hm".into() };
+        doc.apply(Op::Comment { page: 1, mark: note, author: "Ada".into(), date: "D:2026".into(), name: "n".into() }).unwrap();
+        doc.apply(Op::Rotate { pages: vec![2], by: 90 }).unwrap();
+        assert_eq!(doc.layout(), 0, "a comment and a turn leave the pages' text as it was");
+        doc.apply(Op::Delete { pages: vec![3] }).unwrap();
+        assert_eq!(doc.layout(), 1);
+        doc.undo().unwrap();
+        assert_eq!(doc.layout(), 2, "undone, the pages are as they were — a layout of their own");
+        doc.undo().unwrap();
+        assert_eq!(doc.layout(), 2, "undoing a turn changes no text");
+        doc.redo().unwrap();
+        doc.redo().unwrap();
+        assert_eq!(doc.layout(), 3);
+        assert!(doc.view_is_saved());
     }
 
     #[test]

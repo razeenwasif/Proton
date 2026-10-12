@@ -25,6 +25,9 @@ import { createPdfView, drawSmall } from "./pdf-view.js";
 const LISTED = 60;
 /** How wide a thumbnail is drawn, in CSS pixels. */
 const THUMB = 120;
+/** How many thumbnails are kept drawn — at twice the pixels, a third of a
+ *  megabyte each — the least lately drawn let go past it. */
+const THUMBS_KEPT = 150;
 /** Reading colours, in turn: the document's own, then sepia, then night. */
 const COLORS = /** @type {const} */ ([null, { background: "#f4ecd8", foreground: "#3b2f1e" }, { background: "#1c1d21", foreground: "#d6d6d6" }]);
 
@@ -80,8 +83,11 @@ export function createPdf(host) {
   };
   /** Which search is the current one, so one overtaken stops. */
   let searchGeneration = 0;
-  /** Thumbnails drawn for the document on screen, by page. @type {Map<number, HTMLCanvasElement>} */
+  /** Thumbnails drawn for the document on screen, by page, the least lately
+   *  drawn first. @type {Map<number, HTMLCanvasElement>} */
   let thumbs = new Map();
+  /** What tells the sidebar's thumbnails they have come into view. @type {IntersectionObserver | null} */
+  let thumbSeen = null;
 
   /** The comments' tools and overlays, and the form's inputs, made once the view is. @type {ReturnType<typeof createPdfAnnot> | null} */
   let annot = null;
@@ -357,6 +363,7 @@ export function createPdf(host) {
         void thumb(/** @type {HTMLElement} */ (entry.target));
       }
     }, { root: side, rootMargin: "400px 0px" });
+    thumbSeen = seen;
     for (const t of side.querySelectorAll(".pdf-thumb")) seen.observe(t);
   }
 
@@ -365,7 +372,11 @@ export function createPdf(host) {
     const n = Number(slot.dataset.pdfThumb);
     const pic = /** @type {HTMLElement} */ (slot.querySelector(".pdf-thumb-pic"));
     const kept = thumbs.get(n);
-    if (kept) return void pic.replaceChildren(kept);
+    if (kept) {
+      thumbs.delete(n);
+      thumbs.set(n, kept);
+      return void pic.replaceChildren(kept);
+    }
     const doc = view.doc();
     if (!doc) return;
     const mine = thumbs;
@@ -374,6 +385,16 @@ export function createPdf(host) {
       if (mine !== thumbs) return;
       thumbs.set(n, canvas);
       pic.replaceChildren(canvas);
+      // Past the most kept, the least lately drawn go — drawn again if
+      // they come back into view.
+      for (const [old, gone] of thumbs) {
+        if (thumbs.size <= THUMBS_KEPT) break;
+        thumbs.delete(old);
+        gone.width = 0;
+        gone.remove();
+        const slot = side.querySelector(`.pdf-thumb[data-pdf-thumb="${old}"]`);
+        if (slot) thumbSeen?.observe(slot);
+      }
     } catch {
       // Left blank: a page that cannot be drawn small can still be read.
     }
@@ -488,9 +509,14 @@ export function createPdf(host) {
     tools.render();
   }
 
+  /** Which tab's layout of its pages was last looked through for pages with
+   *  no text: a comment or a form value leaves it as it was. */
+  let looked = "";
+
   /** What is read of a document once it is drawn: its labels and bookmarks,
-   *  and the sidebar for it. @param {boolean} fresh another document, not a version of this one */
-  async function read(fresh) {
+   *  and the sidebar for it. @param {boolean} fresh another document, not a version of this one
+   *  @param {string} layout its tab and the layout of its pages, which only a change to them moves */
+  async function read(fresh, layout) {
     const doc = view.doc();
     if (!doc) return;
     thumbs = new Map();
@@ -508,16 +534,22 @@ export function createPdf(host) {
     state.count = view.pages();
     renderSide();
     tools.render();
-    // Which pages are pictures, with no text: looked for again in each
-    // version, since OCR gives them some.
-    void reader.look(doc);
+    // Which pages are pictures, with no text: looked for again only when the
+    // pages changed — OCR gives them text, a page moved moves its number —
+    // and not after a comment, which on a long book cost seconds each.
+    if (fresh || layout !== looked) {
+      looked = layout;
+      void reader.look(doc);
+    } else {
+      reader.offer();
+    }
     if (state.grid) grid.refresh();
     // A search kept across a new version is found again in it.
     if (!fresh && state.query) void search(state.query);
   }
 
   /** A tab drawn: read again in place when it is the one already shown.
-   *  @param {{tab: number, key: string, version: number, page: number | null, quiet: boolean}} event */
+   *  @param {{tab: number, key: string, version: number, page: number | null, quiet: boolean, layout?: number}} event */
   async function show(event) {
     if (event.quiet && state.shown?.tab === event.tab) {
       state.shown = { tab: event.tab, key: event.key };
@@ -537,7 +569,7 @@ export function createPdf(host) {
     if (same && view.isOpen()) await view.reload(bytes);
     else await view.show(bytes, { page: event.page ?? undefined });
     if (same && event.page) view.goTo(event.page);
-    if (state.shown?.key === event.key) await read(!same);
+    if (state.shown?.key === event.key) await read(!same, `${event.tab}:${event.layout ?? event.version}`);
   }
 
   /* ── what is clicked and typed ───────────────────────────────────── */

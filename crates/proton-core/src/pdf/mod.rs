@@ -851,7 +851,7 @@ fn now() -> u64 {
 
 /// A tab drawn: at `page`, or where the window has it.
 fn view_event(tab: &Tab, page: Option<u32>, quiet: bool) -> Event {
-    Event::PdfView { tab: tab.id, key: tab.key(), version: tab.version, page, quiet }
+    Event::PdfView { tab: tab.id, key: tab.key(), version: tab.version, page, quiet, layout: tab.doc.as_ref().map_or(0, |d| d.layout()) }
 }
 
 /// A tab's comments, as it is now — and its form's fields.
@@ -871,7 +871,14 @@ fn info_event(tab: &Tab) -> Event {
         info: doc.map(|d| d.info()).unwrap_or_default(),
         protected: doc.is_some_and(|d| d.protected()),
         on_disk: doc.map(|d| d.size_on_disk()).unwrap_or(tab.view.len()) as u32,
-        now: doc.filter(|d| d.dirty()).and_then(|d| d.bytes().ok()).map(|b| b.len()).unwrap_or_else(|| doc.map(|d| d.size_on_disk()).unwrap_or(tab.view.len())) as u32,
+        // The view, just drawn, is what saving writes unless it is to be
+        // encrypted: its length is the size, without writing it all again.
+        now: match doc {
+            Some(d) if d.dirty() && d.view_is_saved() => tab.view.len(),
+            Some(d) if d.dirty() => d.bytes().map(|b| b.len()).unwrap_or(tab.view.len()),
+            Some(d) => d.size_on_disk(),
+            None => tab.view.len(),
+        } as u32,
     }
 }
 

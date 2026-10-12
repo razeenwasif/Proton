@@ -4495,8 +4495,11 @@ impl Workspace {
             let last = self.agent.transcript().last();
             let note = last.map(|e| first_sentence(&e.text)).unwrap_or_default();
             let tools = last.map_or(0, |e| e.calls.len());
-            self.tasks.progress(&note, tools);
-            events.push(self.tasks_event());
+            // Said only when it moved: sent on every heartbeat, it kept the
+            // shell's loop at sixty a second through a turn's long silences.
+            if self.tasks.progress(&note, tools) {
+                events.push(self.tasks_event());
+            }
         }
         events
     }

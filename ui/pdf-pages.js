@@ -6,6 +6,9 @@
 import { escapeHtml as esc } from "./html.js";
 import { drawSmall } from "./pdf-view.js";
 
+/** How many pages are kept drawn small in the grid. */
+const KEPT = 150;
+
 /** How wide a page is drawn in the grid. */
 const WIDE = 140;
 
@@ -18,8 +21,11 @@ export function createPdfGrid(host) {
   /** The pages chosen, and the one a ⇧-click runs from. */
   let chosen = new Set();
   let anchor = 0;
-  /** Pages drawn small, for the document on screen. @type {Map<number, HTMLCanvasElement>} */
+  /** Pages drawn small, for the document on screen, the least lately drawn
+   *  first. @type {Map<number, HTMLCanvasElement>} */
   let drawn = new Map();
+  /** What tells the cells they have come into view. @type {IntersectionObserver | null} */
+  let seenCells = null;
   /** Where a drag would put the pages: before this page. */
   let dropBefore = 0;
 
@@ -56,6 +62,7 @@ export function createPdfGrid(host) {
         void picture(/** @type {HTMLElement} */ (entry.target));
       }
     }, { root: box, rootMargin: "300px 0px" });
+    seenCells = seen;
     for (const cell of box.querySelectorAll(".pdf-cell")) seen.observe(cell);
   }
 
@@ -64,7 +71,11 @@ export function createPdfGrid(host) {
     const n = Number(cell.dataset.pdfCell);
     const pic = /** @type {HTMLElement} */ (cell.querySelector(".pdf-cell-pic"));
     const kept = drawn.get(n);
-    if (kept) return void pic.replaceChildren(kept);
+    if (kept) {
+      drawn.delete(n);
+      drawn.set(n, kept);
+      return void pic.replaceChildren(kept);
+    }
     const doc = host.doc();
     if (!doc) return;
     const mine = drawn;
@@ -73,6 +84,16 @@ export function createPdfGrid(host) {
       if (mine !== drawn) return;
       drawn.set(n, canvas);
       pic.replaceChildren(canvas);
+      // Past the most kept, the least lately drawn go — drawn again if
+      // they come back into view.
+      for (const [old, gone] of drawn) {
+        if (drawn.size <= KEPT) break;
+        drawn.delete(old);
+        gone.width = 0;
+        gone.remove();
+        const cell = box.querySelector(`.pdf-cell[data-pdf-cell="${old}"]`);
+        if (cell) seenCells?.observe(cell);
+      }
     } catch {
       // A page that cannot be drawn small is still a cell to choose.
     }
