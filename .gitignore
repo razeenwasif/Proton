@@ -5,6 +5,9 @@ node_modules
 /test-results/
 /playwright-report/
 *.log
+# Except the TeX logs proton-tex's tests `include_str!`. They are fixtures, not
+# output, and without them a fresh checkout's proton-tex does not compile.
+!crates/proton-tex/tests/fixtures/*.log
 .venv/
 
 # Conversations. A user's project commits these if they want them — they are
