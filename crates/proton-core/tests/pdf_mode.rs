@@ -79,7 +79,7 @@ fn pdfs_open_in_tabs_from_the_project_or_anywhere_and_are_drawn_from_memory() {
     }
 
     // Closing the one on top brings its neighbour forward; its view is gone.
-    let events = session.apply(Command::PdfClose { tab: 1 });
+    let events = session.apply(Command::PdfClose { tab: 1, discard: false });
     assert_eq!(tabs(&events).unwrap().1, Some(2));
     assert_eq!(view(&events).map(|v| v.0), Some(2));
     assert!(session.document_bytes(&key).is_none());
@@ -107,4 +107,87 @@ fn the_pdf_mode_lists_the_project_s_pdfs_and_sits_on_the_data_side() {
     listed.sort();
     assert_eq!(listed, ["Two.PDF", "papers/one.pdf"]);
     assert_eq!(ModeId::Pdf.layout().document, proton_core::contract::DocumentKind::Pdf);
+}
+
+fn dirty(events: &[Event]) -> Option<(bool, Option<String>, Option<String>)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::PdfTabs { tabs, active, .. } => tabs.iter().find(|t| Some(t.id) == *active).map(|t| (t.dirty, t.undo.clone(), t.redo.clone())),
+        _ => None,
+    })
+}
+
+fn said(events: &[Event], what: &str) -> bool {
+    events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains(what)))
+}
+
+fn rotation(bytes: &[u8], page: u32) -> i64 {
+    let doc = lopdf::Document::load_mem(bytes).unwrap();
+    let id = doc.get_pages()[&page];
+    doc.get_object(id).unwrap().as_dict().unwrap().get(b"Rotate").and_then(|o| o.as_i64()).unwrap_or(0)
+}
+
+#[test]
+fn a_change_is_held_until_saved_undoable_asked_about_before_quitting_and_saved_in_place_or_as_another() {
+    let s = scratch("changes");
+    let path = s.0.join("papers/one.pdf");
+    let original = pdf(&["First.", "Second.", "Third."]);
+    std::fs::write(&path, &original).unwrap();
+    let mut session = Session::new(&s.0);
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: None });
+
+    // Turned: drawn again at a new version, held, not yet on disk.
+    let events = session.apply(Command::PdfRotate { pages: vec![2], by: 90 });
+    let (_, key, _) = view(&events).expect("drawn again");
+    assert_eq!(key, "pdfview:1:2");
+    assert_eq!(rotation(&session.document_bytes(&key).unwrap(), 2), 90);
+    assert_eq!(dirty(&events), Some((true, Some("turn page 2".to_string()), None)));
+    assert_eq!(std::fs::read(&path).unwrap(), original, "nothing is written until it is saved");
+
+    // Asked about before quitting, and not closed without being told.
+    assert_eq!(session.unsaved(), ["one.pdf (PDF)"]);
+    assert!(said(&session.apply(Command::PdfClose { tab: 1, discard: false }), "changes not saved"));
+    assert!(session.document_bytes(&key).is_some(), "still open");
+
+    // Undone, redone; deleted; saved where it is — appended, the first bytes kept.
+    assert_eq!(dirty(&session.apply(Command::PdfUndo)), Some((false, None, Some("turn page 2".to_string()))));
+    session.apply(Command::PdfRedo);
+    session.apply(Command::PdfDelete { pages: vec![3] });
+    assert!(said(&session.apply(Command::PdfSave), "saved"));
+    let saved = std::fs::read(&path).unwrap();
+    assert!(saved.starts_with(&original), "appended to the file");
+    assert_eq!(lopdf::Document::load_mem(&saved).unwrap().get_pages().len(), 2);
+    assert_eq!(rotation(&saved, 2), 90);
+    assert!(session.unsaved().is_empty());
+
+    // As another file, which it is from then on.
+    session.apply(Command::PdfRotate { pages: vec![1], by: 180 });
+    let events = session.apply(Command::PdfSaveAs { path: "papers/turned.pdf".into() });
+    let (open, _, recent, _) = tabs(&events).unwrap();
+    assert_eq!(open, [(1, "turned.pdf".to_string())]);
+    assert!(recent[0].ends_with("turned.pdf"));
+    assert_eq!(rotation(&std::fs::read(s.0.join("papers/turned.pdf")).unwrap(), 1), 180);
+    assert_eq!(rotation(&std::fs::read(&path).unwrap(), 1), 0, "the first file is as it was saved");
+    assert!(said(&session.apply(Command::PdfSaveAs { path: "x.txt".into() }), "ends in .pdf"));
+
+    // A change made and let go of on closing.
+    session.apply(Command::PdfDelete { pages: vec![1] });
+    assert!(tabs(&session.apply(Command::PdfClose { tab: 1, discard: true })).unwrap().0.is_empty());
+}
+
+#[test]
+fn a_pdf_that_cannot_be_read_to_change_it_is_still_read_and_says_why_it_cannot_change() {
+    let s = scratch("readonly");
+    // pdf.js reads what lopdf will not: here, a file that only starts like a PDF.
+    std::fs::write(s.0.join("odd.pdf"), b"%PDF-1.7\n% nothing more").unwrap();
+    let mut session = Session::new(&s.0);
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    let events = session.apply(Command::PdfOpen { path: "odd.pdf".into(), page: None });
+    let read_only = events.iter().rev().find_map(|e| match e {
+        Event::PdfTabs { tabs, .. } => tabs.first().and_then(|t| t.read_only.clone()),
+        _ => None,
+    });
+    assert!(read_only.is_some_and(|why| why.contains("could not be read")), "{events:?}");
+    assert!(view(&events).is_some(), "it is still drawn");
+    assert!(said(&session.apply(Command::PdfRotate { pages: vec![1], by: 90 }), "can only be read"));
 }

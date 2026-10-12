@@ -24,6 +24,7 @@ proton-index = { workspace = true }
 proton-library = { workspace = true }
 proton-study = { workspace = true }
 proton-tex = { workspace = true }
+proton-pdf = { workspace = true }
 proton-voice = { workspace = true }
 # A picture the window drew comes back as base64.
 base64 = "0.22"
@@ -41,3 +42,5 @@ ts-rs = { workspace = true }
 
 [dev-dependencies]
 proton-library = { workspace = true, features = ["fixture"] }
+# The PDF mode's tests read what it saved.
+lopdf = "0.42"

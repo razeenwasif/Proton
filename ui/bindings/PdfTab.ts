@@ -11,4 +11,12 @@ path: string,
 /**
  * Changed since it was opened or saved.
  */
-dirty: boolean, };
+dirty: boolean, 
+/**
+ * Why it can only be read, when it can.
+ */
+readOnly: string | null, 
+/**
+ * What undo and redo would do: "turn page 2".
+ */
+undo: string | null, redo: string | null, };

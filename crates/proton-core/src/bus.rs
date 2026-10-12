@@ -559,9 +559,31 @@ pub enum Command {
         #[serde(default)]
         page: Option<u32>,
     },
-    /// Close a tab.
+    /// Close a tab — one with changes not saved only when told to let
+    /// them go.
     PdfClose {
         tab: u32,
+        #[serde(default)]
+        discard: bool,
+    },
+    /// Undo, or redo, the last change to the tab on top.
+    PdfUndo,
+    PdfRedo,
+    /// Save the tab on top, where it is.
+    PdfSave,
+    /// Save the tab on top as another file — typed as a path is — which it
+    /// is from then on.
+    PdfSaveAs {
+        path: String,
+    },
+    /// Turn pages of the tab on top, numbered from one, by quarters.
+    PdfRotate {
+        pages: Vec<u32>,
+        by: i32,
+    },
+    /// Take pages of the tab on top out.
+    PdfDelete {
+        pages: Vec<u32>,
     },
     /// Bring a tab forward.
     PdfFocus {

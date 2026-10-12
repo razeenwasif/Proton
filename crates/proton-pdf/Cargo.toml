@@ -1,0 +1,18 @@
+[package]
+name = "proton-pdf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The PDF mode's changes to a PDF — pages, comments, forms, passwords, combining, cleaning — each undoable, saved as an incremental update: pure, with no processes."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+ts-rs = { workspace = true }
+# Already in every build, through pdf-extract.
+lopdf = "0.42"
+
+[dev-dependencies]
+proton-library = { workspace = true, features = ["fixture"] }

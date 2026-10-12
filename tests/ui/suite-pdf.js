@@ -158,6 +158,54 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('Changes: undo, redo and save from the bar and the keys; a changed tab asks before closing; Save as; read only said', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    const changed = {id: 3, name: 'paper.pdf', path: '~/Papers/paper.pdf', dirty: true, readOnly: null, undo: 'turn page 2', redo: null};
+    await win.pushEvents([tabs([changed], 3), {type: 'pdfView', tab: 3, key: FIXTURE, version: 2, page: null, quiet: false}]); await settle();
+    assert(await wait(() => $('[data-pdf-pages] .doc-page canvas')), 'not drawn');
+    const undo = $('[data-pdf-undo]'), redo = $('[data-pdf-redo]'), save = $('[data-pdf-save]');
+    assert(!undo.disabled && undo.title.includes('turn page 2') && redo.disabled && !save.disabled, 'the bar does not say what can be undone and saved');
+    let at = win.commands.length;
+    undo.click(); save.click(); await settle();
+    assert(sent(at, 'pdfUndo').length === 1 && sent(at, 'pdfSave').length === 1, 'the bar did not ask');
+    const pages = $('[data-pdf-pages]');
+    pages.focus();
+    at = win.commands.length;
+    for (const [k, extra] of [['z', {metaKey: true}], ['z', {metaKey: true, shiftKey: true}], ['s', {metaKey: true}], ['u', {}], ['r', {ctrlKey: true}]]) {
+      pages.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...extra})); await settle();
+    }
+    const asked = win.commands.slice(at).map((c) => c.type).filter((t) => t.startsWith('pdf')).join(',');
+    assert(asked === 'pdfUndo,pdfRedo,pdfSave,pdfUndo,pdfRedo', `the keys asked: ${asked}`);
+
+    // Closing a changed tab asks: save and close, or close letting them go.
+    doc.querySelector('.pdf-tab [data-pdf-close]').click(); await settle();
+    const ask = $('[data-pdf-ask]');
+    assert(shown(ask) && ask.textContent.includes('paper.pdf'), 'closing a changed tab did not ask');
+    at = win.commands.length;
+    ask.querySelector('[data-pdf-ask-do="save"]').click(); await settle();
+    assert(win.commands.slice(at).map((c) => c.type).join(',') === 'pdfSave,pdfClose' && !shown(ask), 'Save and close did not save, then close');
+    doc.querySelector('.pdf-tab [data-pdf-close]').click(); await settle();
+    at = win.commands.length;
+    ask.querySelector('[data-pdf-ask-do="discard"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfClose')) === JSON.stringify([{type: 'pdfClose', tab: 3, discard: true}]), 'closing without saving did not say so');
+
+    // ⇧⌘S: where, with the name chosen.
+    pages.focus();
+    pages.dispatchEvent(new KeyboardEvent('keydown', {key: 'S', metaKey: true, shiftKey: true, bubbles: true, cancelable: true})); await settle();
+    const field = ask.querySelector('[data-pdf-save-as-path]');
+    assert(field && doc.activeElement === field && field.value === '~/Papers/paper.pdf' && field.selectionStart === '~/Papers/'.length && field.selectionEnd === '~/Papers/paper'.length, 'Save as does not offer the name to change');
+    field.value = '~/Papers/paper-marked.pdf';
+    at = win.commands.length;
+    ask.querySelector('[data-pdf-save-as-form]').requestSubmit(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfSaveAs')) === JSON.stringify([{type: 'pdfSaveAs', path: '~/Papers/paper-marked.pdf'}]) && !shown(ask), 'Save as did not ask');
+
+    // A file only read says so, and offers nothing to save.
+    await win.pushEvents([tabs([{...changed, dirty: false, undo: null, readOnly: 'it is protected by a password'}], 3)]); await settle();
+    assert(shown($('[data-pdf-readonly]')) && $('[data-pdf-readonly]').title.includes('password') && $('[data-pdf-save]').disabled && $('[data-pdf-save-as]').disabled, 'read only is not said');
+    await win.pushEvents([tabs([], null)]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('A PDF opened in the PDF mode is a tab, and the document viewer hands its PDF over at its page', async () => {
     await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
     let at = win.commands.length;

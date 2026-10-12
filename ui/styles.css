@@ -5233,3 +5233,13 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .pdf-hit-row.on { background: var(--row-on); color: var(--text); }
 .pdf-hit-row mark { background: rgba(255, 200, 0, .35); color: var(--text); border-radius: 2px; }
 .pdf-hit-page { color: var(--faint); min-width: 2ch; text-align: right; }
+/* What is asked under the bar: save before closing, or where to save as. */
+.pdf-ask { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); color: var(--text); font: var(--z-xs) var(--zed); }
+.pdf-ask[hidden] { display: none; }
+.pdf-ask .grow { flex: 1; }
+.pdf-ask button { padding: 4px 10px; }
+.pdf-save-as { display: flex; align-items: center; gap: 8px; width: 100%; }
+.pdf-save-as label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.pdf-save-as input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-xs) var(--zed); }
+.pdf-readonly { color: var(--warn) !important; }
+.pdf-bar .hbtn:disabled { opacity: .35; cursor: default; }

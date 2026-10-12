@@ -52,11 +52,13 @@ export function createPdf(host) {
   /** @type {{tabs: Tab[], active: number | null, recent: string[], project: string[], root: string,
    *   shown: {tab: number, key: string} | null, opening: boolean, at: number,
    *   side: string, labels: string[] | null, outline: any[] | null, page: number, count: number,
-   *   query: string, hits: Found[], hitOn: number, searching: boolean, colors: number}} */
+   *   query: string, hits: Found[], hitOn: number, searching: boolean, colors: number,
+   *   ask: {kind: "close", tab: number} | {kind: "saveAs"} | null}} */
   const state = {
     tabs: [], active: null, recent: [], project: [], root: "", shown: null, opening: false, at: 0,
     side: pref("side", "pages"), labels: null, outline: null, page: 1, count: 0,
     query: "", hits: [], hitOn: -1, searching: false, colors: Number(pref("colors", "0")) || 0,
+    ask: null,
   };
   /** Which search is the current one, so one overtaken stops. */
   let searchGeneration = 0;
@@ -77,6 +79,58 @@ export function createPdf(host) {
   view.setColors(COLORS[state.colors] ?? null);
 
   /* ── tabs and the Open box ───────────────────────────────────────── */
+
+  /** The tab on top. */
+  const top = () => state.tabs.find((t) => t.id === state.active) ?? null;
+
+  /** The bar's undo, redo and save, as the tab on top allows; and why it can only be read. */
+  function renderBar() {
+    const tab = top();
+    const undo = /** @type {HTMLButtonElement} */ (q("[data-pdf-undo]")), redo = /** @type {HTMLButtonElement} */ (q("[data-pdf-redo]"));
+    undo.disabled = !tab?.undo;
+    undo.title = tab?.undo ? `Undo ${tab.undo}  ⌘Z` : "Undo  ⌘Z";
+    redo.disabled = !tab?.redo;
+    redo.title = tab?.redo ? `Redo ${tab.redo}  ⇧⌘Z` : "Redo  ⇧⌘Z";
+    /** @type {HTMLButtonElement} */ (q("[data-pdf-save]")).disabled = !tab?.dirty;
+    /** @type {HTMLButtonElement} */ (q("[data-pdf-save-as]")).disabled = !tab || Boolean(tab.readOnly);
+    const lock = q("[data-pdf-readonly]");
+    lock.hidden = !tab?.readOnly;
+    lock.title = tab?.readOnly ? `Read only: ${tab.readOnly}.` : "";
+  }
+
+  /** What is being asked: to save before closing, or where to save as. */
+  function renderAsk() {
+    const box = q("[data-pdf-ask]");
+    const ask = state.ask;
+    box.hidden = !ask;
+    if (!ask) return void (box.innerHTML = "");
+    if (ask.kind === "close") {
+      const tab = state.tabs.find((t) => t.id === ask.tab);
+      if (!tab) return void (state.ask = null, box.hidden = true);
+      box.innerHTML = `<span>Save the changes to <b>${esc(tab.name)}</b> before closing it?</span><span class="grow"></span>` +
+        `<button class="cc-quiet" data-pdf-ask-do="cancel">Cancel</button><button class="cc-quiet" data-pdf-ask-do="discard">Close without saving</button>` +
+        `<button class="cc-primary" data-pdf-ask-do="save">Save and close</button>`;
+    } else {
+      const tab = top();
+      box.innerHTML = `<form class="pdf-save-as" data-pdf-save-as-form><label>Save as <input data-pdf-save-as-path value="${esc(tab?.path ?? "")}" spellcheck="false" autocomplete="off"></label>` +
+        `<button type="button" class="cc-quiet" data-pdf-ask-do="cancel">Cancel</button><button type="submit" class="cc-primary">Save</button></form>`;
+      const field = /** @type {HTMLInputElement} */ (box.querySelector("[data-pdf-save-as-path]"));
+      field.focus();
+      // The name chosen, not the folder: what is usually changed.
+      const slash = field.value.lastIndexOf("/");
+      field.setSelectionRange(slash + 1, field.value.replace(/\.pdf$/i, "").length);
+    }
+  }
+
+  /** Close a tab: one with changes asks first. @param {number} id */
+  function closeTab(id) {
+    const tab = state.tabs.find((t) => t.id === id);
+    if (tab?.dirty) {
+      state.ask = { kind: "close", tab: id };
+      return renderAsk();
+    }
+    host.dispatch({ type: "pdfClose", tab: id });
+  }
 
   /** The tabs, the one on top marked, each a click from forward and closing. */
   function renderTabs() {
@@ -282,8 +336,11 @@ export function createPdf(host) {
       view.close();
       renderSide();
     }
+    if (state.ask?.kind === "close" && !state.tabs.some((t) => t.id === /** @type {any} */ (state.ask).tab)) state.ask = null;
     renderTabs();
+    renderBar();
     renderOpen();
+    if (state.ask?.kind === "close") renderAsk();
   }
 
   /** What is read of a document once it is drawn: its labels and bookmarks,
@@ -346,7 +403,27 @@ export function createPdf(host) {
   section.addEventListener("click", (e) => {
     const t = /** @type {HTMLElement} */ (e.target);
     const close = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-close]"));
-    if (close) return void host.dispatch({ type: "pdfClose", tab: Number(close.dataset.pdfClose) });
+    if (close) return closeTab(Number(close.dataset.pdfClose));
+    if (t.closest("[data-pdf-undo]")) return void host.dispatch({ type: "pdfUndo" });
+    if (t.closest("[data-pdf-redo]")) return void host.dispatch({ type: "pdfRedo" });
+    if (t.closest("[data-pdf-save]")) return void host.dispatch({ type: "pdfSave" });
+    if (t.closest("[data-pdf-save-as]")) {
+      state.ask = { kind: "saveAs" };
+      return renderAsk();
+    }
+    const answer = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-ask-do]"));
+    if (answer) {
+      const ask = state.ask;
+      state.ask = null;
+      renderAsk();
+      if (ask?.kind === "close" && answer.dataset.pdfAskDo === "discard") host.dispatch({ type: "pdfClose", tab: ask.tab, discard: true });
+      if (ask?.kind === "close" && answer.dataset.pdfAskDo === "save") {
+        if (state.active !== ask.tab) host.dispatch({ type: "pdfFocus", tab: ask.tab });
+        host.dispatch({ type: "pdfSave" });
+        host.dispatch({ type: "pdfClose", tab: ask.tab });
+      }
+      return;
+    }
     const tab = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-tab]"));
     if (tab) {
       state.opening = false;
@@ -414,11 +491,26 @@ export function createPdf(host) {
     }
   });
   section.addEventListener("submit", (e) => {
-    if (!/** @type {HTMLElement} */ (e.target).matches("[data-pdf-find]")) return;
+    const form = /** @type {HTMLElement} */ (e.target);
+    if (form.matches("[data-pdf-find]")) return void e.preventDefault();
+    if (!form.matches("[data-pdf-save-as-form]")) return;
     e.preventDefault();
+    const path = /** @type {HTMLInputElement} */ (form.querySelector("[data-pdf-save-as-path]")).value.trim();
+    if (!path) return;
+    state.ask = null;
+    renderAsk();
+    host.dispatch({ type: "pdfSaveAs", path });
   });
   section.addEventListener("keydown", (e) => {
     const t = /** @type {HTMLElement} */ (e.target);
+    if (e.key === "Escape" && state.ask && t.closest("[data-pdf-ask]")) {
+      e.preventDefault();
+      e.stopPropagation();
+      state.ask = null;
+      renderAsk();
+      pages.focus();
+      return;
+    }
     if (!t.matches("[data-pdf-find-query]")) return;
     if (e.key === "Enter") {
       e.preventDefault();
@@ -465,8 +557,16 @@ export function createPdf(host) {
   function key(e) {
     if (!state.shown || pages.hidden) return false;
     if (e.metaKey && !e.altKey && !e.ctrlKey) {
-      if (e.key === "f") return (focusFind(), true);
-      if (e.key === "g" || e.key === "G") return (step(e.shiftKey ? -1 : 1), true);
+      const k = e.key.toLowerCase();
+      if (k === "f") return (focusFind(), true);
+      if (k === "g") return (step(e.shiftKey ? -1 : 1), true);
+      if (k === "z") return (host.dispatch({ type: e.shiftKey ? "pdfRedo" : "pdfUndo" }), true);
+      if (k === "s" && e.shiftKey) {
+        state.ask = { kind: "saveAs" };
+        renderAsk();
+        return true;
+      }
+      if (k === "s") return (host.dispatch({ type: "pdfSave" }), true);
       return false;
     }
     const target = /** @type {HTMLElement | null} */ (e.target instanceof HTMLElement ? e.target : null);
@@ -479,10 +579,13 @@ export function createPdf(host) {
       return true;
     }
     if (e.key === "/" && !e.ctrlKey) return (focusFind(), true);
+    if (e.key === "u" && !e.ctrlKey) return (host.dispatch({ type: "pdfUndo" }), true);
+    if (e.key === "r" && e.ctrlKey) return (host.dispatch({ type: "pdfRedo" }), true);
     return view.key(e);
   }
 
   renderTabs();
+  renderBar();
   renderOpen();
   renderSide();
   return { tabs, show, key, view: () => view, search, state: () => state };

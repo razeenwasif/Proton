@@ -1111,7 +1111,12 @@
         <div class="pdf-bar">
           <div class="pdf-tabs" role="tablist" aria-label="Open PDFs" data-pdf-tabs></div>
           <button class="hbtn" data-pdf-open-box title="Open a PDF" aria-label="Open a PDF"><svg class="i"><use href="#i-plus"/></svg></button>
+          <span class="chip pdf-readonly" data-pdf-readonly hidden>Read only</span>
           <span class="grow"></span>
+          <button class="hbtn" data-pdf-undo title="Undo  ⌘Z" aria-label="Undo" disabled><svg class="i"><use href="#i-undo"/></svg></button>
+          <button class="hbtn" data-pdf-redo title="Redo  ⇧⌘Z" aria-label="Redo" disabled><svg class="i"><use href="#i-redo"/></svg></button>
+          <button class="hbtn" data-pdf-save title="Save  ⌘S — the changes are added to the file, its first bytes kept" disabled>Save</button>
+          <button class="hbtn" data-pdf-save-as title="Save as another file  ⇧⌘S">Save as…</button>
           <div class="pdf-seg" role="group" aria-label="How the pages are laid out">
             <button data-pdf-layout="continuous" title="One after another" aria-label="Continuous" aria-pressed="true"><svg class="i"><use href="#i-split-h"/></svg></button>
             <button data-pdf-layout="single" title="One at a time — Space turns the page" aria-label="One page at a time" aria-pressed="false"><svg class="i"><use href="#i-file"/></svg></button>
@@ -1124,6 +1129,8 @@
           <button class="hbtn" data-pdf-zoom="0" title="Fit the page's width  0" aria-label="Fit the width">Fit</button>
           <button class="hbtn" data-pdf-zoom="1" title="Zoom in  +" aria-label="Zoom in">+</button>
         </div>
+        <!-- What is asked before a tab with changes is closed, and where to save as. -->
+        <div class="pdf-ask" data-pdf-ask hidden></div>
         <div class="pdf-stage">
           <div class="scroll pdf-pages" data-pdf-pages tabindex="0" aria-label="The PDF" hidden></div>
           <!-- What to open: a path, typed; the project's PDFs; those opened before. -->

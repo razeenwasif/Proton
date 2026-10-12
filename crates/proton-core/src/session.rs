@@ -597,7 +597,8 @@ impl Session {
     /// their project when more than one is open.
     pub fn unsaved(&self) -> Vec<String> {
         let many = self.workspaces.len() > 1;
-        self.workspaces
+        let mut files: Vec<String> = self
+            .workspaces
             .iter()
             .flat_map(|workspace| {
                 let project = folder::name_of(workspace.root());
@@ -606,13 +607,18 @@ impl Session {
                     .into_iter()
                     .map(move |file| if many { format!("{project}/{file}") } else { file })
             })
-            .collect()
+            .collect();
+        // And the PDFs changed in the PDF mode, which are no project's.
+        files.extend(self.pdf.unsaved().into_iter().map(|name| format!("{name} (PDF)")));
+        files
     }
 
     /// Save every file with unsaved changes in every project; the ones that
     /// could not be, and why.
     pub fn save_unsaved(&mut self) -> Vec<String> {
-        self.workspaces.iter_mut().flat_map(|workspace| workspace.save_unsaved()).collect()
+        let mut failed: Vec<String> = self.workspaces.iter_mut().flat_map(|workspace| workspace.save_unsaved()).collect();
+        failed.extend(self.pdf.save_unsaved());
+        failed
     }
 
     /// Proton is going: what every workspace has running that would outlive

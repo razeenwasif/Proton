@@ -1496,7 +1496,15 @@ impl Workspace {
                 vec![notice("Where investigations are kept is set for the whole window.".into(), NoticeLevel::Warn)]
             }
             // PDF is the window's too: the session answers it.
-            Command::PdfOpen { .. } | Command::PdfClose { .. } | Command::PdfFocus { .. } => Vec::new(),
+            Command::PdfOpen { .. }
+            | Command::PdfClose { .. }
+            | Command::PdfFocus { .. }
+            | Command::PdfUndo
+            | Command::PdfRedo
+            | Command::PdfSave
+            | Command::PdfSaveAs { .. }
+            | Command::PdfRotate { .. }
+            | Command::PdfDelete { .. } => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }

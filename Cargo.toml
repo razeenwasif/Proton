@@ -23,6 +23,7 @@ members = [
     "crates/proton-study",
     "crates/proton-syntax",
     "crates/proton-term",
+    "crates/proton-pdf",
     "crates/proton-tex",
     "crates/proton-text",
     "crates/proton-trace",
@@ -43,6 +44,7 @@ proton-agent = { path = "crates/proton-agent" }
 proton-claude = { path = "crates/proton-claude" }
 proton-voice = { path = "crates/proton-voice" }
 proton-tex = { path = "crates/proton-tex" }
+proton-pdf = { path = "crates/proton-pdf" }
 proton-council = { path = "crates/proton-council" }
 proton-core = { path = "crates/proton-core" }
 proton-dap = { path = "crates/proton-dap" }

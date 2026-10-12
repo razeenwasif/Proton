@@ -28,7 +28,18 @@ const VIEW: &str = "pdfview:";
 
 /// Whether a command is PDF's.
 pub fn handles(command: &Command) -> bool {
-    matches!(command, Command::PdfOpen { .. } | Command::PdfClose { .. } | Command::PdfFocus { .. })
+    matches!(
+        command,
+        Command::PdfOpen { .. }
+            | Command::PdfClose { .. }
+            | Command::PdfFocus { .. }
+            | Command::PdfUndo
+            | Command::PdfRedo
+            | Command::PdfSave
+            | Command::PdfSaveAs { .. }
+            | Command::PdfRotate { .. }
+            | Command::PdfDelete { .. }
+    )
 }
 
 /// A tab, as the window draws it.
@@ -42,6 +53,11 @@ pub struct TabView {
     pub path: String,
     /// Changed since it was opened or saved.
     pub dirty: bool,
+    /// Why it can only be read, when it can.
+    pub read_only: Option<String>,
+    /// What undo and redo would do: "turn page 2".
+    pub undo: Option<String>,
+    pub redo: Option<String>,
 }
 
 /// One open PDF.
@@ -54,6 +70,8 @@ struct Tab {
     view: Arc<Vec<u8>>,
     /// Goes up with each change, and names the view.
     version: u64,
+    /// What is changed and saved; `None` for a file only read, with why.
+    doc: Result<Box<proton_pdf::Doc>, String>,
 }
 
 impl Tab {
@@ -62,7 +80,20 @@ impl Tab {
     }
 
     fn view(&self) -> TabView {
-        TabView { id: self.id, name: self.name.clone(), path: folder::tilde(&self.path), dirty: false }
+        let doc = self.doc.as_ref().ok();
+        TabView {
+            id: self.id,
+            name: self.name.clone(),
+            path: folder::tilde(&self.path),
+            dirty: doc.is_some_and(|d| d.dirty()),
+            read_only: self.doc.as_ref().err().cloned(),
+            undo: doc.and_then(|d| d.undoable()),
+            redo: doc.and_then(|d| d.redoable()),
+        }
+    }
+
+    fn dirty(&self) -> bool {
+        self.doc.as_ref().is_ok_and(|d| d.dirty())
     }
 }
 
@@ -112,8 +143,14 @@ impl Pdfs {
     pub fn apply(&mut self, command: Command) -> Vec<Event> {
         match command {
             Command::PdfOpen { path, page } => self.open(&path, page),
-            Command::PdfClose { tab } => self.close(tab),
+            Command::PdfClose { tab, discard } => self.close(tab, discard),
             Command::PdfFocus { tab } => self.focus(tab),
+            Command::PdfUndo => self.history(false),
+            Command::PdfRedo => self.history(true),
+            Command::PdfSave => self.save(None),
+            Command::PdfSaveAs { path } => self.save(Some(&path)),
+            Command::PdfRotate { pages, by } => self.change(proton_pdf::Op::Rotate { pages, by }),
+            Command::PdfDelete { pages } => self.change(proton_pdf::Op::Delete { pages }),
             _ => Vec::new(),
         }
     }
@@ -160,7 +197,12 @@ impl Pdfs {
             Err(why) => return vec![notice(why, NoticeLevel::Error)],
         };
         self.next += 1;
-        let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view: Arc::new(bytes), version: 1 };
+        let view = Arc::new(bytes);
+        let doc = match proton_pdf::Doc::open(view.clone()) {
+            proton_pdf::Opened::Editable(doc) => Ok(doc),
+            proton_pdf::Opened::ReadOnly(why) => Err(why),
+        };
+        let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view, version: 1, doc };
         self.active = Some(tab.id);
         let view = view_event(&tab, page, false);
         self.tabs.push(tab);
@@ -168,8 +210,11 @@ impl Pdfs {
         vec![self.tabs_event(), view]
     }
 
-    fn close(&mut self, id: u32) -> Vec<Event> {
+    fn close(&mut self, id: u32, discard: bool) -> Vec<Event> {
         let Some(at) = self.tabs.iter().position(|t| t.id == id) else { return Vec::new() };
+        if self.tabs[at].dirty() && !discard {
+            return vec![notice(format!("{} has changes not saved: save it, or close it letting them go.", self.tabs[at].name), NoticeLevel::Warn)];
+        }
         self.tabs.remove(at);
         if self.active == Some(id) {
             // The one beside it comes forward, as a browser's tab does.
@@ -186,6 +231,121 @@ impl Pdfs {
         let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return Vec::new() };
         self.active = Some(id);
         vec![self.tabs_event(), view_event(tab, None, false)]
+    }
+
+    /// The tab on top, to change; or why it cannot be.
+    fn editable(&mut self) -> Result<&mut Tab, String> {
+        let id = self.active.ok_or("Open a PDF first.")?;
+        let tab = self.tabs.iter_mut().find(|t| t.id == id).ok_or("Open a PDF first.")?;
+        if let Err(why) = &tab.doc {
+            return Err(format!("{} can only be read: {why}.", tab.name));
+        }
+        Ok(tab)
+    }
+
+    /// The tab on top drawn again, as its document now is.
+    fn redrawn(&mut self) -> Vec<Event> {
+        let Some(id) = self.active else { return Vec::new() };
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else { return Vec::new() };
+        let bytes = match tab.doc.as_ref().map(|d| d.bytes()) {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(why)) => return vec![notice(why, NoticeLevel::Error)],
+            Err(_) => return Vec::new(),
+        };
+        tab.view = Arc::new(bytes);
+        tab.version += 1;
+        let view = view_event(tab, None, false);
+        vec![self.tabs_event(), view]
+    }
+
+    /// Make a change to the tab on top: held until it is saved.
+    fn change(&mut self, op: proton_pdf::Op) -> Vec<Event> {
+        let done = match self.editable() {
+            Ok(tab) => tab.doc.as_mut().map_err(|e| e.clone()).and_then(|d| d.apply(op)),
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        match done {
+            Ok(()) => self.redrawn(),
+            Err(why) => vec![notice(why, NoticeLevel::Warn)],
+        }
+    }
+
+    /// Undo, or redo, the last change to the tab on top.
+    fn history(&mut self, redo: bool) -> Vec<Event> {
+        let done = match self.editable() {
+            Ok(tab) => tab.doc.as_mut().map_err(|e| e.clone()).and_then(|d| if redo { d.redo() } else { d.undo() }),
+            Err(why) => return vec![notice(why, NoticeLevel::Info)],
+        };
+        match done {
+            Ok(Some(_)) => self.redrawn(),
+            Ok(None) => vec![notice(if redo { "Nothing to redo." } else { "Nothing to undo." }.into(), NoticeLevel::Info)],
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    /// Save the tab on top where it is, or as another file.
+    fn save(&mut self, typed: Option<&str>) -> Vec<Event> {
+        let target = match typed.map(str::trim) {
+            None => None,
+            Some("") => return vec![notice("Say where to save it.".into(), NoticeLevel::Info)],
+            Some(t) => {
+                let path = folder::expand(t);
+                let path = if path.is_absolute() { path } else { self.project.1.join(path) };
+                if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+                    return vec![notice(format!("{}: a PDF's name ends in .pdf", folder::tilde(&path)), NoticeLevel::Info)];
+                }
+                if self.tabs.iter().any(|t| t.path == path && Some(t.id) != self.active) {
+                    return vec![notice(format!("{} is open in another tab.", folder::tilde(&path)), NoticeLevel::Warn)];
+                }
+                Some(path)
+            }
+        };
+        let saved = match self.editable() {
+            Ok(tab) => {
+                let path = target.clone().unwrap_or_else(|| tab.path.clone());
+                match tab.doc.as_mut().map_err(|e| e.clone()).and_then(|d| d.save(&path)) {
+                    Ok(()) => {
+                        if target.is_some() {
+                            tab.name = folder::name_of(&path);
+                            tab.path = folder::normalise(&path);
+                        }
+                        Ok(tab.path.clone())
+                    }
+                    Err(why) => Err(why),
+                }
+            }
+            Err(why) => Err(why),
+        };
+        match saved {
+            Ok(path) => {
+                if target.is_some() {
+                    self.remember(&path);
+                }
+                let mut events = vec![notice(format!("saved {}", folder::tilde(&path)), NoticeLevel::Info)];
+                events.extend(self.redrawn());
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    /// The tabs with changes not saved, by name.
+    pub fn unsaved(&self) -> Vec<String> {
+        self.tabs.iter().filter(|t| t.dirty()).map(|t| t.name.clone()).collect()
+    }
+
+    /// Save every tab with changes; the ones that could not be, and why.
+    pub fn save_unsaved(&mut self) -> Vec<String> {
+        let mut failed = Vec::new();
+        for tab in self.tabs.iter_mut().filter(|t| t.dirty()) {
+            let path = tab.path.clone();
+            if let Ok(doc) = tab.doc.as_mut() {
+                if let Err(why) = doc.save(&path) {
+                    failed.push(format!("{}: {why}", tab.name));
+                }
+            }
+        }
+        failed
     }
 
     /// A file opened, first among those opened before, and kept.
@@ -232,7 +392,7 @@ mod tests {
     #[test]
     fn a_view_key_names_one_version_of_one_open_tab() {
         let mut pdfs = Pdfs::new();
-        pdfs.tabs.push(Tab { id: 3, path: PathBuf::from("/x.pdf"), name: "x.pdf".into(), view: Arc::new(b"%PDF-1.7".to_vec()), version: 2 });
+        pdfs.tabs.push(Tab { id: 3, path: PathBuf::from("/x.pdf"), name: "x.pdf".into(), view: Arc::new(b"%PDF-1.7".to_vec()), version: 2, doc: Err("a test".into()) });
         assert_eq!(pdfs.view_bytes("pdfview:3:2").as_deref().map(Vec::as_slice), Some(&b"%PDF-1.7"[..]));
         for stale in ["pdfview:3:1", "pdfview:4:2", "pdfview:3", "/x.pdf", "pdfview:a:b"] {
             assert!(pdfs.view_bytes(stale).is_none(), "{stale}");

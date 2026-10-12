@@ -4351,6 +4351,7 @@ name = "proton-core"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "lopdf",
  "proton-agent",
  "proton-claude",
  "proton-council",
@@ -4364,6 +4365,7 @@ dependencies = [
  "proton-literature",
  "proton-lsp",
  "proton-mesh",
+ "proton-pdf",
  "proton-plugin",
  "proton-research",
  "proton-scene",
@@ -4497,6 +4499,17 @@ dependencies = [
 name = "proton-mesh"
 version = "0.0.1"
 dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
+]
+
+[[package]]
+name = "proton-pdf"
+version = "0.0.1"
+dependencies = [
+ "lopdf",
+ "proton-library",
  "serde",
  "serde_json",
  "ts-rs",
