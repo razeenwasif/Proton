@@ -165,17 +165,24 @@ pub(crate) fn is_connection_file(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
 
-    #[test]
-    fn five_ports_are_reserved_and_all_different() {
-        let (connection, held) = Connection::open("k".into()).unwrap();
-        let ports = [
+    /// The five ports a kernel is told to bind.
+    fn ports_of(connection: &Connection) -> [u16; 5] {
+        [
             connection.shell_port,
             connection.iopub_port,
             connection.stdin_port,
             connection.control_port,
             connection.hb_port,
-        ];
+        ]
+    }
+
+    #[test]
+    fn five_ports_are_reserved_and_all_different() {
+        let (connection, held) = Connection::open("k".into()).unwrap();
+        let ports = ports_of(&connection);
         assert!(ports.iter().all(|p| *p != 0), "{ports:?}");
 
         let mut unique = ports.to_vec();
@@ -195,12 +202,31 @@ mod tests {
         // they are held succeeded, they would not be reserved at all and the
         // race this avoids would still be there.
         let (connection, held) = Connection::open("k".into()).unwrap();
-        let taken = std::net::TcpListener::bind(("127.0.0.1", connection.shell_port));
-        assert!(taken.is_err(), "the port was not actually held");
+        let ports = ports_of(&connection);
+        for port in ports {
+            assert!(
+                TcpListener::bind(("127.0.0.1", port)).is_err(),
+                "port {port} was not actually held"
+            );
+        }
 
         held.release();
-        // And once released, a kernel can have them.
-        assert!(std::net::TcpListener::bind(("127.0.0.1", connection.shell_port)).is_ok());
+        // And once released, a kernel can have them — given a moment. A
+        // kernel test running beside this one forks to start its kernel, and
+        // until the child execs it holds a copy of every socket open in this
+        // process, these among them: for that moment, closing ours leaves the
+        // port taken. One still taken after all of the wait is one `release`
+        // kept.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut kept = ports.to_vec();
+        loop {
+            kept.retain(|port| TcpListener::bind(("127.0.0.1", *port)).is_err());
+            if kept.is_empty() || Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(kept.is_empty(), "ports {kept:?} were never released");
     }
 
     #[test]
