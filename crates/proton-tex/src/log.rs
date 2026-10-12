@@ -300,6 +300,78 @@ pub fn read_bib(text: &str, main_dir: &str, root: &str) -> Log {
     log
 }
 
+/// How many errors, and warnings, a description shows.
+pub const DESCRIBED_ERRORS: usize = 20;
+const DESCRIBED_WARNINGS: usize = 10;
+/// The lines shown either side of an error's.
+const AROUND: u32 = 3;
+
+/// A log as an agent reads it: `header` — which file was typeset, how, and
+/// what came of it — then each error where it is, with the source lines
+/// round it from `source` (a project file's text, by the name the log
+/// gives it), what TeX lacked, and the first warnings.
+pub fn describe(log: &Log, header: &str, source: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = header.trim_end().to_string();
+    let errors: Vec<&Entry> = log.entries.iter().filter(|e| e.kind == Kind::Error).collect();
+    if !errors.is_empty() {
+        out.push_str("\n\nErrors:");
+        for (n, e) in errors.iter().take(DESCRIBED_ERRORS).enumerate() {
+            let place = match (&e.file, e.line) {
+                (Some(file), Some(line)) => format!("`{file}` line {line}"),
+                (Some(file), None) => format!("`{file}`"),
+                _ => "somewhere TeX did not say".into(),
+            };
+            out.push_str(&format!("\n{}. {place}: {}", n + 1, e.message));
+            if let Some(context) = &e.context {
+                out.push_str(&format!("\n   TeX stopped at: {context}"));
+            }
+            if let (Some(file), Some(line)) = (&e.file, e.line) {
+                if let Some(text) = source(file) {
+                    let lines: Vec<&str> = text.lines().collect();
+                    let from = line.saturating_sub(AROUND).max(1);
+                    let to = (line + AROUND).min(lines.len() as u32);
+                    if from <= to {
+                        out.push_str("\n   ```latex");
+                        for at in from..=to {
+                            let mark = if at == line { ">" } else { " " };
+                            out.push_str(&format!("\n   {mark}{at:>4}  {}", lines[at as usize - 1]));
+                        }
+                        out.push_str("\n   ```");
+                    }
+                }
+            }
+        }
+        if errors.len() > DESCRIBED_ERRORS {
+            out.push_str(&format!("\n({} more errors not shown: the first is usually the cause of the rest.)", errors.len() - DESCRIBED_ERRORS));
+        }
+    }
+    if !log.missing.is_empty() {
+        out.push_str(&format!(
+            "\n\nTeX looked for files it does not have: {}. A package would bring them; the person installs it from the Log tab, so suggest that rather than rewriting the document round them.",
+            log.missing.join(", ")
+        ));
+    }
+    let warnings: Vec<&Entry> = log.entries.iter().filter(|e| e.kind == Kind::Warning).collect();
+    if !warnings.is_empty() {
+        out.push_str("\n\nWarnings:");
+        for e in warnings.iter().take(DESCRIBED_WARNINGS) {
+            let place = match (&e.file, e.line) {
+                (Some(file), Some(line)) => format!("`{file}` line {line}: "),
+                (Some(file), None) => format!("`{file}`: "),
+                _ => String::new(),
+            };
+            out.push_str(&format!("\n- {place}{}", e.message));
+        }
+        if warnings.len() > DESCRIBED_WARNINGS {
+            out.push_str(&format!("\n({} more)", warnings.len() - DESCRIBED_WARNINGS));
+        }
+    }
+    if errors.is_empty() && warnings.is_empty() && log.missing.is_empty() {
+        out.push_str("\n\nThe log has no errors or warnings.");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,5 +435,27 @@ mod tests {
         stack.follow(")");
         assert_eq!(stack.current(), Some("./main.tex"));
         assert!(!file_like("12.0pt") && !file_like("see") && file_like("article.cls") && file_like("./x.tex"), "a measure is not a file");
+    }
+
+    #[test]
+    fn a_log_is_described_with_each_error_s_source_round_it() {
+        let log = Log {
+            entries: vec![
+                Entry { kind: Kind::Error, file: Some("chapters/intro.tex".into()), line: Some(5), message: "Undefined control sequence.".into(), context: Some("l.5 \\foo".into()) },
+                Entry { kind: Kind::Warning, file: Some("main.tex".into()), line: Some(2), message: "Citation `knuth84' undefined".into(), context: None },
+                Entry { kind: Kind::Box, file: None, line: None, message: "Overfull \\hbox".into(), context: None },
+            ],
+            missing: vec!["tikz-cd.sty".into()],
+            pages: None,
+        };
+        let text = describe(&log, "`main.tex`, typeset with pdfLaTeX: 1 error.", |file| (file == "chapters/intro.tex").then(|| (1..=9).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n")));
+        assert!(text.starts_with("`main.tex`, typeset with pdfLaTeX: 1 error.\n\nErrors:\n1. `chapters/intro.tex` line 5: Undefined control sequence.\n   TeX stopped at: l.5 \\foo\n   ```latex\n       2  line 2\n"), "{text}");
+        assert!(text.contains("\n   >   5  line 5\n") && text.contains("       8  line 8\n   ```"), "{text}");
+        assert!(!text.contains("line 9") && !text.contains("line 1\n"), "three lines either side: {text}");
+        assert!(text.contains("does not have: tikz-cd.sty"));
+        assert!(text.contains("Warnings:\n- `main.tex` line 2: Citation `knuth84' undefined"));
+        assert!(!text.contains("Overfull"), "bad boxes are left out");
+        let clean = describe(&Log::default(), "`main.tex`: typeset.", |_| None);
+        assert_eq!(clean, "`main.tex`: typeset.\n\nThe log has no errors or warnings.");
     }
 }

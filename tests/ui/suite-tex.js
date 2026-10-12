@@ -100,6 +100,16 @@ export async function texChecks({test, assert, win, doc, $, settle, key, shown})
     assert(JSON.stringify(sent(at, 'jumpTo')[0]) === JSON.stringify({type: 'jumpTo', mode: 'tex', path: 'chapters/intro.tex', line: 11, column: 0}), `not taken to its line: ${JSON.stringify(sent(at, 'jumpTo'))}`);
     assert(pane.querySelector('.tex-entry.warning[disabled]'), 'a package\'s own file is not offered to open');
 
+    // An error is the agent's to fix, with @log: the question asked, its tab shown.
+    const fixes = pane.querySelectorAll('[data-tex-fix]');
+    assert(fixes.length === 1, `Fix is offered on ${fixes.length} entries, not on the one error`);
+    at = win.commands.length;
+    fixes[0].click(); await settle();
+    assert(JSON.stringify(sent(at, 'ask')) === JSON.stringify([{type: 'ask', text: 'Fix this LaTeX error in chapters/intro.tex at line 12: Undefined control sequence. @log'}]), `not asked: ${JSON.stringify(sent(at, 'ask'))}`);
+    assert(!pane.querySelector('[data-tex-body="agent"]').hidden, 'the agent is not shown');
+    assert(pane.querySelector('[data-tex-body="agent"] [data-mention="@log"]'), 'the composer has no @log');
+    pane.querySelector('[data-tex-tab="log"]').click(); await settle();
+
     // What it lacks: found, then installed, each when asked.
     at = win.commands.length;
     pane.querySelector('[data-tex-packages="find"]').click(); await settle();

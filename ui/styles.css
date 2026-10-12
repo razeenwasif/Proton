@@ -5033,6 +5033,9 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .tex-entry { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 2px 10px; width: 100%; padding: 6px 8px; border: 0; border-left: 2px solid transparent;
   border-radius: 0 6px 6px 0; background: none; color: var(--text); font: var(--z-2xs)/1.5 var(--zed); text-align: left; cursor: pointer; }
 .tex-entry:disabled { cursor: default; }
+.tex-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.tex-fix { margin: 4px 0 0 6px; padding: 2px 8px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: none; color: var(--cc-muted); font: var(--z-2xs) var(--zed); cursor: pointer; }
+.tex-fix:hover { color: var(--cc-text); background: var(--row-hover); }
 .tex-entry:not(:disabled):hover { background: var(--row-hover); }
 .tex-entry.error { border-left-color: var(--err); }
 .tex-entry.warning { border-left-color: var(--warn); }

@@ -202,9 +202,12 @@ export function createTex(host) {
       const rows = entries.map((e) => {
         const where = e.file ? `${e.file}${e.line ? `:${e.line}` : ""}` : "";
         const jump = e.file && !e.file.startsWith("/") ? ` data-tex-jump="${esc(e.file)}" data-line="${e.line ?? 1}"` : "";
-        return `<button class="tex-entry ${kind}"${jump}${jump ? "" : " disabled"}>` +
+        const entry = `<button class="tex-entry ${kind}"${jump}${jump ? "" : " disabled"}>` +
           `<span class="tex-where">${esc(where)}</span><span class="tex-message">${esc(e.message)}</span>` +
           (e.context ? `<code class="tex-context">${esc(e.context)}</code>` : "") + `</button>`;
+        // An error is the agent's to fix, with the log in front of it.
+        const fix = kind === "error" ? `<button class="tex-fix" data-tex-fix="${log.entries.indexOf(e)}" title="Ask the agent to fix this — its edits wait for you in the Agent tab">Fix</button>` : "";
+        return `<div class="tex-row">${entry}${fix}</div>`;
       }).join("");
       return `<section class="tex-group"><h4>${esc(name)} <span class="lab-faint">${entries.length}</span></h4>${rows}</section>`;
     }).join("");
@@ -238,6 +241,15 @@ export function createTex(host) {
     if (t.closest("[data-tex-add]") && state.chosen) {
       host.dispatch({ type: "texAddTemplate", template: state.chosen });
       return gallery(false);
+    }
+    const fix = /** @type {HTMLElement | null} */ (t.closest("[data-tex-fix]"));
+    if (fix) {
+      const e = state.log?.entries[Number(fix.dataset.texFix)];
+      if (!e) return;
+      const where = e.file ? ` in ${e.file}${e.line ? ` at line ${e.line}` : ""}` : "";
+      show("agent");
+      host.dispatch({ type: "ask", text: `Fix this LaTeX error${where}: ${e.message} @log` });
+      return;
     }
     const jump = /** @type {HTMLElement | null} */ (t.closest("[data-tex-jump]"));
     if (jump) {

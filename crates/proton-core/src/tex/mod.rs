@@ -114,6 +114,8 @@ pub struct Tex {
     synctex: Option<(proton_tex::synctex::Map, PathBuf)>,
     /// The outline last drawn, and the main file it is of.
     outline: Option<(Option<String>, Outline)>,
+    /// What the last build's log said, for the agent.
+    log: Option<proton_tex::log::Log>,
 }
 
 impl std::fmt::Debug for Tex {
@@ -354,6 +356,41 @@ impl Tex {
         }
     }
 
+    /// The last build, as the agent reads it: what was typeset and how, then
+    /// its log — each error with the source round it, read from the editor's
+    /// buffers by `source` so an unsaved fix is what it sees.
+    pub fn describe(&self, source: impl Fn(&str) -> Option<String>) -> String {
+        let Some(last) = &self.last else {
+            return "Nothing has been typeset in this project yet.".into();
+        };
+        let main = last.main.as_deref().unwrap_or("the document");
+        let header = match last.state.as_str() {
+            "running" => format!("`{main}` is being typeset with {} now; this is the build before it.", last.engine),
+            "noMain" => return "No file in this project begins a document with \\documentclass, so nothing was typeset.".into(),
+            "stopped" => format!("Typesetting `{main}` was stopped."),
+            "timedOut" => format!("Typesetting `{main}` took too long and was stopped."),
+            state => {
+                let pages = last.pages.map(|n| format!(", {n} page{}", if n == 1 { "" } else { "s" })).unwrap_or_default();
+                let made = if state == "done" { "made a PDF" } else { "made no PDF" };
+                format!(
+                    "`{main}`, typeset with {} in {:.1} s, {made}: {} error{}, {} warning{}, {} bad box{}{pages}.",
+                    last.engine,
+                    last.seconds,
+                    last.errors,
+                    if last.errors == 1 { "" } else { "s" },
+                    last.warnings,
+                    if last.warnings == 1 { "" } else { "s" },
+                    last.boxes,
+                    if last.boxes == 1 { "" } else { "es" },
+                )
+            }
+        };
+        match &self.log {
+            Some(log) => proton_tex::log::describe(log, &header, source),
+            None => header,
+        }
+    }
+
     /// Copy the last PDF made beside its main file, in the project — the
     /// one write a build makes there, and only when asked.
     pub fn save_pdf(&mut self, root: &Path) -> Vec<Event> {
@@ -465,6 +502,7 @@ impl Tex {
         if state == "stopped" {
             return (Vec::new(), Vec::new());
         }
+        self.log = Some(log.clone());
         (vec![Event::TexBuild { build: result }, Event::TexLog { log, root: root.display().to_string() }], readable)
     }
 }

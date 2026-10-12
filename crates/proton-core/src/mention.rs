@@ -1,4 +1,4 @@
-//! `@selection`, `@dataframe`: naming what the model may look at.
+//! `@selection`, `@dataframe`, `@log`: naming what the model may look at.
 //!
 //! The design's phrasing is the specification: *what the model can see is a
 //! chip you can point at*. A question about "this" is a question the model
@@ -28,6 +28,8 @@ pub enum Mention {
     Selection,
     /// The table the selected notebook cell produced.
     Dataframe,
+    /// What the last LaTeX build said: its errors, with the source round them.
+    Log,
 }
 
 impl Mention {
@@ -36,11 +38,12 @@ impl Mention {
         match self {
             Mention::Selection => "@selection",
             Mention::Dataframe => "@dataframe",
+            Mention::Log => "@log",
         }
     }
 
     /// Every mention this build understands, for the composer's chips.
-    pub const ALL: [Mention; 2] = [Mention::Selection, Mention::Dataframe];
+    pub const ALL: [Mention; 3] = [Mention::Selection, Mention::Dataframe, Mention::Log];
 }
 
 /// The mentions in a question, in the order they were written, without repeats.
@@ -98,6 +101,12 @@ mod tests {
     fn a_mention_is_found() {
         assert_eq!(found("explain @selection"), [Mention::Selection]);
         assert_eq!(found("what is in @dataframe?"), [Mention::Dataframe]);
+    }
+
+    #[test]
+    fn the_log_is_one_too() {
+        assert_eq!(found("why does it not typeset? @log"), [Mention::Log]);
+        assert!(found("see @logs").is_empty());
     }
 
     #[test]

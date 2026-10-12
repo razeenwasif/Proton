@@ -234,6 +234,15 @@ impl Agent {
                 }),
             },
             Tool {
+                name: "latex_log".into(),
+                description: "What the LaTeX project's last build said: the main file, the engine, and \
+                              each error with the source lines round it, what TeX lacked, and the first \
+                              warnings. Read-only. Use it before fixing a document that does not typeset; \
+                              the build runs again when a fix is saved."
+                    .into(),
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            Tool {
                 name: "open_buffer".into(),
                 description: "Open a file in the editor so the user can see it. Use when \
                               pointing at something worth looking at, not to read it."
@@ -967,7 +976,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 12);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the

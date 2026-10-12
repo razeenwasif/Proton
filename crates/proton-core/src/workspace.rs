@@ -4428,9 +4428,22 @@ impl Workspace {
             out.push_str(&match mention {
                 crate::mention::Mention::Selection => self.selected_text(),
                 crate::mention::Mention::Dataframe => self.selected_frame(),
+                crate::mention::Mention::Log => self.tex_log_text(),
             });
         }
         out
+    }
+
+    /// The last LaTeX build and its log, the source round each error read
+    /// from the buffers open — an edit not yet saved included — or the disk.
+    fn tex_log_text(&self) -> String {
+        self.tex.describe(|file| {
+            let path = self.pickers.resolve(file);
+            match self.editor.find(&path) {
+                Some(index) => Some(self.editor.buffers()[index].contents()),
+                None => std::fs::read_to_string(&path).ok(),
+            }
+        })
     }
 
     /// The text selected in the focused editor.
@@ -4802,6 +4815,8 @@ impl Workspace {
                     .collect::<Vec<_>>()
                     .join("\n"))
             }
+
+            "latex_log" => Ok(self.tex_log_text()),
 
             "grep" => {
                 let query = text("query")?;

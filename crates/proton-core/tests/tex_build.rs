@@ -316,3 +316,31 @@ fn a_template_that_wants_what_tex_lacks_offers_it_first_and_is_typeset_once_inst
     let (build, _) = built(&mut ws);
     assert_eq!(build.state, "done", "{build:?}");
 }
+
+#[test]
+fn the_agent_reads_the_last_build_s_errors_with_the_source_round_them_unsaved_edits_and_all() {
+    let (b, env) = bench("agent");
+    let mut ws = Workspace::rooted(&b.project).with_tex_env(env);
+    ws.apply(Command::SetMode { mode: ModeId::Tex });
+    let before = ws.run_tool("latex_log", &serde_json::json!({})).unwrap();
+    assert!(before.contains("Nothing has been typeset"), "{before}");
+
+    // The stand-in fails at line 3 of a main file that says \foo.
+    std::fs::write(b.project.join("main.tex"), "\\documentclass{article}\n\\begin{document}\n\\foo\n\\end{document}\n").unwrap();
+    open(&mut ws, &b.project.join("main.tex"));
+    ws.apply(Command::Save);
+    let (build, _) = built(&mut ws);
+    assert_eq!(build.errors, 1, "{build:?}");
+    // Edited since, not saved: the agent sees what is in the editor.
+    ws.apply(Command::JumpTo { mode: ModeId::Tex, path: b.project.join("main.tex").display().to_string(), line: 3, column: 0 });
+    for key in "OUnsaved.".chars() {
+        ws.apply(Command::Key { key: proton_core::Key::char(key) });
+    }
+    ws.apply(Command::Key { key: proton_core::Key::named("Escape") });
+    let text = ws.run_tool("latex_log", &serde_json::json!({})).unwrap();
+    assert!(text.starts_with("`main.tex`, typeset with pdfLaTeX in"), "{text}");
+    assert!(text.contains("made no PDF: 1 error"), "{text}");
+    assert!(text.contains("1. `main.tex` line 3: Undefined control sequence."), "{text}");
+    assert!(text.contains("TeX stopped at: \\foo"), "{text}");
+    assert!(text.contains(">   3  \\foo") && text.contains("Unsaved."), "the source round it, as the editor has it: {text}");
+}
