@@ -5263,6 +5263,14 @@ function renderEvent(event) {
       pdf?.fields(event);
       break;
 
+    case "pdfPassword":
+      pdf?.password(event);
+      break;
+
+    case "pdfInfo":
+      pdf?.info(event);
+      break;
+
     case "debug":
       renderDebug(event);
       break;

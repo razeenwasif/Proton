@@ -57,12 +57,13 @@ export function createPdf(host) {
    *   shown: {tab: number, key: string} | null, opening: boolean, at: number,
    *   side: string, labels: string[] | null, outline: any[] | null, page: number, count: number,
    *   query: string, hits: Found[], hitOn: number, searching: boolean, colors: number,
-   *   ask: {kind: "close", tab: number} | {kind: "saveAs"} | null, grid: boolean}} */
+   *   ask: {kind: "close", tab: number} | {kind: "saveAs"} | null, grid: boolean,
+   *   locked: {path: string, name: string, wrong: boolean} | null}} */
   const state = {
     tabs: [], active: null, recent: [], project: [], root: "", shown: null, opening: false, at: 0,
     side: pref("side", "pages"), labels: null, outline: null, page: 1, count: 0,
     query: "", hits: [], hitOn: -1, searching: false, colors: Number(pref("colors", "0")) || 0,
-    ask: null, grid: false,
+    ask: null, grid: false, locked: null,
   };
   /** Which search is the current one, so one overtaken stops. */
   let searchGeneration = 0;
@@ -201,7 +202,7 @@ export function createPdf(host) {
   function renderTabs() {
     q("[data-pdf-tabs]").innerHTML = state.tabs.map((t) =>
       `<div class="pdf-tab${t.id === state.active ? " on" : ""}" role="tab" aria-selected="${t.id === state.active}" data-pdf-tab="${t.id}" title="${esc(t.path)}">` +
-      `<span class="pdf-tab-name">${esc(t.name)}</span>${t.dirty ? '<span class="dot" title="Not saved"></span>' : ""}` +
+      `${t.protected ? '<span class="pdf-tab-lock" title="Saved with a password">🔒</span>' : ""}<span class="pdf-tab-name">${esc(t.name)}</span>${t.dirty ? '<span class="dot" title="Not saved"></span>' : ""}` +
       `<button class="pdf-tab-close" data-pdf-close="${t.id}" title="Close" aria-label="Close ${esc(t.name)}">×</button></div>`).join("");
   }
 
@@ -215,11 +216,20 @@ export function createPdf(host) {
     return [...project, ...recent].slice(0, LISTED);
   }
 
-  /** The Open box: shown with nothing open, or when + asks for it. */
+  /** The Open box: shown with nothing open, or when + asks for it — or
+   *  for a PDF's password. */
   function renderOpen() {
-    const showing = state.opening || !state.tabs.length;
+    const showing = state.opening || !state.tabs.length || Boolean(state.locked);
     openBox.hidden = !showing;
     pages.hidden = showing || !state.shown;
+    const lock = q("[data-pdf-locked]");
+    lock.hidden = !state.locked;
+    if (state.locked) {
+      lock.innerHTML = `<p><b>${esc(state.locked.name)}</b> is protected by a password.${state.locked.wrong ? ` <span class="pdf-wrong">That is not it.</span>` : ""}</p>` +
+        `<form data-pdf-unlock><input type="password" data-pdf-unlock-password placeholder="Its password" autocomplete="off" aria-label="Its password">` +
+        `<button type="button" class="cc-quiet" data-pdf-unlock-cancel>Cancel</button><button type="submit" class="cc-primary">Open</button></form>`;
+      /** @type {HTMLInputElement | null} */ (lock.querySelector("[data-pdf-unlock-password]"))?.focus();
+    }
     if (!showing) return;
     const list = choices();
     state.at = Math.min(state.at, Math.max(0, list.length - 1));
@@ -465,6 +475,10 @@ export function createPdf(host) {
     const close = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-close]"));
     if (close) return closeTab(Number(close.dataset.pdfClose));
     if (t.closest("[data-pdf-grid-toggle]")) return showGrid(!state.grid);
+    if (t.closest("[data-pdf-unlock-cancel]")) {
+      state.locked = null;
+      return renderOpen();
+    }
     const toolPick = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-tool-pick]"));
     if (toolPick) return takeTool(toolPick.dataset.pdfToolPick ?? "select");
     const ink = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-ink]"));
@@ -564,6 +578,18 @@ export function createPdf(host) {
   section.addEventListener("submit", (e) => {
     const form = /** @type {HTMLElement} */ (e.target);
     if (form.matches("[data-pdf-find]")) return void e.preventDefault();
+    if (form.matches("[data-pdf-unlock]")) {
+      e.preventDefault();
+      const field = /** @type {HTMLInputElement} */ (form.querySelector("[data-pdf-unlock-password]"));
+      const locked = state.locked;
+      if (!locked || !field.value) return;
+      // Sent once, and not kept here.
+      host.dispatch({ type: "pdfOpen", path: locked.path, password: field.value });
+      field.value = "";
+      state.locked = null;
+      renderOpen();
+      return;
+    }
     if (!form.matches("[data-pdf-save-as-form]")) return;
     e.preventDefault();
     const path = /** @type {HTMLInputElement} */ (form.querySelector("[data-pdf-save-as-path]")).value.trim();
@@ -682,5 +708,16 @@ export function createPdf(host) {
     tools.render();
   }
 
-  return { tabs, show, key, comments, fields, view: () => view, search, state: () => state };
+  /** A PDF that needs its password: asked for. @param {{path: string, name: string, wrong: boolean}} event */
+  function password(event) {
+    state.locked = { path: event.path, name: event.name, wrong: event.wrong };
+    renderOpen();
+  }
+
+  /** What the tab on top says of itself. @param {any} event */
+  function info(event) {
+    if (event.tab === state.active) tools.setAbout(event);
+  }
+
+  return { tabs, show, key, comments, fields, password, info, view: () => view, search, state: () => state };
 }

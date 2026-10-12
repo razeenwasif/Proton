@@ -415,6 +415,54 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('A protected PDF asks for its password; another is given one; its properties set, hidden data removed, and it compressed', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    await win.pushEvents([tabs([], null), {type: 'pdfPassword', path: '/Users/you/locked.pdf', name: 'locked.pdf', wrong: false}]); await settle();
+    const lock = $('[data-pdf-locked]');
+    assert(shown(lock) && lock.textContent.includes('locked.pdf') && !lock.querySelector('.pdf-wrong'), 'the password is not asked for');
+    const field = lock.querySelector('[data-pdf-unlock-password]');
+    assert(doc.activeElement === field && field.type === 'password', 'its field is not ready, or shows what is typed');
+    field.value = 's3cret';
+    let at = win.commands.length;
+    lock.querySelector('[data-pdf-unlock]').requestSubmit(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfOpen')) === JSON.stringify([{type: 'pdfOpen', path: '/Users/you/locked.pdf', password: 's3cret'}]), 'not opened with it');
+    assert(!shown(lock) && !doc.body.innerHTML.includes('s3cret'), 'the password was kept in the page');
+    await win.pushEvents([{type: 'pdfPassword', path: '/Users/you/locked.pdf', name: 'locked.pdf', wrong: true}]); await settle();
+    assert(lock.querySelector('.pdf-wrong'), 'a wrong one is not said');
+    lock.querySelector('[data-pdf-unlock-cancel]').click(); await settle();
+
+    const one = {id: 8, name: 'report.pdf', path: '~/report.pdf', dirty: false, readOnly: null, undo: null, redo: null, protected: false};
+    await win.pushEvents([tabs([one], 8), {type: 'pdfView', tab: 8, key: FIXTURE, version: 1, page: null, quiet: false},
+      {type: 'pdfInfo', tab: 8, protected: false, onDisk: 2_400_000, now: 2_400_000, info: {title: 'Draft', author: 'Ada', subject: '', keywords: '', creator: 'Word', producer: 'macOS', created: '', modified: '', version: '1.7', pages: 3, hidden: ['XMP metadata', 'JavaScript']}}]); await settle();
+    const tools = $('[data-pdf-tools]');
+    assert(tools.querySelector('[data-pdf-prop="title"]').value === 'Draft' && tools.textContent.includes('PDF 1.7 · 3 pages') && tools.textContent.includes('Made with Word, macOS'), 'the properties are not shown');
+    tools.querySelector('[data-pdf-prop="title"]').value = 'Final';
+    tools.querySelector('[data-pdf-prop="title"]').dispatchEvent(new Event('input', {bubbles: true}));
+    at = win.commands.length;
+    tools.querySelector('[data-pdf-tool="props"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfSetInfo')) === JSON.stringify([{type: 'pdfSetInfo', title: 'Final', author: 'Ada', subject: '', keywords: ''}]), 'not set');
+    assert(tools.textContent.includes('XMP metadata, JavaScript') && tools.textContent.includes('On disk 2.3 MB'), 'what it hides, or its size, is not said');
+    tools.querySelector('[data-pdf-tool="sanitize"]').click(); await settle();
+    tools.querySelector('[data-pdf-tool="compress"]').click(); await settle();
+    assert(sent(at, 'pdfSanitize').length === 1 && sent(at, 'pdfCompress').length === 1, 'not cleaned or compressed');
+
+    // A password given: what it allows chosen.
+    const user = tools.querySelector('[data-pdf-secret="user"]');
+    user.value = 'open'; user.dispatchEvent(new Event('input', {bubbles: true}));
+    const copy = tools.querySelector('[data-pdf-allow="copy"]');
+    copy.checked = false; copy.dispatchEvent(new Event('change', {bubbles: true}));
+    at = win.commands.length;
+    tools.querySelector('[data-pdf-tool="protect"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfProtect')) === JSON.stringify([{type: 'pdfProtect', protection: {user: 'open', owner: '', print: true, copy: false, edit: false}}]), `not protected as chosen: ${JSON.stringify(sent(at, 'pdfProtect'))}`);
+    await win.pushEvents([tabs([{...one, protected: true, dirty: true}], 8), {type: 'pdfInfo', tab: 8, protected: true, onDisk: 2_400_000, now: 900_000, info: {title: 'Final', author: '', subject: '', keywords: '', creator: '', producer: '', created: '', modified: '', version: '1.7', pages: 3, hidden: []}}]); await settle();
+    assert(doc.querySelector('.pdf-tab .pdf-tab-lock') && tools.querySelector('[data-pdf-tool="unprotect"]') && tools.textContent.includes('as it would be saved 879 KB'), 'protected is not shown, or the size as it would be saved');
+    at = win.commands.length;
+    tools.querySelector('[data-pdf-tool="unprotect"]').click(); await settle();
+    assert(sent(at, 'pdfUnprotect').length === 1, 'not unprotected');
+    await win.pushEvents([tabs([], null)]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('A PDF opened in the PDF mode is a tab, and the document viewer hands its PDF over at its page', async () => {
     await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
     let at = win.commands.length;

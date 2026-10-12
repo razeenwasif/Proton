@@ -5345,3 +5345,13 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .doc-page textarea.pdf-field { padding: 2px 3px; line-height: 1.15; }
 .doc-page .pdf-field:disabled { opacity: .85; cursor: default; }
 .pdf-tool-check { display: flex; gap: 6px; align-items: center; color: var(--muted); font: var(--z-2xs) var(--zed); }
+/* A PDF's password asked for; the tools' security and properties. */
+.pdf-locked { display: grid; gap: 8px; padding: 12px; margin-bottom: 14px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, var(--bg)); font: var(--z-xs)/1.5 var(--zed); color: var(--text); }
+.pdf-locked[hidden] { display: none; }
+.pdf-locked p { margin: 0; }
+.pdf-locked form { display: flex; gap: 8px; }
+.pdf-locked input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-xs) var(--zed); }
+.pdf-wrong { color: var(--err); }
+.pdf-tab-lock { font-size: 10px; }
+.pdf-tool-checks { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font: var(--z-2xs) var(--zed); }
+.pdf-tool-checks label { display: flex; gap: 4px; align-items: center; }

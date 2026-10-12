@@ -56,7 +56,7 @@ fn pdfs_open_in_tabs_from_the_project_or_anywhere_and_are_drawn_from_memory() {
     assert!(open.is_empty() && active.is_none());
 
     // Relative to the project, at a page.
-    let events = session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: Some(1) });
+    let events = session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: Some(1), password: None });
     let (open, active, recent, _) = tabs(&events).unwrap();
     assert_eq!(open, [(1, "one.pdf".to_string())]);
     assert_eq!(active, Some(1));
@@ -67,14 +67,14 @@ fn pdfs_open_in_tabs_from_the_project_or_anywhere_and_are_drawn_from_memory() {
     assert!(session.document_file(&key).is_none(), "and from nowhere on disk");
 
     // Absolute, a second tab; the first again only comes forward.
-    let events = session.apply(Command::PdfOpen { path: s.0.join("two.pdf").display().to_string(), page: None });
+    let events = session.apply(Command::PdfOpen { path: s.0.join("two.pdf").display().to_string(), page: None, password: None });
     assert_eq!(tabs(&events).unwrap().0.len(), 2);
-    let events = session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: None });
+    let events = session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: None, password: None });
     assert_eq!((tabs(&events).unwrap().0.len(), tabs(&events).unwrap().1), (2, Some(1)));
 
     // What is not a PDF, or not there, is said.
     for (bad, said) in [("notes.txt", "not a PDF"), ("nope.pdf", "nope.pdf"), ("papers", "not a file")] {
-        let events = session.apply(Command::PdfOpen { path: bad.into(), page: None });
+        let events = session.apply(Command::PdfOpen { path: bad.into(), page: None, password: None });
         assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains(said))), "{bad}: {events:?}");
     }
 
@@ -134,7 +134,7 @@ fn a_change_is_held_until_saved_undoable_asked_about_before_quitting_and_saved_i
     std::fs::write(&path, &original).unwrap();
     let mut session = Session::new(&s.0);
     session.apply(Command::SetMode { mode: ModeId::Pdf });
-    session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: None });
+    session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: None, password: None });
 
     // Turned: drawn again at a new version, held, not yet on disk.
     let events = session.apply(Command::PdfRotate { pages: vec![2], by: 90 });
@@ -182,7 +182,7 @@ fn a_pdf_that_cannot_be_read_to_change_it_is_still_read_and_says_why_it_cannot_c
     std::fs::write(s.0.join("odd.pdf"), b"%PDF-1.7\n% nothing more").unwrap();
     let mut session = Session::new(&s.0);
     session.apply(Command::SetMode { mode: ModeId::Pdf });
-    let events = session.apply(Command::PdfOpen { path: "odd.pdf".into(), page: None });
+    let events = session.apply(Command::PdfOpen { path: "odd.pdf".into(), page: None, password: None });
     let read_only = events.iter().rev().find_map(|e| match e {
         Event::PdfTabs { tabs, .. } => tabs.first().and_then(|t| t.read_only.clone()),
         _ => None,
@@ -203,7 +203,7 @@ fn pages_are_moved_inserted_brought_in_taken_out_split_and_combined() {
     std::fs::write(s.0.join("other.pdf"), pdf(&["x", "y"])).unwrap();
     let mut session = Session::new(&s.0);
     session.apply(Command::SetMode { mode: ModeId::Pdf });
-    session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: None });
+    session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: None, password: None });
 
     session.apply(Command::PdfMove { pages: vec![4], before: 1 });
     session.apply(Command::PdfInsertBlank { after: 2, count: 1 });
@@ -248,7 +248,7 @@ fn comments_are_made_answered_edited_and_deleted_each_undoable_and_drawn_into_th
     std::fs::write(s.0.join("paper.pdf"), pdf(&["Words to mark.", "Two."])).unwrap();
     let mut session = Session::new(&s.0);
     session.apply(Command::SetMode { mode: ModeId::Pdf });
-    assert_eq!(comments(&session.apply(Command::PdfOpen { path: "paper.pdf".into(), page: None })), Some(Vec::new()));
+    assert_eq!(comments(&session.apply(Command::PdfOpen { path: "paper.pdf".into(), page: None, password: None })), Some(Vec::new()));
 
     let mark = |kind: &str| proton_pdf::annot::Mark { kind: kind.into(), boxes: vec![[72.0, 716.0, 180.0, 732.0]], rect: Some([300.0, 700.0, 0.0, 0.0]), strokes: Vec::new(), color: "#ffd400".into(), text: String::new() };
     let events = session.apply(Command::PdfComment { page: 1, mark: mark("highlight") });
@@ -290,7 +290,7 @@ fn a_form_is_filled_in_quietly_undone_flattened_and_saved() {
     std::fs::write(s.0.join("form.pdf"), &bytes).unwrap();
     let mut session = Session::new(&s.0);
     session.apply(Command::SetMode { mode: ModeId::Pdf });
-    let events = session.apply(Command::PdfOpen { path: "form.pdf".into(), page: None });
+    let events = session.apply(Command::PdfOpen { path: "form.pdf".into(), page: None, password: None });
     assert_eq!(fields(&events).unwrap().iter().map(|f| f.0.as_str()).collect::<Vec<_>>(), ["name", "notes", "agree", "size", "colour"]);
 
     // Typed into: the view's name moves on, quietly, and nothing is drawn again under the caret.
@@ -309,4 +309,51 @@ fn a_form_is_filled_in_quietly_undone_flattened_and_saved() {
     session.apply(Command::PdfSave);
     let saved = lopdf::Document::load_mem(&std::fs::read(s.0.join("form.pdf")).unwrap()).unwrap();
     assert!(proton_pdf::forms::list(&saved).is_empty());
+}
+
+fn info(events: &[Event]) -> Option<(proton_pdf::clean::Info, bool, u32, u32)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::PdfInfo { info, protected, on_disk, now, .. } => Some((info.clone(), *protected, *on_disk, *now)),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_pdf_is_given_a_password_asked_for_it_again_and_its_properties_hidden_data_and_size_seen_to() {
+    let s = scratch("security");
+    let words: Vec<String> = (0..40).map(|i| format!("Page {i}, which says much what the others say, again and again.\n").repeat(4)).collect();
+    let pages: Vec<&str> = words.iter().map(String::as_str).collect();
+    std::fs::write(s.0.join("report.pdf"), pdf(&pages)).unwrap();
+    let mut session = Session::new(&s.0);
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    let events = session.apply(Command::PdfOpen { path: "report.pdf".into(), page: None, password: None });
+    let (first, protected, on_disk, _) = info(&events).unwrap();
+    assert!(!protected && first.pages == 40 && on_disk > 0);
+
+    // Properties, set and read back.
+    let events = session.apply(Command::PdfSetInfo { title: "Annual report".into(), author: "Ada".into(), subject: String::new(), keywords: "numbers".into() });
+    let (props, ..) = info(&events).unwrap();
+    assert_eq!((props.title.as_str(), props.author.as_str(), props.keywords.as_str()), ("Annual report", "Ada", "numbers"));
+    // Hidden data out; compressed: smaller as it would be saved.
+    session.apply(Command::PdfSanitize);
+    let (after, _, disk, now) = info(&session.apply(Command::PdfCompress)).unwrap();
+    assert_eq!((after.title.as_str(), after.author.as_str()), ("Annual report", ""), "who made it goes, the title stays");
+    assert!(now < disk, "compressed: {disk} → {now}");
+
+    // A password, saved; reopened, it is asked for.
+    let protection = proton_pdf::security::Protection { user: "s3cret".into(), owner: String::new(), print: true, copy: false, edit: false };
+    let events = session.apply(Command::PdfProtect { protection });
+    assert!(info(&events).unwrap().1, "it says it is protected");
+    let (_, key, _) = view(&events).unwrap();
+    assert!(!String::from_utf8_lossy(&session.document_bytes(&key).unwrap()).contains("/Encrypt"), "the window's view needs no password");
+    session.apply(Command::PdfSave);
+    session.apply(Command::PdfClose { tab: 1, discard: false });
+    let events = session.apply(Command::PdfOpen { path: "report.pdf".into(), page: None, password: None });
+    assert!(events.iter().any(|e| matches!(e, Event::PdfPassword { wrong: false, name, .. } if name == "report.pdf")), "{events:?}");
+    let wrong = proton_pdf::security::Secret("nope".into());
+    assert!(session.apply(Command::PdfOpen { path: "report.pdf".into(), page: None, password: Some(wrong) }).iter().any(|e| matches!(e, Event::PdfPassword { wrong: true, .. })));
+    let right = proton_pdf::security::Secret("s3cret".into());
+    let events = session.apply(Command::PdfOpen { path: "report.pdf".into(), page: None, password: Some(right) });
+    let (reopened, protected, ..) = info(&events).expect("opened with its password");
+    assert!(protected && reopened.pages == 40 && reopened.title == "Annual report");
 }

@@ -17,6 +17,10 @@ dirty: boolean,
  */
 readOnly: string | null, 
 /**
+ * Saved with a password.
+ */
+protected: boolean, 
+/**
  * What undo and redo would do: "turn page 2".
  */
 undo: string | null, redo: string | null, };

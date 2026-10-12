@@ -17,6 +17,8 @@ serde_json = { workspace = true }
 ts-rs = { workspace = true }
 # Already in every build, through pdf-extract.
 lopdf = "0.42"
+# A new key for each PDF given passwords; already in the lock file.
+getrandom = "0.3"
 
 [dev-dependencies]
 proton-library = { workspace = true, features = ["fixture"] }

@@ -8,12 +8,14 @@
 //! wrote, and one bad file must cost a tab, not the window.
 
 pub mod annot;
+pub mod clean;
 pub mod combine;
 pub mod doc;
 pub mod forms;
 pub mod ops;
 pub mod pages;
 pub mod save;
+pub mod security;
 
 pub use doc::{Doc, Opened};
 pub use ops::Op;

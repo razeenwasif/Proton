@@ -5,10 +5,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use lopdf::Document;
+use lopdf::{Document, EncryptionState, LoadOptions};
 
 use crate::ops::Op;
-use crate::{guarded, save};
+use crate::security::{self, Protection};
+use crate::{clean, guarded, save};
 
 /// The largest PDF opened.
 pub const LARGEST: usize = 128 * 1024 * 1024;
@@ -29,34 +30,73 @@ pub struct Doc {
     at: usize,
     /// How far into the log the file on disk is, if it is a point in it.
     saved: Option<usize>,
+    /// The file on disk is encrypted: the keys it was read with, and the
+    /// password that opened it — kept in memory, never said.
+    sealed: Option<(EncryptionState, String)>,
 }
 
-/// What opening said: the document, or why it opens only to be read.
+/// What opening said: the document, or why it opens only to be read, or
+/// that it needs its password — `wrong`, when one was given and was not it.
 pub enum Opened {
     Editable(Box<Doc>),
     ReadOnly(String),
+    Locked { wrong: bool },
 }
 
-/// Bytes read as a document. @param bytes the file's
-fn read(bytes: &[u8]) -> Result<Document, String> {
-    guarded("opening", || Document::load_mem(bytes).map_err(|e| format!("lopdf: {e}")))
+/// Bytes read as a document, with a password if one is given; the keys it
+/// was read with, if it was encrypted — itself decrypted — or `Err(None)`
+/// when it needs a password it was not given.
+fn read_with(bytes: &[u8], password: Option<&str>) -> Result<(Document, Option<EncryptionState>), Option<String>> {
+    let loaded = guarded("opening", || {
+        match password {
+            Some(p) => Document::load_mem_with_options(bytes, LoadOptions::with_password(p)),
+            None => Document::load_mem(bytes),
+        }
+        .map_err(|e| format!("lopdf: {e}"))
+    });
+    let mut doc = match loaded {
+        Ok(doc) => doc,
+        Err(why) if why.contains("password") || why.contains("Password") => return Err(None),
+        Err(why) => return Err(Some(why)),
+    };
+    // Encrypted and not decrypted: its password is needed.
+    if doc.is_encrypted() && !doc.was_encrypted() {
+        return Err(None);
+    }
+    let state = doc.encryption_state.clone();
+    if state.is_some() {
+        security::unprotect(&mut doc);
+    }
+    Ok((doc, state))
+}
+
+/// How the document is to be written: plain, under the keys it was read
+/// with, or under new passwords.
+enum Seal {
+    Plain,
+    Kept(EncryptionState),
+    New(Protection),
 }
 
 impl Doc {
     /// Open a PDF from its bytes — editable, or, where it cannot be changed
     /// safely, said so with why.
     pub fn open(bytes: Arc<Vec<u8>>) -> Opened {
+        Doc::open_with(bytes, None)
+    }
+
+    /// The same, with the password it is protected by.
+    pub fn open_with(bytes: Arc<Vec<u8>>, password: Option<&str>) -> Opened {
         if bytes.len() > LARGEST {
             return Opened::ReadOnly("too large to change here".into());
         }
-        let origin = match read(&bytes) {
-            Ok(doc) => doc,
-            Err(why) => return Opened::ReadOnly(format!("it could not be read to change it — {why}")),
+        let (origin, state) = match read_with(&bytes, password) {
+            Ok(read) => read,
+            Err(None) => return Opened::Locked { wrong: password.is_some() },
+            Err(Some(why)) => return Opened::ReadOnly(format!("it could not be read to change it — {why}")),
         };
-        if origin.was_encrypted() || origin.is_encrypted() {
-            return Opened::ReadOnly("it is protected by a password; changing it comes with its passwords".into());
-        }
-        Opened::Editable(Box::new(Doc { current: origin.clone(), on_disk: origin.clone(), origin, disk: bytes, log: Vec::new(), at: 0, saved: Some(0) }))
+        let sealed = state.map(|s| (s, password.unwrap_or("").to_string()));
+        Opened::Editable(Box::new(Doc { current: origin.clone(), on_disk: origin.clone(), origin, disk: bytes, log: Vec::new(), at: 0, saved: Some(0), sealed }))
     }
 
     /// Make a change: what was undone past is let go of.
@@ -111,36 +151,101 @@ impl Doc {
         self.saved != Some(self.at)
     }
 
-    /// Whether what is made can be appended to the file on disk.
-    fn incremental(&self) -> bool {
-        self.log[..self.at].iter().all(Op::incremental)
+    /// How it is to be written: the last password change kept, or as the
+    /// file on disk is.
+    fn seal(&self) -> Seal {
+        for op in self.log[..self.at].iter().rev() {
+            match op {
+                Op::Protect { protection } => return Seal::New(protection.clone()),
+                Op::Unprotect => return Seal::Plain,
+                _ => {}
+            }
+        }
+        match &self.sealed {
+            Some((state, _)) => Seal::Kept(state.clone()),
+            None => Seal::Plain,
+        }
     }
 
-    /// The document as it is now, as bytes: the file on disk with an update
-    /// appended, or written whole.
+    /// Whether it will be written with a password.
+    pub fn protected(&self) -> bool {
+        !matches!(self.seal(), Seal::Plain)
+    }
+
+    /// Whether what is made can be appended to the file on disk: only to a
+    /// plain one, and only changes that can be.
+    fn incremental(&self) -> bool {
+        self.sealed.is_none() && matches!(self.seal(), Seal::Plain) && self.log[..self.at].iter().all(Op::incremental)
+    }
+
+    /// The document as it is now, as it would be saved: the file on disk
+    /// with an update appended; or written whole — compressed, protected —
+    /// when that is what the changes ask.
     pub fn bytes(&self) -> Result<Vec<u8>, String> {
         if !self.dirty() && self.saved.is_some() {
             return Ok(self.disk.as_ref().clone());
         }
         guarded("writing it", || {
             if self.incremental() {
-                save::incremental(&self.disk, &self.on_disk, &self.current)
-            } else {
-                save::whole(&self.current)
+                return save::incremental(&self.disk, &self.on_disk, &self.current);
+            }
+            let compress = self.log[..self.at].iter().any(|op| matches!(op, Op::Compress));
+            let mut doc = self.current.clone();
+            match self.seal() {
+                Seal::Plain if compress => clean::compressed(&doc),
+                Seal::Plain => save::whole(&doc),
+                sealed => {
+                    if compress {
+                        doc.prune_objects();
+                        doc.compress();
+                    }
+                    match sealed {
+                        Seal::Kept(state) => security::reencrypt(&mut doc, &state)?,
+                        Seal::New(p) => security::protect(&mut doc, &p)?,
+                        Seal::Plain => {}
+                    }
+                    save::whole(&doc)
+                }
             }
         })
+    }
+
+    /// The document as it is now, for the window to draw: never encrypted —
+    /// it is held in memory, and drawn without asking for a password again.
+    pub fn view_bytes(&self) -> Result<Vec<u8>, String> {
+        if self.sealed.is_none() && !self.protected() {
+            return self.bytes();
+        }
+        guarded("drawing it", || save::whole(&self.current))
     }
 
     /// Save to `path`: the changes appended where they can be, the whole
     /// written where they cannot; what is on disk from now on.
     pub fn save(&mut self, path: &Path) -> Result<(), String> {
         let bytes = self.bytes()?;
+        // What it is read back with: the password it was given, or kept.
+        let password = match self.seal() {
+            Seal::New(p) => Some(p.user.clone()),
+            Seal::Kept(_) => self.sealed.as_ref().map(|(_, p)| p.clone()),
+            Seal::Plain => None,
+        };
+        let (on_disk, state) = read_with(&bytes, password.as_deref()).map_err(|e| e.unwrap_or_else(|| "what was saved could not be read back with its password".into()))?;
         save::atomically(path, &bytes)?;
-        let on_disk = read(&bytes)?;
+        self.sealed = state.map(|s| (s, password.unwrap_or_default()));
         self.disk = Arc::new(bytes);
         self.on_disk = on_disk;
         self.saved = Some(self.at);
         Ok(())
+    }
+
+    /// What it says of itself, as it is now.
+    pub fn info(&self) -> clean::Info {
+        guarded("reading its properties", || Ok(clean::info(&self.current))).unwrap_or_default()
+    }
+
+    /// How large the file on disk is.
+    pub fn size_on_disk(&self) -> usize {
+        self.disk.len()
     }
 
     /// How many pages it has now.
@@ -176,6 +281,7 @@ mod tests {
         match Doc::open(bytes) {
             Opened::Editable(doc) => *doc,
             Opened::ReadOnly(why) => panic!("{why}"),
+            Opened::Locked { .. } => panic!("locked"),
         }
     }
 
@@ -250,5 +356,38 @@ mod tests {
     #[test]
     fn what_cannot_be_read_or_is_protected_opens_only_to_be_read() {
         assert!(matches!(Doc::open(Arc::new(b"%PDF-1.7\nnot really".to_vec())), Opened::ReadOnly(why) if why.contains("could not be read")));
+    }
+
+    #[test]
+    fn a_protected_pdf_asks_for_its_password_and_is_saved_under_the_same_keys_or_new_ones() {
+        let dir = std::env::temp_dir().join(format!("proton-pdf-locked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("locked.pdf");
+        // Given a password, and saved.
+        let mut doc = editable(fixture(&["Private."]));
+        doc.apply(Op::Protect { protection: Protection { user: "pw".into(), owner: String::new(), print: true, copy: true, edit: false } }).unwrap();
+        assert!(doc.protected() && doc.dirty());
+        assert!(!String::from_utf8_lossy(&doc.view_bytes().unwrap()).contains("/Encrypt"), "the window draws it without its password");
+        doc.save(&path).unwrap();
+        let locked = Arc::new(std::fs::read(&path).unwrap());
+        assert!(String::from_utf8_lossy(&locked).contains("/Encrypt"));
+
+        // Opened: without it, or with the wrong one, it is locked; with it, it opens.
+        assert!(matches!(Doc::open(locked.clone()), Opened::Locked { wrong: false }));
+        assert!(matches!(Doc::open_with(locked.clone(), Some("no")), Opened::Locked { wrong: true }));
+        let Opened::Editable(mut opened) = Doc::open_with(locked.clone(), Some("pw")) else { panic!("it did not open with its password") };
+        assert!(opened.protected() && !opened.dirty());
+        // Changed and saved: under the same keys.
+        opened.apply(Op::Rotate { pages: vec![1], by: 90 }).unwrap();
+        opened.save(&path).unwrap();
+        let again = Arc::new(std::fs::read(&path).unwrap());
+        assert!(matches!(Doc::open(again.clone()), Opened::Locked { .. }), "still protected");
+        assert!(matches!(Doc::open_with(again.clone(), Some("pw")), Opened::Editable(_)));
+        // Its password taken away.
+        opened.apply(Op::Unprotect).unwrap();
+        opened.save(&path).unwrap();
+        assert!(matches!(Doc::open(Arc::new(std::fs::read(&path).unwrap())), Opened::Editable(_)), "plain again");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

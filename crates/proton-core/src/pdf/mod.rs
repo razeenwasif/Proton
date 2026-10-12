@@ -51,6 +51,11 @@ pub fn handles(command: &Command) -> bool {
             | Command::PdfDeleteComment { .. }
             | Command::PdfSetField { .. }
             | Command::PdfFlatten
+            | Command::PdfSetInfo { .. }
+            | Command::PdfProtect { .. }
+            | Command::PdfUnprotect
+            | Command::PdfSanitize
+            | Command::PdfCompress
     )
 }
 
@@ -67,6 +72,8 @@ pub struct TabView {
     pub dirty: bool,
     /// Why it can only be read, when it can.
     pub read_only: Option<String>,
+    /// Saved with a password.
+    pub protected: bool,
     /// What undo and redo would do: "turn page 2".
     pub undo: Option<String>,
     pub redo: Option<String>,
@@ -99,6 +106,7 @@ impl Tab {
             path: folder::tilde(&self.path),
             dirty: doc.is_some_and(|d| d.dirty()),
             read_only: self.doc.as_ref().err().cloned(),
+            protected: doc.is_some_and(|d| d.protected()),
             undo: doc.and_then(|d| d.undoable()),
             redo: doc.and_then(|d| d.redoable()),
         }
@@ -152,13 +160,14 @@ impl Pdfs {
             events.push(view_event(tab, None, false));
             events.push(comments_event(tab));
             events.push(fields_event(tab));
+            events.push(info_event(tab));
         }
         events
     }
 
     pub fn apply(&mut self, command: Command) -> Vec<Event> {
         match command {
-            Command::PdfOpen { path, page } => self.open(&path, page),
+            Command::PdfOpen { path, page, password } => self.open_with(&path, page, password.as_ref().map(|p| p.0.as_str())),
             Command::PdfClose { tab, discard } => self.close(tab, discard),
             Command::PdfFocus { tab } => self.focus(tab),
             Command::PdfUndo => self.history(false),
@@ -191,6 +200,14 @@ impl Pdfs {
             Command::PdfDeleteComment { id } => self.change(proton_pdf::Op::DeleteComment { id }),
             Command::PdfSetField { name, value } => self.change_quietly(proton_pdf::Op::SetField { name, value }),
             Command::PdfFlatten => self.change(proton_pdf::Op::Flatten),
+            Command::PdfSetInfo { title, author, subject, keywords } => {
+                let (_, date, _) = self.signed();
+                self.change(proton_pdf::Op::SetInfo { title, author, subject, keywords, date })
+            }
+            Command::PdfProtect { protection } => self.change(proton_pdf::Op::Protect { protection }),
+            Command::PdfUnprotect => self.change(proton_pdf::Op::Unprotect),
+            Command::PdfSanitize => self.change(proton_pdf::Op::Sanitize),
+            Command::PdfCompress => self.change(proton_pdf::Op::Compress),
             _ => Vec::new(),
         }
     }
@@ -221,6 +238,11 @@ impl Pdfs {
     /// Open a PDF — typed as a path is, `~` and all, or relative to the
     /// project on screen — or bring it forward if it is open.
     fn open(&mut self, typed: &str, page: Option<u32>) -> Vec<Event> {
+        self.open_with(typed, page, None)
+    }
+
+    /// The same, with the password it is protected by.
+    fn open_with(&mut self, typed: &str, page: Option<u32>, password: Option<&str>) -> Vec<Event> {
         let typed = typed.trim();
         if typed.is_empty() {
             return vec![notice("Say which PDF to open.".into(), NoticeLevel::Info)];
@@ -230,26 +252,36 @@ impl Pdfs {
         let path = folder::normalise(&path);
         if let Some(tab) = self.tabs.iter().find(|t| t.path == path) {
             self.active = Some(tab.id);
-            return vec![self.tabs_event(), view_event(tab, page, false), comments_event(tab), fields_event(tab)];
+            return vec![self.tabs_event(), view_event(tab, page, false), comments_event(tab), fields_event(tab), info_event(tab)];
         }
         let bytes = match read(&path) {
             Ok(bytes) => bytes,
             Err(why) => return vec![notice(why, NoticeLevel::Error)],
         };
-        self.next += 1;
-        let view = Arc::new(bytes);
-        let doc = match proton_pdf::Doc::open(view.clone()) {
+        let file = Arc::new(bytes);
+        let doc = match proton_pdf::Doc::open_with(file.clone(), password) {
             proton_pdf::Opened::Editable(doc) => Ok(doc),
             proton_pdf::Opened::ReadOnly(why) => Err(why),
+            proton_pdf::Opened::Locked { wrong } => {
+                return vec![Event::PdfPassword { path: path.display().to_string(), name: folder::name_of(&path), wrong }];
+            }
         };
+        // What the window draws: the file — or, opened with its password,
+        // the document decrypted, which is held in memory only.
+        let view = match doc.as_ref().map(|d| d.view_bytes()) {
+            Ok(Ok(bytes)) if doc.as_ref().is_ok_and(|d| d.protected()) => Arc::new(bytes),
+            _ => file,
+        };
+        self.next += 1;
         let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view, version: 1, doc };
         self.active = Some(tab.id);
         let view = view_event(&tab, page, false);
         let comments = comments_event(&tab);
         let fields = fields_event(&tab);
+        let info = info_event(&tab);
         self.tabs.push(tab);
         self.remember(&path);
-        vec![self.tabs_event(), view, comments, fields]
+        vec![self.tabs_event(), view, comments, fields, info]
     }
 
     fn close(&mut self, id: u32, discard: bool) -> Vec<Event> {
@@ -267,6 +299,7 @@ impl Pdfs {
             events.push(view_event(tab, None, false));
             events.push(comments_event(tab));
             events.push(fields_event(tab));
+            events.push(info_event(tab));
         }
         events
     }
@@ -274,7 +307,7 @@ impl Pdfs {
     fn focus(&mut self, id: u32) -> Vec<Event> {
         let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return Vec::new() };
         self.active = Some(id);
-        vec![self.tabs_event(), view_event(tab, None, false), comments_event(tab), fields_event(tab)]
+        vec![self.tabs_event(), view_event(tab, None, false), comments_event(tab), fields_event(tab), info_event(tab)]
     }
 
     /// The tab on top, to change; or why it cannot be.
@@ -297,7 +330,7 @@ impl Pdfs {
     fn redrawn_as(&mut self, quiet: bool) -> Vec<Event> {
         let Some(id) = self.active else { return Vec::new() };
         let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else { return Vec::new() };
-        let bytes = match tab.doc.as_ref().map(|d| d.bytes()) {
+        let bytes = match tab.doc.as_ref().map(|d| d.view_bytes()) {
             Ok(Ok(bytes)) => bytes,
             Ok(Err(why)) => return vec![notice(why, NoticeLevel::Error)],
             Err(_) => return Vec::new(),
@@ -307,7 +340,8 @@ impl Pdfs {
         let view = view_event(tab, None, quiet);
         let comments = comments_event(tab);
         let fields = fields_event(tab);
-        vec![self.tabs_event(), view, comments, fields]
+        let info = info_event(tab);
+        vec![self.tabs_event(), view, comments, fields, info]
     }
 
     /// Make a change to the tab on top: held until it is saved.
@@ -557,6 +591,18 @@ fn comments_event(tab: &Tab) -> Event {
 
 fn fields_event(tab: &Tab) -> Event {
     Event::PdfFields { tab: tab.id, fields: tab.doc.as_ref().map(|d| d.fields()).unwrap_or_default() }
+}
+
+/// What a tab says of itself, and how large it is.
+fn info_event(tab: &Tab) -> Event {
+    let doc = tab.doc.as_ref().ok();
+    Event::PdfInfo {
+        tab: tab.id,
+        info: doc.map(|d| d.info()).unwrap_or_default(),
+        protected: doc.is_some_and(|d| d.protected()),
+        on_disk: doc.map(|d| d.size_on_disk()).unwrap_or(tab.view.len()) as u32,
+        now: doc.filter(|d| d.dirty()).and_then(|d| d.bytes().ok()).map(|b| b.len()).unwrap_or_else(|| doc.map(|d| d.size_on_disk()).unwrap_or(tab.view.len())) as u32,
+    }
 }
 
 /// A file's bytes, if it is a PDF and not too large to open.

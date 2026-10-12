@@ -1516,7 +1516,12 @@ impl Workspace {
             | Command::PdfEditComment { .. }
             | Command::PdfDeleteComment { .. }
             | Command::PdfSetField { .. }
-            | Command::PdfFlatten => Vec::new(),
+            | Command::PdfFlatten
+            | Command::PdfSetInfo { .. }
+            | Command::PdfProtect { .. }
+            | Command::PdfUnprotect
+            | Command::PdfSanitize
+            | Command::PdfCompress => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }

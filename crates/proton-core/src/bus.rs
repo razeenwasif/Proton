@@ -558,6 +558,11 @@ pub enum Command {
         path: String,
         #[serde(default)]
         page: Option<u32>,
+        /// The password it is protected by, when it asked for one. Held in
+        /// memory while it is open; never written down or said.
+        #[serde(default)]
+        #[ts(as = "Option<String>")]
+        password: Option<proton_pdf::security::Secret>,
     },
     /// Close a tab — one with changes not saved only when told to let
     /// them go.
@@ -654,6 +659,23 @@ pub enum Command {
     },
     /// Draw the tab on top's form into its pages for good.
     PdfFlatten,
+    /// Set the tab on top's title, author, subject and keywords.
+    PdfSetInfo {
+        title: String,
+        author: String,
+        subject: String,
+        keywords: String,
+    },
+    /// Save the tab on top with these passwords from now on.
+    PdfProtect {
+        protection: proton_pdf::security::Protection,
+    },
+    /// Save the tab on top with no password from now on.
+    PdfUnprotect,
+    /// Take out of the tab on top what its reader does not see.
+    PdfSanitize,
+    /// Write the tab on top smaller when it is saved.
+    PdfCompress,
     /// Bring a tab forward.
     PdfFocus {
         tab: u32,
@@ -1869,6 +1891,22 @@ pub enum Event {
         recent: Vec<String>,
         project: Vec<String>,
         root: String,
+    },
+    /// A PDF needs its password to be opened: `wrong` when one was given.
+    PdfPassword {
+        path: String,
+        name: String,
+        wrong: bool,
+    },
+    /// What a tab says of itself, whether it is saved with a password, and
+    /// how large it is on disk and as it would be saved now.
+    PdfInfo {
+        tab: u32,
+        info: proton_pdf::clean::Info,
+        protected: bool,
+        #[serde(rename = "onDisk")]
+        on_disk: u32,
+        now: u32,
     },
     /// The fields of a tab's form, as it is now.
     PdfFields {

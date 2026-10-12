@@ -35,6 +35,16 @@ pub enum Op {
     SetField { name: String, value: String },
     /// The form drawn into its pages for good.
     Flatten,
+    /// Its title, author, subject and keywords set, on `date`.
+    SetInfo { title: String, author: String, subject: String, keywords: String, date: String },
+    /// Saved with these passwords from now on.
+    Protect { protection: crate::security::Protection },
+    /// Saved with no password from now on.
+    Unprotect,
+    /// What it carries that its reader does not see, taken out.
+    Sanitize,
+    /// Written smaller when it is saved.
+    Compress,
 }
 
 impl Op {
@@ -61,6 +71,11 @@ impl Op {
             Op::DeleteComment { .. } => "delete a comment".into(),
             Op::SetField { name, .. } => format!("fill in {name}"),
             Op::Flatten => "flatten the form".into(),
+            Op::SetInfo { .. } => "change its properties".into(),
+            Op::Protect { .. } => "set its password".into(),
+            Op::Unprotect => "remove its password".into(),
+            Op::Sanitize => "remove hidden data".into(),
+            Op::Compress => "compress it".into(),
         }
     }
 
@@ -69,7 +84,9 @@ impl Op {
         match self {
             Op::Rotate { .. } | Op::Delete { .. } | Op::InsertBlank { .. } | Op::Move { .. } | Op::InsertFrom { .. } => true,
             Op::Comment { .. } | Op::Reply { .. } | Op::EditComment { .. } | Op::DeleteComment { .. } => true,
-            Op::SetField { .. } | Op::Flatten => true,
+            Op::SetField { .. } | Op::Flatten | Op::SetInfo { .. } => true,
+            // Appended, these would leave what they change in the bytes before.
+            Op::Protect { .. } | Op::Unprotect | Op::Sanitize | Op::Compress => false,
         }
     }
 
@@ -112,6 +129,16 @@ impl Op {
             Op::DeleteComment { id } => annot::delete(doc, annot::object_of(id)?),
             Op::SetField { name, value } => crate::forms::set(doc, name, value),
             Op::Flatten => crate::forms::flatten(doc).map(|_| ()),
+            Op::SetInfo { title, author, subject, keywords, date } => crate::clean::set_info(doc, title, author, subject, keywords, date),
+            Op::Sanitize => crate::clean::sanitize(doc),
+            // How it is written, not what it is: the document is as it was.
+            Op::Protect { protection } => {
+                if protection.user.is_empty() && protection.owner.is_empty() {
+                    return Err("give it a password".into());
+                }
+                Ok(())
+            }
+            Op::Unprotect | Op::Compress => Ok(()),
         }
     }
 }

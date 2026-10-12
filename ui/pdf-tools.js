@@ -6,6 +6,14 @@
 import { escapeHtml as esc } from "./html.js";
 
 /** @typedef {import("./bindings/PdfTab").PdfTab} Tab */
+/** @typedef {import("./bindings/PdfInfo").PdfInfo} Info */
+
+/** A size, said. @param {number} bytes */
+export function size(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 /**
  * @param {{box: HTMLElement, dispatch: (command: any) => unknown, tab: () => Tab | null,
@@ -21,6 +29,12 @@ export function createPdfTools(host) {
   let adding = "";
   /** The tab the list and the names typed are for: another tab starts afresh. */
   let forTab = /** @type {number | null} */ (null);
+  /** What it says of itself, how large it is, and whether it has a password. */
+  let about = /** @type {{info: Info, protected: boolean, onDisk: number, now: number} | null} */ (null);
+  /** Its properties as typed, not yet set. */
+  let props = /** @type {Record<string, string> | null} */ (null);
+  /** Passwords being typed: held here only until they are asked for, never kept. */
+  const secret = { user: "", owner: "", print: true, copy: true, edit: false };
 
   /** Beside the open file, named after it: `~/Papers/paper-pages.pdf`. @param {string} suffix */
   function beside(suffix) {
@@ -49,7 +63,9 @@ export function createPdfTools(host) {
     if (forTab !== tab.id) {
       forTab = tab.id;
       combining = [];
+      props = null;
       Object.assign(typed, { insert: "", take: "", every: "", at: "", into: "" });
+      Object.assign(secret, { user: "", owner: "" });
     }
     if (!combining.length || combining[0] !== path) combining = [path, ...combining.filter((p) => p !== path)];
     const list = combining.map((p, i) => `<li><span title="${esc(p)}">${esc(p.split("/").pop() ?? p)}</span>` +
@@ -57,7 +73,35 @@ export function createPdfTools(host) {
         `<button class="hbtn" data-pdf-tool="down" data-at="${i}" title="Later"${i === combining.length - 1 ? " disabled" : ""}>↓</button>` +
         `<button class="hbtn" data-pdf-tool="drop" data-at="${i}" title="Leave out">×</button>` : `<span class="lab-faint">this one</span>`) + `</li>`).join("");
     const suggestions = host.project().filter((p) => !combining.some((c) => c.endsWith(p))).slice(0, 30);
+    const info = about?.info;
+    const prop = (/** @type {string} */ key, /** @type {string} */ label) =>
+      `<label class="pdf-tool-field">${label} <input data-pdf-prop="${key}" value="${esc(props?.[key] ?? (info ? String(/** @type {any} */ (info)[key] ?? "") : ""))}" spellcheck="false"></label>`;
+    const security = about?.protected
+      ? `<p>Saved with a password. Whoever opens it is asked for it.</p>
+         <div class="pdf-tool-row"><button class="cc-quiet" data-pdf-tool="unprotect">Remove the password</button></div>`
+      : `<label class="pdf-tool-field">Password to open it <input type="password" data-pdf-secret="user" autocomplete="new-password"></label>
+         <label class="pdf-tool-field">Password to change what it allows <input type="password" data-pdf-secret="owner" autocomplete="new-password" placeholder="the same, if left empty"></label>
+         <div class="pdf-tool-checks">
+           <label><input type="checkbox" data-pdf-allow="print"${secret.print ? " checked" : ""}> Printing</label>
+           <label><input type="checkbox" data-pdf-allow="copy"${secret.copy ? " checked" : ""}> Copying</label>
+           <label><input type="checkbox" data-pdf-allow="edit"${secret.edit ? " checked" : ""}> Changing</label>
+         </div>
+         <div class="pdf-tool-row"><button class="cc-quiet" data-pdf-tool="protect">Protect it</button></div>
+         <p class="lab-faint">AES-256. It is written whole when saved, so nothing of it is left readable in the file.</p>`;
+    const hidden = info?.hidden ?? [];
     box.innerHTML = (host.extra?.() ?? "") + `
+      <section class="pdf-tool"><h4>Properties <span class="lab-faint">${info ? `PDF ${esc(info.version)} · ${info.pages} pages` : ""}</span></h4>
+        ${prop("title", "Title")}${prop("author", "Author")}${prop("subject", "Subject")}${prop("keywords", "Keywords")}
+        ${info && (info.creator || info.producer) ? `<p class="lab-faint">Made with ${esc([info.creator, info.producer].filter(Boolean).join(", "))}</p>` : ""}
+        <div class="pdf-tool-row"><button class="cc-quiet" data-pdf-tool="props">Set the properties</button></div>
+      </section>
+      <section class="pdf-tool"><h4>Security</h4>${security}</section>
+      <section class="pdf-tool"><h4>Clean up</h4>
+        <p class="lab-faint">${hidden.length ? `It carries ${esc(hidden.join(", "))}.` : "It carries nothing hidden that Proton looks for."}</p>
+        <div class="pdf-tool-row"><button class="cc-quiet" data-pdf-tool="sanitize"${hidden.length ? "" : " disabled"}>Remove hidden data</button></div>
+        <p class="lab-faint" data-pdf-sizes>${about ? `On disk ${size(about.onDisk)}${about.now !== about.onDisk ? ` · as it would be saved ${size(about.now)}` : ""}` : ""}</p>
+        <div class="pdf-tool-row"><button class="cc-quiet" data-pdf-tool="compress">Compress</button></div>
+      </section>` + `
       <section class="pdf-tool"><h4>Pages <span class="lab-faint" data-pdf-which>${esc(which())}</span></h4>
         <div class="pdf-tool-row">
           <button class="cc-quiet" data-pdf-tool="left" title="Turn left">⟲ Turn left</button>
@@ -98,6 +142,15 @@ export function createPdfTools(host) {
 
   box.addEventListener("input", (e) => {
     const t = /** @type {HTMLInputElement} */ (e.target);
+    if (t.dataset.pdfProp) {
+      props = props ?? {};
+      props[t.dataset.pdfProp] = t.value;
+      return;
+    }
+    if (t.dataset.pdfSecret === "user" || t.dataset.pdfSecret === "owner") {
+      secret[t.dataset.pdfSecret] = t.value;
+      return;
+    }
     const name = t.dataset.pdfTyped;
     if (name === "adding") adding = t.value;
     else if (name && name in typed) typed[/** @type {keyof typeof typed} */ (name)] = t.value;
@@ -146,8 +199,41 @@ export function createPdfTools(host) {
       case "combine":
         if (combining.length > 1 && field("into")) host.dispatch({ type: "pdfCombine", paths: [...combining], path: field("into") });
         return;
+      case "props": {
+        const value = (/** @type {string} */ key) => /** @type {HTMLInputElement | null} */ (box.querySelector(`[data-pdf-prop="${key}"]`))?.value ?? "";
+        host.dispatch({ type: "pdfSetInfo", title: value("title"), author: value("author"), subject: value("subject"), keywords: value("keywords") });
+        props = null;
+        return;
+      }
+      case "protect": {
+        if (!secret.user && !secret.owner) return;
+        host.dispatch({ type: "pdfProtect", protection: { user: secret.user, owner: secret.owner, print: secret.print, copy: secret.copy, edit: secret.edit } });
+        Object.assign(secret, { user: "", owner: "" });
+        return;
+      }
+      case "unprotect":
+        host.dispatch({ type: "pdfUnprotect" });
+        return;
+      case "sanitize":
+        host.dispatch({ type: "pdfSanitize" });
+        return;
+      case "compress":
+        host.dispatch({ type: "pdfCompress" });
+        return;
     }
   });
 
-  return { render, says };
+  box.addEventListener("change", (e) => {
+    const t = /** @type {HTMLInputElement} */ (e.target);
+    const allow = t.dataset.pdfAllow;
+    if (allow === "print" || allow === "copy" || allow === "edit") secret[allow] = t.checked;
+  });
+
+  /** What the tab on top says of itself. @param {{tab: number, info: Info, protected: boolean, onDisk: number, now: number}} event */
+  function setAbout(event) {
+    about = { info: event.info, protected: event.protected, onDisk: Number(event.onDisk), now: Number(event.now) };
+    render();
+  }
+
+  return { render, says, setAbout };
 }
