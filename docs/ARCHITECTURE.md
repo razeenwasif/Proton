@@ -89,6 +89,8 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-literature` | The literature's sources — arXiv, Semantic Scholar, OpenAlex, Crossref — each host asked no oftener than it asks, on a worker the core polls; open PDFs downloaded, capped and checked |
 | `proton-lab` | The Lab's Python — a conda environment, or a venv where there is no conda — planned, made and removed on the scientist's say-so, and the jobs that run for it; Lean and Mathlib, and TeX (TinyTeX, latexmk, texlab), made the same way, and the sandboxed builds |
 | `proton-tex` | LaTeX with no processes and no network: the log, the main file and engine, SyncTeX, the outline, BibTeX, templates, Markdown to LaTeX, and the visual editor's blocks |
+| `proton-pdf` | A PDF as the PDF mode changes it, with no processes: opened (with a password), changed by undoable operations, saved as an incremental update or whole and atomically; pages, combining, comments with their own appearances, forms, AES-256, cleaning, OCR's words grafted on, and each page's text with where it is |
+| `proton-study` / `proton-voice` | Notebook's notebooks and their sources / speech from Fish Audio |
 | `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
 | `proton-data` | Notebook documents and kernel integration |
 | `proton-design` | Theme tokens and component markup |
@@ -98,7 +100,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-trace` | Code Visualizer client and sidecar integration |
 | `proton-shell` | Tauri window, IPC, native backdrop, packaging |
 
-These are the 24 current workspace members. The modal engine remains in
+These are the 29 current workspace members. The modal engine remains in
 `proton-core/src/vim.rs`; there is no separate `proton-vim` or `proton-cli` crate.
 
 `proton-lsp` ended up with no async runtime and no protocol crate. Two threads
@@ -359,7 +361,9 @@ close — and nothing reaches the buffer or cell underneath, where `dd` would
 delete a line nobody can see.
 
 Before this, opening one failed outright: `read_to_string` refuses invalid
-UTF-8, so the whole of the old behaviour was an error notice.
+UTF-8, so the whole of the old behaviour was an error notice. The viewer only
+reads; Open in PDF hands its file to the PDF mode, at the same page, to be
+changed there.
 
 `ViewerKind` is a small closed set rather than "anything that is not text".
 A format belongs in it only once something can actually draw it — treating
@@ -1121,6 +1125,65 @@ only if the span still holds that text, as one undo step, and the window
 leaves the block being typed in alone when the core's answer is what it
 already shows.
 
+### PDF
+
+The eleventh mode (`ModeId::Pdf`, ⌃-) is Acrobat's reader and editor, on
+the Data side. Its state is the session's (`crate::pdf::Pdfs`), as
+Notebook's is: a PDF is the person's wherever it lives, so its tabs, the
+files opened before (`pdf.json` in the session's folder) and an OCR job
+stay put whichever project is on screen. `Session` routes
+`crate::pdf::handles`, polls it, shuts it down, and asks it in `unsaved()`
+and `save_unsaved()`, so quitting with changes asks first.
+
+**The window draws; the core changes.** Each tab holds a
+`proton_pdf::Doc`, and what the window draws are bytes the core serialises
+after every change and names by a key, `pdfview:<tab>:<version>`;
+`read_document` serves them from the session (`Session::document_bytes`), so
+a file opened with its password is never written anywhere decrypted. The
+window reads a new version in place, its page and zoom kept. Form values
+are the one exception: typed into Proton's own inputs over the fields, sent
+as they rest, and answered `quiet`, so nothing is drawn again under the
+caret. Comments are Proton's overlays too, not pdf.js's annotation layer,
+and the page grid draws thumbnails from the same document.
+
+**`proton-pdf`** is pure — lopdf 0.42, the one pdf-extract already brought
+in, and nothing that runs a process. A change is an `Op` applied to the
+working document; undo replays the log from the document as opened, and the
+log is kept across saves, so undoing after ⌘S makes the tab dirty again.
+Saving writes an incremental update of exactly the objects that differ from
+the file on disk when every change since allows it (comments, form values,
+pages, properties, OCR) and the whole file otherwise (compressing, removing
+hidden data, passwords, a file that was encrypted, which is saved encrypted
+again); either way to a temporary file beside it, synced, renamed over it,
+and read back with its password before it is. Comments are written with
+their own appearance streams, so every viewer shows them; forms are filled
+with `NeedAppearances` and flattened by drawing each widget into its page;
+passwords are AES-256 (V5) with a key from `getrandom`; and every lopdf call
+is under `catch_unwind`, so a file lopdf cannot read opens read-only — pdf.js
+reads it anyway — with why it cannot be changed. `Secret` and `Protection`
+print as redacted, because the debug build logs each command.
+
+**OCR** (`proton-lab::ocr`) draws each page with `pdftoppm -r 300` and reads
+it with `tesseract … -c textonly_pdf=1 pdf`, a page at a time in the
+sandbox, in a folder of its own that goes when the job does, with a
+deadline per page and progress the core polls; Stop kills its process
+group. The text-only page tesseract writes is grafted onto the original as
+a form XObject, turned and scaled to the page as it is shown
+(`proton_pdf::ocr::placing`), as one change to undo. The window finds the
+pages with no text with pdf.js's `getTextContent` and offers to read them.
+
+**The agent** has five tools on the PDF on top: `pdf_info`, `pdf_read`,
+`pdf_search`, `pdf_annotate` and `pdf_pages`. The agent lives in a
+workspace and the PDFs in the session, so `Workspace::call_tool` defers any
+`pdf_*` call, and after each workspace's poll the session runs it
+(`Pdfs::tool`) and hands back the answer, as a cell run is answered later;
+whichever project's agent asks, the PDFs are the same. Text and where it is
+come from pdf-extract's `OutputDev` (`proton_pdf::text`), so a passage the
+agent quotes is found whatever its case or line breaks and highlighted a
+line at a time. Its comments are signed `<you> (agent)`, and every change it
+makes waits for ⌘S and undoes as the person's do. The window tells the core
+which page is being read (`PdfAt`), which `@pdf` sends with its text.
+
 ### Notebook
 
 Gemini Notebook, for studying from one's own files: notebooks of sources drawn
@@ -1462,6 +1525,7 @@ bearing rule of the entire project:
 | Video | `.edl` + sidecar `.srt` |
 | Data | `.ipynb` + `.sql` |
 | Research | `research/<slug>/` — Markdown with TOML front matter, `tournament.jsonl`; papers as `literature/P003.md`, their PDFs beside them and out of Git |
+| PDF | The PDF itself — the one document that is not text, and is the person's rather than a project's. Saved as an update appended to it, so the bytes it had are kept and a diff is the update |
 
 It is not tidiness. It is what lets the agent edit a scene or a timeline by
 writing a patch instead of driving a GUI, and what makes any of it reviewable.

@@ -778,6 +778,39 @@ the other proposals. Above the proposals, where there is a sandbox, a
 switch lets them run without asking; it is off until the scientist turns it
 on, and it never runs anything unsandboxed.
 
+### PDF
+
+Drawn as Notebook is, on the Data side: the pages on the editor's ground,
+each a sheet of paper with a shadow, the sidebar's thumbnails, bookmarks,
+comments and search on the left, and on the right the tools and the agent,
+a tab each. The bar over the pages holds what Acrobat keeps in its ribbon —
+the open PDFs as tabs, a dot on one with changes; the comment tools and
+their colours; undo, redo and Save; the layout, the turn, the reading
+colours, the page and the zoom — and wraps to a second row rather than
+squeeze the tabs out of sight.
+
+**Changes wait for ⌘S.** A PDF is often something sent or signed, so
+nothing is written behind the person's back: every change is held, shown at
+once, undone with ⌘Z even after a save, and written only when saved — as an
+update appended to the file, its first bytes kept. Closing a tab or quitting
+with changes asks.
+
+**What is drawn on a page is Proton's.** Comments and form fields are
+overlays in the page's own points, so they move and zoom with it, rather
+than pdf.js's annotation layer, which draws for reading, not editing. A
+comment is ringed where it is and chosen by a click; a selection of text is
+offered a small bar — highlight, underline, strike out — where it ends.
+
+**A page that is a picture says so.** On a scanned page the bar offers
+Make searchable; Tools says which pages have no text, in which languages
+tesseract will read them, and how far it has got, with Stop. What OCR reads
+is laid over the page unseen, so the picture is as it was and its words can
+be found and selected.
+
+**The agent's comments are its own.** Signed `(agent)`, held like the
+person's, and drawn where it made them, so what it did is on screen to keep
+or undo. `?` lists the mode's keys where which-key lists the leader's.
+
 ---
 
 ## Code Visualizer

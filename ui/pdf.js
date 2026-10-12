@@ -27,6 +27,15 @@ const THUMB = 120;
 /** Reading colours, in turn: the document's own, then sepia, then night. */
 const COLORS = /** @type {const} */ ([null, { background: "#f4ecd8", foreground: "#3b2f1e" }, { background: "#1c1d21", foreground: "#d6d6d6" }]);
 
+/** The PDF mode's keys, as ? lists them. */
+const KEYS = /** @type {[string, string][]} */ ([
+  ["j k", "scroll down, up"], ["h l", "scroll left, right"], ["␣ ⇧␣", "a screen down, up"], ["⌃d ⌃u", "half a screen down, up"],
+  ["gg G", "the first page, the last"], ["n p", "next page, previous: one at a time"], ["+ − 0", "zoom in, out; fit the width"],
+  ["r", "turn the view"], ["/ ⌘F", "find"], ["⌘G ⇧⌘G", "the next found, the one before"], ["g p", "the pages, to organize"],
+  ["u ⌘Z", "undo"], ["⌃r ⇧⌘Z", "redo"], ["⌘S", "save"], ["⇧⌘S", "save as another file"],
+  ["⌫", "delete the comment chosen"], ["⎋", "put the comment tool down"], ["?", "these keys"],
+]);
+
 /** A per-window preference, kept if it can be. @param {string} key @param {string} fallback */
 function pref(key, fallback) {
   try {
@@ -44,7 +53,8 @@ function keep(key, value) {
   }
 }
 
-/** @param {{root: Document, dispatch: (command: any) => unknown}} host */
+/** @param {{root: Document, dispatch: (command: any) => unknown, keys?: (title: string, rows: [string, string][]) => void}} host
+ *  `keys`: shows the mode's keys, where which-key shows the leader's */
 export function createPdf(host) {
   const found = /** @type {HTMLElement | null} */ (host.root.querySelector('.workspace[data-ws="pdf"]'));
   if (!found) return null;
@@ -707,6 +717,9 @@ export function createPdf(host) {
     e.stopPropagation();
   });
 
+  /** When g was last pressed, for g p. */
+  let gAt = 0;
+
   /** The PDF's own keys, when nothing typed into has the keyboard: ⌘F and
    *  ⌘G find, r turns the view, the rest move through the pages.
    *  @param {KeyboardEvent} e @returns {boolean} whether it was the PDF's */
@@ -743,6 +756,14 @@ export function createPdf(host) {
       return true;
     }
     if (e.key === "/" && !e.ctrlKey) return (focusFind(), true);
+    if (e.key === "?") return (host.keys?.("— the PDF's keys", KEYS), true);
+    // g p: the pages, to organize; g alone goes on to the view, for gg.
+    if (e.key === "p" && !e.ctrlKey && Date.now() - gAt < 800) {
+      gAt = 0;
+      showGrid(!state.grid);
+      return true;
+    }
+    gAt = e.key === "g" && !e.ctrlKey ? Date.now() : 0;
     if (e.key === "u" && !e.ctrlKey) return (host.dispatch({ type: "pdfUndo" }), true);
     if (e.key === "r" && e.ctrlKey) return (host.dispatch({ type: "pdfRedo" }), true);
     return view.key(e);

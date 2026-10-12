@@ -1069,6 +1069,9 @@ button.find { border: 0; text-align: left; font: inherit; }
 #whichkey .wk-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 20px; padding: 13px 16px; font: 12px var(--mono); }
 #whichkey .wk { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--ink-2); }
 #whichkey .wk b { color: var(--accent); width: 18px; }
+/* A mode's own keys are words of keys, not one. */
+#whichkey.keys .wk b { flex: 0 0 auto; width: auto; min-width: 6.5em; font-weight: 500; }
+#whichkey.keys .wk-grid { grid-template-columns: repeat(2, 1fr); }
 #whichkey .wk .arrow { color: var(--ink-4); }
 #whichkey .wk .grp { color: var(--accent-2); }
 
@@ -3084,10 +3087,10 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .res mark { color: var(--accent); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .preview { font: var(--z-2xs)/1.6 var(--zed); color: var(--code); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .chip { background: none; box-shadow: none; color: var(--faint); font: var(--z-2xs) var(--zed); }
-:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #whichkey .wk-head,
-:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #whichkey .wk-grid,
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"], [data-mode="pdf"]) #whichkey .wk-head,
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"], [data-mode="pdf"]) #whichkey .wk-grid,
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #cmdline { font-family: var(--zed); }
-:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #whichkey .wk-head { border-bottom-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"], [data-mode="pdf"]) #whichkey .wk-head { border-bottom-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #cmdline .chip { background: none; box-shadow: none; color: var(--faint); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .cmp,
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .hov-body { font: var(--z-xs) var(--zed); }
@@ -5173,10 +5176,11 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .pdf-side-tabs .dock-tab { font: var(--z-2xs) var(--zed); }
 .pdf-side-body { padding: 4px 8px 12px; font: var(--z-xs) var(--zed); color: var(--muted); }
 .pdf-main { position: relative; display: flex; flex-direction: column; min-width: 0; }
-.pdf-bar { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 4px 10px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+/* The bar wraps rather than squeezing: the tabs keep room enough to be read. */
+.pdf-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 40px; padding: 4px 10px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
 .pdf-bar .grow { flex: 1 1 auto; }
 .pdf-bar .chip { font: var(--z-2xs) var(--zed); color: var(--faint); background: none; box-shadow: none; }
-.pdf-tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.pdf-tabs { display: flex; gap: 2px; min-width: min(180px, 100%); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .pdf-tab { display: flex; align-items: center; gap: 6px; max-width: 220px; padding: 4px 6px 4px 10px; border-radius: 7px; color: var(--muted); font: var(--z-xs) var(--zed); cursor: pointer; white-space: nowrap; }
 .pdf-tab:hover { background: var(--row-hover); color: var(--text); }
 .pdf-tab.on { background: var(--row-on); color: var(--text); box-shadow: inset 0 0 0 1px var(--row-on-edge); }

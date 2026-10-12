@@ -94,6 +94,7 @@ But look at what the other modes need:
 | Video | Decoded frames on a timeline, scrubbing, waveforms |
 | Data | Virtualised tables, charts, notebook cells with rich output |
 | Chat | Markdown, code blocks, streaming reflow |
+| PDF | Pages drawn as they are reached, a text layer to select, overlays for comments and form fields |
 
 In GPUI, every one of those is written from scratch. There is no table widget,
 no markdown renderer, no chart primitive, no rich-text engine. And the surface
@@ -161,7 +162,7 @@ fontdb) rather than writing it. Budget weeks, not days.
 
 ## Missing from the proposal
 
-Four things Proton needs that a generic editor stack does not cover:
+Five things Proton needs that a generic editor stack does not cover:
 
 | | |
 |---|---|
@@ -169,6 +170,7 @@ Four things Proton needs that a generic editor stack does not cover:
 | **Code Visualizer** | Upstream is Python and needs `gdb` with Python support. Proton has to supervise that process and ship a runtime — [`CODE-VISUALIZER.md`](CODE-VISUALIZER.md) covers it. On this machine, detect MSYS2 UCRT64 rather than asking. |
 | **Video decode** | `ffmpeg` bindings. There is no pure-Rust path that handles real footage. |
 | **3D** | `wgpu` directly for Modeling; for Game, embed an engine rather than writing one. |
+| **PDF** | pdf.js to draw (vendored; it already drew the viewer), `lopdf` to change — the version `pdf-extract` brought in, so nothing new was downloaded — and `tesseract` with Poppler's `pdftoppm` for OCR, run as processes in the sandbox. PDFium would draw faster but is a C++ binary per platform; pdfcraft (a Rust Acrobat) was the feature list, not a dependency — it patches its own lopdf and is not on crates.io. |
 
 ## The one-line version
 

@@ -885,7 +885,7 @@ const lab = createLab({ root: document, dispatch, readLab });
 const lean = createLean({ root: document, dispatch });
 const tex = createTex({ root: document, dispatch });
 const texVisual = createTexVisual({ root: document, dispatch });
-const pdf = createPdf({ root: document, dispatch });
+const pdf = createPdf({ root: document, dispatch, keys: showKeys });
 /* Notebook: notebooks of your own sources, and the knowledge base they are
    chosen from. Drawn from what the core reads of them. */
 const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
@@ -4732,6 +4732,7 @@ function renderWhichKey(prefix) {
   const head = $("[data-wk-head]");
   const grid = $("[data-wk-grid]");
   if (!head || !grid) return;
+  $("#whichkey")?.classList.remove("keys");
   const rows = LEADER[prefix];
   const keys = ["␣", ...prefix].map((k) => escapeHtml(k)).join(" ");
   const name = prefix ? LEADER[""].find(([k]) => k === prefix)?.[1] ?? "" : "— leader";
@@ -4744,6 +4745,37 @@ function renderWhichKey(prefix) {
           `<span${label.startsWith("+") ? ' class="grp"' : ""}>${escapeHtml(label)}</span></div>`)
         .join("")
     : `<div class="wk"><span>nothing is bound under ${escapeHtml(keys)} — ⎋ to cancel</span></div>`;
+}
+
+/**
+ * A mode's own keys, in which-key's place — ? in the PDF mode, which has no
+ * leader. Put away by the next key or click, which does nothing else.
+ * @param {string} title @param {[string, string][]} rows
+ */
+function showKeys(title, rows) {
+  const head = $("[data-wk-head]");
+  const grid = $("[data-wk-grid]");
+  if (!head || !grid) return;
+  head.innerHTML = `<span style="color:var(--accent)">?</span> <span style="color:var(--ink-4)">${escapeHtml(title)}</span>`;
+  grid.innerHTML = rows
+    .map(([key, label]) => `<div class="wk"><b>${escapeHtml(key)}</b><span class="arrow">→</span><span>${escapeHtml(label)}</span></div>`)
+    .join("");
+  $("#whichkey")?.classList.add("keys");
+  show("whichkey");
+  const away = (/** @type {Event} */ e) => {
+    document.removeEventListener("keydown", away, true);
+    document.removeEventListener("pointerdown", away, true);
+    if (overlays.active === "whichkey") closeAll();
+    if (e.type === "keydown") {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+  // After the ? that opened it has gone by.
+  setTimeout(() => {
+    document.addEventListener("keydown", away, true);
+    document.addEventListener("pointerdown", away, true);
+  });
 }
 
 /* ── the message line ─────────────────────────────────────────────────

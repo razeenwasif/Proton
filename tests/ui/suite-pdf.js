@@ -54,6 +54,14 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     assert(await wait(() => /^2 \/ 3/.test($('[data-pdf-page]').textContent)), `not at the page asked for: ${$('[data-pdf-page]').textContent}`);
     const strip = [...doc.querySelectorAll('.pdf-tab')];
     assert(strip.length === 2 && strip[0].classList.contains('on') && strip[1].querySelector('.dot'), 'the tabs, the one on top and the unsaved one, are not drawn');
+    // A full bar wraps rather than squeezing the tabs out of sight.
+    const ws = $('.workspace[data-ws="pdf"]');
+    const wide = ws.style.getPropertyValue('--col-r');
+    ws.style.setProperty('--col-r', '640px'); await settle();
+    const squeezed = strip[0].getBoundingClientRect().width;
+    const zoom = $('[data-pdf-zoom="1"]').getBoundingClientRect();
+    ws.style.setProperty('--col-r', wide); await settle();
+    assert(squeezed > 60 && zoom.width > 0 && zoom.right <= $('.pdf-bar').getBoundingClientRect().right + 1, `a narrow bar squeezed the tabs (${squeezed}px) or hid its zoom`);
 
     // A new version of the same tab is read again where it was.
     const top = pages.scrollTop;
@@ -537,6 +545,29 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     assert(JSON.stringify(sent(at, 'ask')) === JSON.stringify([{type: 'ask', text: 'summarise @pdf'}]), `not asked: ${JSON.stringify(sent(at, 'ask'))}`);
     pane.querySelector('[data-pdf-panel="tools"]').click(); await settle();
     assert(pane.dataset.showing === 'tools' && shown(pane.querySelector('[data-pdf-tools]')), 'the tools did not come back');
+    await win.pushEvents([tabs([], null)]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('? lists the PDF\'s keys where which-key lists the leader\'s, the next key puts them away, and g p opens the pages', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    const one = {id: 11, name: 'three-pages.pdf', path: '~/three-pages.pdf', dirty: false, readOnly: null, undo: null, redo: null, protected: false};
+    await win.pushEvents([tabs([one], 11), {type: 'pdfView', tab: 11, key: FIXTURE, version: 1, page: null, quiet: false}]); await settle();
+    const pages = $('[data-pdf-pages]');
+    assert(await wait(() => pages.querySelector('.doc-page canvas')), 'not drawn');
+    const press = (k) => pages.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true}));
+    pages.focus();
+    press('?'); await settle();
+    const wk = $('#whichkey');
+    assert(shown(wk) && wk.classList.contains('keys') && wk.textContent.includes('turn the view') && wk.textContent.includes('g p'), 'the keys are not shown');
+    await wait(() => false, 3);
+    const top = pages.scrollTop;
+    press('j'); await settle();
+    assert(!shown(wk) && pages.scrollTop === top, 'the next key did not put them away, or did something besides');
+    press('g'); press('p'); await settle();
+    assert(shown($('[data-pdf-grid]')), 'g p did not open the pages');
+    press('g'); press('p'); await settle();
+    assert(!shown($('[data-pdf-grid]')), 'g p did not put the pages away');
     await win.pushEvents([tabs([], null)]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });

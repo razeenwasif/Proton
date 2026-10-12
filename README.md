@@ -55,6 +55,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-research/` | Research's investigations — the files each is, and the co-scientist round that grows it |
 | `crates/proton-literature/` | Research's literature — arXiv, Semantic Scholar and OpenAlex asked politely, citations checked, open PDFs kept |
 | `crates/proton-lab/` | Research's Lab — the Python its code runs in, and Lean with Mathlib, made with your say-so |
+| `crates/proton-pdf/` | The PDF mode's changes to a PDF — pages, comments, forms, passwords, cleaning — each undoable, saved as an update appended to the file |
 | `crates/proton-vcs/` | The gutter, and what git considers changed |
 | `crates/proton-dap/` | The debug-adapter client |
 | `crates/proton-term/` | The pseudo-terminal, and the screen it paints |
@@ -233,6 +234,23 @@ error. The cite picker finds papers in the `.bib`, in Research's literature
 or online, and an investigation can be written up as a paper. The visual
 editor edits paragraphs, headings and equations as they read, one undo step
 at a time.
+**PDF** · Acrobat's reader and editor, in Proton, on ⌃-: your PDFs in tabs,
+whichever project is open, drawn by pdf.js and changed by Proton's own core.
+Read them continuous, a page at a time or two up, turned, in sepia or at
+night; find as you type, and follow bookmarks, links and page labels.
+Highlight, underline and strike out what is selected; add notes, text boxes,
+ink and shapes, answer them, and they show in Preview and Acrobat. Fill in a
+form and flatten it. In the page grid, choose, turn, delete and drag pages,
+put in blanks and another PDF's pages, take some out, split it, or combine
+several. Set its properties, give it a password (AES-256) or take one off,
+remove hidden data, compress it. A page that is only a picture is made
+searchable by OCR — tesseract, on your Mac, sandboxed and stoppable. Every
+change waits for ⌘S, undoes even after a save, and is saved as an update
+appended to the file, so its first bytes are kept; closing or quitting with
+changes asks first. The agent sits beside the tools: it reads, searches,
+highlights a passage it quotes and rearranges pages — signed as its own, and
+held for you to save — and `@pdf` sends the page you are reading. `?` lists
+the keys.
 
 ## The three things that hold it together
 
@@ -380,7 +398,8 @@ PDF a reader can be sent — and a citation opens Proton's own viewer at it.
 `␣fl` searches it, the agent searches it, and it is checked for changes while
 the editor runs. Any PDF opens in the viewer, from the tree or `␣ff` in any
 mode: its pages drawn as you reach them, its text selectable, `j`/`k` and
-Space to read, `+`/`−` and `0` to zoom and fit, Escape to put it away.
+Space to read, `+`/`−` and `0` to zoom and fit, Escape to put it away — or
+Open in PDF, to annotate or rearrange it in the PDF mode at the same page.
 
 Nothing is read until you list it in `.proton/settings.json`, and nothing outside
 a listed directory is ever read — no symlink is followed out of one. A library
