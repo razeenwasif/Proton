@@ -476,6 +476,15 @@ pub enum Command {
     TexStop,
     /// Copy the PDF last made beside the main file, in the project.
     TexSavePdf,
+    /// Show where the cursor's line is in the PDF.
+    TexSyncForward,
+    /// Go to the line that put something at this point of the PDF: a page,
+    /// and a point in PDF points from its top left.
+    TexSyncInverse {
+        page: u32,
+        x: f64,
+        y: f64,
+    },
     /// Ask CTAN which packages have the files a document lacks: the first
     /// say-so of installing them.
     TexFindPackages {
@@ -1637,6 +1646,10 @@ pub enum Event {
     /// it needs), planned, being installed, installed, or failed.
     TexEnv {
         env: proton_lab::tex::TexState,
+    },
+    /// Where a line of the source is in the PDF: its page, and its boxes.
+    TexSync {
+        found: proton_tex::synctex::Found,
     },
     /// Packages a document lacks: being found, found, being installed,
     /// installed, or failed.

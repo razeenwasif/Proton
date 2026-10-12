@@ -25,6 +25,7 @@ if grep -q 'foo' "$main"; then
 fi
 printf '%%PDF-1.5\n%%stand-in\n' > "$out/$stem.pdf"
 printf '(%s\nLaTeX Warning: Citation `knuth84'"'"' on page 1 undefined on input line 4.\n)\nOutput written on %s.pdf (1 page, 900 bytes).\n' "$main" "$stem" > "$out/$stem.log"
+printf 'SyncTeX Version:1\nInput:1:%s\nUnit:1\nContent:\n{1\n(1,3:4736286,6578176:19734528,657817,131563\n)\n}1\n' "$main" > "$out/$stem.synctex.gz"
 "#;
 
 struct Bench {
@@ -206,4 +207,34 @@ esac
     ws.apply(Command::TexInstallPackages { packages: vec!["tikz-cd".into()] });
     let (again, _) = built(&mut ws);
     assert_eq!(again.state, "done", "typeset again once the package is in: {again:?}");
+}
+
+#[test]
+fn a_line_is_found_in_the_pdf_and_a_point_in_the_pdf_found_in_the_source() {
+    let (b, env) = bench("sync");
+    let mut ws = Workspace::rooted(&b.project).with_tex_env(env);
+    ws.apply(Command::SetMode { mode: ModeId::Tex });
+    open(&mut ws, &b.project.join("main.tex"));
+    let early = ws.apply(Command::TexSyncForward);
+    assert!(early.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("Typeset"))), "{early:?}");
+    ws.apply(Command::TexCompile);
+    built(&mut ws);
+    // The cursor on the third line, which made the box at the top of page 1.
+    ws.apply(Command::JumpTo { mode: ModeId::Tex, path: b.project.join("main.tex").display().to_string(), line: 2, column: 0 });
+    let events = ws.apply(Command::TexSyncForward);
+    let found = events.iter().find_map(|e| match e {
+        Event::TexSync { found } => Some(found.clone()),
+        _ => None,
+    });
+    let found = found.unwrap_or_else(|| panic!("{events:?}"));
+    assert_eq!(found.page, 1);
+    assert!((found.rects[0].y - 90.0).abs() < 0.5 && (found.rects[0].w - 300.0).abs() < 0.5, "{found:?}");
+
+    // From the PDF back: the cursor goes to that line, in LaTeX.
+    ws.apply(Command::JumpTo { mode: ModeId::Tex, path: b.project.join("chapters/intro.tex").display().to_string(), line: 0, column: 0 });
+    ws.apply(Command::TexSyncInverse { page: 1, x: 100.0, y: 95.0 });
+    let buf = ws.editor().buffer();
+    assert!(buf.path().is_some_and(|p| p.ends_with("main.tex")), "{:?}", buf.path());
+    assert_eq!(buf.position(buf.cursor.offset).line, 2);
+    assert_eq!(ws.mode(), ModeId::Tex);
 }

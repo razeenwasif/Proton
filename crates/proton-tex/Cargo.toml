@@ -11,3 +11,5 @@ description = "The LaTeX mode's understanding of TeX: its logs, a project's main
 serde = { workspace = true }
 serde_json = { workspace = true }
 ts-rs = { workspace = true }
+# SyncTeX's map is gzipped.
+flate2 = "1.1"

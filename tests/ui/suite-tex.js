@@ -161,6 +161,18 @@ export async function texChecks({test, assert, win, doc, $, settle, key, shown})
     const saved = win.commands.length;
     pane.querySelector('[data-tex-save-pdf]').click(); await settle();
     assert(sent(saved, 'texSavePdf').length === 1, 'Save PDF did not ask');
+
+    // From the source: ⌘⏎ or the target asks, and the place is marked.
+    doc.body.focus();
+    const forward = win.commands.length;
+    key('Enter', {metaKey: true}); await settle();
+    pane.querySelector('[data-tex-sync]').click(); await settle();
+    assert(sent(forward, 'texSyncForward').length === 2, 'neither ⌘⏎ nor the target asked where the line is');
+    await win.pushEvents([{type: 'texSync', found: {page: 2, rects: [{x: 72, y: 90, w: 300, h: 12}, {x: 72, y: 104, w: 120, h: 12}]}}]); await settle();
+    const mark = pages.querySelector('.doc-page[data-page="2"] .pdf-mark');
+    // Page 2 of the fixture is 400 points wide; the mark is round both lines, 26 points tall.
+    const scale = pages.querySelector('.doc-page[data-page="2"]').offsetWidth / 400;
+    assert(mark && Math.abs(parseFloat(mark.style.height) - 26 * scale) < 3, `the place is not marked round its lines: ${mark?.style.cssText} at ${scale}`);
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 

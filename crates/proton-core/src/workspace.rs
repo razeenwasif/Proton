@@ -1659,6 +1659,19 @@ impl Workspace {
 
             Command::TexCompile => self.tex_compile(),
             Command::TexStop => self.tex.stop(),
+            Command::TexSyncForward => {
+                let root = self.pickers.root().to_path_buf();
+                let buffer = self.editor.buffer();
+                let Some(path) = buffer.path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) }) else {
+                    return vec![notice("Open a file of the document first.".into(), NoticeLevel::Info)];
+                };
+                let line = buffer.position(buffer.cursor.offset).line as u32 + 1;
+                self.tex.sync_forward(&root, &path, line)
+            }
+            Command::TexSyncInverse { page, x, y } => match self.tex.sync_inverse(page, x, y) {
+                Some((path, line)) => self.apply(Command::JumpTo { mode: ModeId::Tex, path, line: line.saturating_sub(1) as usize, column: 0 }),
+                None => vec![notice("Nothing there was typeset from the source.".into(), NoticeLevel::Info)],
+            },
             Command::TexSavePdf => {
                 let root = self.pickers.root().to_path_buf();
                 self.tex.save_pdf(&root)

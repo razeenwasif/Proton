@@ -5119,6 +5119,10 @@ function renderEvent(event) {
       tex?.packages(event);
       break;
 
+    case "texSync":
+      tex?.sync(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;
@@ -5505,6 +5509,13 @@ document.addEventListener("keydown", (e) => {
 
   if (editsText() && !terminalFocused && !overlays.active && !documentIsOpen()
       && historyShortcut(e, dispatch, /Mac/.test(navigator.platform))) return;
+
+  // ⌘⏎ in LaTeX: where the cursor's line is in the PDF.
+  if (e.metaKey && e.key === "Enter" && activeMode === "tex") {
+    e.preventDefault();
+    dispatch({ type: "texSyncForward" });
+    return;
+  }
 
   if (e.metaKey) return; // leave the rest of the browser/OS chords alone
 

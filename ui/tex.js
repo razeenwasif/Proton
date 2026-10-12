@@ -171,6 +171,7 @@ export function createTex(host) {
     if (tab) return show(tab.dataset.texTab ?? "pdf");
     if (t.closest("[data-tex-compile]")) return void host.dispatch({ type: "texCompile" });
     if (t.closest("[data-tex-save-pdf]")) return void host.dispatch({ type: "texSavePdf" });
+    if (t.closest("[data-tex-sync]")) return void host.dispatch({ type: "texSyncForward" });
     const zoom = /** @type {HTMLElement | null} */ (t.closest("[data-tex-zoom]"));
     if (zoom) {
       const by = Number(zoom.dataset.texZoom);
@@ -263,6 +264,18 @@ export function createTex(host) {
     if (event.log.entries.some((e) => e.kind === "error") || event.log.missing.length) show("log");
   }
 
+  /** Where a line of the source is: the PDF shown, there, marked a moment.
+   *  @param {{found: import("./bindings/TexSync").TexSync}} event */
+  function sync(event) {
+    const { page, rects } = event.found;
+    if (!rects.length) return;
+    show("pdf");
+    // The lines a source line made, as one mark round them all.
+    const x = Math.min(...rects.map((r) => r.x)), y = Math.min(...rects.map((r) => r.y));
+    const right = Math.max(...rects.map((r) => r.x + r.w)), bottom = Math.max(...rects.map((r) => r.y + r.h));
+    pdfView.reveal(page, { x, y, w: right - x, h: bottom - y });
+  }
+
   /** Finding or installing what a document lacks. @param {{packages: Packages}} event */
   function packages(event) {
     state.packages = event.packages;
@@ -272,5 +285,5 @@ export function createTex(host) {
   renderPdf();
   renderHead();
   renderLog();
-  return { show, env, build, log, packages, pdf: () => pdfView };
+  return { show, env, build, log, packages, sync, pdf: () => pdfView };
 }

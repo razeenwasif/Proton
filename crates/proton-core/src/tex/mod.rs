@@ -109,6 +109,8 @@ pub struct Tex {
     /// What was last typeset — the project, the file being edited, the
     /// engine asked for — to typeset again once a package it lacked is in.
     again: Option<(PathBuf, Option<PathBuf>, Option<String>)>,
+    /// SyncTeX's map of the last PDF made, and the project as TeX named it.
+    synctex: Option<(proton_tex::synctex::Map, PathBuf)>,
 }
 
 impl std::fmt::Debug for Tex {
@@ -305,6 +307,27 @@ impl Tex {
         }
     }
 
+    /// Where `line` (one-based) of `file`, a path in the project, is in the
+    /// PDF last made.
+    pub fn sync_forward(&self, root: &Path, file: &Path, line: u32) -> Vec<Event> {
+        let Some((map, _)) = &self.synctex else { return vec![notice("Typeset the document first.".into(), NoticeLevel::Info)] };
+        let rel = relative(root, file);
+        match map.forward(&rel, line) {
+            Some(found) => vec![Event::TexSync { found }],
+            None => vec![notice(format!("{rel}:{line} is not in the PDF."), NoticeLevel::Info)],
+        }
+    }
+
+    /// The file and line (one-based) that put something at a point on a
+    /// page of the PDF last made, as the project names the file.
+    pub fn sync_inverse(&self, page: u32, x: f64, y: f64) -> Option<(String, u32)> {
+        let (map, real_root) = self.synctex.as_ref()?;
+        let source = map.inverse(page, x, y)?;
+        let file = PathBuf::from(normalise(&source.file));
+        let file = file.strip_prefix(real_root).map(Path::to_path_buf).unwrap_or(file);
+        Some((file.display().to_string(), source.line))
+    }
+
     /// Stop the build under way, if there is one.
     pub fn stop(&mut self) -> Vec<Event> {
         match &mut self.building {
@@ -341,6 +364,12 @@ impl Tex {
         }
         let mut readable = vec![spec.log()];
         let made = spec.pdf();
+        // SyncTeX's map goes with the PDF it describes.
+        if made.is_file() {
+            if let Ok(map) = std::fs::read(spec.synctex()).map_err(|e| e.to_string()).and_then(|b| proton_tex::synctex::Map::read(&b)) {
+                self.synctex = Some((map, real_root.clone()));
+            }
+        }
         let pdf = match build.state() {
             RunState::Done | RunState::Failed if made.is_file() => match show(&spec, &made) {
                 Ok(view) => {
@@ -379,6 +408,21 @@ impl Tex {
         }
         (vec![Event::TexBuild { build: result }, Event::TexLog { log, root: root.display().to_string() }], readable)
     }
+}
+
+/// A path with its `.` and `..` worked out.
+fn normalise(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    format!("{}{}", if path.starts_with('/') { "/" } else { "" }, parts.join("/"))
 }
 
 /// The main file pinned for the project, in `.proton/tex.json`.

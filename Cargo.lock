@@ -4583,6 +4583,7 @@ dependencies = [
 name = "proton-tex"
 version = "0.0.1"
 dependencies = [
+ "flate2",
  "serde",
  "serde_json",
  "ts-rs",
