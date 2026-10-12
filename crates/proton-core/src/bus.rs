@@ -474,6 +474,8 @@ pub enum Command {
     TexCompile,
     /// Stop the build under way.
     TexStop,
+    /// Copy the PDF last made beside the main file, in the project.
+    TexSavePdf,
     /// Ask CTAN which packages have the files a document lacks: the first
     /// say-so of installing them.
     TexFindPackages {

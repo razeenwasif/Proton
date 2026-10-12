@@ -293,6 +293,18 @@ impl Tex {
         }
     }
 
+    /// Copy the last PDF made beside its main file, in the project — the
+    /// one write a build makes there, and only when asked.
+    pub fn save_pdf(&mut self, root: &Path) -> Vec<Event> {
+        let Some(last) = &self.last else { return vec![notice("Nothing has been typeset yet.".into(), NoticeLevel::Warn)] };
+        let (Some(pdf), Some(main)) = (&last.pdf, &last.main) else { return vec![notice("Nothing has been typeset yet.".into(), NoticeLevel::Warn)] };
+        let target = root.join(main).with_extension("pdf");
+        match std::fs::copy(pdf, &target) {
+            Ok(_) => vec![notice(format!("saved {} beside {main}", relative(root, &target)), NoticeLevel::Info)],
+            Err(e) => vec![notice(format!("{}: {e}", target.display()), NoticeLevel::Error)],
+        }
+    }
+
     /// Stop the build under way, if there is one.
     pub fn stop(&mut self) -> Vec<Event> {
         match &mut self.building {

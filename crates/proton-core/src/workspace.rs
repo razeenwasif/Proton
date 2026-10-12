@@ -1659,6 +1659,10 @@ impl Workspace {
 
             Command::TexCompile => self.tex_compile(),
             Command::TexStop => self.tex.stop(),
+            Command::TexSavePdf => {
+                let root = self.pickers.root().to_path_buf();
+                self.tex.save_pdf(&root)
+            }
             Command::TexFindPackages { files } => self.tex.packages_do(|env| env.find_packages(files)),
             Command::TexInstallPackages { packages } => self.tex.packages_do(|env| env.install_packages(packages)),
             Command::TexForgetPackages => self.tex.packages_do(|env| {

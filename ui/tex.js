@@ -6,7 +6,9 @@
  * PDF and the log. The agent's tab is the same conversation as Codex's
  * dock, painted by app.js like every other copy of it. */
 
+import { readDocument } from "./bridge.js";
 import { escapeHtml as esc, icon } from "./html.js";
+import { createPdfView } from "./pdf-view.js";
 import { commandOf, envHtml, readyHtml } from "./tex-env.js";
 
 /** @typedef {import("./bindings/TexEnv").TexEnv} Env */
@@ -47,8 +49,16 @@ export function createTex(host) {
   if (!found) return null;
   const pane = found;
   const q = (/** @type {string} */ sel) => /** @type {HTMLElement} */ (pane.querySelector(sel));
-  /** @type {{env: Env | null, bundle: Bundle, confirming: boolean, build: Build | null, log: Log | null, root: string, packages: Packages}} */
-  const state = { env: null, bundle: "full", confirming: false, build: null, log: null, root: "", packages: { state: "idle" } };
+  /** @type {{env: Env | null, bundle: Bundle, confirming: boolean, build: Build | null, log: Log | null, root: string, packages: Packages,
+   *   shown: {pdf: string, version: number} | null}} */
+  const state = { env: null, bundle: "full", confirming: false, build: null, log: null, root: "", packages: { state: "idle" }, shown: null };
+  const pages = q("[data-tex-pages]");
+  const pdfView = createPdfView(pages, {
+    onWhere: (page, count) => {
+      q("[data-tex-page]").textContent = `${page} / ${count}`;
+    },
+    onPoint: (page, x, y) => host.dispatch({ type: "texSyncInverse", page, x, y }),
+  });
 
   /** Show one of the pane's tabs. @param {string} which */
   function show(which) {
@@ -73,8 +83,13 @@ export function createTex(host) {
   /** The PDF tab: TeX's card until it is installed, then the PDF, or what
    *  stands in for one before there is one. */
   function renderPdf() {
-    const pdf = q("[data-tex-pdf]");
+    const pdf = q("[data-tex-note]");
     const env = state.env;
+    const showing = env?.state === "ready" && state.shown !== null;
+    pages.hidden = !showing;
+    pdf.hidden = showing;
+    q("[data-tex-pdf-bar]").hidden = !showing;
+    if (showing) return;
     if (env && env.state !== "ready") {
       pdf.innerHTML = `<div class="lab-env tex-env-card"><header>TeX</header>${envHtml(env, state.bundle)}</div>`;
       return;
@@ -155,6 +170,14 @@ export function createTex(host) {
     const tab = /** @type {HTMLElement | null} */ (t.closest("[data-tex-tab]"));
     if (tab) return show(tab.dataset.texTab ?? "pdf");
     if (t.closest("[data-tex-compile]")) return void host.dispatch({ type: "texCompile" });
+    if (t.closest("[data-tex-save-pdf]")) return void host.dispatch({ type: "texSavePdf" });
+    const zoom = /** @type {HTMLElement | null} */ (t.closest("[data-tex-zoom]"));
+    if (zoom) {
+      const by = Number(zoom.dataset.texZoom);
+      if (by === 0) pdfView.fit();
+      else pdfView.zoom(by);
+      return;
+    }
     if (t.closest("[data-tex-stop]")) return void host.dispatch({ type: "texStop" });
     const jump = /** @type {HTMLElement | null} */ (t.closest("[data-tex-jump]"));
     if (jump) {
@@ -181,6 +204,15 @@ export function createTex(host) {
     if (command) host.dispatch(command);
   });
 
+  // The PDF's own keys while it has the keyboard: nothing reaches the editor.
+  pages.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.altKey) return;
+    if (pdfView.key(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+
   pane.addEventListener("change", (e) => {
     const t = /** @type {HTMLInputElement} */ (e.target);
     if (t.matches("[data-tex-bundle]") && t.checked) state.bundle = /** @type {Bundle} */ (t.value);
@@ -194,11 +226,31 @@ export function createTex(host) {
     renderHead();
   }
 
-  /** Where the build stands. @param {{build: Build}} event */
+  /** Where the build stands; a new PDF read and drawn in place.
+   *  @param {{build: Build}} event */
   function build(event) {
     state.build = event.build;
     renderHead();
+    const b = event.build;
+    if (b.pdf && (state.shown?.pdf !== b.pdf || state.shown.version !== b.version)) void draw(b.pdf, b.version);
+    else renderPdf();
+  }
+
+  /** Read the PDF and draw it: in place, when one is drawn already. @param {string} path @param {number} version */
+  async function draw(path, version) {
+    const first = state.shown === null || state.shown.pdf !== path;
+    state.shown = { pdf: path, version };
     renderPdf();
+    let bytes;
+    try {
+      bytes = await readDocument(path);
+    } catch (err) {
+      pdfView.note(`Could not read the PDF.<br>${esc(String(err))}`);
+      return;
+    }
+    if (state.shown?.version !== version || state.shown.pdf !== path) return;
+    if (first) await pdfView.show(bytes);
+    else await pdfView.reload(bytes);
   }
 
   /** What the last build's log said. @param {{log: Log, root: string}} event */
@@ -220,5 +272,5 @@ export function createTex(host) {
   renderPdf();
   renderHead();
   renderLog();
-  return { show, env, build, log, packages };
+  return { show, env, build, log, packages, pdf: () => pdfView };
 }

@@ -5042,3 +5042,14 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .tex-context { grid-column: 2; color: var(--muted); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tex-missing { display: grid; gap: 8px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--cc-line); border-radius: 8px; background: var(--cc-raise); font: var(--z-2xs)/1.6 var(--zed); }
 .tex-missing p { margin: 0; }
+/* The PDF, in LaTeX's pane: paper on the pane's own ground, a bar above it. */
+.tex-pdf-bar { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); font: var(--z-2xs) var(--zed); }
+.tex-pdf-bar[hidden] { display: none; }
+.tex-pdf-bar .grow { flex: 1 1 auto; }
+.tex-pdf { display: flex; flex-direction: column; overflow: hidden; }
+.tex-note { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.tex-note[hidden], .tex-pages[hidden] { display: none; }
+.tex-pages { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; align-items: safe center; gap: 16px; outline: none; }
+.pdf-mark { position: absolute; z-index: 3; border-radius: 3px; pointer-events: none; background: color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent); animation: pdf-mark 2.4s ease-out forwards; }
+@keyframes pdf-mark { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }

@@ -615,7 +615,20 @@
           <span class="grow"></span>
           <span class="tex-build" data-tex-build></span>
         </header>
-        <div class="tex-body" data-tex-body="pdf"><div class="tex-pdf" data-tex-pdf></div></div>
+        <div class="tex-body" data-tex-body="pdf">
+          <div class="tex-pdf-bar" data-tex-pdf-bar hidden>
+            <span class="chip" data-tex-page></span>
+            <span class="grow"></span>
+            <button class="hbtn" data-tex-zoom="-1" title="Zoom out  −" aria-label="Zoom out">−</button>
+            <button class="hbtn" data-tex-zoom="0" title="Fit the page's width  0" aria-label="Fit the width">Fit</button>
+            <button class="hbtn" data-tex-zoom="1" title="Zoom in  +" aria-label="Zoom in">+</button>
+            <button class="hbtn" data-tex-save-pdf title="Save the PDF beside the main file">Save PDF</button>
+          </div>
+          <div class="tex-pdf" data-tex-pdf>
+            <div class="tex-note" data-tex-note></div>
+            <div class="scroll tex-pages" data-tex-pages tabindex="0" aria-label="The PDF" hidden></div>
+          </div>
+        </div>
         <div class="tex-body" data-tex-body="log" hidden><div class="scroll tex-log" data-tex-log></div></div>
         <div class="tex-body tex-agent" data-tex-body="agent" hidden>
           <div class="scroll" data-agent-thread></div>

@@ -51,6 +51,8 @@
     "study-graphic.js",
     "study-code.js",
     "tex.js",
-    "tex-env.js"
+    "tex-env.js",
+    "pdf-view.js",
+    "document.js"
   ]
 }

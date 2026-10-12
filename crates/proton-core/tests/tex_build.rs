@@ -114,6 +114,10 @@ fn saving_a_chapter_typesets_the_main_file_and_its_pdf_and_log_are_said() {
     assert_eq!((log.entries[0].file.as_deref(), log.entries[0].line), (Some("main.tex"), Some(4)));
     let left: Vec<_> = std::fs::read_dir(&b.project).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
     assert_eq!(left.len(), 2, "nothing written into the project: {left:?}");
+    // Until asked: then the PDF goes beside the main file.
+    let events = ws.apply(Command::TexSavePdf);
+    assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("saved main.pdf"))), "{events:?}");
+    assert!(b.project.join("main.pdf").is_file());
 }
 
 #[test]

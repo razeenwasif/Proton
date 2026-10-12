@@ -116,6 +116,54 @@ export async function texChecks({test, assert, win, doc, $, settle, key, shown})
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('The PDF is drawn in the pane, read again in place after each build, zoomed, and double-clicked for where in the source', async () => {
+    await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
+    const pane = $('#tex-pane');
+    pane.querySelector('[data-tex-tab="pdf"]').click(); await settle();
+    await win.pushEvents([{type: 'texEnv', env: {state: 'ready', tinytex: 'v2026.10', texlab: 'v5.26.0', bundle: 'full', size: 812_000_000, home: '/Users/you/.proton/tex'}}]); await settle();
+    const done = (version) => ({type: 'texBuild', build: {state: 'done', main: 'main.tex', engine: 'pdfLaTeX', seconds: 0.4, pdf: '/tests/ui/fixtures/three-pages.pdf', version, errors: 0, warnings: 0, boxes: 0, pages: 3, said: null}});
+    await win.pushEvents([done(1)]);
+    const pages = pane.querySelector('[data-tex-pages]');
+    const wait = async (ready) => { for (let i = 0; i < 60 && !ready(); i++) await settle(); };
+    await wait(() => pages.querySelectorAll('.doc-page canvas').length > 0);
+    assert(!pages.hidden && pages.querySelectorAll('.doc-page').length === 3 && pages.querySelector('.doc-page canvas'), 'the PDF is not drawn in the pane');
+    assert(pane.querySelector('[data-tex-page]').textContent === '1 / 3', `where it is: ${pane.querySelector('[data-tex-page]').textContent}`);
+    assert(!pane.querySelector('[data-tex-note]').checkVisibility?.() || pane.querySelector('[data-tex-note]').hidden, 'the empty page is still over it');
+
+    // Typeset again: read in place, at the same place.
+    pages.scrollTop = pages.querySelector('.doc-page[data-page="2"]').offsetTop + 40; await settle();
+    const before = pages.scrollTop;
+    const first = pages.querySelector('.doc-page');
+    await win.pushEvents([done(2)]);
+    await wait(() => pages.querySelector('.doc-page') !== first && pages.querySelector('.doc-page[data-page="2"] canvas'));
+    assert(pages.querySelector('.doc-page') !== first, 'the PDF was not read again');
+    assert(Math.abs(pages.scrollTop - before) < 4, `the place was lost: ${before} → ${pages.scrollTop}`);
+
+    // Zoomed by its buttons; its keys its own while it has the keyboard.
+    const width = pages.querySelector('.doc-page').offsetWidth;
+    pane.querySelector('[data-tex-zoom="1"]').click(); await settle();
+    assert(pages.querySelector('.doc-page').offsetWidth > width, '+ did not zoom in');
+    pane.querySelector('[data-tex-zoom="0"]').click(); await settle();
+    pages.focus();
+    const keyed = win.commands.length;
+    const top = pages.scrollTop;
+    key('j'); key('j'); await settle();
+    assert(pages.scrollTop > top && !win.commands.slice(keyed).some((c) => c.type === 'key'), 'j did not scroll the PDF, or reached the editor');
+
+    // A double-click asks where in the source that is.
+    const page = pages.querySelector('.doc-page[data-page="1"]');
+    const box = page.getBoundingClientRect();
+    const at = win.commands.length;
+    page.dispatchEvent(new win.MouseEvent('dblclick', {bubbles: true, clientX: box.left + 72, clientY: box.top + 100}));
+    await settle();
+    const asked = sent(at, 'texSyncInverse')[0];
+    assert(asked?.page === 1 && asked.x > 0 && asked.y > 0, `not asked where: ${JSON.stringify(asked)}`);
+    const saved = win.commands.length;
+    pane.querySelector('[data-tex-save-pdf]').click(); await settle();
+    assert(sent(saved, 'texSavePdf').length === 1, 'Save PDF did not ask');
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('LaTeX\'s dock shows the PDF, the log or the agent, and the agent\'s staged changes are there too', async () => {
     await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
     const pane = $('#tex-pane');
