@@ -49,6 +49,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::PdfReply { .. }
             | Command::PdfEditComment { .. }
             | Command::PdfDeleteComment { .. }
+            | Command::PdfSetField { .. }
+            | Command::PdfFlatten
     )
 }
 
@@ -149,6 +151,7 @@ impl Pdfs {
         if let Some(tab) = self.active_tab() {
             events.push(view_event(tab, None, false));
             events.push(comments_event(tab));
+            events.push(fields_event(tab));
         }
         events
     }
@@ -186,6 +189,8 @@ impl Pdfs {
                 self.change(proton_pdf::Op::EditComment { id, color, text, date })
             }
             Command::PdfDeleteComment { id } => self.change(proton_pdf::Op::DeleteComment { id }),
+            Command::PdfSetField { name, value } => self.change_quietly(proton_pdf::Op::SetField { name, value }),
+            Command::PdfFlatten => self.change(proton_pdf::Op::Flatten),
             _ => Vec::new(),
         }
     }
@@ -225,7 +230,7 @@ impl Pdfs {
         let path = folder::normalise(&path);
         if let Some(tab) = self.tabs.iter().find(|t| t.path == path) {
             self.active = Some(tab.id);
-            return vec![self.tabs_event(), view_event(tab, page, false), comments_event(tab)];
+            return vec![self.tabs_event(), view_event(tab, page, false), comments_event(tab), fields_event(tab)];
         }
         let bytes = match read(&path) {
             Ok(bytes) => bytes,
@@ -241,9 +246,10 @@ impl Pdfs {
         self.active = Some(tab.id);
         let view = view_event(&tab, page, false);
         let comments = comments_event(&tab);
+        let fields = fields_event(&tab);
         self.tabs.push(tab);
         self.remember(&path);
-        vec![self.tabs_event(), view, comments]
+        vec![self.tabs_event(), view, comments, fields]
     }
 
     fn close(&mut self, id: u32, discard: bool) -> Vec<Event> {
@@ -260,6 +266,7 @@ impl Pdfs {
         if let Some(tab) = self.active_tab() {
             events.push(view_event(tab, None, false));
             events.push(comments_event(tab));
+            events.push(fields_event(tab));
         }
         events
     }
@@ -267,7 +274,7 @@ impl Pdfs {
     fn focus(&mut self, id: u32) -> Vec<Event> {
         let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return Vec::new() };
         self.active = Some(id);
-        vec![self.tabs_event(), view_event(tab, None, false), comments_event(tab)]
+        vec![self.tabs_event(), view_event(tab, None, false), comments_event(tab), fields_event(tab)]
     }
 
     /// The tab on top, to change; or why it cannot be.
@@ -282,6 +289,12 @@ impl Pdfs {
 
     /// The tab on top drawn again, as its document now is.
     fn redrawn(&mut self) -> Vec<Event> {
+        self.redrawn_as(false)
+    }
+
+    /// The same; `quiet` when the window has it drawn already — a field
+    /// typed in — and only the view's name moves on.
+    fn redrawn_as(&mut self, quiet: bool) -> Vec<Event> {
         let Some(id) = self.active else { return Vec::new() };
         let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else { return Vec::new() };
         let bytes = match tab.doc.as_ref().map(|d| d.bytes()) {
@@ -291,9 +304,10 @@ impl Pdfs {
         };
         tab.view = Arc::new(bytes);
         tab.version += 1;
-        let view = view_event(tab, None, false);
+        let view = view_event(tab, None, quiet);
         let comments = comments_event(tab);
-        vec![self.tabs_event(), view, comments]
+        let fields = fields_event(tab);
+        vec![self.tabs_event(), view, comments, fields]
     }
 
     /// Make a change to the tab on top: held until it is saved.
@@ -304,6 +318,18 @@ impl Pdfs {
         };
         match done {
             Ok(()) => self.redrawn(),
+            Err(why) => vec![notice(why, NoticeLevel::Warn)],
+        }
+    }
+
+    /// A change the window has drawn already: a field filled in.
+    fn change_quietly(&mut self, op: proton_pdf::Op) -> Vec<Event> {
+        let done = match self.editable() {
+            Ok(tab) => tab.doc.as_mut().map_err(|e| e.clone()).and_then(|d| d.apply(op)),
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        match done {
+            Ok(()) => self.redrawn_as(true),
             Err(why) => vec![notice(why, NoticeLevel::Warn)],
         }
     }
@@ -524,9 +550,13 @@ fn view_event(tab: &Tab, page: Option<u32>, quiet: bool) -> Event {
     Event::PdfView { tab: tab.id, key: tab.key(), version: tab.version, page, quiet }
 }
 
-/// A tab's comments, as it is now.
+/// A tab's comments, as it is now — and its form's fields.
 fn comments_event(tab: &Tab) -> Event {
     Event::PdfComments { tab: tab.id, comments: tab.doc.as_ref().map(|d| d.comments()).unwrap_or_default() }
+}
+
+fn fields_event(tab: &Tab) -> Event {
+    Event::PdfFields { tab: tab.id, fields: tab.doc.as_ref().map(|d| d.fields()).unwrap_or_default() }
 }
 
 /// A file's bytes, if it is a PDF and not too large to open.

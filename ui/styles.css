@@ -5334,3 +5334,14 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .pdf-comment-what b { color: var(--text); font-weight: 600; }
 .pdf-comment-text { color: var(--text); overflow-wrap: anywhere; }
 .pdf-comment-reply { padding-left: 6px; overflow-wrap: anywhere; }
+/* A form's fields over the page: lit when highlighting is on, the page's
+   own ground when it is off, so the field's drawing under is covered. */
+.doc-page .pdf-field { position: absolute; z-index: 3; box-sizing: border-box; margin: 0; padding: 0 3px; border: 0; border-radius: 2px;
+  background: var(--page-ground, #fff); color: #111; font-family: Helvetica, Arial, sans-serif; outline: none; resize: none; }
+.doc-page.pdf-fields-lit .pdf-field { background: rgba(204, 221, 255, .92); }
+.doc-page .pdf-field.required { box-shadow: inset 0 0 0 1px rgba(220, 60, 60, .55); }
+.doc-page .pdf-field:focus { box-shadow: inset 0 0 0 2px #3a7bff; background: #fff; }
+.doc-page .pdf-field:is([type="checkbox"], [type="radio"]) { padding: 0; accent-color: #3a7bff; cursor: pointer; }
+.doc-page textarea.pdf-field { padding: 2px 3px; line-height: 1.15; }
+.doc-page .pdf-field:disabled { opacity: .85; cursor: default; }
+.pdf-tool-check { display: flex; gap: 6px; align-items: center; color: var(--muted); font: var(--z-2xs) var(--zed); }

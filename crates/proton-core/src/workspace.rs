@@ -1514,7 +1514,9 @@ impl Workspace {
             | Command::PdfComment { .. }
             | Command::PdfReply { .. }
             | Command::PdfEditComment { .. }
-            | Command::PdfDeleteComment { .. } => Vec::new(),
+            | Command::PdfDeleteComment { .. }
+            | Command::PdfSetField { .. }
+            | Command::PdfFlatten => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }

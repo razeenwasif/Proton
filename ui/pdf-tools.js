@@ -9,7 +9,7 @@ import { escapeHtml as esc } from "./html.js";
 
 /**
  * @param {{box: HTMLElement, dispatch: (command: any) => unknown, tab: () => Tab | null,
- *   pages: () => number[], count: () => number, project: () => string[]}} host
+ *   pages: () => number[], count: () => number, project: () => string[], extra?: () => string}} host
  *   `pages`: the pages the tools act on — those chosen in the grid, or the one being read
  */
 export function createPdfTools(host) {
@@ -57,7 +57,7 @@ export function createPdfTools(host) {
         `<button class="hbtn" data-pdf-tool="down" data-at="${i}" title="Later"${i === combining.length - 1 ? " disabled" : ""}>↓</button>` +
         `<button class="hbtn" data-pdf-tool="drop" data-at="${i}" title="Leave out">×</button>` : `<span class="lab-faint">this one</span>`) + `</li>`).join("");
     const suggestions = host.project().filter((p) => !combining.some((c) => c.endsWith(p))).slice(0, 30);
-    box.innerHTML = `
+    box.innerHTML = (host.extra?.() ?? "") + `
       <section class="pdf-tool"><h4>Pages <span class="lab-faint" data-pdf-which>${esc(which())}</span></h4>
         <div class="pdf-tool-row">
           <button class="cc-quiet" data-pdf-tool="left" title="Turn left">⟲ Turn left</button>

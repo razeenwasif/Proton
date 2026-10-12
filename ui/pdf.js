@@ -11,6 +11,7 @@ import { readDocument } from "./bridge.js";
 import { escapeHtml as esc } from "./html.js";
 import { find } from "./pdf-find.js";
 import { COLORS as INKS, TOOLS, createPdfAnnot } from "./pdf-annot.js";
+import { createPdfForms } from "./pdf-forms.js";
 import { createPdfGrid } from "./pdf-pages.js";
 import { createPdfTools } from "./pdf-tools.js";
 import { createPdfView, drawSmall } from "./pdf-view.js";
@@ -68,10 +69,15 @@ export function createPdf(host) {
   /** Thumbnails drawn for the document on screen, by page. @type {Map<number, HTMLCanvasElement>} */
   let thumbs = new Map();
 
-  /** The comments' tools and overlays, made once the view is. @type {ReturnType<typeof createPdfAnnot> | null} */
+  /** The comments' tools and overlays, and the form's inputs, made once the view is. @type {ReturnType<typeof createPdfAnnot> | null} */
   let annot = null;
+  /** @type {ReturnType<typeof createPdfForms> | null} */
+  let forms = null;
   const view = createPdfView(pages, {
-    onDrawn: (page, slot, viewport) => annot?.drawn(page, slot, viewport),
+    onDrawn: (page, slot, viewport) => {
+      annot?.drawn(page, slot, viewport);
+      forms?.drawn(page, slot, viewport);
+    },
     onWhere: (page, count, scale) => {
       state.page = page;
       state.count = count;
@@ -88,6 +94,9 @@ export function createPdf(host) {
     goTo: (page, offset) => view.goTo(page, offset),
   });
   const marks = annot;
+  forms = createPdfForms({ dispatch: host.dispatch, editable: () => Boolean(state.shown) && !top()?.readOnly });
+  const form = forms;
+  form.listen(pages);
   q("[data-pdf-palette]").innerHTML = TOOLS.map(([id, title, glyph]) =>
     `<button data-pdf-tool-pick="${id}" title="${title}" aria-label="${title}" aria-pressed="${id === "select"}">${glyph}</button>`).join("");
   q("[data-pdf-colors-pick]").innerHTML = INKS.map((c, i) =>
@@ -112,8 +121,11 @@ export function createPdf(host) {
   const tools = createPdfTools({
     box: q("[data-pdf-tools]"), dispatch: host.dispatch, tab: () => top(),
     pages: () => (state.grid && grid.selection().length ? grid.selection() : state.shown ? [state.page] : []),
-    count: () => state.count, project: () => state.project,
+    count: () => state.count, project: () => state.project, extra: () => form.toolsHtml(),
   });
+  q("[data-pdf-tools]").addEventListener("click", (e) => {
+    if (form.toolClick(/** @type {HTMLElement} */ (e.target))) tools.render();
+  }, true);
 
   /** The page grid, or the pages to read. @param {boolean} on */
   function showGrid(on) {
@@ -663,5 +675,12 @@ export function createPdf(host) {
     q('[data-pdf-side="comments"]').textContent = count ? `Comments ${count}` : "Comments";
   }
 
-  return { tabs, show, key, comments, view: () => view, search, state: () => state };
+  /** The fields of a tab's form, as the core lists them. @param {{tab: number, fields: any[]}} event */
+  function fields(event) {
+    if (event.tab !== state.active) return;
+    form.fields(event);
+    tools.render();
+  }
+
+  return { tabs, show, key, comments, fields, view: () => view, search, state: () => state };
 }

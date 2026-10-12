@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 description = "The PDF mode's changes to a PDF — pages, comments, forms, passwords, combining, cleaning — each undoable, saved as an incremental update: pure, with no processes."
 
+[features]
+# A form to test with, for other crates' tests.
+fixture = []
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }

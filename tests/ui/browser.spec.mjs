@@ -5,7 +5,7 @@ test('production UI passes the native-transport regression harness', async ({pag
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/tests/ui/index.html');
   try {
-    await expect(page.locator('#status')).toHaveText(/^\d+ passed · \d+ failed$/, {timeout: 130000});
+    await expect(page.locator('#status')).toHaveText(/^\d+ passed · \d+ failed$/, {timeout: 160000});
     const results = await page.locator('#results li').allTextContents();
     await testInfo.attach('regression-results', {body: results.join('\n'), contentType: 'text/plain'});
     expect(results.length).toBeGreaterThanOrEqual(58);

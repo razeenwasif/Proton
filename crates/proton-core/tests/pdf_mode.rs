@@ -272,3 +272,41 @@ fn comments_are_made_answered_edited_and_deleted_each_undoable_and_drawn_into_th
     let saved = lopdf::Document::load_mem(&std::fs::read(s.0.join("paper.pdf")).unwrap()).unwrap();
     assert_eq!(proton_pdf::annot::list(&saved).iter().map(|c| c.kind.as_str()).collect::<Vec<_>>(), ["Highlight"]);
 }
+
+fn fields(events: &[Event]) -> Option<Vec<(String, String)>> {
+    events.iter().rev().find_map(|e| match e {
+        Event::PdfFields { fields, .. } => Some(fields.iter().map(|f| (f.name.clone(), f.value.clone())).collect()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_form_is_filled_in_quietly_undone_flattened_and_saved() {
+    let s = scratch("form");
+    let mut doc = lopdf::Document::load_mem(&pdf(&["A form."])).unwrap();
+    proton_pdf::forms::sample(&mut doc);
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes).unwrap();
+    std::fs::write(s.0.join("form.pdf"), &bytes).unwrap();
+    let mut session = Session::new(&s.0);
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    let events = session.apply(Command::PdfOpen { path: "form.pdf".into(), page: None });
+    assert_eq!(fields(&events).unwrap().iter().map(|f| f.0.as_str()).collect::<Vec<_>>(), ["name", "notes", "agree", "size", "colour"]);
+
+    // Typed into: the view's name moves on, quietly, and nothing is drawn again under the caret.
+    let events = session.apply(Command::PdfSetField { name: "name".into(), value: "Ada".into() });
+    assert!(events.iter().any(|e| matches!(e, Event::PdfView { quiet: true, version: 2, .. })), "{events:?}");
+    assert_eq!(fields(&events).unwrap()[0].1, "Ada");
+    assert_eq!(dirty(&events).unwrap().1.as_deref(), Some("fill in name"));
+    session.apply(Command::PdfSetField { name: "size".into(), value: "large".into() });
+    assert!(said(&session.apply(Command::PdfSetField { name: "colour".into(), value: "Green".into() }), "no choice Green"));
+    assert_eq!(fields(&session.apply(Command::PdfUndo)).unwrap()[3].1, "Off");
+
+    // Flattened, and saved: the form is the page's.
+    let events = session.apply(Command::PdfFlatten);
+    assert!(events.iter().any(|e| matches!(e, Event::PdfView { quiet: false, .. })), "drawn again");
+    assert_eq!(fields(&events), Some(Vec::new()));
+    session.apply(Command::PdfSave);
+    let saved = lopdf::Document::load_mem(&std::fs::read(s.0.join("form.pdf")).unwrap()).unwrap();
+    assert!(proton_pdf::forms::list(&saved).is_empty());
+}

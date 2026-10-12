@@ -369,6 +369,52 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('A form: inputs over its fields, filled in as typed, boxes and choices set, highlighting, and flattened when agreed', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    const one = {id: 6, name: 'form.pdf', path: '~/form.pdf', dirty: false, readOnly: null, undo: null, redo: null};
+    await win.pushEvents([tabs([one], 6), {type: 'pdfView', tab: 6, key: '/tests/ui/fixtures/outline.pdf', version: 1, page: null, quiet: false}]); await settle();
+    const pages = $('[data-pdf-pages]');
+    assert(await wait(() => pages.querySelector('.doc-page[data-page="1"] canvas')), 'not drawn');
+    const field = (name, kind, rects, extra = {}) => ({name, kind, value: '', options: [], widgets: rects.map(([rect, state]) => ({page: 1, rect, state: state ?? null})), readOnly: false, required: false, multiline: false, ...extra});
+    await win.pushEvents([{type: 'pdfFields', tab: 6, fields: [
+      field('name', 'text', [[[40, 200, 200, 220]]], {required: true}),
+      field('agree', 'checkbox', [[[40, 170, 52, 182], 'Yes']]),
+      field('size', 'radio', [[[40, 140, 52, 152], 'small'], [[80, 140, 92, 152], 'large']]),
+      field('colour', 'combo', [[[40, 100, 140, 116]]], {options: ['Red', 'Blue']}),
+      field('sign', 'signature', [[[40, 60, 140, 80]]]),
+    ]}]); await settle();
+    const page = pages.querySelector('.doc-page[data-page="1"]');
+    const inputs = [...page.querySelectorAll('.pdf-field')];
+    assert(inputs.length === 5, `not an input over each widget but the signature: ${inputs.length}`);
+    assert(page.classList.contains('pdf-fields-lit') && page.querySelector('[data-name="name"]').classList.contains('required'), 'fields are not lit, the required one marked');
+    const text = page.querySelector('input[data-name="name"]');
+    const b = text.getBoundingClientRect(), slot = page.getBoundingClientRect();
+    assert(Math.abs((b.left - slot.left) - 40 * slot.width / 300) < 3, 'the input is not where its widget is');
+
+    let at = win.commands.length;
+    text.focus(); text.value = 'Ada'; text.dispatchEvent(new Event('input', {bubbles: true}));
+    text.blur(); await settle();
+    page.querySelector('[data-name="agree"]').click(); await settle();
+    page.querySelector('[data-name="size"][data-state="large"]').click(); await settle();
+    const select = page.querySelector('select[data-name="colour"]');
+    select.value = 'Blue'; select.dispatchEvent(new Event('change', {bubbles: true})); await settle();
+    const set = sent(at, 'pdfSetField').map((c) => `${c.name}=${c.value}`).join(' ');
+    assert(set === 'name=Ada agree=Yes size=large colour=Blue', `not filled in: ${set}`);
+
+    // Highlighting off; flattening asks first.
+    const tools = $('[data-pdf-tools]');
+    tools.querySelector('[data-pdf-form-do="highlight"]').click(); await settle();
+    assert(!page.classList.contains('pdf-fields-lit'), 'highlighting did not go off');
+    tools.querySelector('[data-pdf-form-do="confirm"]').click(); await settle();
+    at = win.commands.length;
+    tools.querySelector('[data-pdf-form-do="flatten"]').click(); await settle();
+    assert(sent(at, 'pdfFlatten').length === 1, 'Flatten did not ask');
+    await win.pushEvents([{type: 'pdfFields', tab: 6, fields: []}]); await settle();
+    assert(!page.querySelector('.pdf-field') && !tools.querySelector('[data-pdf-form-do]'), 'the form is still shown');
+    await win.pushEvents([tabs([], null)]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('A PDF opened in the PDF mode is a tab, and the document viewer hands its PDF over at its page', async () => {
     await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
     let at = win.commands.length;

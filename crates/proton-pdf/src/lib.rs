@@ -10,6 +10,7 @@
 pub mod annot;
 pub mod combine;
 pub mod doc;
+pub mod forms;
 pub mod ops;
 pub mod pages;
 pub mod save;

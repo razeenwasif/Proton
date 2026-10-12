@@ -36,6 +36,7 @@
     "pdf.js",
     "pdf-pages.js",
     "pdf-annot.js",
+    "pdf-forms.js",
     "pdf-tools.js",
     "pdf-find.js",
     "highlight.js",

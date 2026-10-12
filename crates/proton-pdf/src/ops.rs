@@ -31,6 +31,10 @@ pub enum Op {
     EditComment { id: String, color: Option<String>, text: Option<String>, date: String },
     /// A comment, and its replies, deleted.
     DeleteComment { id: String },
+    /// A form's field filled in.
+    SetField { name: String, value: String },
+    /// The form drawn into its pages for good.
+    Flatten,
 }
 
 impl Op {
@@ -55,6 +59,8 @@ impl Op {
             Op::Reply { .. } => "reply".into(),
             Op::EditComment { .. } => "edit a comment".into(),
             Op::DeleteComment { .. } => "delete a comment".into(),
+            Op::SetField { name, .. } => format!("fill in {name}"),
+            Op::Flatten => "flatten the form".into(),
         }
     }
 
@@ -63,6 +69,7 @@ impl Op {
         match self {
             Op::Rotate { .. } | Op::Delete { .. } | Op::InsertBlank { .. } | Op::Move { .. } | Op::InsertFrom { .. } => true,
             Op::Comment { .. } | Op::Reply { .. } | Op::EditComment { .. } | Op::DeleteComment { .. } => true,
+            Op::SetField { .. } | Op::Flatten => true,
         }
     }
 
@@ -103,6 +110,8 @@ impl Op {
             Op::Reply { to, text, author, date, name } => annot::reply(doc, annot::object_of(to)?, text, author, date, name).map(|_| ()),
             Op::EditComment { id, color, text, date } => annot::edit(doc, annot::object_of(id)?, color.as_deref(), text.as_deref(), date),
             Op::DeleteComment { id } => annot::delete(doc, annot::object_of(id)?),
+            Op::SetField { name, value } => crate::forms::set(doc, name, value),
+            Op::Flatten => crate::forms::flatten(doc).map(|_| ()),
         }
     }
 }

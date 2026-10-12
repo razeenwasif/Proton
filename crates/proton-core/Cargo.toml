@@ -44,3 +44,4 @@ ts-rs = { workspace = true }
 proton-library = { workspace = true, features = ["fixture"] }
 # The PDF mode's tests read what it saved.
 lopdf = "0.42"
+proton-pdf = { workspace = true, features = ["fixture"] }

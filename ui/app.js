@@ -5259,6 +5259,10 @@ function renderEvent(event) {
       pdf?.comments(event);
       break;
 
+    case "pdfFields":
+      pdf?.fields(event);
+      break;
+
     case "debug":
       renderDebug(event);
       break;

@@ -646,6 +646,14 @@ pub enum Command {
     PdfDeleteComment {
         id: String,
     },
+    /// Fill in a field of the tab on top's form: its text, its choice, or
+    /// the state a check box or radio button is in ("" for none).
+    PdfSetField {
+        name: String,
+        value: String,
+    },
+    /// Draw the tab on top's form into its pages for good.
+    PdfFlatten,
     /// Bring a tab forward.
     PdfFocus {
         tab: u32,
@@ -1861,6 +1869,11 @@ pub enum Event {
         recent: Vec<String>,
         project: Vec<String>,
         root: String,
+    },
+    /// The fields of a tab's form, as it is now.
+    PdfFields {
+        tab: u32,
+        fields: Vec<proton_pdf::forms::Field>,
     },
     /// The comments of a tab, as it is now.
     PdfComments {
