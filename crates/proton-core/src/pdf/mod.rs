@@ -56,6 +56,9 @@ pub fn handles(command: &Command) -> bool {
             | Command::PdfUnprotect
             | Command::PdfSanitize
             | Command::PdfCompress
+            | Command::PdfOcr { .. }
+            | Command::PdfOcrStop
+            | Command::PdfOcrLangs
     )
 }
 
@@ -131,12 +134,28 @@ pub struct Pdfs {
     project: (Vec<String>, PathBuf),
     /// Comments made here so far, for naming the next one.
     made: u64,
+    /// The programs OCR uses, where the machine has them; none in tests
+    /// unless they are given stand-ins.
+    ocr: Option<proton_lab::ocr::OcrTools>,
+    /// The languages they read, and the folder tesseract's data is in, once
+    /// asked.
+    langs: Option<(Vec<String>, Option<PathBuf>)>,
+    /// Pages being read, and the tab they are of.
+    job: Option<(u32, proton_lab::ocr::OcrJob)>,
+    /// How far they had got when the window was last told.
+    told: (usize, usize),
 }
 
 impl Pdfs {
     /// Nothing open, nothing kept: for tests.
     pub fn new() -> Pdfs {
         Pdfs::default()
+    }
+
+    /// With these programs for OCR: the machine's, or stand-ins in a test.
+    pub fn with_ocr(mut self, tools: Option<proton_lab::ocr::OcrTools>) -> Pdfs {
+        self.ocr = tools;
+        self
     }
 
     /// The files opened before, kept in `file`.
@@ -208,6 +227,14 @@ impl Pdfs {
             Command::PdfUnprotect => self.change(proton_pdf::Op::Unprotect),
             Command::PdfSanitize => self.change(proton_pdf::Op::Sanitize),
             Command::PdfCompress => self.change(proton_pdf::Op::Compress),
+            Command::PdfOcr { pages, langs } => self.ocr(&pages, &langs),
+            Command::PdfOcrStop => {
+                if let Some((_, job)) = &mut self.job {
+                    job.stop();
+                }
+                Vec::new()
+            }
+            Command::PdfOcrLangs => vec![Event::PdfOcrLangs { langs: self.languages().0 }],
             _ => Vec::new(),
         }
     }
@@ -544,6 +571,104 @@ impl Pdfs {
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
         }
+    }
+
+    /// The languages OCR reads here, asked of tesseract once.
+    fn languages(&mut self) -> (Vec<String>, Option<PathBuf>) {
+        if self.langs.is_none() {
+            self.langs = Some(self.ocr.as_ref().map(|t| t.languages()).unwrap_or_default());
+        }
+        self.langs.clone().unwrap_or_default()
+    }
+
+    /// Start reading `pages` of the tab on top with OCR.
+    fn ocr(&mut self, pages: &[u32], langs: &[String]) -> Vec<Event> {
+        let Some(tools) = self.ocr.clone() else {
+            let tab = self.active.unwrap_or(0);
+            return vec![Event::PdfOcr { tab, state: "missing".into(), done: 0, total: 0, said: "OCR needs tesseract and Poppler's pdftoppm: brew install tesseract poppler".into() }];
+        };
+        if self.job.as_ref().is_some_and(|(_, j)| j.state() == proton_lab::run::State::Running) {
+            return vec![notice("Pages are being read already: stop that first.".into(), NoticeLevel::Info)];
+        }
+        let (_, data) = self.languages();
+        let started = match self.editable() {
+            Ok(tab) => {
+                let id = tab.id;
+                let count = tab.doc.as_ref().map(|d| d.pages()).unwrap_or(0);
+                if let Some(bad) = pages.iter().find(|n| **n == 0 || **n > count) {
+                    return vec![notice(format!("there is no page {bad}"), NoticeLevel::Warn)];
+                }
+                // What is read is the document as it is now, decrypted: in
+                // a folder of the job's own, which goes when it does.
+                match tab.doc.as_ref().map_err(|e| e.clone()).and_then(|d| d.view_bytes()) {
+                    Ok(bytes) => {
+                        let reads: Vec<PathBuf> = data.into_iter().collect();
+                        proton_lab::ocr::OcrJob::start(&tools, &bytes, pages, langs, &std::env::temp_dir(), proton_lab::sandbox::available(), &reads).map(|job| (id, job))
+                    }
+                    Err(why) => Err(why),
+                }
+            }
+            Err(why) => Err(why),
+        };
+        match started {
+            Ok((id, job)) => {
+                let (done, total) = job.progress();
+                self.told = (done, total);
+                self.job = Some((id, job));
+                vec![Event::PdfOcr { tab: id, state: "running".into(), done: done as u32, total: total as u32, said: String::new() }]
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Warn)],
+        }
+    }
+
+    /// Pages being read: how far they have got, and once read, laid over
+    /// their pages — one change, to undo like any other.
+    pub fn poll(&mut self) -> Vec<Event> {
+        let Some((id, job)) = &mut self.job else { return Vec::new() };
+        let id = *id;
+        if !job.poll() {
+            let (done, total) = job.progress();
+            if self.told == (done, total) {
+                return Vec::new();
+            }
+            self.told = (done, total);
+            return vec![Event::PdfOcr { tab: id, state: "running".into(), done: done as u32, total: total as u32, said: String::new() }];
+        }
+        let (_, job) = self.job.take().expect("a job");
+        let (done, total) = job.progress();
+        use proton_lab::run::State;
+        let state = match job.state() {
+            State::Done => "done",
+            State::Stopped => "stopped",
+            State::TimedOut => "timedOut",
+            _ => "failed",
+        };
+        let mut events = vec![Event::PdfOcr { tab: id, state: state.into(), done: done as u32, total: total as u32, said: job.said().to_string() }];
+        if job.state() != State::Done {
+            return events;
+        }
+        let read: Vec<(u32, Arc<Vec<u8>>)> = job.read().into_iter().map(|(n, b)| (n, Arc::new(b))).collect();
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else { return events };
+        let Ok(doc) = tab.doc.as_mut() else { return events };
+        if let Err(why) = doc.apply(proton_pdf::Op::Ocr { pages: read }) {
+            events.push(notice(why, NoticeLevel::Error));
+            return events;
+        }
+        if self.active == Some(id) {
+            events.extend(self.redrawn());
+        } else if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
+            // Drawn when it comes forward.
+            if let Ok(Ok(bytes)) = tab.doc.as_ref().map(|d| d.view_bytes()) {
+                tab.view = Arc::new(bytes);
+                tab.version += 1;
+            }
+        }
+        events
+    }
+
+    /// Reading pages stopped: the window is going.
+    pub fn shutdown(&mut self) {
+        self.job = None;
     }
 
     /// The tabs with changes not saved, by name.

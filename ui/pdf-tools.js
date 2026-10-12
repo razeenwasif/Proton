@@ -17,8 +17,9 @@ export function size(bytes) {
 
 /**
  * @param {{box: HTMLElement, dispatch: (command: any) => unknown, tab: () => Tab | null,
- *   pages: () => number[], count: () => number, project: () => string[], extra?: () => string}} host
- *   `pages`: the pages the tools act on — those chosen in the grid, or the one being read
+ *   pages: () => number[], count: () => number, project: () => string[], extra?: () => string, after?: () => string}} host
+ *   `pages`: the pages the tools act on — those chosen in the grid, or the one being read;
+ *   `extra` and `after`: sections of others', first and last
  */
 export function createPdfTools(host) {
   const { box } = host;
@@ -128,7 +129,7 @@ export function createPdfTools(host) {
         <div class="pdf-tool-row"><button class="cc-quiet" data-pdf-tool="add">Add</button></div>
         <label class="pdf-tool-field">Into <input data-pdf-typed="into" value="${esc(typed.into || beside("-combined.pdf"))}" spellcheck="false"></label>
         <div class="pdf-tool-row"><button class="cc-primary" data-pdf-tool="combine"${combining.length < 2 ? " disabled" : ""}>Combine ${combining.length}</button></div>
-      </section>`;
+      </section>` + (host.after?.() ?? "");
   }
 
   /** The pages to act on, refreshed where it is said. */

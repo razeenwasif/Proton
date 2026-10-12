@@ -676,6 +676,17 @@ pub enum Command {
     PdfSanitize,
     /// Write the tab on top smaller when it is saved.
     PdfCompress,
+    /// Make pages of the tab on top searchable — read with OCR in `langs`
+    /// (tesseract's names: `eng`, `deu`), or English.
+    PdfOcr {
+        pages: Vec<u32>,
+        #[serde(default)]
+        langs: Vec<String>,
+    },
+    /// Stop reading pages.
+    PdfOcrStop,
+    /// Which languages OCR can read here.
+    PdfOcrLangs,
     /// Bring a tab forward.
     PdfFocus {
         tab: u32,
@@ -1907,6 +1918,20 @@ pub enum Event {
         #[serde(rename = "onDisk")]
         on_disk: u32,
         now: u32,
+    },
+    /// Where reading pages with OCR stands: `running`, `done`, `failed`,
+    /// `stopped`, `timedOut`, or `missing` — tesseract or pdftoppm is not
+    /// here; how many pages are read of how many; and what went wrong.
+    PdfOcr {
+        tab: u32,
+        state: String,
+        done: u32,
+        total: u32,
+        said: String,
+    },
+    /// The languages OCR can read here; none when it cannot read at all.
+    PdfOcrLangs {
+        langs: Vec<String>,
     },
     /// The fields of a tab's form, as it is now.
     PdfFields {

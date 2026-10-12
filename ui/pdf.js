@@ -12,6 +12,7 @@ import { escapeHtml as esc } from "./html.js";
 import { find } from "./pdf-find.js";
 import { COLORS as INKS, TOOLS, createPdfAnnot } from "./pdf-annot.js";
 import { createPdfForms } from "./pdf-forms.js";
+import { createPdfOcr } from "./pdf-ocr.js";
 import { createPdfGrid } from "./pdf-pages.js";
 import { createPdfTools } from "./pdf-tools.js";
 import { createPdfView, drawSmall } from "./pdf-view.js";
@@ -87,6 +88,7 @@ export function createPdf(host) {
       for (const t of side.querySelectorAll(".pdf-thumb.on")) t.classList.remove("on");
       side.querySelector(`.pdf-thumb[data-pdf-thumb="${page}"]`)?.classList.add("on");
       tools?.says();
+      ocr?.offer();
     },
     onLink: ({ url }) => void host.dispatch({ type: "openLink", url }),
   });
@@ -119,14 +121,28 @@ export function createPdf(host) {
     },
     onChange: () => tools.says(),
   });
+  /** The pages the tools act on: those chosen in the grid, or the one being read. */
+  const chosen = () => (state.grid && grid.selection().length ? grid.selection() : state.shown ? [state.page] : []);
+  /** @type {ReturnType<typeof createPdfOcr> | null} */
+  let ocr = null;
   const tools = createPdfTools({
-    box: q("[data-pdf-tools]"), dispatch: host.dispatch, tab: () => top(),
-    pages: () => (state.grid && grid.selection().length ? grid.selection() : state.shown ? [state.page] : []),
-    count: () => state.count, project: () => state.project, extra: () => form.toolsHtml(),
+    box: q("[data-pdf-tools]"), dispatch: host.dispatch, tab: () => top(), pages: chosen,
+    count: () => state.count, project: () => state.project,
+    // OCR first when there are pages to read, last when every page has text.
+    extra: () => form.toolsHtml() + (ocr?.wanted() ? ocr.toolsHtml() : ""),
+    after: () => (ocr && !ocr.wanted() ? ocr.toolsHtml() : ""),
   });
+  ocr = createPdfOcr({
+    dispatch: host.dispatch, editable: () => Boolean(state.shown) && !top()?.readOnly, box: q("[data-pdf-tools]"),
+    offer: q("[data-pdf-ocr-offer]"), page: () => state.page, pages: chosen, count: () => state.count,
+    onChange: () => tools.render(),
+  });
+  const reader = ocr;
   q("[data-pdf-tools]").addEventListener("click", (e) => {
-    if (form.toolClick(/** @type {HTMLElement} */ (e.target))) tools.render();
+    const t = /** @type {HTMLElement} */ (e.target);
+    if (form.toolClick(t) || reader.toolClick(t)) tools.render();
   }, true);
+  q("[data-pdf-ocr-offer]").addEventListener("click", () => reader.offered());
 
   /** The page grid, or the pages to read. @param {boolean} on */
   function showGrid(on) {
@@ -400,6 +416,7 @@ export function createPdf(host) {
     if (!state.tabs.length) {
       state.shown = null;
       view.close();
+      void ocr?.look(null);
       renderSide();
     }
     if (state.ask?.kind === "close" && !state.tabs.some((t) => t.id === /** @type {any} */ (state.ask).tab)) state.ask = null;
@@ -431,6 +448,9 @@ export function createPdf(host) {
     state.count = view.pages();
     renderSide();
     tools.render();
+    // Which pages are pictures, with no text: looked for again in each
+    // version, since OCR gives them some.
+    void reader.look(doc);
     if (state.grid) grid.refresh();
     // A search kept across a new version is found again in it.
     if (!fresh && state.query) void search(state.query);
@@ -719,5 +739,15 @@ export function createPdf(host) {
     if (event.tab === state.active) tools.setAbout(event);
   }
 
-  return { tabs, show, key, comments, fields, password, info, view: () => view, search, state: () => state };
+  /** How far OCR has got, of the tab it is reading. @param {{tab: number, state: string, done: number, total: number, said: string}} event */
+  function ocrProgress(event) {
+    reader.progress(event);
+  }
+
+  /** The languages OCR reads here. @param {{langs: string[]}} event */
+  function ocrLangs(event) {
+    reader.langs(event);
+  }
+
+  return { tabs, show, key, comments, fields, password, info, ocrProgress, ocrLangs, view: () => view, search, state: () => state };
 }

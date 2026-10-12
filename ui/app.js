@@ -5271,6 +5271,14 @@ function renderEvent(event) {
       pdf?.info(event);
       break;
 
+    case "pdfOcr":
+      pdf?.ocrProgress(event);
+      break;
+
+    case "pdfOcrLangs":
+      pdf?.ocrLangs(event);
+      break;
+
     case "debug":
       renderDebug(event);
       break;

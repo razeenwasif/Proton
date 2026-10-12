@@ -45,6 +45,8 @@ pub enum Op {
     Sanitize,
     /// Written smaller when it is saved.
     Compress,
+    /// What OCR read of pages laid over them: each page's text-only PDF.
+    Ocr { pages: Vec<(u32, Arc<Vec<u8>>)> },
 }
 
 impl Op {
@@ -76,6 +78,7 @@ impl Op {
             Op::Unprotect => "remove its password".into(),
             Op::Sanitize => "remove hidden data".into(),
             Op::Compress => "compress it".into(),
+            Op::Ocr { pages } => if pages.len() == 1 { "make a page searchable".into() } else { format!("make {} pages searchable", pages.len()) },
         }
     }
 
@@ -84,7 +87,7 @@ impl Op {
         match self {
             Op::Rotate { .. } | Op::Delete { .. } | Op::InsertBlank { .. } | Op::Move { .. } | Op::InsertFrom { .. } => true,
             Op::Comment { .. } | Op::Reply { .. } | Op::EditComment { .. } | Op::DeleteComment { .. } => true,
-            Op::SetField { .. } | Op::Flatten | Op::SetInfo { .. } => true,
+            Op::SetField { .. } | Op::Flatten | Op::SetInfo { .. } | Op::Ocr { .. } => true,
             // Appended, these would leave what they change in the bytes before.
             Op::Protect { .. } | Op::Unprotect | Op::Sanitize | Op::Compress => false,
         }
@@ -139,6 +142,12 @@ impl Op {
                 Ok(())
             }
             Op::Unprotect | Op::Compress => Ok(()),
+            Op::Ocr { pages } => {
+                for (page, text) in pages {
+                    crate::ocr::graft(doc, *page, text)?;
+                }
+                Ok(())
+            }
         }
     }
 }

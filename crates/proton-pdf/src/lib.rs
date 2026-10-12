@@ -12,6 +12,7 @@ pub mod clean;
 pub mod combine;
 pub mod doc;
 pub mod forms;
+pub mod ocr;
 pub mod ops;
 pub mod pages;
 pub mod save;

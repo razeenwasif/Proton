@@ -55,6 +55,9 @@ export function createPdfPreview(_deliver) {
           const on = tabs.find((t) => t.id === active);
           return on ? [tabsEvent(), viewEvent(on, null)] : [tabsEvent()];
         }
+        case "pdfOcrLangs":
+          // No tesseract in a browser: OCR says what it would need.
+          return [{ type: "pdfOcrLangs", langs: [] }];
         default:
           return [];
       }

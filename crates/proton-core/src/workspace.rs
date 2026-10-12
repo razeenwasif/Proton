@@ -1521,7 +1521,10 @@ impl Workspace {
             | Command::PdfProtect { .. }
             | Command::PdfUnprotect
             | Command::PdfSanitize
-            | Command::PdfCompress => Vec::new(),
+            | Command::PdfCompress
+            | Command::PdfOcr { .. }
+            | Command::PdfOcrStop
+            | Command::PdfOcrLangs => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }

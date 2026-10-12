@@ -463,6 +463,47 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('OCR: a page with no text offers to be made searchable, in the languages chosen; the reading followed and stopped', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    const one = {id: 9, name: 'scan.pdf', path: '~/scan.pdf', dirty: false, readOnly: null, undo: null, redo: null, protected: false};
+    await win.pushEvents([tabs([one], 9), {type: 'pdfView', tab: 9, key: '/tests/ui/fixtures/scan.pdf', version: 1, page: null, quiet: false}]); await settle();
+    const tools = $('[data-pdf-tools]');
+    const offer = $('[data-pdf-ocr-offer]');
+    assert(await wait(() => tools.textContent.includes('page 1 has no text')), `the page with no text is not found: ${tools.querySelector('[data-pdf-ocr]')?.textContent}`);
+    assert(win.commands.filter((c) => c.type === 'pdfOcrLangs').length === 1, 'the languages are not asked for, once');
+    assert(shown(offer) && offer.textContent === 'Make searchable', 'the page does not offer to be made searchable');
+    assert(tools.firstElementChild?.matches('[data-pdf-ocr]'), 'OCR is not first, for a PDF with pages to read');
+    await win.pushEvents([{type: 'pdfOcrLangs', langs: ['eng', 'fra', 'chi_sim']}]); await settle();
+    const lang = (code) => tools.querySelector(`[data-pdf-ocr-lang="${code}"]`);
+    assert(tools.textContent.includes('Chinese (simplified)') && lang('eng').checked && !lang('fra').checked, 'English is not chosen first among the languages');
+    lang('fra').click(); await settle();
+    assert(lang('fra').checked, 'French was not chosen');
+    let at = win.commands.length;
+    offer.click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfOcr')) === JSON.stringify([{type: 'pdfOcr', pages: [1], langs: ['eng', 'fra']}]), `the offer did not read the page: ${JSON.stringify(sent(at, 'pdfOcr'))}`);
+    await win.pushEvents([{type: 'pdfOcr', tab: 9, state: 'running', done: 0, total: 1, said: ''}]); await settle();
+    assert(offer.textContent === 'OCR 1/1' && tools.querySelector('[data-pdf-ocr-progress]') && tools.textContent.includes('Reading page 1 of 1'), 'the reading is not followed');
+    at = win.commands.length;
+    tools.querySelector('[data-pdf-ocr-do="stop"]').click(); await settle();
+    assert(sent(at, 'pdfOcrStop').length === 1, 'Stop did not stop it');
+    await win.pushEvents([{type: 'pdfOcr', tab: 9, state: 'stopped', done: 0, total: 1, said: ''}]); await settle();
+    assert(tools.textContent.includes('Stopped: nothing was changed.') && offer.textContent === 'Make searchable', 'stopping is not said, or the offer not made again');
+
+    // Every page, from the tools.
+    tools.querySelector('[data-pdf-ocr-which="all"]').click(); await settle();
+    at = win.commands.length;
+    tools.querySelector('[data-pdf-ocr-do="start"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfOcr')) === JSON.stringify([{type: 'pdfOcr', pages: [1, 2], langs: ['eng', 'fra']}]), `not every page: ${JSON.stringify(sent(at, 'pdfOcr'))}`);
+    await win.pushEvents([{type: 'pdfOcr', tab: 9, state: 'done', done: 2, total: 2, said: ''}]); await settle();
+    assert(tools.textContent.includes('Read 2 pages'), 'what was read is not said');
+    // Without tesseract, what it would need.
+    await win.pushEvents([{type: 'pdfOcrLangs', langs: []}]); await settle();
+    assert(tools.textContent.includes('brew install tesseract poppler') && offer.textContent === 'No text', 'what OCR needs is not said');
+    await win.pushEvents([tabs([], null)]); await settle();
+    assert(!shown(offer), 'the offer outlived its PDF');
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('A PDF opened in the PDF mode is a tab, and the document viewer hands its PDF over at its page', async () => {
     await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
     let at = win.commands.length;

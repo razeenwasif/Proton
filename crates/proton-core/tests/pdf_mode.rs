@@ -357,3 +357,64 @@ fn a_pdf_is_given_a_password_asked_for_it_again_and_its_properties_hidden_data_a
     let (reopened, protected, ..) = info(&events).expect("opened with its password");
     assert!(protected && reopened.pages == 40 && reopened.title == "Annual report");
 }
+
+fn ocr_state(events: &[Event]) -> Option<(String, u32, u32, String)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::PdfOcr { state, done, total, said, .. } => Some((state.clone(), *done, *total, said.clone())),
+        _ => None,
+    })
+}
+
+/// pdftoppm and tesseract standing in: the picture is a file; what is
+/// "read" of a page is a small PDF of words made beforehand.
+fn ocr_stand_ins(at: &std::path::Path) -> proton_lab::ocr::OcrTools {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(at).unwrap();
+    std::fs::write(at.join("words.pdf"), pdf(&["Found by OCR."])).unwrap();
+    let pdftoppm = at.join("pdftoppm");
+    std::fs::write(&pdftoppm, "#!/bin/sh\nfor last; do :; done\necho picture > \"$last.png\"\n").unwrap();
+    let tesseract = at.join("tesseract");
+    std::fs::write(&tesseract, format!("#!/bin/sh\ncase \"$1\" in --list-langs) printf 'List of available languages in \"/x/tessdata/\" (2):\\neng\\nosd\\n'; exit 0;; esac\ncp '{}' \"$2.pdf\"\n", at.join("words.pdf").display())).unwrap();
+    for tool in [&pdftoppm, &tesseract] {
+        std::fs::set_permissions(tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    proton_lab::ocr::OcrTools { pdftoppm, tesseract }
+}
+
+#[test]
+fn a_scanned_page_is_read_with_ocr_and_its_words_laid_over_it_one_change_to_undo() {
+    let s = scratch("ocr");
+    std::fs::write(s.0.join("scan.pdf"), pdf(&["(a picture of words)", "two"])).unwrap();
+    let mut session = Session::new(&s.0);
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    session.apply(Command::PdfOpen { path: "scan.pdf".into(), page: None, password: None });
+    // Without the programs, it says what is needed.
+    assert_eq!(ocr_state(&session.apply(Command::PdfOcr { pages: vec![1], langs: Vec::new() })).map(|o| o.0), Some("missing".to_string()));
+
+    let mut session = Session::new(&s.0).with_pdf_ocr(ocr_stand_ins(&s.0.join("bin")));
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    session.apply(Command::PdfOpen { path: "scan.pdf".into(), page: None, password: None });
+    let langs = session.apply(Command::PdfOcrLangs);
+    assert!(langs.iter().any(|e| matches!(e, Event::PdfOcrLangs { langs } if langs == &["eng"])), "{langs:?}");
+    let events = session.apply(Command::PdfOcr { pages: vec![1, 2], langs: vec!["eng".into()] });
+    assert_eq!(ocr_state(&events).map(|o| (o.0, o.2)), Some(("running".to_string(), 2)));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let ended = loop {
+        let events = session.apply(Command::Poll);
+        if let Some(state) = ocr_state(&events).filter(|o| o.0 != "running") {
+            break (state, events);
+        }
+        assert!(std::time::Instant::now() < deadline, "reading never ended");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let ((state, done, total, said), events) = ended;
+    assert_eq!((state.as_str(), done, total), ("done", 2, 2), "{said}");
+    assert_eq!(dirty(&events).unwrap().1.as_deref(), Some("make 2 pages searchable"));
+    let (_, key, _) = view(&events).expect("drawn again with its words");
+    let doc = lopdf::Document::load_mem(&session.document_bytes(&key).unwrap()).unwrap();
+    let first = doc.get_pages()[&1];
+    assert!(String::from_utf8_lossy(&doc.get_page_content(first).unwrap()).contains("/ProtonOCR1 Do"));
+    let (_, key, _) = view(&session.apply(Command::PdfUndo)).unwrap();
+    let undone = lopdf::Document::load_mem(&session.document_bytes(&key).unwrap()).unwrap();
+    assert!(!String::from_utf8_lossy(&undone.get_page_content(undone.get_pages()[&1]).unwrap()).contains("ProtonOCR"), "one undo takes it all back");
+}

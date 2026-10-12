@@ -310,6 +310,12 @@ impl Session {
         self
     }
 
+    /// With these programs for the PDF mode's OCR: stand-ins, for a test.
+    pub fn with_pdf_ocr(mut self, tools: proton_lab::ocr::OcrTools) -> Session {
+        self.pdf = std::mem::take(&mut self.pdf).with_ocr(Some(tools));
+        self
+    }
+
     /// Notebook's, made otherwise: for a test, one that says which of its
     /// files are in iCloud.
     pub fn with_study(mut self, study: crate::study::Study) -> Session {
@@ -505,7 +511,7 @@ impl Session {
         // The PDFs opened before are kept beside the session, and only where
         // it is kept: a test's session remembers none.
         if let Some(dir) = store.as_deref().and_then(Path::parent) {
-            session.pdf = crate::pdf::Pdfs::kept_in(dir.join("pdf.json"));
+            session.pdf = crate::pdf::Pdfs::kept_in(dir.join("pdf.json")).with_ocr(proton_lab::ocr::OcrTools::find());
         }
         session.store = store;
         session.recents = saved
@@ -631,6 +637,7 @@ impl Session {
             research.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
         }
         self.study.shutdown();
+        self.pdf.shutdown();
         // The machine's Lean, if it is being made: here, not in Research's
         // shutdown, which also runs when the investigations' folder moves.
         crate::research::quit_lean();
@@ -945,6 +952,7 @@ impl Session {
             events.extend(research.lock().unwrap_or_else(|e| e.into_inner()).poll());
         }
         events.extend(self.study.poll());
+        events.extend(self.pdf.poll());
         events.extend(self.crossed(side));
         self.claim(events)
     }
