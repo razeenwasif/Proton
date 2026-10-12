@@ -37,11 +37,15 @@
 use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+#[cfg(not(target_vendor = "apple"))]
+use std::process::Child as Process;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use crate::connection::{connection_dir, connection_file, Connection};
+#[cfg(target_vendor = "apple")]
+use crate::spawn::Process;
 use crate::wire::{Message, Signer};
 
 /// How long a socket wait blocks before the loop looks at its outgoing queue.
@@ -52,7 +56,7 @@ const BEAT: Duration = Duration::from_millis(50);
 
 /// A kernel, and the two channels it speaks through.
 pub struct Kernel {
-    child: Child,
+    child: Process,
     session: String,
     signer: Signer,
     /// Requests bound for the shell socket, which the shell thread owns.
@@ -131,19 +135,8 @@ impl Kernel {
         // which anything else could take one is as small as it can be made.
         reserved.release();
 
-        let mut command = Command::new(&argv[0]);
-        if let Some(path) = kernel_path(Path::new(&argv[0]), path) {
-            command.env("PATH", path);
-        }
-        command
-            .args(&args)
-            .current_dir(cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        no_window(&mut command);
-        own_session(&mut command);
-        let child = match command.spawn() {
+        let path = kernel_path(Path::new(&argv[0]), path);
+        let child = match launch(&argv[0], &args, cwd, path.as_deref()) {
             Ok(child) => child,
             Err(err) => {
                 let _ = std::fs::remove_file(&file);
@@ -509,14 +502,40 @@ fn no_window(command: &mut Command) {
     command.creation_flags(CREATE_NO_WINDOW);
 }
 
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_vendor = "apple")))]
 fn no_window(_command: &mut Command) {}
 
 /// Start the kernel in a session of its own. It leads a process group, which
 /// is stopped as one, and it has no terminal: a cell's `!sudo` asking for a
 /// password fails, where in a group in the background of Proton's terminal it
 /// would be stopped for good by reading it. Jupyter starts kernels this way.
-#[cfg(unix)]
+///
+/// On macOS it is started by `posix_spawn`, which makes it a session's leader
+/// without the fork std needs for that: there a fork can die before it
+/// execs — see [`crate::spawn`].
+#[cfg(target_vendor = "apple")]
+fn launch(program: &str, args: &[String], cwd: &Path, path: Option<&OsStr>) -> std::io::Result<Process> {
+    crate::spawn::spawn(program, args, cwd, path)
+}
+
+#[cfg(not(target_vendor = "apple"))]
+fn launch(program: &str, args: &[String], cwd: &Path, path: Option<&OsStr>) -> std::io::Result<Process> {
+    let mut command = Command::new(program);
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
+    command
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    no_window(&mut command);
+    own_session(&mut command);
+    command.spawn()
+}
+
+#[cfg(all(unix, not(target_vendor = "apple")))]
 fn own_session(command: &mut Command) {
     use std::os::unix::process::CommandExt;
     // SAFETY: setsid is async-signal-safe, and it is all that runs between
@@ -665,8 +684,9 @@ mod tests {
         dir
     }
 
-    /// The kernel's pid and its child's, once it has written them.
-    fn pids(dir: &Path) -> (u32, u32) {
+    /// The kernel's pid and its child's, once it has written them — if it
+    /// does within ten seconds.
+    fn pids(dir: &Path) -> Option<(u32, u32)> {
         let read = || {
             let text = std::fs::read_to_string(dir.join("pids")).ok()?;
             let mut pids = text.split_whitespace().map(|p| p.parse::<u32>().ok());
@@ -676,7 +696,26 @@ mod tests {
         while read().is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
-        read().expect("the kernel never said what it started")
+        read()
+    }
+
+    /// What became of a kernel that did not do what it was started to: how
+    /// it ended and what it said, or that it was still running — stopped
+    /// then, since what it said is read to the end.
+    fn fate(kernel: &mut Kernel) -> String {
+        let running = kernel.is_alive();
+        if running {
+            stop_group(kernel.child.id());
+            while kernel.is_alive() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        let ended = match kernel.child.try_wait() {
+            Ok(Some(status)) => status.to_string(),
+            other => format!("{other:?}"),
+        };
+        let how = if running { "was still running, so was stopped" } else { "had ended" };
+        format!("it {how} ({ended}), and said: {}", kernel.said())
     }
 
     /// Whether `pid` is gone, given a moment: a child orphaned when its
@@ -703,9 +742,17 @@ mod tests {
     #[test]
     fn a_kernel_let_go_of_takes_what_it_started_and_its_file_with_it() {
         let dir = scratch("let-go");
-        let kernel = kernel(&dir, "wait");
-        let (pid, started) = pids(&dir);
+        let mut kernel = kernel(&dir, "wait");
+        let (pid, started) = pids(&dir)
+            .unwrap_or_else(|| panic!("the kernel never said what it started: {}", fate(&mut kernel)));
         assert_eq!(pid, kernel.child.id());
+        // It leads a session of its own, so no terminal can stop it.
+        // SAFETY: getsid only asks.
+        assert_eq!(
+            unsafe { libc::getsid(pid as libc::pid_t) },
+            pid as libc::pid_t,
+            "the kernel does not lead a session"
+        );
         // Its file names it and what started it, and nobody else can read it.
         let named = Connection::read(&kernel.file).unwrap();
         assert_eq!(
@@ -730,7 +777,8 @@ mod tests {
     fn a_kernel_that_exits_leaves_nothing_it_started_behind() {
         let dir = scratch("exits");
         let mut kernel = kernel(&dir, "exit");
-        let (_, started) = pids(&dir);
+        let (_, started) = pids(&dir)
+            .unwrap_or_else(|| panic!("the kernel never said what it started: {}", fate(&mut kernel)));
         let deadline = Instant::now() + Duration::from_secs(10);
         while kernel.is_alive() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
@@ -781,13 +829,65 @@ mod tests {
         let pip = script("pip", "exit 0");
 
         let argv = [python.display().to_string()];
-        let kernel = Kernel::start(&argv, &dir, Some(OsStr::new("/usr/bin:/bin"))).unwrap();
+        let mut kernel = Kernel::start(&argv, &dir, Some(OsStr::new("/usr/bin:/bin"))).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !dir.join("found").exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
-        let found = std::fs::read_to_string(dir.join("found")).expect("the kernel never looked for pip");
+        let found = std::fs::read_to_string(dir.join("found")).unwrap_or_else(|_| {
+            let looked = dir.join("found.part").exists();
+            let what = if looked { "found no pip" } else { "never looked for pip" };
+            panic!("the kernel {what}: {}", fate(&mut kernel))
+        });
         assert_eq!(found.trim(), pip.display().to_string());
+        drop(kernel);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_kernel_named_by_name_alone_is_found_on_its_path() {
+        // As a kernelspec's `python` is: found on the PATH it is given, which
+        // this process's does not share.
+        let dir = scratch("by-name");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join("proton-test-kernel");
+        std::fs::write(&exe, "#!/bin/sh\n: > ran; exec sleep 60\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+
+        let argv = ["proton-test-kernel".to_string()];
+        let mut kernel = Kernel::start(&argv, &dir, Some(OsStr::new(&path))).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !dir.join("ran").exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(dir.join("ran").exists(), "the kernel never ran: {}", fate(&mut kernel));
+        drop(kernel);
+
+        let nowhere = ["proton-test-kernel-nobody-has".to_string()];
+        let err = Kernel::start(&nowhere, &dir, Some(OsStr::new(&path))).unwrap_err();
+        assert!(err.starts_with("could not start proton-test-kernel-nobody-has"), "{err}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_kernel_is_not_left_ignoring_a_closed_pipe() {
+        // This process ignores SIGPIPE, as every Rust program does; a kernel
+        // must not, or `!yes | head` in a cell has `yes` told of the closed
+        // pipe by an error rather than stopped by the signal.
+        let dir = scratch("sigpipe");
+        let script = "(yes; echo $? > status.part && mv status.part status) | head -n 1 > /dev/null; exec sleep 60";
+        let argv = ["/bin/sh", "-c", script].map(String::from);
+        let mut kernel = Kernel::start(&argv, &dir, None).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !dir.join("status").exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let status = std::fs::read_to_string(dir.join("status"))
+            .unwrap_or_else(|_| panic!("`yes` never ended: {}", fate(&mut kernel)));
+        // 128 and SIGPIPE's 13.
+        assert_eq!(status.trim(), "141", "`yes` was not stopped by SIGPIPE");
         drop(kernel);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -839,7 +939,7 @@ mod tests {
                 .stderr(Stdio::null())
                 .spawn()
                 .unwrap();
-            let (_, started) = pids(&at);
+            let (_, started) = pids(&at).expect("the kernel never said what it started");
             (child, started)
         };
 

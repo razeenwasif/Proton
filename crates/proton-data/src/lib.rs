@@ -12,6 +12,9 @@ pub mod notebook;
 pub mod table;
 pub mod wire;
 
+#[cfg(target_vendor = "apple")]
+mod spawn;
+
 pub use connection::Connection;
 pub use kernel::Kernel;
 pub use notebook::{Cell, CellKind, Notebook, Output};
