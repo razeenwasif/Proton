@@ -5062,6 +5062,7 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .tex-gallery.over { position: absolute; inset: 0; z-index: 2; overflow: auto; background: var(--bg); }
 .tex-gallery-in { max-width: 620px; margin: 0 auto; }
 .tex-gallery header { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+.tex-gallery header .grow { flex: 1; }
 .tex-gallery h4 { margin: 0; font: 600 var(--z-sm) var(--zed); color: var(--cc-text); }
 .tex-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 8px; }
 .tex-template { display: grid; gap: 4px; align-content: start; min-width: 0; padding: 10px 12px; border: 1px solid var(--cc-line); border-radius: 8px;
@@ -5070,6 +5071,23 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .tex-template.on { border-color: var(--cc-accent); }
 .tex-template b { color: var(--cc-text); font-weight: 600; }
 .tex-template .lab-faint { font-size: var(--z-2xs); overflow-wrap: anywhere; }
+/* The cite picker: a query, then papers, a line each, the chosen one ringed. */
+.tex-cite-query { width: 100%; padding: 7px 9px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: var(--cc-code); color: var(--cc-text); font: var(--z-xs) var(--zed); }
+.tex-cite-query:focus-visible { outline: 2px solid var(--cc-accent); outline-offset: 1px; }
+.tex-cite-list { display: grid; gap: 4px; margin: 10px 0; }
+.tex-citation { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 7px 10px; border: 1px solid transparent; border-radius: 7px; background: none;
+  color: var(--cc-soft); font: inherit; text-align: left; cursor: pointer; }
+.tex-citation:hover { background: var(--row-hover); }
+.tex-citation.on { border-color: var(--cc-accent); }
+.tex-citation b { color: var(--cc-text); font-weight: 600; overflow-wrap: anywhere; }
+.tex-citation code { color: var(--cc-accent); font: var(--z-2xs) var(--zed); }
+.tex-citation .lab-faint { grid-column: 1 / -1; font-size: var(--z-2xs); }
+.tex-cite-foot { display: flex; align-items: center; gap: 8px; }
+.tex-cite-foot .grow { flex: 1; }
+.tex-writeup { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--cc-line); }
+.tex-writeup h4 { grid-column: 1 / -1; }
+.tex-writeup select { min-width: 0; padding: 6px 8px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: var(--cc-code); color: var(--cc-text); font: var(--z-xs) var(--zed); }
+.tex-writeup label { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; color: var(--cc-muted); font-size: var(--z-2xs); }
 .tex-new { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: 14px; }
 .tex-new label { display: grid; gap: 4px; min-width: 0; color: var(--cc-muted); font-size: var(--z-2xs); }
 .tex-new input { min-width: 0; padding: 6px 8px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: var(--cc-code); color: var(--cc-text); font: var(--z-xs) var(--zed); }

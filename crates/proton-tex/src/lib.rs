@@ -2,7 +2,9 @@
 //! what a build's log says, which file of a project is its main one and
 //! which engine typesets it, and SyncTeX's map between the two.
 
+pub mod bib;
 pub mod log;
+pub mod markdown;
 pub mod outline;
 pub mod project;
 pub mod synctex;

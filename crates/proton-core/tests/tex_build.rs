@@ -281,7 +281,7 @@ fn a_template_that_wants_what_tex_lacks_offers_it_first_and_is_typeset_once_inst
     let mut ws = Workspace::rooted(&b.project).with_tex_env(env);
     let events = ws.apply(Command::SetMode { mode: ModeId::Tex });
     let templates = events.iter().find_map(|e| match e {
-        Event::TexTemplates { templates } => Some(templates.clone()),
+        Event::TexTemplates { templates, .. } => Some(templates.clone()),
         _ => None,
     });
     assert_eq!(templates.map(|t| t.len()), Some(6), "entering LaTeX shows the gallery's templates");

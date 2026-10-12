@@ -620,6 +620,7 @@
           </div>
           <span class="grow"></span>
           <span class="tex-build" data-tex-build></span>
+          <button class="hbtn" data-tex-cite-open title="Cite a paper where the cursor is — from the .bib, Research or online" aria-label="Cite a paper"><svg class="i"><use href="#i-book"/></svg></button>
           <button class="hbtn" data-tex-new title="A new project from a template" aria-label="A new project from a template"><svg class="i"><use href="#i-plus"/></svg></button>
         </header>
         <div class="tex-body" data-tex-body="pdf">
@@ -637,6 +638,17 @@
             <!-- The templates, from Event::TexTemplates: under the empty
                  state, or over the PDF while + has them open. -->
             <div class="tex-gallery" data-tex-gallery hidden></div>
+            <!-- The cite picker, from Event::TexCitations, over the PDF. -->
+            <div class="tex-gallery over tex-cite" data-tex-cite hidden>
+              <div class="tex-gallery-in">
+                <header><h4>Cite a paper</h4><span class="grow"></span>
+                  <button type="button" class="hbtn" data-tex-cite-close title="Back" aria-label="Close the cite picker"><svg class="i"><use href="#i-close"/></svg></button></header>
+                <input class="tex-cite-query" data-tex-cite-query placeholder="Title, author, year or key" spellcheck="false" autocomplete="off" aria-label="Look for a paper">
+                <div class="tex-cite-list" data-tex-cite-list role="listbox" aria-label="Papers"></div>
+                <div class="tex-cite-foot"><span class="lab-faint" data-tex-cite-note></span><span class="grow"></span>
+                  <button type="button" class="cc-quiet" data-tex-cite-online>Search online</button></div>
+              </div>
+            </div>
             <div class="scroll tex-pages" data-tex-pages tabindex="0" aria-label="The PDF" hidden></div>
           </div>
         </div>

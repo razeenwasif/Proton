@@ -5131,6 +5131,10 @@ function renderEvent(event) {
       tex?.templates(event);
       break;
 
+    case "texCitations":
+      tex?.citations(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

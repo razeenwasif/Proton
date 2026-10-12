@@ -489,6 +489,25 @@ pub enum Command {
     TexAddTemplate {
         template: String,
     },
+    /// Look for a paper to cite: in the document's `.bib`, and in every
+    /// investigation's literature.
+    TexCiteSearch {
+        query: String,
+    },
+    /// Look for the last query online, too.
+    TexCiteOnline,
+    /// Cite a paper where the cursor is: `bib` by its key, `research` by
+    /// `slug/P003`, `online` by its place in what the search found — its
+    /// entry added to the document's `.bib` when it is not there yet.
+    TexCite {
+        source: String,
+        id: String,
+    },
+    /// Write an investigation up as a paper: `paper/<slug>/` in the
+    /// project, opened in LaTeX.
+    TexWriteUp {
+        slug: String,
+    },
     /// Show where the cursor's line is in the PDF.
     TexSyncForward,
     /// Go to the line that put something at this point of the PDF: a page,
@@ -1678,9 +1697,21 @@ pub enum Event {
         log: proton_tex::log::Log,
         root: String,
     },
-    /// What a new project can start from, for LaTeX's gallery.
+    /// What a new project can start from, for LaTeX's gallery: the
+    /// templates, and Research's investigations, by slug and title, to
+    /// write up.
     TexTemplates {
         templates: Vec<proton_tex::templates::TemplateView>,
+        investigations: Vec<(String, String)>,
+    },
+    /// What the cite picker found for `query`: the document's own entries,
+    /// Research's papers, and what a search online found. `searching`,
+    /// while one is under way; `note`, what it said.
+    TexCitations {
+        query: String,
+        citations: Vec<proton_tex::bib::Citation>,
+        searching: bool,
+        note: Option<String>,
     },
     /// The document's shape — its headings, each where it is, across the
     /// files its main file brings in — and its words. `main` is the main

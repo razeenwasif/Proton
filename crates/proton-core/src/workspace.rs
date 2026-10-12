@@ -1663,6 +1663,10 @@ impl Workspace {
                 // The PDF and the log a build made, for the window to read.
                 self.documents.extend(readable);
                 events.extend(built);
+                if self.tex.cite.searching() {
+                    let main = self.tex_main();
+                    events.extend(self.tex.cite.poll(main.as_deref()));
+                }
                 events
             }
 
@@ -1696,6 +1700,21 @@ impl Workspace {
                     Err(why) => vec![notice(why, NoticeLevel::Error)],
                 }
             }
+            Command::TexCiteSearch { query } => {
+                let main = self.tex_main();
+                let papers = self.research().every_paper();
+                self.tex.cite.search(main.as_deref(), &papers, &query)
+            }
+            Command::TexCiteOnline => {
+                let query = self.tex.cite.query().to_string();
+                if query.is_empty() {
+                    return vec![notice("Type what to look for first.".into(), NoticeLevel::Info)];
+                }
+                let fetch = self.research().search_literature(&query);
+                self.tex.cite.online(fetch)
+            }
+            Command::TexCite { source, id } => self.tex_cite(&source, &id),
+            Command::TexWriteUp { slug } => self.tex_write_up(&slug),
             // A new project is a new workspace: the session makes it.
             Command::TexNew { .. } => vec![notice("A new project is made by the window.".into(), NoticeLevel::Warn)],
             Command::TexFindPackages { files } => self.tex.packages_do(|env| env.find_packages(files)),
@@ -2776,6 +2795,97 @@ impl Workspace {
         events.extend(self.tex_outline(true));
         events.push(self.tree_event());
         events
+    }
+
+    /// The main file of the project's document, from the file being edited.
+    fn tex_main(&self) -> Option<PathBuf> {
+        let root = self.pickers.root().to_path_buf();
+        let active = self.editor.buffer().path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) });
+        crate::tex::main_of(&root, active.as_deref())
+    }
+
+    /// Cite a paper where the cursor is, in the `.tex` being edited: its
+    /// entry added to the document's `.bib` first, when it is new there.
+    fn tex_cite(&mut self, source: &str, id: &str) -> Vec<Event> {
+        let root = self.pickers.root().to_path_buf();
+        let Some(path) = self.editor.buffer().path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) }) else {
+            return vec![notice("Open the .tex file to cite in.".into(), NoticeLevel::Info)];
+        };
+        if path.extension().and_then(|e| e.to_str()) != Some("tex") {
+            return vec![notice("Open the .tex file to cite in.".into(), NoticeLevel::Info)];
+        }
+        let main = crate::tex::main_of(&root, Some(&path)).unwrap_or_else(|| path.clone());
+        let record = match source {
+            "bib" => None,
+            "research" => {
+                let Some((slug, paper)) = id.split_once('/') else { return vec![notice(format!("{id}: not a paper"), NoticeLevel::Error)] };
+                let found = self.research().investigation(slug).ok().and_then(|f| f.papers().into_iter().find(|p| p.id == paper));
+                match found {
+                    Some(paper) => Some(paper.record),
+                    None => return vec![notice(format!("{id}: no such paper"), NoticeLevel::Error)],
+                }
+            }
+            "online" => match self.tex.cite.online_record(id) {
+                Some(record) => Some(record),
+                None => return vec![notice("Search again: that result has gone.".into(), NoticeLevel::Warn)],
+            },
+            other => return vec![notice(format!("{other}: not somewhere papers are"), NoticeLevel::Error)],
+        };
+        // An entry is written to the file: not under edits not saved.
+        let (bibs, _) = crate::tex::cite::bib_files(&main);
+        if record.is_some() {
+            if let Some(open) = bibs.iter().find(|b| self.editor.find(b).is_some_and(|i| self.editor.buffers()[i].is_modified())) {
+                let name = open.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                return vec![notice(format!("Save {name} first: the entry is added to the file."), NoticeLevel::Warn)];
+            }
+        }
+        let cited = match record {
+            Some(record) => match crate::tex::cite::cite_record(&main, &record) {
+                Ok(cited) => cited,
+                Err(why) => return vec![notice(why, NoticeLevel::Error)],
+            },
+            None => crate::tex::cite::Cited { key: id.to_string(), added: None, unnamed: false },
+        };
+        let buffer = self.editor.buffer();
+        let at = buffer.cursor.offset;
+        let here = buffer.position(at);
+        let before: String = buffer.line(here.line).chars().take(here.column).collect();
+        let text = crate::tex::cite::cite_text(&before, &cited.key);
+        let length = text.chars().count();
+        self.editor.buffer_mut().apply(vec![proton_text::Edit::insert(at, text)], proton_text::Cursor::at(at + length));
+        self.resync();
+        let mut events = self.after_action(true);
+        if let Some(bib) = &cited.added {
+            self.editor.reread_changed_on_disk();
+            let name = bib.strip_prefix(&root).unwrap_or(bib).display().to_string();
+            let said = if cited.unnamed {
+                format!("added {} to {name} — the document names no bibliography yet: add \\bibliography{{references}} before \\end{{document}}", cited.key)
+            } else {
+                format!("added {} to {name}", cited.key)
+            };
+            events.push(notice(said, NoticeLevel::Info));
+            events.push(self.tree_event());
+        }
+        events
+    }
+
+    /// Write an investigation up as a paper in this project, and open it.
+    fn tex_write_up(&mut self, slug: &str) -> Vec<Event> {
+        let folder = match self.research().investigation(slug) {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Error)],
+        };
+        let root = self.pickers.root().to_path_buf();
+        match crate::tex::writeup::write_up(&folder, &root) {
+            Ok(made) => {
+                let name = made.main.strip_prefix(&root).unwrap_or(&made.main).display().to_string();
+                let count = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
+                let mut events = vec![notice(format!("wrote {name}: {}, {}", count(made.figures, "figure"), count(made.papers, "reference")), NoticeLevel::Info)];
+                events.extend(self.tex_begin(&made.main));
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
     }
 
     /// The document's outline, from the file being edited.
@@ -6061,7 +6171,8 @@ impl Workspace {
         if mode == ModeId::Tex {
             events.extend(self.tex.env_event(true));
             events.extend(self.tex.last_event());
-            events.push(Event::TexTemplates { templates: proton_tex::templates::templates() });
+            let investigations = self.research().investigations();
+            events.push(Event::TexTemplates { templates: proton_tex::templates::templates(), investigations });
             events.extend(self.tex_outline(true));
             self.use_texlab();
         }

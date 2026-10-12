@@ -262,4 +262,61 @@ export async function texChecks({test, assert, win, doc, $, settle, key, shown})
     try { win.localStorage.removeItem('proton.tex.parent'); } catch { /* not kept */ }
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
+
+  await test('The cite picker finds papers as they are typed for, chooses with the arrows, and cites with Enter; online only when asked', async () => {
+    await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
+    const pane = $('#tex-pane');
+    const picker = pane.querySelector('[data-tex-cite]');
+    let at = win.commands.length;
+    pane.querySelector('[data-tex-cite-open]').click(); await settle();
+    assert(shown(picker) && JSON.stringify(sent(at, 'texCiteSearch')) === JSON.stringify([{type: 'texCiteSearch', query: ''}]), 'the picker did not open and look');
+    const input = picker.querySelector('[data-tex-cite-query]');
+    assert(doc.activeElement === input, 'the query does not have the keyboard');
+    const paper = (key, source, title, from) => ({source, id: source === 'bib' ? key : `sky/${key}`, key, title, authors: 'Strutt', year: '1871', venue: null, from});
+    input.value = 'light'; input.dispatchEvent(new Event('input', {bubbles: true}));
+    await win.pushEvents([{type: 'texCitations', query: '', citations: [paper('stale', 'bib', 'Typed over', 'references.bib')], searching: false, note: null}]); await settle();
+    assert(!picker.textContent.includes('Typed over'), 'an answer to a query typed over was drawn');
+    await new Promise((r) => setTimeout(r, 160));
+    assert(sent(at, 'texCiteSearch').at(-1)?.query === 'light', `not asked as typed: ${JSON.stringify(sent(at, 'texCiteSearch'))}`);
+    assert(!sent(at, 'texCiteOnline').length, 'online was asked unasked');
+    await win.pushEvents([{type: 'texCitations', query: 'light', citations: [paper('strutt1871light', 'research', 'On the light from the sky', 'P001 · Sky'), paper('light1999', 'bib', 'Light', 'references.bib')], searching: false, note: null}]); await settle();
+    const rows = [...picker.querySelectorAll('.tex-citation')];
+    assert(rows.length === 2 && rows[0].classList.contains('on') && rows[0].textContent.includes('strutt1871light') && rows[0].textContent.includes('P001 · Sky'), 'the papers are not listed, the first chosen');
+    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true})); await settle();
+    assert(picker.querySelectorAll('.tex-citation')[1].classList.contains('on'), 'the arrow did not choose the next');
+    at = win.commands.length;
+    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true})); await settle();
+    assert(JSON.stringify(sent(at, 'texCite')) === JSON.stringify([{type: 'texCite', source: 'bib', id: 'light1999'}]) && !shown(picker), `not cited as chosen: ${JSON.stringify(sent(at, 'texCite'))}`);
+
+    pane.querySelector('[data-tex-cite-open]').click(); await settle();
+    at = win.commands.length;
+    picker.querySelector('[data-tex-cite-online]').click(); await settle();
+    assert(sent(at, 'texCiteOnline').length === 1, 'Search online did not ask');
+    await win.pushEvents([{type: 'texCitations', query: 'light', citations: [], searching: true, note: null}]); await settle();
+    assert(picker.querySelector('[data-tex-cite-note]').textContent.includes('Asking arXiv') && picker.querySelector('[data-tex-cite-online]').disabled, 'the search under way is not said');
+    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true})); await settle();
+    assert(!shown(picker), 'Escape did not put it away');
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('An investigation is written up from the gallery, and the agent asked to write its prose when ticked', async () => {
+    await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
+    const pane = $('#tex-pane');
+    await win.pushEvents([{type: 'texTemplates', templates: [{id: 'article', name: 'Article', about: 'A short paper.', files: ['main.tex'], wants: []}],
+      investigations: [['sky', 'Why is the sky blue?'], ['tides', 'What drives the tides?']]}]); await settle();
+    pane.querySelector('[data-tex-new]').click(); await settle();
+    const gallery = pane.querySelector('[data-tex-gallery]');
+    const select = gallery.querySelector('[data-tex-writeup-slug]');
+    assert(select && [...select.options].map((o) => o.textContent).join('|') === 'Why is the sky blue?|What drives the tides?', 'the investigations are not offered');
+    select.value = 'tides';
+    gallery.querySelector('[data-tex-writeup-draft]').checked = true;
+    const at = win.commands.length;
+    gallery.querySelector('[data-tex-writeup]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'texWriteUp')) === JSON.stringify([{type: 'texWriteUp', slug: 'tides'}]), `not written up: ${JSON.stringify(sent(at, 'texWriteUp'))}`);
+    const ask = sent(at, 'ask')[0]?.text ?? '';
+    assert(ask.includes('"What drives the tides?"') && ask.includes('\\cite'), `the agent was not asked: ${ask}`);
+    assert(!pane.querySelector('[data-tex-body="agent"]').hidden && !shown(gallery), 'the agent is not shown');
+    pane.querySelector('[data-tex-tab="pdf"]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
 }

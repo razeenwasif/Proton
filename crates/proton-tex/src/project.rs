@@ -160,6 +160,40 @@ pub fn wants(text: &str) -> Vec<String> {
     out
 }
 
+/// The `.bib` files a document draws its references from, as written:
+/// `\\bibliography{refs,more}` (BibTeX) or `\\addbibresource{refs.bib}`
+/// (biblatex), each with `.bib` when it has no extension.
+pub fn bibliographies(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in uncommented(text) {
+        for command in ["\\bibliography", "\\addbibresource"] {
+            let mut rest = line.as_str();
+            while let Some(at) = rest.find(command) {
+                let after = &rest[at + command.len()..];
+                rest = after;
+                if after.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                    continue;
+                }
+                let after = after.trim_start();
+                let after = match after.strip_prefix('[') {
+                    Some(options) => options.split_once(']').map_or("", |(_, r)| r),
+                    None => after,
+                };
+                for name in braced(after, 1).first().map(|names| names.split(',').map(str::trim).map(str::to_string).collect::<Vec<_>>()).unwrap_or_default() {
+                    if name.is_empty() {
+                        continue;
+                    }
+                    let file = if name.ends_with(".bib") { name } else { format!("{name}.bib") };
+                    if !out.contains(&file) {
+                        out.push(file);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// What the preamble needs: XeLaTeX for system fonts and polyglossia,
 /// LuaLaTeX for Lua; else nothing.
 pub fn engine_needed(text: &str) -> Option<&'static str> {
@@ -358,5 +392,11 @@ mod tests {
         assert_eq!(find_main(&single, None, None), Some(single.join("essay.tex")));
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(single);
+    }
+
+    #[test]
+    fn the_bibliographies_a_document_uses_are_found_for_bibtex_and_biblatex() {
+        let text = "\\bibliographystyle{plain}\n\\bibliography{references, more}\n% \\bibliography{old}\n\\addbibresource[location=local]{extra.bib}\n";
+        assert_eq!(bibliographies(text), ["references.bib", "more.bib", "extra.bib"]);
     }
 }

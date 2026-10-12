@@ -15,6 +15,9 @@
 //!   view/       the PDF as last made whole, which the window reads
 //! ```
 
+pub mod cite;
+pub mod writeup;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -116,6 +119,8 @@ pub struct Tex {
     outline: Option<(Option<String>, Outline)>,
     /// What the last build's log said, for the agent.
     log: Option<proton_tex::log::Log>,
+    /// The cite picker's search.
+    pub cite: cite::Cite,
 }
 
 impl std::fmt::Debug for Tex {
@@ -523,6 +528,11 @@ fn normalise(path: &str) -> String {
 }
 
 /// The main file pinned for the project, in `.proton/tex.json`.
+/// The main file of the project at `root`, from the file being edited.
+pub fn main_of(root: &Path, active: Option<&Path>) -> Option<PathBuf> {
+    proton_tex::project::find_main(root, active, pinned_main(root).as_deref())
+}
+
 fn pinned_main(root: &Path) -> Option<PathBuf> {
     let text = std::fs::read_to_string(root.join(".proton").join("tex.json")).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;

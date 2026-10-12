@@ -21,6 +21,13 @@ const OUTLINE = { words: 4182, headings: [
   { level: 1, title: "Conclusion", file: "chapters/conclusion.tex", line: 1, label: null },
 ] };
 
+/** What the cite picker finds, as the core would. */
+const CITATIONS = [
+  { source: "bib", id: "knuth1984", key: "knuth1984", title: "The TeXbook", authors: "Knuth", year: "1984", venue: null, from: "references.bib" },
+  { source: "research", id: "why-is-the-sky-blue/P001", key: "strutt1871light", title: "On the light from the sky, its polarization and colour", authors: "Strutt", year: "1871", venue: "Philosophical Magazine", from: "P001 · Why is the sky blue?" },
+  { source: "research", id: "why-is-the-sky-blue/P002", key: "lovelace2021scattering", title: "Scattering in the atmosphere", authors: "Lovelace et al.", year: "2021", venue: null, from: "P002 · Why is the sky blue?" },
+];
+
 /** @param {(event: any) => void} deliver */
 export function createTexPreview(deliver) {
   const home = "~/.proton/tex";
@@ -43,7 +50,8 @@ export function createTexPreview(deliver) {
 
   return {
     /** What the window sees on entering the mode. */
-    entered: () => [event(), { type: "texTemplates", templates: TEMPLATES }, { type: "texOutline", main: "main.tex", outline: OUTLINE }],
+    entered: () => [event(), { type: "texTemplates", templates: TEMPLATES, investigations: [["why-is-the-sky-blue", "Why is the sky blue?"]] },
+      { type: "texOutline", main: "main.tex", outline: OUTLINE }],
     /** @param {any} command */
     command(command) {
       switch (command.type) {
@@ -68,6 +76,11 @@ export function createTexPreview(deliver) {
           env = { state: "removing" };
           later(400, () => { env = { state: "missing", needs: [], free: 120_000_000_000, home }; });
           return [event()];
+        case "texCiteSearch": {
+          const words = String(command.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+          const citations = CITATIONS.filter((c) => words.every((w) => `${c.title} ${c.authors} ${c.year} ${c.key}`.toLowerCase().includes(w)));
+          return [{ type: "texCitations", query: command.query ?? "", citations, searching: false, note: null }];
+        }
         default:
           return [];
       }

@@ -19,6 +19,7 @@ import { commandOf, envHtml, readyHtml } from "./tex-env.js";
 /** @typedef {import("./bindings/TexPackages").TexPackages} Packages */
 /** @typedef {import("./bindings/TexOutline").TexOutline} Outline */
 /** @typedef {import("./bindings/TexTemplate").TexTemplate} Template */
+/** @typedef {import("./bindings/TexCitation").TexCitation} Citation */
 
 /** Where new projects were last made, kept in this window's storage. */
 const PARENT = "proton.tex.parent";
@@ -65,9 +66,11 @@ export function createTex(host) {
   const pane = found;
   const q = (/** @type {string} */ sel) => /** @type {HTMLElement} */ (pane.querySelector(sel));
   /** @type {{env: Env | null, bundle: Bundle, confirming: boolean, build: Build | null, log: Log | null, root: string, packages: Packages,
-   *   shown: {pdf: string, version: number} | null, templates: Template[], gallery: boolean, chosen: string | null, name: string, parent: string}} */
+   *   shown: {pdf: string, version: number} | null, templates: Template[], gallery: boolean, chosen: string | null, name: string, parent: string,
+   *   investigations: [string, string][], cite: {open: boolean, query: string, citations: Citation[], searching: boolean, note: string | null, at: number}}} */
   const state = { env: null, bundle: "full", confirming: false, build: null, log: null, root: "", packages: { state: "idle" }, shown: null,
-    templates: [], gallery: false, chosen: null, name: "", parent: lastParent() };
+    templates: [], gallery: false, chosen: null, name: "", parent: lastParent(),
+    investigations: [], cite: { open: false, query: "", citations: [], searching: false, note: null, at: 0 } };
   const pages = q("[data-tex-pages]");
   const pdfView = createPdfView(pages, {
     onWhere: (page, count) => {
@@ -139,13 +142,56 @@ export function createTex(host) {
         <div class="lab-acts"><button type="button" class="cc-quiet" data-tex-add title="The ${esc(chosen.name)} template's files, added to the project open now">Add to this project</button>
         <button type="submit" class="cc-primary">Make the project</button></div></form>` : "";
     const close = state.gallery ? `<span class="grow"></span><button type="button" class="hbtn" data-tex-gallery-close title="Back" aria-label="Close the templates">${icon("close")}</button>` : "";
-    q("[data-tex-gallery]").innerHTML = `<div class="tex-gallery-in"><header><h4>Start from a template</h4>${close}</header><div class="tex-templates">${cards}</div>${form}</div>`;
+    // Research's investigations, each a paper to be: gathered here, written by the agent if asked.
+    const writeup = state.investigations.length ? `<section class="tex-writeup"><h4>Or write up an investigation</h4>
+        <select data-tex-writeup-slug aria-label="The investigation">${state.investigations.map(([slug, title]) => `<option value="${esc(slug)}">${esc(title)}</option>`).join("")}</select>
+        <button type="button" class="cc-primary" data-tex-writeup title="Gathered into paper/ in this project: its hypotheses, runs, figures, verdicts and literature">Write it up</button>
+        <label><input type="checkbox" data-tex-writeup-draft> Then ask the agent to write its prose — the edits wait for you in the Agent tab</label></section>` : "";
+    q("[data-tex-gallery]").innerHTML = `<div class="tex-gallery-in"><header><h4>Start from a template</h4>${close}</header><div class="tex-templates">${cards}</div>${form}${writeup}</div>`;
+  }
+
+  /** The papers the cite picker found, the chosen one ringed. */
+  function renderCite() {
+    const c = state.cite;
+    q("[data-tex-cite]").hidden = !c.open;
+    if (!c.open) return;
+    const list = q("[data-tex-cite-list]");
+    list.innerHTML = c.citations.length ? c.citations.map((x, i) =>
+      `<button type="button" class="tex-citation${i === c.at ? " on" : ""}" role="option" aria-selected="${i === c.at}" data-tex-cite-pick="${i}">` +
+      `<b>${esc(x.title || "(untitled)")}</b><code>${esc(x.key)}</code>` +
+      `<span class="lab-faint">${esc([x.authors, x.year, x.venue].filter(Boolean).join(" · "))}${x.from ? ` — ${esc(x.from)}` : ""}</span></button>`).join("")
+      : `<p class="lab-faint">${c.query ? "Nothing here matches." : "Nothing to cite yet: no .bib entries or Research papers."}</p>`;
+    q("[data-tex-cite-note]").innerHTML = c.searching ? `<span class="lab-spin"></span> Asking arXiv, Semantic Scholar and OpenAlex…` : esc(c.note ?? "");
+    /** @type {HTMLButtonElement} */ (q("[data-tex-cite-online]")).disabled = c.searching || !c.query.trim();
+  }
+
+  /** Open or close the cite picker. @param {boolean} open */
+  function cite(open) {
+    state.cite.open = open;
+    if (open) {
+      gallery(false);
+      host.dispatch({ type: "texCiteSearch", query: state.cite.query });
+    }
+    renderCite();
+    if (open) /** @type {HTMLInputElement} */ (q("[data-tex-cite-query]")).focus();
+  }
+
+  /** Cite the paper at `i`, and put the picker away. @param {number} i */
+  function citeAt(i) {
+    const x = state.cite.citations[i];
+    if (!x) return;
+    host.dispatch({ type: "texCite", source: x.source, id: x.id });
+    cite(false);
   }
 
   /** Open or close the templates. @param {boolean} open */
   function gallery(open) {
     state.gallery = open;
     if (!open) state.chosen = null;
+    if (open && state.cite.open) {
+      state.cite.open = false;
+      renderCite();
+    }
     renderGallery();
     renderPdf();
   }
@@ -229,6 +275,23 @@ export function createTex(host) {
       return;
     }
     if (t.closest("[data-tex-stop]")) return void host.dispatch({ type: "texStop" });
+    if (t.closest("[data-tex-cite-open]")) return cite(!state.cite.open);
+    if (t.closest("[data-tex-cite-close]")) return cite(false);
+    if (t.closest("[data-tex-cite-online]")) return void host.dispatch({ type: "texCiteOnline" });
+    const pick = /** @type {HTMLElement | null} */ (t.closest("[data-tex-cite-pick]"));
+    if (pick) return citeAt(Number(pick.dataset.texCitePick));
+    if (t.closest("[data-tex-writeup]")) {
+      const slug = /** @type {HTMLSelectElement | null} */ (pane.querySelector("[data-tex-writeup-slug]"))?.value;
+      if (!slug) return;
+      host.dispatch({ type: "texWriteUp", slug });
+      if (/** @type {HTMLInputElement | null} */ (pane.querySelector("[data-tex-writeup-draft]"))?.checked) {
+        const title = state.investigations.find(([s]) => s === slug)?.[1] ?? slug;
+        show("agent");
+        host.dispatch({ type: "ask", text: `Write the prose of the paper just written up in paper/ from the investigation "${title}". It was gathered from the investigation's files: ` +
+          "make it read as a paper — an abstract, an introduction that motivates it, a method, results and a discussion — keeping every \\cite, \\ref, label and figure. Read main.tex first, and use latex_log if it does not typeset." });
+      }
+      return gallery(false);
+    }
     if (t.closest("[data-tex-new]")) return gallery(!state.gallery);
     if (t.closest("[data-tex-gallery-close]")) return gallery(false);
     const template = /** @type {HTMLElement | null} */ (t.closest("[data-tex-template]"));
@@ -276,6 +339,23 @@ export function createTex(host) {
     if (command) host.dispatch(command);
   });
 
+  // The picker's keys: up and down choose, Enter cites, Escape puts it away.
+  q("[data-tex-cite]").addEventListener("keydown", (e) => {
+    const c = state.cite;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      c.at = Math.max(0, Math.min(c.citations.length - 1, c.at + (e.key === "ArrowDown" ? 1 : -1)));
+      renderCite();
+    } else if (e.key === "Enter") {
+      citeAt(c.at);
+    } else if (e.key === "Escape") {
+      cite(false);
+    } else {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
   // The PDF's own keys while it has the keyboard: nothing reaches the editor.
   pages.addEventListener("keydown", (e) => {
     if (e.metaKey || e.altKey) return;
@@ -286,8 +366,17 @@ export function createTex(host) {
   });
 
   // What is typed is kept, for the gallery drawn again.
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let asking;
   pane.addEventListener("input", (e) => {
     const t = /** @type {HTMLInputElement} */ (e.target);
+    if (t.matches("[data-tex-cite-query]")) {
+      state.cite.query = t.value;
+      state.cite.at = 0;
+      clearTimeout(asking);
+      asking = setTimeout(() => host.dispatch({ type: "texCiteSearch", query: state.cite.query }), 120);
+      return;
+    }
     if (t.matches("[data-tex-new-name]")) state.name = t.value;
     if (t.matches("[data-tex-new-parent]")) state.parent = t.value;
   });
@@ -377,11 +466,23 @@ export function createTex(host) {
   /** One element in another. @param {HTMLElement} box @param {string} sel */
   const q2 = (box, sel) => /** @type {HTMLElement} */ (box.querySelector(sel));
 
-  /** What a new project can start from. @param {{templates: Template[]}} event */
+  /** What a new project can start from. @param {{templates: Template[], investigations: [string, string][]}} event */
   function templates(event) {
     state.templates = event.templates;
+    state.investigations = event.investigations ?? [];
     renderGallery();
     renderPdf();
+  }
+
+  /** What the cite picker found. @param {{query: string, citations: Citation[], searching: boolean, note: string | null}} event */
+  function citations(event) {
+    // An answer to a query since typed over is not drawn.
+    if (event.query.trim() !== state.cite.query.trim()) return;
+    state.cite.citations = event.citations;
+    state.cite.searching = event.searching;
+    state.cite.note = event.note;
+    state.cite.at = Math.min(state.cite.at, Math.max(0, event.citations.length - 1));
+    renderCite();
   }
 
   /** The document's headings and its words, under the file tree, each
@@ -416,5 +517,5 @@ export function createTex(host) {
   renderPdf();
   renderHead();
   renderLog();
-  return { show, env, build, log, packages, sync, outline, templates, pdf: () => pdfView };
+  return { show, env, build, log, packages, sync, outline, templates, citations, pdf: () => pdfView };
 }
