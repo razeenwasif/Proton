@@ -35,6 +35,7 @@ import { createStudy } from "./study.js";
 import { createLab } from "./lab.js";
 import { createLean } from "./lean.js";
 import { createTex } from "./tex.js";
+import { createTexVisual } from "./tex-visual.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -879,6 +880,7 @@ const lab = createLab({ root: document, dispatch, readLab });
 /* Lean and Mathlib, in which a mathematics investigation's proofs are checked. */
 const lean = createLean({ root: document, dispatch });
 const tex = createTex({ root: document, dispatch });
+const texVisual = createTexVisual({ root: document, dispatch });
 /* Notebook: notebooks of your own sources, and the knowledge base they are
    chosen from. Drawn from what the core reads of them. */
 const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
@@ -5133,6 +5135,10 @@ function renderEvent(event) {
 
     case "texCitations":
       tex?.citations(event);
+      break;
+
+    case "texBlocks":
+      texVisual?.blocks(event);
       break;
 
     case "leanEnv":

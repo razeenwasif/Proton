@@ -121,6 +121,10 @@ pub struct Tex {
     log: Option<proton_tex::log::Log>,
     /// The cite picker's search.
     pub cite: cite::Cite,
+    /// Whether the visual editor is on, and the file and version it was
+    /// last drawn at.
+    pub visual: bool,
+    pub drawn: Option<(PathBuf, u64)>,
 }
 
 impl std::fmt::Debug for Tex {

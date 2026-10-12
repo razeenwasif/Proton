@@ -3,6 +3,7 @@
 //! which engine typesets it, and SyncTeX's map between the two.
 
 pub mod bib;
+pub mod blocks;
 pub mod log;
 pub mod markdown;
 pub mod outline;

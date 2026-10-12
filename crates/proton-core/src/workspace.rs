@@ -1663,6 +1663,11 @@ impl Workspace {
                 // The PDF and the log a build made, for the window to read.
                 self.documents.extend(readable);
                 events.extend(built);
+                // An edit the visual editor did not make — a save's reload, a
+                // file opened — is drawn there too.
+                if self.tex.visual && self.mode == ModeId::Tex {
+                    events.extend(self.tex_blocks(false));
+                }
                 if self.tex.cite.searching() {
                     let main = self.tex_main();
                     events.extend(self.tex.cite.poll(main.as_deref()));
@@ -1715,6 +1720,34 @@ impl Workspace {
             }
             Command::TexCite { source, id } => self.tex_cite(&source, &id),
             Command::TexWriteUp { slug } => self.tex_write_up(&slug),
+            Command::TexVisual { on, at } => {
+                self.tex.visual = on;
+                self.tex.drawn = None;
+                if on {
+                    return self.tex_blocks(true);
+                }
+                let mut events = Vec::new();
+                if let Some(at) = at {
+                    let buffer = self.editor.buffer_mut();
+                    let at = (at as usize).min(buffer.len_chars());
+                    buffer.cursor = buffer.clamp(proton_text::Cursor::at(at));
+                    events.extend(self.after_action(false));
+                }
+                events
+            }
+            Command::TexVisualEdit { version, start, end, old, latex } => self.tex_visual_edit(version, start as usize, end as usize, &old, &latex),
+            Command::TexVisualUndo { redo } => {
+                let buffer = self.editor.buffer_mut();
+                buffer.end_group();
+                let moved = if redo { buffer.redo() } else { buffer.undo() };
+                if !moved {
+                    return Vec::new();
+                }
+                self.resync();
+                let mut events = self.after_action(true);
+                events.extend(self.tex_blocks(false));
+                events
+            }
             // A new project is a new workspace: the session makes it.
             Command::TexNew { .. } => vec![notice("A new project is made by the window.".into(), NoticeLevel::Warn)],
             Command::TexFindPackages { files } => self.tex.packages_do(|env| env.find_packages(files)),
@@ -2866,6 +2899,78 @@ impl Workspace {
             events.push(notice(said, NoticeLevel::Info));
             events.push(self.tree_event());
         }
+        events
+    }
+
+    /// The file being edited as the visual editor draws it — when it has
+    /// changed since it was last drawn, or `always`. The figures it shows
+    /// are let through to the window.
+    fn tex_blocks(&mut self, always: bool) -> Vec<Event> {
+        let root = self.pickers.root().to_path_buf();
+        let buffer = self.editor.buffer();
+        let Some(path) = buffer.path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) }) else { return Vec::new() };
+        let now = (path.clone(), buffer.version());
+        if !always && self.tex.drawn.as_ref() == Some(&now) {
+            return Vec::new();
+        }
+        self.tex.drawn = Some(now);
+        let text = buffer.contents();
+        let version = buffer.version();
+        let blocks = proton_tex::blocks::blocks(&text);
+        // The macros are the main file's, which a chapter does not have.
+        let main = crate::tex::main_of(&root, Some(&path)).unwrap_or_else(|| path.clone());
+        let preamble = if main == path { text.clone() } else { std::fs::read_to_string(&main).unwrap_or_default() };
+        let preamble = preamble.split("\\begin{document}").next().unwrap_or("").to_string();
+        let macros = proton_tex::blocks::macros(&preamble);
+        // A figure's image, beside the main file as TeX looks for it, with
+        // the extensions it tries.
+        let dir = main.parent().unwrap_or(&root).to_path_buf();
+        let mut images = Vec::new();
+        for name in blocks.iter().filter_map(|b| b.image.clone()) {
+            let named = dir.join(&name);
+            let found = std::iter::once(named.clone())
+                .chain(["png", "jpg", "jpeg", "pdf"].iter().map(|e| named.with_extension(e)))
+                .find(|p| p.is_file() && p.starts_with(&root));
+            if let Some(found) = found {
+                if !images.iter().any(|(n, _): &(String, String)| *n == name) {
+                    self.documents.insert(found.clone());
+                    images.push((name, found.display().to_string()));
+                }
+            }
+        }
+        vec![Event::TexBlocks { path: path.display().to_string(), version, blocks, macros, images }]
+    }
+
+    /// A block edited in the visual editor: applied as the smallest change
+    /// that makes its span read `latex`, if the buffer is as it was drawn.
+    fn tex_visual_edit(&mut self, version: u64, start: usize, end: usize, old: &str, latex: &str) -> Vec<Event> {
+        let buffer = self.editor.buffer();
+        let fits = buffer.version() == version && start <= end && end <= buffer.len_chars() && buffer.slice(proton_text::Range::new(start, end)) == old;
+        if !fits {
+            // Drawn again from the buffer as it is: the edit is not lost to
+            // the person, who still sees it, but it is not guessed at.
+            let mut events = vec![notice("The source changed under that edit: it is drawn again as it stands.".into(), NoticeLevel::Warn)];
+            events.extend(self.tex_blocks(true));
+            return events;
+        }
+        let old_chars: Vec<char> = old.chars().collect();
+        let new_chars: Vec<char> = latex.chars().collect();
+        let prefix = old_chars.iter().zip(&new_chars).take_while(|(a, b)| a == b).count();
+        let suffix = old_chars[prefix..].iter().rev().zip(new_chars[prefix..].iter().rev()).take_while(|(a, b)| a == b).count();
+        if prefix == old_chars.len() && prefix == new_chars.len() {
+            return Vec::new();
+        }
+        let from = start + prefix;
+        let to = end - suffix;
+        let text: String = new_chars[prefix..new_chars.len() - suffix].iter().collect();
+        let length = text.chars().count();
+        let buffer = self.editor.buffer_mut();
+        buffer.end_group();
+        buffer.apply(vec![proton_text::Edit::replace(proton_text::Range::new(from, to), text)], proton_text::Cursor::at(from + length));
+        buffer.end_group();
+        self.resync();
+        let mut events = self.after_action(true);
+        events.extend(self.tex_blocks(false));
         events
     }
 

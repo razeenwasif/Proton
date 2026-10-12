@@ -28,6 +28,27 @@ const CITATIONS = [
   { source: "research", id: "why-is-the-sky-blue/P002", key: "lovelace2021scattering", title: "Scattering in the atmosphere", authors: "Lovelace et al.", year: "2021", venue: null, from: "P002 · Why is the sky blue?" },
 ];
 
+/** A document as the core would cut it for the visual editor. */
+const SAMPLE = [
+  ["preamble", "\\documentclass{article}\n\\newcommand{\\R}{\\mathbb{R}}\n\\begin{document}\n"],
+  ["heading", "\\section{Why the sky is blue}\n\\label{sec:intro}\n", 2],
+  ["paragraph", "Rayleigh found that the sky is \\emph{blue} because short wavelengths scatter\nmore, as $I \\propto \\lambda^{-4}$ says~\\cite{strutt1871light}. See Section~\\ref{sec:intro}.\n"],
+  ["space", "\n"],
+  ["math", "\\begin{equation}\n  I(\\lambda) \\propto \\frac{1}{\\lambda^4}, \\quad \\lambda \\in \\R\n  \\label{eq:rayleigh}\n\\end{equation}\n"],
+  ["list", "\\begin{itemize}\n  \\item Sunsets are \\textbf{red}.\n  \\item Clouds are white.\n\\end{itemize}\n"],
+  ["end", "\\end{document}\n"],
+];
+
+/** The sample's blocks, each with its span. @param {string[][]} texts */
+function cut(texts) {
+  let at = 0;
+  return texts.map(([kind, text, level]) => {
+    const start = at;
+    at += [...text].length;
+    return { kind, start, end: at, text, level: level ?? null, image: null };
+  });
+}
+
 /** @param {(event: any) => void} deliver */
 export function createTexPreview(deliver) {
   const home = "~/.proton/tex";
@@ -46,6 +67,7 @@ export function createTexPreview(deliver) {
   const event = () => ({ type: "texEnv", env });
   /** @type {ReturnType<typeof setTimeout>[]} */
   let timers = [];
+  const visual = { version: 1, texts: SAMPLE.map((b) => [...b]) };
   const later = (/** @type {number} */ ms, /** @type {() => void} */ then) => timers.push(setTimeout(() => { then(); deliver(event()); }, ms));
 
   return {
@@ -76,6 +98,17 @@ export function createTexPreview(deliver) {
           env = { state: "removing" };
           later(400, () => { env = { state: "missing", needs: [], free: 120_000_000_000, home }; });
           return [event()];
+        case "texVisual":
+          return command.on ? [{ type: "texBlocks", path: "/Users/you/paper/main.tex", version: visual.version, blocks: cut(visual.texts), macros: [["\\R", "\\mathbb{R}"]], images: [] }] : [];
+        case "texVisualEdit": {
+          const blocks = cut(visual.texts);
+          const i = blocks.findIndex((b) => b.start === command.start && b.text === command.old);
+          if (i >= 0) {
+            visual.texts[i] = [visual.texts[i][0], command.latex, visual.texts[i][2]];
+            visual.version += 1;
+          }
+          return [{ type: "texBlocks", path: "/Users/you/paper/main.tex", version: visual.version, blocks: cut(visual.texts), macros: [["\\R", "\\mathbb{R}"]], images: [] }];
+        }
         case "texCiteSearch": {
           const words = String(command.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
           const citations = CITATIONS.filter((c) => words.every((w) => `${c.title} ${c.authors} ${c.year} ${c.key}`.toLowerCase().includes(w)));

@@ -377,6 +377,18 @@
                  where they go. -->
             <div class="splits" id="codex-splits"></div>
 
+            <!-- LaTeX's visual editor: Event::TexBlocks drawn by tex-visual.js
+                 over the panes, as the document viewer covers them, and the
+                 switch between it and the source. Shown in LaTeX alone. -->
+            <div class="tex-switch" data-tex-switch role="group" aria-label="How the LaTeX is edited">
+              <button class="on" data-tex-view="source" aria-pressed="true" title="Edit the LaTeX itself">Source</button>
+              <button data-tex-view="visual" aria-pressed="false" title="Edit the document as it reads — Esc for the source">Visual</button>
+            </div>
+            <div id="tex-visual" class="tex-visual" hidden>
+              <header><span data-tex-visual-name></span><span class="grow"></span><span class="tex-v-keys">⌘B bold · ⌘I emphasis · ⌘Z undo · Esc the source</span></header>
+              <div class="scroll"><article class="tex-v-page" data-tex-visual-page></article></div>
+            </div>
+
             <!-- A document is looked at, not edited, so it covers the panes
                  rather than becoming one of them: it has no cursor, no undo
                  and no :w, and a pane implies all three. Closing it puts the

@@ -299,6 +299,84 @@ export async function texChecks({test, assert, win, doc, $, settle, key, shown})
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('The visual editor draws the blocks, sends back exactly what was typed, bolds with ⌘B, and goes back to the source with Esc', async () => {
+    await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
+    let at = win.commands.length;
+    $('[data-tex-view="visual"]').click(); await settle();
+    const visual = $('#tex-visual');
+    assert(shown(visual) && JSON.stringify(sent(at, 'texVisual')) === JSON.stringify([{type: 'texVisual', on: true}]), 'the visual editor did not open and ask');
+    const texts = [
+      ['preamble', '\\documentclass{article}\n\\begin{document}\n'],
+      ['heading', '\\section{The \\emph{blue} sky}\n\\label{sec:sky}\n', 2],
+      ['paragraph', 'Light scatters,~as \\cite{strutt1871light} found: $x^2$ % a note\nand 50\\% more.\n'],
+      ['space', '\n'],
+      ['paragraph', 'Unbalanced } brace.\n'],
+      ['table', '\\begin{tabular}{ll}\na & b\n\\end{tabular}\n'],
+      ['end', '\\end{document}\n'],
+    ];
+    let start = 0;
+    const blocks = texts.map(([kind, text, level]) => { const b = {kind, start, end: start + [...text].length, text, level: level ?? null, image: null}; start = b.end; return b; });
+    await win.pushEvents([{type: 'texBlocks', path: '/Users/you/paper/main.tex', version: 7, blocks, macros: [], images: []}]); await settle();
+    const page = visual.querySelector('[data-tex-visual-page]');
+    assert(page.querySelector('.tex-v-preamble summary')?.textContent.includes('2 lines'), 'the preamble is not folded away');
+    assert(page.querySelector('h1.tex-v-heading .tex-v-text i')?.textContent === 'blue', 'the heading is not drawn with its emphasis');
+    const para = page.querySelector('[data-block="2"] .tex-v-text');
+    assert(para && para.querySelector('.tex-chip')?.textContent.includes('strutt1871light') && para.querySelector('.tex-comment'), 'the paragraph is not drawn with its chips');
+    assert(page.querySelector('[data-block="4"]').tagName === 'PRE', 'a paragraph that would not come back exactly is editable');
+    assert(page.querySelector('[data-block="5"]').tagName === 'PRE', 'the table is not shown as its source');
+
+    // Typed into, and put down: exactly the change, nothing else rewritten.
+    para.focus();
+    const range = doc.createRange();
+    range.setStart(para.firstChild, 'Light'.length); range.collapse(true);
+    win.getSelection().removeAllRanges(); win.getSelection().addRange(range);
+    doc.execCommand('insertText', false, ' & heat');
+    at = win.commands.length;
+    para.blur(); await settle();
+    const edit = sent(at, 'texVisualEdit')[0];
+    assert(edit && edit.version === 7 && edit.start === blocks[2].start && edit.end === blocks[2].end && edit.old === texts[2][1], `not sent for its block: ${JSON.stringify(edit)}`);
+    assert(edit.latex === 'Light \\& heat scatters,~as \\cite{strutt1871light} found: $x^2$ % a note\nand 50\\% more.\n', `not exactly what was typed: ${JSON.stringify(edit.latex)}`);
+
+    // The core's answer draws it again, the typed block left as it stands.
+    const next = texts.map((t) => [...t]);
+    next[2][1] = edit.latex;
+    start = 0;
+    const redrawn = next.map(([kind, text, level]) => { const b = {kind, start, end: start + [...text].length, text, level: level ?? null, image: null}; start = b.end; return b; });
+    await win.pushEvents([{type: 'texBlocks', path: '/Users/you/paper/main.tex', version: 8, blocks: redrawn, macros: [], images: []}]); await settle();
+
+    // ⌘B on a word, and ⌘Z asks the core.
+    const word = page.querySelector('[data-block="2"] .tex-v-text');
+    word.focus();
+    const pick = doc.createRange();
+    pick.setStart(word.firstChild, 0); pick.setEnd(word.firstChild, 'Light'.length);
+    win.getSelection().removeAllRanges(); win.getSelection().addRange(pick);
+    word.dispatchEvent(new KeyboardEvent('keydown', {key: 'b', metaKey: true, bubbles: true, cancelable: true}));
+    at = win.commands.length;
+    word.blur(); await settle();
+    const bold = sent(at, 'texVisualEdit')[0];
+    assert(bold?.version === 8 && bold.latex.startsWith('\\textbf{Light} \\& heat'), `⌘B did not bold: ${JSON.stringify(bold)}`);
+    next[2][1] = bold.latex;
+    start = 0;
+    const bolded = next.map(([kind, text, level]) => { const b = {kind, start, end: start + [...text].length, text, level: level ?? null, image: null}; start = b.end; return b; });
+    await win.pushEvents([{type: 'texBlocks', path: '/Users/you/paper/main.tex', version: 9, blocks: bolded, macros: [], images: []}]); await settle();
+    assert(page.querySelector('[data-block="2"] .tex-v-text b')?.textContent === 'Light', 'the bold word is not drawn as the core has it');
+    at = win.commands.length;
+    page.querySelector('[data-block="2"] .tex-v-text').dispatchEvent(new KeyboardEvent('keydown', {key: 'z', metaKey: true, bubbles: true, cancelable: true})); await settle();
+    assert(JSON.stringify(sent(at, 'texVisualUndo')) === JSON.stringify([{type: 'texVisualUndo', redo: false}]), 'undo did not ask the core');
+
+    // Esc: back to the source, where the caret was.
+    const back = page.querySelector('[data-block="2"] .tex-v-text');
+    back.focus();
+    const caret = doc.createRange();
+    caret.setStart(back.querySelector('b').firstChild, 3); caret.collapse(true);
+    win.getSelection().removeAllRanges(); win.getSelection().addRange(caret);
+    at = win.commands.length;
+    back.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+    assert(!shown(visual) && JSON.stringify(sent(at, 'texVisual').at(-1)) === JSON.stringify({type: 'texVisual', on: false, at: blocks[2].start + '\\textbf{Lig'.length}), `not back at the caret: ${JSON.stringify(sent(at, 'texVisual'))}`);
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+    assert(!shown($('[data-tex-switch]')), 'Codex shows LaTeX\'s switch');
+  });
+
   await test('An investigation is written up from the gallery, and the agent asked to write its prose when ticked', async () => {
     await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
     const pane = $('#tex-pane');

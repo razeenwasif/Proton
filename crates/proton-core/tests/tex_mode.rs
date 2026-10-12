@@ -132,3 +132,56 @@ fn latex_draws_the_document_s_outline_and_words_on_entering_and_again_when_a_sav
     assert!(outline(&ws.apply(Command::Save)).is_none(), "a save that changes nothing draws nothing");
     let _ = std::fs::remove_dir_all(base);
 }
+
+fn blocks(events: &[Event]) -> Option<(u64, Vec<proton_tex::blocks::Block>, Vec<(String, String)>, Vec<(String, String)>)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::TexBlocks { version, blocks, macros, images, .. } => Some((*version, blocks.clone(), macros.clone(), images.clone())),
+        _ => None,
+    })
+}
+
+#[test]
+fn the_visual_editor_draws_blocks_and_an_edit_to_one_is_the_smallest_change_and_one_undo() {
+    let base = std::env::temp_dir().join(format!("proton-tex-visual-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("figures")).unwrap();
+    std::fs::write(base.join("figures/plot.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+    let source = "\\documentclass{article}\n\\newcommand{\\R}{\\mathbb{R}}\n\\begin{document}\nThe sky is\nblue.\n\n\\begin{figure}\n\\includegraphics{figures/plot}\n\\end{figure}\n\\end{document}\n";
+    std::fs::write(base.join("main.tex"), source).unwrap();
+    let mut ws = Workspace::rooted(&base).with_tex_env(offline_tex(&base.join("tex")));
+    ws.apply(Command::SetMode { mode: ModeId::Tex });
+    ws.apply(Command::JumpTo { mode: ModeId::Tex, path: base.join("main.tex").display().to_string(), line: 0, column: 0 });
+
+    let (version, drawn, macros, images) = blocks(&ws.apply(Command::TexVisual { on: true, at: None })).expect("the visual editor is drawn");
+    assert_eq!(drawn.iter().map(|b| b.kind.as_str()).collect::<Vec<_>>(), ["preamble", "paragraph", "space", "figure", "end"]);
+    assert_eq!(macros, [("\\R".to_string(), "\\mathbb{R}".to_string())]);
+    let image = std::fs::canonicalize(base.join("figures/plot.png")).unwrap();
+    assert_eq!(images.len(), 1);
+    assert_eq!((images[0].0.as_str(), std::fs::canonicalize(&images[0].1).unwrap()), ("figures/plot", image), "the figure is found with its extension");
+    assert!(ws.apply(Command::Poll).iter().all(|e| !matches!(e, Event::TexBlocks { .. })), "nothing changed: nothing drawn");
+
+    let paragraph = drawn[1].clone();
+    let events = ws.apply(Command::TexVisualEdit { version, start: paragraph.start, end: paragraph.end, old: paragraph.text.clone(), latex: "The sky is\n\\emph{very} blue.\n".into() });
+    let after = text(&ws);
+    assert!(after.contains("The sky is\n\\emph{very} blue.\n\n\\begin{figure}"), "{after}");
+    let (newer, redrawn, _, _) = blocks(&events).expect("drawn again");
+    assert!(newer > version && redrawn[1].text == "The sky is\n\\emph{very} blue.\n");
+
+    // Drawn at an old version: refused, and drawn again as it is.
+    let events = ws.apply(Command::TexVisualEdit { version, start: paragraph.start, end: paragraph.end, old: paragraph.text.clone(), latex: "Gone.\n".into() });
+    assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("changed under"))) && blocks(&events).is_some());
+    assert_eq!(text(&ws), after);
+
+    // One step back, one forward.
+    ws.apply(Command::TexVisualUndo { redo: false });
+    assert_eq!(text(&ws), source);
+    ws.apply(Command::TexVisualUndo { redo: true });
+    assert_eq!(text(&ws), after);
+
+    // Back to the source, where the person was.
+    ws.apply(Command::TexVisual { on: false, at: Some(paragraph.start + 4) });
+    let buffer = ws.editor().buffer();
+    assert_eq!(buffer.position(buffer.cursor.offset).line, 3);
+    assert_eq!(buffer.position(buffer.cursor.offset).column, 4);
+    let _ = std::fs::remove_dir_all(base);
+}

@@ -508,6 +508,28 @@ pub enum Command {
     TexWriteUp {
         slug: String,
     },
+    /// The visual editor on — the file being edited drawn as blocks — or
+    /// off, the cursor put at `at` (a character offset) in the source.
+    TexVisual {
+        on: bool,
+        #[serde(default)]
+        at: Option<u32>,
+    },
+    /// A block edited in the visual editor: its new source, for the span
+    /// `start..end` that held `old` at the buffer's `version`. Applied as the
+    /// smallest change that makes it so, one step to undo.
+    TexVisualEdit {
+        version: u64,
+        start: u32,
+        end: u32,
+        old: String,
+        latex: String,
+    },
+    /// Undo, or redo, from the visual editor.
+    TexVisualUndo {
+        #[serde(default)]
+        redo: bool,
+    },
     /// Show where the cursor's line is in the PDF.
     TexSyncForward,
     /// Go to the line that put something at this point of the PDF: a page,
@@ -1712,6 +1734,17 @@ pub enum Event {
         citations: Vec<proton_tex::bib::Citation>,
         searching: bool,
         note: Option<String>,
+    },
+    /// The file being edited, as the visual editor draws it: its blocks at
+    /// the buffer's `version`, the main file's macros for KaTeX, and each
+    /// figure's image — as `\includegraphics` names it — where it is, for
+    /// the window to read.
+    TexBlocks {
+        path: String,
+        version: u64,
+        blocks: Vec<proton_tex::blocks::Block>,
+        macros: Vec<(String, String)>,
+        images: Vec<(String, String)>,
     },
     /// The document's shape — its headings, each where it is, across the
     /// files its main file brings in — and its words. `main` is the main
