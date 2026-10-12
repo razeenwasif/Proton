@@ -7,8 +7,10 @@
 //! asked is asked inside `catch_unwind`, because a PDF is whatever its maker
 //! wrote, and one bad file must cost a tab, not the window.
 
+pub mod combine;
 pub mod doc;
 pub mod ops;
+pub mod pages;
 pub mod save;
 
 pub use doc::{Doc, Opened};

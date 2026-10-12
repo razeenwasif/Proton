@@ -191,3 +191,46 @@ fn a_pdf_that_cannot_be_read_to_change_it_is_still_read_and_says_why_it_cannot_c
     assert!(view(&events).is_some(), "it is still drawn");
     assert!(said(&session.apply(Command::PdfRotate { pages: vec![1], by: 90 }), "can only be read"));
 }
+
+fn page_count(bytes: &[u8]) -> usize {
+    lopdf::Document::load_mem(bytes).unwrap().get_pages().len()
+}
+
+#[test]
+fn pages_are_moved_inserted_brought_in_taken_out_split_and_combined() {
+    let s = scratch("pages");
+    std::fs::write(s.0.join("papers/one.pdf"), pdf(&["a", "b", "c", "d"])).unwrap();
+    std::fs::write(s.0.join("other.pdf"), pdf(&["x", "y"])).unwrap();
+    let mut session = Session::new(&s.0);
+    session.apply(Command::SetMode { mode: ModeId::Pdf });
+    session.apply(Command::PdfOpen { path: "papers/one.pdf".into(), page: None });
+
+    session.apply(Command::PdfMove { pages: vec![4], before: 1 });
+    session.apply(Command::PdfInsertBlank { after: 2, count: 1 });
+    let events = session.apply(Command::PdfInsertFile { after: 5, path: "other.pdf".into(), pages: Some(vec![2]) });
+    let (_, key, _) = view(&events).unwrap();
+    assert_eq!(page_count(&session.document_bytes(&key).unwrap()), 6, "d a [blank] b c y");
+    assert_eq!(dirty(&events).unwrap().1.as_deref(), Some("insert pages from other.pdf"));
+    assert!(said(&session.apply(Command::PdfInsertFile { after: 1, path: "nope.pdf".into(), pages: None }), "nope.pdf"));
+
+    // Taken out into a new file, opened in a tab of its own; the tab it came from as it was.
+    let events = session.apply(Command::PdfExtract { pages: vec![1, 6], path: "papers/taken.pdf".into() });
+    assert!(said(&events, "wrote"), "{events:?}");
+    assert_eq!(page_count(&std::fs::read(s.0.join("papers/taken.pdf")).unwrap()), 2);
+    assert_eq!(tabs(&events).unwrap().0.iter().map(|t| t.1.as_str()).collect::<Vec<_>>(), ["one.pdf", "taken.pdf"]);
+    assert!(said(&session.apply(Command::PdfExtract { pages: vec![1], path: "papers/taken.pdf".into() }), "there already"), "never over a file");
+
+    // Split, beside it.
+    session.apply(Command::PdfFocus { tab: 1 });
+    let events = session.apply(Command::PdfSplit { every: Some(4), at: Vec::new() });
+    assert!(said(&events, "split into 2: one-1.pdf, one-2.pdf"), "{events:?}");
+    assert_eq!(page_count(&std::fs::read(s.0.join("papers/one-1.pdf")).unwrap()), 4);
+    assert_eq!(page_count(&std::fs::read(s.0.join("papers/one-2.pdf")).unwrap()), 2);
+    assert!(said(&session.apply(Command::PdfSplit { every: Some(4), at: Vec::new() }), "there already"));
+
+    // Combined — the open one as it is now — into a new one, opened.
+    let events = session.apply(Command::PdfCombine { paths: vec!["papers/one.pdf".into(), "other.pdf".into()], path: "both.pdf".into() });
+    assert!(said(&events, "combined 2"), "{events:?}");
+    assert_eq!(page_count(&std::fs::read(s.0.join("both.pdf")).unwrap()), 8);
+    assert!(tabs(&events).unwrap().0.iter().any(|t| t.1 == "both.pdf"));
+}

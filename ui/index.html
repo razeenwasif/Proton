@@ -1112,6 +1112,7 @@
           <div class="pdf-tabs" role="tablist" aria-label="Open PDFs" data-pdf-tabs></div>
           <button class="hbtn" data-pdf-open-box title="Open a PDF" aria-label="Open a PDF"><svg class="i"><use href="#i-plus"/></svg></button>
           <span class="chip pdf-readonly" data-pdf-readonly hidden>Read only</span>
+          <button class="hbtn" data-pdf-grid-toggle title="The pages, to choose, turn, delete and drag into order  g p" aria-label="Organize the pages" aria-pressed="false"><svg class="i"><use href="#i-grid"/></svg></button>
           <span class="grow"></span>
           <button class="hbtn" data-pdf-undo title="Undo  ⌘Z" aria-label="Undo" disabled><svg class="i"><use href="#i-undo"/></svg></button>
           <button class="hbtn" data-pdf-redo title="Redo  ⇧⌘Z" aria-label="Redo" disabled><svg class="i"><use href="#i-redo"/></svg></button>
@@ -1133,6 +1134,8 @@
         <div class="pdf-ask" data-pdf-ask hidden></div>
         <div class="pdf-stage">
           <div class="scroll pdf-pages" data-pdf-pages tabindex="0" aria-label="The PDF" hidden></div>
+          <!-- The pages, small, to choose and rearrange (pdf-pages.js). -->
+          <div class="pdf-grid" data-pdf-grid tabindex="0" aria-label="The pages" hidden></div>
           <!-- What to open: a path, typed; the project's PDFs; those opened before. -->
           <div class="pdf-open" data-pdf-open>
             <div class="pdf-open-in">

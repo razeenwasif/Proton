@@ -1504,7 +1504,13 @@ impl Workspace {
             | Command::PdfSave
             | Command::PdfSaveAs { .. }
             | Command::PdfRotate { .. }
-            | Command::PdfDelete { .. } => Vec::new(),
+            | Command::PdfDelete { .. }
+            | Command::PdfInsertBlank { .. }
+            | Command::PdfMove { .. }
+            | Command::PdfInsertFile { .. }
+            | Command::PdfExtract { .. }
+            | Command::PdfSplit { .. }
+            | Command::PdfCombine { .. } => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }

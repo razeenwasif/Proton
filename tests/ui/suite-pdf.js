@@ -206,6 +206,84 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('The page grid: pages chosen with click, ⌘ and ⇧, turned, deleted, a blank put after, and dragged into order', async () => {
+    await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
+    const one = {id: 4, name: 'outline.pdf', path: '~/Papers/outline.pdf', dirty: false, readOnly: null, undo: null, redo: null};
+    await win.pushEvents([tabs([one], 4), {type: 'pdfView', tab: 4, key: '/tests/ui/fixtures/outline.pdf', version: 1, page: null, quiet: false}]); await settle();
+    assert(await wait(() => $('[data-pdf-pages] .doc-page canvas') && /\/ 3/.test($('[data-pdf-page]').textContent)), 'not drawn');
+    $('[data-pdf-grid-toggle]').click(); await settle();
+    const grid = $('[data-pdf-grid]');
+    assert(shown(grid) && grid.querySelectorAll('.pdf-cell').length === 3, 'the grid does not show every page');
+    const cell = (n) => grid.querySelector(`[data-pdf-cell="${n}"]`);
+    const chosen = () => [...grid.querySelectorAll('.pdf-cell.on')].map((c) => c.dataset.pdfCell).join(',');
+    assert(chosen() === '1', 'the page being read is not chosen');
+    cell(3).click(); await settle();
+    cell(1).dispatchEvent(new MouseEvent('click', {bubbles: true, metaKey: true})); await settle();
+    assert(chosen() === '1,3', `⌘-click did not add: ${chosen()}`);
+    cell(2).click(); cell(3).dispatchEvent(new MouseEvent('click', {bubbles: true, shiftKey: true})); await settle();
+    assert(chosen() === '2,3', `⇧-click did not run from the last: ${chosen()}`);
+    assert($('[data-pdf-which]').textContent === '2 pages', 'the tools do not say which pages they act on');
+
+    let at = win.commands.length;
+    grid.querySelector('[data-pdf-grid-do="right"]').click(); await settle();
+    grid.querySelector('[data-pdf-grid-do="blank"]').click(); await settle();
+    $('[data-pdf-tools] [data-pdf-tool="left"]').click(); await settle();
+    const done = sent(at, 'pdfRotate').map((c) => `${c.pages}:${c.by}`).join(' ');
+    assert(done === '2,3:90 2,3:-90', `turned: ${done}`);
+    assert(JSON.stringify(sent(at, 'pdfInsertBlank')) === JSON.stringify([{type: 'pdfInsertBlank', after: 3, count: 1}]), 'no blank after');
+    at = win.commands.length;
+    grid.focus();
+    grid.dispatchEvent(new KeyboardEvent('keydown', {key: 'Backspace', bubbles: true, cancelable: true})); await settle();
+    assert(JSON.stringify(sent(at, 'pdfDelete')) === JSON.stringify([{type: 'pdfDelete', pages: [2, 3]}]), '⌫ did not delete the pages chosen');
+
+    // Dragged: page 3 dropped on page 1's near half goes before it.
+    cell(3).click(); await settle();
+    const data = new DataTransfer();
+    cell(3).dispatchEvent(new DragEvent('dragstart', {bubbles: true, dataTransfer: data}));
+    const r = cell(1).getBoundingClientRect();
+    cell(1).dispatchEvent(new DragEvent('dragover', {bubbles: true, cancelable: true, dataTransfer: data, clientX: r.left + 4, clientY: r.top + 10}));
+    assert(cell(1).classList.contains('drop-before'), 'where it would go is not shown');
+    at = win.commands.length;
+    cell(1).dispatchEvent(new DragEvent('drop', {bubbles: true, cancelable: true, dataTransfer: data})); await settle();
+    assert(JSON.stringify(sent(at, 'pdfMove')) === JSON.stringify([{type: 'pdfMove', pages: [3], before: 1}]), `not moved: ${JSON.stringify(sent(at, 'pdfMove'))}`);
+
+    grid.dispatchEvent(new KeyboardEvent('keydown', {key: 'a', metaKey: true, bubbles: true, cancelable: true})); await settle();
+    assert(chosen() === '1,2,3', '⌘A did not choose all');
+    grid.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+    assert(!shown(grid), 'Escape did not go back to reading');
+  });
+
+  await test('The tools take pages out, split, insert from a file, and combine PDFs in an order chosen', async () => {
+    const tools = $('[data-pdf-tools]');
+    const field = (name) => tools.querySelector(`[data-pdf-typed="${name}"]`);
+    const type = (name, value) => { field(name).value = value; field(name).dispatchEvent(new Event('input', {bubbles: true})); };
+    assert(field('take').value === '~/Papers/outline-pages.pdf' && field('into').value === '~/Papers/outline-combined.pdf', 'the new files are not named beside it');
+    let at = win.commands.length;
+    tools.querySelector('[data-pdf-tool="take"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfExtract')) === JSON.stringify([{type: 'pdfExtract', pages: [1], path: '~/Papers/outline-pages.pdf'}]), `not taken out: ${JSON.stringify(sent(at, 'pdfExtract'))}`);
+    type('every', '2');
+    tools.querySelector('[data-pdf-tool="split"]').click(); await settle();
+    type('every', ''); type('at', '2, 3');
+    tools.querySelector('[data-pdf-tool="split"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfSplit').map((c) => [c.every, c.at])) === JSON.stringify([[2, []], [null, [2, 3]]]), `not split: ${JSON.stringify(sent(at, 'pdfSplit'))}`);
+    type('insert', '~/Papers/more.pdf');
+    tools.querySelector('[data-pdf-tool="insert"]').click(); await settle();
+    assert(sent(at, 'pdfInsertFile')[0]?.path === '~/Papers/more.pdf', 'not inserted');
+
+    // Combined: this one first, then two added, the last moved up.
+    for (const path of ['~/a.pdf', '~/b.pdf']) {
+      tools.querySelector('[data-pdf-typed="adding"]').value = path;
+      tools.querySelector('[data-pdf-typed="adding"]').dispatchEvent(new Event('input', {bubbles: true}));
+      tools.querySelector('[data-pdf-tool="add"]').click(); await settle();
+    }
+    tools.querySelector('[data-pdf-tool="up"][data-at="2"]').click(); await settle();
+    at = win.commands.length;
+    tools.querySelector('[data-pdf-tool="combine"]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'pdfCombine')) === JSON.stringify([{type: 'pdfCombine', paths: ['~/Papers/outline.pdf', '~/b.pdf', '~/a.pdf'], path: '~/Papers/outline-combined.pdf'}]), `not combined: ${JSON.stringify(sent(at, 'pdfCombine'))}`);
+    await win.pushEvents([tabs([], null)]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
   await test('A PDF opened in the PDF mode is a tab, and the document viewer hands its PDF over at its page', async () => {
     await win.dispatch({type: 'setMode', mode: 'pdf'}); await settle();
     let at = win.commands.length;

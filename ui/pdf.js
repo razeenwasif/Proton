@@ -10,7 +10,9 @@
 import { readDocument } from "./bridge.js";
 import { escapeHtml as esc } from "./html.js";
 import { find } from "./pdf-find.js";
-import { createPdfView } from "./pdf-view.js";
+import { createPdfGrid } from "./pdf-pages.js";
+import { createPdfTools } from "./pdf-tools.js";
+import { createPdfView, drawSmall } from "./pdf-view.js";
 
 /** @typedef {import("./bindings/PdfTab").PdfTab} Tab */
 /** @typedef {import("./pdf-find.js").Found} Found */
@@ -53,12 +55,12 @@ export function createPdf(host) {
    *   shown: {tab: number, key: string} | null, opening: boolean, at: number,
    *   side: string, labels: string[] | null, outline: any[] | null, page: number, count: number,
    *   query: string, hits: Found[], hitOn: number, searching: boolean, colors: number,
-   *   ask: {kind: "close", tab: number} | {kind: "saveAs"} | null}} */
+   *   ask: {kind: "close", tab: number} | {kind: "saveAs"} | null, grid: boolean}} */
   const state = {
     tabs: [], active: null, recent: [], project: [], root: "", shown: null, opening: false, at: 0,
     side: pref("side", "pages"), labels: null, outline: null, page: 1, count: 0,
     query: "", hits: [], hitOn: -1, searching: false, colors: Number(pref("colors", "0")) || 0,
-    ask: null,
+    ask: null, grid: false,
   };
   /** Which search is the current one, so one overtaken stops. */
   let searchGeneration = 0;
@@ -73,9 +75,40 @@ export function createPdf(host) {
       q("[data-pdf-page]").textContent = count ? `${label && label !== String(page) ? `${label} · ` : ""}${page} / ${count} · ${Math.round(scale * 100)}%` : "";
       for (const t of side.querySelectorAll(".pdf-thumb.on")) t.classList.remove("on");
       side.querySelector(`.pdf-thumb[data-pdf-thumb="${page}"]`)?.classList.add("on");
+      tools?.says();
     },
     onLink: ({ url }) => void host.dispatch({ type: "openLink", url }),
   });
+  const gridBox = q("[data-pdf-grid]");
+  const grid = createPdfGrid({
+    box: gridBox, dispatch: host.dispatch, doc: () => view.doc(), turned: () => view.turned(),
+    labels: () => state.labels, count: () => state.count,
+    onRead: (page) => {
+      showGrid(false);
+      view.goTo(page);
+    },
+    onChange: () => tools.says(),
+  });
+  const tools = createPdfTools({
+    box: q("[data-pdf-tools]"), dispatch: host.dispatch, tab: () => top(),
+    pages: () => (state.grid && grid.selection().length ? grid.selection() : state.shown ? [state.page] : []),
+    count: () => state.count, project: () => state.project,
+  });
+
+  /** The page grid, or the pages to read. @param {boolean} on */
+  function showGrid(on) {
+    state.grid = on && Boolean(state.shown);
+    gridBox.hidden = !state.grid;
+    q("[data-pdf-grid-toggle]").setAttribute("aria-pressed", String(state.grid));
+    if (state.grid) {
+      grid.render();
+      grid.choose([state.page]);
+      gridBox.focus();
+    } else {
+      pages.focus();
+    }
+    tools.says();
+  }
   view.setColors(COLORS[state.colors] ?? null);
 
   /* ── tabs and the Open box ───────────────────────────────────────── */
@@ -219,16 +252,7 @@ export function createPdf(host) {
     if (!doc) return;
     const mine = thumbs;
     try {
-      const page = await doc.getPage(n);
-      const at1 = page.getViewport({ scale: 1, rotation: (page.rotate + view.turned()) % 360 });
-      const viewport = page.getViewport({ scale: THUMB / at1.width, rotation: (page.rotate + view.turned()) % 360 });
-      const ratio = window.devicePixelRatio || 1;
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.floor(viewport.width * ratio);
-      canvas.height = Math.floor(viewport.height * ratio);
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
-      await page.render({ canvasContext: canvas.getContext("2d"), viewport, transform: ratio === 1 ? null : [ratio, 0, 0, ratio, 0, 0] }).promise;
+      const canvas = await drawSmall(doc, n, THUMB, view.turned());
       if (mine !== thumbs) return;
       thumbs.set(n, canvas);
       pic.replaceChildren(canvas);
@@ -341,6 +365,8 @@ export function createPdf(host) {
     renderBar();
     renderOpen();
     if (state.ask?.kind === "close") renderAsk();
+    if (!state.tabs.length && state.grid) showGrid(false);
+    tools.render();
   }
 
   /** What is read of a document once it is drawn: its labels and bookmarks,
@@ -362,6 +388,8 @@ export function createPdf(host) {
     state.outline = outline;
     state.count = view.pages();
     renderSide();
+    tools.render();
+    if (state.grid) grid.refresh();
     // A search kept across a new version is found again in it.
     if (!fresh && state.query) void search(state.query);
   }
@@ -404,6 +432,7 @@ export function createPdf(host) {
     const t = /** @type {HTMLElement} */ (e.target);
     const close = /** @type {HTMLElement | null} */ (t.closest("[data-pdf-close]"));
     if (close) return closeTab(Number(close.dataset.pdfClose));
+    if (t.closest("[data-pdf-grid-toggle]")) return showGrid(!state.grid);
     if (t.closest("[data-pdf-undo]")) return void host.dispatch({ type: "pdfUndo" });
     if (t.closest("[data-pdf-redo]")) return void host.dispatch({ type: "pdfRedo" });
     if (t.closest("[data-pdf-save]")) return void host.dispatch({ type: "pdfSave" });
@@ -556,6 +585,9 @@ export function createPdf(host) {
    *  @param {KeyboardEvent} e @returns {boolean} whether it was the PDF's */
   function key(e) {
     if (!state.shown || pages.hidden) return false;
+    const typing = Boolean(/** @type {HTMLElement | null} */ (e.target instanceof HTMLElement ? e.target : null)?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])"));
+    // The grid's own keys first: ⌘A, ⌫, Escape.
+    if (state.grid && !typing && grid.key(e)) return true;
     if (e.metaKey && !e.altKey && !e.ctrlKey) {
       const k = e.key.toLowerCase();
       if (k === "f") return (focusFind(), true);

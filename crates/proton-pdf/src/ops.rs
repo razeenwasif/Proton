@@ -1,7 +1,11 @@
 //! The changes made to a PDF, as values: each applied to a lopdf document,
 //! named for the undo menu, and known to be appendable as an update or not.
 
+use std::sync::Arc;
+
 use lopdf::{Document, Object, ObjectId};
+
+use crate::pages;
 
 /// One change.
 #[derive(Debug, Clone, PartialEq)]
@@ -10,6 +14,14 @@ pub enum Op {
     Rotate { pages: Vec<u32>, by: i32 },
     /// Take pages out.
     Delete { pages: Vec<u32> },
+    /// Put `count` blank pages after page `after` (0: before the first).
+    InsertBlank { after: u32, count: u32 },
+    /// Move pages, kept in their order, to before page `before`.
+    Move { pages: Vec<u32>, before: u32 },
+    /// Bring in the pages of another PDF — `pages` of them, or all — after
+    /// page `after`. Its bytes are kept with the change, so undoing and
+    /// redoing it never reads the file again.
+    InsertFrom { after: u32, name: String, bytes: Arc<Vec<u8>>, pages: Option<Vec<u32>> },
 }
 
 impl Op {
@@ -19,13 +31,16 @@ impl Op {
         match self {
             Op::Rotate { pages: n, .. } => format!("turn {}", pages(n)),
             Op::Delete { pages: n } => format!("delete {}", pages(n)),
+            Op::InsertBlank { count, .. } => if *count == 1 { "insert a blank page".into() } else { format!("insert {count} blank pages") },
+            Op::Move { pages: n, .. } => format!("move {}", pages(n)),
+            Op::InsertFrom { name, .. } => format!("insert pages from {name}"),
         }
     }
 
     /// Whether it can be saved as an update appended to the file.
     pub fn incremental(&self) -> bool {
         match self {
-            Op::Rotate { .. } | Op::Delete { .. } => true,
+            Op::Rotate { .. } | Op::Delete { .. } | Op::InsertBlank { .. } | Op::Move { .. } | Op::InsertFrom { .. } => true,
         }
     }
 
@@ -59,6 +74,9 @@ impl Op {
                 doc.delete_pages(&unique);
                 Ok(())
             }
+            Op::InsertBlank { after, count } => pages::insert_blank(doc, *after, *count),
+            Op::Move { pages: n, before } => pages::move_pages(doc, n, *before),
+            Op::InsertFrom { after, bytes, pages: n, .. } => pages::insert_from(doc, bytes, n.as_deref(), *after).map(|_| ()),
         }
     }
 }

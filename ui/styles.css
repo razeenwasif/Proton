@@ -5243,3 +5243,57 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .pdf-save-as input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-xs) var(--zed); }
 .pdf-readonly { color: var(--warn) !important; }
 .pdf-bar .hbtn:disabled { opacity: .35; cursor: default; }
+/* The page grid, over the pages to read, and the tools panel's sections. */
+.pdf-grid { position: absolute; inset: 0; z-index: 1; overflow: auto; background: color-mix(in srgb, var(--text) 4%, var(--bg-deep)); outline: none; }
+.pdf-grid[hidden] { display: none; }
+.pdf-grid-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--bg); border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); font: var(--z-xs) var(--zed); }
+.pdf-grid-bar .grow { flex: 1; }
+.pdf-grid-bar .hbtn:disabled { opacity: .35; }
+.pdf-grid-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(164px, 1fr)); gap: 14px; padding: 16px; }
+.pdf-cell { display: grid; justify-items: center; align-content: start; gap: 6px; padding: 10px 8px 8px; border-radius: 8px; color: var(--faint); font: var(--z-2xs) var(--zed); cursor: pointer; user-select: none; }
+.pdf-cell:hover { background: var(--row-hover); }
+.pdf-cell.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); box-shadow: inset 0 0 0 2px var(--accent); }
+.pdf-cell.drop-before { box-shadow: inset 3px 0 0 var(--accent); }
+.pdf-cell.drop-after { box-shadow: inset -3px 0 0 var(--accent); }
+.pdf-cell-pic { display: block; min-width: 140px; min-height: 180px; background: var(--page-ground, #fff); box-shadow: 0 1px 8px rgba(0, 0, 0, .35); }
+.pdf-cell-pic:has(canvas) { min-width: 0; min-height: 0; }
+.pdf-cell-pic canvas { display: block; }
+.pdf-tool { display: grid; gap: 8px; margin: 0 0 18px; }
+.pdf-tool h4 { display: flex; align-items: baseline; gap: 8px; margin: 0; font: 600 var(--z-xs) var(--zed); color: var(--text); }
+.pdf-tool h4 .lab-faint { font-weight: 400; }
+.pdf-tool p { margin: 0; font: var(--z-2xs)/1.5 var(--zed); }
+.pdf-tool-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.pdf-tool-row button { padding: 4px 10px; font: var(--z-2xs) var(--zed); }
+.pdf-tool-field { display: grid; gap: 4px; color: var(--muted); font: var(--z-2xs)/1.5 var(--zed); }
+.pdf-tool-field input { min-width: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-2xs) var(--zed); }
+.pdf-tool-field input.pdf-tool-short { width: 6em; display: inline-block; }
+.pdf-combine { display: grid; gap: 2px; margin: 0; padding-left: 1.4em; font: var(--z-2xs) var(--zed); color: var(--text); }
+.pdf-combine li > span:first-child { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.pdf-combine .hbtn { width: 20px; height: 20px; padding: 0; }
+/* The buttons and fields Chat's modes share, in their colours. */
+.workspace[data-ws="pdf"] {
+  --cc-bg: var(--bg);
+  --cc-side: var(--bg);
+  --cc-head: var(--head);
+  --cc-raise: color-mix(in srgb, var(--text) 6%, var(--bg));
+  --cc-raise-2: color-mix(in srgb, var(--text) 11%, var(--bg));
+  --cc-pop: var(--head);
+  --cc-code: var(--bg-deep);
+  --cc-line: color-mix(in srgb, var(--text) 8%, var(--bg-deep));
+  --cc-line-2: var(--row-on-edge);
+  --cc-text: var(--text);
+  --cc-soft: color-mix(in srgb, var(--text) 74%, var(--bg));
+  --cc-muted: var(--muted);
+  --cc-faint: var(--faint);
+  --cc-accent: var(--accent);
+  --cc-accent-2: color-mix(in srgb, var(--accent) 82%, var(--text));
+  --cc-accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --cc-on-accent: var(--bg-deep);
+  --cc-ok: var(--ok);
+  --cc-warn: var(--warn);
+  --cc-err: var(--err);
+  --cc-add: color-mix(in srgb, var(--ok) 12%, transparent);
+  --cc-del: color-mix(in srgb, var(--err) 13%, transparent);
+  --cc-font: var(--zed);
+}
+.pdf-tool-field:has(.pdf-tool-short) { display: block; line-height: 2.2; }

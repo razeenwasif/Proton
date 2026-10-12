@@ -33,6 +33,23 @@ export function toViewport(viewport, rect) {
   return [a, b, c, d];
 }
 
+/** Page `n` of `doc` drawn `width` CSS pixels wide, turned as the view is:
+ *  for thumbnails and the page grid. @param {any} doc @param {number} n @param {number} width @param {number} turned */
+export async function drawSmall(doc, n, width, turned) {
+  const page = await doc.getPage(n);
+  const rotation = (page.rotate + turned) % 360;
+  const at1 = page.getViewport({ scale: 1, rotation });
+  const viewport = page.getViewport({ scale: width / at1.width, rotation });
+  const ratio = window.devicePixelRatio || 1;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.floor(viewport.width * ratio);
+  canvas.height = Math.floor(viewport.height * ratio);
+  canvas.style.width = `${Math.floor(viewport.width)}px`;
+  canvas.style.height = `${Math.floor(viewport.height)}px`;
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport, transform: ratio === 1 ? null : [ratio, 0, 0, ratio, 0, 0] }).promise;
+  return canvas;
+}
+
 /** The loaded library, once something has needed it. */
 let pdfjs = /** @type {any} */ (null);
 

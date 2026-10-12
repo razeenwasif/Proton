@@ -585,6 +585,45 @@ pub enum Command {
     PdfDelete {
         pages: Vec<u32>,
     },
+    /// Put blank pages in the tab on top, after page `after` (0: first).
+    PdfInsertBlank {
+        after: u32,
+        #[serde(default = "one")]
+        count: u32,
+    },
+    /// Move pages of the tab on top, kept in their order, to before page
+    /// `before` (one past the last: to the end).
+    PdfMove {
+        pages: Vec<u32>,
+        before: u32,
+    },
+    /// Bring the pages of another PDF — `pages` of them, or all — into the
+    /// tab on top after page `after`.
+    PdfInsertFile {
+        after: u32,
+        path: String,
+        #[serde(default)]
+        pages: Option<Vec<u32>>,
+    },
+    /// Write `pages` of the tab on top, as it is now, as a new PDF at
+    /// `path`, and open it.
+    PdfExtract {
+        pages: Vec<u32>,
+        path: String,
+    },
+    /// Split the tab on top into PDFs beside it: every `every` pages, or a
+    /// new one at each of `at`.
+    PdfSplit {
+        #[serde(default)]
+        every: Option<u32>,
+        #[serde(default)]
+        at: Vec<u32>,
+    },
+    /// Combine PDFs, in order, into a new one at `path`, and open it.
+    PdfCombine {
+        paths: Vec<String>,
+        path: String,
+    },
     /// Bring a tab forward.
     PdfFocus {
         tab: u32,
@@ -2625,4 +2664,9 @@ pub enum ClaudeAnswer {
     Deny { message: String },
     /// An AskUserQuestion's answers, by question.
     Questions { answers: BTreeMap<String, String> },
+}
+
+/// One, for a count left out.
+fn one() -> u32 {
+    1
 }

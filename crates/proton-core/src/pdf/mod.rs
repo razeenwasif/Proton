@@ -39,6 +39,12 @@ pub fn handles(command: &Command) -> bool {
             | Command::PdfSaveAs { .. }
             | Command::PdfRotate { .. }
             | Command::PdfDelete { .. }
+            | Command::PdfInsertBlank { .. }
+            | Command::PdfMove { .. }
+            | Command::PdfInsertFile { .. }
+            | Command::PdfExtract { .. }
+            | Command::PdfSplit { .. }
+            | Command::PdfCombine { .. }
     )
 }
 
@@ -151,6 +157,15 @@ impl Pdfs {
             Command::PdfSaveAs { path } => self.save(Some(&path)),
             Command::PdfRotate { pages, by } => self.change(proton_pdf::Op::Rotate { pages, by }),
             Command::PdfDelete { pages } => self.change(proton_pdf::Op::Delete { pages }),
+            Command::PdfInsertBlank { after, count } => self.change(proton_pdf::Op::InsertBlank { after, count }),
+            Command::PdfMove { pages, before } => self.change(proton_pdf::Op::Move { pages, before }),
+            Command::PdfInsertFile { after, path, pages } => match self.located(&path).and_then(|p| read(&p).map(|b| (p, b))) {
+                Ok((path, bytes)) => self.change(proton_pdf::Op::InsertFrom { after, name: folder::name_of(&path), bytes: Arc::new(bytes), pages }),
+                Err(why) => vec![notice(why, NoticeLevel::Error)],
+            },
+            Command::PdfExtract { pages, path } => self.extract(&pages, &path),
+            Command::PdfSplit { every, at } => self.split(every, &at),
+            Command::PdfCombine { paths, path } => self.combine(&paths, &path),
             _ => Vec::new(),
         }
     }
@@ -323,6 +338,116 @@ impl Pdfs {
                 }
                 let mut events = vec![notice(format!("saved {}", folder::tilde(&path)), NoticeLevel::Info)];
                 events.extend(self.redrawn());
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    /// Where a path typed — `~` and all, or relative to the project on
+    /// screen — is.
+    fn located(&self, typed: &str) -> Result<PathBuf, String> {
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return Err("Say which file.".into());
+        }
+        let path = folder::expand(typed);
+        Ok(folder::normalise(&if path.is_absolute() { path } else { self.project.1.join(path) }))
+    }
+
+    /// Where a new PDF is to be written: not over anything there.
+    fn fresh(&self, typed: &str) -> Result<PathBuf, String> {
+        let path = self.located(typed)?;
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+            return Err(format!("{}: a PDF's name ends in .pdf", folder::tilde(&path)));
+        }
+        if path.exists() {
+            return Err(format!("{} is there already: choose another name.", folder::tilde(&path)));
+        }
+        if !path.parent().is_some_and(Path::is_dir) {
+            return Err(format!("{}: no such folder", folder::tilde(path.parent().unwrap_or(&path))));
+        }
+        Ok(path)
+    }
+
+    /// The tab on top's document as it is now, and its file.
+    fn current(&self) -> Result<(&proton_pdf::Doc, PathBuf), String> {
+        let id = self.active.ok_or("Open a PDF first.")?;
+        let tab = self.tabs.iter().find(|t| t.id == id).ok_or("Open a PDF first.")?;
+        match &tab.doc {
+            Ok(doc) => Ok((doc, tab.path.clone())),
+            Err(why) => Err(format!("{} can only be read: {why}.", tab.name)),
+        }
+    }
+
+    /// Some pages of the tab on top, as it is now, written as a new PDF —
+    /// then opened.
+    fn extract(&mut self, pages: &[u32], typed: &str) -> Vec<Event> {
+        let made = self.fresh(typed).and_then(|path| {
+            let (doc, _) = self.current()?;
+            let bytes = proton_pdf::combine::extract(doc.document(), pages)?;
+            proton_pdf::save::atomically(&path, &bytes)?;
+            Ok(path)
+        });
+        match made {
+            Ok(path) => {
+                let mut events = vec![notice(format!("wrote {}", folder::tilde(&path)), NoticeLevel::Info)];
+                events.extend(self.open(&path.display().to_string(), None));
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    /// The tab on top split into PDFs beside it, `name-1.pdf` and on.
+    fn split(&mut self, every: Option<u32>, at: &[u32]) -> Vec<Event> {
+        let made = (|| {
+            let (doc, path) = self.current()?;
+            let ranges = proton_pdf::combine::ranges(doc.pages(), every, at)?;
+            let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "part".into());
+            let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+            let targets: Vec<PathBuf> = (1..=ranges.len()).map(|i| dir.join(format!("{stem}-{i}.pdf"))).collect();
+            if let Some(there) = targets.iter().find(|t| t.exists()) {
+                return Err(format!("{} is there already: nothing was split.", folder::tilde(there)));
+            }
+            for (range, target) in ranges.iter().zip(&targets) {
+                let bytes = proton_pdf::combine::extract(doc.document(), range)?;
+                proton_pdf::save::atomically(target, &bytes)?;
+            }
+            Ok(targets)
+        })();
+        match made {
+            Ok(targets) => vec![notice(
+                format!("split into {}: {}", targets.len(), targets.iter().map(|t| folder::name_of(t)).collect::<Vec<_>>().join(", ")),
+                NoticeLevel::Info,
+            )],
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
+    }
+
+    /// PDFs combined into a new one, then opened. One open with changes is
+    /// combined as it is now.
+    fn combine(&mut self, paths: &[String], typed: &str) -> Vec<Event> {
+        let made = (|| {
+            let target = self.fresh(typed)?;
+            let mut parts = Vec::new();
+            for typed in paths {
+                let path = self.located(typed)?;
+                let open = self.tabs.iter().find(|t| t.path == path).and_then(|t| t.doc.as_ref().ok());
+                let bytes = match open {
+                    Some(doc) => doc.bytes()?,
+                    None => read(&path)?,
+                };
+                parts.push((folder::name_of(&path), bytes));
+            }
+            let bytes = proton_pdf::combine::combine(&parts)?;
+            proton_pdf::save::atomically(&target, &bytes)?;
+            Ok(target)
+        })();
+        match made {
+            Ok(path) => {
+                let mut events = vec![notice(format!("combined {} into {}", paths.len(), folder::tilde(&path)), NoticeLevel::Info)];
+                events.extend(self.open(&path.display().to_string(), None));
                 events
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
