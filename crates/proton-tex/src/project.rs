@@ -127,6 +127,39 @@ fn braced(text: &str, count: usize) -> Vec<String> {
     groups
 }
 
+/// The classes and packages a file asks TeX for, as the files TeX looks
+/// for: `\documentclass{article}` wants `article.cls`, `\usepackage{a,b}`
+/// wants `a.sty` and `b.sty`, and Beamer's `\usetheme{x}` wants
+/// `beamerthemex.sty`.
+pub fn wants(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in uncommented(text) {
+        for (command, made) in [("\\documentclass", "{}.cls"), ("\\usepackage", "{}.sty"), ("\\RequirePackage", "{}.sty"), ("\\usetheme", "beamertheme{}.sty")] {
+            let mut rest = line.as_str();
+            while let Some(at) = rest.find(command) {
+                let after = &rest[at + command.len()..];
+                rest = after;
+                if after.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                    continue;
+                }
+                // Past its options, `[margin=1in]`.
+                let after = after.trim_start();
+                let after = match after.strip_prefix('[') {
+                    Some(options) => options.split_once(']').map_or("", |(_, r)| r),
+                    None => after,
+                };
+                for name in braced(after, 1).first().map(|names| names.split(',').map(str::trim).collect::<Vec<_>>()).unwrap_or_default() {
+                    let file = made.replace("{}", name);
+                    if !name.is_empty() && !out.contains(&file) {
+                        out.push(file);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// What the preamble needs: XeLaTeX for system fonts and polyglossia,
 /// LuaLaTeX for Lua; else nothing.
 pub fn engine_needed(text: &str) -> Option<&'static str> {

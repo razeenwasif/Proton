@@ -18,6 +18,20 @@ import { commandOf, envHtml, readyHtml } from "./tex-env.js";
 /** @typedef {import("./bindings/TexLogEntry").TexLogEntry} Entry */
 /** @typedef {import("./bindings/TexPackages").TexPackages} Packages */
 /** @typedef {import("./bindings/TexOutline").TexOutline} Outline */
+/** @typedef {import("./bindings/TexTemplate").TexTemplate} Template */
+
+/** Where new projects were last made, kept in this window's storage. */
+const PARENT = "proton.tex.parent";
+const FIRST_PARENT = "~/Documents/LaTeX";
+
+/** The folder new projects go in, as last typed. */
+function lastParent() {
+  try {
+    return localStorage.getItem(PARENT) || FIRST_PARENT;
+  } catch {
+    return FIRST_PARENT;
+  }
+}
 
 /** The log's groups, in the order they are shown. */
 const GROUPS = /** @type {[Entry["kind"], string][]} */ ([["error", "Errors"], ["warning", "Warnings"], ["box", "Bad boxes"]]);
@@ -51,8 +65,9 @@ export function createTex(host) {
   const pane = found;
   const q = (/** @type {string} */ sel) => /** @type {HTMLElement} */ (pane.querySelector(sel));
   /** @type {{env: Env | null, bundle: Bundle, confirming: boolean, build: Build | null, log: Log | null, root: string, packages: Packages,
-   *   shown: {pdf: string, version: number} | null}} */
-  const state = { env: null, bundle: "full", confirming: false, build: null, log: null, root: "", packages: { state: "idle" }, shown: null };
+   *   shown: {pdf: string, version: number} | null, templates: Template[], gallery: boolean, chosen: string | null, name: string, parent: string}} */
+  const state = { env: null, bundle: "full", confirming: false, build: null, log: null, root: "", packages: { state: "idle" }, shown: null,
+    templates: [], gallery: false, chosen: null, name: "", parent: lastParent() };
   const pages = q("[data-tex-pages]");
   const pdfView = createPdfView(pages, {
     onWhere: (page, count) => {
@@ -88,9 +103,14 @@ export function createTex(host) {
     const env = state.env;
     const showing = env?.state === "ready" && state.shown !== null;
     pages.hidden = !showing;
-    pdf.hidden = showing;
+    pdf.hidden = showing || state.gallery;
     q("[data-tex-pdf-bar]").hidden = !showing;
-    if (showing) return;
+    // The templates: under the empty state once TeX is in, or over
+    // everything while + has them open.
+    const gallery = q("[data-tex-gallery]");
+    gallery.hidden = !state.templates.length || !(state.gallery || (env?.state === "ready" && !showing && !state.build?.pdf));
+    gallery.classList.toggle("over", state.gallery);
+    if (showing || state.gallery) return;
     if (env && env.state !== "ready") {
       pdf.innerHTML = `<div class="lab-env tex-env-card"><header>TeX</header>${envHtml(env, state.bundle)}</div>`;
       return;
@@ -103,6 +123,31 @@ export function createTex(host) {
       : b?.pdf ? `<h3>${esc(buildSaid(b))}</h3><p><code>${esc(b.main ?? "")}</code></p>`
         : `<h3>Nothing typeset yet</h3><p>Open a <code>.tex</code> file from the tree, and its PDF is drawn here each time it is saved.</p>`;
     pdf.innerHTML = `<div class="tex-empty">${icon("tex")}${head}${ready}</div>`;
+  }
+
+  /** The templates, and once one is chosen, where its project goes. Drawn
+   *  only when they change, so a build's news does not take the keyboard
+   *  from the name being typed. */
+  function renderGallery() {
+    const chosen = state.templates.find((t) => t.id === state.chosen);
+    const cards = state.templates.map((t) =>
+      `<button type="button" class="tex-template${t.id === state.chosen ? " on" : ""}" data-tex-template="${esc(t.id)}" aria-pressed="${t.id === state.chosen}">` +
+      `<b>${esc(t.name)}</b><span>${esc(t.about)}</span><span class="lab-faint">${esc(t.files.join(" · "))}</span></button>`).join("");
+    const form = chosen ? `<form class="tex-new" data-tex-new-form>
+        <label>Name <input data-tex-new-name value="${esc(state.name)}" placeholder="My paper" spellcheck="false" autocomplete="off"></label>
+        <label>In the folder <input data-tex-new-parent value="${esc(state.parent)}" spellcheck="false" autocomplete="off"></label>
+        <div class="lab-acts"><button type="button" class="cc-quiet" data-tex-add title="The ${esc(chosen.name)} template's files, added to the project open now">Add to this project</button>
+        <button type="submit" class="cc-primary">Make the project</button></div></form>` : "";
+    const close = state.gallery ? `<span class="grow"></span><button type="button" class="hbtn" data-tex-gallery-close title="Back" aria-label="Close the templates">${icon("close")}</button>` : "";
+    q("[data-tex-gallery]").innerHTML = `<div class="tex-gallery-in"><header><h4>Start from a template</h4>${close}</header><div class="tex-templates">${cards}</div>${form}</div>`;
+  }
+
+  /** Open or close the templates. @param {boolean} open */
+  function gallery(open) {
+    state.gallery = open;
+    if (!open) state.chosen = null;
+    renderGallery();
+    renderPdf();
   }
 
   /** The header: where the build stands, and what can be done about it. */
@@ -181,6 +226,19 @@ export function createTex(host) {
       return;
     }
     if (t.closest("[data-tex-stop]")) return void host.dispatch({ type: "texStop" });
+    if (t.closest("[data-tex-new]")) return gallery(!state.gallery);
+    if (t.closest("[data-tex-gallery-close]")) return gallery(false);
+    const template = /** @type {HTMLElement | null} */ (t.closest("[data-tex-template]"));
+    if (template) {
+      state.chosen = template.dataset.texTemplate ?? null;
+      renderGallery();
+      /** @type {HTMLInputElement | null} */ (pane.querySelector("[data-tex-new-name]"))?.focus();
+      return;
+    }
+    if (t.closest("[data-tex-add]") && state.chosen) {
+      host.dispatch({ type: "texAddTemplate", template: state.chosen });
+      return gallery(false);
+    }
     const jump = /** @type {HTMLElement | null} */ (t.closest("[data-tex-jump]"));
     if (jump) {
       host.dispatch({ type: "jumpTo", mode: "tex", path: jump.dataset.texJump, line: Math.max(0, Number(jump.dataset.line) - 1), column: 0 });
@@ -213,6 +271,33 @@ export function createTex(host) {
       e.preventDefault();
       e.stopPropagation();
     }
+  });
+
+  // What is typed is kept, for the gallery drawn again.
+  pane.addEventListener("input", (e) => {
+    const t = /** @type {HTMLInputElement} */ (e.target);
+    if (t.matches("[data-tex-new-name]")) state.name = t.value;
+    if (t.matches("[data-tex-new-parent]")) state.parent = t.value;
+  });
+
+  pane.addEventListener("submit", (e) => {
+    const form = /** @type {HTMLElement} */ (e.target);
+    if (!form.matches("[data-tex-new-form]")) return;
+    e.preventDefault();
+    if (!state.chosen) return;
+    const name = state.name.trim();
+    if (!name) {
+      /** @type {HTMLInputElement | null} */ (form.querySelector("[data-tex-new-name]"))?.focus();
+      return;
+    }
+    try {
+      localStorage.setItem(PARENT, state.parent.trim());
+    } catch {
+      // Not kept: the next one starts from the folder first offered.
+    }
+    host.dispatch({ type: "texNew", template: state.chosen, parent: state.parent.trim() || FIRST_PARENT, name });
+    state.name = "";
+    gallery(false);
   });
 
   pane.addEventListener("change", (e) => {
@@ -280,6 +365,13 @@ export function createTex(host) {
   /** One element in another. @param {HTMLElement} box @param {string} sel */
   const q2 = (box, sel) => /** @type {HTMLElement} */ (box.querySelector(sel));
 
+  /** What a new project can start from. @param {{templates: Template[]}} event */
+  function templates(event) {
+    state.templates = event.templates;
+    renderGallery();
+    renderPdf();
+  }
+
   /** The document's headings and its words, under the file tree, each
    *  heading a click from its line. @param {{main: string | null, outline: Outline}} event */
   function outline(event) {
@@ -312,5 +404,5 @@ export function createTex(host) {
   renderPdf();
   renderHead();
   renderLog();
-  return { show, env, build, log, packages, sync, outline, pdf: () => pdfView };
+  return { show, env, build, log, packages, sync, outline, templates, pdf: () => pdfView };
 }

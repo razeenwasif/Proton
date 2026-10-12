@@ -343,6 +343,11 @@ impl Workspace {
         self
     }
 
+    /// A TeX shared with other workspaces: the session's, for a test.
+    pub fn share_tex(&mut self, env: &std::sync::Arc<std::sync::Mutex<proton_lab::tex::TexEnv>>) {
+        self.tex = crate::tex::Tex::sharing(env.clone());
+    }
+
     /// The same, for a workspace that is already in a collection and cannot be
     /// taken by value — the session builds them into a `Vec`.
     pub fn enable_language_servers(&mut self) {
@@ -1680,6 +1685,19 @@ impl Workspace {
                 let root = self.pickers.root().to_path_buf();
                 self.tex.save_pdf(&root)
             }
+            Command::TexAddTemplate { template } => {
+                let root = self.pickers.root().to_path_buf();
+                match proton_tex::templates::add(&template, &root) {
+                    Ok(made) => {
+                        let mut events = vec![notice(format!("added {}", made.wrote.iter().map(|f| made.folder.join(f).strip_prefix(&root).map(|p| p.display().to_string()).unwrap_or_default()).collect::<Vec<_>>().join(", ")), NoticeLevel::Info)];
+                        events.extend(self.tex_begin(&made.main));
+                        events
+                    }
+                    Err(why) => vec![notice(why, NoticeLevel::Error)],
+                }
+            }
+            // A new project is a new workspace: the session makes it.
+            Command::TexNew { .. } => vec![notice("A new project is made by the window.".into(), NoticeLevel::Warn)],
             Command::TexFindPackages { files } => self.tex.packages_do(|env| env.find_packages(files)),
             Command::TexInstallPackages { packages } => self.tex.packages_do(|env| env.install_packages(packages)),
             Command::TexForgetPackages => self.tex.packages_do(|env| {
@@ -2746,6 +2764,18 @@ impl Workspace {
         if let Some(texlab) = self.tex.texlab() {
             self.servers.set_program("latex", texlab);
         }
+    }
+
+    /// A project just made from a template: its main file opened in LaTeX,
+    /// what TeX lacks for it offered or else typeset, and its outline drawn.
+    pub fn tex_begin(&mut self, main: &Path) -> Vec<Event> {
+        let mut events = self.apply(Command::JumpTo { mode: ModeId::Tex, path: main.display().to_string(), line: 0, column: 0 });
+        let root = self.pickers.root().to_path_buf();
+        let engine = self.settings.get("tex.engine").and_then(|v| v.as_str()).map(str::to_string);
+        events.extend(self.tex.begin(&root, main, engine.as_deref()));
+        events.extend(self.tex_outline(true));
+        events.push(self.tree_event());
+        events
     }
 
     /// The document's outline, from the file being edited.
@@ -6016,6 +6046,7 @@ impl Workspace {
         if mode == ModeId::Tex {
             events.extend(self.tex.env_event(true));
             events.extend(self.tex.last_event());
+            events.push(Event::TexTemplates { templates: proton_tex::templates::templates() });
             events.extend(self.tex_outline(true));
             self.use_texlab();
         }

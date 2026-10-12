@@ -190,6 +190,35 @@ impl TexEnv {
         Ok(())
     }
 
+    /// Which of `files` — `amsmath.sty`, `beamer.cls` — this TeX lacks, as
+    /// kpsewhich finds them: local and quick, nothing asked of CTAN. Before
+    /// a new project's first build, so what it needs is offered first.
+    pub fn lacking(&self, files: &[String]) -> Result<Vec<String>, String> {
+        let bin = match (&self.state, self.marker()) {
+            (TexState::Ready { .. }, Some(marker)) => marker.bin,
+            _ => return Err("TeX is not installed.".into()),
+        };
+        let files: Vec<&String> = files.iter().filter(|f| !f.is_empty() && !f.contains('/') && !f.starts_with('-')).collect();
+        if files.is_empty() {
+            return Ok(Vec::new());
+        }
+        let own_home = self.home.join(".home");
+        let _ = std::fs::create_dir_all(&own_home);
+        // kpsewhich says where each file it finds is, and nothing of the
+        // rest — and exits 1 for them, which is not a failure here.
+        let output = Command::new(bin.join("kpsewhich"))
+            .args(&files)
+            .env_clear()
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("HOME", &own_home)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("kpsewhich could not be run: {e}"))?;
+        let found = String::from_utf8_lossy(&output.stdout);
+        let has = |file: &str| found.lines().any(|line| line.trim_end().rsplit('/').next() == Some(file));
+        Ok(files.into_iter().filter(|f| !has(f)).cloned().collect())
+    }
+
     /// Put what was found, installed or failed away.
     pub fn forget_packages(&mut self) {
         if self.packages_asking.is_none() {
@@ -281,5 +310,20 @@ mod tests {
         tex.forget_packages();
         assert_eq!(tex.packages(), &Packages::Idle);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn what_a_new_project_lacks_is_what_kpsewhich_does_not_find() {
+        let (dir, tex) = ready("lacking", "exit 0");
+        let bin = tex.marker().unwrap().bin;
+        // As kpsewhich does: where each file it has is, nothing of the rest.
+        std::fs::write(bin.join("kpsewhich"), "#!/bin/sh\nfor f in \"$@\"; do case $f in amsmath.sty|article.cls) echo /tex/dist/$f ;; esac; done\nexit 1\n").unwrap();
+        std::fs::set_permissions(bin.join("kpsewhich"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let asked: Vec<String> = ["article.cls", "amsmath.sty", "natbib.sty", "-debug", "../x.sty"].map(String::from).to_vec();
+        assert_eq!(tex.lacking(&asked).unwrap(), ["natbib.sty"], "found ones and odd names left out");
+        assert_eq!(tex.lacking(&[]).unwrap(), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(dir);
+        let missing = TexEnv::new(&std::env::temp_dir().join("proton-tlmgr-none"), Arc::new(Script::default()), Some(MAC), Tools::default());
+        assert!(missing.lacking(&asked).unwrap_err().contains("not installed"));
     }
 }

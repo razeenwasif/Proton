@@ -5052,6 +5052,27 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .tex-heading:hover { background: var(--row-hover); color: var(--text); }
 .tex-heading.top { color: var(--text); }
 .tex-outline .lab-faint { padding: 2px 13px 10px; margin: 0; font: var(--z-2xs)/1.5 var(--zed); }
+/* The templates a project starts from: cards, then a name and a folder. */
+.tex-gallery { padding: 22px 16px 30px; font: var(--z-xs)/1.5 var(--zed); color: var(--cc-soft); }
+.tex-gallery[hidden] { display: none; }
+/* Opened with +, it lies over the PDF, which keeps its page and zoom. */
+.tex-gallery.over { position: absolute; inset: 0; z-index: 2; overflow: auto; background: var(--bg); }
+.tex-gallery-in { max-width: 620px; margin: 0 auto; }
+.tex-gallery header { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+.tex-gallery h4 { margin: 0; font: 600 var(--z-sm) var(--zed); color: var(--cc-text); }
+.tex-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 8px; }
+.tex-template { display: grid; gap: 4px; align-content: start; min-width: 0; padding: 10px 12px; border: 1px solid var(--cc-line); border-radius: 8px;
+  background: var(--cc-raise); color: var(--cc-soft); font: inherit; text-align: left; cursor: pointer; }
+.tex-template:hover { border-color: var(--cc-line-2); }
+.tex-template.on { border-color: var(--cc-accent); }
+.tex-template b { color: var(--cc-text); font-weight: 600; }
+.tex-template .lab-faint { font-size: var(--z-2xs); overflow-wrap: anywhere; }
+.tex-new { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: 14px; }
+.tex-new label { display: grid; gap: 4px; min-width: 0; color: var(--cc-muted); font-size: var(--z-2xs); }
+.tex-new input { min-width: 0; padding: 6px 8px; border: 1px solid var(--cc-line-2); border-radius: 6px; background: var(--cc-code); color: var(--cc-text); font: var(--z-xs) var(--zed); }
+.tex-new input:focus-visible { outline: 2px solid var(--cc-accent); outline-offset: 1px; }
+.tex-new .lab-acts { grid-column: 1 / -1; }
+@media (max-width: 520px) { .tex-new { grid-template-columns: minmax(0, 1fr); } }
 .tex-missing { display: grid; gap: 8px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--cc-line); border-radius: 8px; background: var(--cc-raise); font: var(--z-2xs)/1.6 var(--zed); }
 .tex-missing p { margin: 0; }
 /* The PDF, in LaTeX's pane: paper on the pane's own ground, a bar above it. */

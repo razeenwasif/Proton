@@ -2,6 +2,25 @@
  * planned, installed a stage at a time, as the core would say. Scripted —
  * the real install is in proton-lab, and this must never grow into one. */
 
+/** The gallery's templates, as the core lists them. */
+const TEMPLATES = [
+  { id: "article", name: "Article", about: "A short paper or essay: a title, an abstract, sections and references.", files: ["main.tex", "references.bib"], wants: [] },
+  { id: "paper", name: "Research paper", about: "Theorems and proofs, a table, and references by number with natbib.", files: ["main.tex", "references.bib"], wants: [] },
+  { id: "report", name: "Report", about: "Chapters, with a table of contents.", files: ["main.tex"], wants: [] },
+  { id: "thesis", name: "Thesis", about: "A book of several files, a chapter in each, typeset from main.tex.", files: ["main.tex", "chapters/introduction.tex", "chapters/background.tex", "chapters/conclusion.tex", "references.bib"], wants: [] },
+  { id: "slides", name: "Slides", about: "A Beamer presentation: a title page, an outline, and frames.", files: ["main.tex"], wants: [] },
+  { id: "cv", name: "CV", about: "One page: education, experience and skills.", files: ["main.tex"], wants: [] },
+];
+
+/** A thesis's outline, as the core reads one. */
+const OUTLINE = { words: 4182, headings: [
+  { level: 1, title: "Introduction", file: "chapters/introduction.tex", line: 1, label: "ch:introduction" },
+  { level: 1, title: "Background", file: "chapters/background.tex", line: 1, label: "ch:background" },
+  { level: 2, title: "What is known", file: "chapters/background.tex", line: 4, label: "sec:known" },
+  { level: 2, title: "What is not", file: "chapters/background.tex", line: 9, label: "sec:gap" },
+  { level: 1, title: "Conclusion", file: "chapters/conclusion.tex", line: 1, label: null },
+] };
+
 /** @param {(event: any) => void} deliver */
 export function createTexPreview(deliver) {
   const home = "~/.proton/tex";
@@ -24,7 +43,7 @@ export function createTexPreview(deliver) {
 
   return {
     /** What the window sees on entering the mode. */
-    entered: () => [event()],
+    entered: () => [event(), { type: "texTemplates", templates: TEMPLATES }, { type: "texOutline", main: "main.tex", outline: OUTLINE }],
     /** @param {any} command */
     command(command) {
       switch (command.type) {

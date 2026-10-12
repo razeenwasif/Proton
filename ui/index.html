@@ -620,6 +620,7 @@
           </div>
           <span class="grow"></span>
           <span class="tex-build" data-tex-build></span>
+          <button class="hbtn" data-tex-new title="A new project from a template" aria-label="A new project from a template"><svg class="i"><use href="#i-plus"/></svg></button>
         </header>
         <div class="tex-body" data-tex-body="pdf">
           <div class="tex-pdf-bar" data-tex-pdf-bar hidden>
@@ -633,6 +634,9 @@
           </div>
           <div class="tex-pdf" data-tex-pdf>
             <div class="tex-note" data-tex-note></div>
+            <!-- The templates, from Event::TexTemplates: under the empty
+                 state, or over the PDF while + has them open. -->
+            <div class="tex-gallery" data-tex-gallery hidden></div>
             <div class="scroll tex-pages" data-tex-pages tabindex="0" aria-label="The PDF" hidden></div>
           </div>
         </div>

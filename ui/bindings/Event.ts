@@ -115,6 +115,7 @@ import type { TexLog } from "./TexLog";
 import type { TexOutline } from "./TexOutline";
 import type { TexPackages } from "./TexPackages";
 import type { TexSync } from "./TexSync";
+import type { TexTemplate } from "./TexTemplate";
 import type { ThemeView } from "./ThemeView";
 import type { Token } from "./Token";
 import type { TraceState } from "./TraceState";
@@ -269,7 +270,7 @@ check: boolean,
 /**
  * Whether this Proton asks anybody at all.
  */
-live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "texEnv", env: TexEnv, } | { "type": "texSync", found: TexSync, } | { "type": "texPackages", packages: TexPackages, } | { "type": "texBuild", build: TexBuild, } | { "type": "texLog", log: TexLog, root: string, } | { "type": "texOutline", main: string | null, outline: TexOutline, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "studyList", notebooks: Array<StudySummary>, open: string | null, folder: string | null, } | { "type": "studyNotebook", slug: string, title: string, course: string, exam: string | null, readOnly: string | null, sources: Array<StudySourceRow>, notes: Array<StudyNoteRow>, } | { "type": "studyClosed" } | { "type": "studyKb", roots: Array<StudyRoot>, rules: Array<string>, 
+live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "texEnv", env: TexEnv, } | { "type": "texSync", found: TexSync, } | { "type": "texPackages", packages: TexPackages, } | { "type": "texBuild", build: TexBuild, } | { "type": "texLog", log: TexLog, root: string, } | { "type": "texTemplates", templates: Array<TexTemplate>, } | { "type": "texOutline", main: string | null, outline: TexOutline, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "studyList", notebooks: Array<StudySummary>, open: string | null, folder: string | null, } | { "type": "studyNotebook", slug: string, title: string, course: string, exam: string | null, readOnly: string | null, sources: Array<StudySourceRow>, notes: Array<StudyNoteRow>, } | { "type": "studyClosed" } | { "type": "studyKb", roots: Array<StudyRoot>, rules: Array<string>, 
 /**
  * Whether it has been begun on: Notebook has been opened.
  */

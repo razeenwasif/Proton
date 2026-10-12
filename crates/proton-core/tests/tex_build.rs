@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use proton_core::bus::Event;
 use proton_core::mode::ModeId;
 use proton_core::tex::TexBuild;
+use proton_core::session::Session;
 use proton_core::{Command, Workspace};
 use proton_lab::tex::{Bundle, Marker, Platform, TexEnv, Tools};
 
@@ -27,6 +28,9 @@ printf '%%PDF-1.5\n%%stand-in\n' > "$out/$stem.pdf"
 printf '(%s\nLaTeX Warning: Citation `knuth84'"'"' on page 1 undefined on input line 4.\n)\nOutput written on %s.pdf (1 page, 900 bytes).\n' "$main" "$stem" > "$out/$stem.log"
 printf 'SyncTeX Version:1\nInput:1:%s\nUnit:1\nContent:\n{1\n(1,3:4736286,6578176:19734528,657817,131563\n)\n}1\n' "$main" > "$out/$stem.synctex.gz"
 "#;
+
+/// kpsewhich, standing in: TeX has every file asked for but natbib's.
+const KPSEWHICH: &str = "#!/bin/sh\nfor f in \"$@\"; do case $f in natbib.sty) ;; *) echo /tex/dist/$f ;; esac; done\n";
 
 struct Bench {
     base: PathBuf,
@@ -51,7 +55,7 @@ fn bench(tag: &str) -> (Bench, TexEnv) {
     let home = base.join("tex");
     let bin = home.join("TinyTeX/bin/universal-darwin");
     std::fs::create_dir_all(&bin).unwrap();
-    for (name, body) in [("latexmk", LATEXMK), ("pdflatex", "#!/bin/sh\n"), ("tlmgr", "#!/bin/sh\n")] {
+    for (name, body) in [("latexmk", LATEXMK), ("pdflatex", "#!/bin/sh\n"), ("tlmgr", "#!/bin/sh\n"), ("kpsewhich", KPSEWHICH)] {
         std::fs::write(bin.join(name), body).unwrap();
         std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -237,4 +241,78 @@ fn a_line_is_found_in_the_pdf_and_a_point_in_the_pdf_found_in_the_source() {
     assert!(buf.path().is_some_and(|p| p.ends_with("main.tex")), "{:?}", buf.path());
     assert_eq!(buf.position(buf.cursor.offset).line, 2);
     assert_eq!(ws.mode(), ModeId::Tex);
+}
+
+fn said(events: &[Event], what: &str) -> bool {
+    events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains(what)))
+}
+
+#[test]
+fn a_new_project_from_a_template_is_opened_in_latex_on_its_main_file_and_typeset() {
+    let (b, env) = bench("new");
+    let mut session = Session::new(&b.project).with_tex_env(env);
+    session.apply(Command::SetMode { mode: ModeId::Tex });
+    let parent = b.base.join("papers");
+    let events = session.apply(Command::TexNew { template: "article".into(), parent: parent.display().to_string(), name: "An essay".into() });
+    let folder = parent.join("An essay");
+    assert!(said(&events, "Made"), "{events:?}");
+    assert_eq!(session.workspaces().len(), 2, "a workspace of its own");
+    let ws = session.active();
+    assert_eq!(ws.root(), std::fs::canonicalize(&folder).unwrap());
+    assert_eq!(ws.mode(), ModeId::Tex);
+    assert_eq!(ws.editor().buffer().path().map(|p| p.file_name().unwrap().to_owned()), Some("main.tex".into()));
+    assert!(std::fs::read_to_string(folder.join("main.tex")).unwrap().contains("\\title{An essay}"));
+    let running = events.iter().find_map(|e| match e {
+        Event::TexBuild { build } => Some(build.clone()),
+        _ => None,
+    });
+    assert_eq!(running.map(|r| r.state), Some("running".into()), "nothing lacking: typeset at once — {events:?}");
+    assert!(events.iter().any(|e| matches!(e, Event::TexOutline { main: Some(m), outline } if m == "main.tex" && outline.headings.len() == 2)), "{events:?}");
+
+    // The same folder again: refused, and nothing opened.
+    let events = session.apply(Command::TexNew { template: "cv".into(), parent: parent.display().to_string(), name: "An essay".into() });
+    assert!(said(&events, "not empty"), "{events:?}");
+    assert_eq!(session.workspaces().len(), 2);
+}
+
+#[test]
+fn a_template_that_wants_what_tex_lacks_offers_it_first_and_is_typeset_once_installed() {
+    let (b, env) = bench("template");
+    let mut ws = Workspace::rooted(&b.project).with_tex_env(env);
+    let events = ws.apply(Command::SetMode { mode: ModeId::Tex });
+    let templates = events.iter().find_map(|e| match e {
+        Event::TexTemplates { templates } => Some(templates.clone()),
+        _ => None,
+    });
+    assert_eq!(templates.map(|t| t.len()), Some(6), "entering LaTeX shows the gallery's templates");
+
+    // The paper wants natbib, which this TeX lacks: offered, not typeset.
+    let events = ws.apply(Command::TexAddTemplate { template: "paper".into() });
+    assert!(said(&events, "added paper/main.tex, paper/references.bib"), "the project's own main.tex is not written over: {events:?}");
+    assert_eq!(std::fs::read_to_string(b.project.join("main.tex")).unwrap().lines().count(), 4);
+    assert!(ws.editor().buffer().path().is_some_and(|p| p.ends_with("paper/main.tex")));
+    let missing = events.iter().find_map(|e| match e {
+        Event::TexLog { log, .. } => Some(log.missing.clone()),
+        _ => None,
+    });
+    assert_eq!(missing, Some(vec!["natbib.sty".to_string()]), "{events:?}");
+    assert!(!events.iter().any(|e| matches!(e, Event::TexBuild { .. })), "not typeset while it lacks a package");
+
+    // Installed — tlmgr standing in — and the paper is typeset, not the project's main.tex.
+    ws.apply(Command::TexInstallPackages { packages: vec!["natbib".into()] });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let running = loop {
+        let events = ws.apply(Command::Poll);
+        if let Some(build) = events.iter().find_map(|e| match e {
+            Event::TexBuild { build } => Some(build.clone()),
+            _ => None,
+        }) {
+            break build;
+        }
+        assert!(Instant::now() < deadline, "not typeset once installed");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(running.main.as_deref(), Some("paper/main.tex"));
+    let (build, _) = built(&mut ws);
+    assert_eq!(build.state, "done", "{build:?}");
 }

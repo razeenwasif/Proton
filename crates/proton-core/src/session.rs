@@ -227,6 +227,9 @@ pub struct Session {
     /// Notebook: the person's notebooks and the knowledge base they draw
     /// from, one for every project here.
     study: crate::study::Study,
+    /// The TeX every workspace here shares, given for a test; the machine's
+    /// otherwise.
+    tex: Option<std::sync::Arc<std::sync::Mutex<proton_lab::tex::TexEnv>>>,
 }
 
 impl Session {
@@ -251,6 +254,7 @@ impl Session {
             person: None,
             make_research: crate::research::Research::kept_in,
             study: crate::study::Study::new(),
+            tex: None,
         }
     }
 
@@ -289,6 +293,18 @@ impl Session {
 
     pub fn plugins(&self) -> &crate::plugins::Plugins {
         &self.plugins
+    }
+
+    /// With this TeX rather than the machine's, for every workspace here and
+    /// every one opened later: for a test, which must not look in
+    /// `~/.proton/tex`, let alone typeset with it.
+    pub fn with_tex_env(mut self, env: proton_lab::tex::TexEnv) -> Session {
+        let env = std::sync::Arc::new(std::sync::Mutex::new(env));
+        for workspace in &mut self.workspaces {
+            workspace.share_tex(&env);
+        }
+        self.tex = Some(env);
+        self
     }
 
     /// Notebook's, made otherwise: for a test, one that says which of its
@@ -350,6 +366,23 @@ impl Session {
     /// Refused while a round or a run is going, since the Research that has
     /// them is let go of. A folder that is not there is made only when its
     /// parent is, so a slip of the keyboard cannot make a tree of them.
+    /// A new LaTeX project from a template, opened as a workspace of its own
+    /// in LaTeX, on its main file.
+    fn tex_new(&mut self, template: &str, parent: &str, name: &str) -> Vec<Event> {
+        let parent = folder::normalise(&folder::expand(parent.trim()));
+        let made = match proton_tex::templates::create(template, &parent, name) {
+            Ok(made) => made,
+            Err(why) => return vec![notice(why, NoticeLevel::Error)],
+        };
+        let mut events = vec![notice(format!("Made {}.", folder::tilde(&made.folder)), NoticeLevel::Info)];
+        if self.active().mode() != ModeId::Tex {
+            events.extend(self.set_mode(ModeId::Tex));
+        }
+        events.extend(self.open(&made.folder.display().to_string()));
+        events.extend(self.active_mut().tex_begin(&made.main));
+        events
+    }
+
     fn set_research_folder(&mut self, typed: &str) -> Vec<Event> {
         let lock = |r: &std::sync::Arc<std::sync::Mutex<crate::research::Research>>| r.lock().map(|r| r.has_work()).unwrap_or(false);
         if self.research.as_ref().is_some_and(lock) || self.workspaces.iter().any(Workspace::research_busy) {
@@ -674,6 +707,7 @@ impl Session {
                 events
             }
             Command::ResearchFolder { folder } => self.set_research_folder(&folder),
+            Command::TexNew { template, parent, name } => self.tex_new(&template, &parent, &name),
             // Notebook's are the session's: a notebook is the person's, not a project's.
             command if crate::study::handles(&command) => self.study.apply(command),
 
@@ -893,6 +927,9 @@ impl Session {
 
     fn build(&self, root: &Path) -> Workspace {
         let mut workspace = Workspace::rooted(root).sharing_plugins(&self.plugins).sharing_research(self.research.as_ref());
+        if let Some(tex) = &self.tex {
+            workspace.share_tex(tex);
+        }
         if self.servers {
             workspace.enable_language_servers();
         }

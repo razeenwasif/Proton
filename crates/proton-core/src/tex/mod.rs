@@ -128,6 +128,11 @@ impl Tex {
         Tex { env: Some(Arc::new(Mutex::new(env))), ..Tex::default() }
     }
 
+    /// With a TeX another workspace has too.
+    pub fn sharing(env: Arc<Mutex<TexEnv>>) -> Tex {
+        Tex { env: Some(env), ..Tex::default() }
+    }
+
     fn env(&mut self) -> Arc<Mutex<TexEnv>> {
         self.env.get_or_insert_with(shared_tex).clone()
     }
@@ -317,6 +322,36 @@ impl Tex {
         }
         self.outline = Some(now.clone());
         vec![Event::TexOutline { main: now.0, outline: now.1 }]
+    }
+
+    /// A project just made from a template, before its first build: what
+    /// its main file asks TeX for and TeX lacks is offered, as a build's
+    /// missing files are — the build waiting until it is installed — and
+    /// with nothing lacking it is typeset at once. Without TeX, the pane
+    /// says to install it.
+    pub fn begin(&mut self, root: &Path, main: &Path, engine_setting: Option<&str>) -> Vec<Event> {
+        let env = self.env();
+        let lacking = {
+            let mut env = env.lock().unwrap_or_else(|e| e.into_inner());
+            if matches!(env.state(), TexState::Unknown) {
+                env.check();
+            }
+            if env.marker().is_none() {
+                None
+            } else {
+                let wants = proton_tex::project::wants(&std::fs::read_to_string(main).unwrap_or_default());
+                Some(env.lacking(&wants).unwrap_or_default())
+            }
+        };
+        match lacking {
+            None => self.env_event(true),
+            Some(missing) if !missing.is_empty() => {
+                self.again = Some((root.to_path_buf(), Some(main.to_path_buf()), engine_setting.map(str::to_string)));
+                let log = proton_tex::log::Log { missing, ..Default::default() };
+                vec![Event::TexLog { log, root: root.display().to_string() }]
+            }
+            Some(_) => self.compile(root, Some(main), engine_setting),
+        }
     }
 
     /// Copy the last PDF made beside its main file, in the project — the

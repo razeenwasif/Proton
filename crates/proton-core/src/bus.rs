@@ -476,6 +476,19 @@ pub enum Command {
     TexStop,
     /// Copy the PDF last made beside the main file, in the project.
     TexSavePdf,
+    /// A new LaTeX project from a template: a folder called `name` made in
+    /// `parent` — typed as a path is, `~` and all — and opened in LaTeX on
+    /// its main file. The folder must be new or empty.
+    TexNew {
+        template: String,
+        parent: String,
+        name: String,
+    },
+    /// A template's files added to the open project: at its top when none
+    /// of them are there yet, else in a folder of their own.
+    TexAddTemplate {
+        template: String,
+    },
     /// Show where the cursor's line is in the PDF.
     TexSyncForward,
     /// Go to the line that put something at this point of the PDF: a page,
@@ -1664,6 +1677,10 @@ pub enum Event {
     TexLog {
         log: proton_tex::log::Log,
         root: String,
+    },
+    /// What a new project can start from, for LaTeX's gallery.
+    TexTemplates {
+        templates: Vec<proton_tex::templates::TemplateView>,
     },
     /// The document's shape — its headings, each where it is, across the
     /// files its main file brings in — and its words. `main` is the main

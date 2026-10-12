@@ -213,4 +213,43 @@ export async function texChecks({test, assert, win, doc, $, settle, key, shown})
     assert(!shown($('.workspace.on [data-tex-outline]')), 'Codex shows LaTeX\'s outline');
     await win.pushEvents([{type: 'texOutline', main: null, outline: {words: 0, headings: []}}]); await settle();
   });
+
+  await test('+ opens the templates over the PDF: one chosen makes a project of that name in the folder typed, or is added to this one', async () => {
+    await win.dispatch({type: 'setMode', mode: 'tex'}); await settle();
+    const pane = $('#tex-pane');
+    await win.pushEvents([{type: 'texTemplates', templates: [
+      {id: 'article', name: 'Article', about: 'A short paper.', files: ['main.tex', 'references.bib'], wants: ['article.cls']},
+      {id: 'thesis', name: 'Thesis', about: 'A book of several files.', files: ['main.tex', 'chapters/introduction.tex'], wants: ['book.cls']}]}]); await settle();
+    pane.querySelector('[data-tex-tab="pdf"]').click();
+    pane.querySelector('[data-tex-new]').click(); await settle();
+    const gallery = pane.querySelector('[data-tex-gallery]');
+    assert(shown(gallery) && gallery.classList.contains('over'), 'the templates did not open');
+    assert([...gallery.querySelectorAll('.tex-template b')].map((b) => b.textContent).join('|') === 'Article|Thesis', 'not the templates there are');
+    assert(!gallery.querySelector('[data-tex-new-form]'), 'a folder is asked for before a template is chosen');
+    gallery.querySelector('[data-tex-template="thesis"]').click(); await settle();
+    const name = gallery.querySelector('[data-tex-new-name]');
+    assert(name && doc.activeElement === name, 'the name is not asked for');
+    const parent = gallery.querySelector('[data-tex-new-parent]');
+    assert(parent.value === '~/Documents/LaTeX', `not the first folder offered: ${parent.value}`);
+    name.value = 'My thesis'; name.dispatchEvent(new Event('input', {bubbles: true}));
+    parent.value = '~/Papers'; parent.dispatchEvent(new Event('input', {bubbles: true}));
+    let at = win.commands.length;
+    gallery.querySelector('[data-tex-new-form]').requestSubmit(); await settle();
+    assert(JSON.stringify(sent(at, 'texNew')) === JSON.stringify([{type: 'texNew', template: 'thesis', parent: '~/Papers', name: 'My thesis'}]), `not made as asked: ${JSON.stringify(sent(at, 'texNew'))}`);
+    assert(!shown(gallery), 'the templates stayed open');
+
+    // Again: the folder is the one typed last; Add puts it in this project.
+    pane.querySelector('[data-tex-new]').click(); await settle();
+    gallery.querySelector('[data-tex-template="article"]').click(); await settle();
+    assert(gallery.querySelector('[data-tex-new-parent]').value === '~/Papers', 'the folder typed last is not offered');
+    at = win.commands.length;
+    gallery.querySelector('[data-tex-add]').click(); await settle();
+    assert(JSON.stringify(sent(at, 'texAddTemplate')) === JSON.stringify([{type: 'texAddTemplate', template: 'article'}]), 'Add did not ask');
+    assert(!sent(at, 'texNew').length && !shown(gallery), 'Add made a project, or left the templates open');
+    pane.querySelector('[data-tex-new]').click(); await settle();
+    gallery.querySelector('[data-tex-gallery-close]').click(); await settle();
+    assert(!shown(gallery), 'the templates did not close');
+    try { win.localStorage.removeItem('proton.tex.parent'); } catch { /* not kept */ }
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
 }

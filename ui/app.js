@@ -5127,6 +5127,10 @@ function renderEvent(event) {
       tex?.outline(event);
       break;
 
+    case "texTemplates":
+      tex?.templates(event);
+      break;
+
     case "leanEnv":
       lean?.env(event);
       break;

@@ -6,3 +6,4 @@ pub mod log;
 pub mod outline;
 pub mod project;
 pub mod synctex;
+pub mod templates;
