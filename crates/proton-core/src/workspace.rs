@@ -153,6 +153,10 @@ pub struct Workspace {
     /// outstanding call has an answer — so deferring one is simply not
     /// answering it yet.
     waiting: Vec<Waiting>,
+    /// Each entry of the conversation as the window was last sent it, by a
+    /// hash: so a streaming answer sends the entries from the first that
+    /// changed rather than the whole conversation on every token.
+    agent_sent: std::cell::RefCell<Vec<u64>>,
     /// The agent's PDF tool calls, which the session answers: the PDFs are
     /// its, not a project's. Deferred as a cell run is, and for as long.
     pdf_calls: Vec<(String, String, serde_json::Value)>,
@@ -285,6 +289,14 @@ const PATIENCE_ASKING: u32 = 400;
 /// typo would break the work this is for. What it catches is the cell that
 /// never finishes at all.
 const PATIENCE: u32 = 12_000;
+
+/// An entry of the conversation, as a number that moves when it does.
+fn entry_hash(entry: &crate::agent::Entry) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    entry.hash(&mut hash);
+    hash.finish()
+}
 
 impl Workspace {
     pub fn new() -> Self {
@@ -4476,7 +4488,7 @@ impl Workspace {
         let shown = self.agent_fingerprint();
         if !self.quiet && self.agent_shown != Some(shown) {
             self.agent_shown = Some(shown);
-            events.push(self.agent_event());
+            events.push(self.agent_delta());
         }
 
         // The turn ended between the start of this poll and its end, which is
@@ -5430,7 +5442,7 @@ impl Workspace {
         let transcript = self.agent.transcript();
         transcript.len().hash(&mut hash);
         for entry in transcript.iter().rev().take(2) {
-            format!("{entry:?}").hash(&mut hash);
+            entry.hash(&mut hash);
         }
         format!("{:?} {:?} {} {}", self.agent.activity(), self.agent.usage(), self.agent.provider().id(), self.agent.model()).hash(&mut hash);
         hash.finish()
@@ -5450,10 +5462,29 @@ impl Workspace {
         said
     }
 
+    /// The whole conversation, for the window to draw afresh: after a new
+    /// chat, a chat opened, a project focused.
     fn agent_event(&self) -> Event {
+        self.agent_from(0)
+    }
+
+    /// What changed of the conversation since the window was last sent it:
+    /// the entries from the first that differs — while an answer streams,
+    /// the one entry growing.
+    fn agent_delta(&self) -> Event {
+        let sent = self.agent_sent.borrow();
+        let from = self.agent.transcript().iter().zip(sent.iter()).take_while(|(entry, was)| entry_hash(entry) == **was).count();
+        drop(sent);
+        self.agent_from(from)
+    }
+
+    fn agent_from(&self, from: usize) -> Event {
+        let transcript = self.agent.transcript();
+        *self.agent_sent.borrow_mut() = transcript.iter().map(entry_hash).collect();
         let usage = self.agent.usage();
         Event::Agent {
-            transcript: self.agent.transcript().to_vec(),
+            transcript: transcript[from.min(transcript.len())..].to_vec(),
+            from: from.min(transcript.len()) as u32,
             activity: self.agent.activity(),
             // The cache number earns its place in the UI: it is the only
             // visible sign that the prefix is still being hit, and a silent

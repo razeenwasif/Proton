@@ -6594,6 +6594,14 @@ function showDataPanel(which) {
 
 /** The conversation as last painted, for a copy of it that comes into view stale. */
 let lastThread = null;
+/** The conversation as the core has sent it, and each entry's key: an event
+ * from `from` replaces what is from there on, and the rest is kept — a
+ * streaming answer sends the one entry growing, not the whole conversation.
+ * @type {any[]} */
+let agentTranscript = [];
+/** @type {string[]} */
+let agentKeys = [];
+let agentKeysModel = "";
 const threadSeen = new IntersectionObserver((entries) => {
   for (const entry of entries) {
     const thread = /** @type {HTMLElement} */ (entry.target);
@@ -6619,8 +6627,16 @@ function renderAgent(event) {
   // leave the other showing whatever it had when it was last looked at.
   // Entry by entry: what has not changed is not drawn again — while a turn
   // streams, only its last entry grows.
-  const keys = event.transcript.map((entry) => `${answeringModel}\u0000${JSON.stringify(entry)}`);
-  lastThread = { transcript: event.transcript, keys };
+  const from = Math.min(event.from ?? 0, agentTranscript.length);
+  const keyOf = (/** @type {any} */ entry) => `${answeringModel}\u0000${JSON.stringify(entry)}`;
+  agentTranscript = agentTranscript.slice(0, from).concat(event.transcript);
+  agentKeys = agentKeysModel === answeringModel
+    ? agentKeys.slice(0, from).concat(event.transcript.map(keyOf))
+    : agentTranscript.map(keyOf);
+  agentKeysModel = answeringModel;
+  const transcript = agentTranscript;
+  const keys = agentKeys;
+  lastThread = { transcript, keys };
   // Only the copies on screen are painted — each paint is the answer's
   // markdown, code and TeX again, and there are four copies. The rest are
   // marked stale and painted when they come into view. Every read before
@@ -6636,7 +6652,7 @@ function renderAgent(event) {
       continue;
     }
     delete thread.dataset.stale;
-    paintThread(thread, event.transcript, keys);
+    paintThread(thread, transcript, keys);
     // Follow the answer only if the reader was already at the bottom —
     // yanking someone back down while they are reading is worse than
     // making them scroll.

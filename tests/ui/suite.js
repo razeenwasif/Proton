@@ -1384,6 +1384,25 @@ await test('An answer in the agent panel colours its code, draws its TeX, keeps 
   assert(reply().querySelector('.md-math-block .katex-display') && !reply().querySelector('.md-pending'), 'the finished equation was not drawn');
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
 });
+await test('A streaming answer arrives as the entries that changed, spliced onto the conversation the window has', async () => {
+  const agent = (transcript, from) => win.pushEvents([{type: 'agent', provider: 'codex', model: 'gpt-6-astra', credential: '',
+    activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0, transcript, ...(from === undefined ? {} : {from})}]);
+  const you = {speaker: 'you', text: 'first question', thinking: '', streaming: false, calls: []};
+  await showAgentDock();
+  await agent([you, {speaker: 'proton', text: 'Partly', thinking: '', streaming: true, calls: []}]);
+  const thread = $('#codex-dock [data-agent-thread]');
+  const asked = thread.querySelector('.msg.you');
+  await agent([{speaker: 'proton', text: 'Partly answered, and more', thinking: '', streaming: false, calls: []}], 1);
+  const texts = () => [...thread.querySelectorAll('.msg')].map((m) => m.textContent);
+  assert(texts().length === 2 && texts()[0].includes('first question') && texts()[1].includes('Partly answered, and more'), `wrong conversation: ${texts()}`);
+  assert(thread.querySelector('.msg.you') === asked, 'the question was drawn again');
+  await agent([{speaker: 'you', text: 'second question', thinking: '', streaming: false, calls: []}], 2);
+  assert(texts().length === 3 && texts()[2].includes('second question'), `the new entry was not added: ${texts()}`);
+  // A whole conversation — another chat opened — replaces it all.
+  await agent([{speaker: 'you', text: 'another chat', thinking: '', streaming: false, calls: []}]);
+  assert(texts().length === 1 && texts()[0].includes('another chat'), `the old conversation is still there: ${texts()}`);
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+});
 await test('The agent panel keeps its threads: the clock lists them, a row opens one, and one is deleted after asking', async () => {
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   // An earlier check may have left the dock on another of its panels.

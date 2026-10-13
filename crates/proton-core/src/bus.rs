@@ -2526,7 +2526,10 @@ pub enum Event {
     /// be written.
     #[serde(rename_all = "camelCase")]
     Agent {
+        /// The conversation's entries from `from` on: those before it are as
+        /// the window was last sent them. A whole conversation is from 0.
         transcript: Vec<Entry>,
+        from: u32,
         activity: Activity,
         input_tokens: u64,
         output_tokens: u64,

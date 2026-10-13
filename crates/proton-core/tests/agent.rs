@@ -150,15 +150,18 @@ fn exclusive() -> std::sync::MutexGuard<'static, ()> {
     guard
 }
 
+/// The conversation as the window has it after these events: each replaces
+/// what it was sent from its `from` on.
 fn transcript(events: &[Event]) -> Vec<proton_core::agent::Entry> {
-    events
-        .iter()
-        .rev()
-        .find_map(|e| match e {
-            Event::Agent { transcript, .. } => Some(transcript.clone()),
-            _ => None,
-        })
-        .unwrap_or_default()
+    let mut whole = Vec::new();
+    for event in events {
+        if let Event::Agent { transcript, from, .. } = event {
+            assert!(*from as usize <= whole.len(), "an event from {from} after {} entries", whole.len());
+            whole.truncate(*from as usize);
+            whole.extend(transcript.iter().cloned());
+        }
+    }
+    whole
 }
 
 #[test]
@@ -186,7 +189,7 @@ fn a_question_runs_a_tool_and_comes_back_with_an_answer() {
         "the turn should start, not warn: {started:?}"
     );
 
-    let events = settle(&mut ws);
+    let events = [started, settle(&mut ws)].concat();
     let entries = transcript(&events);
     // Sent when something changed, not on every heartbeat of the turn.
     let sent: Vec<String> = events
@@ -242,6 +245,38 @@ fn a_turn_waiting_on_the_model_sends_nothing_new() {
         .collect();
     assert!(sent.windows(2).all(|w| w[0] != w[1]), "the same conversation was sent twice running");
     assert!(sent.len() < 10, "{} agent events for one short answer", sent.len());
+}
+
+#[test]
+fn a_streaming_answer_sends_what_changed_and_a_sync_sends_it_all() {
+    // A turn's answer grows token by token; sending the whole conversation
+    // each time made a long chat cost more with every word. The question,
+    // once sent, is not sent again — until the window is drawn afresh.
+    let _guard = exclusive();
+    let (url, _seen) = api(vec![answers()]);
+    std::env::set_var("ANTHROPIC_BASE_URL", &url);
+    std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key");
+    let mut ws = Workspace::rooted(std::env::temp_dir());
+    let started = ws.apply(Command::Ask { text: "hello".into() });
+    let events = [started, settle(&mut ws)].concat();
+    let froms: Vec<u32> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Agent { from, .. } => Some(*from),
+            _ => None,
+        })
+        .collect();
+    assert!(froms.iter().skip(1).any(|from| *from >= 1), "the question was sent again with every change: {froms:?}");
+    let entries = transcript(&events);
+    assert_eq!(entries.len(), 2);
+    assert!(entries[1].text.contains("It is in workspace.rs."));
+
+    let synced = ws.apply(Command::Sync);
+    let whole = synced.iter().find_map(|e| match e {
+        Event::Agent { transcript, from, .. } => Some((*from, transcript.clone())),
+        _ => None,
+    });
+    assert_eq!(whole, Some((0, entries)), "a sync sends the whole conversation");
 }
 
 #[test]
@@ -415,10 +450,10 @@ fn an_edit_the_model_asks_for_is_staged_and_never_written() {
     std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key");
 
     let mut ws = Workspace::rooted(&root);
-    ws.apply(Command::Ask {
+    let started = ws.apply(Command::Ask {
         text: "make it eleven".into(),
     });
-    let events = settle(&mut ws);
+    let events = [started, settle(&mut ws)].concat();
 
     let entries = transcript(&events);
     let call = entries[1]

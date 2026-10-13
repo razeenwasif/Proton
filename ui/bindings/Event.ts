@@ -599,7 +599,12 @@ problem: string, } | { "type": "layout", layout: Layout, } | { "type": "repo",
  * `None` outside a repository, on a detached `HEAD`, or before the
  * first commit. All three mean the same thing to the panel.
  */
-branch: string | null, files: Array<RepoFile>, } | { "type": "agent", transcript: Array<Entry>, activity: Activity, inputTokens: bigint, outputTokens: bigint, 
+branch: string | null, files: Array<RepoFile>, } | { "type": "agent", 
+/**
+ * The conversation's entries from `from` on: those before it are as
+ * the window was last sent them. A whole conversation is from 0.
+ */
+transcript: Array<Entry>, from: number, activity: Activity, inputTokens: bigint, outputTokens: bigint, 
 /**
  * Served from cache. Surfaced because a silently invalidated prefix
  * is a cost regression rather than an error, and nothing else shows it.

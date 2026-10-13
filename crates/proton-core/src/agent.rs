@@ -19,7 +19,7 @@ use ts_rs::TS;
 
 /* ── what the front end draws ─────────────────────────────────────── */
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Hash)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "lowercase")]
 pub enum Speaker {
@@ -27,7 +27,7 @@ pub enum Speaker {
     Proton,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Hash)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "lowercase")]
 pub enum CallState {
@@ -38,7 +38,7 @@ pub enum CallState {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Hash)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCall {
@@ -52,7 +52,7 @@ pub struct ToolCall {
     pub state: CallState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Hash)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
