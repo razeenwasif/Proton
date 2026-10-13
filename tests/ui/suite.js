@@ -886,6 +886,42 @@ await test('Rapid project clicks preserve the final project and its scroll posit
     assert($('.workspace.on [role=tab][data-buffer]').title.includes('/Beta/same.txt'), 'tab path belongs to a different project');
   } finally { win.replyDelay = 0; }
 });
+await test('A trackpad scroll is never pulled back by the core answering late, nor queues behind itself', async () => {
+  win.installProjectFixtures(); await settle();
+  const editor = $('.workspace.on [data-editor]');
+  const line = editor.querySelector('.ln').getBoundingClientRect().height;
+  const frame = () => new Promise((done) => win.requestAnimationFrame(done));
+  const before = win.commands.length;
+  // Three lines a frame, with every answer two frames late: each answer is
+  // for a place the pane has already passed, and must not be followed.
+  win.replyDelay = 30;
+  try {
+    let want = editor.scrollTop;
+    for (let i = 0; i < 30; i++) {
+      assert(Math.abs(editor.scrollTop - want) <= 1, `frame ${i}: pulled back from ${want} to ${editor.scrollTop}`);
+      want = editor.scrollTop + 3 * line;
+      editor.scrollTop = want;
+      await frame();
+    }
+    const reports = win.commands.slice(before).filter((c) => c.type === 'viewport').length;
+    assert(reports < 20, `${reports} reports for 30 frames: they queued behind each other`);
+    await settle(); await settle();
+    assert(editor.scrollTop === want, 'the pane did not stay where it was scrolled');
+    const top = Math.floor(editor.scrollTop / line);
+    assert([...editor.querySelectorAll('.ln')][0]?.textContent.endsWith(`Alpha row ${top}`), 'the lines where it stopped were not drawn');
+  } finally { win.replyDelay = 0; }
+  // A line further, and the rows still on screen are kept: one is built.
+  editor.querySelectorAll('.ln').forEach((row) => { row.dataset.kept = '1'; });
+  editor.scrollTop += line; await settle();
+  const built = [...editor.querySelectorAll('.ln')].filter((row) => !row.dataset.kept).length;
+  assert(built === 1, `a one-line scroll built ${built} rows`);
+  // The core moving the window itself — G, a search hit — is still followed.
+  win.projectFixture.first[0] = 50000;
+  await win.pushEvents([{type: 'viewport', view: 0, firstLine: 50000, totalLines: 100000, version: 0,
+    lines: Array.from({length: 30}, (_, i) => `Alpha row ${50000 + i}`), highlights: [], matches: [], git: [], stops: []}]);
+  await settle();
+  assert(Math.round(editor.scrollTop / line) === 50000, 'the pane did not follow the core to line 50000');
+});
 /* ── Chat: Claude Code ─────────────────────────────────────────────── */
 const ccRun = (text, extra = {}) => ({kind: 'text', id: `t-${text}`, text, done: true, parent: null, ...extra});
 const ccTool = (id, name, input, extra = {}) => ({kind: 'tool', id, name, input, state: 'done', streamed: 0, result: null,

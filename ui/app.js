@@ -795,6 +795,7 @@ function renderSplits(views, focused, vertical) {
     // but a cache that outlives the thing it describes should be cleared
     // where the thing is destroyed, not left to be caught downstream.
     for (const pane of panes.values()) pane.painted = null;
+    proposed.clear();
     // Splitting resets the shares. Two panes from one are even, which is what
     // you asked for; carrying the old ratios over would give the new pane a
     // width nobody chose.
@@ -1036,6 +1037,13 @@ const fileIcon = fileIconHtml;
 /** Height of one rendered line. Measured, because the theme sets it. */
 let lineHeight = 20;
 
+/** Per pane, the top lines it has reported and the core has not yet answered
+ * past — so that an answer to one of them, arriving after the pane has
+ * scrolled on, is told apart from the core moving the window itself. Kept
+ * with the pane element they were measured on: a rebuilt pane starts afresh.
+ * @type {Map<number, {pane: Element, lines: number[]}>} */
+const proposed = new Map();
+
 function measureLineHeight() {
   const line = $(".workspace.on [data-editor] .ln");
   const measured = line?.getBoundingClientRect().height;
@@ -1096,6 +1104,7 @@ function paintEditor(index) {
       `<div class="win" style="transform:${shift}">${rows.join("")}</div></div>`;
     win = target.querySelector(".win");
     drawing.painted = rows;
+    drawing.paintedFirst = drawing.firstLine;
   } else {
     // Only the rows that actually differ. The core re-sends the whole visible
     // window on every edit — which is right, it is the thing that knows what
@@ -1106,8 +1115,23 @@ function paintEditor(index) {
     // Compared against the strings from last time rather than against the
     // DOM: reading `outerHTML` back to compare it serialises every row, which
     // is most of the work this exists to avoid.
-    const before = drawing.painted ?? [];
+    let before = drawing.painted ?? [];
     const kids = win.children;
+    // A scroll moves the window a few lines and changes none of the lines
+    // still in it: they are the same rows one place up or down. So they are
+    // moved, and only the lines the scroll brings in are built — rather than
+    // every row of the screen replaced, every frame of a scroll, because each
+    // now sits at a different index from the one it was painted at.
+    const moved = drawing.firstLine - drawing.paintedFirst;
+    if (moved > 0 && moved < kids.length) {
+      for (let i = 0; i < moved; i++) win.firstElementChild?.remove();
+      before = before.slice(moved);
+    } else if (moved < 0 && -moved < kids.length) {
+      const room = document.createDocumentFragment();
+      for (let i = 0; i < -moved; i++) room.appendChild(document.createElement("div"));
+      win.prepend(room);
+      before = [...new Array(-moved).fill(null), ...before];
+    }
     for (let i = 0; i < rows.length; i++) {
       if (before[i] === rows[i] && kids[i]) continue;
       const holder = document.createElement("div");
@@ -1120,6 +1144,7 @@ function paintEditor(index) {
     // The window can shrink — at the end of a file, or on a smaller pane.
     while (kids.length > rows.length) win.lastElementChild.remove();
     drawing.painted = rows;
+    drawing.paintedFirst = drawing.firstLine;
 
     const doc = target.querySelector(".doc");
     if (doc && doc.style.height !== height) doc.style.height = height;
@@ -1127,10 +1152,21 @@ function paintEditor(index) {
   }
 
   // The window moved for a reason of the core's — `G`, a grep hit, the cursor
-  // leaving the screen — so the pane has to follow. A user scroll is already
-  // within one line of where it should be, which is what tells the two apart.
+  // leaving the screen — so the pane has to follow. An answer to the pane's
+  // own report is not one of those, however late it arrives: a trackpad
+  // moves a few lines a frame, the answer comes a frame or two behind, and
+  // following it pulled the pane back to where it was — over and over, all
+  // the way down a flick. So a top line the pane itself asked for is never
+  // followed; any other more than a line away is.
   const want = drawing.firstLine * lineHeight;
-  if (Math.abs(target.scrollTop - want) > lineHeight) target.scrollTop = want;
+  const asked = proposed.get(index);
+  const answered = asked?.pane === target ? asked.lines.indexOf(drawing.firstLine) : -1;
+  // Answered in order, so the ones asked before it are done with.
+  if (answered >= 0) asked?.lines.splice(0, answered);
+  else if (Math.abs(target.scrollTop - want) > lineHeight) {
+    proposed.delete(index);
+    target.scrollTop = want;
+  }
 
   // The caret element the popup was anchored to has just been replaced, so
   // an open popup has to be told where the new one is or it stays where the
@@ -1255,6 +1291,9 @@ const bufferTabs = createBufferTabs(document, dispatchMany, fileIcon);
 const editorFeedback = createEditorFeedback(document);
 onCommand(editorFeedback.command);
 onCommand((command, active) => {
+  // What the panes reported was about the document being left; the one
+  // arriving has its own place, which the panes must follow.
+  if (active && changesContext(command)) proposed.clear();
   if (active && changesContext(command)) renderStatus("");
   if (!active && changesContext(command)) requestAnimationFrame(reportEveryViewport);
 });
@@ -4396,7 +4435,13 @@ function reportViewport(index = view.focused) {
   if (!target || target.clientHeight <= 0) return;
   const first = Math.max(0, Math.floor(target.scrollTop / lineHeight));
   const rows = Math.max(1, Math.ceil(target.clientHeight / lineHeight) + OVERSCAN);
-  dispatch({ type: "viewport", view: index, firstLine: first, lines: rows });
+  let asked = proposed.get(index);
+  if (asked?.pane !== target) proposed.set(index, (asked = { pane: target, lines: [] }));
+  if (asked.lines[asked.lines.length - 1] !== first) asked.lines.push(first);
+  // A report dropped on the way (one sent while a project is opening) is
+  // never answered; the list is not let grow on them.
+  if (asked.lines.length > 64) asked.lines.shift();
+  return dispatch({ type: "viewport", view: index, firstLine: first, lines: rows });
 }
 
 /** Every pane has its own height, and the core has to be told all of them. */
@@ -4410,13 +4455,31 @@ const viewportObserver = new ResizeObserver(() => reportEveryViewport());
 // otherwise be a round trip to the core. One per frame is enough to keep up
 // with a trackpad and is the most the screen can show anyway.
 const viewportQueued = new Set();
+// And one on its way at a time. Commands go to the core in order, so when an
+// answer takes longer than a frame, a report a frame queued behind the one
+// before: a flick left a line of places the pane had already passed, drawn
+// one after another long after it stopped. Now a pane that scrolls while its
+// report is out sends once more when the answer is in — from where it is then.
+/** @type {Map<number, boolean>} pane → whether it has scrolled since */
+const viewportSending = new Map();
 
 function reportViewportSoon(index) {
+  if (viewportSending.has(index)) {
+    viewportSending.set(index, true);
+    return;
+  }
   if (viewportQueued.has(index)) return;
   viewportQueued.add(index);
   requestAnimationFrame(() => {
     viewportQueued.delete(index);
-    reportViewport(index);
+    const sent = reportViewport(index);
+    if (!sent) return;
+    viewportSending.set(index, false);
+    sent.finally(() => {
+      const again = viewportSending.get(index);
+      viewportSending.delete(index);
+      if (again) reportViewportSoon(index);
+    });
   });
 }
 
