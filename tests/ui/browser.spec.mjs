@@ -36,3 +36,14 @@ test('standalone preview loads its adapter and switches modes', async ({page}) =
   await expect(page.locator('.workspace.on [data-editor] .ln').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('Game mode\'s renderer draws its art, hazed by its plane, over the ground', async ({page}) => {
+  await page.goto('/tests/ui/game-render.html');
+  await page.waitForFunction(() => window.result !== undefined);
+  const result = await page.evaluate(() => window.result);
+  expect(result.gl).toBe(true);
+  const near = (got, want) => got.slice(0, 3).every((v, i) => Math.abs(v - want[i]) <= 3);
+  expect(near(result.left, [255, 0, 0])).toBe(true);
+  expect(near(result.right, [128, 0, 128])).toBe(true);
+  expect(near(result.ground, [0, 255, 0])).toBe(true);
+});

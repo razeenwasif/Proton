@@ -131,7 +131,7 @@
         {
           "id": "ground_5",
           "image": "art/ground.png",
-          "at": [2384, 1776],
+          "at": [2384, 1676],
           "scale": 1,
           "rot": 0,
           "flip": false,
@@ -141,7 +141,7 @@
         {
           "id": "ground_6",
           "image": "art/ground.png",
-          "at": [2864, 1776],
+          "at": [2864, 1676],
           "scale": 1,
           "rot": 0,
           "flip": false,
@@ -151,17 +151,7 @@
         {
           "id": "ground_7",
           "image": "art/ground.png",
-          "at": [3344, 1776],
-          "scale": 1,
-          "rot": 0,
-          "flip": false,
-          "opacity": 1,
-          "blend": "normal"
-        },
-        {
-          "id": "ground_8",
-          "image": "art/ground.png",
-          "at": [3824, 1776],
+          "at": [3344, 1676],
           "scale": 1,
           "rot": 0,
           "flip": false,

@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Game renderer probe</title>
+<canvas id="c" style="width:64px;height:64px"></canvas>
+<script type="module">
+  // Game mode's renderer, drawn small and read back: a red square on the left,
+  // the same red hazed half to blue on the right, over a green ground.
+  import {createGameRender} from '/game-render.js';
+  const canvas = document.getElementById('c');
+  const render = createGameRender(canvas);
+  const result = {gl: Boolean(render)};
+  if (render) {
+    const red = new ImageData(new Uint8ClampedArray([255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255]), 2, 2);
+    render.upload('red', await createImageBitmap(red), 'nearest');
+    const sprite = (x, tint) => ({key: 'red', plane: 'p', item: 'i', x, y: 0, w: 32, h: 64, rot: 0, flip: false, opacity: 1, tint, blend: 'normal'});
+    render.draw([sprite(0, [0, 0, 0, 0]), sprite(32, [0, 0, 1, 0.5])], {scale: 1, x: 0, y: 0}, 64, 64, 1, [0, 1, 0]);
+    result.left = render.probe(16, 32);
+    result.right = render.probe(48, 32);
+    render.draw([], {scale: 1, x: 0, y: 0}, 64, 64, 1, [0, 1, 0]);
+    result.ground = render.probe(16, 32);
+  }
+  window.result = result;
+</script>

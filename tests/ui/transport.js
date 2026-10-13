@@ -67,6 +67,12 @@ window.__TAURI__ = {
       if (!response.ok) throw new Error(`${args.path}: not a document Proton opened`);
       return await response.arrayBuffer();
     }
+    // The open game's images: the fixture game's, from the server.
+    if (name === 'read_game') {
+      const response = await fetch(`/tests/ui/fixtures/game/${args.key}`);
+      if (!response.ok) throw new Error(`${args.key}: not an image of the open game`);
+      return await response.arrayBuffer();
+    }
     // A Lab run's files, as a test puts them.
     if (name === 'read_lab') {
       const bytes = window.labFiles?.[args.key];

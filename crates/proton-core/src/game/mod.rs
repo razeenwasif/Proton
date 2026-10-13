@@ -302,6 +302,20 @@ impl Game {
         Ok(())
     }
 
+    /// Where a file of the open game is, for the window to draw: only inside
+    /// its folder, only an image or the sidecar that cuts one up, and only
+    /// one that is there.
+    pub fn file(&self, rel: &str) -> Option<PathBuf> {
+        const DRAWN: &[&str] = &[".png", ".jpg", ".jpeg", ".webp", ".img.json"];
+        let lower = rel.to_ascii_lowercase();
+        if !DRAWN.iter().any(|kind| lower.ends_with(kind)) {
+            return None;
+        }
+        let project = self.project.as_ref()?;
+        let path = proton_game::path::inside(project.root(), rel).ok()?;
+        path.is_file().then_some(path)
+    }
+
     /// The files with unsaved changes, as the project names them.
     pub fn unsaved(&self) -> Vec<String> {
         let Some(project) = &self.project else { return Vec::new() };

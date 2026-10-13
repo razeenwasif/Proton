@@ -113,6 +113,42 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     await win.pushEvents([project(), room('crossroads_01')]); await settle();
   });
 
+  await test('The room\'s art is drawn under what is solid, a drag sends one edit, and a plane can be hidden or shown alone', async () => {
+    const gl = $('[data-game-gl]');
+    for (let i = 0; i < 40 && gl.width <= 300; i++) await settle();
+    assert(shown(gl) && gl.width > 300, 'the art was not drawn');
+    const canvas = $('[data-game-overlay]');
+    const box = canvas.getBoundingClientRect();
+    const first = fixture.rooms[0];
+    const zoom = Math.min((box.width - 48) / first.size[0], (box.height - 48) / first.size[1]);
+    const stage = (/** @type {number} */ x, /** @type {number} */ y) => [box.left + box.width / 2 + (x - first.size[0] / 2) * zoom, box.top + box.height / 2 + (y - first.size[1] / 2) * zoom];
+    const fire = (/** @type {string} */ type, /** @type {number[]} */ [x, y]) => canvas.dispatchEvent(new win.PointerEvent(type, {clientX: x, clientY: y, bubbles: true, pointerId: 1, button: 0}));
+    const [bx, by] = stage(700, 1800);
+    const before = win.commands.length;
+    fire('pointerdown', [bx, by]);
+    for (let step = 1; step <= 4; step++) fire('pointermove', [bx + step * 10, by]);
+    fire('pointerup', [bx + 40, by]);
+    await settle();
+    const edits = sent(before, 'gameEdit');
+    assert(edits.length === 1, `a drag sent ${edits.length} edits`);
+    const move = edits[0].ops[0];
+    assert(move.op === 'set' && move.path.join('/') === 'entities/#bench/at' && move.value[1] === 1800 && Math.abs(move.value[0] - (700 + Math.round(40 / zoom))) <= 1,
+      `the drag was sent as ${JSON.stringify(move)}`);
+    // A plane hidden, then shown alone; neither is saved.
+    $('[data-game-side="layers"]').click(); await settle();
+    const eye = () => ws().querySelector('[data-game-hide="hills_far"]');
+    eye().click(); await settle();
+    assert(eye().getAttribute('aria-pressed') === 'false', 'the plane was not hidden');
+    eye().dispatchEvent(new win.MouseEvent('click', {bubbles: true, altKey: true})); await settle();
+    assert(eye().classList.contains('solo') && ws().querySelector('[data-game-hide="sky"]').getAttribute('aria-pressed') === 'false', 'the plane was not shown alone');
+    // A click ends showing it alone, back to what was hidden before; another shows it.
+    eye().click(); await settle();
+    assert(!eye().classList.contains('solo') && eye().getAttribute('aria-pressed') === 'false', 'showing it alone did not end');
+    eye().click(); await settle();
+    assert(eye().getAttribute('aria-pressed') === 'true', 'showing it again did not');
+    assert(!sent(before + 1, 'gameEdit').length, 'hiding a plane was sent as an edit');
+  });
+
   await test('A click on the stage selects what is there, ⎋ selects nothing, and ? lists Game\'s keys', async () => {
     const canvas = $('[data-game-overlay]');
     const box = canvas.getBoundingClientRect();

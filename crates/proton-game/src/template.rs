@@ -107,8 +107,8 @@ fn metroidvania(name: &str) -> Vec<File> {
 }
 
 /// The planes every template room shares, sized to a room `width` wide whose
-/// floor is at `floor`.
-fn planes(width: i32, floor: i32, prefix: &str) -> Vec<Plane> {
+/// floor is at `floor(x)`: the stone is laid along it, slab by slab.
+fn planes(width: i32, floor: &dyn Fn(i32) -> i32, prefix: &str) -> Vec<Plane> {
     let item = |id: &str, image: &str, at: [i32; 2], scale: f64| Item {
         id: format!("{prefix}{id}"),
         image: image.into(),
@@ -122,7 +122,10 @@ fn planes(width: i32, floor: i32, prefix: &str) -> Vec<Plane> {
         let step = (tile as f64 * scale) as i32;
         (0..=(reach(depth) / step)).map(|i| item(&format!("{id}_{i}"), image, [i * step, y], scale)).collect()
     };
-    let slabs = (0..=(width / 480)).map(|i| item(&format!("ground_{i}"), "art/ground.png", [i * 480 - 16, floor - 24], 1.0)).collect();
+    let slabs = (0..(width + 479) / 480)
+        .map(|i| item(&format!("ground_{i}"), "art/ground.png", [i * 480 - 16, floor(i * 480 + 240) - 24], 1.0))
+        .collect();
+    let low = floor(0);
     vec![
         Plane {
             id: "sky".into(),
@@ -155,7 +158,7 @@ fn planes(width: i32, floor: i32, prefix: &str) -> Vec<Plane> {
             id: "fronds".into(),
             name: "Fronds".into(),
             depth: -300.0,
-            items: row("fronds", "art/fronds.png", 512, 3.0, floor - 700, -300.0),
+            items: row("fronds", "art/fronds.png", 512, 3.0, low - 700, -300.0),
             ..Plane::default()
         },
     ]
@@ -165,7 +168,12 @@ fn first_room() -> Room {
     Room {
         id: "crossroads_01".into(),
         size: [3840, 2160],
-        planes: planes(3840, 1800, ""),
+        // Flat, a slope up, then flat again — as the floor's collision runs.
+        planes: planes(3840, &|x| match x {
+            ..=2200 => 1800,
+            2201..=2600 => 1800 - (x - 2200) / 4,
+            _ => 1700,
+        }, ""),
         collision: vec![
             Shape { id: "floor".into(), kind: ShapeKind::Solid, closed: false, points: vec![[0, 1800], [2200, 1800], [2600, 1700], [3840, 1700]] },
             Shape { id: "left_wall".into(), kind: ShapeKind::Solid, closed: false, points: vec![[0, 0], [0, 1800]] },
@@ -195,7 +203,7 @@ fn second_room() -> Room {
     Room {
         id: "crossroads_02".into(),
         size: [2880, 1620],
-        planes: planes(2880, 1400, "b_"),
+        planes: planes(2880, &|_| 1400, "b_"),
         collision: vec![
             Shape { id: "floor".into(), kind: ShapeKind::Solid, closed: false, points: vec![[0, 1400], [2880, 1400]] },
             Shape { id: "right_wall".into(), kind: ShapeKind::Solid, closed: false, points: vec![[2880, 0], [2880, 1400]] },

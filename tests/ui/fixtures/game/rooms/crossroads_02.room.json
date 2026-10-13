@@ -137,16 +137,6 @@
           "flip": false,
           "opacity": 1,
           "blend": "normal"
-        },
-        {
-          "id": "b_ground_6",
-          "image": "art/ground.png",
-          "at": [2864, 1376],
-          "scale": 1,
-          "rot": 0,
-          "flip": false,
-          "opacity": 1,
-          "blend": "normal"
         }
       ]
     },

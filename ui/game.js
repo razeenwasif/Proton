@@ -12,7 +12,10 @@
  * is always what would be saved. */
 
 import { escapeHtml as esc } from "./html.js";
-import { draw, fit, pick } from "./game-overlay.js";
+import { draw, handle, pick, toRoom } from "./game-overlay.js";
+import { corner, fitCam, layout, maskOf, pickItem, rgb, toPlane, viewOf } from "./game-scene.js";
+import { createGameRender } from "./game-render.js";
+import { readGame } from "./bridge.js";
 
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
 /** @typedef {import('./bindings/GameProjectView').GameProjectView} Project */
@@ -24,7 +27,8 @@ import { draw, fit, pick } from "./game-overlay.js";
 const KEYS = /** @type {[string, string][]} */ ([
   ["⌘S", "save every changed room and file"], ["⌘Z ⇧⌘Z", "undo, redo — wherever the change was"],
   ["⎋", "select nothing"], ["⌫", "remove what is selected"], ["[ ]", "the room tab before, after"],
-  ["1 2 3 4", "World, Layers, Entities, Assets"], ["?", "these keys"],
+  ["1 2 3 4", "World, Layers, Entities, Assets"], ["f", "the whole room"], ["two fingers", "move over the room"],
+  ["pinch ⌘ wheel", "zoom"], ["␣ drag", "move over the room"], ["?", "these keys"],
 ]);
 
 /** What rooms place without a prefab of the game's own. */
@@ -203,10 +207,10 @@ export function createGame(host) {
   });
 
   /** A row of a list that selects something. */
-  const row = (/** @type {string} */ kind, /** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ meta = "", extra = "") => {
+  const row = (/** @type {string} */ kind, /** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ meta = "", extra = "", after = "") => {
     const on = selected?.kind === kind && selected.id === id;
     return `<div class="game-row${on ? " on" : ""}" data-game-pick="${kind}" data-game-pick-id="${esc(id)}"${extra}>` +
-      `<span class="game-row-name">${esc(label)}</span>${meta ? `<span class="game-row-meta">${meta}</span>` : ""}</div>`;
+      `<span class="game-row-name">${esc(label)}</span>${meta ? `<span class="game-row-meta">${meta}</span>` : ""}${after}</div>`;
   };
 
   function renderSide() {
@@ -252,7 +256,11 @@ export function createGame(host) {
             ? p.items.map((i) => row("item", i.id, i.image.split("/").pop() ?? i.id, "", ` data-game-pick-plane="${esc(p.id)}"`)).join("")
             : "";
           const meta = `${p.gameplay ? "play · " : ""}${p.parallax !== null && p.parallax !== undefined ? `×${p.parallax}` : depthText(p.depth)} · ${p.items.length}`;
-          return row("plane", p.id, p.name || p.id, esc(meta)) + (items ? `<div class="game-sub">${items}</div>` : "");
+          const off = solo ? solo !== p.id : hidden.has(p.id);
+          const toggles =
+            `<button class="game-toggle${off ? " off" : ""}${solo === p.id ? " solo" : ""}" data-game-hide="${esc(p.id)}" title="Show or hide it · ⌥ shows it alone" aria-pressed="${!off}">${off ? "◌" : "●"}</button>` +
+            `<button class="game-toggle${locked.has(p.id) ? " on" : ""}" data-game-lock="${esc(p.id)}" title="Lock it, so a click on the stage passes through" aria-pressed="${locked.has(p.id)}">${locked.has(p.id) ? "▣" : "□"}</button>`;
+          return row("plane", p.id, p.name || p.id, esc(meta), "", toggles) + (items ? `<div class="game-sub">${items}</div>` : "");
         })
         .join("");
       return;
@@ -268,7 +276,7 @@ export function createGame(host) {
       return;
     }
     box.innerHTML = project.assets.length
-      ? project.assets.map((a) => row("asset", a, a)).join("")
+      ? project.assets.map((a) => row("asset", a, a, "", /\.(png|jpe?g|webp)$/i.test(a) ? ` draggable="true" title="Drag it onto the stage to place it"` : "")).join("")
       : `<p class="game-faint">No images or sounds in the game's folder.</p>`;
   }
 
@@ -282,6 +290,25 @@ export function createGame(host) {
     const open = /** @type {HTMLElement | null} */ (target.closest("[data-game-room]"));
     if (open) {
       send({ type: "gameOpenRoom", room: open.dataset.gameRoom });
+      return;
+    }
+    const hide = /** @type {HTMLElement | null} */ (target.closest("[data-game-hide]"));
+    if (hide) {
+      const id = hide.dataset.gameHide ?? "";
+      if (/** @type {MouseEvent} */ (e).altKey) solo = solo === id ? null : id;
+      else if (solo) solo = null;
+      else if (hidden.has(id)) hidden.delete(id);
+      else hidden.add(id);
+      renderSide();
+      paint();
+      return;
+    }
+    const lock = /** @type {HTMLElement | null} */ (target.closest("[data-game-lock]"));
+    if (lock) {
+      const id = lock.dataset.gameLock ?? "";
+      if (locked.has(id)) locked.delete(id);
+      else locked.add(id);
+      renderSide();
       return;
     }
     const picked = /** @type {HTMLElement | null} */ (target.closest("[data-game-pick]"));
@@ -315,6 +342,133 @@ export function createGame(host) {
     };
   }
 
+  /** The art, drawn by the GPU — or nothing, where WebGL 2 is not to be had,
+   *  and the overlay alone shows the room. */
+  const glCanvas = /** @type {HTMLCanvasElement} */ (q("[data-game-gl]"));
+  let gpu = (() => {
+    try {
+      return createGameRender(glCanvas, { onLost: () => { gpu = null; images.clear(); paint(); } });
+    } catch {
+      return null;
+    }
+  })();
+  glCanvas.hidden = !gpu;
+
+  /** Each image's size once it is on the GPU, and the ones on their way.
+   *  @type {Map<string, [number, number]>} */
+  const images = new Map();
+  /** Each image's opacity, small, so a click finds what is drawn there.
+   *  @type {Map<string, {w: number, h: number, alpha: Uint8Array}>} */
+  const masks = new Map();
+  /** Whether an image is drawn at u, v. @param {string} key @param {number} u @param {number} v */
+  const solid = (key, u, v) => {
+    const m = masks.get(key);
+    if (!m) return true;
+    const x = Math.min(m.w - 1, Math.max(0, Math.floor(u * m.w)));
+    const y = Math.min(m.h - 1, Math.max(0, Math.floor(v * m.h)));
+    return m.alpha[y * m.w + x] > 24;
+  };
+  /** @type {Set<string>} */
+  const loading = new Set();
+  /** @type {Set<string>} */
+  const failed = new Set();
+
+  /** Load what a room draws and has not been loaded. @param {Room} r */
+  function load(r) {
+    if (!gpu) return;
+    const wanted = new Set(r.planes.flatMap((p) => p.items.map((i) => i.image)));
+    for (const s of sprites(r)) wanted.add(s.key);
+    const filter = project?.game.view.filter === "nearest" ? "nearest" : "smooth";
+    for (const key of wanted) {
+      if (!key || images.has(key) || loading.has(key) || failed.has(key)) continue;
+      if (!/\.(png|jpe?g|webp)$/i.test(key)) continue;
+      loading.add(key);
+      readGame(key)
+        .then((bytes) => createImageBitmap(new Blob([bytes])))
+        .then((bitmap) => {
+          gpu?.upload(key, bitmap, filter);
+          images.set(key, [bitmap.width, bitmap.height]);
+          const mask = maskOf(bitmap);
+          if (mask) masks.set(key, mask);
+          bitmap.close?.();
+        })
+        .catch(() => failed.add(key))
+        .finally(() => {
+          loading.delete(key);
+          paint();
+        });
+    }
+  }
+
+  /** What stands in the room drawn as its prefab's sprite: enemies, props,
+   *  and the player where a run starts. @param {Room} r */
+  function sprites(r) {
+    if (!project) return [];
+    const prefabs = new Map(project.prefabs.map((p) => [p.id, p]));
+    const out = [];
+    for (const e of r.entities) {
+      const prefab = prefabs.get(e.prefab);
+      if (prefab?.sprite && e.at) out.push({ key: prefab.sprite, at: e.at, pivot: prefab.pivot });
+    }
+    const player = project.prefabs.find((p) => project && project.game.player.endsWith(`${p.id}.prefab.json`));
+    const start = project.game.start.room === r.id ? r.spawns.find((s) => s.id === project?.game.start.spawn) : null;
+    if (player?.sprite && start) out.push({ key: player.sprite, at: start.at, pivot: player.pivot });
+    return out;
+  }
+
+  /** The editor's camera for each room, kept while the game is open — and
+   *  fitted to the stage again as the stage changes size, until the person
+   *  has moved it themselves. @type {Map<string, import('./game-scene.js').Cam & {moved?: boolean}>} */
+  const cams = new Map();
+  /** Planes hidden, locked, or shown alone — the editor's, never saved. */
+  const hidden = new Set();
+  const locked = new Set();
+  /** @type {string | null} */
+  let solo = null;
+  /** A drag under way: what moves, from where, and the room as it is meanwhile.
+   *  @type {{kind: "move" | "scale" | "pan", from: [number, number], at: [number, number], moved: boolean, base: any, picked: Selected | null} | null} */
+  let drag = null;
+  /** The room as a drag has it, drawn in place of the room until the drag ends.
+   *  @type {Room | null} */
+  let draft = null;
+
+  function stageSize() {
+    return [stage.clientWidth, stage.clientHeight];
+  }
+
+  /** The editor's camera on the room on screen. */
+  function cam() {
+    if (!room) return null;
+    const [w, h] = stageSize();
+    if (!w || !h) return null;
+    let held = cams.get(room.id);
+    if (!held || !held.moved) {
+      held = { ...fitCam(room, w, h), moved: false };
+      cams.set(room.id, held);
+    }
+    return held;
+  }
+
+  /** How the scene is laid out for the camera. */
+  function how() {
+    const c = cam();
+    const view = /** @type {[number, number]} */ ([project?.game.view.width ?? 1920, project?.game.view.height ?? 1080]);
+    return { focal: project?.game.view.focal ?? 1000, view, center: c?.center ?? /** @type {[number, number]} */ ([0, 0]), sizes: images, hidden, solo, sprites: room ? sprites(draft ?? room) : [] };
+  }
+
+  /** What the scene draws now. */
+  function drawn() {
+    const r = draft ?? room;
+    return r ? layout(r, how()) : [];
+  }
+
+  /** The selected image's box in room pixels, when an image is selected. */
+  function selectedBox() {
+    if (selected?.kind !== "item") return null;
+    const s = drawn().find((d) => d.item === selected?.id);
+    return s ? { x: s.x, y: s.y, w: s.w, h: s.h, rot: s.rot } : null;
+  }
+
   let painting = 0;
   function paint() {
     if (painting) return;
@@ -328,11 +482,17 @@ export function createGame(host) {
     empty.hidden = Boolean(room) || !project;
     if (!room && project) empty.innerHTML = `<p class="game-faint">Open a room from the World tab.</p>`;
     canvas.hidden = !room;
+    glCanvas.hidden = !room || !gpu;
     if (!room || !shown) return;
+    const [width, height] = stageSize();
+    const c = cam();
+    if (!width || !height || !c) return;
     const ratio = window.devicePixelRatio || 1;
-    const width = stage.clientWidth;
-    const height = stage.clientHeight;
-    if (!width || !height) return;
+    const view = viewOf(c, width, height);
+    const shade = colors();
+    const r = draft ?? room;
+    load(r);
+    gpu?.draw(drawn(), view, width, height, ratio, rgb(shade.ground));
     canvas.width = Math.round(width * ratio);
     canvas.height = Math.round(height * ratio);
     canvas.style.width = `${width}px`;
@@ -341,16 +501,215 @@ export function createGame(host) {
     if (!g) return;
     g.setTransform(ratio, 0, 0, ratio, 0, 0);
     g.clearRect(0, 0, width, height);
-    draw(g, room, fit(room, width, height), colors(), selected);
+    const frame = how();
+    const at = corner(r, frame.view, frame.center);
+    draw(g, r, view, shade, selected, { art: Boolean(gpu), box: selectedBox(), camera: gpu ? [at[0], at[1], frame.view[0], frame.view[1]] : null });
   }
   new ResizeObserver(() => paint()).observe(stage);
 
-  canvas.addEventListener("pointerdown", (e) => {
-    if (!room) return;
+  /** A stage point, from a pointer. @param {MouseEvent} e @returns {[number, number]} */
+  function stagePoint(e) {
     const box = canvas.getBoundingClientRect();
-    const view = fit(room, box.width, box.height);
-    select(pick(room, view, e.clientX - box.left, e.clientY - box.top) ?? { kind: "room", id: room.id });
+    return [e.clientX - box.left, e.clientY - box.top];
+  }
+
+  /** Fit the room in the stage again. */
+  function refit() {
+    if (!room) return;
+    cams.delete(room.id);
+    paint();
+  }
+
+  let space = false;
+  stage.addEventListener("keydown", (e) => { if (e.key === " ") space = true; });
+  stage.addEventListener("keyup", (e) => { if (e.key === " ") space = false; });
+
+  // Two fingers move over the room; a pinch, or ⌘ with the wheel, zooms
+  // about the pointer.
+  stage.addEventListener("wheel", (e) => {
+    const c = cam();
+    if (!c || !room) return;
+    e.preventDefault();
+    c.moved = true;
+    if (e.ctrlKey || e.metaKey) {
+      const [sx, sy] = stagePoint(e);
+      const [w, h] = stageSize();
+      const before = toRoom(viewOf(c, w, h), sx, sy);
+      c.zoom = Math.min(8, Math.max(0.02, c.zoom * Math.exp(-e.deltaY * 0.01)));
+      const after = toRoom(viewOf(c, w, h), sx, sy);
+      c.center = [c.center[0] + before[0] - after[0], c.center[1] + before[1] - after[1]];
+    } else {
+      c.center = [c.center[0] + e.deltaX / c.zoom, c.center[1] + e.deltaY / c.zoom];
+    }
+    paint();
+  }, { passive: false });
+
+  canvas.addEventListener("pointerdown", (e) => {
+    const c = cam();
+    if (!room || !c) return;
     stage.focus({ preventScroll: true });
+    const [sx, sy] = stagePoint(e);
+    const [w, h] = stageSize();
+    const view = viewOf(c, w, h);
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // A pointer the browser does not know — a test's — is not held.
+    }
+    if (e.button === 1 || space) {
+      drag = { kind: "pan", from: [sx, sy], at: [sx, sy], moved: false, base: [...c.center], picked: null };
+      return;
+    }
+    // The selected image's handle scales it.
+    const box = selectedBox();
+    if (box) {
+      const [hx, hy] = handle(view, box);
+      if (Math.abs(sx - hx) <= 7 && Math.abs(sy - hy) <= 7) {
+        drag = { kind: "scale", from: [sx, sy], at: [sx, sy], moved: false, base: box, picked: selected };
+        return;
+      }
+    }
+    const [rx, ry] = toRoom(view, sx, sy);
+    const thing = pick(room, view, sx, sy);
+    const art = thing ? null : pickItem(drawn(), rx, ry, locked, solid);
+    /** @type {Selected | null} */
+    const picked = thing ?? (art?.item ? { kind: "item", id: art.item, plane: art.plane } : null);
+    select(picked ?? { kind: "room", id: room.id });
+    if (picked) drag = { kind: "move", from: [sx, sy], at: [sx, sy], moved: false, base: structuredClone(room), picked };
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    const c = cam();
+    if (!drag || !room || !c) return;
+    const [sx, sy] = stagePoint(e);
+    drag.at = [sx, sy];
+    if (!drag.moved && Math.hypot(sx - drag.from[0], sy - drag.from[1]) < 3) return;
+    drag.moved = true;
+    const dx = (sx - drag.from[0]) / c.zoom;
+    const dy = (sy - drag.from[1]) / c.zoom;
+    if (drag.kind === "pan") {
+      c.moved = true;
+      c.center = [drag.base[0] - dx, drag.base[1] - dy];
+    } else if (drag.kind === "move" && drag.picked) {
+      draft = moved(drag.base, drag.picked, Math.round(dx), Math.round(dy));
+    } else if (drag.kind === "scale" && drag.picked) {
+      const box = drag.base;
+      const grow = Math.max(0.05, (box.w + dx) / Math.max(1, box.w));
+      draft = scaled(room, drag.picked, grow);
+    }
+    paint();
+  });
+
+  canvas.addEventListener("pointerup", () => {
+    const done = drag;
+    drag = null;
+    if (!done || !room || !done.moved || done.kind === "pan" || !done.picked) {
+      draft = null;
+      paint();
+      return;
+    }
+    const edit = commit(done.picked, draft);
+    draft = null;
+    if (edit) send({ type: "gameEdit", target: `room:${room.id}`, ops: [edit], label: done.kind });
+    paint();
+  });
+
+  /** The room with `what` moved by `dx`, `dy` room pixels.
+   *  @param {Room} base @param {Selected} what @param {number} dx @param {number} dy @returns {Room} */
+  function moved(base, what, dx, dy) {
+    const r = structuredClone(base);
+    const by = (/** @type {number[]} */ p) => [p[0] + dx, p[1] + dy];
+    if (what.kind === "entity") {
+      const e = r.entities.find((x) => x.id === what.id);
+      if (e?.at) e.at = /** @type {[number, number]} */ (by(e.at));
+      if (e?.rect) e.rect = [e.rect[0] + dx, e.rect[1] + dy, e.rect[2], e.rect[3]];
+    } else if (what.kind === "spawn") {
+      const s = r.spawns.find((x) => x.id === what.id);
+      if (s) s.at = /** @type {[number, number]} */ (by(s.at));
+    } else if (what.kind === "light") {
+      const l = r.lights.find((x) => x.id === what.id);
+      if (l) l.at = /** @type {[number, number]} */ (by(l.at));
+    } else if (what.kind === "shape") {
+      const s = r.collision.find((x) => x.id === what.id);
+      if (s) s.points = s.points.map((p) => /** @type {[number, number]} */ (by(p)));
+    } else if (what.kind === "item") {
+      for (const p of r.planes) for (const i of p.items) if (i.id === what.id) i.at = /** @type {[number, number]} */ (by(i.at));
+    }
+    return r;
+  }
+
+  /** The room with the image `what` scaled by `grow`. @param {Room} base @param {Selected} what @param {number} grow */
+  function scaled(base, what, grow) {
+    const r = structuredClone(base);
+    for (const p of r.planes) for (const i of p.items) if (i.id === what.id) i.scale = Math.round(i.scale * grow * 1000) / 1000;
+    return r;
+  }
+
+  /** The one op that says what a drag did. @param {Selected} what @param {Room | null} r */
+  function commit(what, r) {
+    if (!r) return null;
+    const set = (/** @type {string[]} */ path, /** @type {any} */ value) => ({ op: "set", path, value });
+    if (what.kind === "entity") {
+      const e = r.entities.find((x) => x.id === what.id);
+      if (!e) return null;
+      return e.rect ? set(["entities", `#${e.id}`, "rect"], e.rect) : set(["entities", `#${e.id}`, "at"], e.at);
+    }
+    if (what.kind === "spawn") {
+      const s = r.spawns.find((x) => x.id === what.id);
+      return s ? set(["spawns", `#${s.id}`, "at"], s.at) : null;
+    }
+    if (what.kind === "light") {
+      const l = r.lights.find((x) => x.id === what.id);
+      return l ? set(["lights", `#${l.id}`, "at"], l.at) : null;
+    }
+    if (what.kind === "shape") {
+      const s = r.collision.find((x) => x.id === what.id);
+      return s ? set(["collision", `#${s.id}`, "points"], s.points) : null;
+    }
+    if (what.kind === "item") {
+      for (const p of r.planes) {
+        const i = p.items.find((x) => x.id === what.id);
+        if (i) {
+          const was = room?.planes.find((x) => x.id === p.id)?.items.find((x) => x.id === i.id);
+          if (was && was.scale !== i.scale) return set(["planes", `#${p.id}`, "items", `#${i.id}`, "scale"], i.scale);
+          return set(["planes", `#${p.id}`, "items", `#${i.id}`, "at"], i.at);
+        }
+      }
+    }
+    return null;
+  }
+
+  // An image dragged in from Assets is placed where it is dropped, on the
+  // plane selected — or the one the game is played on.
+  stage.addEventListener("dragover", (e) => {
+    if (e.dataTransfer?.types.includes("text/x-proton-asset")) e.preventDefault();
+  });
+  stage.addEventListener("drop", (e) => {
+    const key = e.dataTransfer?.getData("text/x-proton-asset");
+    const c = cam();
+    if (!key || !room || !c) return;
+    e.preventDefault();
+    const planeId = selected?.kind === "plane" ? selected.id : selected?.kind === "item" ? selected.plane : null;
+    const plane = room.planes.find((p) => p.id === planeId) ?? room.planes.find((p) => p.gameplay) ?? room.planes[room.planes.length - 1];
+    if (!plane) return;
+    const [w, h] = stageSize();
+    const [sx, sy] = stagePoint(e);
+    const point = toPlane(room, plane, how(), toRoom(viewOf(c, w, h), sx, sy));
+    const size = images.get(key) ?? [0, 0];
+    const base = (key.split("/").pop() ?? "image").replace(/\.[^.]+$/, "").replace(/[^a-z0-9_]+/gi, "_").toLowerCase();
+    const taken = new Set(room.planes.flatMap((p) => p.items.map((i) => i.id)));
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}_${n}`;
+    const at = [Math.round(point[0] - size[0] / 2), Math.round(point[1] - size[1] / 2)];
+    send({ type: "gameEdit", target: `room:${room.id}`, ops: [{ op: "insert", path: ["planes", `#${plane.id}`, "items"], value: { id, image: key, at } }], label: "place" });
+    selected = { kind: "item", id, plane: plane.id };
+  });
+  q("[data-game-side-body]").addEventListener("dragstart", (e) => {
+    const row = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-pick='asset']"));
+    if (row && e.dataTransfer) {
+      e.dataTransfer.setData("text/x-proton-asset", row.dataset.gamePickId ?? "");
+      e.dataTransfer.effectAllowed = "copy";
+    }
   });
 
   /* ── the right: Inspector, Run, Agent ────────────────────────── */
@@ -661,6 +1020,7 @@ export function createGame(host) {
     if (typing || e.altKey || e.ctrlKey || e.metaKey) return false;
     if (e.key === "?") return (host.keys?.("— Game's keys", KEYS), true);
     if (e.key === "Escape") return (select(null), true);
+    if (e.key === "f") return (refit(), true);
     if (e.key === "Backspace" || e.key === "Delete") return (removeSelected(), true);
     if (e.key === "[" || e.key === "]") {
       const open = project.open;

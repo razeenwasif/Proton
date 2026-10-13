@@ -178,3 +178,13 @@ fn a_project_that_is_a_game_opens_it_on_entering_the_mode() {
     assert_eq!(project.path, ".");
     assert_eq!(project.game.name, "Itself");
 }
+
+#[test]
+fn the_window_is_given_only_the_open_games_images() {
+    let (space, root) = with_game("files");
+    let sky = space.game_file("art/sky.png").expect("the sky is the game's");
+    assert!(sky.starts_with(std::fs::canonicalize(root.join("crossroads")).unwrap()), "{}", sky.display());
+    for refused in ["game.json", "../crossroads/art/sky.png", "/etc/hosts.png", "art/nowhere.png", "rooms/crossroads_01.room.json"] {
+        assert!(space.game_file(refused).is_none(), "{refused} was given to the window");
+    }
+}

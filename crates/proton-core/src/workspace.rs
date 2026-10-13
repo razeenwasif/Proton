@@ -4006,6 +4006,11 @@ impl Workspace {
         self.research().lab_file(key)
     }
 
+    /// Where an image of the open game is: see `game::Game::file`.
+    pub fn game_file(&self, key: &str) -> Option<PathBuf> {
+        self.game.file(key)
+    }
+
     /// A file to show in the document viewer, remembered so the shell will
     /// read it for the page: it reads only what was opened here this way.
     fn document_event(&mut self, path: &Path, kind: ViewerKind, page: Option<u32>) -> Event {

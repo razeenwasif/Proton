@@ -7,6 +7,7 @@ export interface NativeApi {
     invoke(name: 'read_document', args: {path: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'read_geometry', args: {key: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'read_lab', args: {key: string}): Promise<ArrayBuffer | number[]>;
+    invoke(name: 'read_game', args: {key: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'backdrop'): Promise<string>;
     invoke(name: 'set_backdrop', args: {material: string}): Promise<string>;
     invoke(name: 'set_opaque', args: {color: string | null}): Promise<void>;

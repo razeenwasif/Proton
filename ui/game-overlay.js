@@ -92,10 +92,24 @@ function tone(prefab, c) {
   }
 }
 
-/** Draw a room's outline, collision, entities, spawns and lights.
+/** Where the corner handle that scales a selected image is, on the stage.
+ *  @param {View} view @param {{x: number, y: number, w: number, h: number, rot: number}} box @returns {[number, number]} */
+export function handle(view, box) {
+  const a = (box.rot * Math.PI) / 180;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const dx = box.w / 2;
+  const dy = box.h / 2;
+  return toStage(view, [cx + dx * Math.cos(a) - dy * Math.sin(a), cy + dx * Math.sin(a) + dy * Math.cos(a)]);
+}
+
+/** Draw a room's outline, collision, entities, spawns and lights — over its
+ *  art when the renderer drew it (`art`), on a ground of its own when not —
+ *  and the box of a selected image, with its handle.
  *  @param {CanvasRenderingContext2D} g @param {Room} room @param {View} view @param {Colors} c
- *  @param {Selected | null} selected */
-export function draw(g, room, view, c, selected) {
+ *  @param {Selected | null} selected
+ *  @param {{art?: boolean, box?: {x: number, y: number, w: number, h: number, rot: number} | null, camera?: number[] | null}} [also] */
+export function draw(g, room, view, c, selected, also = {}) {
   const is = (/** @type {string} */ kind, /** @type {string} */ id) => selected?.kind === kind && selected.id === id;
   const [w, h] = room.size;
   g.save();
@@ -104,8 +118,10 @@ export function draw(g, room, view, c, selected) {
   g.font = "11px ui-sans-serif, system-ui, sans-serif";
   g.textBaseline = "bottom";
   // The room.
-  g.fillStyle = c.ground;
-  g.fillRect(view.x, view.y, w * view.scale, h * view.scale);
+  if (!also.art) {
+    g.fillStyle = c.ground;
+    g.fillRect(view.x, view.y, w * view.scale, h * view.scale);
+  }
   g.strokeStyle = c.faint;
   g.lineWidth = 1;
   g.strokeRect(Math.round(view.x) + 0.5, Math.round(view.y) + 0.5, Math.round(w * view.scale), Math.round(h * view.scale));
@@ -186,6 +202,35 @@ export function draw(g, room, view, c, selected) {
     g.stroke();
     g.fillStyle = is("spawn", s.id) ? c.accent : c.muted;
     g.fillText(s.id, x + 11, y - 8);
+  }
+  // What the game's camera frames from here: the art far behind is drawn as
+  // it would see it, so this is where that picture is whole.
+  if (also.camera) {
+    const [x, y] = toStage(view, [also.camera[0], also.camera[1]]);
+    g.setLineDash([3, 6]);
+    g.strokeStyle = c.faint;
+    g.lineWidth = 1;
+    g.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(also.camera[2] * view.scale), Math.round(also.camera[3] * view.scale));
+    g.setLineDash([]);
+    g.fillStyle = c.faint;
+    g.fillText("camera", x + 4, y - 2);
+  }
+  // A selected image: its box, turned as it is, and the handle that scales it.
+  const box = also.box;
+  if (box) {
+    const a = (box.rot * Math.PI) / 180;
+    const [cx, cy] = toStage(view, [box.x + box.w / 2, box.y + box.h / 2]);
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(a);
+    g.strokeStyle = c.accent;
+    g.lineWidth = 1.5;
+    g.setLineDash([5, 4]);
+    g.strokeRect((-box.w / 2) * view.scale, (-box.h / 2) * view.scale, box.w * view.scale, box.h * view.scale);
+    g.restore();
+    const [hx, hy] = handle(view, box);
+    g.fillStyle = c.accent;
+    g.fillRect(hx - 4, hy - 4, 8, 8);
   }
   g.restore();
 }

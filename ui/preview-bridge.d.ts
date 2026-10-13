@@ -5,4 +5,5 @@ export function createPreview(deliver: (event: WireEvent) => void, latency: Map<
   send(command: WireCommand): Promise<WireEvent[]>;
   readGeometry(key: string): Promise<ArrayBuffer>;
   readLab(key: string): Promise<ArrayBuffer>;
+  readGame(key: string): Promise<ArrayBuffer>;
 };

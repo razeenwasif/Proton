@@ -668,6 +668,11 @@ impl Session {
         self.active().lab_file(key)
     }
 
+    /// Where an image of the game open in the project on screen is.
+    pub fn game_file(&self, key: &str) -> Option<PathBuf> {
+        self.active().game_file(key)
+    }
+
     /// A file some workspace here opened in the document viewer — the page
     /// may still be showing one from a project it has since left.
     /// The bytes of a view the PDF mode holds, by its key — never on disk.

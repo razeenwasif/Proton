@@ -140,6 +140,12 @@ export function createGamePreview(deliver) {
 
   return {
     sync: all,
+    /** An image of the fixture game, as the shell reads one. @param {string} key */
+    async file(key) {
+      const response = await fetch(ROOT + key);
+      if (!response.ok) throw new Error(`${key}: not an image of the open game`);
+      return response.arrayBuffer();
+    },
     /** @param {any} command */
     command(command) {
       if (!files) return [];

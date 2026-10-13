@@ -43,6 +43,8 @@
     "pdf-find.js",
     "game.js",
     "game-overlay.js",
+    "game-scene.js",
+    "game-render.js",
     "highlight.js",
     "claude.js",
     "research.js",

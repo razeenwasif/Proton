@@ -77,6 +77,18 @@ export async function readLab(key) {
   return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
 }
 
+/** An image of the open game, as bytes: a path inside its folder.
+ *  @param {string} key */
+export async function readGame(key) {
+  if (!tauri) {
+    const adapter = await preview;
+    if (!adapter) throw new Error('Browser preview is unavailable');
+    return adapter.readGame(key);
+  }
+  const body = await tauri.core.invoke("read_game", { key });
+  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
+}
+
 /** @param {string} key */
 export async function readGeometry(key) {
   if (!tauri) {

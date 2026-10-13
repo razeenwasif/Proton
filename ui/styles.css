@@ -5511,6 +5511,8 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .game-ask .grow { flex: 1; }
 .game-ask button { padding: 4px 10px; }
 .game-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; outline: none; background: color-mix(in srgb, var(--text) 4%, var(--bg-deep)); }
+.game-gl { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.game-gl[hidden] { display: none; }
 .game-overlay { position: absolute; inset: 0; display: block; }
 .game-overlay[hidden] { display: none; }
 .game-empty { position: absolute; inset: 0; display: grid; place-items: center; }
@@ -5541,6 +5543,10 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .game-row.on { background: var(--row-on); color: var(--text); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
 .game-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .game-row-meta { flex: none; color: var(--faint); font: var(--z-2xs) var(--zed); }
+.game-toggle { flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); font: 11px/1 var(--zed); cursor: pointer; }
+.game-toggle:hover { background: var(--row-hover); color: var(--text); }
+.game-toggle.off { color: var(--faint); }
+.game-toggle.on, .game-toggle.solo { color: var(--accent); }
 .game-sub { margin-left: 14px; padding-left: 6px; border-left: 1px solid color-mix(in srgb, var(--text) 10%, var(--bg-deep)); }
 .game-head { display: flex; align-items: center; gap: 6px; margin: 12px 8px 4px; font: 600 var(--z-2xs) var(--zed); color: var(--faint); text-transform: none; }
 .game-head.warn { color: var(--warn); }

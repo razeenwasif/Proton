@@ -288,6 +288,20 @@ fn read_lab(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tau
     std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
 }
 
+/// An image of the open game — a plane's art, a sprite — as bytes.
+///
+/// As with a Lab run's files: where it is is asked under the lock, which
+/// gives only an image inside the game's folder, and it is read after.
+#[tauri::command(async)]
+fn read_game(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
+    let path = match session.lock() {
+        Ok(it) => it.session.game_file(&key),
+        Err(poisoned) => poisoned.into_inner().session.game_file(&key),
+    };
+    let path = path.ok_or_else(|| format!("{key}: not an image of the open game"))?;
+    std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
+}
+
 /// Give the core a heartbeat.
 ///
 /// Everything a language server says arrives on a thread the core cannot see,
@@ -509,6 +523,7 @@ fn main() {
             read_document,
             read_geometry,
             read_lab,
+            read_game,
             quit
         ])
         .setup(|app| {

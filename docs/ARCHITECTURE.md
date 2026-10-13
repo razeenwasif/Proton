@@ -1522,12 +1522,27 @@ symlinks (`path::inside`).
 Modeling is. With no game open the home page lists the project's games and
 makes a new one from a template whose art is drawn in code. An open game has
 World / Layers / Entities / Assets on the left, its rooms as tabs over the
-stage, and Inspector / Run / Agent on the right. The stage draws a room's
-edge, collision, entities, spawns and lights (`ui/game-overlay.js`); clicking
-selects what is there.
+stage, and Inspector / Run / Agent on the right.
 
-**What comes next** (the plan's G2–G14): a WebGL2 renderer for the planes,
-collision authoring, a fixed-point simulation in Rust run natively for tests
+**The stage.** A room's art is drawn by `ui/game-render.js` — WebGL 2, one
+unit quad drawn instanced, each image a mipmapped texture (or sampled nearest
+for pixel art), a plane's haze mixed in by the shader, the blend a plane or
+item asks for — from a list `ui/game-scene.js` lays out. A plane `depth`
+behind the play plane moves `focal / (focal + depth)` as fast as it; the
+editor shows the room as the game's camera would see it centred on the stage,
+with that camera's frame drawn, and its own pan and zoom move over the
+picture. Images reach the window through `read_game`, a byte command that
+gives only an image inside the open game's folder (a texture from a custom
+scheme would be cross-origin, which WebGL refuses). Over the art,
+`ui/game-overlay.js` draws what is solid and where things stand. A click
+picks what is there — images by their opaque pixels, so leaves in front of
+the camera do not take a click meant for the stone between them; a drag
+sends one edit when it ends; a selected image scales from its corner; planes
+can be hidden, locked or shown alone, which is the editor's and never saved;
+and an image dragged in from Assets is placed where it lands, in the plane's
+own pixels.
+
+**What comes next** (the plan's G3–G14): collision authoring, a fixed-point simulation in Rust run natively for tests
 and the agent and as WebAssembly in the window, importers (PSD, Aseprite,
 DragonBones, Spine, glTF), lighting, animation, combat, the world map with
 ability gates, hot reload and a web export.
