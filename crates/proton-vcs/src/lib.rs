@@ -135,33 +135,17 @@ impl Repo {
         let Some(repo) = self.repo.as_ref() else {
             return Vec::new();
         };
-        let Ok(status) = repo.status(gix::progress::Discard) else {
-            return Vec::new();
-        };
-        // Untracked *files* rather than the collapsed directory git reports by
-        // default: a row you cannot open is not worth a row.
-        let status = status.index_worktree_options_mut(|opts| {
-            if let Some(dirwalk) = opts.dirwalk_options.as_mut() {
-                dirwalk.set_emit_untracked(gix::dir::walk::EmissionMode::Matching);
-            }
-        });
-        let Ok(iter) = status.into_iter(None) else {
-            return Vec::new();
-        };
+        changes_of(repo, None)
+    }
 
-        let mut found: Vec<Change> = iter
-            .filter_map(Result::ok)
-            .filter_map(|item| {
-                let path = item.location().to_string();
-                Some(Change {
-                    state: state_of(&item)?,
-                    path,
-                })
-            })
-            .collect();
-        found.sort_by(|a, b| a.path.cmp(&b.path));
-        found.dedup_by(|a, b| a.path == b.path);
-        found
+    /// What asking for the project's changes needs, to ask on another
+    /// thread: a status walks the whole working tree, and a project in a
+    /// folder of a bigger repository — one course of a courses repository —
+    /// is asked only about its folder.
+    pub fn asking(&self) -> Option<Asking> {
+        let repo = self.repo.as_ref()?;
+        let within = self.relative(&self.root).filter(|within| !within.is_empty());
+        repo.workdir().map(|_| Asking { root: self.root.clone(), within })
     }
 
     /// A path as git spells it: relative to the repository, forward slashes.
@@ -176,6 +160,55 @@ impl Repo {
         let relative = path.strip_prefix(&work_dir).ok()?;
         Some(relative.to_string_lossy().replace('\\', "/"))
     }
+}
+
+/// The project's changes, asked of a repository opened afresh — on a worker,
+/// away from everything waiting on the editor.
+#[derive(Debug, Clone)]
+pub struct Asking {
+    root: PathBuf,
+    within: Option<String>,
+}
+
+impl Asking {
+    pub fn changes(&self) -> Vec<Change> {
+        match gix::discover(&self.root) {
+            Ok(repo) => changes_of(&repo, self.within.as_deref()),
+            Err(_) => Vec::new(),
+        }
+    }
+}
+
+/// Every path git considers changed — under `within`, a folder as git spells
+/// it, when given.
+fn changes_of(repo: &gix::Repository, within: Option<&str>) -> Vec<Change> {
+    let Ok(status) = repo.status(gix::progress::Discard) else {
+        return Vec::new();
+    };
+    // Untracked *files* rather than the collapsed directory git reports by
+    // default: a row you cannot open is not worth a row.
+    let status = status.index_worktree_options_mut(|opts| {
+        if let Some(dirwalk) = opts.dirwalk_options.as_mut() {
+            dirwalk.set_emit_untracked(gix::dir::walk::EmissionMode::Matching);
+        }
+    });
+    let Ok(iter) = status.into_iter(within.map(|within| gix::bstr::BString::from(format!(":(top,literal){within}")))) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<Change> = iter
+        .filter_map(Result::ok)
+        .filter_map(|item| {
+            let path = item.location().to_string();
+            Some(Change {
+                state: state_of(&item)?,
+                path,
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| a.path.cmp(&b.path));
+    found.dedup_by(|a, b| a.path == b.path);
+    found
 }
 
 fn state_of(item: &gix::status::Item) -> Option<State> {
@@ -208,6 +241,28 @@ fn state_of(item: &gix::status::Item) -> Option<State> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_project_in_a_folder_of_a_repository_is_asked_about_its_folder() {
+        // One course of a courses repository: its status walked every course.
+        let top = std::env::temp_dir().join(format!("proton-vcs-within-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        std::fs::create_dir_all(top.join("one [course]")).unwrap();
+        std::fs::create_dir_all(top.join("other")).unwrap();
+        let made = std::process::Command::new("git").args(["init", "-q"]).current_dir(&top).status();
+        if !made.is_ok_and(|s| s.success()) {
+            return;
+        }
+        std::fs::write(top.join("one [course]").join("notes.md"), "mine\n").unwrap();
+        std::fs::write(top.join("other").join("notes.md"), "theirs\n").unwrap();
+        let repo = Repo::discover(top.join("one [course]"));
+        let asked: Vec<String> = repo.asking().unwrap().changes().into_iter().map(|c| c.path).collect();
+        assert_eq!(asked, vec!["one [course]/notes.md".to_string()], "not only the project's folder");
+        assert_eq!(repo.changes().len(), 2, "the whole repository's changes went");
+        let whole: Vec<String> = Repo::discover(&top).asking().unwrap().changes().into_iter().map(|c| c.path).collect();
+        assert_eq!(whole.len(), 2, "a project at the top was not asked about all of it: {whole:?}");
+        let _ = std::fs::remove_dir_all(&top);
+    }
 
     /// Proton's own checkout, which is the most convenient real repository
     /// there is and is guaranteed to be one.

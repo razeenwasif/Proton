@@ -8,10 +8,23 @@
 use proton_core::bus::Event;
 use proton_core::{Command, Workspace};
 
+/// The panel's answer: the branch at once, the changes when git has given
+/// them — asked on a worker, and sent when they differ from the last.
 fn repo_event(space: &mut Workspace) -> (Option<String>, Vec<(String, String)>) {
-    let events = space.apply(Command::RefreshRepo);
+    let mut events = space.apply(Command::RefreshRepo);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let polled = space.apply(Command::Poll);
+        let came = polled.iter().any(|event| matches!(event, Event::Repo { .. }));
+        events.extend(polled);
+        if came || !space.repo_asking() {
+            break;
+        }
+    }
     events
         .iter()
+        .rev()
         .find_map(|event| match event {
             Event::Repo { branch, files } => Some((
                 branch.clone(),

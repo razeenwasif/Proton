@@ -70,6 +70,10 @@ pub struct Workspace {
     tree: Tree,
     /// The gutter, and what git has to say about the project.
     git: Git,
+    /// The project's changes as git last gave them, and an asking in flight:
+    /// a status walks the working tree, so it is asked on a worker rather
+    /// than with everything waiting on the editor.
+    repo_asked: std::cell::RefCell<RepoAsked>,
     /// Breakpoints, and the debug session when there is one.
     debugger: Debugger,
     /// The terminal, once something has asked for one. Not started on boot:
@@ -292,6 +296,14 @@ const PATIENCE_ASKING: u32 = 400;
 /// typo would break the work this is for. What it catches is the cell that
 /// never finishes at all.
 const PATIENCE: u32 = 12_000;
+
+/// The project's changes as git last gave them, and an asking in flight.
+#[derive(Debug, Default)]
+struct RepoAsked {
+    files: Vec<crate::bus::RepoFile>,
+    asking: Option<std::sync::mpsc::Receiver<Vec<proton_vcs::Change>>>,
+    again: bool,
+}
 
 /// An entry of the conversation, as a number that moves when it does.
 fn entry_hash(entry: &crate::agent::Entry) -> u64 {
@@ -3303,6 +3315,11 @@ impl Workspace {
         self.answer_embedded_searches();
         events.extend(self.poll_external_format());
 
+        if let Some(event) = self.poll_repo() {
+            if !self.quiet {
+                events.push(event);
+            }
+        }
         let polled = self.data.poll();
         if polled != crate::data::Polled::Nothing {
             // A kernel that died under a running cell is news, not a state:
@@ -6364,19 +6381,67 @@ impl Workspace {
     /// that never pass through this core — a commit in the terminal panel, a
     /// branch switched from outside — so a remembered list would be stale
     /// exactly when somebody looked at it to find out what had happened.
+    ///
+    /// The branch now, with the changes as last asked; git is asked again on
+    /// a worker, and its answer goes when it comes if it is different.
     fn repo_event(&self) -> Event {
+        self.ask_repo();
         Event::Repo {
             branch: self.git.branch(),
-            files: self
-                .git
-                .changes()
-                .into_iter()
-                .map(|change| crate::bus::RepoFile {
-                    path: change.path,
-                    state: change.state.letter().to_string(),
-                })
-                .collect(),
+            files: self.repo_asked.borrow().files.clone(),
         }
+    }
+
+    fn ask_repo(&self) {
+        let mut asked = self.repo_asked.borrow_mut();
+        if asked.asking.is_some() {
+            // Asked while asking: what changed since the asking began is
+            // asked about once it has answered.
+            asked.again = true;
+            return;
+        }
+        let Some(asking) = self.git.asking() else {
+            asked.files.clear();
+            return;
+        };
+        let (done, answer) = std::sync::mpsc::channel();
+        let started = std::thread::Builder::new().name("proton-git-status".into()).spawn(move || {
+            let _ = done.send(asking.changes());
+        });
+        if started.is_ok() {
+            asked.asking = Some(answer);
+        }
+    }
+
+    /// Whether git is being asked for the project's changes.
+    pub fn repo_asking(&self) -> bool {
+        self.repo_asked.borrow().asking.is_some()
+    }
+
+    /// Git's answer, when it has come and says something new.
+    fn poll_repo(&mut self) -> Option<Event> {
+        let mut asked = self.repo_asked.borrow_mut();
+        let answer = match asked.asking.as_ref()?.try_recv() {
+            Ok(changes) => changes,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                asked.asking = None;
+                return None;
+            }
+        };
+        asked.asking = None;
+        let files: Vec<crate::bus::RepoFile> = answer
+            .into_iter()
+            .map(|change| crate::bus::RepoFile { path: change.path, state: change.state.letter().to_string() })
+            .collect();
+        let again = std::mem::take(&mut asked.again);
+        let changed = files != asked.files;
+        asked.files = files;
+        drop(asked);
+        if again {
+            self.ask_repo();
+        }
+        changed.then(|| Event::Repo { branch: self.git.branch(), files: self.repo_asked.borrow().files.clone() })
     }
 
     fn trace_event(&self) -> Event {

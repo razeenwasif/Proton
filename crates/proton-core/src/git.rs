@@ -52,6 +52,11 @@ impl Git {
         self.repo.changes()
     }
 
+    /// The project's changes, to be asked for on a worker.
+    pub fn asking(&self) -> Option<proton_vcs::Asking> {
+        self.repo.asking()
+    }
+
     /// Forget what was cached for a buffer.
     ///
     /// Called on save and on close: a save changes what git thinks of the file
