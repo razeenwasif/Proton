@@ -22,7 +22,8 @@
         "decorations": false,
         "transparent": true,
         "theme": "Dark",
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "backgroundThrottling": "throttle"
       }
     ],
     "security": {
