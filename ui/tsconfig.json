@@ -48,6 +48,7 @@
     "game-play.js",
     "raster.js",
     "raster-view.js",
+    "raster-sync.js",
     "raster-runtime.js",
     "raster-render.js",
     "highlight.js",

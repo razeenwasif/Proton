@@ -75,6 +75,48 @@ export async function createRasterRuntime() {
       if (pass(rr.rr_apply, text(op)) !== 0) return { refused: why() };
       return { hash: ((BigInt(rr.rr_hash_hi() >>> 0) << 32n) | BigInt(rr.rr_hash_lo() >>> 0)).toString(16).padStart(16, "0") };
     },
+    /** The tiles the last op or stroke touched, as [layer, index] pairs. @returns {[number, number][]} */
+    touched() {
+      const at = rr.rr_touched();
+      const count = new Uint32Array(rr.memory.buffer, at, 1)[0];
+      const words = new Uint32Array(rr.memory.buffer, at + 4, count * 2);
+      return Array.from({ length: count }, (_, i) => /** @type {[number, number]} */ ([words[2 * i], words[2 * i + 1]]));
+    },
+    /** A pencil or eraser begun. @param {{layer: number, tool: string, tip: {size: number, round: boolean, mirror: (number | null)[]}, color: number[], pixelPerfect: boolean}} stroke */
+    strokeBegin(stroke) {
+      if (pass(rr.rr_stroke_begin, text(stroke)) !== 0) throw new Error(why());
+    },
+    /** More of it: x, y (1/256 px), pressure, three numbers a point. @param {Int32Array} points */
+    strokeAdd(points) {
+      if (!points.length) return;
+      const bytes = points.length * 4;
+      const at = rr.rr_alloc(bytes);
+      new Int32Array(rr.memory.buffer, at, points.length).set(points);
+      const result = rr.rr_stroke_add(at, points.length);
+      rr.rr_free(at, bytes);
+      if (result !== 0) throw new Error(why());
+    },
+    /** The stroke finished, as the op the core is to make, and its hash.
+     *  @returns {{op: Op, hash: string}} */
+    strokeEnd() {
+      const at = rr.rr_stroke_end();
+      const length = new DataView(rr.memory.buffer).getUint32(at, true);
+      if (!length) throw new Error(why());
+      const op = JSON.parse(new TextDecoder().decode(new Uint8Array(rr.memory.buffer, at + 4, length)));
+      return { op, hash: ((BigInt(rr.rr_hash_hi() >>> 0) << 32n) | BigInt(rr.rr_hash_lo() >>> 0)).toString(16).padStart(16, "0") };
+    },
+    /** The stroke taken away; nothing is sent. */
+    strokeCancel() {
+      rr.rr_stroke_cancel();
+    },
+    /** An op shown and not kept: a shape being dragged. @param {Op} op */
+    preview(op) {
+      if (pass(rr.rr_preview, text(op)) !== 0) throw new Error(why());
+    },
+    /** What was previewed taken away. */
+    clearPreview() {
+      rr.rr_preview_clear();
+    },
     /** Tiles laid together again since last asked: their rectangles, as x, y, w, h. */
     dirty() {
       const at = rr.rr_dirty();
@@ -138,4 +180,35 @@ export function tilesPayload(from, generation, layer, tiles, version = 0, lastSe
     at += p.byteLength;
   }
   return out.buffer;
+}
+
+/** A `read_raster` payload with only the tiles named kept, and the last edit
+ *  the core had made when it read them.
+ *  @param {ArrayBuffer} bytes @param {number[]} keep @returns {{lastSeq: number, bytes: ArrayBuffer}} */
+export function keepTiles(bytes, keep) {
+  const view = new DataView(bytes);
+  const lastSeq = view.getUint32(16, true);
+  const count = view.getUint32(20, true);
+  /** @type {Uint8Array[]} */
+  const parts = [];
+  let at = 24;
+  let kept = 0;
+  for (let i = 0; i < count; i++) {
+    const present = view.getUint32(at + 4, true) === 1;
+    const length = 8 + (present ? 64 * 64 * 4 : 0);
+    if (keep.includes(view.getUint32(at, true))) {
+      parts.push(new Uint8Array(bytes, at, length));
+      kept += 1;
+    }
+    at += length;
+  }
+  const out = new Uint8Array(24 + parts.reduce((n, p) => n + p.length, 0));
+  out.set(new Uint8Array(bytes, 0, 24));
+  new DataView(out.buffer).setUint32(20, kept, true);
+  let to = 24;
+  for (const p of parts) {
+    out.set(p, to);
+    to += p.length;
+  }
+  return { lastSeq, bytes: out.buffer };
 }

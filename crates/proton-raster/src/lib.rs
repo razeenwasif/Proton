@@ -23,6 +23,8 @@
 //! - [`canvas`]: the document — its size, preset, palette and layers.
 //! - [`blend`]: the layers composited, mode by mode, as the W3C defines them.
 //! - [`op`]: every change, as a value: applied whole or not at all.
+//! - [`stroke`], [`fill`]: what a pencil, a shape or a bucket covers, as a
+//!   mask, and painting it.
 //! - [`history`]: undo and redo by the tiles each change touched.
 //! - [`file`]: a canvas on disk, a folder of PNGs and a `canvas.json` (`io`).
 
@@ -30,13 +32,16 @@ pub mod blend;
 pub mod canvas;
 #[cfg(feature = "io")]
 pub mod file;
+pub mod fill;
 pub mod fixed;
 pub mod history;
 pub mod op;
+pub mod stroke;
 pub mod text;
 pub mod tile;
 
 pub use canvas::{Blend, Canvas, Layer, LayerInfo, Preset};
 pub use history::History;
-pub use op::{Applied, Op};
+pub use op::{Applied, Op, ShapeKind};
+pub use stroke::{Stroke, Tip, Tool};
 pub use tile::{Grid, Tile, TILE};

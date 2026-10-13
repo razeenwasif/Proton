@@ -11,12 +11,16 @@ import { createRasterRuntime, tilesPayload } from "./raster-runtime.js";
 
 /** @typedef {Awaited<ReturnType<typeof createRasterRuntime>>} Runtime */
 
+/** The palette a new pixel canvas starts with — the core's `PALETTE16`. */
+const PALETTE16 = ["1b1b23", "3d3d4f", "6e6e86", "a8a8bf", "f2f2f7", "5a1f2e", "b0303f", "e8743b", "f4c95d", "8fd16a", "3e9e5c", "1f5f5b", "2f6fb0", "6fb7e8", "6b3fa0", "e07ab8"]
+  .map((h) => [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), 255]);
+
 /** @param {(event: any) => void} _deliver */
 export function createRasterPreview(_deliver) {
   /** @type {{path: string, name: string, preset: string, size: [number, number]}[]} */
   const canvases = [];
   /** @type {{path: string, name: string, preset: string, width: number, height: number, core: Runtime,
-   *          ops: {op: any, label: string}[], undone: {op: any, label: string}[], saved: number, generation: number, version: number} | null} */
+   *          ops: {op: any, label: string}[], undone: {op: any, label: string}[], saved: number, generation: number, version: number, lastSeq: number} | null} */
   let open = null;
   let generations = 0;
 
@@ -25,7 +29,7 @@ export function createRasterPreview(_deliver) {
   /** A copy with the edits made. @param {string} preset @param {number} width @param {number} height @param {any[]} ops */
   async function made(preset, width, height, ops) {
     const core = await createRasterRuntime();
-    core.open({ width, height, preset, palette: [], layers: [first(preset)], generation: generations });
+    core.open({ width, height, preset, palette: preset === "pixel" ? PALETTE16 : [], layers: [first(preset)], generation: generations });
     for (const op of ops) core.apply(op);
     return core;
   }
@@ -72,7 +76,7 @@ export function createRasterPreview(_deliver) {
     /** @param {number} generation @param {number} layer @param {number[]} tiles */
     async tiles(generation, layer, tiles) {
       if (!open || open.generation !== generation) throw new Error(`layer ${layer} of canvas ${generation} is not open`);
-      return tilesPayload(open.core, generation, layer, tiles, open.version, 0);
+      return tilesPayload(open.core, generation, layer, tiles, open.version, open.lastSeq);
     },
     /** @param {any} command */
     async command(command) {
@@ -82,14 +86,14 @@ export function createRasterPreview(_deliver) {
           if (canvases.some((c) => c.path === path)) return [{ type: "notice", text: `${path} is already there`, level: "warn" }];
           generations += 1;
           canvases.push({ path, name: path.replace(/\.canvas$/, ""), preset: command.preset, size: [command.width, command.height] });
-          open = { path, name: path.replace(/\.canvas$/, ""), preset: command.preset, width: command.width, height: command.height, core: await made(command.preset, command.width, command.height, []), ops: [], undone: [], saved: 0, generation: generations, version: 0 };
+          open = { path, name: path.replace(/\.canvas$/, ""), preset: command.preset, width: command.width, height: command.height, core: await made(command.preset, command.width, command.height, []), ops: [], undone: [], saved: 0, generation: generations, version: 0, lastSeq: 0 };
           return [home(), canvasEvent()];
         }
         case "rasterOpen": {
           const found = canvases.find((c) => c.path === command.path);
           if (!found) return [{ type: "notice", text: `${command.path} is not a canvas here`, level: "warn" }];
           generations += 1;
-          open = { path: found.path, name: found.name, preset: found.preset, width: found.size[0], height: found.size[1], core: await made(found.preset, found.size[0], found.size[1], []), ops: [], undone: [], saved: 0, generation: generations, version: 0 };
+          open = { path: found.path, name: found.name, preset: found.preset, width: found.size[0], height: found.size[1], core: await made(found.preset, found.size[0], found.size[1], []), ops: [], undone: [], saved: 0, generation: generations, version: 0, lastSeq: 0 };
           return [home(), canvasEvent()];
         }
         case "rasterClose":
@@ -98,6 +102,7 @@ export function createRasterPreview(_deliver) {
           return [home(), canvasEvent()];
         case "rasterEdit": {
           if (!open || command.generation !== open.generation) return [];
+          open.lastSeq = command.seq;
           const before = JSON.stringify(open.core.info().layers);
           const done = open.core.apply(command.op);
           const answer = (/** @type {any} */ extra) => ({

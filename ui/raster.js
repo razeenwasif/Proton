@@ -10,15 +10,21 @@
  * first and shown at once, then sent to the core numbered; the core makes it
  * on the canvas it saves and answers with a hash of the tiles it touched,
  * which must be the hash made here. When it is not — or the edit was
- * refused — this copy is thrown away and fetched again from the core. What
- * the core changes itself (undo, redo, the agent) arrives as the tiles it
- * changed, fetched through `read_raster`. */
+ * refused — the tiles it touched are fetched again from the core
+ * (`raster-sync.js` keeps the rules). What the core changes itself (undo,
+ * redo, the agent) arrives as the tiles it changed, fetched the same way.
+ *
+ * A pencil is drawn as the pen moves: its points go to the copy a frame at a
+ * time, and the finished stroke — every point, as the copy saw them — is the
+ * edit sent. A shape is shown as it is dragged and sent when let go; a fill
+ * and a colour picked are a click. */
 
 import { escapeHtml as esc } from "./html.js";
 import { readRaster } from "./bridge.js";
-import { createRasterRuntime } from "./raster-runtime.js";
+import { createRasterRuntime, keepTiles } from "./raster-runtime.js";
 import { createRasterRender } from "./raster-render.js";
-import { fit, toCanvas, zoomAt } from "./raster-view.js";
+import { createSync } from "./raster-sync.js";
+import { fit, q8, toCanvas, toStage, zoomAt } from "./raster-view.js";
 
 /** @typedef {import('./bindings/RasterFound').RasterFound} Found */
 /** @typedef {import('./bindings/RasterView').RasterView} View */
@@ -40,9 +46,20 @@ const SIZES = {
 };
 
 const KEYS = /** @type {[string, string][]} */ ([
-  ["⌘S", "save the canvas"], ["⌘Z ⇧⌘Z", "undo, redo"], ["f", "the whole canvas"], ["1", "100 %"],
+  ["b e g i", "pencil, eraser, fill, pick a colour"], ["l r o", "line, rectangle, ellipse"], ["[ ]", "a smaller, a larger tip"],
+  ["p", "pixel-perfect"], ["m ⇧M", "mirror across, down"], ["⇧G", "the pixel grid"], ["⌥ click", "pick a colour"],
+  ["⎋", "take back the stroke being drawn"], ["⌘S", "save the canvas"], ["⌘Z ⇧⌘Z", "undo, redo"], ["f", "the whole canvas"], ["1", "100 %"],
   ["two fingers", "move over the canvas"], ["pinch ⌘ wheel", "zoom"], ["␣ drag", "move over the canvas"], ["?", "these keys"],
 ]);
+
+/** The tools, by the key that takes each. */
+const TOOL_KEYS = /** @type {Record<string, string>} */ ({ b: "pencil", e: "eraser", g: "fill", i: "pick", l: "line", r: "rect", o: "ellipse" });
+
+/** Ops that change the layers themselves, not only their pixels. @param {Op} op */
+const changesLayers = (op) => ["addLayer", "removeLayer", "moveLayer", "setLayer", "setPalette"].includes(op.op) || (op.op === "replaceColor" && op.swatch !== undefined && op.swatch !== null);
+
+/** `#rrggbb` of a colour. @param {number[]} c */
+const hex = (c) => `#${c.slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 
 /** @param {{root: Document, dispatch: (command: any) => unknown, keys?: (title: string, rows: [string, string][]) => void}} host */
 export function createRaster(host) {
@@ -60,10 +77,22 @@ export function createRaster(host) {
   let copyOf = 0;
   /** The layer drawn on and inspected. @type {number | null} */
   let chosen = null;
-  /** Edits sent and not yet answered, oldest first. @type {{seq: number, hash: string}[]} */
-  let inflight = [];
-  let seq = 0;
   let shown = false;
+  /** What the pointer does, and how. */
+  let tool = "pencil";
+  /** The colour drawn with, straight RGBA. @type {[number, number, number, number]} */
+  let color = [27, 27, 35, 255];
+  /** Four numbers as a colour. @param {number[]} c @returns {[number, number, number, number]} */
+  const rgba = (c) => [c[0] ?? 0, c[1] ?? 0, c[2] ?? 0, c[3] ?? 255];
+  let tipSize = 1;
+  let round = false;
+  let pixelPerfect = true;
+  let mirror = [false, false];
+  let fillOptions = { tolerance: 0, contiguous: true, diagonal: false };
+  let filled = false;
+  let grid = false;
+  /** The pixel under the pointer, for the cursor. @type {[number, number] | null} */
+  let hover = null;
   let asking = false;
   /** How the canvas is seen; refitted until the person moves it.
    *  @type {{zoom: number, x: number, y: number, moved: boolean} | null} */
@@ -77,6 +106,7 @@ export function createRaster(host) {
 
   const stage = q("[data-raster-stage]");
   const glCanvas = /** @type {HTMLCanvasElement} */ (q("[data-raster-gl]"));
+  const overlay = /** @type {HTMLCanvasElement} */ (q("[data-raster-overlay]"));
   let gpu = (() => {
     try {
       return createRasterRender(glCanvas, { onLost: () => { gpu = null; } });
@@ -147,6 +177,36 @@ export function createRaster(host) {
     save.textContent = view?.saving ? "Saving…" : "Save";
     q("[data-raster-zoom]").textContent = cam ? `${Math.round(cam.zoom * 100)} %` : "";
   }
+  /** @param {string} which */
+  function useTool(which) {
+    cancel();
+    tool = which;
+    ws.dataset.tool = which;
+    for (const b of ws.querySelectorAll("[data-raster-tool]")) b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.rasterTool === which));
+    renderInspector();
+    paint();
+  }
+  q("[data-raster-tools]").addEventListener("click", (e) => {
+    const b = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-raster-tool]"));
+    if (b) useTool(b.dataset.rasterTool ?? "pencil");
+  });
+  function renderColor() {
+    const input = /** @type {HTMLInputElement} */ (q("[data-raster-color]"));
+    input.value = hex(color);
+    q("[data-raster-color-swatch]").style.background = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`;
+  }
+  q("[data-raster-color]").addEventListener("input", (e) => {
+    const v = /** @type {HTMLInputElement} */ (e.target).value;
+    color = rgba([parseInt(v.slice(1, 3), 16), parseInt(v.slice(3, 5), 16), parseInt(v.slice(5, 7), 16), 255]);
+    renderColor();
+    renderPalette();
+  });
+  function toggleGrid() {
+    grid = !grid;
+    q("[data-raster-grid]").setAttribute("aria-pressed", String(grid));
+    paint();
+  }
+  q("[data-raster-grid]").addEventListener("click", () => toggleGrid());
   q("[data-raster-undo]").addEventListener("click", () => send({ type: "rasterUndo" }));
   q("[data-raster-redo]").addEventListener("click", () => send({ type: "rasterRedo" }));
   q("[data-raster-save]").addEventListener("click", () => send({ type: "rasterSave" }));
@@ -183,6 +243,71 @@ export function createRaster(host) {
     } else if (answer === "discard") {
       send({ type: "rasterClose", discard: true });
     }
+  });
+
+  /* ── the side: layers, or the palette ────────────────────────── */
+
+  let side = "layers";
+  /** @param {string} which */
+  function showSide(which) {
+    side = which;
+    for (const tab of ws.querySelectorAll("[data-raster-side]")) {
+      const on = /** @type {HTMLElement} */ (tab).dataset.rasterSide === which;
+      tab.classList.toggle("on", on);
+      tab.setAttribute("aria-selected", String(on));
+    }
+    q("[data-raster-palette]").hidden = which !== "palette";
+    q("[data-raster-layers]").hidden = which !== "layers";
+    q("[data-raster-layer-tools]").hidden = which !== "layers";
+    renderPalette();
+  }
+  ws.querySelector(".raster-side-tabs")?.addEventListener("click", (e) => {
+    const tab = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-raster-side]"));
+    if (tab) showSide(tab.dataset.rasterSide ?? "layers");
+  });
+
+  function renderPalette() {
+    const box = q("[data-raster-palette]");
+    if (!view || side !== "palette") return;
+    const same = (/** @type {number[]} */ c) => c.every((v, i) => v === color[i]);
+    box.innerHTML =
+      (view.palette.length
+        ? `<div class="raster-swatches">${view.palette
+            .map((c, i) => `<button class="raster-swatch${same(c) ? " on" : ""}" data-raster-swatch="${i}" style="background: rgba(${c[0]}, ${c[1]}, ${c[2]}, ${c[3] / 255})" title="${hex(c)} — double-click to change it everywhere it is"></button>`)
+            .join("")}</div>`
+        : `<p class="raster-faint">No palette yet.</p>`) +
+      `<div class="raster-palette-tools"><button class="cc-quiet" data-raster-swatch-add>Add ${hex(color)}</button>` +
+      (view.palette.some(same) ? `<button class="cc-quiet" data-raster-swatch-remove>Remove it</button>` : "") +
+      `</div><p class="raster-palette-hint">Double-click a swatch to change its colour, and every pixel of it, as one edit.</p>`;
+  }
+  const palette = q("[data-raster-palette]");
+  palette.addEventListener("click", (e) => {
+    const target = /** @type {HTMLElement} */ (e.target);
+    if (!view) return;
+    const swatch = /** @type {HTMLElement | null} */ (target.closest("[data-raster-swatch]"));
+    if (swatch) {
+      color = rgba(view.palette[Number(swatch.dataset.rasterSwatch)]);
+      renderColor();
+      renderPalette();
+      return;
+    }
+    if (target.closest("[data-raster-swatch-add]")) edit({ op: "setPalette", colors: [...view.palette, color] }, "add a colour");
+    if (target.closest("[data-raster-swatch-remove]")) edit({ op: "setPalette", colors: view.palette.filter((c) => !c.every((v, i) => v === color[i])) }, "remove a colour");
+  });
+  palette.addEventListener("dblclick", (e) => {
+    const swatch = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-raster-swatch]"));
+    if (!swatch || !view) return;
+    const i = Number(swatch.dataset.rasterSwatch);
+    const from = view.palette[i];
+    const ask = Object.assign(document.createElement("input"), { type: "color", value: hex(from) });
+    ask.addEventListener("change", () => {
+      const v = ask.value;
+      const to = rgba([parseInt(v.slice(1, 3), 16), parseInt(v.slice(3, 5), 16), parseInt(v.slice(5, 7), 16), from[3]]);
+      edit({ op: "replaceColor", from, to, swatch: i }, "recolour");
+      color = to;
+      renderColor();
+    });
+    ask.click();
   });
 
   /* ── layers ──────────────────────────────────────────────────── */
@@ -256,7 +381,23 @@ export function createRaster(host) {
       box.innerHTML = view ? `<p class="raster-faint">Choose a layer.</p>` : "";
       return;
     }
+    const number = (/** @type {string} */ name, /** @type {number} */ value, /** @type {number} */ min, /** @type {number} */ max, /** @type {string} */ label) =>
+      `<label class="raster-field"><span>${label}</span><input type="number" min="${min}" max="${max}" value="${value}" data-raster-option="${name}"></label>`;
+    const check = (/** @type {string} */ name, /** @type {boolean} */ on, /** @type {string} */ label) =>
+      `<label class="raster-field raster-check"><input type="checkbox" data-raster-option="${name}"${on ? " checked" : ""}> <span>${label}</span></label>`;
+    const options =
+      tool === "fill"
+        ? number("tolerance", fillOptions.tolerance, 0, 255, "Tolerance") + check("contiguous", fillOptions.contiguous, "Only what touches it") + check("diagonal", fillOptions.diagonal, "Across corners too")
+        : tool === "pick"
+          ? `<p class="raster-faint">A click takes the colour there, every layer laid together. ⌥ with any tool does too.</p>`
+          : number("size", tipSize, 1, 64, "Size") + check("round", round, "Round") +
+            (tool === "pencil" ? check("pixelPerfect", pixelPerfect, "Pixel-perfect — no corners on steps") : "") +
+            (tool === "rect" || tool === "ellipse" ? check("filled", filled, "Filled") : "") +
+            check("mirrorX", mirror[0], "Mirror across the middle") + check("mirrorY", mirror[1], "Mirror down the middle");
     box.innerHTML =
+      `<h5 class="raster-tool-head">${esc({ pencil: "Pencil", eraser: "Eraser", fill: "Fill", pick: "Pick a colour", line: "Line", rect: "Rectangle", ellipse: "Ellipse" }[tool] ?? tool)}</h5>` +
+      `<div class="raster-fields" data-raster-options>${options}</div>` +
+      `<h5 class="raster-layer-head">Layer</h5>` +
       `<header class="raster-insp-head"><h4>${esc(l.name)}</h4></header>` +
       `<div class="raster-fields" data-raster-fields="${l.id}">` +
       `<label class="raster-field"><span>Name</span><input type="text" data-raster-field="name" value="${esc(l.name)}" spellcheck="false"></label>` +
@@ -282,6 +423,22 @@ export function createRaster(host) {
   });
   inspector.addEventListener("change", (e) => {
     const field = /** @type {HTMLInputElement} */ (e.target);
+    const option = field.dataset.rasterOption;
+    if (option) {
+      const n = Math.round(Number(field.value));
+      if (option === "size") tipSize = Math.min(64, Math.max(1, n || 1));
+      if (option === "tolerance") fillOptions = { ...fillOptions, tolerance: Math.min(255, Math.max(0, n || 0)) };
+      if (option === "round") round = field.checked;
+      if (option === "pixelPerfect") pixelPerfect = field.checked;
+      if (option === "filled") filled = field.checked;
+      if (option === "contiguous") fillOptions = { ...fillOptions, contiguous: field.checked };
+      if (option === "diagonal") fillOptions = { ...fillOptions, diagonal: field.checked };
+      if (option === "mirrorX") mirror = [field.checked, mirror[1]];
+      if (option === "mirrorY") mirror = [mirror[0], field.checked];
+      renderInspector();
+      paint();
+      return;
+    }
     const name = field.dataset.rasterField;
     if (!name || !view) return;
     const id = Number(field.closest("[data-raster-fields]")?.getAttribute("data-raster-fields"));
@@ -315,14 +472,32 @@ export function createRaster(host) {
 
   /* ── edits ───────────────────────────────────────────────────── */
 
-  /** An edit: made on this window's copy, then sent. @param {Op} op @param {string} label */
+  const sync = createSync({
+    fetch: async (layer, tiles) => {
+      if (!view) return { lastSeq: 0, bytes: new ArrayBuffer(24) };
+      const bytes = await readRaster(view.generation, layer, tiles);
+      return { lastSeq: new DataView(bytes).getUint32(16, true), bytes };
+    },
+    put: (layer, bytes, keep) => copy?.put(layer, keepTiles(bytes, keep).bytes),
+    reload: () => reload(),
+    painted: () => paint(),
+  });
+
+  /** An op: made on this window's copy, then sent. @param {Op} op @param {string} label */
   function edit(op, label) {
     if (!view || !copy) return;
     const made = copy.apply(op);
-    seq += 1;
     // Refused here too: sent all the same, unpredicted, so the core says why.
-    if ("hash" in made) inflight.push({ seq, hash: made.hash });
-    send({ type: "rasterEdit", generation: view.generation, seq, op, label });
+    send_(op, label, "hash" in made ? made.hash : null, "hash" in made ? copy.touched() : []);
+  }
+
+  /** An edit made here, sent numbered. @param {Op} op @param {string} label
+   *  @param {string | null} hash @param {[number, number][]} touched */
+  function send_(op, label, hash, touched) {
+    if (!view) return;
+    const n = sync.next();
+    sync.sent(n, hash, touched, changesLayers(op));
+    send({ type: "rasterEdit", generation: view.generation, seq: n, op, label });
     paint();
   }
 
@@ -330,18 +505,9 @@ export function createRaster(host) {
   function applied(event) {
     later(async () => {
       if (!view || event.generation !== view.generation) return;
-      // Answered in order: what was sent before this is answered too.
-      const at = inflight.findIndex((f) => f.seq === event.seq);
-      const mine = at >= 0 ? inflight.splice(0, at + 1)[at] : null;
       view = { ...view, dirty: event.dirty, canUndo: event.canUndo, canRedo: event.canRedo };
       renderBar();
-      // An edit this copy refused too: nothing here to take back.
-      if (!mine) return;
-      if (event.refused || mine.hash !== event.hash) {
-        // Not the canvas this window made: start again from the core's.
-        if (!event.refused) console.warn(`proton: canvas edit ${event.seq} made different pixels here; fetched again`);
-        await reload();
-      }
+      await sync.answered(event);
     });
   }
 
@@ -349,7 +515,7 @@ export function createRaster(host) {
   function changed(event) {
     later(async () => {
       if (!view || !copy || event.generation !== view.generation) return;
-      for (const [layer, tiles] of event.tiles) await fetchTiles(layer, tiles);
+      await sync.changed(event.tiles);
       paint();
     });
   }
@@ -368,7 +534,6 @@ export function createRaster(host) {
     next.open({ width: view.width, height: view.height, preset: view.preset, palette: view.palette, layers: view.layers, generation: view.generation });
     copy = next;
     copyOf = view.generation;
-    inflight = [];
     gpu?.resize(view.width, view.height);
     for (const [layer, tiles] of view.tiles) await fetchTiles(layer, tiles);
     paint();
@@ -413,6 +578,11 @@ export function createRaster(host) {
     empty.hidden = true;
     glCanvas.hidden = !view || !gpu;
     if (!view || !copy || !shown) return;
+    // The points queued this frame go to the copy before it is drawn.
+    if (drawing?.queued.length) {
+      copy.strokeAdd(Int32Array.from(drawing.queued));
+      drawing.queued = [];
+    }
     const c = camera();
     if (!c) return;
     const [w, h] = stageSize();
@@ -420,8 +590,50 @@ export function createRaster(host) {
     // from the copy's memory before anything else is asked of it.
     const rects = copy.dirty();
     if (rects.length) gpu?.upload(rects, copy.composite());
-    gpu?.draw(c, w, h, window.devicePixelRatio || 1, { ...colors(), pixel: view.preset === "pixel" });
+    const ratio = window.devicePixelRatio || 1;
+    gpu?.draw(c, w, h, ratio, { ...colors(), pixel: view.preset === "pixel", grid });
+    drawCursor(c, w, h, ratio);
     renderBar();
+  }
+
+  /** Where the tip will land, over the picture: its outline, and the
+   *  mirror lines when there are any. @param {{zoom: number, x: number, y: number}} c
+   *  @param {number} w @param {number} h @param {number} ratio */
+  function drawCursor(c, w, h, ratio) {
+    overlay.width = Math.round(w * ratio);
+    overlay.height = Math.round(h * ratio);
+    overlay.style.width = `${w}px`;
+    overlay.style.height = `${h}px`;
+    const g = overlay.getContext("2d");
+    if (!g || !view) return;
+    g.setTransform(ratio, 0, 0, ratio, 0, 0);
+    g.clearRect(0, 0, w, h);
+    g.lineWidth = 1;
+    if (mirror[0] || mirror[1]) {
+      g.strokeStyle = "rgba(255, 255, 255, 0.35)";
+      g.setLineDash([4, 4]);
+      g.beginPath();
+      if (mirror[0]) {
+        const [x] = toStage(c, view.width / 2, 0);
+        g.moveTo(Math.round(x) + 0.5, c.y);
+        g.lineTo(Math.round(x) + 0.5, c.y + view.height * c.zoom);
+      }
+      if (mirror[1]) {
+        const [, y] = toStage(c, 0, view.height / 2);
+        g.moveTo(c.x, Math.round(y) + 0.5);
+        g.lineTo(c.x + view.width * c.zoom, Math.round(y) + 0.5);
+      }
+      g.stroke();
+      g.setLineDash([]);
+    }
+    if (!hover || tool === "pick" || tool === "fill") return;
+    const n = tipSize;
+    const start = -Math.floor((n - 1) / 2);
+    const [x, y] = toStage(c, hover[0] + start, hover[1] + start);
+    g.strokeStyle = "rgba(255, 255, 255, 0.8)";
+    g.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(n * c.zoom) - 1, Math.round(n * c.zoom) - 1);
+    g.strokeStyle = "rgba(0, 0, 0, 0.6)";
+    g.strokeRect(Math.round(x) - 0.5, Math.round(y) - 0.5, Math.round(n * c.zoom) + 1, Math.round(n * c.zoom) + 1);
   }
   new ResizeObserver(() => paint()).observe(stage);
 
@@ -449,26 +661,177 @@ export function createRaster(host) {
   let panning = null;
   stage.addEventListener("keydown", (e) => { if (e.key === " ") space = true; });
   stage.addEventListener("keyup", (e) => { if (e.key === " ") space = false; });
-  stage.addEventListener("pointerdown", (e) => {
-    stage.focus({ preventScroll: true });
-    const c = camera();
-    if (!c || !(space || e.button === 1)) return;
-    panning = { from: stagePoint(e), at: [c.x, c.y] };
+  /** A stroke being drawn: the pointer drawing it, and points not yet given to the copy.
+   *  @type {{pointer: number, queued: number[]} | null} */
+  let drawing = null;
+  /** A shape being dragged: where it began. @type {{pointer: number, from: [number, number]} | null} */
+  let shaping = null;
+  /** Whether a pen is down, so touch is let be (palm rejection). */
+  let pen = false;
+
+  const capture = (/** @type {PointerEvent} */ e) => {
     try {
       stage.setPointerCapture(e.pointerId);
     } catch {
       // A synthetic pointer has nothing to capture.
     }
-  });
-  stage.addEventListener("pointermove", (e) => {
-    if (!panning || !cam) return;
+  };
+  /** A pointer as a canvas point. @param {PointerEvent} e @returns {[number, number] | null} */
+  const at = (e) => {
+    const c = camera();
+    if (!c) return null;
     const [sx, sy] = stagePoint(e);
-    cam = { ...cam, x: panning.at[0] + sx - panning.from[0], y: panning.at[1] + sy - panning.from[1], moved: true };
+    return toCanvas(c, sx, sy);
+  };
+  const pixel = (/** @type {[number, number]} */ p) => /** @type {[number, number]} */ ([Math.floor(p[0]), Math.floor(p[1])]);
+  /** A point as the engine takes it: x, y in 1/256 px and pressure. @param {PointerEvent} e */
+  const triple = (e) => {
+    const p = at(e);
+    if (!p) return [];
+    const pressure = e.pointerType === "pen" ? Math.round(Math.min(1, Math.max(0, e.pressure)) * 65535) : 65535;
+    return [q8(p[0]), q8(p[1]), pressure];
+  };
+  /** @returns {import('./bindings/RasterTip').RasterTip} */
+  const tip = () => ({ size: tipSize, round, mirror: [mirror[0] && view ? view.width : null, mirror[1] && view ? view.height : null] });
+  /** The colour at a canvas point, laid together, as the colour drawn with. @param {[number, number]} p */
+  function pickAt(p) {
+    if (!copy || !view) return;
+    const [x, y] = pixel(p);
+    if (x < 0 || y < 0 || x >= view.width || y >= view.height) return;
+    const c = copy.pick(x, y);
+    if (c[3] === 0) return;
+    color = rgba(c);
+    renderColor();
+    renderPalette();
+  }
+  /** The shape the drag says, from `from` to the pointer. @param {[number, number]} from @param {[number, number]} to @param {boolean} even */
+  function shapeOp(from, to, even) {
+    const layer = current();
+    if (!layer) return null;
+    let [x, y] = to;
+    if (even) {
+      // ⇧: a square or a circle; a line held to eighths of a turn.
+      const [dx, dy] = [x - from[0], y - from[1]];
+      if (tool === "line") {
+        const step = Math.PI / 4;
+        const angle = Math.round(Math.atan2(dy, dx) / step) * step;
+        const length = Math.max(Math.abs(dx), Math.abs(dy));
+        [x, y] = [from[0] + Math.round(Math.cos(angle) * length / Math.max(Math.abs(Math.cos(angle)), Math.abs(Math.sin(angle)) || 1)), from[1] + Math.round(Math.sin(angle) * length / Math.max(Math.abs(Math.cos(angle)), Math.abs(Math.sin(angle)) || 1))];
+      } else {
+        const side = Math.max(Math.abs(dx), Math.abs(dy));
+        [x, y] = [from[0] + Math.sign(dx || 1) * side, from[1] + Math.sign(dy || 1) * side];
+      }
+    }
+    return /** @type {Op} */ ({ op: "shape", layer: layer.id, shape: tool, from, to: [x, y], filled: tool !== "line" && filled, tip: tip(), color });
+  }
+
+  stage.addEventListener("pointerdown", (e) => {
+    stage.focus({ preventScroll: true });
+    const c = camera();
+    if (!c || !view || !copy) return;
+    if (space || e.button === 1) {
+      panning = { from: stagePoint(e), at: [c.x, c.y] };
+      capture(e);
+      return;
+    }
+    if (e.button !== 0 || drawing || shaping) return;
+    if (e.pointerType === "touch" && pen) return;
+    if (e.pointerType === "pen") pen = true;
+    const p = at(e);
+    if (!p) return;
+    if (tool === "pick" || e.altKey) return pickAt(p);
+    const layer = current();
+    if (!layer) return;
+    if (tool === "fill") {
+      const [x, y] = pixel(p);
+      edit({ op: "fill", layer: layer.id, x, y, color, ...fillOptions }, "fill");
+      return;
+    }
+    if (tool === "line" || tool === "rect" || tool === "ellipse") {
+      shaping = { pointer: e.pointerId, from: pixel(p) };
+      const op = shapeOp(shaping.from, shaping.from, false);
+      if (op) copy.preview(op);
+      capture(e);
+      paint();
+      return;
+    }
+    try {
+      copy.strokeBegin({ layer: layer.id, tool, tip: tip(), color, pixelPerfect: tool === "pencil" && pixelPerfect });
+    } catch (error) {
+      // A locked layer, say: the core is asked anyway, so it says why.
+      edit({ op: "stroke", layer: layer.id, tool: /** @type {any} */ (tool), tip: tip(), color, pixelPerfect, points: triple(e) }, tool);
+      return;
+    }
+    drawing = { pointer: e.pointerId, queued: triple(e) };
+    capture(e);
     paint();
   });
-  stage.addEventListener("pointerup", () => {
-    panning = null;
+
+  stage.addEventListener("pointermove", (e) => {
+    if (panning && cam) {
+      const [sx, sy] = stagePoint(e);
+      cam = { ...cam, x: panning.at[0] + sx - panning.from[0], y: panning.at[1] + sy - panning.from[1], moved: true };
+      paint();
+      return;
+    }
+    const p = at(e);
+    hover = p ? pixel(p) : null;
+    if (drawing && e.pointerId === drawing.pointer) {
+      // Every point the pointer passed through, not only the last a frame.
+      const all = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
+      for (const each of all.length ? all : [e]) drawing.queued.push(...triple(/** @type {PointerEvent} */ (each)));
+    } else if (shaping && e.pointerId === shaping.pointer && p && copy) {
+      const op = shapeOp(shaping.from, pixel(p), e.shiftKey);
+      if (op) copy.preview(op);
+    }
+    paint();
   });
+
+  /** The stroke being drawn, finished and sent. */
+  function finishStroke() {
+    if (!drawing || !copy) return;
+    if (drawing.queued.length) copy.strokeAdd(Int32Array.from(drawing.queued));
+    drawing = null;
+    const { op, hash } = copy.strokeEnd();
+    send_(op, op.op === "stroke" && op.tool === "eraser" ? "erase" : "draw", hash, copy.touched());
+  }
+
+  /** The shape being dragged, sent. @param {PointerEvent} e */
+  function finishShape(e) {
+    if (!shaping || !copy) return;
+    const p = at(e);
+    const op = p ? shapeOp(shaping.from, pixel(p), e.shiftKey) : null;
+    shaping = null;
+    copy.clearPreview();
+    if (op) edit(op, op.op === "shape" ? op.shape : "shape");
+  }
+
+  /** What is being drawn, taken back: nothing is sent. */
+  function cancel() {
+    if (drawing) {
+      copy?.strokeCancel();
+      drawing = null;
+    }
+    if (shaping) {
+      copy?.clearPreview();
+      shaping = null;
+    }
+    paint();
+  }
+
+  const end = (/** @type {PointerEvent} */ e) => {
+    if (e.pointerType === "pen") pen = false;
+    panning = null;
+    if (drawing && e.pointerId === drawing.pointer) finishStroke();
+    if (shaping && e.pointerId === shaping.pointer) finishShape(e);
+  };
+  stage.addEventListener("pointerup", end);
+  stage.addEventListener("pointercancel", end);
+  stage.addEventListener("pointerleave", () => {
+    hover = null;
+    paint();
+  });
+
 
   /** The whole canvas again. */
   function refit() {
@@ -495,13 +858,34 @@ export function createRaster(host) {
     if (e.metaKey && !e.altKey && !e.ctrlKey) {
       const k = e.key.toLowerCase();
       if (k === "s" && view) return (send({ type: "rasterSave" }), true);
+      if (k === "z" && view && !typing && (drawing || shaping)) return (cancel(), true);
       if (k === "z" && view && !typing) return (send({ type: e.shiftKey ? "rasterRedo" : "rasterUndo" }), true);
       return false;
     }
     if (typing || e.altKey || e.ctrlKey || e.metaKey || !view) return false;
+    if (e.key === "Escape" && (drawing || shaping)) return (cancel(), true);
     if (e.key === "?") return (host.keys?.("— Canvas's keys", KEYS), true);
     if (e.key === "f") return (refit(), true);
     if (e.key === "1") return (actualSize(), true);
+    if (TOOL_KEYS[e.key]) return (useTool(TOOL_KEYS[e.key]), true);
+    if (e.key === "[" || e.key === "]") {
+      tipSize = Math.min(64, Math.max(1, tipSize + (e.key === "]" ? 1 : -1)));
+      renderInspector();
+      paint();
+      return true;
+    }
+    if (e.key === "p") {
+      pixelPerfect = !pixelPerfect;
+      renderInspector();
+      return true;
+    }
+    if (e.key === "m" || e.key === "M") {
+      mirror = e.key === "M" ? [mirror[0], !mirror[1]] : [!mirror[0], mirror[1]];
+      renderInspector();
+      paint();
+      return true;
+    }
+    if (e.key === "G") return (toggleGrid(), true);
     return false;
   }
 
@@ -513,6 +897,8 @@ export function createRaster(host) {
     renderAsk();
     renderLayers();
     renderInspector();
+    renderPalette();
+    renderColor();
     paint();
   }
 
@@ -522,7 +908,16 @@ export function createRaster(host) {
   /** @type {any} */ (ws).rasterProbe = {
     /** @param {number} x @param {number} y */
     pick: (x, y) => copy?.pick(x, y) ?? null,
-    settled: () => queue.then(() => inflight.length === 0),
+    settled: () => queue.then(() => sync.settled()),
+    sync: () => sync.state(),
+    /** Where the middle of canvas pixel `x`, `y` is, in the window. @param {number} x @param {number} y */
+    at: (x, y) => {
+      const c = camera();
+      if (!c) return null;
+      const box = stage.getBoundingClientRect();
+      const [sx, sy] = toStage(c, x + 0.5, y + 0.5);
+      return [box.left + sx, box.top + sy];
+    },
   };
 
   return {
@@ -538,14 +933,18 @@ export function createRaster(host) {
         const opened = next && next.generation !== copyOf;
         view = next;
         if (!view) {
+          cancel();
+          sync.reset();
           copy = null;
           copyOf = 0;
           chosen = null;
-          inflight = [];
           cam = null;
         } else if (opened) {
           chosen = null;
           cam = null;
+          cancel();
+          sync.reset();
+          if (view.preset === "pixel" && view.palette.length) color = rgba(view.palette[0]);
           await reload();
         } else if (copy) {
           // The same canvas: its layers or palette may have changed.
@@ -566,7 +965,7 @@ export function createRaster(host) {
     /** For tests: a pixel of everything laid together, as this window has it. @param {number} x @param {number} y */
     pick: (x, y) => copy?.pick(x, y) ?? null,
     /** For tests: whether everything sent and fetched has arrived. */
-    settled: () => queue.then(() => inflight.length === 0),
+    settled: () => queue.then(() => sync.settled()),
     /** A stage point as a canvas point. @param {number} sx @param {number} sy */
     toCanvas: (sx, sy) => (cam ? toCanvas(cam, sx, sy) : null),
   };

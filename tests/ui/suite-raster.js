@@ -28,7 +28,9 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
   core.apply({op: 'fillRect', layer: 1, rect: [0, 0, 96, 80], color: [20, 40, 200, 255]});
   core.apply({op: 'fillRect', layer: 2, rect: [10, 10, 30, 20], color: [250, 200, 0, 255]});
   let version = 2;
-  win.rasterRead = (/** @type {number} */ g, /** @type {number} */ l, /** @type {number[]} */ tiles) => (g === generation ? tilesPayload(core, g, l, tiles, version) : null);
+  /** The last edit the stand-in core made, as the real one numbers what it reads. */
+  let lastSeq = 0;
+  win.rasterRead = (/** @type {number} */ g, /** @type {number} */ l, /** @type {number[]} */ tiles) => (g === generation ? tilesPayload(core, g, l, tiles, version, lastSeq) : null);
   const viewOf = (/** @type {Record<string, any>} */ extra = {}) => {
     const info = core.info();
     return {type: 'rasterCanvas', canvas: {path: 'hero.canvas', name: 'hero', preset: 'pixel', width: 96, height: 80, palette: info.palette, layers: info.layers,
@@ -129,6 +131,118 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
     assert(sent(before, 'rasterUndo').length === 1, '⌘Z did not undo');
     press('1'); await settle();
     assert($('[data-raster-zoom]').textContent === '100 %', `1 did not show it at 100 %: ${$('[data-raster-zoom]').textContent}`);
+  });
+
+  /** A pointer down, through, and up over canvas pixels. @param {number[][]} pixels @param {KeyboardEventInit & {shiftKey?: boolean, up?: boolean}} [extra] */
+  const drag = async (pixels, extra = {}) => {
+    const stage = $('[data-raster-stage]');
+    const fire = (/** @type {string} */ type, /** @type {number[]} */ p) => {
+      const [x, y] = probe().at(p[0], p[1]);
+      stage.dispatchEvent(new win.PointerEvent(type, {clientX: x, clientY: y, pointerId: 7, pointerType: 'mouse', button: 0, buttons: 1, bubbles: true, cancelable: true, ...extra}));
+    };
+    fire('pointerdown', pixels[0]);
+    for (const p of pixels.slice(1)) {
+      fire('pointermove', p);
+      await frame();
+    }
+    if (extra.up !== false) fire('pointerup', pixels[pixels.length - 1]);
+    await frame();
+  };
+  /** The core's answer to the last edit sent: the stand-in core makes it too. */
+  const answer = async (/** @type {number} */ from, /** @type {string} */ [wrong] = []) => {
+    const edit = sent(from, 'rasterEdit').at(-1);
+    const made = core.apply(edit.op);
+    version += 1;
+    lastSeq = edit.seq;
+    await win.pushEvents([{type: 'rasterApplied', generation, seq: edit.seq, version, hash: wrong ?? made.hash, refused: made.refused ?? null, dirty: true, canUndo: true, canRedo: false}]);
+    await settle(); await probe().settled();
+    return edit;
+  };
+
+  await test('A pencil stroke shows as it is drawn, goes to the core as the points drawn, and is fetched again only where the core disagrees', async () => {
+    await win.pushEvents([viewOf()]); await settle(); await probe().settled();
+    // The ground layer, and the pencil in a colour of its own.
+    ws().querySelector('[data-raster-layer="1"] .raster-layer-name').click(); await settle();
+    press('b');
+    const input = /** @type {HTMLInputElement} */ ($('[data-raster-color]'));
+    input.value = '#ff0080';
+    input.dispatchEvent(new win.Event('input', {bubbles: true}));
+    let before = win.commands.length;
+    const fetched = reads();
+    await drag([[60, 60], [64, 60], [68, 62], [70, 66]], {up: false});
+    // Shown while the pen is still down, and nothing sent yet.
+    assert(JSON.stringify(probe().pick(64, 60)) === '[255,0,128,255]', `the stroke is not shown as drawn: ${probe().pick(64, 60)}`);
+    assert(!sent(before, 'rasterEdit').length, 'a stroke was sent before it was finished');
+    const [x, y] = probe().at(70, 66);
+    $('[data-raster-stage]').dispatchEvent(new win.PointerEvent('pointerup', {clientX: x, clientY: y, pointerId: 7, pointerType: 'mouse', button: 0, bubbles: true}));
+    await frame();
+    let edit = await answer(before);
+    assert(edit.op.op === 'stroke' && edit.op.tool === 'pencil' && edit.op.layer === 1 && edit.op.points.length === 12 && edit.op.color.join() === '255,0,128,255', `the stroke sent was ${JSON.stringify(edit.op).slice(0, 200)}`);
+    assert(reads() === fetched, 'a stroke the core agreed with was fetched again');
+    assert(JSON.stringify(probe().sync()) === '{"inflight":[],"stale":[]}', `still waiting: ${JSON.stringify(probe().sync())}`);
+    // The core makes it differently: only the tile it touched is fetched again.
+    before = win.commands.length;
+    const invokes = (win.invokes ?? []).length;
+    await drag([[5, 5], [8, 5]]);
+    edit = await answer(before, ['0000000000000000']);
+    const asked = (win.invokes ?? []).slice(invokes).filter((/** @type {any} */ c) => c.name === 'read_raster');
+    assert(asked.length === 1 && JSON.stringify(asked[0].args.tiles) === '[0]' && asked[0].args.layer === 1, `fetched again: ${JSON.stringify(asked.map((/** @type {any} */ a) => a.args))}`);
+    assert(JSON.stringify(probe().pick(6, 5)) === '[255,0,128,255]', 'the tile fetched is not the core\'s');
+  });
+
+  await test('⎋ takes back a stroke being drawn and sends nothing; a shape is shown while dragged and sent when let go', async () => {
+    let before = win.commands.length;
+    const under = JSON.stringify(probe().pick(30, 40));
+    await drag([[30, 40], [36, 40]], {up: false});
+    assert(JSON.stringify(probe().pick(33, 40)) === '[255,0,128,255]', 'the stroke was not drawn');
+    press('Escape'); await frame();
+    assert(JSON.stringify(probe().pick(33, 40)) === under, '⎋ did not take the stroke back');
+    const [x, y] = probe().at(36, 40);
+    $('[data-raster-stage]').dispatchEvent(new win.PointerEvent('pointerup', {clientX: x, clientY: y, pointerId: 7, pointerType: 'mouse', button: 0, bubbles: true}));
+    await settle();
+    assert(!sent(before, 'rasterEdit').length, 'a stroke taken back was sent');
+    // A rectangle, dragged: shown as it goes, sent once.
+    press('r');
+    before = win.commands.length;
+    await drag([[50, 10], [58, 16], [62, 20]], {up: false});
+    assert(JSON.stringify(probe().pick(62, 15)) === '[255,0,128,255]', 'the rectangle is not shown while dragged');
+    assert(!sent(before, 'rasterEdit').length, 'the shape was sent while dragged');
+    const [ex, ey] = probe().at(62, 20);
+    $('[data-raster-stage]').dispatchEvent(new win.PointerEvent('pointerup', {clientX: ex, clientY: ey, pointerId: 7, pointerType: 'mouse', button: 0, bubbles: true}));
+    await frame();
+    const edit = await answer(before);
+    assert(edit.op.op === 'shape' && edit.op.shape === 'rect' && edit.op.from.join() === '50,10' && edit.op.to.join() === '62,20', `the shape sent was ${JSON.stringify(edit.op)}`);
+    assert(probe().sync().stale.length === 0, 'the shape the core agreed with is stale');
+  });
+
+  await test('A fill, a colour picked, the palette and the grid', async () => {
+    // The ink layer is hidden by now: the ground there is blue.
+    press('i');
+    await drag([[40, 40]]);
+    assert($('[data-raster-color]').value === '#1428c8', `the colour picked is ${$('[data-raster-color]').value}`);
+    // The pink stroke, filled blue.
+    press('g');
+    let before = win.commands.length;
+    await drag([[64, 60]]);
+    assert(JSON.stringify(probe().pick(64, 60)) === '[20,40,200,255]', `the fill is not shown at once: ${probe().pick(64, 60)}`);
+    const edit = await answer(before);
+    assert(edit.op.op === 'fill' && edit.op.x === 64 && edit.op.y === 60 && edit.op.contiguous === true && edit.op.color.join() === '20,40,200,255', `the fill sent was ${JSON.stringify(edit.op)}`);
+    assert(probe().sync().stale.length === 0, 'a fill the core agreed with is stale');
+    $('[data-raster-side="palette"]').click(); await settle();
+    await win.pushEvents([viewOf({palette: [[26, 28, 44, 255], [240, 240, 247, 255]]})]); await settle();
+    const swatches = ws().querySelectorAll('[data-raster-swatch]');
+    assert(swatches.length === 2, `the palette shows ${swatches.length} swatches`);
+    swatches[1].click(); await settle();
+    assert($('[data-raster-color]').value === '#f0f0f7', 'a swatch did not become the colour drawn with');
+    assert(ws().querySelector('[data-raster-swatch-remove]'), 'a colour in the palette cannot be removed');
+    before = win.commands.length;
+    $('[data-raster-swatch-remove]').click(); await settle();
+    const removed = sent(before, 'rasterEdit')[0];
+    assert(removed?.op.op === 'setPalette' && removed.op.colors.length === 1, `removing the swatch sent ${JSON.stringify(removed?.op)}`);
+    $('[data-raster-side="layers"]').click(); await settle();
+    press('G'); await settle();
+    assert($('[data-raster-grid]').getAttribute('aria-pressed') === 'true', 'G did not show the grid');
+    press('G'); await settle();
     win.rasterRead = undefined;
     await win.pushEvents([{type: 'rasterCanvas', canvas: null}]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();

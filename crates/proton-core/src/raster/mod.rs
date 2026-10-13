@@ -163,7 +163,13 @@ impl Raster {
                 if dir.exists() {
                     return vec![notice(format!("{folder} is already there"), NoticeLevel::Warn)];
                 }
-                let made = Canvas::new(width, height, preset).and_then(|canvas| file::save(&dir, &canvas).map(|_| canvas));
+                let made = Canvas::new(width, height, preset).and_then(|mut canvas| {
+                    // A pixel canvas starts with colours to pick from.
+                    if preset == Preset::Pixel {
+                        canvas.palette = proton_raster::canvas::PALETTE16.to_vec();
+                    }
+                    file::save(&dir, &canvas).map(|_| canvas)
+                });
                 match made {
                     Ok(canvas) => {
                         self.show(root, dir, canvas);

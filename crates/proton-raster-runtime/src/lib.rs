@@ -22,6 +22,17 @@
 //!                                  row by row, the canvas's size
 //! rr_pick(x, y) → u32              a pixel of that, straight RGBA, little-endian
 //! rr_layer_pixel(layer, x, y) → u32 a pixel of one layer
+//! rr_stroke_begin(ptr, len) → 0|-1 a pencil or eraser begun (JSON: layer, tool,
+//!                                  tip, color, pixelPerfect)
+//! rr_stroke_add(ptr, n) → 0|-1      n numbers: x, y (1/256 px), pressure, …
+//! rr_stroke_end() → ptr            the stroke as an op (JSON: length, then
+//!                                  bytes); its hash kept, as rr_apply's
+//! rr_stroke_cancel()               the stroke taken away, nothing sent
+//! rr_preview(ptr, len) → 0|-1      an op shown and not kept: a shape being
+//!                                  dragged, a generator being tuned
+//! rr_preview_clear()               what was previewed taken away
+//! rr_touched() → ptr               the tiles the last op touched:
+//!                                  [count, (layer, index)…] as u32s
 //! rr_info() → ptr                  the layers, palette and which tiles each layer
 //!                                  has, as JSON: length, then bytes
 //! rr_tile(layer, index) → ptr | 0   a tile's RGBA (0: clear) — for a second
@@ -34,11 +45,26 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use std::collections::BTreeMap;
+
+use proton_raster::history::Patch;
+use proton_raster::stroke::paint;
 use proton_raster::tile::{Tile, TILE_BYTES};
-use proton_raster::{blend, Canvas, Grid, Layer, LayerInfo, Op, Preset};
+use proton_raster::{blend, Canvas, Grid, Layer, LayerInfo, Op, Preset, Stroke, Tip, Tool};
 use serde::Deserialize;
 
 pub const ABI: u32 = 1;
+
+/// A stroke as it is drawn: the tiles as they were under it, and what it
+/// covers so far.
+struct Live {
+    layer: u32,
+    tool: Tool,
+    color: [u8; 4],
+    lock: bool,
+    stroke: Stroke,
+    bases: BTreeMap<u32, Option<Arc<Tile>>>,
+}
 
 #[derive(Default)]
 struct Held {
@@ -52,6 +78,14 @@ struct Held {
     rects: Vec<u32>,
     /// What `rr_info` last said: length, then JSON.
     info: Vec<u8>,
+    /// A stroke being drawn.
+    live: Option<Live>,
+    /// What a preview changed, to put back.
+    preview: Option<Patch>,
+    /// The tiles the last op touched, as u32s: count, then layer and index.
+    touched: Vec<u32>,
+    /// What `rr_stroke_end` gave: length, then the op as JSON.
+    ended: Vec<u8>,
     hash: u64,
     error: Vec<u8>,
 }
@@ -225,10 +259,21 @@ pub fn put(layer: u32, bytes: &[u8]) -> Result<(), String> {
             } else {
                 None
             };
-            if index < target.grid.cols * target.grid.rows {
-                target.grid.put(index, tile);
-                held.dirty.insert(index);
+            if index >= target.grid.cols * target.grid.rows {
+                continue;
             }
+            held.dirty.insert(index);
+            // Under a stroke being drawn, the tile fetched is what the stroke
+            // is over: the picture is made again from it and the stroke.
+            if let Some(live) = held.live.as_mut().filter(|l| l.layer == layer) {
+                if let Some(base) = live.bases.get_mut(&index) {
+                    *base = tile;
+                    let painted = paint(&live.stroke.mask, index, base.as_ref(), live.tool, live.color, live.lock, target.grid.width, target.grid.height);
+                    target.grid.put(index, painted);
+                    continue;
+                }
+            }
+            target.grid.put(index, tile);
         }
         Ok(())
     })
@@ -253,6 +298,7 @@ pub fn apply(bytes: &[u8]) -> Result<u64, String> {
         let (applied, _) = canvas.apply(&op)?;
         held.hash = canvas.hash_touched(&applied.touched);
         held.dirty.extend(applied.touched.iter().map(|(_, i)| *i));
+        held.touched = flat(&applied.touched);
         Ok(held.hash)
     })
 }
@@ -376,4 +422,205 @@ pub extern "C" fn rr_info() -> *const u8 {
         h.info.extend(text);
         h.info.as_ptr()
     })
+}
+
+fn flat(touched: &[(u32, u32)]) -> Vec<u32> {
+    let mut out = vec![touched.len() as u32];
+    for &(layer, index) in touched {
+        out.extend([layer, index]);
+    }
+    out
+}
+
+#[no_mangle]
+pub extern "C" fn rr_touched() -> *const u32 {
+    HELD.with(|h| h.borrow().touched.as_ptr())
+}
+
+/// A stroke begun, as the window starts one.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Begin {
+    pub layer: u32,
+    pub tool: Tool,
+    pub tip: Tip,
+    pub color: [u8; 4],
+    #[serde(default)]
+    pub pixel_perfect: bool,
+}
+
+/// Begin a stroke — the safe half of `rr_stroke_begin`. One being drawn is
+/// taken away first.
+pub fn stroke_begin(bytes: &[u8]) -> Result<(), String> {
+    let b: Begin = serde_json::from_slice(bytes).map_err(|e| format!("not a stroke: {e}"))?;
+    stroke_cancel();
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let held = &mut *h;
+        let canvas = held.canvas.as_ref().ok_or("no canvas is open")?;
+        let layer = canvas.layer(b.layer).ok_or_else(|| format!("there is no layer {}", b.layer))?;
+        if layer.info.locked {
+            return Err(format!("{} is locked", layer.info.name));
+        }
+        if !(1..=Tip::MOST).contains(&b.tip.size) {
+            return Err(format!("a tip is 1 to {} pixels across", Tip::MOST));
+        }
+        held.live = Some(Live {
+            layer: b.layer,
+            tool: b.tool,
+            color: b.color,
+            lock: layer.info.alpha_lock,
+            stroke: Stroke::new(b.tip, b.pixel_perfect, canvas.width, canvas.height),
+            bases: BTreeMap::new(),
+        });
+        Ok(())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_stroke_begin(ptr: *const u8, len: usize) -> i32 {
+    match stroke_begin(json(ptr, len)) {
+        Ok(()) => 0,
+        Err(why) => failed(why),
+    }
+}
+
+/// More of the stroke: numbers in threes — the safe half of `rr_stroke_add`.
+pub fn stroke_add(points: &[i32]) -> Result<(), String> {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let held = &mut *h;
+        let live = held.live.as_mut().ok_or("no stroke is being drawn")?;
+        let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
+        let changed = live.stroke.add(points);
+        let target = canvas.layer_mut(live.layer).ok_or("the stroke's layer has gone")?;
+        for index in changed {
+            let base = live.bases.entry(index).or_insert_with(|| target.grid.tile(index).cloned());
+            let painted = paint(&live.stroke.mask, index, base.as_ref(), live.tool, live.color, live.lock, target.grid.width, target.grid.height);
+            target.grid.put(index, painted);
+            held.dirty.insert(index);
+        }
+        Ok(())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_stroke_add(ptr: *const i32, n: usize) -> i32 {
+    let points = if ptr.is_null() || n == 0 {
+        &[][..]
+    } else {
+        // SAFETY: the window passes `n` numbers it wrote where `rr_alloc` gave.
+        unsafe { std::slice::from_raw_parts(ptr, n) }
+    };
+    match stroke_add(points) {
+        Ok(()) => 0,
+        Err(why) => failed(why),
+    }
+}
+
+/// The stroke finished: it stays on the canvas as drawn, and is given back
+/// as the op the core is to make — the safe half of `rr_stroke_end`.
+pub fn stroke_end() -> Result<Op, String> {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let held = &mut *h;
+        let live = held.live.take().ok_or("no stroke is being drawn")?;
+        let canvas = held.canvas.as_ref().ok_or("no canvas is open")?;
+        let grid = &canvas.layer(live.layer).ok_or("the stroke's layer has gone")?.grid;
+        // Touched as the core will count it: a tile whose pixels differ from
+        // what was under the stroke.
+        let touched: Vec<(u32, u32)> = live.bases.iter().filter(|(&i, base)| grid.tile(i).cloned() != **base).map(|(&i, _)| (live.layer, i)).collect();
+        held.hash = canvas.hash_touched(&touched);
+        held.touched = flat(&touched);
+        Ok(Op::Stroke { layer: live.layer, tool: live.tool, tip: live.stroke.tip.clone(), color: live.color, pixel_perfect: live.stroke.pixel_perfect, points: live.stroke.points })
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_stroke_end() -> *const u8 {
+    let text = match stroke_end() {
+        Ok(op) => serde_json::to_vec(&op).unwrap_or_default(),
+        Err(why) => {
+            failed(why);
+            Vec::new()
+        }
+    };
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        h.ended = (text.len() as u32).to_le_bytes().to_vec();
+        h.ended.extend(text);
+        h.ended.as_ptr()
+    })
+}
+
+/// The stroke taken away: the tiles as they were.
+pub fn stroke_cancel() {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let held = &mut *h;
+        let Some(live) = held.live.take() else { return };
+        let Some(target) = held.canvas.as_mut().and_then(|c| c.layer_mut(live.layer)) else { return };
+        for (index, base) in live.bases {
+            target.grid.put(index, base);
+            held.dirty.insert(index);
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_stroke_cancel() {
+    stroke_cancel();
+}
+
+/// An op shown, not kept: the last one shown is taken away first — the
+/// safe half of `rr_preview`.
+pub fn preview(bytes: &[u8]) -> Result<(), String> {
+    let op: Op = serde_json::from_slice(bytes).map_err(|e| format!("not an edit: {e}"))?;
+    preview_clear();
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let held = &mut *h;
+        let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
+        let (state, made) = (canvas.state, canvas.made);
+        let (applied, patch) = canvas.apply(&op)?;
+        canvas.state = state;
+        canvas.made = made;
+        held.dirty.extend(applied.touched.iter().map(|(_, i)| *i));
+        held.preview = Some(patch);
+        Ok(())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_preview(ptr: *const u8, len: usize) -> i32 {
+    match preview(json(ptr, len)) {
+        Ok(()) => 0,
+        Err(why) => failed(why),
+    }
+}
+
+/// What was previewed taken away.
+pub fn preview_clear() {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let held = &mut *h;
+        let (Some(patch), Some(canvas)) = (held.preview.take(), held.canvas.as_mut()) else { return };
+        let (_, applied) = canvas.restore(patch);
+        held.dirty.extend(applied.touched.iter().map(|(_, i)| *i));
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_preview_clear() {
+    preview_clear();
+}
+
+/// The whole canvas as one number, for tests.
+pub fn canvas_hash() -> u64 {
+    HELD.with(|h| h.borrow().canvas.as_ref().map(Canvas::hash).unwrap_or(0))
+}
+
+/// The hash the last op or stroke made, for tests.
+pub fn last_hash() -> u64 {
+    HELD.with(|h| h.borrow().hash)
 }

@@ -26,6 +26,7 @@ uniform vec2 u_size;     // canvas pixels
 uniform float u_check;   // canvas pixels a checker square
 uniform vec3 u_light;
 uniform vec3 u_dark;
+uniform float u_line;    // canvas pixels a device pixel: the grid's width; 0 for none
 in vec2 v_uv;
 out vec4 o;
 void main() {
@@ -33,7 +34,11 @@ void main() {
   vec2 cell = floor(px / u_check);
   vec3 ground = mod(cell.x + cell.y, 2.0) < 1.0 ? u_light : u_dark;
   vec4 c = texture(u_tex, v_uv);              // premultiplied
-  o = vec4(c.rgb + ground * (1.0 - c.a), 1.0);
+  vec3 seen = c.rgb + ground * (1.0 - c.a);
+  // The pixel grid: a hairline at every pixel's left and top edge.
+  vec2 f = fract(px);
+  if (u_line > 0.0 && (f.x < u_line || f.y < u_line)) seen = mix(seen, vec3(0.5), 0.35);
+  o = vec4(seen, 1.0);
 }`;
 
 /** @param {HTMLCanvasElement} canvas @param {{onLost?: () => void}} [hooks] */
@@ -53,7 +58,7 @@ export function createRasterRender(canvas, hooks = {}) {
   gl.linkProgram(program);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? "program");
   const where = (/** @type {string} */ name) => gl.getUniformLocation(program, name);
-  const u = { rect: where("u_rect"), stage: where("u_stage"), size: where("u_size"), check: where("u_check"), light: where("u_light"), dark: where("u_dark"), tex: where("u_tex") };
+  const u = { rect: where("u_rect"), stage: where("u_stage"), size: where("u_size"), check: where("u_check"), light: where("u_light"), dark: where("u_dark"), tex: where("u_tex"), line: where("u_line") };
   const corners = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, corners);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
@@ -104,7 +109,7 @@ export function createRasterRender(canvas, hooks = {}) {
     },
     /** The picture where the view puts it, on the ground colour.
      *  @param {{zoom: number, x: number, y: number}} view @param {number} width @param {number} height
-     *  @param {number} ratio @param {{ground: number[], light: number[], dark: number[], pixel: boolean}} look */
+     *  @param {number} ratio @param {{ground: number[], light: number[], dark: number[], pixel: boolean, grid?: boolean}} look */
     draw(view, width, height, ratio, look) {
       if (lost) return;
       const w = Math.round(width * ratio);
@@ -135,6 +140,9 @@ export function createRasterRender(canvas, hooks = {}) {
       gl.uniform1f(u.check, look.pixel && view.zoom >= 8 ? 1 : Math.max(1 / 64, 8 / view.zoom));
       gl.uniform3f(u.light, look.light[0], look.light[1], look.light[2]);
       gl.uniform3f(u.dark, look.dark[0], look.dark[1], look.dark[2]);
+      // The grid once a pixel is six screen pixels or more: below that it is
+      // only a shade over the picture.
+      gl.uniform1f(u.line, look.grid && view.zoom >= 6 ? 1 / (view.zoom * ratio) : 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     },
     /** One pixel of the drawn frame, as RGBA — for tests. @param {number} x @param {number} y */

@@ -70,3 +70,43 @@ test('an op the canvas cannot take is refused with why, and memory stops at a gi
   equal(why, 'a canvas keeps at least one layer');
   throws(() => rr.memory.grow(16385), RangeError, 'the memory grew past 1 GiB');
 });
+
+test('a stroke drawn in pieces in the WebAssembly is the stroke the core makes whole', async () => {
+  const {rr, pass} = await engine();
+  const fixture = JSON.parse(read('tests/ui/fixtures/raster-ops.json').toString());
+  equal(pass(rr.rr_open, JSON.stringify(fixture.open)), 0);
+  // Seeded, so every run cuts the strokes the same way.
+  let seed = 7;
+  const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648);
+  let strokes = 0;
+  fixture.ops.forEach((op, i) => {
+    if (op.op !== 'stroke') {
+      equal(pass(rr.rr_apply, JSON.stringify(op)), 0);
+      return;
+    }
+    strokes += 1;
+    const {points, ...begin} = op;
+    equal(pass(rr.rr_stroke_begin, JSON.stringify(begin)), 0);
+    for (let at = 0; at < points.length;) {
+      const take = 3 * (1 + (next() % 5));
+      const piece = Int32Array.from(points.slice(at, at + take));
+      const room = rr.rr_alloc(piece.length * 4);
+      new Int32Array(rr.memory.buffer, room, piece.length).set(piece);
+      equal(rr.rr_stroke_add(room, piece.length), 0);
+      rr.rr_free(room, piece.length * 4);
+      at += take;
+    }
+    const ended = rr.rr_stroke_end();
+    const length = new DataView(rr.memory.buffer).getUint32(ended, true);
+    const back = JSON.parse(new TextDecoder().decode(new Uint8Array(rr.memory.buffer, ended + 4, length)));
+    equal(JSON.stringify(back.points), JSON.stringify(points), 'the stroke given back is not the one drawn');
+    const h = (BigInt(rr.rr_hash_hi() >>> 0) << 32n | BigInt(rr.rr_hash_lo() >>> 0)).toString(16).padStart(16, '0');
+    equal(h, fixture.hashes[i], `stroke ${i}, drawn in pieces, touched different pixels from the core's whole`);
+  });
+  equal(strokes, 3);
+  const dirty = rr.rr_dirty();
+  equal(new Uint32Array(rr.memory.buffer, dirty, 1)[0] > 0, true);
+  const at = rr.rr_composite();
+  const {width, height} = fixture.open;
+  equal(hash(new Uint8Array(rr.memory.buffer, at, width * height * 4)), fixture.composite, 'the canvas drawn in pieces lays together differently');
+});

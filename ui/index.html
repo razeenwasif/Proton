@@ -1001,7 +1001,9 @@
       <aside class="pane side raster-side">
         <header class="raster-side-tabs" role="tablist" aria-label="The canvas">
           <button class="dock-tab on" role="tab" aria-selected="true" data-raster-side="layers">Layers</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-raster-side="palette">Palette</button>
         </header>
+        <div class="scroll raster-side-body raster-palette" data-raster-palette hidden></div>
         <div class="raster-layer-tools" data-raster-layer-tools>
           <button class="hbtn" data-raster-layer-add title="A new layer above the one chosen" aria-label="New layer">＋</button>
           <button class="hbtn" data-raster-layer-up title="Up a place" aria-label="Move the layer up">↑</button>
@@ -1020,6 +1022,17 @@
           <span class="raster-dirty dot" data-raster-dirty title="Changes not saved" hidden></span>
           <span class="raster-size" data-raster-size></span>
           <span class="grow"></span>
+          <div class="raster-seg" role="group" aria-label="Tool" data-raster-tools>
+            <button data-raster-tool="pencil" aria-pressed="true" title="Pencil  b — ⌥ picks a colour" aria-label="Pencil">✎</button>
+            <button data-raster-tool="eraser" aria-pressed="false" title="Eraser  e" aria-label="Eraser">⌫</button>
+            <button data-raster-tool="fill" aria-pressed="false" title="Fill  g" aria-label="Fill">◪</button>
+            <button data-raster-tool="pick" aria-pressed="false" title="Pick a colour  i" aria-label="Pick a colour">⊙</button>
+            <button data-raster-tool="line" aria-pressed="false" title="Line  l — ⇧ to eighths of a turn" aria-label="Line">╱</button>
+            <button data-raster-tool="rect" aria-pressed="false" title="Rectangle  r — ⇧ square" aria-label="Rectangle">▭</button>
+            <button data-raster-tool="ellipse" aria-pressed="false" title="Ellipse  o — ⇧ circle" aria-label="Ellipse">◯</button>
+          </div>
+          <label class="raster-color" title="The colour drawn with"><input type="color" data-raster-color aria-label="The colour drawn with"><span class="raster-color-swatch" data-raster-color-swatch></span></label>
+          <button class="hbtn raster-toggle" data-raster-grid aria-pressed="false" title="The pixel grid  ⇧G" aria-label="Pixel grid">#</button>
           <span class="raster-zoom" data-raster-zoom title="f fits it; 1 is 100 %"></span>
           <button class="hbtn" data-raster-undo title="Undo  ⌘Z" aria-label="Undo" disabled><svg class="i"><use href="#i-undo"/></svg></button>
           <button class="hbtn" data-raster-redo title="Redo  ⇧⌘Z" aria-label="Redo" disabled><svg class="i"><use href="#i-redo"/></svg></button>
@@ -1029,6 +1042,7 @@
         <div class="raster-ask" data-raster-ask hidden></div>
         <div class="raster-stage" data-raster-stage tabindex="0" aria-label="The canvas">
           <canvas class="raster-gl" data-raster-gl></canvas>
+          <canvas class="raster-overlay" data-raster-overlay></canvas>
           <div class="raster-empty" data-raster-stage-empty hidden></div>
           <!-- The home page: the canvases here, and a new one. -->
           <div class="raster-open" data-raster-open>

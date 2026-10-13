@@ -1676,10 +1676,37 @@ canvases. The same pixels write the same bytes, so a layer nobody touched
 never shows in a diff. ⌘S writes on a worker from a snapshot that shares the
 tiles; quitting saves at once, after any save under way.
 
-**What comes next** (the plan's P2–P8): the pencil and the pixel tools with
-prediction for every stroke, pressure brushes, selections and transforms,
-procedural generators and filters, import and export (PSD, sending art to a
-game), the agent's tools, and pixel animation.
+**The pixel tools.** A stroke is not painted dab by dab: it is first the
+pixels it covers, a mask that counts the stamps over each, and the layer is
+what was under it with the mask painted over once — so a line crossing
+itself is no darker where it crosses. The pencil joins its points with
+Bresenham's lines; pixel-perfect, it takes the corner pixel out of each L as
+the next pixel comes, and the window, which paints the stroke as it is drawn
+(points go to its copy a frame at a time, coalesced events included), makes
+each tile again from what was under it and the mask as it stands — so a
+stroke drawn in pieces is, to the pixel, the stroke the core makes whole
+(tested natively over random strokes, and in the WebAssembly). Tips are 1 to
+64 pixels, square or round, mirrored across or down the middle; the eraser
+clears; alpha-lock colours only what is there. A bucket takes what is like
+the pixel clicked within a tolerance — four- or eight-connected, or
+everywhere — and every clear pixel is like every other. Lines, rectangles
+and ellipses (Zingl's rasteriser) are shown while dragged, as a preview the
+copy takes back, and sent when let go. A swatch recoloured changes every
+pixel of it and the palette as one edit; a new pixel canvas starts with
+sixteen colours of Proton's own, and a pixel grid shows once a pixel is six
+screen pixels or more.
+
+**When the copies disagree** (`ui/raster-sync.js`, a state machine the node
+tests drive): an edit's touched tiles are what is fetched again, not the
+canvas; a stale tile waits while an edit on its way touches it; and a tile
+that arrives older than the last edit sent to it — `read_raster` says which
+edit the core had made — is fetched again rather than put. An edit to the
+layers themselves that disagrees still loads the canvas again whole. ⎋ or
+⌘Z while drawing takes the stroke back and sends nothing.
+
+**What comes next** (the plan's P3–P8): pressure brushes and pen input,
+selections and transforms, procedural generators and filters, import and
+export (PSD, sending art to a game), the agent's tools, and pixel animation.
 
 ### Trace
 
