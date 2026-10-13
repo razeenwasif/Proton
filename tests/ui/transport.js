@@ -69,6 +69,9 @@ window.__TAURI__ = {
     }
     // The open game's images: the fixture game's, from the server.
     if (name === 'read_game') {
+      // A test's own files first: an image cut up, say.
+      const own = window.gameFiles?.[args.key];
+      if (own !== undefined) return typeof own === 'string' ? new TextEncoder().encode(own).buffer : own;
       const response = await fetch(`/tests/ui/fixtures/game/${args.key}`);
       if (!response.ok) throw new Error(`${args.key}: not an image of the open game`);
       return await response.arrayBuffer();

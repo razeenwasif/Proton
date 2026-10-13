@@ -77,3 +77,41 @@ test('a point dropped on a plane is placed in that plane\'s own pixels, and an e
   deepEqual(cam, {center: [2000, 1000], zoom: 0.25});
   deepEqual(viewOf(cam, 1048, 548), {scale: 0.25, x: 24, y: 24});
 });
+
+test('an image cut into pieces is drawn as its pieces, each where its part of the whole is, scaled, flipped and turned with it', () => {
+  // 3000 × 1000, cut at 2048: two pieces.
+  const parts = new Map([['wide.img.json', {size: [3000, 1000], chunks: [
+    {file: 'wide/0_0.png', at: [0, 0], size: [2048, 1000]},
+    {file: 'wide/1_0.png', at: [2048, 0], size: [952, 1000]},
+  ]}]]);
+  const loaded = new Map([...sizes, ['wide.img.json', [3000, 1000]], ['wide/0_0.png', [2048, 1000]], ['wide/1_0.png', [952, 1000]]]);
+  /** Where a point of a sprite's own (u, v) lands in the room. */
+  const at = (s, u, v) => {
+    const a = (s.rot * Math.PI) / 180;
+    const lx = (s.flip ? s.w - u : u) - s.w / 2;
+    const ly = v - s.h / 2;
+    return [s.x + s.w / 2 + lx * Math.cos(a) - ly * Math.sin(a), s.y + s.h / 2 + lx * Math.sin(a) + ly * Math.cos(a)];
+  };
+  for (const more of [{}, {scale: 0.5}, {flip: true}, {rot: 30, scale: 2}, {rot: -90, flip: true}]) {
+    const one = {...room, planes: [plane('main', 0, [item('cut', 'wide.img.json', [100, 200], more)], {gameplay: true})]};
+    const drawn = layout(one, {...how, sizes: loaded, parts});
+    equal(drawn.length, 2, 'not one sprite a piece');
+    ok(drawn.every((s) => s.item === 'cut' && s.whole), 'a piece does not say what it is part of');
+    const whole = {...drawn[0].whole, rot: more.rot ?? 0, flip: Boolean(more.flip)};
+    deepEqual([whole.w, whole.h], [3000 * (more.scale ?? 1), 1000 * (more.scale ?? 1)]);
+    const s = more.scale ?? 1;
+    // Points of the image: in the first piece, in the second, on the cut.
+    for (const [u, v] of [[10, 10], [2500, 900], [2048, 500], [2999, 0]]) {
+      const piece = drawn[u < 2048 ? 0 : 1];
+      const within = u < 2048 ? u : u - 2048;
+      const want = at(whole, u * s, v * s);
+      const got = at(piece, within * s, v * s);
+      ok(Math.hypot(want[0] - got[0], want[1] - got[1]) < 1e-6, `${JSON.stringify(more)}: (${u}, ${v}) lands at ${got}, not ${want}`);
+    }
+  }
+  // A piece not loaded yet is left out; the rest is drawn.
+  const partly = new Map([...loaded]);
+  partly.delete('wide/1_0.png');
+  const one = {...room, planes: [plane('main', 0, [item('cut', 'wide.img.json', [0, 0])], {gameplay: true})]};
+  deepEqual(layout(one, {...how, sizes: partly, parts}).map((x) => x.key), ['wide/0_0.png']);
+});

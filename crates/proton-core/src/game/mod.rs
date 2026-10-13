@@ -21,6 +21,7 @@ use crate::bus::{Command, Event, NoticeLevel};
 use crate::workspace::notice;
 
 mod agent;
+mod import;
 pub use agent::{GamePathPart, TOOLS};
 
 /// Whether a command is Game mode's.
@@ -35,6 +36,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::GameFocus { .. }
             | Command::GameEdit { .. }
             | Command::GameTrace { .. }
+            | Command::GameImport { .. }
             | Command::GamePlay { .. }
             | Command::GameRecorded { .. }
             | Command::GameUndo
@@ -123,6 +125,23 @@ pub struct GameProjectView {
     pub recordings: Vec<GameRecording>,
     /// The images and sounds in its folder, for the Assets tab.
     pub assets: Vec<String>,
+    /// Art brought in, and whether each file has changed since.
+    pub imports: Vec<GameImportRow>,
+}
+
+/// A file imported into the game, as the Assets tab shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct GameImportRow {
+    pub source: String,
+    pub room: String,
+    pub planes: u32,
+    pub items: u32,
+    pub scale: f64,
+    pub normals: bool,
+    /// Saved again since it was imported.
+    pub changed: bool,
 }
 
 /// The game open in a project, and the editor's place in it.
@@ -145,6 +164,8 @@ pub struct Game {
     recorded: u32,
     /// What the agent's tools changed on screen, for the window.
     pending: Vec<Event>,
+    /// What art was brought in from where (`import.json`).
+    imports: proton_game::format::Imports,
 }
 
 impl Game {
@@ -256,6 +277,17 @@ impl Game {
                     let n = ops.len();
                     let mut events = self.edit(&Target::Room(room), &ops);
                     events.push(notice(format!("traced {n} shape{} from {item}", if n == 1 { "" } else { "s" }), NoticeLevel::Info));
+                    events
+                }
+                Err(why) => vec![notice(why, NoticeLevel::Warn)],
+            },
+            Command::GameImport { source, room, scale, normals } => match self.import_art(&source, room.as_deref(), scale, normals) {
+                Ok(done) => {
+                    let mut events = done.events;
+                    events.push(notice(done.said, NoticeLevel::Info));
+                    if !done.notes.is_empty() {
+                        events.push(notice(done.notes.join("; "), NoticeLevel::Warn));
+                    }
                     events
                 }
                 Err(why) => vec![notice(why, NoticeLevel::Warn)],
@@ -458,6 +490,7 @@ impl Game {
             recordings: Vec::new(),
             recorded: 0,
             pending: Vec::new(),
+            imports: import::read_imports(dir),
         };
         Ok(())
     }
@@ -545,6 +578,20 @@ impl Game {
                 problems: project.problems(),
                 recordings: self.recordings.iter().rev().cloned().collect(),
                 assets: assets(project.root()),
+                imports: self
+                    .imports
+                    .sources
+                    .iter()
+                    .map(|s| GameImportRow {
+                        source: s.source.clone(),
+                        room: s.room.clone(),
+                        planes: s.planes.len() as u32,
+                        items: s.items.len() as u32,
+                        scale: s.scale,
+                        normals: s.normals,
+                        changed: proton_game::path::inside(project.root(), &s.source).ok().and_then(|p| import::stamp(&p)).is_some_and(|now| now != s.stamp),
+                    })
+                    .collect(),
             }),
         }
     }
@@ -643,7 +690,7 @@ fn assets(root: &Path) -> Vec<String> {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().and_then(|e| e.to_str()).is_some_and(|e| SHOWN.contains(&e.to_ascii_lowercase().as_str())) {
+            } else if name.ends_with(".img.json") || path.extension().and_then(|e| e.to_str()).is_some_and(|e| SHOWN.contains(&e.to_ascii_lowercase().as_str())) {
                 if let Ok(rel) = path.strip_prefix(root) {
                     out.push(rel.to_string_lossy().replace('\\', "/"));
                 }
@@ -653,6 +700,10 @@ fn assets(root: &Path) -> Vec<String> {
             }
         }
     }
+    // A cut image's pieces and its normal maps are its sidecar's, not
+    // images to place on their own.
+    let cut: Vec<String> = out.iter().filter_map(|a| a.strip_suffix(".img.json").map(|base| format!("{base}/"))).collect();
+    out.retain(|a| !a.ends_with(".normal.png") && !cut.iter().any(|base| a.starts_with(base.as_str())));
     out.sort();
     out
 }

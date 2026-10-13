@@ -1524,6 +1524,7 @@ impl Workspace {
             | Command::GameFocus { .. }
             | Command::GameEdit { .. }
             | Command::GameTrace { .. }
+            | Command::GameImport { .. }
             | Command::GamePlay { .. }
             | Command::GameRecorded { .. }
             | Command::GameUndo

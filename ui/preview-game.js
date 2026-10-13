@@ -123,6 +123,7 @@ export function createGamePreview(deliver) {
         open: tabs, focus, gameDirty: dirty("game"), worldDirty: dirty("world"), dirty: targets().some(dirty),
         canUndo: done.length > 0, canRedo: undone.length > 0, problems: [],
         recordings: recordings.map(({ id, room, ticks, hash, same }) => ({ id, room, ticks, hash, same })).reverse(),
+        imports: [],
         assets: ["art/crawler.png", "art/fronds.png", "art/ground.png", "art/hills_far.png", "art/hills_near.png", "art/player.png", "art/sky.png"],
       },
     };
@@ -225,6 +226,8 @@ export function createGamePreview(deliver) {
           revision++;
           return [projectEvent(), roomEvent()];
         }
+        case "gameImport":
+          return [{ type: "notice", text: "importing reads the file's layers in the app — the preview has no core to do it", level: "info" }];
         case "gameTrace":
           return [{ type: "notice", text: "tracing reads the image's pixels in the app — the preview has no core to do it", level: "info" }];
         case "gamePlay":

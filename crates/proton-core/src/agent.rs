@@ -558,6 +558,29 @@ impl Agent {
                 }),
             },
             Tool {
+                name: "game_import".into(),
+                description: "Bring a layered .psd, or a .png, from the open game's folder into a room. Each \
+                              group becomes a plane at the depth its name gives in square brackets — \
+                              \"Far hills [800]\" behind, \"Leaves [-150]\" in front, \"[still]\" for a sky \
+                              that does not move, \"[play]\" for art that joins the plane the game is played \
+                              on — and each layer an image, trimmed, cut into pieces when large. The images \
+                              are written into the game's art folder at once; the room's change is held \
+                              until the person saves and is one step of their undo. Importing the same file \
+                              again replaces what it made before. Says what was left out (effects, \
+                              adjustment layers, hidden layers) and why."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "source": { "type": "string", "description": "The file, in the game's folder, as game_info's summary or the Assets tab names it." },
+                        "room": { "type": "string", "description": "The room. Defaults to the one it went into before, else the one on screen." },
+                        "scale": { "type": "number", "description": "Room pixels to a source pixel. Defaults to 1, or what it was before." },
+                        "normals": { "type": "boolean", "description": "Also make normal maps from brightness, for lights to shade with." }
+                    },
+                    "required": ["source"]
+                }),
+            },
+            Tool {
                 name: "diagnostics".into(),
                 description: "Errors and warnings the language server has reported for a \
                               file, or for the active buffer when no path is given."
@@ -1130,7 +1153,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 21);
+        assert_eq!(tools.len(), 22);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the
@@ -1157,7 +1180,7 @@ mod tests {
         // The PDF tools that change it have to say the change waits for the
         // person: told only "rotate the pages", a model reports a file
         // rewritten, and the person believes it.
-        for name in ["pdf_annotate", "pdf_pages", "game_edit"] {
+        for name in ["pdf_annotate", "pdf_pages", "game_edit", "game_import"] {
             let changing = tools.iter().find(|t| t.name == name).unwrap();
             assert!(changing.description.contains("held until the person saves"), "{name}: {}", changing.description);
         }

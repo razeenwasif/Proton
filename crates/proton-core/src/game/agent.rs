@@ -23,7 +23,7 @@ use super::Game;
 use crate::bus::Event;
 
 /// The tools answered here, by name.
-pub const TOOLS: [&str; 4] = ["game_info", "game_edit", "game_check", "game_play"];
+pub const TOOLS: [&str; 5] = ["game_info", "game_edit", "game_check", "game_play", "game_import"];
 
 /// The most text one answer carries.
 const BUDGET: usize = 60_000;
@@ -265,6 +265,23 @@ impl Game {
             "game_edit" => self.tool_edit(input),
             "game_check" => Ok(self.tool_check()),
             "game_play" => self.tool_play(input),
+            "game_import" => {
+                let source = input.get("source").and_then(Value::as_str).ok_or("game_import: `source` is required: a .psd or .png in the game's folder")?;
+                let room = input.get("room").and_then(Value::as_str);
+                let scale = input.get("scale").and_then(Value::as_f64);
+                let normals = input.get("normals").and_then(Value::as_bool).unwrap_or(false);
+                let done = self.import_art(source, room, scale, normals)?;
+                self.pending.extend(done.events);
+                let mut out = format!(
+                    "{}. The images are written into the game's art folder now; the room's change is held until the person saves, and ⌘Z undoes it.",
+                    done.said
+                );
+                if !done.notes.is_empty() {
+                    out.push_str("\nNotes:\n- ");
+                    out.push_str(&done.notes.join("\n- "));
+                }
+                Ok(out)
+            }
             _ => Err(format!("{name}: not a game tool")),
         }
     }
@@ -358,6 +375,22 @@ impl Game {
         }
         let prefabs: Vec<String> = project.prefabs.iter().map(|p| p.get().id.clone()).collect();
         let _ = writeln!(out, "Prefabs: {}.", list(&prefabs));
+        let art: Vec<String> = super::assets(project.root()).into_iter().filter(|a| a.ends_with(".psd") || a.ends_with(".PSD")).collect();
+        if !art.is_empty() {
+            let _ = writeln!(out, "Layered art in its folder, for game_import: {}.", art.join(", "));
+        }
+        for imported in &self.imports.sources {
+            let _ = writeln!(
+                out,
+                "Imported {} into {}: {} plane{} and {} image{} on the play plane.",
+                imported.source,
+                imported.room,
+                imported.planes.len(),
+                if imported.planes.len() == 1 { "" } else { "s" },
+                imported.items.len(),
+                if imported.items.len() == 1 { "" } else { "s" },
+            );
+        }
         let unsaved = project.unsaved_files();
         if !unsaved.is_empty() {
             let _ = writeln!(out, "Not saved: {}.", unsaved.join(", "));

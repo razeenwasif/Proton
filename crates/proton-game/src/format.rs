@@ -690,3 +690,59 @@ pub struct Chunk {
     pub at: [u32; 2],
     pub size: [u32; 2],
 }
+
+/* ── import.json ──────────────────────────────────────────────────── */
+
+/// What art was brought in from where: importing a file again replaces what
+/// it made the time before, rather than adding a second copy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameImports")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Imports {
+    pub format: u32,
+    pub sources: Vec<Imported>,
+}
+
+impl Default for Imports {
+    fn default() -> Imports {
+        Imports { format: FORMAT, sources: Vec::new() }
+    }
+}
+
+/// One file brought in, and what it made.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameImported")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Imported {
+    /// The file, in the game's folder.
+    pub source: String,
+    /// Its bytes' hash when imported (FNV-1a, hex), to tell when it changed.
+    pub hash: String,
+    pub room: String,
+    pub scale: f64,
+    pub normals: bool,
+    /// The planes it made in the room, and the items it put on the play plane.
+    pub planes: Vec<String>,
+    pub items: Vec<String>,
+    /// The images it wrote.
+    pub files: Vec<String>,
+    /// The file's size and time when imported, to tell cheaply when it has
+    /// changed since.
+    pub stamp: String,
+}
+
+impl Default for Imported {
+    fn default() -> Imported {
+        Imported {
+            source: String::new(),
+            hash: String::new(),
+            room: String::new(),
+            scale: 1.0,
+            normals: false,
+            planes: Vec::new(),
+            items: Vec::new(),
+            files: Vec::new(),
+            stamp: String::new(),
+        }
+    }
+}

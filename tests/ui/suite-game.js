@@ -18,7 +18,7 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     path: 'crossroads', game: fixture.game, world: fixture.world, prefabs: fixture.prefabs,
     rooms: fixture.rooms.map((/** @type {any} */ r) => ({id: r.id, area: 'crossroads', size: r.size, dirty: false})),
     open: ['crossroads_01'], focus: 'crossroads_01', gameDirty: false, worldDirty: false, dirty: false,
-    canUndo: false, canRedo: false, problems: [], assets: ['art/player.png', 'art/sky.png'], recordings: [], ...over}});
+    canUndo: false, canRedo: false, problems: [], assets: ['art/player.png', 'art/sky.png', 'src/forest.psd'], recordings: [], imports: [], ...over}});
   const room = (/** @type {string} */ id, revision = 1) => ({type: 'gameRoom', room: fixture.rooms.find((/** @type {any} */ r) => r.id === id), revision});
   const press = (/** @type {string} */ k, /** @type {KeyboardEventInit} */ extra = {}) =>
     $('[data-game-stage]').dispatchEvent(new win.KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...extra}));
@@ -314,6 +314,63 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     assert($('[data-game-body="agent"] [data-agent-input]').textContent.includes('@game'), 'the chip did not put @game in the question');
     $('[data-game-body="agent"] [data-agent-input]').textContent = '';
     $('[data-game-panel="inspector"]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('A layered file is imported from its inspector, and an image cut into pieces is loaded piece by piece and picked as one', async () => {
+    await win.dispatch({type: 'setMode', mode: 'game'}); await settle();
+    // An image cut in two, placed high on the play plane.
+    const sky = await (await fetch('/tests/ui/fixtures/game/art/sky.png')).arrayBuffer();
+    win.gameFiles = {
+      'art/cut.img.json': JSON.stringify({format: 1, source: 'cut.psd', size: [400, 200], chunks: [
+        {file: 'art/cut/0_0.png', at: [0, 0], size: [200, 200]}, {file: 'art/cut/1_0.png', at: [200, 0], size: [200, 200]}]}),
+      'art/cut/0_0.png': sky, 'art/cut/1_0.png': sky,
+    };
+    const first = structuredClone(fixture.rooms[0]);
+    first.planes.find((/** @type {any} */ p) => p.gameplay).items.push({id: 'cut', image: 'art/cut.img.json', at: [1100, 300], scale: 1, rot: 0, flip: false, opacity: 1, blend: 'normal'});
+    const reads = (win.invokes ?? []).length;
+    await win.pushEvents([project({assets: ['art/sky.png', 'art/cut.img.json', 'src/forest.psd']}), {type: 'gameRoom', room: first, revision: 7}]); await settle();
+    press('f'); await settle();
+    const read = () => (win.invokes ?? []).slice(reads).filter((/** @type {any} */ c) => c.name === 'read_game').map((/** @type {any} */ c) => c.args.key);
+    for (let i = 0; i < 30 && !read().includes('art/cut/1_0.png'); i++) await settle();
+    assert(read().includes('art/cut.img.json') && read().includes('art/cut/0_0.png') && read().includes('art/cut/1_0.png'), `read ${read()}`);
+    await settle();
+    // A click on its second piece is a click on it.
+    const canvas = $('[data-game-overlay]');
+    const box = canvas.getBoundingClientRect();
+    const zoom = Math.min((box.width - 48) / first.size[0], (box.height - 48) / first.size[1]);
+    const [x, y] = [box.left + box.width / 2 + (1400 - first.size[0] / 2) * zoom, box.top + box.height / 2 + (400 - first.size[1] / 2) * zoom];
+    canvas.dispatchEvent(new win.PointerEvent('pointerdown', {clientX: x, clientY: y, bubbles: true, pointerId: 1, button: 0}));
+    canvas.dispatchEvent(new win.PointerEvent('pointerup', {clientX: x, clientY: y, bubbles: true, pointerId: 1, button: 0}));
+    await settle();
+    // An item is titled by its image.
+    assert($('[data-game-inspector] h4')?.textContent === 'cut.img.json', `the click selected ${$('[data-game-inspector] h4')?.textContent}`);
+    press('Escape'); await settle();
+
+    // The layered file, from the Assets tab: it is brought in, not dragged.
+    $('[data-game-side="assets"]').click(); await settle();
+    const row = ws().querySelector('[data-game-pick="asset"][data-game-pick-id="src/forest.psd"]');
+    assert(row && row.getAttribute('draggable') !== 'true', 'a .psd is offered to drag onto the stage');
+    assert(ws().querySelector('[data-game-pick-id="art/cut.img.json"]')?.getAttribute('draggable') === 'true', 'an image cut up cannot be placed');
+    row.click(); await settle();
+    const form = $('[data-game-import-form]');
+    assert(form && shown(form), 'selecting a .psd did not offer to import it');
+    assert(form.querySelector('[data-game-import-room]').value === 'crossroads_01', 'it would not go into the room on screen');
+    form.querySelector('[data-game-import-scale]').value = '2';
+    form.querySelector('[data-game-import-normals]').checked = true;
+    const before = win.commands.length;
+    form.querySelector('[data-game-import]').click(); await settle();
+    const asked = sent(before, 'gameImport')[0];
+    assert(asked?.source === 'src/forest.psd' && asked.room === 'crossroads_01' && asked.scale === 2 && asked.normals === true, `Import sent ${JSON.stringify(asked)}`);
+    // Imported, and saved again since: said on its row and in the inspector.
+    await win.pushEvents([project({assets: ['art/sky.png', 'art/cut.img.json', 'src/forest.psd'],
+      imports: [{source: 'src/forest.psd', room: 'crossroads_02', planes: 3, items: 1, scale: 2, normals: true, changed: true}]})]);
+    await settle();
+    assert(ws().querySelector('[data-game-pick-id="src/forest.psd"] .game-changed'), 'a file changed since it was imported is not marked');
+    assert($('[data-game-import]').textContent === 'Import again' && $('[data-game-import-form]').textContent.includes('saved since'), 'the inspector does not say it was imported, and changed');
+    assert($('[data-game-import-room]').value === 'crossroads_02', 'importing again would not go where it went before');
+    win.gameFiles = undefined;
+    await win.pushEvents([project(), room('crossroads_01')]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 }

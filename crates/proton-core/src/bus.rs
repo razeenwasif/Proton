@@ -1277,6 +1277,23 @@ pub enum Command {
     },
     /// Trace collision from where an image on the play plane is opaque,
     /// added to its room as closed solid shapes — one edit, undone whole.
+    /// Bring a `.psd` or `.png` in the game's folder into a room: its groups
+    /// become planes at the depths their names give, its layers images. The
+    /// images are written at once; the room's change is held until saved.
+    #[serde(rename_all = "camelCase")]
+    GameImport {
+        source: String,
+        /// The room; the one on screen when not said.
+        #[serde(default)]
+        #[ts(optional)]
+        room: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        scale: Option<f64>,
+        /// Make normal maps from the art's brightness, for lights.
+        #[serde(default)]
+        normals: bool,
+    },
     GameTrace {
         room: String,
         item: String,

@@ -1542,6 +1542,28 @@ can be hidden, locked or shown alone, which is the editor's and never saved;
 and an image dragged in from Assets is placed where it lands, in the plane's
 own pixels.
 
+**Art brought in** (`proton-game::import`). A painter's layered `.psd`, or a
+`.png`, in the game's folder becomes a room's planes from its inspector (or
+the agent's `game_import`). A group is a plane, at the depth its name gives in
+square brackets — `Far hills [800]`, `Leaves [-150]`, `[still]` for a sky that
+does not move — and a `[play]` group's layers join the room's play plane; a
+layer outside any group is a plane of its own. Each layer is trimmed to where
+it is not clear and written as a PNG under `art/<file>/`; one wider or taller
+than 2048 px is cut into pieces with an `.img.json` saying where each goes and
+the empty pieces dropped, and the window draws the pieces as one image —
+placed, flipped and turned about the whole's middle, picked as one. Normal
+maps can be made from brightness for the lights to come. The PSD reader is
+our own and reads the common file: 8 bits a channel, RGB or grayscale, layers
+raw, run-length or zipped, layer masks applied; CMYK, 16 and 32 bits and
+`.psb` are refused with what to save instead, and effects, adjustment layers,
+clipping and hidden layers are left out with a note naming the layer. The
+images are written at once; the room's change is one held edit. `import.json`
+remembers what each file made, so importing it again replaces that rather than
+adding a copy, and the Assets tab marks a file saved again since; an image an
+earlier import wrote and this one does not is named, never deleted. The
+reader is tested against files a test-only writer makes to Adobe's
+description.
+
 **Collision** is polylines in the room's own pixels, each solid, one-way,
 hazard or not-a-wall. The pen lays one a click at a time (⇧ holds it to
 eighths of a turn, and it snaps to points already there); a selected line's
@@ -1606,9 +1628,9 @@ jump height shows as a route that worked before the edit and fails after it.
 Its path is sent to the window (`GamePath`) and drawn over the rooms it
 crossed until ⎋. `@game` sends the summary and the room on screen.
 
-**What comes next** (the plan's G7–G14): importers (PSD, Aseprite,
-DragonBones, Spine, glTF), lighting, animation, combat, the world map with
-ability gates, hot reload and a web export.
+**What comes next** (the plan's G8–G14): lighting and atmosphere, animation
+(Aseprite, DragonBones, Spine), combat, the world map with ability gates, hot
+reload and a web export.
 
 ### Trace
 

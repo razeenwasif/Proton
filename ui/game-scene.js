@@ -23,8 +23,11 @@
 /** @typedef {import('./game-overlay.js').View} View */
 /** The editor's camera: the room point at the stage's middle, and stage pixels a room pixel.
  *  @typedef {{center: [number, number], zoom: number}} Cam */
-/** One thing to draw, in room pixels. Rotation is about its middle.
- *  @typedef {{key: string, plane: string, item: string | null, x: number, y: number, w: number, h: number, rot: number, flip: boolean, opacity: number, tint: [number, number, number, number], blend: string}} Sprite */
+/** One thing to draw, in room pixels. Rotation is about its middle. A piece
+ *  of an image cut up carries the whole image's rectangle as `whole`.
+ *  @typedef {{key: string, plane: string, item: string | null, x: number, y: number, w: number, h: number, rot: number, flip: boolean, opacity: number, tint: [number, number, number, number], blend: string, whole?: {x: number, y: number, w: number, h: number}}} Sprite */
+/** How an image is cut up: its size, and where each piece goes in it (an `.img.json`).
+ *  @typedef {{size: [number, number], chunks: {file: string, at: [number, number], size: [number, number]}[]}} Parts */
 
 /** How fast a plane moves against the play plane. @param {Plane} plane @param {number} focal */
 export function factor(plane, focal) {
@@ -77,7 +80,8 @@ export function rgb(hex) {
  *  what has not loaded is left out until it has.
  *  @param {Room} room
  *  @param {{focal: number, view: [number, number], center: [number, number], sizes: Map<string, [number, number]>,
- *           hidden?: Set<string>, solo?: string | null, sprites?: {key: string, at: number[], pivot: number[], flip?: boolean}[]}} how
+ *           hidden?: Set<string>, solo?: string | null, sprites?: {key: string, at: number[], pivot: number[], flip?: boolean}[],
+ *           parts?: Map<string, Parts>}} how
  *  @returns {Sprite[]} */
 export function layout(room, how) {
   const at = corner(room, how.view, how.center);
@@ -88,13 +92,18 @@ export function layout(room, how) {
     const [dx, dy] = shift(factor(plane, how.focal), at);
     const tint = plane.tint && plane.fog > 0 ? /** @type {[number, number, number, number]} */ ([...rgb(plane.tint), Math.min(1, plane.fog)]) : /** @type {[number, number, number, number]} */ ([0, 0, 0, 0]);
     for (const item of plane.items) {
+      const blend = item.blend !== "normal" ? item.blend : plane.blend;
+      const parts = how.parts?.get(item.image);
+      if (parts) {
+        out.push(...pieces(item, parts, how.sizes, plane.id, item.at[0] + dx, item.at[1] + dy, tint, blend));
+        continue;
+      }
       const size = how.sizes.get(item.image);
       if (!size) continue;
       out.push({
         key: item.image, plane: plane.id, item: item.id,
         x: item.at[0] + dx, y: item.at[1] + dy, w: size[0] * item.scale, h: size[1] * item.scale,
-        rot: item.rot, flip: item.flip, opacity: item.opacity, tint,
-        blend: item.blend !== "normal" ? item.blend : plane.blend,
+        rot: item.rot, flip: item.flip, opacity: item.opacity, tint, blend,
       });
     }
     // What stands in the room stands on the play plane, in front of its art.
@@ -108,6 +117,33 @@ export function layout(room, how) {
           rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal" });
       }
     }
+  }
+  return out;
+}
+
+/** An image cut up, as its pieces: each placed, flipped and turned as its
+ *  part of the whole is — about the whole's middle, not its own. A piece
+ *  not loaded yet is left out.
+ *  @param {Item} item @param {Parts} parts @param {Map<string, [number, number]>} sizes @param {string} plane
+ *  @param {number} x the whole's left @param {number} y its top
+ *  @param {[number, number, number, number]} tint @param {string} blend @returns {Sprite[]} */
+function pieces(item, parts, sizes, plane, x, y, tint, blend) {
+  const s = item.scale;
+  const whole = { x, y, w: parts.size[0] * s, h: parts.size[1] * s };
+  const a = (item.rot * Math.PI) / 180;
+  const [cos, sin] = [Math.cos(a), Math.sin(a)];
+  /** @type {Sprite[]} */
+  const out = [];
+  for (const c of parts.chunks) {
+    if (!sizes.has(c.file)) continue;
+    const [w, h] = [c.size[0] * s, c.size[1] * s];
+    const left = item.flip ? whole.w - c.at[0] * s - w : c.at[0] * s;
+    // From the whole's middle to the piece's, turned with the whole.
+    const dx = left + w / 2 - whole.w / 2;
+    const dy = c.at[1] * s + h / 2 - whole.h / 2;
+    const cx = whole.x + whole.w / 2 + dx * cos - dy * sin;
+    const cy = whole.y + whole.h / 2 + dx * sin + dy * cos;
+    out.push({ key: c.file, plane, item: item.id, x: cx - w / 2, y: cy - h / 2, w, h, rot: item.rot, flip: item.flip, opacity: item.opacity, tint, blend, whole });
   }
   return out;
 }

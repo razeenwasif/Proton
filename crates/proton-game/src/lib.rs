@@ -21,6 +21,8 @@
 //! - [`path`]: every path a file names, held to the game's folder.
 //! - [`template`]: a new game to start from, with its art drawn in code.
 //! - [`trace`]: collision traced from where art is opaque.
+//! - [`import`]: a painter's layered `.psd`, or a `.png`, brought in as a
+//!   room's planes.
 //!
 //! - [`sim`]: the game, run — a tick at a time, in whole numbers, written
 //!   once and run twice: natively in the core, where tests and the agent
@@ -29,6 +31,8 @@
 
 pub mod doc;
 pub mod format;
+#[cfg(feature = "editor")]
+pub mod import;
 pub mod path;
 pub mod project;
 pub mod sim;

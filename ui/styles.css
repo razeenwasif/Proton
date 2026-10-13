@@ -5532,6 +5532,11 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .game-error { color: var(--err); font: var(--z-2xs)/1.5 var(--zed); margin: 6px 4px; }
 .game-run .game-error { margin: 0; }
 .game-playing [data-game-stage] { cursor: none; }
+/* Importing art: a file changed since it was imported, and the form. */
+.game-changed { color: var(--warn); font: var(--z-2xs)/1.4 var(--zed); }
+.game-changed-note { margin: 6px 4px; color: var(--warn); font: var(--z-2xs)/1.5 var(--zed); }
+.game-import code { font: var(--z-2xs) var(--mono); color: var(--text); }
+.game-field.game-check { display: flex; flex-direction: row; align-items: center; gap: 6px; }
 /* With no game open, the home page is the whole page. */
 .workspace[data-ws="game"].game-home { grid-template-columns: 0 0 minmax(0, 1fr) 0 0 !important; }
 .workspace[data-ws="game"].game-home > .game-side,

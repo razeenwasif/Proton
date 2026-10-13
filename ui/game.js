@@ -38,6 +38,11 @@ const BUILT_IN = ["transition", "save_point", "ability_gate", "ability_pickup"];
 
 const SIDES = ["world", "layers", "entities", "assets"];
 
+/** Whether an asset is an image to place: a picture, or one cut into pieces. @param {string} a */
+const placeable = (a) => /\.(png|jpe?g|webp)$/i.test(a) || a.endsWith(".img.json");
+/** Whether an asset is art to bring in as planes. @param {string} a */
+const importable = (a) => /\.(psd|png)$/i.test(a);
+
 /** How far a point is from a segment. @param {number} px @param {number} py @param {number[]} a @param {number[]} b */
 function segmentDistance(px, py, a, b) {
   const dx = b[0] - a[0];
@@ -231,6 +236,12 @@ export function createGame(host) {
   });
 
   /** A row of a list that selects something. */
+  /** Where a file was imported into, or that it changed since, for its row. @param {string} a */
+  const imported = (a) => {
+    const done = project?.imports?.find((i) => i.source === a);
+    if (!done) return "";
+    return done.changed ? `<span class="game-changed" title="Saved again since it was imported">changed</span>` : `in ${esc(done.room)}`;
+  };
   const row = (/** @type {string} */ kind, /** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ meta = "", extra = "", after = "") => {
     const on = selected?.kind === kind && selected.id === id;
     return `<div class="game-row${on ? " on" : ""}" data-game-pick="${kind}" data-game-pick-id="${esc(id)}"${extra}>` +
@@ -300,7 +311,7 @@ export function createGame(host) {
       return;
     }
     box.innerHTML = project.assets.length
-      ? project.assets.map((a) => row("asset", a, a, "", /\.(png|jpe?g|webp)$/i.test(a) ? ` draggable="true" title="Drag it onto the stage to place it"` : "")).join("")
+      ? project.assets.map((a) => row("asset", a, a, imported(a), placeable(a) ? ` draggable="true" title="Drag it onto the stage to place it"` : "")).join("")
       : `<p class="game-faint">No images or sounds in the game's folder.</p>`;
   }
 
@@ -345,7 +356,7 @@ export function createGame(host) {
     renderSide();
     renderInspector();
     paint();
-    if (what && what.kind !== "asset" && what.kind !== "game") showPanel("inspector");
+    if (what && (what.kind !== "asset" || importable(what.id)) && what.kind !== "game") showPanel("inspector");
   }
 
   /* ── the stage ───────────────────────────────────────────────── */
@@ -381,6 +392,9 @@ export function createGame(host) {
   /** Each image's size once it is on the GPU, and the ones on their way.
    *  @type {Map<string, [number, number]>} */
   const images = new Map();
+  /** Images cut into pieces (`.img.json`): where each piece goes.
+   *  @type {Map<string, import('./game-scene.js').Parts>} */
+  const parts = new Map();
   /** Each image's opacity, small, so a click finds what is drawn there.
    *  @type {Map<string, {w: number, h: number, alpha: Uint8Array}>} */
   const masks = new Map();
@@ -410,6 +424,24 @@ export function createGame(host) {
     const filter = project?.game.view.filter === "nearest" ? "nearest" : "smooth";
     for (const key of wanted) {
       if (!key || images.has(key) || loading.has(key) || failed.has(key)) continue;
+      // An image cut up: what its pieces are first, then the pieces.
+      if (key.endsWith(".img.json")) {
+        loading.add(key);
+        readGame(key)
+          .then((bytes) => JSON.parse(new TextDecoder().decode(bytes)))
+          .then((sheet) => {
+            const chunks = (sheet.chunks ?? []).filter((/** @type {any} */ c) => c && typeof c.file === "string");
+            parts.set(key, { size: sheet.size ?? [0, 0], chunks });
+            images.set(key, sheet.size ?? [0, 0]);
+            loadKeys(chunks.map((/** @type {any} */ c) => c.file));
+          })
+          .catch(() => failed.add(key))
+          .finally(() => {
+            loading.delete(key);
+            if (!playing()) paint();
+          });
+        continue;
+      }
       if (!/\.(png|jpe?g|webp)$/i.test(key)) continue;
       loading.add(key);
       readGame(key)
@@ -546,7 +578,7 @@ export function createGame(host) {
   function how() {
     const c = cam();
     const view = /** @type {[number, number]} */ ([project?.game.view.width ?? 1920, project?.game.view.height ?? 1080]);
-    return { focal: project?.game.view.focal ?? 1000, view, center: c?.center ?? /** @type {[number, number]} */ ([0, 0]), sizes: images, hidden, solo, sprites: room ? sprites(draft ?? room) : [] };
+    return { focal: project?.game.view.focal ?? 1000, view, center: c?.center ?? /** @type {[number, number]} */ ([0, 0]), sizes: images, parts, hidden, solo, sprites: room ? sprites(draft ?? room) : [] };
   }
 
   /** What the scene draws now. */
@@ -559,7 +591,9 @@ export function createGame(host) {
   function selectedBox() {
     if (selected?.kind !== "item") return null;
     const s = drawn().find((d) => d.item === selected?.id);
-    return s ? { x: s.x, y: s.y, w: s.w, h: s.h, rot: s.rot } : null;
+    if (!s) return null;
+    const box = s.whole ?? s;
+    return { x: box.x, y: box.y, w: box.w, h: box.h, rot: s.rot };
   }
 
   let painting = 0;
@@ -616,6 +650,7 @@ export function createGame(host) {
     canvas,
     gpu: () => gpu,
     sizes: images,
+    parts,
     want: (keys) => loadKeys(keys),
     stageSize,
     focal: () => project?.game.view.focal ?? 1000,
@@ -1010,7 +1045,7 @@ export function createGame(host) {
         remove: at,
         trace: plane.gameplay ? item.id : undefined,
         fields: [
-          { label: "Image", path: [...at, "image"], value: item.image, type: "select", options: project.assets.filter((a) => /\.(png|jpe?g|webp)$/i.test(a)).map((a) => [a, a]) },
+          { label: "Image", path: [...at, "image"], value: item.image, type: "select", options: project.assets.filter(placeable).map((a) => [a, a]) },
           { label: "Where", path: [...at, "at"], value: item.at, type: "pair" },
           { label: "Scale", path: [...at, "scale"], value: item.scale, type: "number" },
           { label: "Turn", path: [...at, "rot"], value: item.rot, type: "number", hint: "degrees" },
@@ -1136,8 +1171,40 @@ export function createGame(host) {
       (shape.trace ? `<p class="game-trace"><button class="cc-quiet" data-game-trace="${esc(shape.trace)}" title="Collision drawn round where it is opaque — one edit, undone whole">Trace collision</button></p>` : "") +
       `<div class="game-fields" data-game-target="${esc(shape.target)}">${shape.fields
         .map((f, i) => `<label class="game-field"><span>${esc(f.label)}</span>${input(f, i)}${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`)
-        .join("")}</div>`;
+        .join("")}</div>` +
+      (selected?.kind === "asset" && importable(selected.id) ? importForm(selected.id) : "");
   }
+
+  /** Bringing a .psd or .png in as a room's planes: where, how large, and
+   *  whether lights get normal maps — and what it made the last time.
+   *  @param {string} source */
+  function importForm(source) {
+    if (!project) return "";
+    const done = project.imports?.find((i) => i.source === source);
+    const into = done?.room ?? project.focus ?? project.game.start.room;
+    const rooms = project.rooms.map((r) => `<option value="${esc(r.id)}"${r.id === into ? " selected" : ""}>${esc(r.id)}</option>`).join("");
+    const before = done
+      ? `<p class="game-faint">Imported into ${esc(done.room)}: ${done.planes} plane${done.planes === 1 ? "" : "s"}${done.items ? `, ${done.items} on the play plane` : ""}. Importing again replaces them.</p>` +
+        (done.changed ? `<p class="game-changed-note">The file has been saved since.</p>` : "")
+      : "";
+    return `<section class="game-tool game-import" data-game-import-form><h4>Import as planes</h4>` +
+      `<p class="game-faint">Each group becomes a plane at the depth in its name — <code>Far hills [800]</code> behind, <code>Leaves [-150]</code> in front, <code>[still]</code> for a sky that does not move, <code>[play]</code> for the plane the game is played on. The images are written now; the room's change waits for ⌘S.</p>` +
+      before +
+      `<div class="game-fields">` +
+      `<label class="game-field"><span>Room</span><select data-game-import-room>${rooms}</select></label>` +
+      `<label class="game-field"><span>Scale</span><input type="number" step="any" min="0.01" value="${done?.scale ?? 1}" data-game-import-scale><small>room pixels to a pixel of the file</small></label>` +
+      `<label class="game-field game-check"><input type="checkbox" data-game-import-normals${done?.normals ? " checked" : ""}> <span>Normal maps, for lights</span></label>` +
+      `</div><p><button class="cc-primary" data-game-import="${esc(source)}">${done ? "Import again" : "Import"}</button></p></section>`;
+  }
+  q("[data-game-inspector]").addEventListener("click", (e) => {
+    const go = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-import]"));
+    if (!go) return;
+    const form = go.closest("[data-game-import-form]");
+    const room = /** @type {HTMLSelectElement | null} */ (form?.querySelector("[data-game-import-room]"))?.value;
+    const scale = Number(/** @type {HTMLInputElement | null} */ (form?.querySelector("[data-game-import-scale]"))?.value);
+    const normals = Boolean(/** @type {HTMLInputElement | null} */ (form?.querySelector("[data-game-import-normals]"))?.checked);
+    send({ type: "gameImport", source: go.dataset.gameImport, room, scale: Number.isFinite(scale) && scale > 0 ? scale : undefined, normals });
+  });
 
   /** The value a field's inputs say now. @param {HTMLElement} field */
   function valueOf(field) {

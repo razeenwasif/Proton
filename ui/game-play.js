@@ -42,6 +42,7 @@ function compile() {
  *   canvas: HTMLCanvasElement,
  *   gpu: () => ReturnType<typeof import('./game-render.js').createGameRender>,
  *   sizes: Map<string, [number, number]>,
+ *   parts: Map<string, import('./game-scene.js').Parts>,
  *   want: (keys: string[]) => void,
  *   stageSize: () => number[],
  *   focal: () => number,
@@ -160,7 +161,7 @@ export function createPlayer(host) {
       drawn.push({ key: world.sprites[now[o]], at, pivot: [now[o + 3], now[o + 4]], flip: Boolean(now[o + 5]) });
     }
     host.want([...room.planes.flatMap((p) => p.items.map((i) => i.image)), ...drawn.map((d) => d.key)]);
-    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, sprites: drawn });
+    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, sprites: drawn });
     const ratio = window.devicePixelRatio || 1;
     host.gpu()?.draw(sprites, view, width, height, ratio, host.ground());
     // Over it: what is outside the game's view, a door's fade, and a readout.

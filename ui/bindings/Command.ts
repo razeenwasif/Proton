@@ -62,7 +62,15 @@ line: number | null, } | { "type": "refreshRepo" } | { "type": "runCell", index:
 /**
  * What the change was, in words, for the undo history.
  */
-label: string, } | { "type": "gameTrace", room: string, item: string, 
+label: string, } | { "type": "gameImport", source: string, 
+/**
+ * The room; the one on screen when not said.
+ */
+room?: string, scale?: number, 
+/**
+ * Make normal maps from the art's brightness, for lights.
+ */
+normals: boolean, } | { "type": "gameTrace", room: string, item: string, 
 /**
  * The alpha at which a pixel counts as solid, 0–255.
  */

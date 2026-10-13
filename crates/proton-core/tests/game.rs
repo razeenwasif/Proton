@@ -385,3 +385,106 @@ fn game_mentioned_sends_the_game_and_the_room_on_screen() {
     assert!(about.starts_with("Crossroads"), "{about}");
     assert!(about.contains("The room on screen, crossroads_01 (rooms/crossroads_01.room.json)"), "{about}");
 }
+
+/* ── art brought in ────────────────────────────────────────────────── */
+
+fn painted_room(with_mist: bool) -> Vec<u8> {
+    use proton_game::import::psd_write::{write, Entry, Header, Layer};
+    let mut entries = vec![
+        Entry::group("Ground [play]", vec![Entry::Layer(Layer::filled("slab", [100, 1700], 400, 100, [80, 60, 40, 255]))]),
+        Entry::group("Ridge [1000]", vec![Entry::Layer(Layer::filled("ridge", [0, 900], 600, 200, [90, 90, 120, 255]))]),
+    ];
+    if with_mist {
+        entries.insert(0, Entry::Layer(Layer::filled("Mist [-50]", [0, 1500], 300, 100, [255, 255, 255, 80])));
+    }
+    write(640, 1800, &entries, Header::default(), None)
+}
+
+fn planes_of(events: &[Event]) -> Vec<String> {
+    room(events).and_then(|(r, _)| r).map(|r| r.planes.iter().map(|p| p.id.clone()).collect()).unwrap_or_default()
+}
+
+#[test]
+fn a_layered_file_comes_in_as_planes_by_depth_held_until_saved_and_undone_whole() {
+    let (mut space, root) = with_game("import");
+    let game = root.join("crossroads");
+    std::fs::create_dir_all(game.join("src")).unwrap();
+    std::fs::write(game.join("src/forest.psd"), painted_room(true)).unwrap();
+    let before = std::fs::read_to_string(game.join("rooms/crossroads_01.room.json")).unwrap();
+
+    let events = space.apply(Command::GameImport { source: "src/forest.psd".into(), room: None, scale: None, normals: false });
+    assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.starts_with("imported forest.psd into crossroads_01: 2 planes and 1 image on the play plane"))), "{events:?}");
+    // Each plane where its depth puts it among the room's own.
+    assert_eq!(planes_of(&events), ["sky", "hills_far", "ridge", "hills_near", "main", "mist", "fronds"]);
+    let (shown, _) = room(&events).unwrap();
+    let main = shown.unwrap().planes.into_iter().find(|p| p.id == "main").unwrap();
+    assert!(main.items.iter().any(|i| i.id == "forest_slab" && i.at == [100, 1700]), "the play group did not join the play plane");
+    // The images are written; the room is not, until saved.
+    assert!(game.join("art/forest/ridge.png").exists() && game.join("art/forest/slab.png").exists());
+    assert_eq!(std::fs::read_to_string(game.join("rooms/crossroads_01.room.json")).unwrap(), before);
+    assert!(view(&events).unwrap().unwrap().dirty);
+    let imports = view(&events).unwrap().unwrap().imports;
+    assert_eq!((imports[0].source.as_str(), imports[0].planes, imports[0].items, imports[0].changed), ("src/forest.psd", 2, 1, false));
+    assert!(std::fs::read_to_string(game.join("import.json")).unwrap().contains("\"source\": \"src/forest.psd\""));
+
+    // Imported again: replaced, not doubled.
+    let again = space.apply(Command::GameImport { source: "src/forest.psd".into(), room: None, scale: None, normals: false });
+    assert_eq!(planes_of(&again), ["sky", "hills_far", "ridge", "hills_near", "main", "mist", "fronds"]);
+    let (shown, _) = room(&again).unwrap();
+    assert_eq!(shown.unwrap().planes.iter().flat_map(|p| &p.items).filter(|i| i.id.starts_with("forest_slab")).count(), 1);
+
+    // The file changed: what it no longer makes goes, and the image it no
+    // longer writes is said rather than deleted.
+    std::fs::write(game.join("src/forest.psd"), painted_room(false)).unwrap();
+    let changed = space.apply(Command::GameImport { source: "src/forest.psd".into(), room: None, scale: None, normals: false });
+    assert_eq!(planes_of(&changed), ["sky", "hills_far", "ridge", "hills_near", "main", "fronds"]);
+    assert!(warned(&changed).is_some_and(|w| w.contains("art/forest/mist.png")), "{changed:?}");
+    assert!(game.join("art/forest/mist.png").exists(), "an image the person may use elsewhere was deleted");
+
+    // Each import that changed the room is one step of undo; the one that
+    // changed nothing is none.
+    let undone = space.apply(Command::GameUndo);
+    assert_eq!(planes_of(&undone), ["sky", "hills_far", "ridge", "hills_near", "main", "mist", "fronds"]);
+    let first = space.apply(Command::GameUndo);
+    assert_eq!(planes_of(&first), ["sky", "hills_far", "hills_near", "main", "fronds"]);
+}
+
+#[test]
+fn art_from_outside_the_game_or_that_is_not_art_is_refused() {
+    let (mut space, root) = with_game("import-refused");
+    std::fs::write(root.join("outside.psd"), painted_room(false)).unwrap();
+    let outside = space.apply(Command::GameImport { source: "../outside.psd".into(), room: None, scale: None, normals: false });
+    assert!(warned(&outside).is_some_and(|w| w.contains("outside the game")), "{outside:?}");
+    std::fs::write(root.join("crossroads/notes.json"), "{}").unwrap();
+    let not_art = space.apply(Command::GameImport { source: "notes.json".into(), room: None, scale: None, normals: false });
+    assert!(warned(&not_art).is_some_and(|w| w.contains("not art that can be imported")), "{not_art:?}");
+    let nowhere = space.apply(Command::GameImport { source: "src/none.psd".into(), room: None, scale: None, normals: false });
+    assert!(warned(&nowhere).is_some(), "{nowhere:?}");
+}
+
+#[test]
+fn the_agent_imports_art_and_is_told_what_was_left_out() {
+    use proton_game::import::psd_write::{write, Entry, Header, Layer};
+    let (mut space, root) = with_game("import-agent");
+    let bytes = write(
+        200,
+        200,
+        &[
+            Entry::Layer(Layer { tags: vec![*b"lfx2"], ..Layer::filled("Glow [-20]", [0, 0], 20, 20, [255, 255, 0, 255]) }),
+            Entry::Layer(Layer::filled("Far [900]", [0, 0], 50, 50, [0, 0, 90, 255])),
+        ],
+        Header::default(),
+        None,
+    );
+    std::fs::write(root.join("crossroads/art/cave.psd"), bytes).unwrap();
+    let info = space.run_tool("game_info", &json!({})).unwrap();
+    assert!(info.contains("Layered art in its folder, for game_import: art/cave.psd"), "{info}");
+    let said = space.run_tool("game_import", &json!({"source": "art/cave.psd", "room": "crossroads_02", "normals": true})).unwrap();
+    assert!(said.starts_with("imported cave.psd into crossroads_02: 2 planes"), "{said}");
+    assert!(said.contains("held until the person saves") && said.contains("Glow [-20]'s layer effects"), "{said}");
+    // With normal maps, each image is a sidecar naming its pieces and its map.
+    let sidecar = std::fs::read_to_string(root.join("crossroads/art/cave/far.img.json")).unwrap();
+    assert!(sidecar.contains("far.normal.png"), "{sidecar}");
+    let after = space.run_tool("game_info", &json!({})).unwrap();
+    assert!(after.contains("Imported art/cave.psd into crossroads_02: 2 planes"), "{after}");
+}
