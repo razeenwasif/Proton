@@ -1571,7 +1571,10 @@ pub enum Event {
     /// character would put eighty objects on the bridge for a line of prose.
     #[serde(rename_all = "camelCase")]
     Terminal {
-        rows: Vec<Vec<TermRun>>,
+        /// Every row of the screen; `None` for a row that is as the window
+        /// was last sent it. A shell printing a line changes a row or two of
+        /// the screen, and sending the rest again was most of the work.
+        rows: Vec<Option<Vec<TermRun>>>,
         cursor: (u16, u16),
         cursor_visible: bool,
         /// The shell is still there. A dead terminal keeps its last screen:

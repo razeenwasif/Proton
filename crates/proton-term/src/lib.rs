@@ -26,7 +26,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 /// Runs rather than cells: a terminal row is mostly one colour, and a cell per
 /// character would put eighty objects on the bridge for a line of prose. The
 /// editor's viewport merges its spans for the same reason.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Run {
     pub text: String,
     /// An ANSI palette index, when the colour came from one.

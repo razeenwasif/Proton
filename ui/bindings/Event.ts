@@ -193,7 +193,13 @@ selection: Selection | null, } | { "type": "buffers", names: Array<BufferTab>, a
 /**
  * Side by side rather than stacked.
  */
-vertical: boolean, } | { "type": "terminal", rows: Array<Array<TermRun>>, cursor: [number, number], cursorVisible: boolean, 
+vertical: boolean, } | { "type": "terminal", 
+/**
+ * Every row of the screen; `None` for a row that is as the window
+ * was last sent it. A shell printing a line changes a row or two of
+ * the screen, and sending the rest again was most of the work.
+ */
+rows: Array<Array<TermRun> | null>, cursor: [number, number], cursorVisible: boolean, 
 /**
  * The shell is still there. A dead terminal keeps its last screen:
  * what a command printed before it exited is the useful part.

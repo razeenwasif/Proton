@@ -21,6 +21,9 @@ const win = frame.contentWindow;
 const doc = win.document;
 const $ = (selector) => doc.querySelector(selector);
 const settle = () => new Promise((done) => setTimeout(done, 100));
+/** The next frame: what streams — an answer, a shell — is painted at once
+ *  and then at most once a frame, with whatever came last. */
+const nextFrame = () => new Promise((done) => win.requestAnimationFrame(() => done(undefined)));
 const key = (value, options = {}) => doc.activeElement.dispatchEvent(new win.KeyboardEvent('keydown', {
   key: value, bubbles: true, cancelable: true, ...options,
 }));
@@ -387,10 +390,35 @@ await test('The GPU draws the terminal, and the rows under it catch up once it i
     if (!wasOpen) { toggle.click(); await settle(); }
   }
 });
+await test('A shell\'s screen arrives as the rows that changed, and a burst of them is drawn once a frame', async () => {
+  const pane = $('[data-term-pane]'), screen = $('[data-term-screen]'), toggle = $('.titlebar [data-term-toggle]');
+  const wasOpen = !pane.hidden;
+  if (!wasOpen) { toggle.click(); await settle(); }
+  const rows = (texts) => ({type: 'terminal', running: true, scrollback: 0, cursor: [0, 0], cursorVisible: false,
+    rows: texts.map((text) => text === null ? null : [{text}])});
+  await settle();
+  await win.pushEvents([rows(['one', 'two', 'three'])]);
+  const lines = () => [...screen.querySelectorAll('.trow')].map((r) => r.textContent);
+  assert(lines().join('|') === 'one|two|three', `the screen was not drawn: ${lines()}`);
+  const first = screen.children[0];
+  await settle();
+  await win.pushEvents([rows([null, 'TWO', null])]);
+  assert(lines().join('|') === 'one|TWO|three', `the rows left out were not kept: ${lines()}`);
+  assert(screen.children[0] === first, 'a row that did not change was drawn again');
+  // Ten screens in one breath: the first drawn at once, the last at the next frame.
+  await settle();
+  for (let i = 0; i < 10; i++) win.pushEvents([rows([null, `burst ${i}`, null])]);
+  assert(lines()[1] === 'burst 0', `the first of a burst was not drawn at once: ${lines()}`);
+  await nextFrame();
+  assert(lines().join('|') === 'one|burst 9|three', `the last of a burst was not drawn: ${lines()}`);
+  await settle();
+  if (!wasOpen) { toggle.click(); await settle(); }
+});
 await test('The text terminal colours all 256 of xterm\'s colours, not only the theme\'s sixteen', async () => {
   const screen = $('[data-term-screen]');
   await win.pushEvents([{type: 'terminal', running: true, scrollback: 0, cursor: [0, 0], cursorVisible: false,
     rows: [[{text: 'cube', fg: 196, bg: 21}, {text: 'grey', fg: 244}]]}]);
+  await nextFrame();
   const [cube, grey] = screen.querySelectorAll('.trow span');
   assert(cube && win.getComputedStyle(cube).color === 'rgb(255, 0, 0)', `colour 196 was ${cube && win.getComputedStyle(cube).color}`);
   assert(win.getComputedStyle(cube).backgroundColor === 'rgb(0, 0, 255)', 'background 21 was not drawn');
@@ -1338,8 +1366,11 @@ await test('Antigravity is a provider, with its own models and its own tools nam
   assert([...doc.querySelectorAll('#codex-dock .tool b')].some(b => b.textContent === 'Read file'), 'its tool row is unnamed');
 });
 await test('An answer in the agent panel colours its code, draws its TeX, keeps its citations, and never becomes HTML', async () => {
-  const agent = (transcript) => win.pushEvents([{type: 'agent', provider: 'codex', model: 'gpt-6-astra', credential: '',
-    activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0, transcript}]);
+  const agent = async (transcript) => {
+    await win.pushEvents([{type: 'agent', provider: 'codex', model: 'gpt-6-astra', credential: '',
+      activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0, transcript}]);
+    await nextFrame();
+  };
   const answer = ['Run it like this:', '', '```rust', '#[derive(Debug)]', 'fn main() { let n: u32 = 42; println!("{n}"); } // done', '```', '',
     'The energy is $E = mc^2$; $5 and $10 are prices, and \\$x\\$ is not TeX. Then', '$$', '\\int_0^1 x^2\\,dx = \\tfrac{1}{3}', '$$',
     'See [[notes/physics.md § Energy L1-4]] and [the docs](https://example.com/a).', '', '<img src=x onerror="window.pwned=1">'].join('\n');
@@ -1385,8 +1416,11 @@ await test('An answer in the agent panel colours its code, draws its TeX, keeps 
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
 });
 await test('A streaming answer arrives as the entries that changed, spliced onto the conversation the window has', async () => {
-  const agent = (transcript, from) => win.pushEvents([{type: 'agent', provider: 'codex', model: 'gpt-6-astra', credential: '',
-    activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0, transcript, ...(from === undefined ? {} : {from})}]);
+  const agent = async (transcript, from) => {
+    await win.pushEvents([{type: 'agent', provider: 'codex', model: 'gpt-6-astra', credential: '',
+      activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0, transcript, ...(from === undefined ? {} : {from})}]);
+    await nextFrame();
+  };
   const you = {speaker: 'you', text: 'first question', thinking: '', streaming: false, calls: []};
   await showAgentDock();
   await agent([you, {speaker: 'proton', text: 'Partly', thinking: '', streaming: true, calls: []}]);

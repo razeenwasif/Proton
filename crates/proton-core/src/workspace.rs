@@ -75,6 +75,9 @@ pub struct Workspace {
     /// The terminal, once something has asked for one. Not started on boot:
     /// a shell nobody opened is a process nobody wanted.
     terminal: Option<proton_term::Terminal>,
+    /// Each row of the terminal's screen as the window was last sent it, by a
+    /// hash: what a poll sends is only the rows that are not.
+    term_sent: Vec<u64>,
     /// The notebook Data mode has open, and the kernel running it.
     data: crate::data::Data,
     design: crate::design::Design,
@@ -3316,7 +3319,7 @@ impl Workspace {
             }
         }
         if self.terminal.as_mut().is_some_and(|t| t.poll()) && !self.quiet {
-            events.push(self.terminal_event());
+            events.push(self.terminal_delta());
         }
 
         // The debugger is on the same heartbeat as everything else that
@@ -6236,8 +6239,19 @@ impl Workspace {
 
     /* ── the terminal ─────────────────────────────────────────────── */
 
+    /// The whole screen, for the window to draw afresh.
     fn terminal_event(&mut self) -> Event {
+        self.terminal_screen(false)
+    }
+
+    /// The screen's rows that changed since the window was last sent it.
+    fn terminal_delta(&mut self) -> Event {
+        self.terminal_screen(true)
+    }
+
+    fn terminal_screen(&mut self, delta: bool) -> Event {
         let Some(term) = self.terminal.as_mut() else {
+            self.term_sent.clear();
             // Closed. An empty screen rather than no event at all, so the
             // panel clears instead of keeping a dead shell on it.
             return Event::Terminal {
@@ -6250,11 +6264,16 @@ impl Workspace {
         };
         let running = term.is_alive();
         let screen = term.screen();
+        let hashes: Vec<u64> = screen.rows.iter().map(row_hash).collect();
+        let sent = std::mem::replace(&mut self.term_sent, hashes);
+        let fresh = !delta || sent.len() != screen.rows.len();
         Event::Terminal {
             rows: screen
                 .rows
                 .iter()
-                .map(|row| row.iter().map(term_run).collect())
+                .zip(&self.term_sent)
+                .enumerate()
+                .map(|(i, (row, hash))| (fresh || sent[i] != *hash).then(|| row.iter().map(term_run).collect()))
                 .collect(),
             cursor: screen.cursor,
             cursor_visible: screen.cursor_visible && running,
@@ -7134,6 +7153,14 @@ fn open_outside(path: &Path) -> Result<(), String> {
 }
 
 /// One terminal run, as the bridge carries it.
+/// A row of the terminal, as a number that moves when it does.
+fn row_hash(row: &Vec<proton_term::Run>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    row.hash(&mut hash);
+    hash.finish()
+}
+
 fn term_run(run: &proton_term::Run) -> TermRun {
     TermRun {
         text: run.text.clone(),

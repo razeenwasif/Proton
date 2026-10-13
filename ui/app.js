@@ -3589,6 +3589,36 @@ function renderRepo(event) {
 let terminalPainted = [];
 /** The last screen the core sent, to draw again without being sent it. */
 let lastTerminal = null;
+
+/** Paint at once, and while events come faster than frames — a shell
+ *  printing, an answer streaming, a window that fell behind — at most once
+ *  more a frame, with whatever came last. `flush` paints what is waiting,
+ *  for something about to read what is drawn. @param {() => void} paint */
+function framePainter(paint) {
+  let used = false;
+  let waiting = 0;
+  const now = () => {
+    used = true;
+    requestAnimationFrame(() => { used = false; });
+    paint();
+  };
+  return {
+    schedule() {
+      if (waiting) return;
+      if (!used) return now();
+      waiting = requestAnimationFrame(() => {
+        waiting = 0;
+        now();
+      });
+    },
+    flush() {
+      if (!waiting) return;
+      cancelAnimationFrame(waiting);
+      waiting = 0;
+      now();
+    },
+  };
+}
 /** The GPU renderer, while Settings asks for one and there is a GPU to ask. */
 let termGL = null;
 /** A catch-up of the rows under the GPU's picture, waiting for a still screen. */
@@ -3664,6 +3694,19 @@ function runHtml(run) {
   return attrs ? `<span${attrs}>${escapeHtml(run.text)}</span>` : escapeHtml(run.text);
 }
 
+/** A screen from the core: each row it sends replaces the one the window
+ *  has, and a row it leaves out (`null`) is as it was. The screen is drawn
+ *  at once — and while a shell prints faster than frames, at most once more
+ *  a frame: each drawing is a layout, and the GPU's a draw. */
+function takeTerminal(event) {
+  const was = lastTerminal?.rows ?? [];
+  lastTerminal = { ...event, rows: event.rows.map((row, i) => row ?? was[i] ?? []) };
+  terminalFrame.schedule();
+}
+const terminalFrame = framePainter(() => {
+  if (lastTerminal) renderTerminal(lastTerminal);
+});
+
 function renderTerminal(event) {
   terminalRunning = event.running;
   // No shell at all — not one that exited, which keeps its last screen. Every
@@ -3711,6 +3754,7 @@ function renderTerminal(event) {
 /** Bring the rows under the GPU's picture up to date now, rather than when
  *  the screen is next still: a selection starts on what is shown. */
 function settleTerminalRows() {
+  terminalFrame.flush();
   if (!termRowsLater) return;
   clearTimeout(termRowsLater);
   termRowsLater = 0;
@@ -5370,7 +5414,7 @@ function renderEvent(event) {
       break;
 
     case "terminal":
-      renderTerminal(event);
+      takeTerminal(event);
       // The shell has to be told how big the panel is, and only the panel
       // knows once it has a row to measure — but only when it is not that
       // size already. A screen with a different number of rows is a shell
@@ -6646,20 +6690,11 @@ const threadSeen = new IntersectionObserver((entries) => {
 });
 for (const thread of $$("[data-agent-thread]")) threadSeen.observe(thread);
 
+/** The conversation from the core: put together at once, painted at once —
+ *  and while an answer streams faster than frames, at most once more a
+ *  frame. */
 function renderAgent(event) {
   answeringModel = event.model ?? "";
-  // Working where it cannot be seen: a dot on Data's Agent tab says so.
-  const dot = $("[data-data-agent-dot]");
-  if (dot && $(".data-side")?.dataset.showing !== "agent") dot.hidden = event.activity === "idle";
-  const texDot = $("[data-tex-agent-dot]");
-  if (texDot && $("#tex-pane")?.dataset.showing !== "agent") texDot.hidden = event.activity === "idle";
-  const pdfDot = $("[data-pdf-agent-dot]");
-  if (pdfDot && $("#pdf-pane")?.dataset.showing !== "agent") pdfDot.hidden = event.activity === "idle";
-  // Every thread: Codex's dock and Chat's stage show the same conversation,
-  // and one of them is always off screen. Painting only the visible one would
-  // leave the other showing whatever it had when it was last looked at.
-  // Entry by entry: what has not changed is not drawn again — while a turn
-  // streams, only its last entry grows.
   const from = Math.min(event.from ?? 0, agentTranscript.length);
   const keyOf = (/** @type {any} */ entry) => `${answeringModel}\u0000${JSON.stringify(entry)}`;
   agentTranscript = agentTranscript.slice(0, from).concat(event.transcript);
@@ -6667,9 +6702,20 @@ function renderAgent(event) {
     ? agentKeys.slice(0, from).concat(event.transcript.map(keyOf))
     : agentTranscript.map(keyOf);
   agentKeysModel = answeringModel;
+  lastThread = { transcript: agentTranscript, keys: agentKeys };
+  agentFrame.schedule();
+  paintAgent(event);
+}
+
+/** Every copy of the conversation on screen, as it now is. */
+const agentFrame = framePainter(() => {
+  // Every thread: Codex's dock and Chat's stage show the same conversation,
+  // and one of them is always off screen. Painting only the visible one would
+  // leave the other showing whatever it had when it was last looked at.
+  // Entry by entry: what has not changed is not drawn again — while a turn
+  // streams, only its last entry grows.
   const transcript = agentTranscript;
   const keys = agentKeys;
-  lastThread = { transcript, keys };
   // Only the copies on screen are painted — each paint is the answer's
   // markdown, code and TeX again, and there are four copies. The rest are
   // marked stale and painted when they come into view. Every read before
@@ -6691,7 +6737,16 @@ function renderAgent(event) {
     // making them scroll.
     if (atBottom) thread.scrollTop = thread.scrollHeight;
   }
+});
 
+function paintAgent(event) {
+  // Working where it cannot be seen: a dot on Data's Agent tab says so.
+  const dot = $("[data-data-agent-dot]");
+  if (dot && $(".data-side")?.dataset.showing !== "agent") dot.hidden = event.activity === "idle";
+  const texDot = $("[data-tex-agent-dot]");
+  if (texDot && $("#tex-pane")?.dataset.showing !== "agent") texDot.hidden = event.activity === "idle";
+  const pdfDot = $("[data-pdf-agent-dot]");
+  if (pdfDot && $("#pdf-pane")?.dataset.showing !== "agent") pdfDot.hidden = event.activity === "idle";
   // Which service answered. Worth a permanent chip rather than a setting you
   // have to go and look up: the two give different answers to the same
   // question, and a transcript you cannot attribute is one you cannot reason
