@@ -5,8 +5,19 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Game mode's document: a Godot scene, read and written without reformatting it."
+description = "Game mode: Proton's own 2D-first engine — its project format, editable documents and simulation."
+
+[features]
+default = ["editor"]
+# What only the editor needs: writing PNGs for the template, and the importers.
+# The runtime the window and exported games run is built without it.
+editor = ["dep:png"]
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 ts-rs = { workspace = true }
+png = { version = "0.17", optional = true }
+
+[dev-dependencies]
+png = "0.17"

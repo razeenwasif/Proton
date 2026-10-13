@@ -1,0 +1,69 @@
+{
+  "format": 1,
+  "name": "Crossroads",
+  "niche": "metroidvania",
+  "view": {
+    "width": 1920,
+    "height": 1080,
+    "focal": 1000,
+    "filter": "smooth"
+  },
+  "physics": {
+    "tick": 60,
+    "maxFall": 1400
+  },
+  "controller": {
+    "run": 520,
+    "accel": 6000,
+    "decel": 8000,
+    "jump": {
+      "height": 180,
+      "apex": 0.38,
+      "cut": 0.5,
+      "coyote": 6,
+      "buffer": 6
+    },
+    "dash": {
+      "distance": 260,
+      "frames": 10,
+      "cooldown": 24
+    },
+    "wall": {
+      "slide": 220,
+      "jump": [420, 560]
+    },
+    "airJumps": 1
+  },
+  "abilities": [
+    {
+      "id": "dash",
+      "name": "Dash"
+    },
+    {
+      "id": "walljump",
+      "name": "Wall Cling"
+    },
+    {
+      "id": "double_jump",
+      "name": "Second Wind"
+    }
+  ],
+  "input": {
+    "attack": ["KeyX", "pad:x"],
+    "dash": ["KeyC", "ShiftLeft", "pad:rb"],
+    "down": ["ArrowDown", "KeyS", "pad:down"],
+    "jump": ["KeyZ", "Space", "pad:a"],
+    "left": ["ArrowLeft", "KeyA", "pad:left"],
+    "right": ["ArrowRight", "KeyD", "pad:right"],
+    "up": ["ArrowUp", "KeyW", "pad:up"]
+  },
+  "player": "prefabs/player.prefab.json",
+  "start": {
+    "room": "crossroads_01",
+    "spawn": "start"
+  },
+  "post": {
+    "bloom": 0.25,
+    "vignette": 0.3
+  }
+}

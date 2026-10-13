@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "areas": [
+    {
+      "id": "crossroads",
+      "name": "Old Crossroads",
+      "color": "#6b7a99"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "crossroads_01",
+      "area": "crossroads",
+      "at": [0, 0],
+      "file": "rooms/crossroads_01.room.json"
+    },
+    {
+      "id": "crossroads_02",
+      "area": "crossroads",
+      "at": [3840, 540],
+      "file": "rooms/crossroads_02.room.json"
+    }
+  ]
+}

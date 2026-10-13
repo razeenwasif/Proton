@@ -4425,7 +4425,9 @@ dependencies = [
 name = "proton-game"
 version = "0.0.1"
 dependencies = [
+ "png 0.17.16",
  "serde",
+ "serde_json",
  "ts-rs",
 ]
 

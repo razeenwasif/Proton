@@ -1,37 +1,42 @@
-//! Game mode's document: a Godot scene.
+//! Game mode: Proton's own engine, made for a few kinds of game rather than
+//! every kind.
 //!
-//! ## Why somebody else's format, when every other mode has its own
+//! ## Why its own, when the architecture once said to embed one
 //!
-//! Design has `theme.css`, Modeling has `scene.proton.json`, Data has
-//! `.ipynb`. Game's document is listed in the architecture as *engine-native
-//! scene files*, and that is a decision rather than an omission: a game's
-//! scene is only meaningful to the engine that runs it. A Proton format here
-//! would be a second copy of the truth that the engine cannot open, and
-//! keeping the two in step would be the whole job forever.
+//! An engine embedded is an engine whose files are somebody else's, whose
+//! scenes play in somebody else's window, and whose runs the agent cannot
+//! step through. The kinds of game Proton is for — hand-drawn and painted
+//! side-scrollers on dozens of parallax planes, pixel art lit like a modern
+//! game, isometric rooms, low-poly worlds; Metroidvanias and roguelites — are
+//! narrow enough that an engine shaped to them is smaller than a general one,
+//! and every part of it can be something the editor, the window and the agent
+//! all see.
 //!
-//! So this reads and writes what Godot already writes. `.tscn` is a text
-//! format that diffs in Git on its own — the load-bearing rule of this project
-//! is already satisfied by somebody else's decision, and the useful thing to
-//! do is not to break it.
+//! ## The pieces
 //!
-//! Godot rather than Unity or Unreal, and the reason is the same one: Unity's
-//! scenes are YAML with generated file ids that churn, and Unreal's are
-//! binary. `.tscn` is the one where reading and writing honestly is possible.
+//! - [`format`]: what a game is on disk — `game.json`, `world.json`, a file
+//!   per room and per prefab, all text that diffs.
+//! - [`doc`] and [`project`]: those files open for editing — changed by ops
+//!   addressed by id, undone and redone, held until saved.
+//! - [`path`]: every path a file names, held to the game's folder.
+//! - [`template`]: a new game to start from, with its art drawn in code.
 //!
-//! ## Nothing is re-printed
+//! The simulation comes next, written once and run twice: natively in the
+//! core, where tests and the agent replay recorded input, and as WebAssembly
+//! in the window, where the game is played.
 //!
-//! Every edit is a splice, as everywhere else in this project — and here it
-//! matters more, because the file belongs to a tool that will open it next.
-//! Re-emitting a `.tscn` from a model would mean guessing at Godot's own
-//! formatting, and being wrong in a way that shows up as a whole-file diff in
-//! somebody's game repository.
-//!
-//! ## What this is not
-//!
-//! It reads a scene. It does not run one. The play transport, the profiler,
-//! hot reload and replaying recorded input all need a Godot process to talk
-//! to, and none of them is faked here.
+//! [`tscn`] is the Godot reader this crate used to be. It goes once Game mode
+//! no longer reads `.tscn` files.
 
+pub mod doc;
+pub mod format;
+pub mod path;
+pub mod project;
+#[cfg(feature = "editor")]
+pub mod template;
+pub mod text;
 mod tscn;
 
+pub use doc::{Doc, Document, Op};
+pub use project::{Project, Target};
 pub use tscn::{GameNode, Property, Scene};

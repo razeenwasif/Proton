@@ -1,0 +1,328 @@
+{
+  "format": 1,
+  "id": "crossroads_01",
+  "size": [3840, 2160],
+  "planes": [
+    {
+      "id": "sky",
+      "name": "Sky",
+      "depth": 100000,
+      "parallax": 0,
+      "fog": 0,
+      "lit": false,
+      "blend": "normal",
+      "gameplay": false,
+      "items": [
+        {
+          "id": "sky",
+          "image": "art/sky.png",
+          "at": [0, 0],
+          "scale": 4,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        }
+      ]
+    },
+    {
+      "id": "hills_far",
+      "name": "Far hills",
+      "depth": 1500,
+      "tint": "#8fa3c7",
+      "fog": 0.45,
+      "lit": false,
+      "blend": "normal",
+      "gameplay": false,
+      "items": [
+        {
+          "id": "far_0",
+          "image": "art/hills_far.png",
+          "at": [0, 620],
+          "scale": 2.75,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        }
+      ]
+    },
+    {
+      "id": "hills_near",
+      "name": "Near hills",
+      "depth": 600,
+      "tint": "#5d6f96",
+      "fog": 0.2,
+      "lit": false,
+      "blend": "normal",
+      "gameplay": false,
+      "items": [
+        {
+          "id": "near_0",
+          "image": "art/hills_near.png",
+          "at": [0, 820],
+          "scale": 3.1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        }
+      ]
+    },
+    {
+      "id": "main",
+      "name": "Gameplay",
+      "depth": 0,
+      "fog": 0,
+      "lit": true,
+      "blend": "normal",
+      "gameplay": true,
+      "items": [
+        {
+          "id": "ground_0",
+          "image": "art/ground.png",
+          "at": [-16, 1776],
+          "scale": 1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "ground_1",
+          "image": "art/ground.png",
+          "at": [464, 1776],
+          "scale": 1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "ground_2",
+          "image": "art/ground.png",
+          "at": [944, 1776],
+          "scale": 1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "ground_3",
+          "image": "art/ground.png",
+          "at": [1424, 1776],
+          "scale": 1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "ground_4",
+          "image": "art/ground.png",
+          "at": [1904, 1776],
+          "scale": 1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "ground_5",
+          "image": "art/ground.png",
+          "at": [2384, 1776],
+          "scale": 1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "ground_6",
+          "image": "art/ground.png",
+          "at": [2864, 1776],
+          "scale": 1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "ground_7",
+          "image": "art/ground.png",
+          "at": [3344, 1776],
+          "scale": 1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "ground_8",
+          "image": "art/ground.png",
+          "at": [3824, 1776],
+          "scale": 1,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        }
+      ]
+    },
+    {
+      "id": "fronds",
+      "name": "Fronds",
+      "depth": -300,
+      "fog": 0,
+      "lit": false,
+      "blend": "normal",
+      "gameplay": false,
+      "items": [
+        {
+          "id": "fronds_0",
+          "image": "art/fronds.png",
+          "at": [0, 1100],
+          "scale": 3,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "fronds_1",
+          "image": "art/fronds.png",
+          "at": [1536, 1100],
+          "scale": 3,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "fronds_2",
+          "image": "art/fronds.png",
+          "at": [3072, 1100],
+          "scale": 3,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        },
+        {
+          "id": "fronds_3",
+          "image": "art/fronds.png",
+          "at": [4608, 1100],
+          "scale": 3,
+          "rot": 0,
+          "flip": false,
+          "opacity": 1,
+          "blend": "normal"
+        }
+      ]
+    }
+  ],
+  "collision": [
+    {
+      "id": "floor",
+      "kind": "solid",
+      "closed": false,
+      "points": [
+        [0, 1800],
+        [2200, 1800],
+        [2600, 1700],
+        [3840, 1700]
+      ]
+    },
+    {
+      "id": "left_wall",
+      "kind": "solid",
+      "closed": false,
+      "points": [
+        [0, 0],
+        [0, 1800]
+      ]
+    },
+    {
+      "id": "ledge",
+      "kind": "oneway",
+      "closed": false,
+      "points": [
+        [1300, 1520],
+        [1700, 1520]
+      ]
+    },
+    {
+      "id": "high_ledge",
+      "kind": "solid",
+      "closed": true,
+      "points": [
+        [2700, 1200],
+        [3200, 1200],
+        [3200, 1260],
+        [2700, 1260]
+      ]
+    },
+    {
+      "id": "thorns",
+      "kind": "hazard",
+      "closed": false,
+      "points": [
+        [1900, 1790],
+        [2100, 1790]
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "id": "to_east",
+      "prefab": "transition",
+      "rect": [3800, 1400, 40, 300],
+      "to": {
+        "room": "crossroads_02",
+        "entry": "west"
+      }
+    },
+    {
+      "id": "dash_gate",
+      "prefab": "ability_gate",
+      "rect": [2640, 1000, 60, 260],
+      "requires": ["dash"]
+    },
+    {
+      "id": "bench",
+      "prefab": "save_point",
+      "at": [700, 1800]
+    }
+  ],
+  "lights": [
+    {
+      "id": "lantern",
+      "plane": "main",
+      "at": [1000, 1560],
+      "radius": 520,
+      "color": "#ffd9a0",
+      "intensity": 1.2,
+      "flicker": 0.1
+    }
+  ],
+  "spawns": [
+    {
+      "id": "start",
+      "at": [400, 1800]
+    },
+    {
+      "id": "east",
+      "at": [3700, 1700]
+    }
+  ],
+  "ambience": {
+    "ambient": "#1d2433",
+    "particles": [
+      {
+        "preset": "motes",
+        "plane": "main"
+      }
+    ]
+  }
+}
