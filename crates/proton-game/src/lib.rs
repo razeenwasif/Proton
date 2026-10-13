@@ -22,14 +22,16 @@
 //! - [`template`]: a new game to start from, with its art drawn in code.
 //! - [`trace`]: collision traced from where art is opaque.
 //!
-//! The simulation comes next, written once and run twice: natively in the
-//! core, where tests and the agent replay recorded input, and as WebAssembly
-//! in the window, where the game is played.
+//! - [`sim`]: the game, run — a tick at a time, in whole numbers, written
+//!   once and run twice: natively in the core, where tests and the agent
+//!   replay recorded input, and as WebAssembly in the window, where it is
+//!   played.
 
 pub mod doc;
 pub mod format;
 pub mod path;
 pub mod project;
+pub mod sim;
 #[cfg(feature = "editor")]
 pub mod template;
 pub mod text;
