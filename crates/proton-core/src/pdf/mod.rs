@@ -97,8 +97,10 @@ struct Tab {
     id: u32,
     path: PathBuf,
     name: String,
-    /// What the window draws.
-    view: Arc<Vec<u8>>,
+    /// What the window draws of this version: made when it is first asked
+    /// for, so a change the window has drawn already — a field typed in —
+    /// is never written out at all. None when it could not be written.
+    view: std::sync::OnceLock<Option<Arc<Vec<u8>>>>,
     /// Goes up with each change, and names the view.
     version: u64,
     /// What is changed and saved; `None` for a file only read, with why.
@@ -112,6 +114,18 @@ struct Tab {
 impl Tab {
     fn key(&self) -> String {
         format!("{VIEW}{}:{}", self.id, self.version)
+    }
+
+    /// This version's view, written now if it has not been.
+    fn drawn(&self) -> Option<Arc<Vec<u8>>> {
+        self.view.get_or_init(|| self.doc.as_ref().ok().and_then(|d| d.view_bytes().ok()).map(Arc::new)).clone()
+    }
+
+    /// A view already in hand: the file as read, or a document decrypted.
+    fn shown(view: Arc<Vec<u8>>) -> std::sync::OnceLock<Option<Arc<Vec<u8>>>> {
+        let cell = std::sync::OnceLock::new();
+        let _ = cell.set(Some(view));
+        cell
     }
 
     fn view(&self) -> TabView {
@@ -352,7 +366,7 @@ impl Pdfs {
         let rest = key.strip_prefix(VIEW)?;
         let (id, version) = rest.split_once(':')?;
         let (id, version): (u32, u64) = (id.parse().ok()?, version.parse().ok()?);
-        self.tabs.iter().find(|t| t.id == id && t.version == version).map(|t| t.view.clone())
+        self.tabs.iter().find(|t| t.id == id && t.version == version).and_then(Tab::drawn)
     }
 
     fn active_tab(&self) -> Option<&Tab> {
@@ -403,8 +417,8 @@ impl Pdfs {
         };
         // What the window draws: the file — or, opened with its password,
         // the document decrypted, which is held in memory only.
-        let view = match doc.as_ref().map(|d| d.view_bytes()) {
-            Ok(Ok(bytes)) if doc.as_ref().is_ok_and(|d| d.protected()) => Arc::new(bytes),
+        let view = match &doc {
+            Ok(d) if d.protected() => d.view_bytes().map(Arc::new).unwrap_or(file),
             _ => file,
         };
         self.next += 1;
@@ -412,7 +426,7 @@ impl Pdfs {
         let page = page.or_else(|| self.read.get(&path).map(|r| r.0).filter(|p| *p > 1));
         let at = page.unwrap_or(1);
         self.read.insert(path.clone(), (at, now()));
-        let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view, version: 1, doc, at, read: Default::default() };
+        let tab = Tab { id: self.next, name: folder::name_of(&path), path: path.clone(), view: Tab::shown(view), version: 1, doc, at, read: Default::default() };
         self.active = Some(tab.id);
         let view = view_event(&tab, page, false);
         let comments = comments_event(&tab);
@@ -471,18 +485,21 @@ impl Pdfs {
     fn redrawn_as(&mut self, quiet: bool) -> Vec<Event> {
         let Some(id) = self.active else { return Vec::new() };
         let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else { return Vec::new() };
-        let bytes = match tab.doc.as_ref().map(|d| d.view_bytes()) {
-            Ok(Ok(bytes)) => bytes,
-            Ok(Err(why)) => return vec![notice(why, NoticeLevel::Error)],
-            Err(_) => return Vec::new(),
-        };
-        tab.view = Arc::new(bytes);
+        if tab.doc.is_err() {
+            return Vec::new();
+        }
+        // Written when the window asks for it, which a quiet change it has
+        // drawn already never does.
+        tab.view = std::sync::OnceLock::new();
         tab.version += 1;
         let view = view_event(tab, None, quiet);
         let comments = comments_event(tab);
         let fields = fields_event(tab);
-        let info = info_event(tab);
-        vec![self.tabs_event(), view, comments, fields, info]
+        // Its size as saved is the view's: said when the view is drawn.
+        let info = (!quiet).then(|| info_event(tab));
+        let mut events = vec![self.tabs_event(), view, comments, fields];
+        events.extend(info);
+        events
     }
 
     /// Make a change to the tab on top: held until it is saved.
@@ -789,10 +806,8 @@ impl Pdfs {
             events.extend(self.redrawn());
         } else if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
             // Drawn when it comes forward.
-            if let Ok(Ok(bytes)) = tab.doc.as_ref().map(|d| d.view_bytes()) {
-                tab.view = Arc::new(bytes);
-                tab.version += 1;
-            }
+            tab.view = std::sync::OnceLock::new();
+            tab.version += 1;
         }
         events
     }
@@ -870,14 +885,14 @@ fn info_event(tab: &Tab) -> Event {
         tab: tab.id,
         info: doc.map(|d| d.info()).unwrap_or_default(),
         protected: doc.is_some_and(|d| d.protected()),
-        on_disk: doc.map(|d| d.size_on_disk()).unwrap_or(tab.view.len()) as u32,
+        on_disk: doc.map(|d| d.size_on_disk()).unwrap_or_else(|| tab.drawn().map_or(0, |v| v.len())) as u32,
         // The view, just drawn, is what saving writes unless it is to be
         // encrypted: its length is the size, without writing it all again.
         now: match doc {
-            Some(d) if d.dirty() && d.view_is_saved() => tab.view.len(),
-            Some(d) if d.dirty() => d.bytes().map(|b| b.len()).unwrap_or(tab.view.len()),
+            Some(d) if d.dirty() && d.view_is_saved() => tab.drawn().map_or(0, |v| v.len()),
+            Some(d) if d.dirty() => d.bytes().map(|b| b.len()).unwrap_or(0),
             Some(d) => d.size_on_disk(),
-            None => tab.view.len(),
+            None => tab.drawn().map_or(0, |v| v.len()),
         } as u32,
     }
 }
@@ -940,7 +955,7 @@ mod tests {
     #[test]
     fn a_view_key_names_one_version_of_one_open_tab() {
         let mut pdfs = Pdfs::new();
-        pdfs.tabs.push(Tab { id: 3, path: PathBuf::from("/x.pdf"), name: "x.pdf".into(), view: Arc::new(b"%PDF-1.7".to_vec()), version: 2, doc: Err("a test".into()), at: 1, read: Default::default() });
+        pdfs.tabs.push(Tab { id: 3, path: PathBuf::from("/x.pdf"), name: "x.pdf".into(), view: Tab::shown(Arc::new(b"%PDF-1.7".to_vec())), version: 2, doc: Err("a test".into()), at: 1, read: Default::default() });
         assert_eq!(pdfs.view_bytes("pdfview:3:2").as_deref().map(Vec::as_slice), Some(&b"%PDF-1.7"[..]));
         for stale in ["pdfview:3:1", "pdfview:4:2", "pdfview:3", "/x.pdf", "pdfview:a:b"] {
             assert!(pdfs.view_bytes(stale).is_none(), "{stale}");

@@ -1,11 +1,13 @@
 //! An open PDF: the file as it is on disk, the document its changes have
-//! made, and the log of those changes — undone by replaying the ones kept,
-//! the log surviving a save.
+//! made, and the log of those changes — each with the objects it changed as
+//! they were before and after, so undo and redo put them back rather than
+//! replay anything, and the log survives a save.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use lopdf::{Document, EncryptionState, LoadOptions};
+use lopdf::{Dictionary, Document, EncryptionState, LoadOptions, Object, ObjectId};
 
 use crate::ops::Op;
 use crate::security::{self, Protection};
@@ -14,19 +16,83 @@ use crate::{clean, guarded, save};
 /// The largest PDF opened.
 pub const LARGEST: usize = 128 * 1024 * 1024;
 
+/// What a change did to the objects: the ones it changed, as they were or
+/// as they became — `None` where there was none — and the trailer and last
+/// number around them.
+#[derive(Debug, Clone)]
+struct Patch {
+    objects: Vec<(ObjectId, Option<Object>)>,
+    max_id: u32,
+    trailer: Dictionary,
+}
+
+impl Patch {
+    /// Put the objects as the patch has them.
+    fn onto(&self, doc: &mut Document) {
+        for (id, object) in &self.objects {
+            match object {
+                Some(object) => {
+                    doc.objects.insert(*id, object.clone());
+                }
+                None => {
+                    doc.objects.remove(id);
+                }
+            }
+        }
+        doc.max_id = self.max_id;
+        doc.trailer = self.trailer.clone();
+    }
+
+    fn ids(&self) -> impl Iterator<Item = ObjectId> + '_ {
+        self.objects.iter().map(|(id, _)| *id)
+    }
+}
+
+/// A change made: what it was, and what it did, either way.
+#[derive(Debug)]
+struct Step {
+    op: Op,
+    before: Patch,
+    after: Patch,
+}
+
+/// What a change did: `prev` and `next` compared, object by object.
+fn patches(prev: &Document, next: &Document) -> (Patch, Patch) {
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    for (id, object) in &next.objects {
+        let was = prev.objects.get(id);
+        if was != Some(object) {
+            before.push((*id, was.cloned()));
+            after.push((*id, Some(object.clone())));
+        }
+    }
+    for (id, object) in &prev.objects {
+        if !next.objects.contains_key(id) {
+            before.push((*id, Some(object.clone())));
+            after.push((*id, None));
+        }
+    }
+    (
+        Patch { objects: before, max_id: prev.max_id, trailer: prev.trailer.clone() },
+        Patch { objects: after, max_id: next.max_id, trailer: next.trailer.clone() },
+    )
+}
+
 /// An open PDF.
 #[derive(Debug)]
 pub struct Doc {
-    /// The bytes as they were opened, and as read: what undo replays from.
-    origin: Document,
-    /// The file as it is on disk now — after a save, what was saved — and
-    /// as read: what the next update is appended to.
+    /// The file as it is on disk now — after a save, what was saved — what
+    /// the next update is appended to, and what it needs of it.
     disk: Arc<Vec<u8>>,
-    on_disk: Document,
-    /// What the changes kept have made of `origin`.
+    base: save::Base,
+    /// What the changes kept have made of the file as it was opened.
     current: Document,
+    /// Every object that may differ from the file on disk: what an update
+    /// writes. Let go of when it is saved.
+    differs: BTreeSet<ObjectId>,
     /// Every change since opening; the first `at` are made.
-    log: Vec<Op>,
+    log: Vec<Step>,
     at: usize,
     /// How far into the log the file on disk is, if it is a point in it.
     saved: Option<usize>,
@@ -94,19 +160,22 @@ impl Doc {
         if bytes.len() > LARGEST {
             return Opened::ReadOnly("too large to change here".into());
         }
-        let (origin, state) = match read_with(&bytes, password) {
+        let (current, state) = match read_with(&bytes, password) {
             Ok(read) => read,
             Err(None) => return Opened::Locked { wrong: password.is_some() },
             Err(Some(why)) => return Opened::ReadOnly(format!("it could not be read to change it — {why}")),
         };
         let sealed = state.map(|s| (s, password.unwrap_or("").to_string()));
-        Opened::Editable(Box::new(Doc { current: origin.clone(), on_disk: origin.clone(), origin, disk: bytes, log: Vec::new(), at: 0, saved: Some(0), sealed, layout: 0 }))
+        let base = save::Base::of(&current);
+        Opened::Editable(Box::new(Doc { current, base, disk: bytes, differs: BTreeSet::new(), log: Vec::new(), at: 0, saved: Some(0), sealed, layout: 0 }))
     }
 
     /// Make a change: what was undone past is let go of.
     pub fn apply(&mut self, op: Op) -> Result<(), String> {
         let mut next = self.current.clone();
         guarded("changing it", || op.apply(&mut next))?;
+        let (before, after) = patches(&self.current, &next);
+        self.differs.extend(after.ids());
         self.current = next;
         self.layout += u64::from(op.reshapes());
         self.log.truncate(self.at);
@@ -114,7 +183,7 @@ impl Doc {
             // The file on disk is a state no longer in the log.
             self.saved = None;
         }
-        self.log.push(op);
+        self.log.push(Step { op, before, after });
         self.at += 1;
         Ok(())
     }
@@ -124,25 +193,22 @@ impl Doc {
         if self.at == 0 {
             return Ok(None);
         }
-        let mut replayed = self.origin.clone();
-        for op in &self.log[..self.at - 1] {
-            guarded("undoing", || op.apply(&mut replayed))?;
-        }
-        self.current = replayed;
+        let step = &self.log[self.at - 1];
+        step.before.onto(&mut self.current);
+        self.differs.extend(step.before.ids());
         self.at -= 1;
-        self.layout += u64::from(self.log[self.at].reshapes());
-        Ok(Some(self.log[self.at].said()))
+        self.layout += u64::from(step.op.reshapes());
+        Ok(Some(step.op.said()))
     }
 
     /// Make again the last change undone; what it was.
     pub fn redo(&mut self) -> Result<Option<String>, String> {
-        let Some(op) = self.log.get(self.at).cloned() else { return Ok(None) };
-        let mut next = self.current.clone();
-        guarded("redoing", || op.apply(&mut next))?;
-        self.current = next;
+        let Some(step) = self.log.get(self.at) else { return Ok(None) };
+        step.after.onto(&mut self.current);
+        self.differs.extend(step.after.ids());
         self.at += 1;
-        self.layout += u64::from(op.reshapes());
-        Ok(Some(op.said()))
+        self.layout += u64::from(step.op.reshapes());
+        Ok(Some(step.op.said()))
     }
 
     /// Which layout of its pages the document is in: changed only by a
@@ -159,10 +225,10 @@ impl Doc {
 
     /// What undo would undo, and redo redo.
     pub fn undoable(&self) -> Option<String> {
-        self.at.checked_sub(1).map(|i| self.log[i].said())
+        self.at.checked_sub(1).map(|i| self.log[i].op.said())
     }
     pub fn redoable(&self) -> Option<String> {
-        self.log.get(self.at).map(Op::said)
+        self.log.get(self.at).map(|s| s.op.said())
     }
 
     /// Changed since it was opened or saved.
@@ -173,7 +239,7 @@ impl Doc {
     /// How it is to be written: the last password change kept, or as the
     /// file on disk is.
     fn seal(&self) -> Seal {
-        for op in self.log[..self.at].iter().rev() {
+        for op in self.log[..self.at].iter().rev().map(|s| &s.op) {
             match op {
                 Op::Protect { protection } => return Seal::New(protection.clone()),
                 Op::Unprotect => return Seal::Plain,
@@ -194,7 +260,7 @@ impl Doc {
     /// Whether what is made can be appended to the file on disk: only to a
     /// plain one, and only changes that can be.
     fn incremental(&self) -> bool {
-        self.sealed.is_none() && matches!(self.seal(), Seal::Plain) && self.log[..self.at].iter().all(Op::incremental)
+        self.sealed.is_none() && matches!(self.seal(), Seal::Plain) && self.log[..self.at].iter().all(|s| s.op.incremental())
     }
 
     /// The document as it is now, as it would be saved: the file on disk
@@ -206,9 +272,9 @@ impl Doc {
         }
         guarded("writing it", || {
             if self.incremental() {
-                return save::incremental(&self.disk, &self.on_disk, &self.current);
+                return save::update(&self.disk, &self.base, &self.current, &self.differs);
             }
-            let compress = self.log[..self.at].iter().any(|op| matches!(op, Op::Compress));
+            let compress = self.log[..self.at].iter().any(|s| matches!(s.op, Op::Compress));
             let mut doc = self.current.clone();
             match self.seal() {
                 Seal::Plain if compress => clean::compressed(&doc),
@@ -252,7 +318,9 @@ impl Doc {
         save::atomically(path, &bytes)?;
         self.sealed = state.map(|s| (s, password.unwrap_or_default()));
         self.disk = Arc::new(bytes);
-        self.on_disk = on_disk;
+        self.base = save::Base::of(&on_disk);
+        // What is on disk is what is made: nothing differs from it now.
+        self.differs.clear();
         self.saved = Some(self.at);
         Ok(())
     }
@@ -369,6 +437,36 @@ mod tests {
         let second = std::fs::read(&path).unwrap();
         assert!(second.starts_with(&first), "appended to what was saved");
         assert_eq!(rotations(&second), [0, 180]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn undone_past_a_save_and_changed_again_what_is_written_is_what_is_made() {
+        let dir = std::env::temp_dir().join(format!("proton-pdf-patches-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.pdf");
+        let mut doc = editable(fixture(&["One", "Two", "Three"]));
+        let note = |text: &str| crate::annot::Mark { kind: "note".into(), boxes: Vec::new(), rect: Some([100.0, 700.0, 0.0, 0.0]), strokes: Vec::new(), color: "#ffd400".into(), text: text.into() };
+        let read = |bytes: Vec<u8>| {
+            let d = Document::load_mem(&bytes).unwrap();
+            (d.get_pages().len(), crate::annot::list(&d).len())
+        };
+        doc.apply(Op::Comment { page: 1, mark: note("a"), author: "Ada".into(), date: "D:2026".into(), name: "a".into() }).unwrap();
+        doc.apply(Op::Delete { pages: vec![3] }).unwrap();
+        doc.save(&path).unwrap();
+        assert_eq!(read(std::fs::read(&path).unwrap()), (2, 1));
+        // Undone past the save: the page and the comment back, as written.
+        doc.undo().unwrap();
+        doc.undo().unwrap();
+        assert_eq!(read(doc.bytes().unwrap()), (3, 0));
+        // A new change there: the file on disk is no state of the log now.
+        doc.apply(Op::Comment { page: 2, mark: note("b"), author: "Ada".into(), date: "D:2026".into(), name: "b".into() }).unwrap();
+        let made = doc.bytes().unwrap();
+        assert!(made.starts_with(&std::fs::read(&path).unwrap()), "appended to what is on disk");
+        assert_eq!(read(made), (3, 1));
+        assert!(doc.redoable().is_none(), "what was undone is let go of");
+        doc.undo().unwrap();
+        assert_eq!(read(doc.bytes().unwrap()), (3, 0));
         let _ = std::fs::remove_dir_all(dir);
     }
 
