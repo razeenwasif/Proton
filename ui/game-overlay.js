@@ -108,7 +108,8 @@ export function handle(view, box) {
  *  and the box of a selected image, with its handle.
  *  @param {CanvasRenderingContext2D} g @param {Room} room @param {View} view @param {Colors} c
  *  @param {Selected | null} selected
- *  @param {{art?: boolean, box?: {x: number, y: number, w: number, h: number, rot: number} | null, camera?: number[] | null}} [also] */
+ *  @param {{art?: boolean, box?: {x: number, y: number, w: number, h: number, rot: number} | null, camera?: number[] | null,
+ *    vertices?: number[][] | null, pen?: {points: number[][], hover: number[] | null, kind: string} | null}} [also] */
 export function draw(g, room, view, c, selected, also = {}) {
   const is = (/** @type {string} */ kind, /** @type {string} */ id) => selected?.kind === kind && selected.id === id;
   const [w, h] = room.size;
@@ -214,6 +215,36 @@ export function draw(g, room, view, c, selected, also = {}) {
     g.setLineDash([]);
     g.fillStyle = c.faint;
     g.fillText("camera", x + 4, y - 2);
+  }
+  // A selected line's points, to drag.
+  for (const p of also.vertices ?? []) {
+    const [x, y] = toStage(view, p);
+    g.fillStyle = c.ground;
+    g.strokeStyle = c.accent;
+    g.lineWidth = 1.5;
+    g.fillRect(x - 3.5, y - 3.5, 7, 7);
+    g.strokeRect(x - 3.5, y - 3.5, 7, 7);
+  }
+  // A line being drawn, and where the next point would go.
+  const pen = also.pen;
+  if (pen && (pen.points.length || pen.hover)) {
+    const points = pen.hover ? [...pen.points, pen.hover] : pen.points;
+    g.beginPath();
+    points.forEach((p, i) => {
+      const [x, y] = toStage(view, p);
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    });
+    g.setLineDash(pen.kind === "oneway" ? [6, 5] : []);
+    g.strokeStyle = pen.kind === "hazard" ? c.err : c.accent;
+    g.lineWidth = 2;
+    g.stroke();
+    g.setLineDash([]);
+    for (const p of pen.points) {
+      const [x, y] = toStage(view, p);
+      g.fillStyle = c.accent;
+      g.fillRect(x - 3, y - 3, 6, 6);
+    }
   }
   // A selected image: its box, turned as it is, and the handle that scales it.
   const box = also.box;

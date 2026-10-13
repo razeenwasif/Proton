@@ -929,6 +929,16 @@
           <span class="game-name" data-game-name></span>
           <div class="game-tabs" role="tablist" aria-label="Open rooms" data-game-tabs></div>
           <span class="grow"></span>
+          <div class="game-seg" role="group" aria-label="Tool" data-game-tools>
+            <button data-game-tool="select" aria-pressed="true" title="Select and move  v" aria-label="Select">↖</button>
+            <button data-game-tool="pen" aria-pressed="false" title="Draw collision  p — click points, Enter or the first point to finish" aria-label="Draw collision">✎</button>
+          </div>
+          <select class="game-pen-kind" data-game-pen-kind hidden aria-label="What the line drawn is">
+            <option value="solid">Solid</option>
+            <option value="oneway">One-way</option>
+            <option value="hazard">Hazard</option>
+            <option value="nowall">Not a wall</option>
+          </select>
           <div class="game-seg" role="group" aria-label="Play" data-game-transport>
             <button data-game-play title="Play from here" aria-label="Play" disabled><svg class="i"><use href="#i-play"/></svg></button>
             <button data-game-pause title="Pause" aria-label="Pause" disabled><svg class="i"><use href="#i-pause"/></svg></button>

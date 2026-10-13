@@ -149,6 +149,62 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     assert(!sent(before + 1, 'gameEdit').length, 'hiding a plane was sent as an edit');
   });
 
+  await test('Collision is drawn with the pen, its points dragged one edit at a time, and an image on the play plane traced', async () => {
+    const canvas = $('[data-game-overlay]');
+    const first = fixture.rooms[0];
+    // Measured each time: the pen's choices in the bar can wrap it, and the
+    // stage — fitted to the room — changes with it.
+    const stage = (/** @type {number} */ x, /** @type {number} */ y) => {
+      const box = canvas.getBoundingClientRect();
+      const zoom = Math.min((box.width - 48) / first.size[0], (box.height - 48) / first.size[1]);
+      return [box.left + box.width / 2 + (x - first.size[0] / 2) * zoom, box.top + box.height / 2 + (y - first.size[1] / 2) * zoom];
+    };
+    const fire = (/** @type {string} */ type, /** @type {number[]} */ [x, y], /** @type {Record<string, any>} */ more = {}) =>
+      canvas.dispatchEvent(new win.PointerEvent(type, {clientX: x, clientY: y, bubbles: true, pointerId: 1, button: 0, ...more}));
+    $('[data-game-stage]').focus();
+    press('p'); await settle();
+    assert($('[data-game-tool="pen"]').getAttribute('aria-pressed') === 'true' && shown($('[data-game-pen-kind]')), 'p did not take up the pen');
+    const kind = /** @type {HTMLSelectElement} */ ($('[data-game-pen-kind]'));
+    kind.value = 'oneway';
+    kind.dispatchEvent(new win.Event('change', {bubbles: true}));
+    await settle();
+    let before = win.commands.length;
+    for (const [x, y] of [[1000, 1300], [1200, 1300], [1400, 1250]]) {
+      fire('pointerdown', stage(x, y));
+      fire('pointerup', stage(x, y));
+    }
+    press('Enter'); await settle();
+    press('v'); await settle();
+    const drawn = sent(before, 'gameEdit')[0];
+    const value = drawn?.ops?.[0]?.value;
+    assert(drawn?.ops?.[0]?.op === 'insert' && drawn.ops[0].path.join() === 'collision' && value.kind === 'oneway' && value.points.length === 3 && !value.closed,
+      `the line was sent as ${JSON.stringify(drawn)}`);
+    assert(Math.abs(value.points[1][0] - 1200) <= 6 && Math.abs(value.points[1][1] - 1300) <= 6, `a point landed at ${value.points[1]}`);
+    // The floor, selected: its second point dragged.
+    $('[data-game-side="entities"]').click(); await settle();
+    ws().querySelector('[data-game-pick="shape"][data-game-pick-id="floor"]').click(); await settle();
+    before = win.commands.length;
+    const [vx, vy] = stage(2200, 1800);
+    fire('pointerdown', [vx, vy]);
+    for (let step = 1; step <= 3; step++) fire('pointermove', [vx, vy - step * 5]);
+    fire('pointerup', [vx, vy - 15]); await settle();
+    const dragged = sent(before, 'gameEdit');
+    assert(dragged.length === 1 && dragged[0].ops[0].path.join('/') === 'collision/#floor/points', `a point's drag sent ${JSON.stringify(dragged)}`);
+    const points = dragged[0].ops[0].value;
+    assert(points.length === 4 && points[1][0] === 2200 && points[1][1] < 1800 && points[0][1] === 1800, `the floor became ${JSON.stringify(points)}`);
+    // An image on the play plane: traced on request.
+    $('[data-game-side="layers"]').click(); await settle();
+    ws().querySelector('[data-game-pick="plane"][data-game-pick-id="main"]').click(); await settle();
+    ws().querySelector('[data-game-pick="item"][data-game-pick-id="ground_1"]').click(); await settle();
+    before = win.commands.length;
+    $('[data-game-trace]').click(); await settle();
+    const traced = sent(before, 'gameTrace')[0];
+    assert(traced?.room === 'crossroads_01' && traced.item === 'ground_1', `Trace sent ${JSON.stringify(traced)}`);
+    ws().querySelector('[data-game-pick="plane"][data-game-pick-id="hills_far"]').click(); await settle();
+    ws().querySelector('[data-game-pick="item"][data-game-pick-id="far_0"]').click(); await settle();
+    assert(!$('[data-game-trace]'), 'an image off the play plane offers to be traced into collision');
+  });
+
   await test('A click on the stage selects what is there, ⎋ selects nothing, and ? lists Game\'s keys', async () => {
     const canvas = $('[data-game-overlay]');
     const box = canvas.getBoundingClientRect();

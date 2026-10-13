@@ -20,6 +20,7 @@
 //!   addressed by id, undone and redone, held until saved.
 //! - [`path`]: every path a file names, held to the game's folder.
 //! - [`template`]: a new game to start from, with its art drawn in code.
+//! - [`trace`]: collision traced from where art is opaque.
 //!
 //! The simulation comes next, written once and run twice: natively in the
 //! core, where tests and the agent replay recorded input, and as WebAssembly
@@ -32,6 +33,7 @@ pub mod project;
 #[cfg(feature = "editor")]
 pub mod template;
 pub mod text;
+pub mod trace;
 
 pub use doc::{Doc, Document, Op};
 pub use project::{Project, Target};

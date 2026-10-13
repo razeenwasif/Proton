@@ -5506,6 +5506,10 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .game-seg button { display: grid; place-items: center; width: 28px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--faint); cursor: pointer; }
 .game-seg button .i { width: 14px; height: 14px; }
 .game-seg button:disabled { opacity: .45; cursor: default; }
+.game-seg button[aria-pressed="true"] { background: var(--row-on); color: var(--text); }
+.game-pen-kind { padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-2xs) var(--zed); }
+.game-pen-kind[hidden] { display: none; }
+.workspace[data-ws="game"][data-tool="pen"] .game-overlay { cursor: crosshair; }
 .game-ask { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); color: var(--text); font: var(--z-xs) var(--zed); }
 .game-ask[hidden] { display: none; }
 .game-ask .grow { flex: 1; }

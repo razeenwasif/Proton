@@ -1523,6 +1523,7 @@ impl Workspace {
             | Command::GameCloseRoom { .. }
             | Command::GameFocus { .. }
             | Command::GameEdit { .. }
+            | Command::GameTrace { .. }
             | Command::GameUndo
             | Command::GameRedo
             | Command::GameSave => Vec::new(),

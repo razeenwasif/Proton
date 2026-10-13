@@ -201,6 +201,8 @@ export function createGamePreview(deliver) {
           revision++;
           return [projectEvent(), roomEvent()];
         }
+        case "gameTrace":
+          return [{ type: "notice", text: "tracing reads the image's pixels in the app — the preview has no core to do it", level: "info" }];
         case "gameSave":
           for (const target of targets()) saved.set(target, JSON.stringify(doc(target)));
           return [projectEvent(), roomEvent(), { type: "notice", text: "saved — in the preview, only here", level: "info" }];

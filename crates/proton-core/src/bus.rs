@@ -1275,6 +1275,20 @@ pub enum Command {
         #[serde(default)]
         label: String,
     },
+    /// Trace collision from where an image on the play plane is opaque,
+    /// added to its room as closed solid shapes — one edit, undone whole.
+    GameTrace {
+        room: String,
+        item: String,
+        /// The alpha at which a pixel counts as solid, 0–255.
+        #[serde(default)]
+        #[ts(optional)]
+        threshold: Option<u8>,
+        /// How far a simplified outline may stray, in the image's pixels.
+        #[serde(default)]
+        #[ts(optional)]
+        tolerance: Option<f64>,
+    },
     /// Undo the newest edit, wherever it was made.
     GameUndo,
     GameRedo,

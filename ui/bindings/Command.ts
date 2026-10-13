@@ -62,7 +62,15 @@ line: number | null, } | { "type": "refreshRepo" } | { "type": "runCell", index:
 /**
  * What the change was, in words, for the undo history.
  */
-label: string, } | { "type": "gameUndo" } | { "type": "gameRedo" } | { "type": "gameSave" } | { "type": "openTimeline", path: string, } | { "type": "selectClip", index: number, } | { "type": "setClipField", index: number, field: string, value: string, } | { "type": "setCaptionField", index: number, field: string, value: string, } | { "type": "setTimelineRate", fps: number, } | { "type": "setMaterialParam", material: string, node: string, param: string, value: ParamValue, } | { "type": "moveGraphNode", material: string, node: string, at: [number, number], } | { "type": "connectPorts", material: string, from: string, to: string, } | { "type": "rewirePort", material: string, fromInput: string, toInput: string, } | { "type": "disconnectPort", material: string, to: string, } | { "type": "revealLayer", index: number, } | { "type": "setSetting", key: string, value: unknown, } | { "type": "convene", question: string, } | { "type": "openDebate", name: string, } | { "type": "setLibraryScope", sources: Array<string>, } | { "type": "refreshLibrary" } | { "type": "openCitation", cite: string, } | { "type": "askToQuit" } | { "type": "saveNotebook" } | { "type": "answerProposal", id: number, accept: boolean, } | { "type": "jumpTo", mode: ModeId, path: string, 
+label: string, } | { "type": "gameTrace", room: string, item: string, 
+/**
+ * The alpha at which a pixel counts as solid, 0–255.
+ */
+threshold?: number, 
+/**
+ * How far a simplified outline may stray, in the image's pixels.
+ */
+tolerance?: number, } | { "type": "gameUndo" } | { "type": "gameRedo" } | { "type": "gameSave" } | { "type": "openTimeline", path: string, } | { "type": "selectClip", index: number, } | { "type": "setClipField", index: number, field: string, value: string, } | { "type": "setCaptionField", index: number, field: string, value: string, } | { "type": "setTimelineRate", fps: number, } | { "type": "setMaterialParam", material: string, node: string, param: string, value: ParamValue, } | { "type": "moveGraphNode", material: string, node: string, at: [number, number], } | { "type": "connectPorts", material: string, from: string, to: string, } | { "type": "rewirePort", material: string, fromInput: string, toInput: string, } | { "type": "disconnectPort", material: string, to: string, } | { "type": "revealLayer", index: number, } | { "type": "setSetting", key: string, value: unknown, } | { "type": "convene", question: string, } | { "type": "openDebate", name: string, } | { "type": "setLibraryScope", sources: Array<string>, } | { "type": "refreshLibrary" } | { "type": "openCitation", cite: string, } | { "type": "askToQuit" } | { "type": "saveNotebook" } | { "type": "answerProposal", id: number, accept: boolean, } | { "type": "jumpTo", mode: ModeId, path: string, 
 /**
  * Zero-based, as every line number crossing this bus is.
  */

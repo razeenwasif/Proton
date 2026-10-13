@@ -31,6 +31,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::GameCloseRoom { .. }
             | Command::GameFocus { .. }
             | Command::GameEdit { .. }
+            | Command::GameTrace { .. }
             | Command::GameUndo
             | Command::GameRedo
             | Command::GameSave
@@ -217,6 +218,16 @@ impl Game {
                 };
                 self.edit(&target, &ops)
             }
+            Command::GameTrace { room, item, threshold, tolerance } => match self.traced(&room, &item, threshold, tolerance) {
+                Ok(ops) if ops.is_empty() => vec![notice(format!("{item} has nothing opaque enough to trace"), NoticeLevel::Warn)],
+                Ok(ops) => {
+                    let n = ops.len();
+                    let mut events = self.edit(&Target::Room(room), &ops);
+                    events.push(notice(format!("traced {n} shape{} from {item}", if n == 1 { "" } else { "s" }), NoticeLevel::Info));
+                    events
+                }
+                Err(why) => vec![notice(why, NoticeLevel::Warn)],
+            },
             Command::GameUndo => self.step(true),
             Command::GameRedo => self.step(false),
             Command::GameSave => {
@@ -248,6 +259,65 @@ impl Game {
             }
             Err(why) => vec![notice(why, NoticeLevel::Warn)],
         }
+    }
+
+    /// The shapes tracing an image on the play plane makes, as ops that add
+    /// them to its room: the outline of where it is opaque, in room pixels —
+    /// placed, scaled, flipped and turned as the image is.
+    fn traced(&self, room: &str, item: &str, threshold: Option<u8>, tolerance: Option<f64>) -> Result<Vec<Op>, String> {
+        use proton_game::trace::{outlines, Mask, Tracing};
+        let project = self.project.as_ref().ok_or("no game is open")?;
+        let doc = project.room(room).ok_or_else(|| format!("there is no room {room}"))?;
+        let room_now = doc.get();
+        let (plane, found) = room_now
+            .planes
+            .iter()
+            .find_map(|p| p.items.iter().find(|i| i.id == item).map(|i| (p, i)))
+            .ok_or_else(|| format!("there is no image {item} in room {room}"))?;
+        if !plane.gameplay {
+            return Err(format!("{item} is on {}, and collision belongs to the plane the game is played on", plane.name));
+        }
+        let path = proton_game::path::inside(project.root(), &found.image)?;
+        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", found.image))?;
+        let mask = Mask::of_png(&bytes).map_err(|e| format!("{}: {e}", found.image))?;
+        let how = Tracing {
+            threshold: threshold.unwrap_or(128),
+            tolerance: tolerance.unwrap_or(2.0).max(0.25),
+            ..Tracing::default()
+        };
+        let (w, h) = (mask.width as f64 * found.scale, mask.height as f64 * found.scale);
+        let (cx, cy) = (found.at[0] as f64 + w / 2.0, found.at[1] as f64 + h / 2.0);
+        let (sin, cos) = found.rot.to_radians().sin_cos();
+        let taken: std::collections::HashSet<&str> = room_now.collision.iter().map(|s| s.id.as_str()).collect();
+        let mut ops = Vec::new();
+        let mut n = 0;
+        for ring in outlines(&mask, &how) {
+            let mut points: Vec<[i32; 2]> = Vec::new();
+            for p in ring {
+                let x = if found.flip { mask.width as f64 - p[0] } else { p[0] } * found.scale - w / 2.0;
+                let y = p[1] * found.scale - h / 2.0;
+                let at = [(cx + x * cos - y * sin).round() as i32, (cy + x * sin + y * cos).round() as i32];
+                if points.last() != Some(&at) {
+                    points.push(at);
+                }
+            }
+            if points.len() < 3 {
+                continue;
+            }
+            let id = loop {
+                n += 1;
+                let id = format!("{item}_outline_{n}");
+                if !taken.contains(id.as_str()) {
+                    break id;
+                }
+            };
+            ops.push(Op::Insert {
+                path: vec!["collision".into()],
+                value: serde_json::json!({ "id": id, "kind": "solid", "closed": true, "points": points }),
+                at: None,
+            });
+        }
+        Ok(ops)
     }
 
     /// Undo (or redo) the newest edit, in whichever document it was made.

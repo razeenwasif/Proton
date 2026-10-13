@@ -12,7 +12,7 @@
  * is always what would be saved. */
 
 import { escapeHtml as esc } from "./html.js";
-import { draw, handle, pick, toRoom } from "./game-overlay.js";
+import { draw, handle, pick, toRoom, toStage } from "./game-overlay.js";
 import { corner, fitCam, layout, maskOf, pickItem, rgb, toPlane, viewOf } from "./game-scene.js";
 import { createGameRender } from "./game-render.js";
 import { readGame } from "./bridge.js";
@@ -27,7 +27,8 @@ import { readGame } from "./bridge.js";
 const KEYS = /** @type {[string, string][]} */ ([
   ["⌘S", "save every changed room and file"], ["⌘Z ⇧⌘Z", "undo, redo — wherever the change was"],
   ["⎋", "select nothing"], ["⌫", "remove what is selected"], ["[ ]", "the room tab before, after"],
-  ["1 2 3 4", "World, Layers, Entities, Assets"], ["f", "the whole room"], ["two fingers", "move over the room"],
+  ["1 2 3 4", "World, Layers, Entities, Assets"], ["v p", "select; draw collision"], ["↩ ⎋", "end the line; drop it"],
+  ["⌥ click", "a point on the selected line"], ["double-click", "take a point away"], ["f", "the whole room"], ["two fingers", "move over the room"],
   ["pinch ⌘ wheel", "zoom"], ["␣ drag", "move over the room"], ["?", "these keys"],
 ]);
 
@@ -35,6 +36,15 @@ const KEYS = /** @type {[string, string][]} */ ([
 const BUILT_IN = ["transition", "save_point", "ability_gate", "ability_pickup"];
 
 const SIDES = ["world", "layers", "entities", "assets"];
+
+/** How far a point is from a segment. @param {number} px @param {number} py @param {number[]} a @param {number[]} b */
+function segmentDistance(px, py, a, b) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const length = dx * dx + dy * dy;
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / length));
+  return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
+}
 
 /** A per-window preference, kept if it can be. @param {string} key @param {string} fallback */
 function pref(key, fallback) {
@@ -426,8 +436,72 @@ export function createGame(host) {
   /** @type {string | null} */
   let solo = null;
   /** A drag under way: what moves, from where, and the room as it is meanwhile.
-   *  @type {{kind: "move" | "scale" | "pan", from: [number, number], at: [number, number], moved: boolean, base: any, picked: Selected | null} | null} */
+   *  @type {{kind: "move" | "scale" | "pan" | "vertex", from: [number, number], at: [number, number], moved: boolean, base: any, picked: Selected | null, index?: number} | null} */
   let drag = null;
+  /** What a click on the stage does: selects, or draws collision. */
+  let tool = "select";
+  /** A line of collision being drawn. @type {{points: number[][], hover: number[] | null, kind: string}} */
+  const pen = { points: [], hover: null, kind: "solid" };
+
+  /** @param {string} which */
+  function useTool(which) {
+    tool = which;
+    ws.dataset.tool = which;
+    for (const b of ws.querySelectorAll("[data-game-tool]")) b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.gameTool === which));
+    q("[data-game-pen-kind]").hidden = which !== "pen";
+    pen.points = [];
+    pen.hover = null;
+    paint();
+  }
+  q("[data-game-tools]").addEventListener("click", (e) => {
+    const b = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-tool]"));
+    if (b) useTool(b.dataset.gameTool ?? "select");
+  });
+  q("[data-game-pen-kind]").addEventListener("change", (e) => {
+    pen.kind = /** @type {HTMLSelectElement} */ (e.target).value;
+    paint();
+  });
+
+  /** Where a point drawn with the pen goes: onto a point already there when
+   *  near one, and held to eighths of a turn from the last with ⇧.
+   *  @param {number} sx @param {number} sy @param {boolean} straight */
+  function penPoint(sx, sy, straight) {
+    const c = cam();
+    if (!c || !room) return null;
+    const [w, h] = stageSize();
+    const view = viewOf(c, w, h);
+    for (const p of [...pen.points.slice(0, 1), ...room.collision.flatMap((s) => s.points)]) {
+      const [x, y] = toStage(view, p);
+      if (Math.hypot(x - sx, y - sy) <= 8) return [p[0], p[1]];
+    }
+    let [x, y] = toRoom(view, sx, sy);
+    const last = pen.points[pen.points.length - 1];
+    if (straight && last) {
+      const angle = Math.round(Math.atan2(y - last[1], x - last[0]) / (Math.PI / 4)) * (Math.PI / 4);
+      const length = Math.hypot(x - last[0], y - last[1]);
+      x = last[0] + Math.cos(angle) * length;
+      y = last[1] + Math.sin(angle) * length;
+    }
+    return [Math.round(x), Math.round(y)];
+  }
+
+  /** The line drawn, added to the room: closed when it ended on its start. @param {boolean} closed */
+  function finishPen(closed) {
+    if (!room || pen.points.length < 2) {
+      pen.points = [];
+      paint();
+      return;
+    }
+    const taken = new Set(room.collision.map((s) => s.id));
+    let n = room.collision.length + 1;
+    while (taken.has(`shape_${n}`)) n++;
+    const id = `shape_${n}`;
+    send({ type: "gameEdit", target: `room:${room.id}`, ops: [{ op: "insert", path: ["collision"], value: { id, kind: pen.kind, closed: closed && pen.points.length >= 3, points: pen.points } }], label: "draw" });
+    selected = { kind: "shape", id };
+    pen.points = [];
+    pen.hover = null;
+    paint();
+  }
   /** The room as a drag has it, drawn in place of the room until the drag ends.
    *  @type {Room | null} */
   let draft = null;
@@ -503,7 +577,11 @@ export function createGame(host) {
     g.clearRect(0, 0, width, height);
     const frame = how();
     const at = corner(r, frame.view, frame.center);
-    draw(g, r, view, shade, selected, { art: Boolean(gpu), box: selectedBox(), camera: gpu ? [at[0], at[1], frame.view[0], frame.view[1]] : null });
+    const line = selected?.kind === "shape" ? r.collision.find((x) => x.id === selected?.id) : null;
+    draw(g, r, view, shade, selected, {
+      art: Boolean(gpu), box: selectedBox(), camera: gpu ? [at[0], at[1], frame.view[0], frame.view[1]] : null,
+      vertices: line?.points ?? null, pen: tool === "pen" ? pen : null,
+    });
   }
   new ResizeObserver(() => paint()).observe(stage);
 
@@ -560,6 +638,53 @@ export function createGame(host) {
       drag = { kind: "pan", from: [sx, sy], at: [sx, sy], moved: false, base: [...c.center], picked: null };
       return;
     }
+    if (tool === "pen") {
+      const p = penPoint(sx, sy, e.shiftKey);
+      if (!p) return;
+      const start = pen.points[0];
+      if (pen.points.length >= 3 && start && p[0] === start[0] && p[1] === start[1]) return finishPen(true);
+      if (e.detail >= 2) return finishPen(false);
+      pen.points.push(p);
+      paint();
+      return;
+    }
+    // A selected line's points move; ⌥ on the line adds one; a double click
+    // on one takes it away.
+    const shape = selected?.kind === "shape" ? room.collision.find((x) => x.id === selected?.id) : null;
+    if (shape) {
+      const index = shape.points.findIndex((p) => {
+        const [x, y] = toStage(view, p);
+        return Math.abs(x - sx) <= 7 && Math.abs(y - sy) <= 7;
+      });
+      if (index >= 0 && e.detail >= 2 && shape.points.length > 2) {
+        const points = shape.points.filter((_, i) => i !== index);
+        send({ type: "gameEdit", target: `room:${room.id}`, ops: [{ op: "set", path: ["collision", `#${shape.id}`, "points"], value: points }], label: "remove a point" });
+        return;
+      }
+      if (index >= 0) {
+        drag = { kind: "vertex", from: [sx, sy], at: [sx, sy], moved: false, base: structuredClone(room), picked: selected, index };
+        return;
+      }
+      if (e.altKey) {
+        const [rx, ry] = toRoom(view, sx, sy);
+        const ring = shape.closed ? [...shape.points, shape.points[0]] : shape.points;
+        let best = -1;
+        let bestAt = 8 / view.scale;
+        for (let i = 1; i < ring.length; i++) {
+          const at = segmentDistance(rx, ry, ring[i - 1], ring[i]);
+          if (at <= bestAt) {
+            bestAt = at;
+            best = i;
+          }
+        }
+        if (best >= 0) {
+          const points = [...shape.points];
+          points.splice(best, 0, [Math.round(rx), Math.round(ry)]);
+          send({ type: "gameEdit", target: `room:${room.id}`, ops: [{ op: "set", path: ["collision", `#${shape.id}`, "points"], value: points }], label: "add a point" });
+          return;
+        }
+      }
+    }
     // The selected image's handle scales it.
     const box = selectedBox();
     if (box) {
@@ -580,6 +705,12 @@ export function createGame(host) {
 
   canvas.addEventListener("pointermove", (e) => {
     const c = cam();
+    if (tool === "pen" && room && c && !drag) {
+      const [sx, sy] = stagePoint(e);
+      pen.hover = pen.points.length ? penPoint(sx, sy, e.shiftKey) : null;
+      paint();
+      return;
+    }
     if (!drag || !room || !c) return;
     const [sx, sy] = stagePoint(e);
     drag.at = [sx, sy];
@@ -590,6 +721,12 @@ export function createGame(host) {
     if (drag.kind === "pan") {
       c.moved = true;
       c.center = [drag.base[0] - dx, drag.base[1] - dy];
+    } else if (drag.kind === "vertex" && drag.picked && drag.index !== undefined) {
+      const r = structuredClone(drag.base);
+      const s = r.collision.find((/** @type {any} */ x) => x.id === drag?.picked?.id);
+      const was = drag.base.collision.find((/** @type {any} */ x) => x.id === drag?.picked?.id)?.points[drag.index];
+      if (s && was) s.points[drag.index] = [was[0] + Math.round(dx), was[1] + Math.round(dy)];
+      draft = r;
     } else if (drag.kind === "move" && drag.picked) {
       draft = moved(drag.base, drag.picked, Math.round(dx), Math.round(dy));
     } else if (drag.kind === "scale" && drag.picked) {
@@ -740,7 +877,7 @@ export function createGame(host) {
   if (startPanel !== "inspector") showPanel(startPanel);
 
   /** Which document a selection is in, and the fields it has.
-   *  @returns {{title: string, target: string, fields: Field[], remove?: string[]} | null} */
+   *  @returns {{title: string, target: string, fields: Field[], remove?: string[], trace?: string} | null} */
   function inspected() {
     if (!project) return null;
     const game = project.game;
@@ -797,6 +934,7 @@ export function createGame(host) {
         title: item.image.split("/").pop() ?? item.id,
         target,
         remove: at,
+        trace: plane.gameplay ? item.id : undefined,
         fields: [
           { label: "Image", path: [...at, "image"], value: item.image, type: "select", options: project.assets.filter((a) => /\.(png|jpe?g|webp)$/i.test(a)).map((a) => [a, a]) },
           { label: "Where", path: [...at, "at"], value: item.at, type: "pair" },
@@ -921,6 +1059,7 @@ export function createGame(host) {
     };
     box.innerHTML =
       `<header class="game-insp-head"><h4>${esc(shape.title)}</h4>${shape.remove ? `<button class="cc-quiet" data-game-remove title="Remove it  ⌫">Remove</button>` : ""}</header>` +
+      (shape.trace ? `<p class="game-trace"><button class="cc-quiet" data-game-trace="${esc(shape.trace)}" title="Collision drawn round where it is opaque — one edit, undone whole">Trace collision</button></p>` : "") +
       `<div class="game-fields" data-game-target="${esc(shape.target)}">${shape.fields
         .map((f, i) => `<label class="game-field"><span>${esc(f.label)}</span>${input(f, i)}${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`)
         .join("")}</div>`;
@@ -967,7 +1106,10 @@ export function createGame(host) {
     send({ type: "gameEdit", target, ops: [{ op: "set", path: JSON.parse(field.dataset.gameField ?? "[]"), value }], label: "inspector" });
   });
   q("[data-game-inspector]").addEventListener("click", (e) => {
-    if (/** @type {HTMLElement} */ (e.target).closest("[data-game-remove]")) removeSelected();
+    const target = /** @type {HTMLElement} */ (e.target);
+    if (target.closest("[data-game-remove]")) removeSelected();
+    const trace = /** @type {HTMLElement | null} */ (target.closest("[data-game-trace]"));
+    if (trace && room) send({ type: "gameTrace", room: room.id, item: trace.dataset.gameTrace });
   });
 
   function removeSelected() {
@@ -1019,7 +1161,11 @@ export function createGame(host) {
     }
     if (typing || e.altKey || e.ctrlKey || e.metaKey) return false;
     if (e.key === "?") return (host.keys?.("— Game's keys", KEYS), true);
+    if (tool === "pen" && e.key === "Escape") return (pen.points.length ? ((pen.points = []), (pen.hover = null), paint()) : useTool("select"), true);
+    if (tool === "pen" && e.key === "Enter") return (finishPen(false), true);
     if (e.key === "Escape") return (select(null), true);
+    if (e.key === "v") return (useTool("select"), true);
+    if (e.key === "p") return (useTool("pen"), true);
     if (e.key === "f") return (refit(), true);
     if (e.key === "Backspace" || e.key === "Delete") return (removeSelected(), true);
     if (e.key === "[" || e.key === "]") {

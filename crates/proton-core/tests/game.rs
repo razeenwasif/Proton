@@ -188,3 +188,28 @@ fn the_window_is_given_only_the_open_games_images() {
         assert!(space.game_file(refused).is_none(), "{refused} was given to the window");
     }
 }
+
+#[test]
+fn an_image_on_the_play_plane_is_traced_into_collision_as_one_edit() {
+    let (mut space, _root) = with_game("trace");
+    let before = room(&space.apply(Command::Sync)).unwrap().0.unwrap().collision.len();
+    let events = space.apply(Command::GameTrace { room: "crossroads_01".into(), item: "ground_1".into(), threshold: None, tolerance: None });
+    assert!(warned(&events).is_none(), "{events:?}");
+    let traced = room(&events).unwrap().0.unwrap();
+    let new: Vec<_> = traced.collision.iter().filter(|s| s.id.starts_with("ground_1_outline_")).collect();
+    assert_eq!(new.len(), 1, "the slab is one piece");
+    assert_eq!(traced.collision.len(), before + 1);
+    let shape = new[0];
+    assert!(shape.closed && shape.points.len() >= 4);
+    // Where the slab is: ground_1 is at 464, 1776, 512 by 128.
+    let xs: Vec<i32> = shape.points.iter().map(|p| p[0]).collect();
+    let ys: Vec<i32> = shape.points.iter().map(|p| p[1]).collect();
+    assert!(*xs.iter().min().unwrap() >= 462 && *xs.iter().max().unwrap() <= 978, "{xs:?}");
+    assert!(*ys.iter().min().unwrap() >= 1774 && *ys.iter().max().unwrap() <= 1906, "{ys:?}");
+    // One edit: one undo takes all of it back.
+    let undone = space.apply(Command::GameUndo);
+    assert_eq!(room(&undone).unwrap().0.unwrap().collision.len(), before);
+    // Collision is the play plane's.
+    let far = space.apply(Command::GameTrace { room: "crossroads_01".into(), item: "far_0".into(), threshold: None, tolerance: None });
+    assert!(warned(&far).unwrap().contains("plane the game is played on"));
+}
