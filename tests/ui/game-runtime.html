@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Game runtime under the app's CSP</title>
+<!-- Asked for with ?csp=1, this page is served with the app's own
+     Content-Security-Policy (from tauri.conf.json): its script has to be a
+     file, as the app's are, and the WebAssembly has to be let through by
+     'wasm-unsafe-eval' and nothing wider. -->
+<pre id="out" style="white-space: pre-wrap; word-break: break-all">running</pre>
+<script type="module" src="game-runtime-check.js"></script>

@@ -4432,6 +4432,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-game-runtime"
+version = "0.0.1"
+dependencies = [
+ "proton-game",
+ "serde_json",
+]
+
+[[package]]
 name = "proton-index"
 version = "0.0.1"
 dependencies = [

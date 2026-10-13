@@ -32,6 +32,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::GameFocus { .. }
             | Command::GameEdit { .. }
             | Command::GameTrace { .. }
+            | Command::GamePlay { .. }
+            | Command::GameRecorded { .. }
             | Command::GameUndo
             | Command::GameRedo
             | Command::GameSave
@@ -57,6 +59,26 @@ pub struct GameFound {
 pub struct GameTemplate {
     pub id: String,
     pub name: String,
+}
+
+/// A run played in the window, kept: what the Run tab lists to play back, and
+/// what the agent can replay.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct GameRecording {
+    pub id: u32,
+    pub room: String,
+    pub ticks: u32,
+    pub hash: String,
+    /// Whether the core, running it again, ended where the window did.
+    pub same: bool,
+    #[serde(skip)]
+    #[ts(skip)]
+    pub start: (u16, [i32; 2], u32),
+    #[serde(skip)]
+    #[ts(skip)]
+    pub replay: Vec<(u32, u32)>,
 }
 
 /// A room as the World tab lists it.
@@ -94,6 +116,8 @@ pub struct GameProjectView {
     pub can_redo: bool,
     /// What is wrong across its files, in words.
     pub problems: Vec<String>,
+    /// Runs played, newest first.
+    pub recordings: Vec<GameRecording>,
     /// The images and sounds in its folder, for the Assets tab.
     pub assets: Vec<String>,
 }
@@ -113,6 +137,9 @@ pub struct Game {
     /// Bumped with every change to the room on screen, so the window can tell
     /// a room it has from a room changed since.
     revision: u64,
+    /// Runs played, newest last, and the next one's number.
+    recordings: Vec<GameRecording>,
+    recorded: u32,
 }
 
 impl Game {
@@ -228,6 +255,11 @@ impl Game {
                 }
                 Err(why) => vec![notice(why, NoticeLevel::Warn)],
             },
+            Command::GamePlay { room, at, abilities, recording } => match self.play(room, at, abilities, recording) {
+                Ok(event) => vec![event],
+                Err(why) => vec![notice(why, NoticeLevel::Warn)],
+            },
+            Command::GameRecorded { room, at, abilities, replay, hash } => self.recorded(room, at, abilities, replay, hash),
             Command::GameUndo => self.step(true),
             Command::GameRedo => self.step(false),
             Command::GameSave => {
@@ -320,6 +352,69 @@ impl Game {
         Ok(ops)
     }
 
+    /// A run to play, cooked from the game as it is now.
+    fn play(&self, room: Option<String>, at: Option<[i32; 2]>, abilities: Vec<String>, recording: Option<u32>) -> Result<Event, String> {
+        use proton_game::sim::world::fx;
+        let project = self.project.as_ref().ok_or("no game is open")?;
+        let world = proton_game::sim::World::cook(project)?;
+        let (start, replay) = match recording.and_then(|id| self.recordings.iter().find(|r| r.id == id)) {
+            Some(r) => ((r.start.0, r.start.1, r.start.2), Some(r.replay.clone())),
+            None => {
+                let bits = abilities.iter().map(|id| world.ability(id)).fold(0, |all, b| all | b);
+                let (index, place) = match &room {
+                    Some(id) => {
+                        let index = world.room(id).ok_or_else(|| format!("there is no room {id}"))?;
+                        let there = &world.rooms[index as usize];
+                        let place = match at {
+                            Some(p) => [fx(p[0] as f64), fx(p[1] as f64)],
+                            None => there.spawns.first().map(|s| s.1).unwrap_or([fx(64.0), fx(64.0)]),
+                        };
+                        (index, place)
+                    }
+                    None => world.start,
+                };
+                ((index, place, bits), None)
+            }
+        };
+        let json = serde_json::to_string(&world).map_err(|e| e.to_string())?;
+        let game = project.game.get();
+        let mut bindings = proton_game::format::default_input();
+        bindings.extend(game.input.clone());
+        let keys = proton_game::sim::input::ACTIONS
+            .iter()
+            .flat_map(|(action, bit)| bindings.get(*action).cloned().unwrap_or_default().into_iter().map(move |key| (key, *bit)))
+            .collect();
+        Ok(Event::GamePlay {
+            world: json,
+            start: [start.0 as i64, start.1[0] as i64, start.1[1] as i64, start.2 as i64],
+            rooms: project.rooms.iter().map(|d| d.get().clone()).collect(),
+            keys,
+            replay,
+        })
+    }
+
+    /// A run played in the window, kept — and run again here, to see that the
+    /// core's simulation ends where the window's did.
+    fn recorded(&mut self, room: u32, at: [i32; 2], abilities: u32, replay: Vec<(u32, u32)>, hash: String) -> Vec<Event> {
+        let Some(project) = &self.project else { return Vec::new() };
+        let Ok(world) = proton_game::sim::World::cook(project) else { return Vec::new() };
+        let Some(name) = world.rooms.get(room as usize).map(|r| r.id.clone()) else { return Vec::new() };
+        let mut sim = proton_game::sim::Sim::at(world, room as u16, at, abilities);
+        proton_game::sim::replay(&mut sim, &replay, |_| {});
+        let same = format!("{:016x}", sim.hash()) == hash;
+        self.recorded += 1;
+        let ticks = replay.iter().map(|(_, n)| n).sum();
+        self.recordings.push(GameRecording { id: self.recorded, room: name, ticks, hash, same, start: (room as u16, at, abilities), replay });
+        if self.recordings.len() > 10 {
+            self.recordings.remove(0);
+        }
+        let mut events = vec![self.project_event()];
+        if !same {
+            events.push(notice("the run played here and the run in the window ended differently — the simulation is not the same in both".into(), NoticeLevel::Error));
+        }
+        events
+    }
+
     /// Undo (or redo) the newest edit, in whichever document it was made.
     fn step(&mut self, back: bool) -> Vec<Event> {
         let Some(project) = &mut self.project else { return Vec::new() };
@@ -368,6 +463,8 @@ impl Game {
             done: Vec::new(),
             undone: Vec::new(),
             revision: self.revision + 1,
+            recordings: Vec::new(),
+            recorded: 0,
         };
         Ok(())
     }
@@ -453,6 +550,7 @@ impl Game {
                 can_undo: !self.done.is_empty(),
                 can_redo: !self.undone.is_empty(),
                 problems: project.problems(),
+                recordings: self.recordings.iter().rev().cloned().collect(),
                 assets: assets(project.root()),
             }),
         }

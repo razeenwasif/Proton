@@ -77,7 +77,7 @@ export function rgb(hex) {
  *  what has not loaded is left out until it has.
  *  @param {Room} room
  *  @param {{focal: number, view: [number, number], center: [number, number], sizes: Map<string, [number, number]>,
- *           hidden?: Set<string>, solo?: string | null, sprites?: {key: string, at: number[], pivot: number[]}[]}} how
+ *           hidden?: Set<string>, solo?: string | null, sprites?: {key: string, at: number[], pivot: number[], flip?: boolean}[]}} how
  *  @returns {Sprite[]} */
 export function layout(room, how) {
   const at = corner(room, how.view, how.center);
@@ -102,8 +102,10 @@ export function layout(room, how) {
       for (const s of how.sprites ?? []) {
         const size = how.sizes.get(s.key);
         if (!size) continue;
-        out.push({ key: s.key, plane: plane.id, item: null, x: s.at[0] - s.pivot[0], y: s.at[1] - s.pivot[1], w: size[0], h: size[1],
-          rot: 0, flip: false, opacity: 1, tint: [0, 0, 0, 0], blend: "normal" });
+        // Flipped about its pivot, so it turns where it stands.
+        const x = s.flip ? s.at[0] - (size[0] - s.pivot[0]) : s.at[0] - s.pivot[0];
+        out.push({ key: s.key, plane: plane.id, item: null, x, y: s.at[1] - s.pivot[1], w: size[0], h: size[1],
+          rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal" });
       }
     }
   }

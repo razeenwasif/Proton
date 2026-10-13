@@ -213,3 +213,44 @@ fn an_image_on_the_play_plane_is_traced_into_collision_as_one_edit() {
     let far = space.apply(Command::GameTrace { room: "crossroads_01".into(), item: "far_0".into(), threshold: None, tolerance: None });
     assert!(warned(&far).unwrap().contains("plane the game is played on"));
 }
+
+#[test]
+fn play_cooks_the_game_as_it_is_now_and_a_run_recorded_is_checked_here() {
+    let (mut space, _root) = with_game("play");
+    // An unsaved edit is in what is played.
+    space.apply(edit("room:crossroads_01", vec![set(&["spawns", "#start", "at"], json!([600, 1800]))]));
+    let events = space.apply(Command::GamePlay { room: None, at: None, abilities: vec!["dash".into()], recording: None });
+    let (world, start, rooms, keys) = events
+        .iter()
+        .find_map(|e| match e {
+            Event::GamePlay { world, start, rooms, keys, .. } => Some((world.clone(), *start, rooms.clone(), keys.clone())),
+            _ => None,
+        })
+        .expect("a run to play");
+    let cooked: proton_game::sim::World = serde_json::from_str(&world).expect("the world is the simulation's");
+    assert_eq!(start[0], 0);
+    assert_eq!([start[1], start[2]], [600 * 256, 1800 * 256], "the unsaved start was not played");
+    assert_eq!(start[3], cooked.ability("dash") as i64);
+    assert_eq!(rooms.len(), 2);
+    assert!(keys.contains(&("KeyZ".to_string(), proton_game::sim::input::JUMP)));
+    // From a room of one's choosing.
+    let there = space.apply(Command::GamePlay { room: Some("crossroads_02".into()), at: Some([300, 1400]), abilities: vec![], recording: None });
+    assert!(there.iter().any(|e| matches!(e, Event::GamePlay { start, .. } if start[0] == 1 && start[1] == 300 * 256)));
+
+    // A run recorded: run again here, and the same.
+    let replay = vec![(proton_game::sim::input::RIGHT, 30), (0, 10)];
+    let mut sim = proton_game::sim::Sim::at(cooked, 0, [600 * 256, 1800 * 256], 0);
+    proton_game::sim::replay(&mut sim, &replay, |_| {});
+    let hash = format!("{:016x}", sim.hash());
+    let kept = space.apply(Command::GameRecorded { room: 0, at: [600 * 256, 1800 * 256], abilities: 0, replay: replay.clone(), hash: hash.clone() });
+    let recordings = view(&kept).unwrap().unwrap().recordings;
+    assert_eq!(recordings.len(), 1);
+    assert!(recordings[0].same && recordings[0].ticks == 40 && recordings[0].room == "crossroads_01");
+    // A run the window says ended elsewhere: said.
+    let wrong = space.apply(Command::GameRecorded { room: 0, at: [600 * 256, 1800 * 256], abilities: 0, replay, hash: "0".into() });
+    assert!(!view(&wrong).unwrap().unwrap().recordings[0].same);
+    assert!(wrong.iter().any(|e| matches!(e, Event::Notice { level: NoticeLevel::Error, .. })));
+    // And played back.
+    let back = space.apply(Command::GamePlay { room: None, at: None, abilities: vec![], recording: Some(recordings[0].id) });
+    assert!(back.iter().any(|e| matches!(e, Event::GamePlay { replay: Some(r), .. } if r.len() == 2)));
+}

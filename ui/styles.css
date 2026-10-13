@@ -5522,6 +5522,16 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .game-empty { position: absolute; inset: 0; display: grid; place-items: center; }
 .game-empty[hidden] { display: none; }
 .game-faint { margin: 6px 4px; color: var(--faint); font: var(--z-2xs)/1.5 var(--zed); }
+/* Play: the Run tab's grants and kept runs, and the stage while a run has it. */
+.game-grants { display: flex; flex-direction: column; gap: 4px; padding: 2px 4px; }
+.game-grant { display: flex; align-items: center; gap: 6px; color: var(--text); font: var(--z-xs)/1.4 var(--zed); }
+.game-runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.game-run { display: flex; align-items: center; gap: 8px; padding: 3px 4px; font: var(--z-xs)/1.4 var(--zed); }
+.game-run-room { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.game-ok { color: var(--ok); font: var(--z-2xs)/1.4 var(--zed); }
+.game-error { color: var(--err); font: var(--z-2xs)/1.5 var(--zed); margin: 6px 4px; }
+.game-run .game-error { margin: 0; }
+.game-playing [data-game-stage] { cursor: none; }
 /* With no game open, the home page is the whole page. */
 .workspace[data-ws="game"].game-home { grid-template-columns: 0 0 minmax(0, 1fr) 0 0 !important; }
 .workspace[data-ws="game"].game-home > .game-side,

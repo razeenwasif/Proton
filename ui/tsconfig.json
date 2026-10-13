@@ -45,6 +45,7 @@
     "game-overlay.js",
     "game-scene.js",
     "game-render.js",
+    "game-play.js",
     "highlight.js",
     "claude.js",
     "research.js",

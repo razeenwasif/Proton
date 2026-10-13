@@ -1,0 +1,19 @@
+[package]
+name = "proton-game-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Game mode's simulation as WebAssembly: proton-game's run, behind a plain C ABI for the window and exported games."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+proton-game = { path = "../proton-game", default-features = false }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# The template, to cook a world from in the tests — not in the wasm.
+proton-game = { path = "../proton-game" }

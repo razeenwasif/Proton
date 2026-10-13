@@ -6,6 +6,7 @@ members = [
     "crates/proton-council",
     "crates/proton-core",
     "crates/proton-game",
+    "crates/proton-game-runtime",
     "crates/proton-dap",
     "crates/proton-data",
     "crates/proton-design",

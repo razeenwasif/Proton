@@ -63,7 +63,8 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-plugin/` | The Wasmtime host, WIT interfaces and capability grants |
 | `crates/proton-trace/` | The Code Visualizer client |
 | `crates/proton-design/` | Theme tokens and component markup, for Design mode |
-| `crates/proton-game/` | Game mode's engine: its project format, editable documents and template |
+| `crates/proton-game/` | Game mode's engine: its project format, editable documents, template, collision tracing and the fixed-point simulation |
+| `crates/proton-game-runtime/` | The simulation as WebAssembly, for the window's Play — built to `ui/game-runtime.wasm` by `scripts/game-wasm.mjs` |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
 | `ui/` | The front end — the app's real chrome, and the interactive prototype — all eleven modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
@@ -221,8 +222,9 @@ painted and pixel-art 2D on dozens of parallax planes, low-poly 3D, isometric
 rooms; Metroidvanias first, roguelites after. A game is a folder of JSON — the
 game, its world, a file per room — edited by ops the core applies whole or not
 at all, undone wherever they were made and held until saved. The rooms open as
-tabs over a stage that draws what is solid and what stands where; playing them
-comes with the engine's runtime.
+tabs over a stage that draws their art and what is solid, and ▶ plays the room
+on screen — the core's own simulation, as WebAssembly — with each run kept and
+checked against the core's.
 **Video** · a multitrack timeline over a CMX3600 edit decision list, with the
 captions from the `.srt` beside it. Both files are spliced, never re-printed.
 There is no program monitor: a frame of the programme is a decoded frame of
@@ -533,8 +535,9 @@ narrow enough that an engine shaped to them is smaller than a general one.
 A game is `game.json`, `world.json` and a `.room.json` per room, written in
 the order the format declares with nothing empty said, so a diff of one reads
 as the change it was. A new game comes from a template whose art is drawn in
-code. What is still to come is the runtime: a simulation written once in
-Rust, run natively for tests and the agent and as WebAssembly in the window.
+code. The simulation is written once, in Rust on integers only, and runs
+natively for tests and the agent and as WebAssembly in the window, so a run
+played in one ends exactly where it does in the other.
 
 Video reads a cut: an `.edl` is one line per event and four timecodes per line,
 plain text that has diffed in Git since before Git, and the timeline draws each

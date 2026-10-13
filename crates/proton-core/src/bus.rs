@@ -1289,6 +1289,33 @@ pub enum Command {
         #[ts(optional)]
         tolerance: Option<f64>,
     },
+    /// Play the game as it is now, saved or not: from where it starts, or —
+    /// with `room` — from `at` in that room (its first spawn without), with
+    /// these abilities already had. Answered with `Event::GamePlay`. With
+    /// `recording`, that recording is played back instead.
+    GamePlay {
+        #[serde(default)]
+        #[ts(optional)]
+        room: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        at: Option<[i32; 2]>,
+        #[serde(default)]
+        abilities: Vec<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        recording: Option<u32>,
+    },
+    /// A run just played in the window: where it started, the input held
+    /// tick by tick, and the hash it ended in — kept, and run again here to
+    /// see that it ends the same.
+    GameRecorded {
+        room: u32,
+        at: [i32; 2],
+        abilities: u32,
+        replay: Vec<(u32, u32)>,
+        hash: String,
+    },
     /// Undo the newest edit, wherever it was made.
     GameUndo,
     GameRedo,
@@ -2497,6 +2524,19 @@ pub enum Event {
     /// The game that is open — everything but its rooms — or none.
     GameProject {
         project: Option<crate::game::GameProjectView>,
+    },
+    /// A run to play: the world cooked for the simulation, as the JSON the
+    /// window's WebAssembly reads; where it starts; the rooms to draw; the
+    /// keys each action is on; and, for a recording played back, its input.
+    GamePlay {
+        world: String,
+        /// Room, x, y (1/256 px), abilities.
+        #[ts(type = "[number, number, number, number]")]
+        start: [i64; 4],
+        rooms: Vec<proton_game::format::Room>,
+        keys: Vec<(String, u32)>,
+        #[serde(default)]
+        replay: Option<Vec<(u32, u32)>>,
     },
     /// The room on screen, whole, or none. `revision` moves with every change
     /// to it, so the window can tell a room it has from one changed since.

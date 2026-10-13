@@ -1542,10 +1542,55 @@ can be hidden, locked or shown alone, which is the editor's and never saved;
 and an image dragged in from Assets is placed where it lands, in the plane's
 own pixels.
 
-**What comes next** (the plan's G3–G14): collision authoring, a fixed-point simulation in Rust run natively for tests
-and the agent and as WebAssembly in the window, importers (PSD, Aseprite,
-DragonBones, Spine, glTF), lighting, animation, combat, the world map with
-ability gates, hot reload and a web export.
+**Collision** is polylines in the room's own pixels, each solid, one-way,
+hazard or not-a-wall. The pen lays one a click at a time (⇧ holds it to
+eighths of a turn, and it snaps to points already there); a selected line's
+points drag one edit at a time, ⌥ adds one and a double click takes one
+away. Ground painted rather than tiled can be traced instead
+(`proton-game::trace`): the image's alpha thresholded, walked with marching
+squares into closed outlines — a saddle's two corners kept apart, holes and
+all — and each outline simplified with Douglas–Peucker to the few points a
+designer would have placed, then placed, scaled and turned as the image is.
+
+**The simulation** (`proton-game::sim`) is the game's rules, in Rust, on
+integers only: positions and speeds in 1/256 px (`Fx`), so every build — the
+core's, the window's WebAssembly — makes the same run, and a test keeps
+floats out of its state. `World::cook` turns the documents, saved or not, into
+segments, doors, gates, pickups and zones; `Sim::step` runs one tick of held
+input. Movement is one axis then the other, a pixel at a time, bisected to
+exact contact: slopes are climbed by lifting up to twice the step and walked
+down without leaving them, one-way ledges hold only what comes down onto
+them clear (down and jump drops through), and a hazard puts the player back
+on the last ground clear of it. The controller is a platformer's: the jump is
+the exact parabola `game.json` asks for (height and time to the apex), with
+coyote time and a jump buffer to the frame, a cut for a short tap, a dash,
+wall slides and wall jumps and air jumps, each gated by its ability bit. A
+run's state hashes to one number (FNV), and a replay is its input as runs of
+ticks.
+
+**Play.** The same simulation, built for `wasm32-unknown-unknown` as
+`proton-game-runtime` — a plain C ABI (`pg_load`, `pg_start`, `pg_step`,
+`pg_frame` and the hash), no bindings generator — is copied to
+`ui/game-runtime.wasm` by `scripts/game-wasm.mjs`, which the tests' pre-steps
+and the app's `beforeBuildCommand` run, so it is never older than the Rust
+and is not committed. ▶ asks the core for a run of the room on screen
+(`gamePlay`); the core cooks the world as it is now and sends it with where to
+start and the game's key bindings, and `ui/game-play.js` steps it at the
+game's tick on a fixed clock, drawing each screen frame eased between the last
+two ticks, through the editor's own renderer. While it plays, the game has
+every key but ⌘ ones, ⌃ with a digit and ⎋, which stops it; Pause holds it and
+Step runs exactly one tick. On stopping, the input held tick by tick goes back
+(`gameRecorded`); the core runs it again natively and keeps it in the Run tab
+with whether the two runs ended in the same state — the two builds checked
+against each other on every run, as a test checks them on a committed replay
+(natively in cargo, in node, and in WebKit under the app's CSP). The CSP
+allows WebAssembly by `'wasm-unsafe-eval'` and nothing wider: `eval` stays
+refused, and `ui/serve.mjs?csp=1` serves a page with the app's own policy so a
+test sees both.
+
+**What comes next** (the plan's G6–G14): the agent's tools and `@game`,
+importers (PSD, Aseprite, DragonBones, Spine, glTF), lighting, animation,
+combat, the world map with ability gates, hot reload and a web export.
 
 ### Trace
 

@@ -1,3 +1,5 @@
 [toolchain]
 channel = "stable"
 components = ["rustfmt", "clippy"]
+# Game mode's simulation runs in the window as WebAssembly.
+targets = ["wasm32-unknown-unknown"]

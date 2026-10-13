@@ -1,7 +1,7 @@
 /* Game mode's checks, run by suite.js in the same fixture window: the newer
  * modes' chrome, the home page, a game's rooms as tabs, the World, Layers
  * and Entities tabs, the inspector's edits as ops, unsaved dots, ⌘S, ⌘Z,
- * asking before leaving, and a click on the stage. The game is the fixture
+ * asking before leaving, a click on the stage, and a room played. The game is the fixture
  * (tests/ui/fixtures/game — proton-game's template, written out). */
 
 import {readFixture} from '/preview-game.js';
@@ -18,7 +18,7 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     path: 'crossroads', game: fixture.game, world: fixture.world, prefabs: fixture.prefabs,
     rooms: fixture.rooms.map((/** @type {any} */ r) => ({id: r.id, area: 'crossroads', size: r.size, dirty: false})),
     open: ['crossroads_01'], focus: 'crossroads_01', gameDirty: false, worldDirty: false, dirty: false,
-    canUndo: false, canRedo: false, problems: [], assets: ['art/player.png', 'art/sky.png'], ...over}});
+    canUndo: false, canRedo: false, problems: [], assets: ['art/player.png', 'art/sky.png'], recordings: [], ...over}});
   const room = (/** @type {string} */ id, revision = 1) => ({type: 'gameRoom', room: fixture.rooms.find((/** @type {any} */ r) => r.id === id), revision});
   const press = (/** @type {string} */ k, /** @type {KeyboardEventInit} */ extra = {}) =>
     $('[data-game-stage]').dispatchEvent(new win.KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...extra}));
@@ -223,6 +223,63 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     $('[data-game-panel="agent"]').click(); await settle();
     assert(shown($('[data-game-body="agent"] [data-agent-input]')), 'the agent is not beside the room');
     $('[data-game-panel="inspector"]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('▶ plays the room in the stage by the runtime: the game has the keys, Step is one tick, and ⎋ stops and sends the run back', async () => {
+    await win.dispatch({type: 'setMode', mode: 'game'}); await settle();
+    await win.pushEvents([project(), room('crossroads_01')]); await settle();
+    const frame = () => new Promise((done) => win.requestAnimationFrame(() => done(undefined)));
+    const tick = () => Number(($('[data-game-tick]')?.textContent ?? '').match(/tick (\d+)/)?.[1] ?? -1);
+    const until = async (/** @type {() => boolean} */ ok, what = '') => {
+      for (let i = 0; i < 120 && !ok(); i++) await frame();
+      assert(ok(), `timed out waiting for ${what}`);
+    };
+    let before = win.commands.length;
+    $('[data-game-play]').click(); await settle();
+    const asked = sent(before, 'gamePlay')[0];
+    assert(asked?.room === 'crossroads_01' && Array.isArray(asked.abilities), `▶ sent ${JSON.stringify(asked)}`);
+    // The core's answer: the world it cooked, where to start, the keys.
+    const world = await (await fetch('/tests/ui/fixtures/game-world.json')).text();
+    const parsed = JSON.parse(world);
+    const keys = [['ArrowLeft', 1], ['ArrowRight', 2], ['KeyZ', 16], ['Space', 16]];
+    const start = [0, ...parsed.rooms[0].spawns[0][1], 0];
+    await win.pushEvents([{type: 'gamePlay', world, start, rooms: fixture.rooms, keys, replay: null}]);
+    await until(() => tick() > 3, 'the run to tick');
+    assert(ws().classList.contains('game-playing') && !$('[data-game-stop]').disabled, 'the stage is not playing');
+    // Held keys are the game's: none reaches the core or the editor's keys.
+    before = win.commands.length;
+    const hold = (/** @type {string} */ type, /** @type {string} */ code, /** @type {string} */ k) =>
+      $('[data-game-stage]').dispatchEvent(new win.KeyboardEvent(type, {key: k, code, bubbles: true, cancelable: true}));
+    hold('keydown', 'ArrowRight', 'ArrowRight');
+    const from = tick();
+    await until(() => tick() > from + 10, 'ticks with → held');
+    hold('keyup', 'ArrowRight', 'ArrowRight');
+    hold('keydown', 'Slash', '?'); await frame();
+    assert(!shown($('#whichkey')), '? reached the editor while the game played');
+    assert(!sent(before, 'key').length, 'a key went to the core while the game played');
+    // Paused, it holds; Step is exactly one tick.
+    $('[data-game-pause]').click(); await frame(); await frame();
+    const held = tick();
+    await frame(); await frame(); await frame();
+    assert(tick() === held, `paused, the run went on: ${held} → ${tick()}`);
+    $('[data-game-step]').click(); await frame();
+    assert(tick() === held + 1, `Step went from ${held} to ${tick()}`);
+    // ⎋ stops it, and the run goes to the core to be kept and checked.
+    before = win.commands.length;
+    doc.activeElement?.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', code: 'Escape', bubbles: true, cancelable: true}));
+    await settle();
+    assert(!ws().classList.contains('game-playing') && $('[data-game-stop]').disabled, '⎋ did not stop the run');
+    const run = sent(before, 'gameRecorded')[0];
+    assert(run && run.room === 0 && /^[0-9a-f]{16}$/.test(run.hash), `the run was not sent back: ${JSON.stringify(run)?.slice(0, 200)}`);
+    assert(run.replay.reduce((/** @type {number} */ n, /** @type {number[]} */ r) => n + r[1], 0) === held + 1, 'the run sent back is not as long as it was played');
+    assert(run.replay.some((/** @type {number[]} */ r) => r[0] === 2), 'the run sent back has no → in it');
+    // A run played back plays to its end, and stops there to be looked at.
+    await win.pushEvents([{type: 'gamePlay', world, start, rooms: fixture.rooms, keys, replay: [[2, 12], [0, 6]]}]);
+    await until(() => tick() === 18 && Boolean(win.document.querySelector('[data-game-tick]')?.textContent.includes('paused')), 'the playback to end');
+    before = win.commands.length;
+    $('[data-game-stop]').click(); await settle();
+    assert(!sent(before, 'gameRecorded').length, 'a run played back was sent back as a new run');
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 }

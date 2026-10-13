@@ -24,3 +24,7 @@ node_modules
 # It registers this checkout's `proton-mcp.exe` with the Codex CLI by absolute
 # path, so it is true on one machine and wrong on every other.
 .codex/
+
+# Game mode's simulation, built from proton-game-runtime by scripts/game-wasm.mjs
+# before the tests and the app: never older than the Rust, so never committed.
+ui/game-runtime.wasm

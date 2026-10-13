@@ -88,6 +88,8 @@ export function createGamePreview(deliver) {
   /** @type {{target: string, was: string}[]} */
   const undone = [];
   let revision = 1;
+  /** Runs played, as the core keeps them. @type {{id: number, room: string, ticks: number, hash: string, same: boolean, start: number[], replay: [number, number][]}[]} */
+  const recordings = [];
 
   const doc = (/** @type {string} */ target) => {
     if (!files) return null;
@@ -120,6 +122,7 @@ export function createGamePreview(deliver) {
         rooms: files.rooms.map((r) => ({ id: r.id, area: files?.world.rooms.find((/** @type {any} */ w) => w.id === r.id)?.area ?? "", size: r.size, dirty: dirty(`room:${r.id}`) })),
         open: tabs, focus, gameDirty: dirty("game"), worldDirty: dirty("world"), dirty: targets().some(dirty),
         canUndo: done.length > 0, canRedo: undone.length > 0, problems: [],
+        recordings: recordings.map(({ id, room, ticks, hash, same }) => ({ id, room, ticks, hash, same })),
         assets: ["art/crawler.png", "art/fronds.png", "art/ground.png", "art/hills_far.png", "art/hills_near.png", "art/player.png", "art/sky.png"],
       },
     };
@@ -137,6 +140,27 @@ export function createGamePreview(deliver) {
       // No fixture to read: the home page has no games, and that is all.
     }
   })();
+
+  /** A run, as the core sends one. The preview cooks nothing: it plays the
+   *  fixture's world as the core cooked it from the template, edits or not.
+   *  @param {any} command */
+  async function play(command) {
+    const text = await (await fetch("/tests/ui/fixtures/game-world.json")).text();
+    const world = JSON.parse(text);
+    const kept = recordings.find((r) => r.id === command.recording);
+    let start;
+    if (kept) start = kept.start;
+    else {
+      const index = Math.max(0, world.rooms.findIndex((/** @type {any} */ r) => r.id === command.room));
+      const at = world.rooms[index]?.spawns?.[0]?.[1] ?? world.start[1];
+      const bits = (command.abilities ?? []).reduce((all, /** @type {string} */ id) => all | (world.abilities.includes(id) ? 1 << world.abilities.indexOf(id) : 0), 0);
+      start = [index, at[0], at[1], bits];
+    }
+    /** @type {[string, number][]} */
+    const keys = [["ArrowLeft", 1], ["KeyA", 1], ["ArrowRight", 2], ["KeyD", 2], ["ArrowUp", 4], ["KeyW", 4], ["ArrowDown", 8], ["KeyS", 8],
+      ["KeyZ", 16], ["Space", 16], ["KeyX", 32], ["KeyC", 64], ["ShiftLeft", 64]];
+    return [{ type: "gamePlay", world: text, start, rooms: files?.rooms ?? [], keys, replay: kept?.replay ?? null }];
+  }
 
   return {
     sync: all,
@@ -203,6 +227,15 @@ export function createGamePreview(deliver) {
         }
         case "gameTrace":
           return [{ type: "notice", text: "tracing reads the image's pixels in the app — the preview has no core to do it", level: "info" }];
+        case "gamePlay":
+          return play(command);
+        case "gameRecorded": {
+          // The core runs it again to compare; the preview has no core, and
+          // takes the window's word for it.
+          recordings.push({ id: recordings.length + 1, room: files.rooms[command.room]?.id ?? "", ticks: command.replay.reduce((n, /** @type {number[]} */ r) => n + r[1], 0),
+            hash: command.hash, same: true, start: [command.room, ...command.at, command.abilities], replay: command.replay });
+          return [projectEvent()];
+        }
         case "gameSave":
           for (const target of targets()) saved.set(target, JSON.stringify(doc(target)));
           return [projectEvent(), roomEvent(), { type: "notice", text: "saved — in the preview, only here", level: "info" }];

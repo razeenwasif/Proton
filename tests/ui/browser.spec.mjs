@@ -47,3 +47,15 @@ test('Game mode\'s renderer draws its art, hazed by its plane, over the ground',
   expect(near(result.right, [128, 0, 128])).toBe(true);
   expect(near(result.ground, [0, 255, 0])).toBe(true);
 });
+
+test('Game mode\'s runtime compiles and runs under the app\'s own CSP, which still refuses eval', async ({page}) => {
+  const response = await page.goto('/tests/ui/game-runtime.html?csp=1');
+  expect(response.headers()['content-security-policy']).toContain("'wasm-unsafe-eval'");
+  await page.waitForFunction(() => window.result !== undefined);
+  const result = await page.evaluate(() => window.result);
+  expect(result.error).toBeUndefined();
+  expect(result.eval).toBe('refused');
+  expect(result.hash).toBe(result.want);
+  // The one refusal is the control's: eval, never the WebAssembly.
+  expect(result.violations.filter((v) => !/: eval$/.test(v))).toEqual([]);
+});

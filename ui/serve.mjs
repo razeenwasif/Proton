@@ -1,6 +1,6 @@
 // Static server for the Proton design preview. No dependencies.
 //   node ui/serve.mjs   →  http://localhost:5178
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,7 +21,19 @@ const TYPES = {
   ".mp4": "video/mp4",
   ".woff2": "font/woff2",
   ".woff": "font/woff",
+  ".wasm": "application/wasm",
 };
+
+/** The app's own Content-Security-Policy, for a page asked for with `?csp=1`:
+ *  what the shell's window enforces, so a test can see it hold. */
+const CSP = (() => {
+  try {
+    const conf = JSON.parse(readFileSync(join(ROOT, "crates", "proton-shell", "tauri.conf.json"), "utf8"));
+    return conf.app?.security?.csp ?? null;
+  } catch {
+    return null;
+  }
+})();
 
 /** The first candidate that is a real file, or null. */
 function resolve(path) {
@@ -54,10 +66,12 @@ createServer((req, res) => {
   }
   const stat = statSync(file);
 
+  const strict = /[?&]csp=1\b/.test(req.url) && extname(file) === ".html" && CSP;
   res.writeHead(200, {
     "Content-Type": TYPES[extname(file)] ?? "application/octet-stream",
     "Content-Length": stat.size,
     "Cache-Control": "no-cache",
+    ...(strict ? { "Content-Security-Policy": CSP } : {}),
   });
   createReadStream(file).pipe(res);
 }).listen(PORT, '127.0.0.1', () => console.log(`Proton preview → http://localhost:${PORT}`));

@@ -527,7 +527,11 @@ shaders: Array<Shader>,
  * Every distinct mesh the scene names, so the front end can ask for
  * the ones it does not already hold.
  */
-meshes: Array<string>, } | { "type": "geometry" } & Geometry | { "type": "gameHome", games: Array<GameFound>, templates: Array<GameTemplate>, } | { "type": "gameProject", project: GameProjectView | null, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "cut", 
+meshes: Array<string>, } | { "type": "geometry" } & Geometry | { "type": "gameHome", games: Array<GameFound>, templates: Array<GameTemplate>, } | { "type": "gameProject", project: GameProjectView | null, } | { "type": "gamePlay", world: string, 
+/**
+ * Room, x, y (1/256 px), abilities.
+ */
+start: [number, number, number, number], rooms: Array<GameRoom>, keys: Array<[string, number]>, replay: Array<[number, number]> | null, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "cut", 
 /**
  * Empty when none is open.
  */

@@ -15,6 +15,7 @@ import { escapeHtml as esc } from "./html.js";
 import { draw, handle, pick, toRoom, toStage } from "./game-overlay.js";
 import { corner, fitCam, layout, maskOf, pickItem, rgb, toPlane, viewOf } from "./game-scene.js";
 import { createGameRender } from "./game-render.js";
+import { createPlayer } from "./game-play.js";
 import { readGame } from "./bridge.js";
 
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
@@ -85,6 +86,16 @@ export function createGame(host) {
   let asking = false;
   /** Whether the person is looking at this mode. */
   let shown = false;
+  /** The game being played in the stage, once the runtime is up.
+   *  @type {ReturnType<typeof createPlayer> | null} */
+  let player = null;
+  const playing = () => Boolean(player?.playing());
+  /** The abilities a run from here starts with: the Run tab's toggles. */
+  const granted = new Set();
+  /** What to do with the next run when it arrives: Step asks for one paused. */
+  let startPaused = false;
+  /** Why the last run could not start, shown in the Run tab. */
+  let playError = "";
 
   const stage = q("[data-game-stage]");
   const canvas = /** @type {HTMLCanvasElement} */ (q("[data-game-overlay]"));
@@ -385,9 +396,14 @@ export function createGame(host) {
 
   /** Load what a room draws and has not been loaded. @param {Room} r */
   function load(r) {
-    if (!gpu) return;
     const wanted = new Set(r.planes.flatMap((p) => p.items.map((i) => i.image)));
     for (const s of sprites(r)) wanted.add(s.key);
+    loadKeys(wanted);
+  }
+
+  /** Load these images, those not loaded yet. @param {Iterable<string>} wanted */
+  function loadKeys(wanted) {
+    if (!gpu) return;
     const filter = project?.game.view.filter === "nearest" ? "nearest" : "smooth";
     for (const key of wanted) {
       if (!key || images.has(key) || loading.has(key) || failed.has(key)) continue;
@@ -405,7 +421,7 @@ export function createGame(host) {
         .catch(() => failed.add(key))
         .finally(() => {
           loading.delete(key);
-          paint();
+          if (!playing()) paint();
         });
     }
   }
@@ -553,6 +569,13 @@ export function createGame(host) {
   }
   function paintNow() {
     const empty = q("[data-game-stage-empty]");
+    // A run draws itself, every frame, until it stops.
+    if (playing()) {
+      empty.hidden = true;
+      canvas.hidden = false;
+      glCanvas.hidden = !gpu;
+      return;
+    }
     empty.hidden = Boolean(room) || !project;
     if (!room && project) empty.innerHTML = `<p class="game-faint">Open a room from the World tab.</p>`;
     canvas.hidden = !room;
@@ -585,6 +608,49 @@ export function createGame(host) {
   }
   new ResizeObserver(() => paint()).observe(stage);
 
+  player = createPlayer({
+    canvas,
+    gpu: () => gpu,
+    sizes: images,
+    want: (keys) => loadKeys(keys),
+    stageSize,
+    focal: () => project?.game.view.focal ?? 1000,
+    ground: () => rgb(colors().ground),
+    dispatch: send,
+    changed: (state) => renderTransport(state),
+    ended: () => paint(),
+  });
+
+  /** The transport over the stage, as the run stands.
+   *  @param {{playing: boolean, paused: boolean, tick: number}} [state] */
+  function renderTransport(state = { playing: playing(), paused: Boolean(player?.paused()), tick: 0 }) {
+    const button = (/** @type {string} */ name) => /** @type {HTMLButtonElement} */ (q(`[data-game-${name}]`));
+    const can = Boolean(project?.focus && room);
+    button("play").disabled = state.playing ? !state.paused : !can;
+    button("play").title = state.playing ? "Go on" : "Play from here — this room, with the Run tab's abilities";
+    button("pause").disabled = !state.playing || state.paused;
+    button("step").disabled = state.playing ? false : !can;
+    button("stop").disabled = !state.playing;
+    ws.classList.toggle("game-playing", state.playing);
+    const tick = ws.querySelector("[data-game-tick]");
+    if (tick) tick.textContent = state.playing ? `tick ${state.tick}${state.paused ? " · paused" : ""}` : "";
+  }
+
+  /** A run from this room, with the abilities the Run tab grants. */
+  function play() {
+    if (!project?.focus) return;
+    playError = "";
+    send({ type: "gamePlay", room: project.focus, abilities: [...granted] });
+  }
+  q("[data-game-play]").addEventListener("click", () => (playing() ? player?.pause(false) : play()));
+  q("[data-game-pause]").addEventListener("click", () => player?.pause(true));
+  q("[data-game-step]").addEventListener("click", () => {
+    if (playing()) return player?.step();
+    startPaused = true;
+    play();
+  });
+  q("[data-game-stop]").addEventListener("click", () => player?.stop());
+
   /** A stage point, from a pointer. @param {MouseEvent} e @returns {[number, number]} */
   function stagePoint(e) {
     const box = canvas.getBoundingClientRect();
@@ -605,6 +671,7 @@ export function createGame(host) {
   // Two fingers move over the room; a pinch, or ⌘ with the wheel, zooms
   // about the pointer.
   stage.addEventListener("wheel", (e) => {
+    if (playing()) return;
     const c = cam();
     if (!c || !room) return;
     e.preventDefault();
@@ -623,6 +690,7 @@ export function createGame(host) {
   }, { passive: false });
 
   canvas.addEventListener("pointerdown", (e) => {
+    if (playing()) return;
     const c = cam();
     if (!room || !c) return;
     stage.focus({ preventScroll: true });
@@ -704,6 +772,7 @@ export function createGame(host) {
   });
 
   canvas.addEventListener("pointermove", (e) => {
+    if (playing()) return;
     const c = cam();
     if (tool === "pen" && room && c && !drag) {
       const [sx, sy] = stagePoint(e);
@@ -824,7 +893,7 @@ export function createGame(host) {
   stage.addEventListener("drop", (e) => {
     const key = e.dataTransfer?.getData("text/x-proton-asset");
     const c = cam();
-    if (!key || !room || !c) return;
+    if (!key || !room || !c || playing()) return;
     e.preventDefault();
     const planeId = selected?.kind === "plane" ? selected.id : selected?.kind === "item" ? selected.plane : null;
     const plane = room.planes.find((p) => p.id === planeId) ?? room.planes.find((p) => p.gameplay) ?? room.planes[room.planes.length - 1];
@@ -1132,14 +1201,47 @@ export function createGame(host) {
       `<label class="game-field"><span>Room</span><select data-game-field='["start","room"]' data-game-kind="select">${start}</select></label>` +
       `<label class="game-field"><span>Spawn</span><input type="text" data-game-field='["start","spawn"]' data-game-kind="text" value="${esc(game.start.spawn)}" spellcheck="false"></label>` +
       `</div></section>` +
-      `<section class="game-tool"><h4>Abilities</h4>${
+      `<section class="game-tool"><h4>Abilities a run starts with</h4>${
         game.abilities.length
-          ? `<p class="game-faint">${game.abilities.map((a) => esc(a.name || a.id)).join(" · ")}</p>`
+          ? `<div class="game-toggles game-grants">${game.abilities
+              .map((a) => `<label class="game-grant"><input type="checkbox" data-game-grant="${esc(a.id)}"${granted.has(a.id) ? " checked" : ""}> ${esc(a.name || a.id)}</label>`)
+              .join("")}</div>`
           : `<p class="game-faint">None yet.</p>`
       }</section>` +
-      `<section class="game-tool"><h4>Play</h4><p class="game-faint">Playing a room comes with the engine's runtime: the transport over the stage lights up then.</p></section>`;
+      `<section class="game-tool"><h4>Play</h4>` +
+      `<p class="game-faint">▶ over the stage plays the room on screen. The game has the keys while it runs; Esc stops it, and the run is kept here.</p>` +
+      (playError ? `<p class="game-error" role="alert">${esc(playError)}</p>` : "") +
+      `<p class="game-faint" data-game-tick></p></section>` +
+      `<section class="game-tool"><h4>Runs</h4>${
+        project.recordings.length
+          ? `<ul class="game-runs">${[...project.recordings]
+              .reverse()
+              .map(
+                (r) =>
+                  `<li class="game-run"><span class="game-run-room">${esc(r.room)}</span>` +
+                  `<span class="game-faint">${(r.ticks / Math.max(1, game.physics.tick)).toFixed(1)} s</span>` +
+                  `<span class="${r.same ? "game-ok" : "game-error"}" title="${r.same ? "Run again in the core, it ended in the same place" : "Run again in the core, it ended somewhere else"}">${r.same ? "same in the core" : "differs in the core"}</span>` +
+                  `<button class="cc-quiet" data-game-replay="${r.id}">Play back</button></li>`,
+              )
+              .join("")}</ul>`
+          : `<p class="game-faint">None yet: a run played is kept here, to be played back.</p>`
+      }</section>`;
+    renderTransport();
   }
+  q("[data-game-run]").addEventListener("click", (e) => {
+    const replay = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-replay]"));
+    if (replay) {
+      playError = "";
+      send({ type: "gamePlay", recording: Number(replay.dataset.gameReplay), abilities: [] });
+    }
+  });
   q("[data-game-run]").addEventListener("change", (e) => {
+    const grant = /** @type {HTMLInputElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-grant]"));
+    if (grant) {
+      if (grant.checked) granted.add(grant.dataset.gameGrant ?? "");
+      else granted.delete(grant.dataset.gameGrant ?? "");
+      return;
+    }
     const field = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-field]"));
     if (!field) return;
     send({ type: "gameEdit", target: "game", ops: [{ op: "set", path: JSON.parse(field.dataset.gameField ?? "[]"), value: valueOf(field) }], label: "start" });
@@ -1219,13 +1321,35 @@ export function createGame(host) {
       if (room?.id !== was && selected?.kind !== "game" && selected?.kind !== "asset") selected = null;
       renderSide();
       renderInspector();
+      renderTransport();
       paint();
     },
     /** The mode came on screen, or went. @param {boolean} on */
     show(on) {
       shown = on;
+      if (!on && playing()) player?.stop();
       if (on) paint();
     },
+    /** A run, cooked by the core: played in the stage.
+     *  @param {{world: string, start: number[], rooms: Room[], keys: [string, number][], replay?: [number, number][] | null}} event */
+    play(event) {
+      const paused = startPaused;
+      startPaused = false;
+      if (!shown || !player) return;
+      select(null);
+      player
+        .start(event)
+        .then(() => {
+          if (paused) player?.step();
+          stage.focus({ preventScroll: true });
+        })
+        .catch((error) => {
+          playError = `The game could not run: ${error instanceof Error ? error.message : String(error)}`;
+          renderRun();
+        });
+    },
+    /** The run's frame, for tests. */
+    frame: () => player?.frame() ?? null,
     key,
   };
 }

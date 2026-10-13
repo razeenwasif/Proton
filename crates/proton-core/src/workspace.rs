@@ -1524,6 +1524,8 @@ impl Workspace {
             | Command::GameFocus { .. }
             | Command::GameEdit { .. }
             | Command::GameTrace { .. }
+            | Command::GamePlay { .. }
+            | Command::GameRecorded { .. }
             | Command::GameUndo
             | Command::GameRedo
             | Command::GameSave => Vec::new(),
