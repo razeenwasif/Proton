@@ -1656,17 +1656,41 @@ function renderNotebook(event) {
     kernel.textContent = event.problem;
   }
 
-  const save = $("[data-nb-save]");
-  if (save) {
-    save.classList.toggle("dirty", Boolean(event.modified));
-    save.title = event.modified ? "Unsaved changes — write the notebook back" : "Write the notebook back";
-  }
+  markNotebookSaved(event.modified);
   renderProposals(event.proposals ?? []);
 
   const boxes = $$("[data-cells]");
   if (!boxes.length) return;
   for (const box of boxes) paintCells(box, event);
   renderTableDock(event);
+}
+
+/** @param {boolean} modified */
+function markNotebookSaved(modified) {
+  const save = $("[data-nb-save]");
+  if (save) {
+    save.classList.toggle("dirty", Boolean(modified));
+    save.title = modified ? "Unsaved changes — write the notebook back" : "Write the notebook back";
+  }
+}
+
+/** Some cells changed and nothing else did — a running cell's output as it
+ * comes: they are put into the notebook the window has, and only they are
+ * drawn again. */
+function renderNotebookCells(event) {
+  if (!lastNotebook || event.path !== lastNotebook.path) return;
+  const cells = lastNotebook.cells.slice();
+  const changed = new Set();
+  for (const { index, cell } of event.cells) {
+    // Out of step with what was sent whole: the next whole notebook is right.
+    if (cells[index]?.key !== cell.key) return;
+    cells[index] = cell;
+    changed.add(index);
+  }
+  lastNotebook = { ...lastNotebook, cells, modified: event.modified };
+  markNotebookSaved(event.modified);
+  for (const box of $$("[data-cells]")) paintCells(box, lastNotebook, changed);
+  renderTableDock(lastNotebook);
 }
 
 /** The agent's proposals, listed above its composer in Data. Each is also
@@ -3451,7 +3475,8 @@ function renderTableDock(event) {
  * live selection; the others take it from the split layout, which is where a
  * pane's cell is parked while it is not focused.
  */
-function paintCells(box, event) {
+/** @param {Set<number>} [only] the cells that changed, when only some did */
+function paintCells(box, event, only) {
   const view = Number(box.dataset.view ?? 0);
   if (!event.cells.length) {
     box.innerHTML = `<div class="empty">Open a notebook to start.${openFileAction("Open notebook", ".ipynb")}</div>`;
@@ -3469,10 +3494,14 @@ function paintCells(box, event) {
   // it is unchanged. The one that matters is that these are editable — and
   // replacing the markup underneath somebody who is typing takes the caret
   // with it, on every keystroke of output that arrives while they think.
-  const rows = event.cells.map((cell, i) =>
-    cellHtml({ ...cell, selected: i === mine }, i),
-  );
   const painted = notebookPainted.get(view) ?? [];
+  // A cell that did not change is not even written out again to compare:
+  // its outputs, images and all, are what that costs.
+  const rows = event.cells.map((cell, i) =>
+    only && !only.has(i) && painted.length === event.cells.length && painted[i] != null
+      ? painted[i]
+      : cellHtml({ ...cell, selected: i === mine }, i),
+  );
   // Only this pane's caret matters here. A caret in the *other* pane must not
   // stop this one from being redrawn.
   const held = document.activeElement?.closest?.("[data-cell]");
@@ -4989,6 +5018,10 @@ function renderEvent(event) {
 
     case "notebook":
       renderNotebook(event);
+      break;
+
+    case "notebookCells":
+      renderNotebookCells(event);
       break;
 
     case "cellSelected":

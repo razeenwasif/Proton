@@ -193,6 +193,19 @@ pub struct Notebook {
     crlf: bool,
 }
 
+fn cell_of(value: &Value) -> Cell {
+    Cell {
+        kind: CellKind::of(value),
+        source: joined(value.get("source")),
+        outputs: value
+            .get("outputs")
+            .and_then(Value::as_array)
+            .map(|all| all.iter().filter_map(Output::read).collect())
+            .unwrap_or_default(),
+        execution_count: value.get("execution_count").and_then(Value::as_i64),
+    }
+}
+
 impl Notebook {
     pub fn parse(text: &str) -> Result<Notebook, String> {
         let json: Value = serde_json::from_str(text).map_err(|err| err.to_string())?;
@@ -304,19 +317,12 @@ impl Notebook {
     }
 
     pub fn cells(&self) -> Vec<Cell> {
-        self.raw_cells()
-            .iter()
-            .map(|value| Cell {
-                kind: CellKind::of(value),
-                source: joined(value.get("source")),
-                outputs: value
-                    .get("outputs")
-                    .and_then(Value::as_array)
-                    .map(|all| all.iter().filter_map(Output::read).collect())
-                    .unwrap_or_default(),
-                execution_count: value.get("execution_count").and_then(Value::as_i64),
-            })
-            .collect()
+        self.raw_cells().iter().map(cell_of).collect()
+    }
+
+    /// The cell at `index` alone: reading one needs no other cell's outputs.
+    pub fn cell(&self, index: usize) -> Option<Cell> {
+        self.raw_cells().get(index).map(cell_of)
     }
 
     fn cell_mut(&mut self, index: usize) -> Option<&mut Value> {

@@ -1732,6 +1732,15 @@ pub enum Event {
         /// on each cell, and listed here for the agent's panel.
         proposals: Vec<crate::data::ProposalView>,
     },
+    /// Some of the open notebook's cells changed and nothing else did: while
+    /// a cell runs, what it has printed so far. Sent in place of the whole
+    /// notebook, which carried every cell's outputs, images and all, with
+    /// each line a cell printed.
+    NotebookCells {
+        path: String,
+        cells: Vec<crate::data::CellAt>,
+        modified: bool,
+    },
     /// The notebook's cursor moved to another cell, and nothing else changed:
     /// sent in place of the whole notebook, which `j` and `k` resent with
     /// every output in it.

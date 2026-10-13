@@ -3300,7 +3300,8 @@ impl Workspace {
         self.answer_embedded_searches();
         events.extend(self.poll_external_format());
 
-        if self.data.poll() {
+        let polled = self.data.poll();
+        if polled != crate::data::Polled::Nothing {
             // A kernel that died under a running cell is news, not a state:
             // the chip says what is wrong now, but only a notice tells
             // somebody who is looking at the cell rather than at the header.
@@ -3308,7 +3309,10 @@ impl Workspace {
                 events.push(notice(why, NoticeLevel::Error));
             }
             if !self.quiet {
-                events.push(self.notebook_event());
+                events.push(match polled {
+                    crate::data::Polled::Cells(keys) => self.notebook_cells_event(&keys),
+                    _ => self.notebook_event(),
+                });
             }
         }
         if self.terminal.as_mut().is_some_and(|t| t.poll()) && !self.quiet {
@@ -4755,8 +4759,7 @@ impl Workspace {
         if !self.data.is_open() {
             return "No notebook is open.".into();
         }
-        let cells = self.data.cells();
-        let Some(cell) = cells.get(self.data.selected()) else {
+        let Some(cell) = self.data.cell_at(self.data.selected()) else {
             return "No cell is selected.".into();
         };
 
@@ -4976,11 +4979,13 @@ impl Workspace {
             return Vec::new();
         }
 
-        let cells = self.data.cells();
-        let problem = self.data.problem().map(str::to_string);
+        // Each waited-on cell alone: every cell's outputs, cloned on every
+        // beat a turn waits, were what reading one flag cost.
+        let data = &self.data;
+        let problem = data.problem().map(str::to_string);
         let mut done: Vec<(String, Result<String, String>)> = Vec::new();
         self.waiting.retain_mut(|waiting| {
-            let Some(view) = cells.iter().find(|cell| cell.key == waiting.key) else {
+            let Some(view) = data.cell_keyed(waiting.key) else {
                 // Deleted while it ran. Saying so beats waiting forever for a
                 // cell that is not there.
                 done.push((
@@ -4996,7 +5001,7 @@ impl Workspace {
                 // break, unlike a cell that raised.
                 done.push(match problem.clone() {
                     Some(why) => (waiting.id.clone(), Err(why)),
-                    None => (waiting.id.clone(), Ok(cell_result(view))),
+                    None => (waiting.id.clone(), Ok(cell_result(&view))),
                 });
                 return false;
             }
@@ -5012,7 +5017,7 @@ impl Workspace {
                         "cell {} is still running and has been left running. What it \
                          had printed so far:\n{}",
                         waiting.cell,
-                        cell_result(view)
+                        cell_result(&view)
                     )),
                 ));
                 return false;
@@ -6305,6 +6310,15 @@ impl Workspace {
     fn tree_event(&self) -> Event {
         Event::Tree {
             rows: self.tree.rows(self.editor.buffer().path()),
+        }
+    }
+
+    /// These cells of the notebook, as they are now.
+    fn notebook_cells_event(&self, keys: &[u64]) -> Event {
+        Event::NotebookCells {
+            path: self.data.path().map(|p| p.display().to_string()).unwrap_or_default(),
+            cells: self.data.cells_keyed(keys),
+            modified: self.data.is_modified(),
         }
     }
 

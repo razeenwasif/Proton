@@ -221,3 +221,50 @@ fn a_kernel_that_dies_says_so_instead_of_spinning() {
         "the cell is still spinning and nothing was said: {events:?}"
     );
 }
+
+#[test]
+#[ignore = "starts a real kernel"]
+fn a_running_cell_sends_itself_and_not_the_notebook() {
+    // Each line a cell printed used to send the whole notebook again, every
+    // other cell's outputs with it. Only the cell that changed goes now.
+    let Some(python) = kernel() else {
+        eprintln!("PROTON_TEST_KERNEL not set — skipping");
+        return;
+    };
+    std::env::set_var("PROTON_PYTHON", &python);
+    let mut space = open("percell");
+    let two = NOTEBOOK.replacen(
+        "\"print('marmalade')\"\n   ]\n  }",
+        "\"print('marmalade')\"\n   ]\n  },\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"import time\\n\",\n    \"for i in range(3):\\n\",\n    \"    print(i, flush=True); time.sleep(0.2)\"\n   ]\n  }",
+        1,
+    );
+    assert_ne!(two, NOTEBOOK);
+    let root = space.pickers().root().to_path_buf();
+    std::fs::write(root.join("two.ipynb"), &two).unwrap();
+    space.apply(Command::OpenBuffer { path: "two.ipynb".into() });
+    let key = cells(&mut space)[1].key;
+
+    space.apply(Command::RunCell { index: 1 });
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut sent = Vec::new();
+    loop {
+        let events = space.apply(Command::Poll);
+        assert!(!events.iter().any(|e| matches!(e, Event::Notebook { .. })), "a poll sent the whole notebook");
+        sent.extend(events.into_iter().filter_map(|e| match e {
+            Event::NotebookCells { cells, .. } => Some(cells),
+            _ => None,
+        }));
+        let done = sent.last().is_some_and(|cells| cells.iter().any(|c| c.index == 1 && !c.cell.running && c.cell.execution_count.is_some()));
+        if done || Instant::now() > deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    std::env::remove_var("PROTON_PYTHON");
+
+    assert!(sent.len() >= 2, "the cell's lines did not arrive as they were printed: {sent:?}");
+    assert!(sent.iter().flatten().all(|c| c.index == 1 && c.cell.key == key), "another cell was sent: {sent:?}");
+    let last = &sent.last().unwrap()[0].cell;
+    assert!(!last.running && printed(last).contains('2'), "the cell did not finish: {last:?}");
+    assert_eq!(printed(&cells(&mut space)[1]), printed(last), "what was sent is not what the notebook has");
+}

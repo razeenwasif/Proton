@@ -1531,6 +1531,30 @@ await test('Quitting with unsaved changes asks, and Cancel stays', async () => {
   ask.querySelector('[data-quit="stay"]').click(); await settle();
   assert(ask.hidden, 'Cancel did not put the question away');
 });
+await test('A running cell sends only itself: it is drawn again and the notebook\'s other cells are left as they are', async () => {
+  await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
+  const cell = (key, source, extra = {}) => ({kind: 'code', source, outputs: [], executionCount: null, running: false, selected: false, key, proposals: [], ...extra});
+  await win.pushEvents([{type: 'notebook', path: '/fixture/run.ipynb', problem: '', language: 'python', modified: false, proposals: [], cells: [
+    cell(11, 'a = 1', {selected: true}), cell(12, 'for i in range(3): print(i)', {running: true}), cell(13, 'a + 1')]}]);
+  await settle();
+  const box = $('.workspace[data-ws="data"] .split.on [data-cells]');
+  const at = (i) => box.querySelector(`:scope > [data-cell="${i}"]`);
+  const [first, third] = [at(0), at(2)];
+  const lines = (text, extra = {}) => win.pushEvents([{type: 'notebookCells', path: '/fixture/run.ipynb', modified: Boolean(extra.modified),
+    cells: [{index: 1, cell: cell(12, 'for i in range(3): print(i)', {running: true, outputs: [{type: 'stream', name: 'stdout', text}], ...extra})}]}]);
+  await lines('0\n'); await settle();
+  assert(at(1).textContent.includes('0') && at(1).classList.contains('running'), 'the running cell\'s first line is not shown');
+  await lines('0\n1\n2\n', {running: false, executionCount: 4, modified: true}); await settle();
+  assert(at(1).textContent.includes('2') && !at(1).classList.contains('running') && at(1).textContent.includes('[4]'), `the finished cell is not shown: ${at(1).textContent}`);
+  assert(at(0) === first && at(2) === third, 'a cell that did not change was drawn again');
+  assert(box.children.length === 3, `${box.children.length} cells, not 3`);
+  assert($('[data-nb-save]').classList.contains('dirty'), 'the notebook is not marked unsaved');
+  // A cell that is not where the window has it is left to the next whole notebook.
+  await win.pushEvents([{type: 'notebookCells', path: '/fixture/run.ipynb', modified: true, cells: [{index: 2, cell: cell(99, 'elsewhere')}]}]); await settle();
+  assert(at(2) === third && !at(2).textContent.includes('elsewhere'), 'a cell out of step was drawn');
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('In a notebook, i puts the caret in the selected cell', async () => {
   await win.dispatch({type: 'setMode', mode: 'data'}); await settle();
   const cell = (kind, source, selected = false) => ({kind, source, outputs: [], executionCount: null, running: false, selected});

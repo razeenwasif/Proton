@@ -142,16 +142,28 @@ fn running_a_cell_with_no_notebook_open_is_not_a_panic() {
         .any(|event| matches!(event, Event::Notice { .. })));
 }
 
-/// Poll the way the shell does, until the cells look right or time runs out.
+/// Poll the way the shell does, until the cells look right or time runs out:
+/// the cells as the window has them, a whole notebook replacing them all and
+/// a running cell's own event replacing that cell.
 fn until(space: &mut Workspace, want: impl Fn(&[CellView]) -> bool) -> Vec<CellView> {
     let deadline = Instant::now() + Duration::from_secs(90);
-    let mut latest = Vec::new();
+    let mut latest = notebook_in(&space.apply(Command::Sync)).map(|(_, cells)| cells).unwrap_or_default();
     while Instant::now() < deadline {
-        if let Some((_, cells)) = notebook_in(&space.apply(Command::Poll)) {
-            latest = cells;
-            if want(&latest) {
-                return latest;
+        for event in space.apply(Command::Poll) {
+            match event {
+                Event::Notebook { cells, .. } => latest = cells,
+                Event::NotebookCells { cells, .. } => {
+                    for at in cells {
+                        if let Some(cell) = latest.get_mut(at.index) {
+                            *cell = at.cell;
+                        }
+                    }
+                }
+                _ => {}
             }
+        }
+        if want(&latest) {
+            return latest;
         }
         std::thread::sleep(Duration::from_millis(30));
     }

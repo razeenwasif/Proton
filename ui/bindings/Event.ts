@@ -4,6 +4,7 @@ import type { Activity } from "./Activity";
 import type { Artifact } from "./Artifact";
 import type { BufferTab } from "./BufferTab";
 import type { Caption } from "./Caption";
+import type { CellAt } from "./CellAt";
 import type { CellView } from "./CellView";
 import type { ChangeView } from "./ChangeView";
 import type { ChatEngine } from "./ChatEngine";
@@ -257,7 +258,7 @@ modified: boolean,
  * What the agent proposed and nobody has answered yet — also drawn
  * on each cell, and listed here for the agent's panel.
  */
-proposals: Array<ProposalView>, } | { "type": "cellSelected", index: number, } | { "type": "unsaved", files: Array<string>, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
+proposals: Array<ProposalView>, } | { "type": "notebookCells", path: string, cells: Array<CellAt>, modified: boolean, } | { "type": "cellSelected", index: number, } | { "type": "unsaved", files: Array<string>, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
 /**
  * The folders conversations are grouped into, each with what it
  * holds; what is in a folder is not in `sessions` as well.

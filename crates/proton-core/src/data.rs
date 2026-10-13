@@ -54,6 +54,25 @@ pub struct CellView {
     pub proposals: Vec<ProposalView>,
 }
 
+/// A cell and where it is, for an event that sends only the cells that
+/// changed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+pub struct CellAt {
+    pub index: usize,
+    pub cell: CellView,
+}
+
+/// What a poll of the kernel changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Polled {
+    Nothing,
+    /// These cells, by key: what they have printed, whether they still run.
+    Cells(Vec<u64>),
+    /// More than its cells: the kernel went, and every cell it was running.
+    All,
+}
+
 /// A change the agent proposed to the open notebook, waiting for the person
 /// to accept or reject it — drawn on the cell it is about.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -340,43 +359,61 @@ impl Data {
         };
         let waiting: std::collections::HashSet<u64> = self.running.values().copied().collect();
         let proposals = self.proposals();
+        notebook.cells().iter().enumerate().map(|(index, cell)| self.view_of(index, cell, &waiting, &proposals)).collect()
+    }
 
-        notebook
-            .cells()
-            .iter()
-            .enumerate()
-            .map(|(index, cell)| {
-                let key = self.keys.get(index).copied().unwrap_or_default();
-                // While a cell is running, what it has produced *so far* is
-                // shown rather than what it produced last time. Otherwise a
-                // long cell shows the previous run's answer until it finishes,
-                // which reads as if it had already finished.
-                let outputs = match self.collected.get(&key) {
-                    Some(live) => live.iter().map(OutputView::of).collect(),
-                    None => self
-                        .drawn
-                        .borrow_mut()
-                        .entry(key)
-                        .or_insert_with(|| cell.outputs.iter().map(OutputView::of).collect())
-                        .clone(),
-                };
-                CellView {
-                    kind: match cell.kind {
-                        CellKind::Code => "code",
-                        CellKind::Markdown => "markdown",
-                        CellKind::Raw => "raw",
-                    }
-                    .into(),
-                    source: cell.source.clone(),
-                    outputs,
-                    execution_count: cell.execution_count,
-                    running: waiting.contains(&key),
-                    selected: index == self.selected,
-                    key,
-                    proposals: proposals.iter().filter(|p| p.cell == index).cloned().collect(),
-                }
-            })
+    /// The cells with these keys, each with where it is now: what a poll that
+    /// changed only them sends, rather than every cell's outputs again.
+    pub fn cells_keyed(&self, keys: &[u64]) -> Vec<CellAt> {
+        let waiting: std::collections::HashSet<u64> = self.running.values().copied().collect();
+        let proposals = self.proposals();
+        keys.iter()
+            .filter_map(|key| self.index_of(*key))
+            .filter_map(|index| Some(CellAt { index, cell: self.view_of(index, &self.notebook.as_ref()?.cell(index)?, &waiting, &proposals) }))
             .collect()
+    }
+
+    /// The cell at `index`, as the panel draws it.
+    pub fn cell_at(&self, index: usize) -> Option<CellView> {
+        let waiting: std::collections::HashSet<u64> = self.running.values().copied().collect();
+        Some(self.view_of(index, &self.notebook.as_ref()?.cell(index)?, &waiting, &self.proposals()))
+    }
+
+    /// The cell with this key, as the panel draws it.
+    pub fn cell_keyed(&self, key: u64) -> Option<CellView> {
+        self.cell_at(self.index_of(key)?)
+    }
+
+    fn view_of(&self, index: usize, cell: &proton_data::notebook::Cell, waiting: &std::collections::HashSet<u64>, proposals: &[ProposalView]) -> CellView {
+        let key = self.keys.get(index).copied().unwrap_or_default();
+        // While a cell is running, what it has produced *so far* is
+        // shown rather than what it produced last time. Otherwise a
+        // long cell shows the previous run's answer until it finishes,
+        // which reads as if it had already finished.
+        let outputs = match self.collected.get(&key) {
+            Some(live) => live.iter().map(OutputView::of).collect(),
+            None => self
+                .drawn
+                .borrow_mut()
+                .entry(key)
+                .or_insert_with(|| cell.outputs.iter().map(OutputView::of).collect())
+                .clone(),
+        };
+        CellView {
+            kind: match cell.kind {
+                CellKind::Code => "code",
+                CellKind::Markdown => "markdown",
+                CellKind::Raw => "raw",
+            }
+            .into(),
+            source: cell.source.clone(),
+            outputs,
+            execution_count: cell.execution_count,
+            running: waiting.contains(&key),
+            selected: index == self.selected,
+            key,
+            proposals: proposals.iter().filter(|p| p.cell == index).cloned().collect(),
+        }
     }
 
     /// Everything proposed and not yet answered, each placed against the cell
@@ -809,10 +846,10 @@ impl Data {
         }
     }
 
-    /// Take whatever the kernel has said. `true` when something changed.
+    /// Take whatever the kernel has said, and say what it changed.
     ///
     /// Called on the heartbeat, like every other foreign process here.
-    pub fn poll(&mut self) -> bool {
+    pub fn poll(&mut self) -> Polled {
         // A kernel that has exited will never answer, and every cell waiting
         // on it waits forever. Noticing costs one `try_wait` per beat; not
         // noticing costs a spinner that never stops and no reason given —
@@ -823,17 +860,17 @@ impl Data {
             .as_mut()
             .is_some_and(|kernel| !kernel.is_alive())
         {
-            return self.lost_the_kernel();
+            return if self.lost_the_kernel() { Polled::All } else { Polled::Nothing };
         }
         let Some(kernel) = self.kernel.as_mut() else {
-            return false;
+            return Polled::Nothing;
         };
         let messages = kernel.poll();
         if messages.is_empty() {
-            return false;
+            return Polled::Nothing;
         }
 
-        let mut changed = false;
+        let mut changed: Vec<u64> = Vec::new();
         let mut finished: Vec<(u64, Option<i64>)> = Vec::new();
         for message in messages {
             let Some(parent) = message.parent_id() else {
@@ -844,7 +881,9 @@ impl Data {
                 // was opened. Not ours to draw.
                 continue;
             };
-            changed = true;
+            if !changed.contains(&index) {
+                changed.push(index);
+            }
 
             match message.msg_type() {
                 "stream" => {
@@ -901,7 +940,7 @@ impl Data {
                 self.modified |= notebook.set_outputs(index, &outputs, count);
             }
         }
-        changed
+        if changed.is_empty() { Polled::Nothing } else { Polled::Cells(changed) }
     }
 
     /// Stream output arrives in pieces, and a line can be split across two of
