@@ -362,7 +362,7 @@ delete a line nobody can see.
 
 Before this, opening one failed outright: `read_to_string` refuses invalid
 UTF-8, so the whole of the old behaviour was an error notice. The viewer only
-reads; Open in PDF hands its file to the PDF mode, at the same page, to be
+reads; Open in Reader hands its file to the PDF mode, at the same page, to be
 changed there.
 
 `ViewerKind` is a small closed set rather than "anything that is not text".
@@ -1187,7 +1187,7 @@ and change, and sent as `data:` JPEGs — the window's CSP allows no other
 image a page did not ship. Where each PDF was left is kept with the files
 opened before (`pdf.json`, `PdfAt`), and opening one goes there.
 
-The rail and the title bar draw LaTeX and PDF beside Notebook; their keys
+The rail and the title bar draw LaTeX and Reader (the PDF mode) beside Notebook; their keys
 stay ⌃0 and ⌃-, as `ModeId::ALL` keeps the order the keys bind.
 
 **The agent** has five tools on the PDF on top: `pdf_info`, `pdf_read`,

@@ -244,7 +244,7 @@ error. The cite picker finds papers in the `.bib`, in Research's literature
 or online, and an investigation can be written up as a paper. The visual
 editor edits paragraphs, headings and equations as they read, one undo step
 at a time.
-**PDF** · Acrobat's reader and editor, in Proton, on ⌃-: your PDFs in tabs,
+**Reader** · Acrobat's reader and editor, in Proton, on ⌃-: your PDFs in tabs,
 whichever project is open, drawn by pdf.js and changed by Proton's own core.
 It opens on your library — the books in `~/Documents/Books`, or the folders
 you name — a shelf for each folder, each book with its cover and title, the
@@ -412,7 +412,7 @@ PDF a reader can be sent — and a citation opens Proton's own viewer at it.
 the editor runs. Any PDF opens in the viewer, from the tree or `␣ff` in any
 mode: its pages drawn as you reach them, its text selectable, `j`/`k` and
 Space to read, `+`/`−` and `0` to zoom and fit, Escape to put it away — or
-Open in PDF, to annotate or rearrange it in the PDF mode at the same page.
+Open in Reader, to annotate or rearrange it in Reader at the same page.
 
 Nothing is read until you list it in `.proton/settings.json`, and nothing outside
 a listed directory is ever read — no symlink is followed out of one. A library

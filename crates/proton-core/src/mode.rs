@@ -35,7 +35,7 @@ pub enum ModeId {
     Tex,
     /// PDFs, read and edited as Acrobat does: pages, comments, forms,
     /// passwords, combining and splitting, OCR — held until saved. The
-    /// person's, whichever project is open. "PDF" on the rail.
+    /// person's, whichever project is open. "Reader" on the rail.
     Pdf,
 }
 

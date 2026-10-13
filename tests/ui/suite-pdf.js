@@ -678,7 +678,7 @@ export async function pdfChecks({test, assert, win, doc, $, settle, shown}) {
     assert(await wait(() => $('#doc-viewer [data-doc-at]')?.textContent.startsWith('page 2')), 'the viewer did not open');
     at = win.commands.length;
     $('#doc-viewer [data-doc-in-pdf]').click(); await settle();
-    assert(sent(at, 'setMode').some((c) => c.mode === 'pdf'), 'Open in PDF did not go to the PDF mode');
+    assert(sent(at, 'setMode').some((c) => c.mode === 'pdf'), 'Open in Reader did not go to the PDF mode');
     assert(JSON.stringify(sent(at, 'pdfOpen')) === JSON.stringify([{type: 'pdfOpen', path: FIXTURE, page: 2}]), `not handed over at its page: ${JSON.stringify(sent(at, 'pdfOpen'))}`);
     assert(!shown($('#doc-viewer')), 'the viewer stayed open');
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
