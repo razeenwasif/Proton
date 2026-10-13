@@ -29,7 +29,7 @@
 //! the file it came from. Editing one note re-embeds that note's passages and
 //! nothing else, and moving a file re-embeds nothing at all.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// How many passages go in one request.
@@ -104,8 +104,9 @@ impl Embedder {
 
         let mut wanted: Vec<String> = Vec::new();
         let mut wanted_keys: Vec<u64> = Vec::new();
+        let mut asked: HashSet<u64> = HashSet::new();
         for (text, key) in texts.iter().zip(&keys) {
-            if !have.contains_key(key) && !wanted_keys.contains(key) {
+            if !have.contains_key(key) && asked.insert(*key) {
                 wanted.push(text.clone());
                 wanted_keys.push(*key);
             }
@@ -117,16 +118,19 @@ impl Embedder {
         let agent = agent();
         for (chunk, chunk_keys) in wanted.chunks(BATCH).zip(wanted_keys.chunks(BATCH)) {
             let made = self.embed_with(&agent, chunk)?;
-            for (key, vector) in chunk_keys.iter().zip(made) {
-                have.insert(*key, vector);
-            }
             // Written after every batch, not at the end. Embedding the real
             // corpus is nine minutes, and the first attempt died two thirds of
             // the way through — with the cache written once at the end, every
             // vector earned up to that point was thrown away. Now a failure
             // costs the batch it happened in and the next attempt resumes.
+            // Added to the end of the file, the batch alone: the whole cache
+            // written again after each was gigabytes over a first embedding.
             if let Some(dir) = &self.cache {
-                let _ = write_cache(dir, &self.model, &have);
+                let rows: Vec<(u64, &[f32])> = chunk_keys.iter().zip(&made).map(|(key, vector)| (*key, vector.as_slice())).collect();
+                let _ = append_cache(dir, &self.model, &rows);
+            }
+            for (key, vector) in chunk_keys.iter().zip(made) {
+                have.insert(*key, vector);
             }
         }
 
@@ -302,6 +306,7 @@ fn cache_path(dir: &Path, model: &str) -> PathBuf {
 /// A flat binary file rather than JSON: twenty-eight thousand rows of 768
 /// floats is eighty-eight megabytes as text and a quarter of that raw, and
 /// parsing the text form costs seconds on every launch.
+#[cfg(test)]
 fn write_cache(dir: &Path, model: &str, have: &HashMap<u64, Vec<f32>>) -> std::io::Result<()> {
     let dims = have.values().next().map(Vec::len).unwrap_or(0) as u32;
     let mut out = Vec::with_capacity(have.len() * (dims as usize * 4 + 8) + 8);
@@ -318,6 +323,45 @@ fn write_cache(dir: &Path, model: &str, have: &HashMap<u64, Vec<f32>>) -> std::i
     }
     std::fs::create_dir_all(dir)?;
     std::fs::write(cache_path(dir, model), out)
+}
+
+/// Add vectors to the end of the cache: the file's header is the vectors'
+/// size, and its rows are read to its end. A file of vectors of another size
+/// is begun again; a row a crash cut short is dropped, or every row added
+/// after it would be read askew. Written in one append, so another process
+/// adding to the same cache adds after it rather than over it.
+fn append_cache(dir: &Path, model: &str, rows: &[(u64, &[f32])]) -> std::io::Result<()> {
+    use std::io::{Read, Write};
+    let Some(dims) = rows.first().map(|(_, vector)| vector.len()) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(dir)?;
+    let path = cache_path(dir, model);
+    let row = 8 + dims * 4;
+    let mut out = Vec::with_capacity(rows.len() * row + 8);
+    {
+        let mut file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
+        let len = file.metadata()?.len() as usize;
+        let mut header = [0u8; 4];
+        let held = if len >= 8 { file.read_exact(&mut header).map(|_| u32::from_le_bytes(header) as usize).unwrap_or(0) } else { 0 };
+        if held != dims {
+            file.set_len(0)?;
+            out.extend_from_slice(&(dims as u32).to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+        } else if (len - 8) % row != 0 {
+            file.set_len((8 + (len - 8) / row * row) as u64)?;
+        }
+    }
+    for (key, vector) in rows {
+        if vector.len() != dims {
+            continue;
+        }
+        out.extend_from_slice(&key.to_le_bytes());
+        for value in *vector {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    std::fs::OpenOptions::new().append(true).open(&path)?.write_all(&out)
 }
 
 fn read_cache(dir: &Path, model: &str) -> HashMap<u64, Vec<f32>> {
@@ -400,6 +444,36 @@ mod tests {
         let read = read_cache(&at, "m");
         assert_eq!(read.len(), 2);
         assert_eq!(read.get(&2), Some(&vec![1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn vectors_are_added_to_the_end_and_a_row_cut_short_is_dropped() {
+        // Each batch adds itself, not the whole cache again; a crash in the
+        // middle of one leaves the rows before it, and the next adds after
+        // them as if it had not happened.
+        let at = dir("append");
+        append_cache(&at, "m", &[(1, &[1.0, 2.0]), (2, &[3.0, 4.0])]).unwrap();
+        let path = cache_path(&at, "m");
+        let one = std::fs::metadata(&path).unwrap().len();
+        append_cache(&at, "m", &[(3, &[5.0, 6.0])]).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), one + 16, "more than the batch was written");
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes.extend_from_slice(&[7u8; 5]);
+        std::fs::write(&path, &bytes).unwrap();
+        append_cache(&at, "m", &[(4, &[7.0, 8.0])]).unwrap();
+        let read = read_cache(&at, "m");
+        assert_eq!(read.len(), 4);
+        assert_eq!(read.get(&4), Some(&vec![7.0, 8.0]));
+        assert_eq!(read.get(&1), Some(&vec![1.0, 2.0]));
+        // Vectors of another size begin the file again.
+        append_cache(&at, "m", &[(5, &[1.0, 2.0, 3.0])]).unwrap();
+        assert_eq!(read_cache(&at, "m").into_keys().collect::<Vec<_>>(), vec![5]);
+        // And a file written whole is added to the same way.
+        let mut whole = HashMap::new();
+        whole.insert(9u64, vec![0.5f32, 0.25, 0.125]);
+        write_cache(&at, "m", &whole).unwrap();
+        append_cache(&at, "m", &[(10, &[1.0, 1.0, 1.0])]).unwrap();
+        assert_eq!(read_cache(&at, "m").len(), 2);
     }
 
     #[test]

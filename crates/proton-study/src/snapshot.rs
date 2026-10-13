@@ -164,15 +164,55 @@ pub fn words(book: &Book, id: &str, units: Units) -> Option<Body> {
 
 /// A library of a notebook's sources — those with words kept — each cited by
 /// its id: `S07 p. 12`, `S03 § Search L4-12`, `S12 @ 3:12-3:40`.
-pub fn library(book: &Book) -> Library {
+///
+/// Built once for the sources as they are and shared after: every question
+/// to the tutor and every studio job searched it, and each built it again
+/// from every source's words. A source added, removed or read again is a
+/// different library.
+pub fn library(book: &Book) -> std::sync::Arc<Library> {
+    use std::sync::{Arc, Mutex};
+    /// The libraries built lately, by notebook: a few, since each holds its
+    /// sources' words.
+    static BUILT: Mutex<Vec<(PathBuf, Vec<Stamp>, Arc<Library>)>> = Mutex::new(Vec::new());
+    const KEPT: usize = 4;
+    let dir = book.snapshots();
+    let stamps: Vec<Stamp> = book
+        .sources
+        .sources
+        .iter()
+        .filter(|s| s.status.has_words())
+        .map(|s| {
+            let meta = std::fs::metadata(file(&dir, &s.id)).ok();
+            (s.id.clone(), s.kind.clone(), format!("{:?}", s.units), meta.as_ref().map(|m| m.len()), meta.and_then(|m| m.modified().ok()))
+        })
+        .collect();
+    let mut built = BUILT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(at) = built.iter().position(|(d, s, _)| *d == dir && *s == stamps) {
+        let hit = built.remove(at);
+        let library = hit.2.clone();
+        built.push(hit);
+        return library;
+    }
+    drop(built);
     let mut library = Library::new();
     for source in book.sources.sources.iter().filter(|s| s.status.has_words()) {
         let Some(body) = words(book, &source.id, source.units) else { continue };
         let kind = Kind::from_name(&source.kind);
-        library.add_named(&source.id, &file(&book.snapshots(), &source.id), kind, &body);
+        library.add_named(&source.id, &file(&dir, &source.id), kind, &body);
+    }
+    let library = Arc::new(library);
+    let mut built = BUILT.lock().unwrap_or_else(|e| e.into_inner());
+    built.retain(|(d, _, _)| *d != dir);
+    built.push((dir, stamps, library.clone()));
+    if built.len() > KEPT {
+        built.remove(0);
     }
     library
 }
+
+/// A kept source as a library was built from it: its id, kind and units, and
+/// its words' file's size and time.
+type Stamp = (String, String, String, Option<u64>, Option<std::time::SystemTime>);
 
 #[cfg(test)]
 mod tests {
@@ -208,6 +248,27 @@ mod tests {
             labels: Vec::new(),
         });
         id
+    }
+
+    #[test]
+    fn a_notebook_s_library_is_built_once_until_a_source_changes() {
+        // Every question to the tutor built it again from every source.
+        let mut book = book("shared");
+        let files = book.dir().parent().unwrap().join("files-shared");
+        std::fs::create_dir_all(&files).unwrap();
+        std::fs::write(files.join("a.md"), "# One\nthe albatross\n").unwrap();
+        add(&mut book, &files.join("a.md"));
+        let first = library(&book);
+        assert!(std::sync::Arc::ptr_eq(&first, &library(&book)), "built again for the same sources");
+        std::fs::write(files.join("b.md"), "# Two\nthe cormorant\n").unwrap();
+        add(&mut book, &files.join("b.md"));
+        let second = library(&book);
+        assert!(!std::sync::Arc::ptr_eq(&first, &second) && second.search("cormorant", 1).len() == 1, "a source added was not in it");
+        // Its words read again, as a source refreshed is.
+        keep(&book, "S01", &Body::Lines("# One\nthe pelican\n".into())).unwrap();
+        let third = library(&book);
+        assert!(third.search("pelican", 1).len() == 1 && third.search("albatross", 1).is_empty(), "a source read again was not");
+        let _ = std::fs::remove_dir_all(files);
     }
 
     #[test]

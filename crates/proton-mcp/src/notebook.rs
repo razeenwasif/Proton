@@ -34,14 +34,14 @@ pub struct Served {
     dir: PathBuf,
     roots: Vec<(String, PathBuf)>,
     book: Option<Book>,
-    library: Library,
+    library: std::sync::Arc<Library>,
     /// `sources.json` as it was when the passages were last built.
     stamp: Option<SystemTime>,
 }
 
 impl Served {
     pub fn open(dir: PathBuf, roots: Vec<(String, PathBuf)>) -> Served {
-        let mut served = Served { dir, roots, book: None, library: Library::new(), stamp: None };
+        let mut served = Served { dir, roots, book: None, library: Default::default(), stamp: None };
         served.fresh();
         served
     }

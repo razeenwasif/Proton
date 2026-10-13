@@ -149,6 +149,27 @@ pub struct Driver {
     warming: Arc<AtomicBool>,
     /// The machine's Lean as last asked: what the round plans with.
     facts: Option<LeanFacts>,
+    /// The papers' library as last built, and the files it was built from:
+    /// every call of a round searched it, and each read and indexed every
+    /// paper again.
+    shelf: std::sync::Mutex<Option<(Vec<FileStamp>, Arc<proton_library::Library>)>>,
+}
+
+/// A file as a library was built from it: where, how big, and when written.
+type FileStamp = (PathBuf, u64, Option<std::time::SystemTime>);
+
+/// Every file in `dirs`, stamped.
+fn stamps(dirs: &[&Path]) -> Vec<FileStamp> {
+    let mut all: Vec<FileStamp> = dirs
+        .iter()
+        .flat_map(|dir| std::fs::read_dir(dir).into_iter().flatten().flatten())
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok()?;
+            meta.is_file().then(|| (entry.path(), meta.len(), meta.modified().ok()))
+        })
+        .collect();
+    all.sort();
+    all
 }
 
 /// Checks a Proton gone mid-round left running: stopped, if still going in
@@ -248,6 +269,7 @@ impl Driver {
             downloads: Vec::new(),
             warming: Arc::default(),
             facts: None,
+            shelf: Default::default(),
         }
     }
 
@@ -691,13 +713,28 @@ impl Driver {
 
     /// The investigation's papers, read for one call: every abstract, and
     /// each PDF whose text is already extracted — never one that is not.
-    fn shelf_now(&self) -> proton_library::Library {
+    fn shelf_now(&self) -> Arc<proton_library::Library> {
         let dir = self.folder.dir().join("literature");
         let cache = self.text_cache();
+        // The papers and their texts as they are: a paper added, or its text
+        // read into the cache, is a different library.
+        let now = stamps(&[&dir, &cache]);
+        let mut shelf = self.shelf.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((was, library)) = shelf.as_ref() {
+            if *was == now {
+                return library.clone();
+            }
+        }
+        let library = Arc::new(self.shelf_built(&dir, &cache));
+        *shelf = Some((now, library.clone()));
+        library
+    }
+
+    fn shelf_built(&self, dir: &Path, cache: &Path) -> proton_library::Library {
         let mut library = proton_library::Library::new();
-        library.add_root(&dir);
+        library.add_root(dir);
         library.cite_from(self.folder.dir());
-        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir).map(|entries| entries.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+        let mut files: Vec<PathBuf> = std::fs::read_dir(dir).map(|entries| entries.flatten().map(|e| e.path()).collect()).unwrap_or_default();
         files.sort();
         for path in files {
             match path.extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase).as_deref() {
@@ -707,7 +744,7 @@ impl Driver {
                     }
                 }
                 Some("pdf") => {
-                    if let Some(text) = proton_library::pdf::cached(&path, &cache) {
+                    if let Some(text) = proton_library::pdf::cached(&path, cache) {
                         library.add_pages(&path, &text.pages);
                     }
                 }

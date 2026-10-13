@@ -233,6 +233,37 @@ impl Library {
         }
     }
 
+    /// Where a document's passages are: added together, so in a row.
+    fn doc_range(&self, doc: usize) -> std::ops::Range<usize> {
+        self.doc_of.partition_point(|d| *d < doc)..self.doc_of.partition_point(|d| *d <= doc)
+    }
+
+    /// Take a document as another library read it — from the same roots, its
+    /// file unchanged since — without reading it again: its name, passages
+    /// and citations, indexed here. `false` if there is no such document.
+    pub fn carry(&mut self, from: &Library, doc: usize) -> bool {
+        let range = from.doc_range(doc);
+        if doc >= from.docs.len() || range.is_empty() {
+            return false;
+        }
+        let here = self.docs.len();
+        self.docs.push(from.docs[doc].clone());
+        for i in range {
+            let passage = &from.passages[i];
+            self.index.add(&passage.text, &passage.title);
+            self.passages.push(passage.clone());
+            self.cites.push(from.cites[i].clone());
+            self.doc_of.push(here);
+        }
+        true
+    }
+
+    /// A document's passages' vectors, when there are vectors.
+    pub fn doc_vectors(&self, doc: usize) -> Option<&[Vec<f32>]> {
+        let range = self.doc_range(doc);
+        (!self.vectors.is_empty() && range.end <= self.vectors.len()).then(|| &self.vectors[range])
+    }
+
     /// Read one PDF, already extracted to a string per page.
     ///
     /// Separate from [`add`](Self::add) because getting the text out of a PDF

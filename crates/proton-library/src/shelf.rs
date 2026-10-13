@@ -107,8 +107,28 @@ impl Meaning {
     }
 }
 
+/// A file as a walk read it: its size and when it was written.
+type Stamp = (u64, Option<std::time::SystemTime>);
+
+fn stamp_of(path: &Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()))
+}
+
+/// What the last walk read, for the next to keep what has not changed: its
+/// library, each document in it by its file — as it was, and which it is —
+/// and what each note says of itself.
+#[derive(Default)]
+struct Carry {
+    library: Arc<Library>,
+    docs: Arc<HashMap<PathBuf, (Stamp, usize)>>,
+    notes: Arc<HashMap<String, Meta>>,
+}
+
 struct Built {
     library: Library,
+    /// Each document in `library` by its file, as it was read.
+    docs: Arc<HashMap<PathBuf, (Stamp, usize)>>,
     elapsed: Duration,
     /// Roots that were named but are not directories. Worth saying: a typo in
     /// a settings file otherwise reads as "the library found nothing".
@@ -145,7 +165,10 @@ struct Counted {
 #[derive(Default)]
 pub struct Shelf {
     roots: Vec<PathBuf>,
-    library: Library,
+    /// Shared with the next walk, which keeps from it what has not changed.
+    library: Arc<Library>,
+    /// Each document in `library` by its file, as it was read.
+    docs: Arc<HashMap<PathBuf, (Stamp, usize)>>,
     building: Option<Receiver<Built>>,
     built: Option<Duration>,
     missing: Vec<PathBuf>,
@@ -335,12 +358,20 @@ impl Shelf {
     /// in a parent folder too, so a root inside a repository would read none
     /// of them.
     pub fn honour_gitignore(&mut self, on: bool) {
+        if self.read_ignored == on {
+            // What the last walk read is not what the next would.
+            self.docs = Arc::default();
+        }
         self.read_ignored = !on;
     }
 
     /// Write citations relative to `base` rather than to the roots — see
     /// [`Library::cite_from`] — and find them there again in [`locate`](Self::locate).
     pub fn cite_from(&mut self, base: Option<PathBuf>) {
+        if self.cite_from != base {
+            // Its citations were written from elsewhere.
+            self.docs = Arc::default();
+        }
         self.cite_from = base;
     }
 
@@ -409,7 +440,8 @@ impl Shelf {
 
     /// Throw away what was read and read it again from nothing.
     fn restart(&mut self) {
-        self.library = Library::new();
+        self.library = Arc::default();
+        self.docs = Arc::default();
         self.built = None;
         self.missing.clear();
         self.counted = Arc::default();
@@ -467,6 +499,9 @@ impl Shelf {
         let rules = self.rules.clone();
         let flags = self.flags;
         let (paused, stop) = (Arc::clone(&self.paused), Arc::clone(&self.stop));
+        // What the last walk read, kept where its file is unchanged: a note
+        // edited is that note read again, not every note and every PDF's text.
+        let carry = Carry { library: Arc::clone(&self.library), docs: Arc::clone(&self.docs), notes: Arc::clone(&self.notes) };
         // Detached, like the picker's walk: it holds nothing the editor needs,
         // and if the window closes first the send fails and the thread ends.
         let _ = std::thread::Builder::new()
@@ -485,6 +520,7 @@ impl Shelf {
                         paused: &paused,
                         stop: &stop,
                     },
+                    &carry,
                     &counted,
                     &done,
                     embedder.as_ref(),
@@ -579,7 +615,8 @@ impl Shelf {
                     }
                     return false;
                 }
-                self.library = built.library;
+                self.library = Arc::new(built.library);
+                self.docs = built.docs;
                 self.built = Some(built.elapsed);
                 self.missing = built.missing;
                 self.stamp = Some(built.stamp);
@@ -606,7 +643,8 @@ impl Shelf {
 
     /// The library itself, for whoever wants to add vectors to it.
     pub fn into_library(mut self) -> Library {
-        std::mem::take(&mut self.library)
+        let library = std::mem::take(&mut self.library);
+        Arc::try_unwrap(library).unwrap_or_else(|shared| (*shared).clone())
     }
 
     pub fn library(&self) -> &Library {
@@ -713,9 +751,52 @@ impl Reading<'_> {
 /// second and two hundred PDFs took three and a half minutes the first time —
 /// and holding the fast half hostage to the slow one would mean a library that
 /// is unusable for the length of the slow one.
+/// A walk's library as it is built: each document read afresh or kept as
+/// the last walk read it, and the vectors that came with what was kept.
+struct Taking<'a> {
+    library: Library,
+    carry: &'a Carry,
+    docs: HashMap<PathBuf, (Stamp, usize)>,
+    /// One per passage: its vector, when it was kept with one.
+    known: Vec<Option<Vec<f32>>>,
+}
+
+impl Taking<'_> {
+    /// Keep `path` as the last walk read it, if its file is as it was then.
+    fn kept(&mut self, path: &Path, stamp: Option<Stamp>) -> bool {
+        let (Some(stamp), Some((was, doc))) = (stamp, self.carry.docs.get(path)) else { return false };
+        if *was != stamp {
+            return false;
+        }
+        let (before, here) = (self.library.len(), self.library.documents());
+        if !self.library.carry(&self.carry.library, *doc) {
+            return false;
+        }
+        let added = self.library.len() - before;
+        match self.carry.library.doc_vectors(*doc) {
+            Some(vectors) if vectors.len() == added => self.known.extend(vectors.iter().cloned().map(Some)),
+            _ => self.known.extend(std::iter::repeat_with(|| None).take(added)),
+        }
+        self.docs.insert(path.to_path_buf(), (stamp, here));
+        true
+    }
+
+    /// Read `path`'s words in, as the file was at `stamp`.
+    fn add(&mut self, path: &Path, kind: Kind, body: &Body, stamp: Option<Stamp>) {
+        let (before, here) = (self.library.len(), self.library.documents());
+        self.library.add_body(path, kind, body);
+        let added = self.library.len() - before;
+        self.known.extend(std::iter::repeat_with(|| None).take(added));
+        if let (Some(stamp), true) = (stamp, added > 0) {
+            self.docs.insert(path.to_path_buf(), (stamp, here));
+        }
+    }
+}
+
 fn read(
     roots: &[PathBuf],
     reading: Reading,
+    carry: &Carry,
     counted: &Counted,
     done: &mpsc::Sender<Built>,
     embedder: Option<&crate::Embedder>,
@@ -725,6 +806,7 @@ fn read(
     if let Some(base) = reading.cite_from {
         library.cite_from(base);
     }
+    let mut taking = Taking { library: Library::new(), carry, docs: HashMap::new(), known: Vec::new() };
     let mut missing = Vec::new();
     // Each text document with its kind, and its labelled name in catalog mode.
     let mut text: Vec<(PathBuf, Kind, String)> = Vec::new();
@@ -781,26 +863,35 @@ fn read(
         }
     };
     counted.total.fetch_add(text.len() + papers.len(), Ordering::Relaxed);
+    taking.library = library;
 
     let mut notes = HashMap::new();
     for (path, kind, name) in text {
         if !reading.go_on() {
             break;
         }
-        if let Ok(body) = extract::read(&path, kind, &reading.extract) {
+        // Stamped before it is read: a file written while it is read is read
+        // again next time rather than kept as what it no longer is.
+        let stamp = stamp_of(&path);
+        if taking.kept(&path, stamp) {
+            if let Some(meta) = carry.notes.get(&name) {
+                notes.insert(name, meta.clone());
+            }
+        } else if let Ok(body) = extract::read(&path, kind, &reading.extract) {
             if let (Kind::Markdown, Body::Lines(words), true) = (kind, &body, catalog.is_some()) {
                 let meta = Meta::of(words);
                 if meta != Meta::default() {
                     notes.insert(name, meta);
                 }
             }
-            library.add_body(&path, kind, &body);
+            taking.add(&path, kind, &body, stamp);
         }
         counted.done.fetch_add(1, Ordering::Relaxed);
     }
     let notes = Arc::new(notes);
-    let answer = |library: Library, whole: bool, trouble: Option<String>| Built {
+    let answer = |library: Library, docs: &HashMap<PathBuf, (Stamp, usize)>, whole: bool, trouble: Option<String>| Built {
         library,
+        docs: Arc::new(docs.clone()),
         elapsed: started.elapsed(),
         missing: missing.clone(),
         whole,
@@ -819,17 +910,20 @@ fn read(
     // all: the walk announced itself finished and stopped one phase early.
     // A library of pure Markdown is the ordinary case, not the exotic one.
     let more = (!papers.is_empty() || embedder.is_some()) && !reading.stop.load(Ordering::Relaxed);
-    if done.send(answer(library.clone(), !more, None)).is_err() || !more {
+    if done.send(answer(taking.library.clone(), &taking.docs, !more, None)).is_err() || !more {
         return;
     }
 
     for path in papers {
         if !reading.go_on() {
-            let _ = done.send(answer(library, true, None));
+            let _ = done.send(answer(taking.library, &taking.docs, true, None));
             return;
         }
-        if let Ok(body) = extract::read(&path, Kind::Pdf, &reading.extract) {
-            library.add_body(&path, Kind::Pdf, &body);
+        let stamp = stamp_of(&path);
+        if !taking.kept(&path, stamp) {
+            if let Ok(body) = extract::read(&path, Kind::Pdf, &reading.extract) {
+                taking.add(&path, Kind::Pdf, &body, stamp);
+            }
         }
         counted.done.fetch_add(1, Ordering::Relaxed);
     }
@@ -840,28 +934,45 @@ fn read(
     // A failure here loses the vectors and keeps the index, which is the right
     // way round: lexical search is a complete answer.
     let Some(embedder) = embedder else {
-        let _ = done.send(answer(library, true, None));
+        let _ = done.send(answer(taking.library, &taking.docs, true, None));
         return;
     };
+    let Taking { mut library, docs, mut known, .. } = taking;
 
-    let _ = done.send(answer(library.clone(), false, None));
+    let _ = done.send(answer(library.clone(), &docs, false, None));
 
     // Said out loud when it fails. It was silent for one afternoon, and the
     // symptom — searches answering in a tenth of a second instead of two —
     // looks exactly like everything working, because the lexical fallback it
     // drops to is a perfectly good answer. A failure nobody can see is worse
     // than one that costs a line of output.
-    let trouble = match embedder.vectors(&library.texts()) {
-        Ok(vectors) => library
-            .take_vectors(vectors)
-            .err()
-            .map(|why| format!("the vectors did not match the passages ({why})")),
+    // Only the passages not kept with their vectors are asked for: a walk
+    // after one note changed asks for that note's, and does not read the
+    // whole cache of vectors to find the rest.
+    let wanted: Vec<usize> = (0..known.len()).filter(|i| known[*i].is_none()).collect();
+    let made = match wanted.is_empty() {
+        true => Ok(Vec::new()),
+        false => {
+            let texts = library.texts();
+            embedder.vectors(&wanted.iter().map(|i| texts[*i].clone()).collect::<Vec<_>>())
+        }
+    };
+    let trouble = match made {
+        Ok(made) => {
+            for (i, vector) in wanted.iter().zip(made) {
+                known[*i] = Some(vector);
+            }
+            library
+                .take_vectors(known.into_iter().map(Option::unwrap_or_default).collect())
+                .err()
+                .map(|why| format!("the vectors did not match the passages ({why})"))
+        }
         Err(why) => Some(why),
     };
     if let Some(why) = &trouble {
         eprintln!("proton-library: no vectors ({why}); searching by word only");
     }
-    let _ = done.send(answer(library, true, trouble));
+    let _ = done.send(answer(library, &docs, true, trouble));
 }
 
 /// What the roots look like right now: how many files, and the newest
@@ -1030,6 +1141,42 @@ mod tests {
         let hits = shelf.search("sparsity", 5);
         assert_eq!(hits.len(), 1);
         assert!(hits[0].cite.starts_with("notes.md"), "{}", hits[0].cite);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_walk_after_an_edit_reads_that_note_again_and_keeps_the_rest_as_read() {
+        // Every walk read every note and every PDF's text again, for one note
+        // changed. Now an unchanged file is kept as the last walk read it —
+        // shown here by one that can no longer be read at all.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = root("carry");
+        write(&dir, "kept.md", "# Kept\nthe albatross circles the harbour\n");
+        write(&dir, "edited.md", "# Edited\nthe first draft mentions a pelican\n");
+        let mut shelf = Shelf::new();
+        shelf.set_roots(vec![dir.clone()]);
+        finish(&mut shelf);
+        assert_eq!(shelf.search("albatross", 3).len(), 1);
+
+        let kept = dir.join("kept.md");
+        std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o000)).unwrap();
+        write(&dir, "edited.md", "# Edited\nthe second draft mentions a cormorant instead\n");
+        shelf.refresh();
+        finish(&mut shelf);
+        std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(shelf.documents(), 2, "{shelf:?}");
+        assert_eq!(shelf.search("albatross", 3).len(), 1, "an unchanged note was read again, or dropped");
+        assert_eq!(shelf.search("cormorant", 3).len(), 1, "the edited note was not read again");
+        assert!(shelf.search("pelican", 3).is_empty(), "the edited note's old words are still there");
+        assert!(shelf.search("albatross", 3)[0].cite.starts_with("kept.md"), "a kept note lost its citation");
+
+        // A note deleted is gone, kept or not.
+        std::fs::remove_file(&kept).unwrap();
+        shelf.refresh();
+        finish(&mut shelf);
+        assert!(shelf.search("albatross", 3).is_empty(), "a deleted note was kept");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
