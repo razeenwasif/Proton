@@ -32,6 +32,8 @@ pub enum Mention {
     Log,
     /// The PDF on top in the PDF mode, and the page the person is reading.
     Pdf,
+    /// The game open in Game mode, and the room on screen.
+    Game,
 }
 
 impl Mention {
@@ -42,11 +44,12 @@ impl Mention {
             Mention::Dataframe => "@dataframe",
             Mention::Log => "@log",
             Mention::Pdf => "@pdf",
+            Mention::Game => "@game",
         }
     }
 
     /// Every mention this build understands, for the composer's chips.
-    pub const ALL: [Mention; 4] = [Mention::Selection, Mention::Dataframe, Mention::Log, Mention::Pdf];
+    pub const ALL: [Mention; 5] = [Mention::Selection, Mention::Dataframe, Mention::Log, Mention::Pdf, Mention::Game];
 }
 
 /// The mentions in a question, in the order they were written, without repeats.
@@ -115,6 +118,8 @@ mod tests {
     #[test]
     fn the_pdf_is_one_too() {
         assert_eq!(found("summarise @pdf, then @selection"), [Mention::Pdf, Mention::Selection]);
+        assert_eq!(found("why can't I reach the ledge in @game?"), [Mention::Game]);
+        assert!(found("@games are fun").is_empty());
         assert!(found("mail@pdf.org and @pdfs").is_empty());
     }
 

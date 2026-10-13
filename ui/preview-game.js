@@ -122,7 +122,7 @@ export function createGamePreview(deliver) {
         rooms: files.rooms.map((r) => ({ id: r.id, area: files?.world.rooms.find((/** @type {any} */ w) => w.id === r.id)?.area ?? "", size: r.size, dirty: dirty(`room:${r.id}`) })),
         open: tabs, focus, gameDirty: dirty("game"), worldDirty: dirty("world"), dirty: targets().some(dirty),
         canUndo: done.length > 0, canRedo: undone.length > 0, problems: [],
-        recordings: recordings.map(({ id, room, ticks, hash, same }) => ({ id, room, ticks, hash, same })),
+        recordings: recordings.map(({ id, room, ticks, hash, same }) => ({ id, room, ticks, hash, same })).reverse(),
         assets: ["art/crawler.png", "art/fronds.png", "art/ground.png", "art/hills_far.png", "art/hills_near.png", "art/player.png", "art/sky.png"],
       },
     };

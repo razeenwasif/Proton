@@ -224,7 +224,9 @@ game, its world, a file per room — edited by ops the core applies whole or not
 at all, undone wherever they were made and held until saved. The rooms open as
 tabs over a stage that draws their art and what is solid, and ▶ plays the room
 on screen — the core's own simulation, as WebAssembly — with each run kept and
-checked against the core's.
+checked against the core's. The agent reads, checks, edits (held for you to
+save) and plays the game headless, comparing a route against the saved game,
+and `@game` sends it the game and the room on screen.
 **Video** · a multitrack timeline over a CMX3600 edit decision list, with the
 captions from the `.srt` beside it. Both files are spliced, never re-printed.
 There is no program monitor: a frame of the programme is a decoded frame of

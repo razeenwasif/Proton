@@ -485,6 +485,78 @@ impl Agent {
                     "required": ["action", "pages"]
                 }),
             },
+            // The game open in Game mode: the workspace's own (`game::agent`).
+            Tool {
+                name: "game_info".into(),
+                description: "The game open in Game mode. With no document: its name, view and controller \
+                              (jump height, run speed, coyote and buffer ticks), abilities, where it starts, \
+                              its rooms with their sizes, spawns and entities and which is on screen, its \
+                              prefabs, what is not saved, its problems, and the runs the person played. With \
+                              a document (game, world, room:<id> or prefab:<id>): that file's JSON as it is \
+                              now, unsaved changes included — the paths game_edit takes are read from it. \
+                              Read-only; call it first when asked about the game."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "document": { "type": "string", "description": "game, world, room:<id> or prefab:<id>. Omit for the summary." }
+                    }
+                }),
+            },
+            Tool {
+                name: "game_edit".into(),
+                description: "Change one of the open game's documents by ops, as the person's own edits are \
+                              made: {\"op\": \"set\", \"path\": [...], \"value\": ...}, {\"op\": \"insert\", \"path\": \
+                              [list], \"value\": ..., \"at\": n}, {\"op\": \"remove\", \"path\": [...]}, {\"op\": \
+                              \"move\", \"path\": [...], \"to\": n}. A path names keys, and list members by \
+                              \"#id\" (e.g. [\"collision\", \"#ledge\", \"points\", \"1\"]) or by index. The ops \
+                              apply together or not at all: a batch that leaves a document invalid is refused \
+                              whole. The change is held until the person saves: it shows on their screen at \
+                              once and is one step of their undo, so say what you changed rather than that a \
+                              file was written."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "document": { "type": "string", "description": "game, world, room:<id> or prefab:<id>." },
+                        "ops": { "type": "array", "items": { "type": "object" }, "description": "The ops, applied in order, together." }
+                    },
+                    "required": ["document", "ops"]
+                }),
+            },
+            Tool {
+                name: "game_check".into(),
+                description: "What is wrong with the open game: doors to rooms or spawns that are not there, \
+                              gates and pickups naming abilities the game does not have, entities that are \
+                              neither built in nor a prefab, rooms with no collision or no spawn, and whether \
+                              it can be played at all. Read-only."
+                    .into(),
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            Tool {
+                name: "game_play".into(),
+                description: "Play the open game headless, by the same simulation the person plays, and say \
+                              what happened: where the player ended, where it was hurt, which rooms it went \
+                              into and which abilities it gained, with its place every few ticks. Inputs are \
+                              held for a number of ticks (the game runs at its own tick, usually 60 a \
+                              second): [{\"hold\": [\"right\"], \"ticks\": 60}, {\"hold\": [\"right\", \"jump\"], \
+                              \"ticks\": 20}]; the actions are left, right, up, down, jump, attack and dash. Or \
+                              replay a run the person played, by its number. When the game has changes not \
+                              saved, the same inputs are also played on the game as last saved, so you can \
+                              tell what an edit did to a route. The run is drawn over the room on the \
+                              person's screen."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "room": { "type": "string", "description": "The room to start in. Defaults to where the game starts." },
+                        "at": { "type": "array", "items": { "type": "integer" }, "description": "[x, y] in pixels of the room, the player's feet. Defaults to the room's first spawn." },
+                        "abilities": { "type": "array", "items": { "type": "string" }, "description": "Abilities the run starts with, by id." },
+                        "inputs": { "type": "array", "items": { "type": "object" }, "description": "What is held, and for how many ticks." },
+                        "recording": { "type": "integer", "description": "A run the person played, by its number, in place of inputs." }
+                    }
+                }),
+            },
             Tool {
                 name: "diagnostics".into(),
                 description: "Errors and warnings the language server has reported for a \
@@ -1058,7 +1130,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 17);
+        assert_eq!(tools.len(), 21);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the
@@ -1085,13 +1157,15 @@ mod tests {
         // The PDF tools that change it have to say the change waits for the
         // person: told only "rotate the pages", a model reports a file
         // rewritten, and the person believes it.
-        for name in ["pdf_annotate", "pdf_pages"] {
+        for name in ["pdf_annotate", "pdf_pages", "game_edit"] {
             let changing = tools.iter().find(|t| t.name == name).unwrap();
             assert!(changing.description.contains("held until the person saves"), "{name}: {}", changing.description);
         }
         // Every one the session answers is declared, and none it does not.
         let declared: Vec<&str> = tools.iter().map(|t| t.name.as_str()).filter(|n| n.starts_with("pdf_")).collect();
         assert_eq!(declared, crate::pdf::TOOLS);
+        let declared: Vec<&str> = tools.iter().map(|t| t.name.as_str()).filter(|n| n.starts_with("game_")).collect();
+        assert_eq!(declared, crate::game::TOOLS);
         for tool in &tools {
             // A description written with line continuations and mangled into
             // one long line reads to the model as a run of whitespace in the

@@ -2538,6 +2538,11 @@ pub enum Event {
         #[serde(default)]
         replay: Option<Vec<(u32, u32)>>,
     },
+    /// Where the agent's last run (`game_play`) went, room by room, for the
+    /// stage to draw over the room it is in.
+    GamePath {
+        parts: Vec<crate::game::GamePathPart>,
+    },
     /// The room on screen, whole, or none. `revision` moves with every change
     /// to it, so the window can tell a room it has from one changed since.
     GameRoom {

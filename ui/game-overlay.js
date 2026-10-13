@@ -109,7 +109,8 @@ export function handle(view, box) {
  *  @param {CanvasRenderingContext2D} g @param {Room} room @param {View} view @param {Colors} c
  *  @param {Selected | null} selected
  *  @param {{art?: boolean, box?: {x: number, y: number, w: number, h: number, rot: number} | null, camera?: number[] | null,
- *    vertices?: number[][] | null, pen?: {points: number[][], hover: number[] | null, kind: string} | null}} [also] */
+ *    vertices?: number[][] | null, pen?: {points: number[][], hover: number[] | null, kind: string} | null,
+ *    path?: {points: number[][], hurt: number[][]}[] | null}} [also] */
 export function draw(g, room, view, c, selected, also = {}) {
   const is = (/** @type {string} */ kind, /** @type {string} */ id) => selected?.kind === kind && selected.id === id;
   const [w, h] = room.size;
@@ -224,6 +225,30 @@ export function draw(g, room, view, c, selected, also = {}) {
     g.lineWidth = 1.5;
     g.fillRect(x - 3.5, y - 3.5, 7, 7);
     g.strokeRect(x - 3.5, y - 3.5, 7, 7);
+  }
+  // Where the agent's last run went in this room, and where it was hurt.
+  for (const part of also.path ?? []) {
+    g.beginPath();
+    part.points.forEach((p, i) => {
+      const [x, y] = toStage(view, p);
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    });
+    g.strokeStyle = c.warn;
+    g.lineWidth = 2;
+    g.setLineDash([2, 4]);
+    g.stroke();
+    g.setLineDash([]);
+    g.strokeStyle = c.err;
+    for (const p of part.hurt) {
+      const [x, y] = toStage(view, p);
+      g.beginPath();
+      g.moveTo(x - 5, y - 5);
+      g.lineTo(x + 5, y + 5);
+      g.moveTo(x + 5, y - 5);
+      g.lineTo(x - 5, y + 5);
+      g.stroke();
+    }
   }
   // A line being drawn, and where the next point would go.
   const pen = also.pen;

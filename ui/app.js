@@ -5283,6 +5283,10 @@ function renderEvent(event) {
       game.play(event);
       break;
 
+    case "gamePath":
+      game.path(event);
+      break;
+
     case "geometry":
       // One mesh, described — asked for when a scene names it, and sent again
       // by itself when the file is re-exported or its stack changes. The mesh

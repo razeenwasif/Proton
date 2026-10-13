@@ -282,4 +282,38 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     assert(!sent(before, 'gameRecorded').length, 'a run played back was sent back as a new run');
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
+
+  await test('The agent\'s run is drawn over the room it crossed until ⎋, and @game is a chip beside the agent', async () => {
+    await win.dispatch({type: 'setMode', mode: 'game'}); await settle();
+    await win.pushEvents([project(), room('crossroads_01')]); await settle();
+    press('f'); await settle();
+    const canvas = $('[data-game-overlay]');
+    const first = fixture.rooms[0];
+    /** Whether the overlay draws anything in a few pixels round a room point. */
+    const inked = (/** @type {number} */ rx, /** @type {number} */ ry) => {
+      const box = canvas.getBoundingClientRect();
+      const scale = Math.min((box.width - 48) / first.size[0], (box.height - 48) / first.size[1]);
+      const ratio = canvas.width / box.width;
+      const x = ((box.width - first.size[0] * scale) / 2 + rx * scale) * ratio;
+      const y = ((box.height - first.size[1] * scale) / 2 + ry * scale) * ratio;
+      const data = canvas.getContext('2d').getImageData(Math.round(x - 6), Math.round(y - 6), 12, 12).data;
+      for (let i = 3; i < data.length; i += 4) if (data[i] > 0) return true;
+      return false;
+    };
+    assert(!inked(1500, 900), 'something is already drawn where the run will go');
+    const points = Array.from({length: 60}, (_, i) => [600 + i * 40, 900]);
+    await win.pushEvents([{type: 'gamePath', parts: [{room: 'crossroads_01', points, hurt: [[2000, 900]]}, {room: 'crossroads_02', points: [[0, 0], [50, 0]], hurt: []}]}]);
+    await settle();
+    assert(inked(1500, 900) && inked(2000, 900), 'the agent\'s run is not drawn over the room');
+    press('Escape'); await settle();
+    assert(!inked(1500, 900), '⎋ with nothing selected did not clear the agent\'s run');
+    $('[data-game-panel="agent"]').click(); await settle();
+    const chip = $('[data-game-body="agent"] [data-mention="@game"]');
+    assert(chip && shown(chip), 'there is no @game chip beside the agent');
+    chip.click(); await settle();
+    assert($('[data-game-body="agent"] [data-agent-input]').textContent.includes('@game'), 'the chip did not put @game in the question');
+    $('[data-game-body="agent"] [data-agent-input]').textContent = '';
+    $('[data-game-panel="inspector"]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
 }

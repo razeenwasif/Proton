@@ -254,3 +254,134 @@ fn play_cooks_the_game_as_it_is_now_and_a_run_recorded_is_checked_here() {
     let back = space.apply(Command::GamePlay { room: None, at: None, abilities: vec![], recording: Some(recordings[0].id) });
     assert!(back.iter().any(|e| matches!(e, Event::GamePlay { replay: Some(r), .. } if r.len() == 2)));
 }
+
+/* ── the agent's tools ─────────────────────────────────────────────── */
+
+#[test]
+fn the_agent_reads_the_game_and_a_room_as_it_is_now() {
+    let (mut space, _root) = with_game("agent-info");
+    let summary = space.run_tool("game_info", &json!({})).unwrap();
+    assert!(summary.starts_with("Crossroads"), "{summary}");
+    assert!(summary.contains("crossroads_01 in") && summary.contains("[on screen]"), "{summary}");
+    assert!(summary.contains("Abilities: dash"), "{summary}");
+    // A room's file as it is now, unsaved changes included and said.
+    space.apply(edit("room:crossroads_01", vec![set(&["spawns", "#start", "at"], json!([450, 1800]))]));
+    let room = space.run_tool("game_info", &json!({"document": "room:crossroads_01"})).unwrap();
+    assert!(room.starts_with("rooms/crossroads_01.room.json (with changes not saved):"), "{room}");
+    assert!(room.contains("[450, 1800]") && room.contains("\"collision\""), "{room}");
+    assert!(space.run_tool("game_info", &json!({"document": "room:nowhere"})).unwrap_err().contains("no room nowhere"));
+    assert!(space.run_tool("game_info", &json!({"document": "level"})).is_err());
+}
+
+#[test]
+fn with_no_game_open_the_tools_say_how_to_open_one() {
+    let root = project("agent-none");
+    let mut space = Workspace::rooted(&root);
+    for name in proton_core::game::TOOLS {
+        let why = space.run_tool(name, &json!({})).unwrap_err();
+        assert!(why.contains("No game is open"), "{name}: {why}");
+    }
+}
+
+#[test]
+fn the_agents_edit_is_one_of_the_persons_held_until_saved_and_undone_by_their_undo() {
+    let (mut space, root) = with_game("agent-edit");
+    let said = space
+        .run_tool("game_edit", &json!({"document": "room:crossroads_01", "ops": [{"op": "set", "path": ["spawns", "#start", "at"], "value": [700, 1800]}]}))
+        .unwrap();
+    assert!(said.contains("held until the person saves"), "{said}");
+    let disk = std::fs::read_to_string(root.join("crossroads/rooms/crossroads_01.room.json")).unwrap();
+    assert!(disk.contains("[400, 1800]"), "the edit was written before the person saved");
+    let shown = space.apply(Command::Sync);
+    assert!(view(&shown).unwrap().unwrap().dirty, "the edit is not shown as unsaved");
+    // The person's ⌘Z takes it back.
+    let undone = space.apply(Command::GameUndo);
+    let (back, _) = room(&undone).unwrap();
+    assert_eq!(back.unwrap().spawns[0].at, [400, 1800]);
+    // A batch that cannot be made changes nothing, and says so.
+    let refused = space
+        .run_tool(
+            "game_edit",
+            &json!({"document": "room:crossroads_01", "ops": [
+                {"op": "set", "path": ["spawns", "#start", "at"], "value": [900, 1800]},
+                {"op": "set", "path": ["spawns", "#nope", "at"], "value": [0, 0]}
+            ]}),
+        )
+        .unwrap_err();
+    assert!(refused.contains("refused the whole batch"), "{refused}");
+    let after = space.run_tool("game_info", &json!({"document": "room:crossroads_01"})).unwrap();
+    assert!(after.contains("[400, 1800]") && !after.contains("[900, 1800]"), "half a refused batch was applied");
+    // An edit that leaves a problem says which.
+    let broke = space
+        .run_tool("game_edit", &json!({"document": "room:crossroads_01", "ops": [{"op": "set", "path": ["entities", "#to_east", "to", "room"], "value": "nowhere"}]}))
+        .unwrap();
+    assert!(broke.contains("new problems") && broke.contains("nowhere"), "{broke}");
+}
+
+#[test]
+fn the_check_finds_what_is_wrong_and_says_when_nothing_is() {
+    let (mut space, _root) = with_game("agent-check");
+    let clean = space.run_tool("game_check", &json!({})).unwrap();
+    assert!(clean.starts_with("Nothing wrong found"), "{clean}");
+    space.apply(edit("room:crossroads_02", vec![Op::Remove { path: vec!["collision".into()] }]));
+    space.apply(edit("room:crossroads_01", vec![set(&["entities", "#to_east", "to", "entry"], json!("north"))]));
+    let found = space.run_tool("game_check", &json!({})).unwrap();
+    assert!(found.contains("room crossroads_02 has no collision"), "{found}");
+    assert!(found.contains("leads to north in room crossroads_02, which is not a spawn there"), "{found}");
+}
+
+#[test]
+fn the_agent_plays_a_route_and_sees_what_an_unsaved_edit_did_to_it() {
+    use proton_core::game::Game;
+    let root = project("agent-play");
+    let mut game = Game::default();
+    game.apply(&root, Command::GameNew { name: "Crossroads".into(), template: "metroidvania".into(), folder: None });
+    let run = json!({"room": "crossroads_01", "inputs": [{"hold": ["right"], "ticks": 240}]});
+    // Saved and unchanged: the thorns on the way hurt.
+    let saved = game.tool("game_play", &run).unwrap();
+    assert!(saved.contains("Hurt 1 time") || saved.contains("Hurt 2 times"), "{saved}");
+    assert!(!saved.contains("as last saved"), "a game with nothing unsaved was compared with itself: {saved}");
+    // Drawn over the room for the person.
+    let drawn = game.take_pending();
+    let parts = drawn.iter().find_map(|e| match e {
+        Event::GamePath { parts } => Some(parts.clone()),
+        _ => None,
+    });
+    let parts = parts.expect("the run was not drawn");
+    assert_eq!(parts[0].room, "crossroads_01");
+    assert!(parts[0].points.len() > 100 && !parts[0].hurt.is_empty());
+    assert!(parts[0].hurt.iter().all(|p| (1850..2150).contains(&p[0])), "hurt away from the thorns: {:?}", parts[0].hurt);
+    // The thorns taken away and not saved: this run is never hurt, and the
+    // saved game's, played beside it, still is.
+    game.tool("game_edit", &json!({"document": "room:crossroads_01", "ops": [{"op": "remove", "path": ["collision", "#thorns"]}]})).unwrap();
+    let now = game.tool("game_play", &run).unwrap();
+    let (this, before) = now.split_once("On the game as last saved").expect("not compared with the saved game");
+    assert!(this.contains("Never hurt") && this.contains("unsaved changes included"), "{now}");
+    assert!(before.starts_with(", the same inputs make a different run") && before.contains("Hurt"), "{now}");
+    // Inputs that are not actions are refused with the ones there are.
+    let wrong = game.tool("game_play", &json!({"inputs": [{"hold": ["fly"], "ticks": 10}]})).unwrap_err();
+    assert!(wrong.contains("left, right, up, down, jump, attack, dash"), "{wrong}");
+    assert!(game.tool("game_play", &json!({"abilities": ["fly"], "inputs": [{"hold": [], "ticks": 1}]})).unwrap_err().contains("no ability fly"));
+}
+
+#[test]
+fn a_run_the_person_played_is_replayed_by_its_number() {
+    let (mut space, _root) = with_game("agent-replay");
+    let replay = vec![(proton_game::sim::input::RIGHT, 60), (0, 20)];
+    space.apply(Command::GameRecorded { room: 0, at: [400 * 256, 1800 * 256], abilities: 0, replay, hash: "0".into() });
+    let info = space.run_tool("game_info", &json!({})).unwrap();
+    assert!(info.contains("1 (crossroads_01, 80 ticks)"), "{info}");
+    let played = space.run_tool("game_play", &json!({"recording": 1})).unwrap();
+    assert!(played.starts_with("Played the person's run 1 from crossroads_01 at (400, 1800)"), "{played}");
+    assert!(played.contains("after 80 ticks"), "{played}");
+}
+
+#[test]
+fn game_mentioned_sends_the_game_and_the_room_on_screen() {
+    let mut game = proton_core::game::Game::default();
+    let root = project("agent-mention");
+    game.apply(&root, Command::GameNew { name: "Crossroads".into(), template: "metroidvania".into(), folder: None });
+    let about = game.about();
+    assert!(about.starts_with("Crossroads"), "{about}");
+    assert!(about.contains("The room on screen, crossroads_01 (rooms/crossroads_01.room.json)"), "{about}");
+}

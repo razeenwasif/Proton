@@ -27,10 +27,10 @@ import { readGame } from "./bridge.js";
 /** The Game mode's keys, as ? lists them. */
 const KEYS = /** @type {[string, string][]} */ ([
   ["⌘S", "save every changed room and file"], ["⌘Z ⇧⌘Z", "undo, redo — wherever the change was"],
-  ["⎋", "select nothing"], ["⌫", "remove what is selected"], ["[ ]", "the room tab before, after"],
+  ["⎋", "select nothing; with nothing selected, clear the agent's run"], ["⌫", "remove what is selected"], ["[ ]", "the room tab before, after"],
   ["1 2 3 4", "World, Layers, Entities, Assets"], ["v p", "select; draw collision"], ["↩ ⎋", "end the line; drop it"],
   ["⌥ click", "a point on the selected line"], ["double-click", "take a point away"], ["f", "the whole room"], ["two fingers", "move over the room"],
-  ["pinch ⌘ wheel", "zoom"], ["␣ drag", "move over the room"], ["?", "these keys"],
+  ["pinch ⌘ wheel", "zoom"], ["␣ drag", "move over the room"], ["▶", "play the room — the game has the keys; ⎋ stops"], ["?", "these keys"],
 ]);
 
 /** What rooms place without a prefab of the game's own. */
@@ -96,6 +96,9 @@ export function createGame(host) {
   let startPaused = false;
   /** Why the last run could not start, shown in the Run tab. */
   let playError = "";
+  /** Where the agent's last run went, room by room: drawn until ⎋ or a run of
+   *  the person's own. @type {{room: string, points: number[][], hurt: number[][]}[]} */
+  let agentPath = [];
 
   const stage = q("[data-game-stage]");
   const canvas = /** @type {HTMLCanvasElement} */ (q("[data-game-overlay]"));
@@ -604,6 +607,7 @@ export function createGame(host) {
     draw(g, r, view, shade, selected, {
       art: Boolean(gpu), box: selectedBox(), camera: gpu ? [at[0], at[1], frame.view[0], frame.view[1]] : null,
       vertices: line?.points ?? null, pen: tool === "pen" ? pen : null,
+      path: agentPath.filter((p) => p.room === r.id),
     });
   }
   new ResizeObserver(() => paint()).observe(stage);
@@ -640,6 +644,7 @@ export function createGame(host) {
   function play() {
     if (!project?.focus) return;
     playError = "";
+    agentPath = [];
     send({ type: "gamePlay", room: project.focus, abilities: [...granted] });
   }
   q("[data-game-play]").addEventListener("click", () => (playing() ? player?.pause(false) : play()));
@@ -1214,8 +1219,7 @@ export function createGame(host) {
       `<p class="game-faint" data-game-tick></p></section>` +
       `<section class="game-tool"><h4>Runs</h4>${
         project.recordings.length
-          ? `<ul class="game-runs">${[...project.recordings]
-              .reverse()
+          ? `<ul class="game-runs">${project.recordings
               .map(
                 (r) =>
                   `<li class="game-run"><span class="game-run-room">${esc(r.room)}</span>` +
@@ -1265,6 +1269,7 @@ export function createGame(host) {
     if (e.key === "?") return (host.keys?.("— Game's keys", KEYS), true);
     if (tool === "pen" && e.key === "Escape") return (pen.points.length ? ((pen.points = []), (pen.hover = null), paint()) : useTool("select"), true);
     if (tool === "pen" && e.key === "Enter") return (finishPen(false), true);
+    if (e.key === "Escape" && !selected && agentPath.length) return ((agentPath = []), paint(), true);
     if (e.key === "Escape") return (select(null), true);
     if (e.key === "v") return (useTool("select"), true);
     if (e.key === "p") return (useTool("pen"), true);
@@ -1347,6 +1352,12 @@ export function createGame(host) {
           playError = `The game could not run: ${error instanceof Error ? error.message : String(error)}`;
           renderRun();
         });
+    },
+    /** Where the agent's run went, to draw over the room.
+     *  @param {{parts: {room: string, points: number[][], hurt: number[][]}[]}} event */
+    path(event) {
+      agentPath = event.parts ?? [];
+      paint();
     },
     /** The run's frame, for tests. */
     frame: () => player?.frame() ?? null,

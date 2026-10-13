@@ -23,6 +23,7 @@ import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
 import type { ExperimentRow } from "./ExperimentRow";
 import type { GameFound } from "./GameFound";
+import type { GamePathPart } from "./GamePathPart";
 import type { GameProjectView } from "./GameProjectView";
 import type { GameRoom } from "./GameRoom";
 import type { GameTemplate } from "./GameTemplate";
@@ -531,7 +532,7 @@ meshes: Array<string>, } | { "type": "geometry" } & Geometry | { "type": "gameHo
 /**
  * Room, x, y (1/256 px), abilities.
  */
-start: [number, number, number, number], rooms: Array<GameRoom>, keys: Array<[string, number]>, replay: Array<[number, number]> | null, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "cut", 
+start: [number, number, number, number], rooms: Array<GameRoom>, keys: Array<[string, number]>, replay: Array<[number, number]> | null, } | { "type": "gamePath", parts: Array<GamePathPart>, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "cut", 
 /**
  * Empty when none is open.
  */

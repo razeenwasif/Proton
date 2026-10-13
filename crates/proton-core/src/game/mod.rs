@@ -20,6 +20,9 @@ use ts_rs::TS;
 use crate::bus::{Command, Event, NoticeLevel};
 use crate::workspace::notice;
 
+mod agent;
+pub use agent::{GamePathPart, TOOLS};
+
 /// Whether a command is Game mode's.
 pub fn handles(command: &Command) -> bool {
     matches!(
@@ -140,6 +143,8 @@ pub struct Game {
     /// Runs played, newest last, and the next one's number.
     recordings: Vec<GameRecording>,
     recorded: u32,
+    /// What the agent's tools changed on screen, for the window.
+    pending: Vec<Event>,
 }
 
 impl Game {
@@ -354,25 +359,12 @@ impl Game {
 
     /// A run to play, cooked from the game as it is now.
     fn play(&self, room: Option<String>, at: Option<[i32; 2]>, abilities: Vec<String>, recording: Option<u32>) -> Result<Event, String> {
-        use proton_game::sim::world::fx;
         let project = self.project.as_ref().ok_or("no game is open")?;
         let world = proton_game::sim::World::cook(project)?;
         let (start, replay) = match recording.and_then(|id| self.recordings.iter().find(|r| r.id == id)) {
             Some(r) => ((r.start.0, r.start.1, r.start.2), Some(r.replay.clone())),
             None => {
-                let bits = abilities.iter().map(|id| world.ability(id)).fold(0, |all, b| all | b);
-                let (index, place) = match &room {
-                    Some(id) => {
-                        let index = world.room(id).ok_or_else(|| format!("there is no room {id}"))?;
-                        let there = &world.rooms[index as usize];
-                        let place = match at {
-                            Some(p) => [fx(p[0] as f64), fx(p[1] as f64)],
-                            None => there.spawns.first().map(|s| s.1).unwrap_or([fx(64.0), fx(64.0)]),
-                        };
-                        (index, place)
-                    }
-                    None => world.start,
-                };
+                let (index, place, bits) = agent::start_of(&world, room.as_deref(), at, &abilities)?;
                 ((index, place, bits), None)
             }
         };
@@ -465,6 +457,7 @@ impl Game {
             revision: self.revision + 1,
             recordings: Vec::new(),
             recorded: 0,
+            pending: Vec::new(),
         };
         Ok(())
     }

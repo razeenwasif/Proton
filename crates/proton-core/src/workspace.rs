@@ -4499,6 +4499,10 @@ impl Workspace {
             if call.name == "edit_file" {
                 events.push(self.review_event());
             }
+            // An edit to the game, or a run drawn over its room.
+            if crate::game::TOOLS.contains(&call.name.as_str()) {
+                events.extend(self.game.take_pending());
+            }
             self.agent.answer(&call.id, answer);
         }
 
@@ -4737,6 +4741,7 @@ impl Workspace {
                 crate::mention::Mention::Dataframe => self.selected_frame(),
                 crate::mention::Mention::Log => self.tex_log_text(),
                 crate::mention::Mention::Pdf => self.pdf_about.clone().unwrap_or_else(|| "No PDF is open in the PDF mode.".into()),
+                crate::mention::Mention::Game => self.game.about(),
             });
         }
         out
@@ -5128,6 +5133,8 @@ impl Workspace {
         };
 
         match name {
+            // The game open in Game mode, answered by its module.
+            name if crate::game::TOOLS.contains(&name) => self.game.tool(name, input),
             "read_file" => {
                 let path = text("path")?;
                 let buffer = proton_text::Buffer::open(self.pickers.resolve(&path))

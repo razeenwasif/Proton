@@ -1588,9 +1588,27 @@ allows WebAssembly by `'wasm-unsafe-eval'` and nothing wider: `eval` stays
 refused, and `ui/serve.mjs?csp=1` serves a page with the app's own policy so a
 test sees both.
 
-**What comes next** (the plan's G6–G14): the agent's tools and `@game`,
-importers (PSD, Aseprite, DragonBones, Spine, glTF), lighting, animation,
-combat, the world map with ability gates, hot reload and a web export.
+**The agent** has four tools on the open game (`game::agent`), answered in
+the workspace, whose the game is. `game_info` gives the game in a page — its
+controller's numbers, abilities, rooms with their spawns and entities, what
+is unsaved, its problems, the person's runs — or one document's JSON as it is
+now, from which the paths `game_edit` takes are read. `game_edit` sends the
+same ops the person's gestures do, so its change is one step of their undo,
+refused whole if it would leave a document invalid, and held until they save;
+it says which problems it newly leaves. `game_check` adds rooms with no
+collision or spawn, and whether the game cooks at all, to the documents'
+problems. `game_play` plays the game headless, natively, from actions held
+for counts of ticks (or a run the person played, by its number), and says
+where the player ended, where it was hurt, which rooms it entered and what it
+gained, with its place every few ticks; when the game has unsaved changes the
+same inputs are played on the game as last saved too, so a ledge raised past
+jump height shows as a route that worked before the edit and fails after it.
+Its path is sent to the window (`GamePath`) and drawn over the rooms it
+crossed until ⎋. `@game` sends the summary and the room on screen.
+
+**What comes next** (the plan's G7–G14): importers (PSD, Aseprite,
+DragonBones, Spine, glTF), lighting, animation, combat, the world map with
+ability gates, hot reload and a web export.
 
 ### Trace
 
