@@ -492,6 +492,43 @@ fn study_media(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response
     builder.body(served.body).unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
 }
 
+/// Keep the page drawn while the window is out of sight.
+///
+/// WebKit counts a window covered by others, or on another desktop, as not
+/// visible, and marks what the page drew as memory the system may take back.
+/// Under memory pressure it is taken, and Mission Control — which shows the
+/// other desktops from what each window last drew — shows only the frosted
+/// backdrop. `backgroundThrottling: "throttle"` (tauri.conf.json) stopped
+/// WebKit suspending the page, but not this; it came back on a day of builds
+/// that filled the swap. Told not to watch the window's occlusion, WebKit
+/// keeps the page visible until the window is minimised or Proton hidden. The
+/// cost is a covered page whose timers run at their own speed, which for
+/// Proton at rest is the caret's blink. A private call — the app already uses
+/// macOS's private API — asked for only where this WebKit has it.
+fn keep_drawing(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        let done = window.with_webview(|webview| {
+            use objc2::runtime::AnyObject;
+            use objc2::{msg_send, sel};
+            let view = webview.inner() as *mut AnyObject;
+            // SAFETY: `view` is this window's live WKWebView, and Tauri runs
+            // this on the main thread.
+            unsafe {
+                let has: bool = msg_send![view, respondsToSelector: sel!(_setWindowOcclusionDetectionEnabled:)];
+                if has {
+                    let _: () = msg_send![view, _setWindowOcclusionDetectionEnabled: false];
+                }
+            }
+        });
+        if let Err(err) = done {
+            eprintln!("proton: could not keep the page drawn while hidden: {err}");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+}
+
 fn main() {
     // Opened from the Finder or the Dock, this has launchd's PATH, and so
     // would everything it starts by name — ffprobe, pandoc, git, a kernel's
@@ -549,6 +586,7 @@ fn main() {
             let applied = backdrop::apply(&window, Backdrop::default());
             println!("[shell] backdrop: {applied}");
             app.manage(Surface::new(applied));
+            keep_drawing(&window);
 
             spawn_poll(app.handle().clone());
 
