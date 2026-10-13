@@ -89,6 +89,18 @@ export async function readGame(key) {
   return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
 }
 
+/** Tiles of one layer of the open canvas, as bytes (see the shell's
+ *  `read_raster` for the layout). @param {number} generation @param {number} layer @param {number[]} tiles */
+export async function readRaster(generation, layer, tiles) {
+  if (!tauri) {
+    const adapter = await preview;
+    if (!adapter) throw new Error('Browser preview is unavailable');
+    return adapter.readRaster(generation, layer, tiles);
+  }
+  const body = await tauri.core.invoke("read_raster", { generation, layer, tiles });
+  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
+}
+
 /** @param {string} key */
 export async function readGeometry(key) {
   if (!tauri) {

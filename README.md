@@ -33,7 +33,7 @@ wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
 on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
 already call it `cmake`.
 
-Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃8` switch mode · `␣` leader · `⌘K` Telescope ·
+Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃0`, `⌃-` and `⌃=` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
 `␣w` splits · `` ⌃` `` terminal · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
@@ -66,6 +66,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-game/` | Game mode's engine: its project format, editable documents, template, collision tracing and the fixed-point simulation |
 | `crates/proton-game-runtime/` | The simulation as WebAssembly, for the window's Play — built to `ui/game-runtime.wasm` by `scripts/game-wasm.mjs` |
 | `crates/proton-raster/` | Canvas mode's engine: layered pictures in 64-px tiles, blend modes, ops with undo, the `.canvas` folder format — in whole numbers only, so the window's WebAssembly and the core make the same pixels |
+| `crates/proton-raster-runtime/` | The raster engine as WebAssembly, the window's copy of a canvas — built to `ui/raster-runtime.wasm` by `scripts/wasm.mjs` |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
 | `ui/` | The front end — the app's real chrome, and the interactive prototype — all eleven modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
@@ -230,6 +231,12 @@ each group at the depth its name gives (`Far hills [800]`). The agent reads,
 checks, edits (held for you to save) and plays the game headless, comparing a
 route against the saved game, and `@game` sends it the game and the room on
 screen.
+**Canvas** · pixel art and painting, on ⌃=: one engine, two presets — Pixel,
+a small grid drawn a pixel at a time from a palette, and Paint, a large
+canvas of pressure-led brushes over layers that blend. A canvas is a folder,
+`Name.canvas/`: a `canvas.json` that diffs and a PNG a layer. The window
+paints on its own copy, the engine built as WebAssembly, and the core makes
+every edit again on the canvas it saves, checking the two by a hash.
 **Video** · a multitrack timeline over a CMX3600 edit decision list, with the
 captions from the `.srt` beside it. Both files are spliced, never re-printed.
 There is no program monitor: a frame of the programme is a decoded frame of
@@ -543,6 +550,15 @@ as the change it was. A new game comes from a template whose art is drawn in
 code. The simulation is written once, in Rust on integers only, and runs
 natively for tests and the agent and as WebAssembly in the window, so a run
 played in one ends exactly where it does in the other.
+
+Canvas is a raster engine of Proton's own, for the two kinds of picture a
+game and a person most often want: pixel art, and painting. Layers are kept
+in 64-pixel tiles, shared until changed, and laid together by the W3C's blend
+modes in whole numbers, so the copy the window paints on — the same engine as
+WebAssembly — and the canvas the core saves are the same to the byte; an edit
+made in the window is checked against the core's by a hash of the tiles it
+touched, and fetched again from the core if they differ. Generators — palettes,
+sprites, noise, caves — are procedural and seeded, not a model.
 
 Video reads a cut: an `.edl` is one line per event and four timecodes per line,
 plain text that has diffed in Git since before Git, and the timeline draws each

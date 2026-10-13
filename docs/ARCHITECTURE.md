@@ -1632,6 +1632,55 @@ crossed until ⎋. `@game` sends the summary and the room on screen.
 (Aseprite, DragonBones, Spine), combat, the world map with ability gates, hot
 reload and a web export.
 
+### Canvas
+
+Pixel art and painting, one mode with two presets: **Pixel**, a small grid
+seen through nearest-neighbour and drawn a pixel at a time from a palette,
+and **Paint**, a large canvas of pressure-led brushes over layers that blend.
+"Canvas" on the rail and ⌃=; `raster` in the code, where "paint" and "canvas"
+already mean drawing a frame (as PDF is `pdf` behind "Reader").
+
+**The engine** (`proton-raster`) is whole numbers only — no floats, no
+unordered maps, no arithmetic on `usize`, a test keeps it so — because it runs
+twice. A layer's pixels are straight RGBA in 64 × 64 tiles: the size of what
+an undo step keeps, of what the window is sent, and of what a sparse layer
+holds; tiles are shared (`Arc`) until changed and absent when clear. Layers
+are laid together by the W3C's separable blend modes (and add and subtract),
+premultiplied at 16 bits a channel so a stack of half-clear layers loses no
+shade, each within one of the formula in floats. Every change is an `Op`,
+applied whole or not at all, reporting the tiles it touched; history keeps the
+tiles as they were, held to bytes and steps, and a state number says whether
+the canvas is saved — undoing to the saved state is saved.
+
+**Two copies.** The window keeps its own copy of the canvas in the same
+engine built as WebAssembly (`proton-raster-runtime`, a plain C ABI, built by
+`scripts/wasm.mjs` with Game's) and lays it together there, so what is shown
+is the integer code the core exports with; WebGL only shows one texture,
+updated a rectangle at a time straight from the engine's memory
+(`UNPACK_ROW_LENGTH`), over a checkerboard. An edit is made there first and
+shown at once, then sent numbered (`RasterEdit`); the core makes it on the
+canvas it saves and answers with a hash of the tiles it touched. The window
+compares; when they differ, or the core refused, its copy is made again from
+the core's through `read_raster` — a byte command that takes the tiles under
+the lock, shared, and writes them out after letting go. What the core changes
+itself — undo, redo, the agent — is pushed as the tiles it changed, the layer
+list first. `generation` numbers each canvas opened, so nothing about one is
+taken for the next. The WebAssembly's memory is capped at a gigabyte, so a
+canvas too large for it fails with a reason; the probe confirms WebKit grows
+it that far and no further, under the app's CSP.
+
+**On disk** a canvas is a folder, `Name.canvas/`: `canvas.json` (size, preset,
+palette, layers) written last and in declared order, a full-size PNG a layer —
+indexed for a pixel layer of 256 colours or fewer — and `flat.png` for pixel
+canvases. The same pixels write the same bytes, so a layer nobody touched
+never shows in a diff. ⌘S writes on a worker from a snapshot that shares the
+tiles; quitting saves at once, after any save under way.
+
+**What comes next** (the plan's P2–P8): the pencil and the pixel tools with
+prediction for every stroke, pressure brushes, selections and transforms,
+procedural generators and filters, import and export (PSD, sending art to a
+game), the agent's tools, and pixel animation.
+
 ### Trace
 
 Code Visualizer, sidecar first and native second — [`CODE-VISUALIZER.md`](CODE-VISUALIZER.md)

@@ -211,6 +211,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="design"><svg class="i"><use href="#i-pen"/></svg><span>Design</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="modeling"><svg class="i"><use href="#i-cube"/></svg><span>Model</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="game"><svg class="i"><use href="#i-game"/></svg><span>Game</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="raster"><svg class="i"><use href="#i-palette"/></svg><span>Canvas</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="video"><svg class="i"><use href="#i-video"/></svg><span>Video</span></button>
       </div>
 
@@ -992,6 +993,76 @@
       </aside>
     </section>
 
+    <!-- ══ CANVAS ════════════════════════════════════════════════ -->
+    <!-- Canvas mode ("raster" in the code): pixel art and painting, one
+         engine and two presets. Laid out as Game is: the layers, the picture,
+         and what is selected beside the agent. -->
+    <section class="workspace raster-home" data-ws="raster" style="--col-l:260px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side raster-side">
+        <header class="raster-side-tabs" role="tablist" aria-label="The canvas">
+          <button class="dock-tab on" role="tab" aria-selected="true" data-raster-side="layers">Layers</button>
+        </header>
+        <div class="raster-layer-tools" data-raster-layer-tools>
+          <button class="hbtn" data-raster-layer-add title="A new layer above the one chosen" aria-label="New layer">＋</button>
+          <button class="hbtn" data-raster-layer-up title="Up a place" aria-label="Move the layer up">↑</button>
+          <button class="hbtn" data-raster-layer-down title="Down a place" aria-label="Move the layer down">↓</button>
+          <span class="grow"></span>
+          <button class="hbtn" data-raster-layer-remove title="Remove the layer" aria-label="Remove the layer">✕</button>
+        </div>
+        <div class="scroll raster-side-body" data-raster-layers></div>
+      </aside>
+
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
+      <main class="pane raster-main">
+        <div class="raster-bar">
+          <button class="hbtn" data-raster-leave title="Your canvases — the home page" aria-label="Your canvases"><svg class="i"><use href="#i-grid"/></svg></button>
+          <span class="raster-name" data-raster-name></span>
+          <span class="raster-dirty dot" data-raster-dirty title="Changes not saved" hidden></span>
+          <span class="raster-size" data-raster-size></span>
+          <span class="grow"></span>
+          <span class="raster-zoom" data-raster-zoom title="f fits it; 1 is 100 %"></span>
+          <button class="hbtn" data-raster-undo title="Undo  ⌘Z" aria-label="Undo" disabled><svg class="i"><use href="#i-undo"/></svg></button>
+          <button class="hbtn" data-raster-redo title="Redo  ⇧⌘Z" aria-label="Redo" disabled><svg class="i"><use href="#i-redo"/></svg></button>
+          <button class="hbtn" data-raster-save title="Save  ⌘S" disabled>Save</button>
+        </div>
+        <!-- What is asked before a canvas with changes is left. -->
+        <div class="raster-ask" data-raster-ask hidden></div>
+        <div class="raster-stage" data-raster-stage tabindex="0" aria-label="The canvas">
+          <canvas class="raster-gl" data-raster-gl></canvas>
+          <div class="raster-empty" data-raster-stage-empty hidden></div>
+          <!-- The home page: the canvases here, and a new one. -->
+          <div class="raster-open" data-raster-open>
+            <div class="raster-open-in" data-raster-home></div>
+          </div>
+        </div>
+      </main>
+
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+      <aside class="pane raster-pane" id="raster-pane" data-showing="inspector">
+        <header class="raster-pane-head" role="tablist" aria-label="Inspector and the agent">
+          <button class="dock-tab on" role="tab" aria-selected="true" data-raster-panel="inspector">Inspector</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-raster-panel="agent">Agent <span class="dot" data-raster-agent-dot hidden></span></button>
+        </header>
+        <div class="scroll raster-pane-body" data-raster-body="inspector" data-raster-inspector></div>
+        <div class="raster-agent" data-raster-body="agent" hidden>
+          <div class="scroll" data-agent-thread></div>
+          <div class="composer">
+            <div class="box">
+              <div class="txt" contenteditable="plaintext-only" role="textbox"
+                   aria-label="Ask about this canvas" data-agent-input
+                   data-placeholder="Ask about this canvas"></div>
+              <div class="foot">
+                <span class="grow"></span>
+                <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
+                <span class="send" data-agent-send role="button" tabindex="0"
+                      aria-label="Send"><svg class="i"><use href="#i-send"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
     <!-- ══ VIDEO ═════════════════════════════════════════════════ -->
     <section class="workspace" data-ws="video" style="--col-l:226px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side">
@@ -1351,7 +1422,7 @@
        one ground from edge to edge. The title bar it does keep stands on its
        end down the right edge, so the code has the window's full height. It
        holds what the rails held that Codex still needs: the window controls,
-       the modes — so the window can be left by mouse as well as by ⌃1–9, ⌃0 and ⌃- —
+       the modes — so the window can be left by mouse as well as by ⌃1–9, ⌃0, ⌃- and ⌃= —
        and the panel toggles a hidden statusline would otherwise take with
        it. The empty stretch between them is the window's drag surface.
        After the body in the source because it is after it on screen, so Tab
@@ -1375,6 +1446,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="design" title="Design  ⌃6"><span>Design</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="modeling" title="Model  ⌃7"><span>Model</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="game" title="Game  ⌃8"><span>Game</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="raster" title="Canvas  ⌃="><span>Canvas</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="video" title="Video  ⌃9"><span>Video</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
@@ -1672,7 +1744,7 @@
   <button class="hint-toggle" title="Keyboard hints"><svg class="i"><use href="#i-keyboard"/></svg></button>
   <div class="hint-keys">
   <span>Try</span>
-  <kbd>⌃1</kbd><kbd>…</kbd><kbd>⌃0</kbd><kbd>⌃-</kbd><span style="color:var(--ink-3)">modes</span>
+  <kbd>⌃1</kbd><kbd>…</kbd><kbd>⌃0</kbd><kbd>⌃-</kbd><kbd>⌃=</kbd><span style="color:var(--ink-3)">modes</span>
   <kbd>␣</kbd><span style="color:var(--ink-3)">leader</span>
   <kbd>⌘K</kbd><span style="color:var(--ink-3)">telescope</span>
   <kbd>:</kbd><span style="color:var(--ink-3)">cmd</span>

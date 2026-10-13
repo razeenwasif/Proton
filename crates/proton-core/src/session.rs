@@ -673,6 +673,11 @@ impl Session {
         self.active().game_file(key)
     }
 
+    /// Tiles of the canvas open in the project on screen, shared.
+    pub fn raster_tiles(&self, generation: u32, layer: u32, tiles: &[u32]) -> Option<crate::raster::RasterTiles> {
+        self.active().raster_tiles(generation, layer, tiles)
+    }
+
     /// A file some workspace here opened in the document viewer — the page
     /// may still be showing one from a project it has since left.
     /// The bytes of a view the PDF mode holds, by its key — never on disk.

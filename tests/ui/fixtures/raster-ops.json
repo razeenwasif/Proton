@@ -1,0 +1,588 @@
+{
+  "composite": "3af1aafb0161c4cb",
+  "flat": "d95f745e61322a0b",
+  "hashes": [
+    "a5fbe81a74dae0c1",
+    "88d4c5bf137aa7ab",
+    "cbf29ce484222325",
+    "cbf29ce484222325",
+    "3d6c62c0998f0fd6",
+    "3d6c62c0998f0fd6",
+    "cbf29ce484222325",
+    "30359bc399aa5681",
+    "30359bc399aa5681",
+    "cbf29ce484222325",
+    "e7939f6985b673ac",
+    "e7939f6985b673ac",
+    "cbf29ce484222325",
+    "40a0ce87cdc2a457",
+    "40a0ce87cdc2a457",
+    "cbf29ce484222325",
+    "b1a4ea9882a91382",
+    "b1a4ea9882a91382",
+    "cbf29ce484222325",
+    "8bf0d2f24603e42d",
+    "8bf0d2f24603e42d",
+    "cbf29ce484222325",
+    "b69138687f342108",
+    "b69138687f342108",
+    "cbf29ce484222325",
+    "8dcb5d3e0926d253",
+    "8dcb5d3e0926d253",
+    "cbf29ce484222325",
+    "ab76efa9b4f0c1fe",
+    "ab76efa9b4f0c1fe",
+    "cbf29ce484222325",
+    "bb697a8e02cc5d38",
+    "bb697a8e02cc5d38",
+    "cbf29ce484222325",
+    "b28f6b336a38a0f2",
+    "b28f6b336a38a0f2",
+    "cbf29ce484222325",
+    "b207476ee87fa602",
+    "b207476ee87fa602",
+    "cbf29ce484222325",
+    "a62459211e28fd87",
+    "a62459211e28fd87",
+    "cbf29ce484222325",
+    "0cfb43c6dca87d35",
+    "0cfb43c6dca87d35",
+    "30359bc399aa5681",
+    "40a0ce87cdc2a457",
+    "bf50a1185d5733b6"
+  ],
+  "open": {
+    "generation": 1,
+    "height": 70,
+    "layers": [
+      {
+        "alphaLock": false,
+        "blend": "normal",
+        "hidden": false,
+        "id": 1,
+        "locked": false,
+        "name": "Background",
+        "opacity": 255
+      }
+    ],
+    "palette": [],
+    "preset": "paint",
+    "width": 100
+  },
+  "ops": [
+    {
+      "color": [
+        40,
+        60,
+        90,
+        255
+      ],
+      "layer": 1,
+      "op": "fillRect",
+      "rect": [
+        0,
+        0,
+        100,
+        70
+      ]
+    },
+    {
+      "color": [
+        220,
+        180,
+        40,
+        200
+      ],
+      "layer": 1,
+      "op": "fillRect",
+      "rect": [
+        10,
+        5,
+        30,
+        50
+      ]
+    },
+    {
+      "colors": [
+        [
+          26,
+          28,
+          44,
+          255
+        ],
+        [
+          93,
+          39,
+          93,
+          255
+        ]
+      ],
+      "op": "setPalette"
+    },
+    {
+      "at": null,
+      "name": "Normal",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        0,
+        200,
+        0,
+        150
+      ],
+      "layer": 2,
+      "op": "fillRect",
+      "rect": [
+        0,
+        0,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "normal",
+      "hidden": null,
+      "layer": 2,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 160
+    },
+    {
+      "at": null,
+      "name": "Multiply",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        37,
+        189,
+        53,
+        157
+      ],
+      "layer": 3,
+      "op": "fillRect",
+      "rect": [
+        6,
+        4,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "multiply",
+      "hidden": null,
+      "layer": 3,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 166
+    },
+    {
+      "at": null,
+      "name": "Screen",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        74,
+        178,
+        106,
+        164
+      ],
+      "layer": 4,
+      "op": "fillRect",
+      "rect": [
+        12,
+        8,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "screen",
+      "hidden": null,
+      "layer": 4,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 172
+    },
+    {
+      "at": null,
+      "name": "Overlay",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        111,
+        167,
+        159,
+        171
+      ],
+      "layer": 5,
+      "op": "fillRect",
+      "rect": [
+        18,
+        12,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "overlay",
+      "hidden": null,
+      "layer": 5,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 178
+    },
+    {
+      "at": null,
+      "name": "Darken",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        148,
+        156,
+        212,
+        178
+      ],
+      "layer": 6,
+      "op": "fillRect",
+      "rect": [
+        24,
+        16,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "darken",
+      "hidden": null,
+      "layer": 6,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 184
+    },
+    {
+      "at": null,
+      "name": "Lighten",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        185,
+        145,
+        9,
+        185
+      ],
+      "layer": 7,
+      "op": "fillRect",
+      "rect": [
+        30,
+        20,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "lighten",
+      "hidden": null,
+      "layer": 7,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 190
+    },
+    {
+      "at": null,
+      "name": "ColorDodge",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        222,
+        134,
+        62,
+        192
+      ],
+      "layer": 8,
+      "op": "fillRect",
+      "rect": [
+        36,
+        24,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "colorDodge",
+      "hidden": null,
+      "layer": 8,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 196
+    },
+    {
+      "at": null,
+      "name": "ColorBurn",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        3,
+        123,
+        115,
+        199
+      ],
+      "layer": 9,
+      "op": "fillRect",
+      "rect": [
+        42,
+        28,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "colorBurn",
+      "hidden": null,
+      "layer": 9,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 202
+    },
+    {
+      "at": null,
+      "name": "HardLight",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        40,
+        112,
+        168,
+        206
+      ],
+      "layer": 10,
+      "op": "fillRect",
+      "rect": [
+        48,
+        32,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "hardLight",
+      "hidden": null,
+      "layer": 10,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 208
+    },
+    {
+      "at": null,
+      "name": "SoftLight",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        77,
+        101,
+        221,
+        213
+      ],
+      "layer": 11,
+      "op": "fillRect",
+      "rect": [
+        54,
+        36,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "softLight",
+      "hidden": null,
+      "layer": 11,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 214
+    },
+    {
+      "at": null,
+      "name": "Difference",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        114,
+        90,
+        18,
+        220
+      ],
+      "layer": 12,
+      "op": "fillRect",
+      "rect": [
+        60,
+        40,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "difference",
+      "hidden": null,
+      "layer": 12,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 220
+    },
+    {
+      "at": null,
+      "name": "Exclusion",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        151,
+        79,
+        71,
+        227
+      ],
+      "layer": 13,
+      "op": "fillRect",
+      "rect": [
+        66,
+        44,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "exclusion",
+      "hidden": null,
+      "layer": 13,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 226
+    },
+    {
+      "at": null,
+      "name": "Add",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        188,
+        68,
+        124,
+        234
+      ],
+      "layer": 14,
+      "op": "fillRect",
+      "rect": [
+        72,
+        48,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "add",
+      "hidden": null,
+      "layer": 14,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 232
+    },
+    {
+      "at": null,
+      "name": "Subtract",
+      "op": "addLayer"
+    },
+    {
+      "color": [
+        225,
+        57,
+        177,
+        241
+      ],
+      "layer": 15,
+      "op": "fillRect",
+      "rect": [
+        78,
+        52,
+        22,
+        16
+      ]
+    },
+    {
+      "alphaLock": null,
+      "blend": "subtract",
+      "hidden": null,
+      "layer": 15,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": 238
+    },
+    {
+      "layer": 3,
+      "op": "moveLayer",
+      "to": 9
+    },
+    {
+      "alphaLock": null,
+      "blend": null,
+      "hidden": true,
+      "layer": 5,
+      "locked": null,
+      "name": null,
+      "op": "setLayer",
+      "opacity": null
+    },
+    {
+      "layer": 7,
+      "op": "removeLayer"
+    }
+  ],
+  "pick": [
+    [
+      15,
+      20,
+      3763521744
+    ],
+    [
+      70,
+      40,
+      4285278534
+    ]
+  ]
+}

@@ -116,6 +116,9 @@ impl Canvas {
                 if to != at {
                     patch.layers = Some((self.layers.clone(), self.next_id));
                     let moved = self.layers.remove(at as usize);
+                    // What is seen changes where it has pixels: what it is
+                    // over and under changed there.
+                    applied.touched = present(&moved);
                     self.layers.insert(to as usize, moved);
                     applied.meta = true;
                     applied.changed = true;
@@ -255,14 +258,15 @@ impl Canvas {
 }
 
 /// The tiles a layer has, as (layer, index).
-fn present(layer: &Layer) -> Vec<(u32, u32)> {
+pub fn present(layer: &Layer) -> Vec<(u32, u32)> {
     let id = layer.info.id;
     (0..layer.grid.cols * layer.grid.rows).filter(|&i| layer.grid.tile(i).is_some()).map(|i| (id, i)).collect()
 }
 
 /// The tiles that differ between two stacks of layers, by layer id: a layer
-/// in only one of them differs wherever it has pixels.
-fn differ(a: &[Layer], b: &[Layer]) -> Vec<(u32, u32)> {
+/// in only one of them differs wherever it has pixels, and one that moved, or
+/// is drawn differently, wherever it has them.
+pub fn differ(a: &[Layer], b: &[Layer]) -> Vec<(u32, u32)> {
     let mut out = Vec::new();
     let same = |x: Option<&Arc<Tile>>, y: Option<&Arc<Tile>>| match (x, y) {
         (None, None) => true,
@@ -277,7 +281,8 @@ fn differ(a: &[Layer], b: &[Layer]) -> Vec<(u32, u32)> {
         let (x, y) = (a.iter().find(|l| l.info.id == id), b.iter().find(|l| l.info.id == id));
         match (x, y) {
             (Some(x), Some(y)) => {
-                let shows = x.info.hidden != y.info.hidden || x.info.opacity != y.info.opacity || x.info.blend != y.info.blend;
+                let place = |s: &[Layer]| s.iter().position(|l| l.info.id == id);
+                let shows = x.info.hidden != y.info.hidden || x.info.opacity != y.info.opacity || x.info.blend != y.info.blend || place(a) != place(b);
                 for i in 0..x.grid.cols * x.grid.rows {
                     if shows && (x.grid.tile(i).is_some() || y.grid.tile(i).is_some()) || !same(x.grid.tile(i), y.grid.tile(i)) {
                         out.push((id, i));

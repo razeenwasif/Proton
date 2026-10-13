@@ -60,6 +60,8 @@ import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
 import type { PluginView } from "./PluginView";
 import type { ProposalView } from "./ProposalView";
+import type { RasterFound } from "./RasterFound";
+import type { RasterView } from "./RasterView";
 import type { Rate } from "./Rate";
 import type { RepoFile } from "./RepoFile";
 import type { ResearchDiscipline } from "./ResearchDiscipline";
@@ -532,7 +534,7 @@ meshes: Array<string>, } | { "type": "geometry" } & Geometry | { "type": "gameHo
 /**
  * Room, x, y (1/256 px), abilities.
  */
-start: [number, number, number, number], rooms: Array<GameRoom>, keys: Array<[string, number]>, replay: Array<[number, number]> | null, } | { "type": "gamePath", parts: Array<GamePathPart>, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "cut", 
+start: [number, number, number, number], rooms: Array<GameRoom>, keys: Array<[string, number]>, replay: Array<[number, number]> | null, } | { "type": "gamePath", parts: Array<GamePathPart>, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "rasterHome", canvases: Array<RasterFound>, } | { "type": "rasterCanvas", canvas: RasterView | null, } | { "type": "rasterApplied", generation: number, seq: number, version: number, hash: string, refused: string | null, dirty: boolean, canUndo: boolean, canRedo: boolean, } | { "type": "rasterChanged", generation: number, version: number, tiles: Array<[number, Array<number>]>, meta: boolean, } | { "type": "cut", 
 /**
  * Empty when none is open.
  */

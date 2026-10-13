@@ -27,6 +27,7 @@ pub mod mention;
 pub mod mode;
 pub mod modeling;
 pub mod pdf;
+pub mod raster;
 pub mod picker;
 pub mod plugins;
 pub mod review;

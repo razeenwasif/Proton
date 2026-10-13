@@ -1339,6 +1339,42 @@ pub enum Command {
     /// Write every unsaved document of the game.
     GameSave,
 
+    /* ── Canvas mode ──────────────────────────────────────────────── */
+    /// Open a canvas: a `.canvas` folder in the project.
+    RasterOpen { path: String },
+    /// Make a canvas, of a preset and a size, and open it. `folder` is where,
+    /// in the project; `<name>.canvas` at its top when not said.
+    #[serde(rename_all = "camelCase")]
+    RasterNew {
+        name: String,
+        preset: proton_raster::Preset,
+        width: u32,
+        height: u32,
+        #[serde(default)]
+        #[ts(optional)]
+        folder: Option<String>,
+    },
+    /// Close the canvas; refused while it has changes, unless they are to go.
+    RasterClose {
+        #[serde(default)]
+        discard: bool,
+    },
+    /// An edit the window has already made on its own copy, numbered: applied
+    /// here and answered with a hash of what it touched. `generation` is the
+    /// canvas's, so an edit meant for one since closed is not applied.
+    #[serde(rename_all = "camelCase")]
+    RasterEdit {
+        generation: u32,
+        seq: u32,
+        op: proton_raster::Op,
+        #[serde(default)]
+        label: String,
+    },
+    RasterUndo,
+    RasterRedo,
+    /// Write the canvas, on a worker.
+    RasterSave,
+
     /* ── cuts and captions ────────────────────── */
     /// Point Video mode at an `.edl`. Answered with `Event::Cut`.
     OpenTimeline {
@@ -2566,6 +2602,34 @@ pub enum Event {
         room: Option<proton_game::format::Room>,
         #[ts(type = "number")]
         revision: u64,
+    },
+    /// The project's canvases, for Canvas mode's home page.
+    RasterHome { canvases: Vec<crate::raster::RasterFound> },
+    /// The canvas open — its layers, palette and which tiles hold anything —
+    /// or none.
+    RasterCanvas { canvas: Option<crate::raster::RasterView> },
+    /// An edit answered: applied, with a hash of the tiles it touched for the
+    /// window to check its own copy against, or refused with why.
+    #[serde(rename_all = "camelCase")]
+    RasterApplied {
+        generation: u32,
+        seq: u32,
+        #[ts(type = "number")]
+        version: u64,
+        hash: String,
+        refused: Option<String>,
+        dirty: bool,
+        can_undo: bool,
+        can_redo: bool,
+    },
+    /// The canvas changed here, not in the window — undo, redo, the agent:
+    /// the tiles to fetch, by layer, and whether the layers themselves did.
+    RasterChanged {
+        generation: u32,
+        #[ts(type = "number")]
+        version: u64,
+        tiles: Vec<(u32, Vec<u32>)>,
+        meta: bool,
     },
     /// The cut Video mode is showing, and the captions beside it.
     ///

@@ -302,6 +302,37 @@ fn read_game(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<ta
     std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
 }
 
+/// Tiles of the open canvas, as bytes — what the window fetches when the core
+/// changed them (undo, redo, the agent) or when its copy was found to differ.
+///
+/// Under the lock only the tiles are taken, shared rather than copied; they
+/// are written out after it is let go, so a large canvas fetched whole does
+/// not hold every other command up. The layout, all little-endian `u32`s:
+/// abi (1), generation, version (low, high), the last edit's number, how many
+/// tiles; then each tile's index and whether it holds anything, and its
+/// 64 × 64 RGBA if it does.
+#[tauri::command(async)]
+fn read_raster(generation: u32, layer: u32, tiles: Vec<u32>, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
+    let taken = match session.lock() {
+        Ok(it) => it.session.raster_tiles(generation, layer, &tiles),
+        Err(poisoned) => poisoned.into_inner().session.raster_tiles(generation, layer, &tiles),
+    };
+    let taken = taken.ok_or_else(|| format!("layer {layer} of canvas {generation} is not open"))?;
+    let present = taken.tiles.iter().filter(|(_, t)| t.is_some()).count();
+    let mut out = Vec::with_capacity(24 + taken.tiles.len() * 8 + present * proton_raster::tile::TILE_BYTES as usize);
+    for word in [1, taken.generation, taken.version as u32, (taken.version >> 32) as u32, taken.last_seq, taken.tiles.len() as u32] {
+        out.extend(word.to_le_bytes());
+    }
+    for (index, tile) in &taken.tiles {
+        out.extend(index.to_le_bytes());
+        out.extend((tile.is_some() as u32).to_le_bytes());
+        if let Some(tile) = tile {
+            out.extend_from_slice(&tile.px);
+        }
+    }
+    Ok(tauri::ipc::Response::new(out))
+}
+
 /// Give the core a heartbeat.
 ///
 /// Everything a language server says arrives on a thread the core cannot see,
@@ -561,6 +592,7 @@ fn main() {
             read_geometry,
             read_lab,
             read_game,
+            read_raster,
             quit
         ])
         .setup(|app| {

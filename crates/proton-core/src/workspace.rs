@@ -118,6 +118,8 @@ pub struct Workspace {
     modeling: crate::modeling::Modeling,
     /// The game Game mode has open, and the rooms it shows.
     game: crate::game::Game,
+    /// The canvas open in Canvas mode, with its history and its saves.
+    raster: crate::raster::Raster,
     /// The cut Video mode is showing, and the captions beside it.
     video: crate::video::Video,
     /// The local model that turns a question into a vector, when the settings
@@ -589,7 +591,7 @@ impl Workspace {
     /// asks before closing it, because a closed workspace takes its buffers
     /// with it and there is no undo for that.
     pub fn is_modified(&self) -> bool {
-        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.game.unsaved().is_empty()
+        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.game.unsaved().is_empty() || !self.raster.unsaved().is_empty()
     }
 
     /// The files with unsaved changes, as the project names them.
@@ -605,6 +607,8 @@ impl Workspace {
             .collect();
         // A game's rooms are held until ⌘S, as a buffer is.
         files.extend(self.game.unsaved());
+        // So is a canvas.
+        files.extend(self.raster.unsaved());
         files
     }
 
@@ -617,6 +621,7 @@ impl Workspace {
         }
         let mut failed: Vec<String> = failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect();
         failed.extend(self.game.save_unsaved());
+        failed.extend(self.raster.save_unsaved());
         failed
     }
 
@@ -648,6 +653,16 @@ impl Workspace {
         match command {
             // Game mode's own, answered by its module as PDF's and
             // Notebook's are by theirs.
+            command if crate::raster::handles(&command) => {
+                let root = self.root().to_path_buf();
+                let mut events = self.raster.apply(&root, command);
+                if events.iter().any(|e| matches!(e, Event::RasterHome { .. })) {
+                    // A canvas made is files the tree and git see.
+                    events.push(self.tree_event());
+                    events.push(self.repo_event());
+                }
+                events
+            }
             command if crate::game::handles(&command) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.game.apply(&root, command);
@@ -722,6 +737,8 @@ impl Workspace {
                 // The games here, the one open and the room on screen.
                 let root = self.root().to_path_buf();
                 events.extend(self.game.events(&root));
+                // The canvases here, and the one open.
+                events.extend(self.raster.events(&root));
                 events
             }
 
@@ -1530,6 +1547,14 @@ impl Workspace {
             | Command::GameUndo
             | Command::GameRedo
             | Command::GameSave => Vec::new(),
+            // And these by Canvas's.
+            Command::RasterOpen { .. }
+            | Command::RasterNew { .. }
+            | Command::RasterClose { .. }
+            | Command::RasterEdit { .. }
+            | Command::RasterUndo
+            | Command::RasterRedo
+            | Command::RasterSave => Vec::new(),
             // PDF is the window's too: the session answers it.
             Command::PdfOpen { .. }
             | Command::PdfClose { .. }
@@ -1734,6 +1759,8 @@ impl Workspace {
 
             Command::Poll => {
                 let mut events = self.poll_servers();
+                // A canvas's save, written on a worker, has finished.
+                events.extend(self.raster.poll());
                 let (built, readable) = self.tex.poll();
                 // TeX installed: the editor's LaTeX server is its texlab.
                 if built.iter().any(|e| matches!(e, Event::TexEnv { env: proton_lab::tex::TexState::Ready { .. } })) {
@@ -4013,6 +4040,11 @@ impl Workspace {
     /// Where an image of the open game is: see `game::Game::file`.
     pub fn game_file(&self, key: &str) -> Option<PathBuf> {
         self.game.file(key)
+    }
+
+    /// Tiles of the open canvas, shared: see `raster::Raster::tiles`.
+    pub fn raster_tiles(&self, generation: u32, layer: u32, tiles: &[u32]) -> Option<crate::raster::RasterTiles> {
+        self.raster.tiles(generation, layer, tiles)
     }
 
     /// A file to show in the document viewer, remembered so the shell will
@@ -6504,6 +6536,11 @@ impl Workspace {
         if mode == ModeId::Game {
             let root = self.root().to_path_buf();
             events.extend(self.game.enter(&root));
+        }
+        // Canvas shows the project's canvases, and the one open.
+        if mode == ModeId::Raster {
+            let root = self.root().to_path_buf();
+            events.extend(self.raster.enter(&root));
         }
         // Video goes looking on the same terms, once — and re-reads on the way
         // back in. Its second document is the difference: a transcription is

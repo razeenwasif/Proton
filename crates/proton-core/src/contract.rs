@@ -1,7 +1,7 @@
 //! The mode contract: four slots, a verb table, and a document.
 //!
 //! A mode is the unit of "which application am I in", and the claim the whole
-//! project rests on is that eleven of them can share one editor because a mode
+//! project rests on is that twelve of them can share one editor because a mode
 //! is a small, closed thing:
 //!
 //! ```text
@@ -86,17 +86,22 @@ pub enum Slot {
     /// What can be done to a PDF — its pages, its forms, its security, OCR —
     /// and the agent.
     PdfTools,
+    /// A picture, to draw on.
+    Canvas,
 }
 
 /// How a mode's work persists.
 ///
-/// **Every one of these is a text file that diffs in Git** — but one. That
+/// **Every one of these is a text file that diffs in Git** — but two. That
 /// is the load-bearing rule of the project rather than a matter of taste: it
 /// is what lets the agent edit a scene or a timeline by writing a patch
-/// instead of driving a GUI, and what makes any of it reviewable. The one is
-/// the PDF, which is the person's to read and mark rather than the project's
-/// to write: it is changed through the core's own operations, each undoable,
-/// and saved as an update appended to the file, its first bytes kept.
+/// instead of driving a GUI, and what makes any of it reviewable. The first
+/// is the PDF, which is the person's to read and mark rather than the
+/// project's to write: it is changed through the core's own operations, each
+/// undoable, and saved as an update appended to the file, its first bytes
+/// kept. The second is a canvas's pixels: a picture is not text, so the rule
+/// keeps what it can — a `canvas.json` that diffs, and layers that are
+/// ordinary PNGs, written the same bytes for the same pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
@@ -124,8 +129,12 @@ pub enum DocumentKind {
     StudyNotebook,
     /// `.tex` and `.bib`: a LaTeX project, whose PDF is built outside it.
     Manuscript,
-    /// A `.pdf`, anywhere: the one document that is not text.
+    /// A `.pdf`, anywhere: a document that is not text.
     Pdf,
+    /// A `.canvas` folder: `canvas.json`, which diffs, and a PNG a layer —
+    /// pictures, which no text can be; each saved the same bytes when the
+    /// same pixels, so an untouched layer never shows in a diff.
+    Canvas,
 }
 
 /// The whole of a mode, as anything outside it needs to know.
@@ -230,6 +239,14 @@ impl Layout {
                 Slot::PdfTools,
                 DocumentKind::Pdf,
             ),
+            // Procreate's and Aseprite's: the layers, the picture, and what
+            // is selected — the brush, the layer — beside the agent.
+            ModeId::Raster => (
+                Slot::Layers,
+                Slot::Canvas,
+                Slot::Inspector,
+                DocumentKind::Canvas,
+            ),
         };
         Layout {
             mode,
@@ -264,7 +281,7 @@ mod tests {
 
     #[test]
     fn every_mode_has_a_layout_and_a_document() {
-        // The contract is only a contract if it covers all eleven. A mode
+        // The contract is only a contract if it covers all twelve. A mode
         // added later fails to compile rather than falling through to a
         // default that puts an editor where its stage should be.
         for mode in ModeId::ALL {

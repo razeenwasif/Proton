@@ -6,4 +6,5 @@ export function createPreview(deliver: (event: WireEvent) => void, latency: Map<
   readGeometry(key: string): Promise<ArrayBuffer>;
   readLab(key: string): Promise<ArrayBuffer>;
   readGame(key: string): Promise<ArrayBuffer>;
+  readRaster(generation: number, layer: number, tiles: number[]): Promise<ArrayBuffer>;
 };

@@ -25,6 +25,7 @@ node_modules
 # path, so it is true on one machine and wrong on every other.
 .codex/
 
-# Game mode's simulation, built from proton-game-runtime by scripts/game-wasm.mjs
-# before the tests and the app: never older than the Rust, so never committed.
+# The engines the window runs as WebAssembly, built by scripts/wasm.mjs
+# (Game's simulation, Canvas's pictures)
 ui/game-runtime.wasm
+ui/raster-runtime.wasm

@@ -59,3 +59,17 @@ test('Game mode\'s runtime compiles and runs under the app\'s own CSP, which sti
   // The one refusal is the control's: eval, never the WebAssembly.
   expect(result.violations.filter((v) => !/: eval$/.test(v))).toEqual([]);
 });
+
+test('Canvas\'s engine runs under the app\'s CSP: its composite uploaded from its memory, which grows to a gigabyte and no further', async ({page}) => {
+  await page.goto('/tests/ui/raster-probe.html?csp=1');
+  await page.waitForFunction(() => window.result !== undefined);
+  const result = await page.evaluate(() => window.result);
+  expect(result.error).toBeUndefined();
+  // A 256 × 256 canvas is sixteen tiles, all laid together when it opens.
+  expect(result.rects).toBe(16);
+  expect(result.gl).toBe(true);
+  expect(result.inside).toEqual([255, 0, 0, 255]);
+  expect(result.outside).toEqual([255, 255, 255, 255]);
+  expect(result.grew).toBe(true);
+  expect(result.beyond).toBe('RangeError');
+});

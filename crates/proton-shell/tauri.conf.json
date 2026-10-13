@@ -5,7 +5,7 @@
   "identifier": "dev.razeen.proton",
   "build": {
     "frontendDist": "../../ui",
-    "beforeBuildCommand": "cargo build --release -p proton-mcp && node \"$(dirname \"$(cargo locate-project --workspace --message-format plain)\")/scripts/game-wasm.mjs\""
+    "beforeBuildCommand": "cargo build --release -p proton-mcp && node \"$(dirname \"$(cargo locate-project --workspace --message-format plain)\")/scripts/wasm.mjs\""
   },
   "app": {
     "withGlobalTauri": true,

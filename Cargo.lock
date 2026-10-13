@@ -4367,6 +4367,7 @@ dependencies = [
  "proton-mesh",
  "proton-pdf",
  "proton-plugin",
+ "proton-raster",
  "proton-research",
  "proton-scene",
  "proton-study",
@@ -4550,6 +4551,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-raster-runtime"
+version = "0.0.1"
+dependencies = [
+ "proton-raster",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "proton-research"
 version = "0.0.1"
 dependencies = [
@@ -4575,6 +4585,7 @@ dependencies = [
  "objc2",
  "proton-claude",
  "proton-core",
+ "proton-raster",
  "serde",
  "serde_json",
  "tauri",

@@ -67,6 +67,12 @@ window.__TAURI__ = {
       if (!response.ok) throw new Error(`${args.path}: not a document Proton opened`);
       return await response.arrayBuffer();
     }
+    // The open canvas's tiles, as a test's stand-in core lays them out.
+    if (name === 'read_raster') {
+      const bytes = await window.rasterRead?.(args.generation, args.layer, args.tiles);
+      if (!bytes) throw new Error(`layer ${args.layer} of canvas ${args.generation} is not open`);
+      return bytes;
+    }
     // The open game's images: the fixture game's, from the server.
     if (name === 'read_game') {
       // A test's own files first: an image cut up, say.

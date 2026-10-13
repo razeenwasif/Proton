@@ -26,6 +26,7 @@ members = [
     "crates/proton-term",
     "crates/proton-pdf",
     "crates/proton-raster",
+    "crates/proton-raster-runtime",
     "crates/proton-tex",
     "crates/proton-text",
     "crates/proton-trace",
@@ -53,6 +54,7 @@ proton-dap = { path = "crates/proton-dap" }
 proton-data = { path = "crates/proton-data" }
 proton-design = { path = "crates/proton-design" }
 proton-game = { path = "crates/proton-game" }
+proton-raster = { path = "crates/proton-raster" }
 proton-scene = { path = "crates/proton-scene" }
 proton-index = { path = "crates/proton-index" }
 proton-library = { path = "crates/proton-library" }
