@@ -1233,22 +1233,53 @@ pub enum Command {
         index: usize,
     },
 
-    /* ── Godot scenes ─────────────────────────── */
-    /// Point Game mode at a `.tscn`. Answered with `Event::Level`.
-    OpenLevel {
+    /* ── Game mode ────────────────────────────── */
+    /// Open the game in a folder of the project — `.` for the project
+    /// itself. Answered with `Event::GameProject` and the room it starts in.
+    GameOpen {
         path: String,
     },
-    /// Pick a node — a click in the hierarchy.
-    SelectGameNode {
-        index: usize,
-    },
-    /// Change one property on the node at `index`.
-    #[serde(rename_all = "camelCase")]
-    SetGameProperty {
-        index: usize,
+    /// Make a new game from a template, in `folder` (or one named after it),
+    /// and open it.
+    GameNew {
         name: String,
-        value: String,
+        template: String,
+        #[serde(default)]
+        #[ts(optional)]
+        folder: Option<String>,
     },
+    /// Close the open game, back to the home page. Refused while it has
+    /// unsaved changes, unless they are to be thrown away.
+    GameClose {
+        #[serde(default)]
+        discard: bool,
+    },
+    /// Open a room as a tab, and show it.
+    GameOpenRoom {
+        room: String,
+    },
+    /// Close a room's tab. Its changes stay with the game until it is saved.
+    GameCloseRoom {
+        room: String,
+    },
+    /// Show a room already open as a tab.
+    GameFocus {
+        room: String,
+    },
+    /// One gesture's changes to one of the game's documents — `game`,
+    /// `world`, `room:<id>`, `prefab:<id>` — applied whole or not at all.
+    GameEdit {
+        target: String,
+        ops: Vec<proton_game::Op>,
+        /// What the change was, in words, for the undo history.
+        #[serde(default)]
+        label: String,
+    },
+    /// Undo the newest edit, wherever it was made.
+    GameUndo,
+    GameRedo,
+    /// Write every unsaved document of the game.
+    GameSave,
 
     /* ── cuts and captions ────────────────────── */
     /// Point Video mode at an `.edl`. Answered with `Event::Cut`.
@@ -2443,31 +2474,28 @@ pub enum Event {
     /// arrives on its own schedule: a mesh re-exported from Blender while the
     /// scene is open comes back through here without the scene having moved.
     Geometry(crate::modeling::Geometry),
-    /// The Godot scene Game mode is showing.
-    ///
-    /// `Level` rather than `Scene`, because `Event::Scene` is Modeling's and
-    /// two events with one name is a front end that draws the wrong panel.
-    #[serde(rename_all = "camelCase")]
-    Level {
-        /// Empty when none is open.
-        path: String,
-        nodes: Vec<proton_game::GameNode>,
-        /// The file's text.
-        ///
-        /// Sent whole, like Design's component source and for the same reason:
-        /// what Game mode can honestly show in the middle of the screen is
-        /// Godot's file, until there is an engine process to run the scene.
-        source: String,
-        /// Which one is selected, or `usize::MAX`.
-        selected: usize,
-        /// Why there is no scene, when there is a reason worth showing.
-        problem: String,
+    /// The games in the project, and what a new one can be made from: Game
+    /// mode's home page, shown when no game is open.
+    GameHome {
+        games: Vec<crate::game::GameFound>,
+        templates: Vec<crate::game::GameTemplate>,
+    },
+    /// The game that is open — everything but its rooms — or none.
+    GameProject {
+        project: Option<crate::game::GameProjectView>,
+    },
+    /// The room on screen, whole, or none. `revision` moves with every change
+    /// to it, so the window can tell a room it has from one changed since.
+    GameRoom {
+        room: Option<proton_game::format::Room>,
+        #[ts(type = "number")]
+        revision: u64,
     },
     /// The cut Video mode is showing, and the captions beside it.
     ///
     /// `Cut` rather than `Timeline`, because the timeline is the widget and
-    /// this is the document — and because `Event::Scene` and `Event::Level`
-    /// already taught this enum what two events with one name cost.
+    /// this is the document — and because `Event::Scene` already taught this
+    /// enum what two events with one name cost.
     #[serde(rename_all = "camelCase")]
     Cut {
         /// Empty when none is open.

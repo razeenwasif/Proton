@@ -116,7 +116,7 @@ pub struct Workspace {
     library_scope: proton_library::Scope,
     /// The scene Modeling mode is editing.
     modeling: crate::modeling::Modeling,
-    /// The Godot scene Game mode is showing.
+    /// The game Game mode has open, and the rooms it shows.
     game: crate::game::Game,
     /// The cut Video mode is showing, and the captions beside it.
     video: crate::video::Video,
@@ -589,19 +589,23 @@ impl Workspace {
     /// asks before closing it, because a closed workspace takes its buffers
     /// with it and there is no undo for that.
     pub fn is_modified(&self) -> bool {
-        self.editor.buffers().iter().any(|b| b.is_modified())
+        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.game.unsaved().is_empty()
     }
 
     /// The files with unsaved changes, as the project names them.
     pub fn unsaved(&self) -> Vec<String> {
-        self.editor
+        let mut files: Vec<String> = self
+            .editor
             .unsaved()
             .iter()
             .map(|buffer| match buffer.path() {
                 Some(path) => self.root.shown(path),
                 None => buffer.name(),
             })
-            .collect()
+            .collect();
+        // A game's rooms are held until ⌘S, as a buffer is.
+        files.extend(self.game.unsaved());
+        files
     }
 
     /// Save every file with unsaved changes; the ones that could not be, and
@@ -611,7 +615,9 @@ impl Workspace {
         if failed.len() != self.editor.unsaved().len() {
             self.resync();
         }
-        failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect()
+        let mut failed: Vec<String> = failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect();
+        failed.extend(self.game.save_unsaved());
+        failed
     }
 
     /// Abandon a half-typed leader sequence.
@@ -640,6 +646,18 @@ impl Workspace {
             self.editor.buffer_mut().end_group();
         }
         match command {
+            // Game mode's own, answered by its module as PDF's and
+            // Notebook's are by theirs.
+            command if crate::game::handles(&command) => {
+                let root = self.root().to_path_buf();
+                let mut events = self.game.apply(&root, command);
+                if events.iter().any(|e| matches!(e, Event::GameProject { .. })) {
+                    // A game made or saved is files the tree and git see.
+                    events.push(self.tree_event());
+                    events.push(self.repo_event());
+                }
+                events
+            }
             Command::Sync => {
                 // The front end connecting is the signal that the window is
                 // up, which is the right moment to start walking the tree: not
@@ -690,7 +708,6 @@ impl Workspace {
                     self.theme_event(),
                     self.artboard_event(),
                     self.scene_event(),
-                    self.level_event(),
                     self.cut_event(),
                     self.settings_event(),
                     self.library_event(),
@@ -702,6 +719,9 @@ impl Workspace {
                 ]);
                 events.extend(self.claude.sync());
                 events.extend(self.research().sync());
+                // The games here, the one open and the room on screen.
+                let root = self.root().to_path_buf();
+                events.extend(self.game.events(&root));
                 events
             }
 
@@ -858,39 +878,6 @@ impl Workspace {
             },
 
             /* ── scenes ────────────────────────────────────── */
-            Command::OpenLevel { path } => {
-                let full = self.pickers.resolve(&path);
-                match self.game.open(&full) {
-                    Ok(()) => vec![self.level_event()],
-                    Err(why) => vec![self.level_event(), notice(why, NoticeLevel::Warn)],
-                }
-            }
-
-            Command::SelectGameNode { index } => match self.game.select(index) {
-                true => vec![self.level_event()],
-                false => Vec::new(),
-            },
-
-            Command::SetGameProperty { index, name, value } => {
-                let Some(node) = self.game.nodes().into_iter().nth(index) else {
-                    return vec![notice(
-                        format!("there is no node at row {index}"),
-                        NoticeLevel::Error,
-                    )];
-                };
-                match self.game.set_property(&node.path, &name, &value) {
-                    Ok(false) => Vec::new(),
-                    Ok(true) => {
-                        // Somebody else's file just moved on disk, so the
-                        // gutter, the tree and any buffer holding it are told.
-                        let mut events = vec![self.level_event(), self.repo_event()];
-                        events.extend(self.every_view());
-                        events
-                    }
-                    Err(why) => vec![notice(why, NoticeLevel::Error)],
-                }
-            }
-
             Command::OpenScene { path } => {
                 let full = self.pickers.resolve(&path);
                 // The event goes out either way: "that file is not a scene"
@@ -1528,6 +1515,17 @@ impl Workspace {
             Command::ResearchFolder { .. } => {
                 vec![notice("Where investigations are kept is set for the whole window.".into(), NoticeLevel::Warn)]
             }
+            // Answered above, by the game's module.
+            Command::GameOpen { .. }
+            | Command::GameNew { .. }
+            | Command::GameClose { .. }
+            | Command::GameOpenRoom { .. }
+            | Command::GameCloseRoom { .. }
+            | Command::GameFocus { .. }
+            | Command::GameEdit { .. }
+            | Command::GameUndo
+            | Command::GameRedo
+            | Command::GameSave => Vec::new(),
             // PDF is the window's too: the session answers it.
             Command::PdfOpen { .. }
             | Command::PdfClose { .. }
@@ -2327,7 +2325,6 @@ impl Workspace {
                     (ModeId::Design, Some("css")) => Some(Command::OpenTheme { path: path.clone() }),
                     (ModeId::Modeling, Some("json")) if path.ends_with(".proton.json") =>
                         Some(Command::OpenScene { path: path.clone() }),
-                    (ModeId::Game, Some("tscn")) => Some(Command::OpenLevel { path: path.clone() }),
                     (ModeId::Video, Some("edl")) => Some(Command::OpenTimeline { path: path.clone() }),
                     _ => None,
                 };
@@ -2850,10 +2847,6 @@ impl Workspace {
                 // re-exported from Blender, not edited here — so the ones
                 // already read are checked for having moved.
                 events.extend(self.modeling.restale().into_iter().map(Event::Geometry));
-                // A `.tscn` is Godot's file, and Godot may be open beside us.
-                if self.game.reload() {
-                    events.push(self.level_event());
-                }
                 // A cut edited as text, and the caption file whatever
                 // transcribed the dialogue may have only just written.
                 if self.video.reload() {
@@ -6149,20 +6142,6 @@ impl Workspace {
         }
     }
 
-    fn level_event(&self) -> Event {
-        Event::Level {
-            path: self
-                .game
-                .path()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            nodes: self.game.nodes(),
-            source: self.game.source(),
-            selected: self.game.selected(),
-            problem: self.game.problem().unwrap_or_default().to_string(),
-        }
-    }
-
     fn scene_event(&self) -> Event {
         Event::Scene {
             path: self
@@ -6504,17 +6483,11 @@ impl Workspace {
             }
             events.push(self.theme_event());
         }
-        // Game goes looking on the same terms, once.
-        if mode == ModeId::Game && !self.game.is_open() {
-            if let Some(path) = crate::game::discover(self.pickers.root()) {
-                if self.game.open(&path).is_ok() {
-                    events.push(notice(
-                        format!("scene: {}", path.display()),
-                        NoticeLevel::Info,
-                    ));
-                }
-            }
-            events.push(self.level_event());
+        // Game opens the project when the project is a game, and otherwise
+        // shows the games it holds.
+        if mode == ModeId::Game {
+            let root = self.root().to_path_buf();
+            events.extend(self.game.enter(&root));
         }
         // Video goes looking on the same terms, once — and re-reads on the way
         // back in. Its second document is the difference: a transcription is

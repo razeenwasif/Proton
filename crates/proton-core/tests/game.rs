@@ -1,210 +1,180 @@
-//! Game mode's hierarchy, through the seam the shell uses.
-//!
-//! The document is somebody else's — `proton-game` reads Godot's `.tscn` and
-//! has its own tests for the format. What is checked here is the editor's
-//! half: that entering the mode finds the project's scene, that a click
-//! selects, that an edit reaches the disk without disturbing the rest of a
-//! file Godot will open next, and that a change made elsewhere comes back.
+//! Game mode through the seam the window uses: the home page, a new game from
+//! the template, edits held until saved, undo across documents, and the quit
+//! prompt naming what is unsaved.
 
 use std::path::PathBuf;
 
-use proton_core::bus::Event;
-use proton_core::key::Key;
+use proton_core::bus::{Event, NoticeLevel};
 use proton_core::{Command, ModeId, Workspace};
+use proton_game::Op;
+use serde_json::json;
 
-const SCENE: &str = r#"[gd_scene load_steps=2 format=3 uid="uid://bq2x8k1n0v"]
+fn project(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("proton-core-game-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
 
-[ext_resource type="Texture2D" path="res://art/tiles.png" id="1_x8k"]
+fn home(events: &[Event]) -> Option<(Vec<String>, Vec<String>)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::GameHome { games, templates } => {
+            Some((games.iter().map(|g| format!("{} {}", g.path, g.name)).collect(), templates.iter().map(|t| t.id.clone()).collect()))
+        }
+        _ => None,
+    })
+}
 
-[node name="World" type="Node2D"]
+fn view(events: &[Event]) -> Option<Option<proton_core::game::GameProjectView>> {
+    events.iter().rev().find_map(|e| match e {
+        Event::GameProject { project } => Some(project.clone()),
+        _ => None,
+    })
+}
 
-[node name="Player" type="CharacterBody2D" parent="."]
-position = Vector2(196, 286)
-speed = 400.0
+fn room(events: &[Event]) -> Option<(Option<proton_game::format::Room>, u64)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::GameRoom { room, revision } => Some((room.clone(), *revision)),
+        _ => None,
+    })
+}
 
-[node name="Sprite" type="Sprite2D" parent="Player"]
-texture = ExtResource("1_x8k")
+fn warned(events: &[Event]) -> Option<String> {
+    events.iter().find_map(|e| match e {
+        Event::Notice { text, level: NoticeLevel::Warn | NoticeLevel::Error } => Some(text.clone()),
+        _ => None,
+    })
+}
 
-[connection signal="body_entered" from="Player" to="." method="_on_entered"]
-"#;
+fn edit(target: &str, ops: Vec<Op>) -> Command {
+    Command::GameEdit { target: target.into(), ops, label: String::new() }
+}
 
-/// A project laid out the way Godot lays one out.
-fn open(name: &str) -> (Workspace, PathBuf) {
-    let root = std::env::temp_dir().join(format!(
-        "proton-game-{name}-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(root.join("scenes")).unwrap();
-    let path = root.join("scenes").join("world.tscn");
-    std::fs::write(&path, SCENE).unwrap();
-    std::fs::write(
-        root.join("project.godot"),
-        "config_version=5\n\n[application]\n\nrun/main_scene=\"res://scenes/world.tscn\"\n",
-    )
-    .unwrap();
+fn set(path: &[&str], value: serde_json::Value) -> Op {
+    Op::Set { path: path.iter().map(|s| s.to_string()).collect(), value }
+}
 
+/// A project with a game made in it from the template, in Game mode.
+fn with_game(tag: &str) -> (Workspace, PathBuf) {
+    let root = project(tag);
     let mut space = Workspace::rooted(&root);
     space.apply(Command::SetMode { mode: ModeId::Game });
-    (space, path)
-}
-
-fn tree(space: &mut Workspace) -> (Vec<(usize, String)>, usize) {
-    space
-        .apply(Command::Sync)
-        .iter()
-        .find_map(|event| match event {
-            Event::Level {
-                nodes, selected, ..
-            } => Some((
-                nodes
-                    .iter()
-                    .map(|one| (one.depth, one.name.clone()))
-                    .collect(),
-                *selected,
-            )),
-            _ => None,
-        })
-        .expect("a level event")
-}
-
-fn problem(space: &mut Workspace) -> String {
-    space
-        .apply(Command::Sync)
-        .iter()
-        .find_map(|event| match event {
-            Event::Level { problem, .. } => Some(problem.clone()),
-            _ => None,
-        })
-        .expect("a level event")
+    let events = space.apply(Command::GameNew { name: "Crossroads".into(), template: "metroidvania".into(), folder: None });
+    assert!(warned(&events).is_none(), "{events:?}");
+    (space, root)
 }
 
 #[test]
-fn entering_game_mode_opens_the_scene_the_project_starts_with() {
-    // `project.godot` says which scene the game runs, and that is the one
-    // somebody means — not whichever `.tscn` sorts first.
-    let (mut space, _) = open("discover");
-    let (rows, selected) = tree(&mut space);
-    assert_eq!(
-        rows,
-        [
-            (0, "World".into()),
-            (1, "Player".into()),
-            (2, "Sprite".into())
-        ]
-    );
-    assert_eq!(selected, usize::MAX);
+fn a_project_with_no_game_shows_the_home_page_and_what_to_make_one_from() {
+    let root = project("home");
+    let mut space = Workspace::rooted(&root);
+    let events = space.apply(Command::SetMode { mode: ModeId::Game });
+    assert_eq!(home(&events), Some((Vec::new(), vec!["metroidvania".to_string()])));
+    assert_eq!(view(&events), Some(None));
+    assert_eq!(room(&events).map(|r| r.0), Some(None));
 }
 
 #[test]
-fn a_property_edited_here_reaches_the_disk_and_moves_nothing_else() {
-    // The file belongs to Godot and Godot will open it next. A reformatted
-    // `.tscn` is a whole-file diff in somebody's game repository.
-    let (mut space, path) = open("write");
-    space.apply(Command::SetGameProperty {
-        index: 1,
-        name: "speed".into(),
-        value: "250.0".into(),
-    });
-
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        SCENE.replace("speed = 400.0", "speed = 250.0")
-    );
+fn a_new_game_is_written_from_the_template_and_opened_at_its_first_room() {
+    let (mut space, root) = with_game("new");
+    assert!(root.join("crossroads/game.json").is_file());
+    assert!(root.join("crossroads/art/sky.png").is_file());
+    let events = space.apply(Command::Sync);
+    assert_eq!(home(&events).unwrap().0, vec!["crossroads Crossroads".to_string()]);
+    let project = view(&events).unwrap().unwrap();
+    assert_eq!(project.path, "crossroads");
+    assert_eq!(project.open, vec!["crossroads_01".to_string()]);
+    assert_eq!(project.focus.as_deref(), Some("crossroads_01"));
+    assert!(project.problems.is_empty(), "{:?}", project.problems);
+    assert!(project.assets.contains(&"art/player.png".to_string()));
+    assert_eq!(room(&events).unwrap().0.unwrap().id, "crossroads_01");
+    // A second game of the same name is not written over the first.
+    let again = space.apply(Command::GameNew { name: "Crossroads".into(), template: "metroidvania".into(), folder: None });
+    assert!(warned(&again).unwrap().contains("already holds a game"));
 }
 
 #[test]
-fn setting_what_is_already_there_does_not_touch_the_file() {
-    let (mut space, path) = open("no-op");
-    let before = std::fs::metadata(&path).unwrap().modified().unwrap();
-    let events = space.apply(Command::SetGameProperty {
-        index: 1,
-        name: "speed".into(),
-        value: "400.0".into(),
-    });
-    assert!(events.is_empty(), "{events:?}");
-    assert_eq!(
-        std::fs::metadata(&path).unwrap().modified().unwrap(),
-        before
-    );
+fn an_edit_is_held_until_saved_and_the_quit_prompt_names_its_file() {
+    let (mut space, root) = with_game("held");
+    let file = root.join("crossroads/rooms/crossroads_01.room.json");
+    let before = std::fs::read_to_string(&file).unwrap();
+    let (_, was) = room(&space.apply(Command::Sync)).unwrap();
+    let events = space.apply(edit("room:crossroads_01", vec![set(&["planes", "#sky", "fog"], json!(0.4))]));
+    let (shown, revision) = room(&events).unwrap();
+    assert!(revision > was, "the room changed and its revision did not");
+    assert_eq!(shown.unwrap().planes.iter().find(|p| p.id == "sky").unwrap().fog, 0.4);
+    let project = view(&events).unwrap().unwrap();
+    assert!(project.dirty && project.rooms.iter().any(|r| r.id == "crossroads_01" && r.dirty));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "an edit reached the disk before a save");
+    assert_eq!(space.unsaved(), vec!["crossroads/rooms/crossroads_01.room.json".to_string()]);
+    assert!(space.is_modified());
+
+    let saved = space.apply(Command::GameSave);
+    assert!(!view(&saved).unwrap().unwrap().dirty);
+    assert!(std::fs::read_to_string(&file).unwrap().contains("\"fog\": 0.4"));
+    assert!(space.unsaved().is_empty());
 }
 
 #[test]
-fn a_scene_edited_in_codex_reaches_the_hierarchy() {
-    // Godot may be open beside us and writing this file, and so may the agent.
-    let (mut space, path) = open("codex");
-    space.apply(Command::SetMode {
-        mode: ModeId::Codex,
-    });
-    space.apply(Command::OpenBuffer {
-        path: path.display().to_string(),
-    });
-    for c in "/Sprite".chars() {
-        space.apply(Command::Key { key: Key::char(c) });
-    }
-    space.apply(Command::Key {
-        key: Key::named("Enter"),
-    });
-    for c in "ciwLamp".chars() {
-        space.apply(Command::Key { key: Key::char(c) });
-    }
-    space.apply(Command::Key {
-        key: Key::named("Escape"),
-    });
-    space.apply(Command::Save);
-
-    let rows = tree(&mut space).0;
-    assert!(
-        rows.iter().any(|(_, name)| name == "Lamp"),
-        "the hierarchy is still showing the old tree: {rows:?}"
-    );
+fn undo_takes_back_the_newest_edit_wherever_it_was_made() {
+    let (mut space, _root) = with_game("undo");
+    space.apply(edit("room:crossroads_01", vec![set(&["size"], json!([4000, 2160]))]));
+    space.apply(edit("game", vec![set(&["name"], json!("Renamed"))]));
+    let first = view(&space.apply(Command::GameUndo)).unwrap().unwrap();
+    assert_eq!(first.game.name, "Crossroads", "the game's own edit was the newest");
+    assert_eq!(room(&space.apply(Command::Sync)).unwrap().0.unwrap().size, [4000, 2160]);
+    let second = space.apply(Command::GameUndo);
+    assert_eq!(room(&second).unwrap().0.unwrap().size, [3840, 2160]);
+    assert!(!view(&second).unwrap().unwrap().can_undo);
+    let redone = space.apply(Command::GameRedo);
+    assert_eq!(room(&redone).unwrap().0.unwrap().size, [4000, 2160]);
+    // A new edit ends what could be redone.
+    space.apply(edit("room:crossroads_01", vec![set(&["size"], json!([4100, 2160]))]));
+    assert!(!view(&space.apply(Command::Sync)).unwrap().unwrap().can_redo);
 }
 
 #[test]
-fn a_resource_is_refused_and_the_panel_says_why() {
-    // `.tres` has the same syntax and is not a scene. Listing its contents as
-    // a hierarchy would be a confident wrong answer.
-    let (mut space, path) = open("resource");
-    let theme = path.parent().unwrap().join("theme.tres");
-    std::fs::write(
-        &theme,
-        "[gd_resource type=\"Theme\" format=3]\n\n[resource]\n",
-    )
-    .unwrap();
-
-    space.apply(Command::OpenLevel {
-        path: theme.display().to_string(),
-    });
-    let said = problem(&mut space);
-    assert!(said.contains("resource"), "{said}");
-    assert!(tree(&mut space).0.is_empty(), "it drew something anyway");
+fn an_edit_that_cannot_be_made_says_why_and_changes_nothing() {
+    let (mut space, _root) = with_game("refused");
+    let events = space.apply(edit("room:crossroads_01", vec![set(&["planes", "#nowhere", "depth"], json!(1))]));
+    assert!(warned(&events).unwrap().contains("nowhere"));
+    assert!(!view(&space.apply(Command::Sync)).unwrap().unwrap().dirty);
+    assert!(warned(&space.apply(edit("somewhere", vec![]))).is_some(), "a target that is no document was taken");
 }
 
 #[test]
-fn selecting_a_row_that_is_no_longer_there_selects_nothing() {
-    let (mut space, _) = open("stale");
-    space.apply(Command::SelectGameNode { index: 99 });
-    assert_eq!(tree(&mut space).1, usize::MAX);
+fn rooms_open_as_tabs_and_closing_the_one_on_screen_shows_its_neighbour() {
+    let (mut space, _root) = with_game("tabs");
+    let events = space.apply(Command::GameOpenRoom { room: "crossroads_02".into() });
+    let project = view(&events).unwrap().unwrap();
+    assert_eq!(project.open, vec!["crossroads_01".to_string(), "crossroads_02".to_string()]);
+    assert_eq!(room(&events).unwrap().0.unwrap().id, "crossroads_02");
+    let events = space.apply(Command::GameCloseRoom { room: "crossroads_02".into() });
+    assert_eq!(view(&events).unwrap().unwrap().focus.as_deref(), Some("crossroads_01"));
+    assert!(warned(&space.apply(Command::GameOpenRoom { room: "nope".into() })).is_some());
 }
 
 #[test]
-fn a_project_with_no_main_scene_still_finds_one() {
-    // Plenty of projects never set it. Falling back to the conventional
-    // places beats an empty panel.
-    let (space, path) = open("no-main");
-    drop(space);
-    std::fs::write(
-        path.parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("project.godot"),
-        "config_version=5\n",
-    )
-    .unwrap();
+fn a_game_with_changes_is_not_closed_or_left_for_another_until_they_are_dealt_with() {
+    let (mut space, _root) = with_game("close");
+    space.apply(edit("room:crossroads_01", vec![set(&["size"], json!([4000, 2160]))]));
+    assert!(warned(&space.apply(Command::GameClose { discard: false })).is_some());
+    assert!(warned(&space.apply(Command::GameNew { name: "Second".into(), template: "metroidvania".into(), folder: None })).is_some());
+    let closed = space.apply(Command::GameClose { discard: true });
+    assert_eq!(view(&closed), Some(None));
+    assert!(space.unsaved().is_empty());
+    // And it opens again from the home page.
+    let opened = space.apply(Command::GameOpen { path: "crossroads".into() });
+    assert_eq!(view(&opened).unwrap().unwrap().rooms[0].size, [3840, 2160], "a discarded change came back");
+}
 
-    let mut space = Workspace::rooted(path.parent().unwrap().parent().unwrap());
-    space.apply(Command::SetMode { mode: ModeId::Game });
-    assert_eq!(tree(&mut space).0.len(), 3);
+#[test]
+fn a_project_that_is_a_game_opens_it_on_entering_the_mode() {
+    let root = project("itself");
+    proton_game::template::write(&root, &proton_game::template::files("metroidvania", "Itself").unwrap()).unwrap();
+    let mut space = Workspace::rooted(&root);
+    let events = space.apply(Command::SetMode { mode: ModeId::Game });
+    let project = view(&events).unwrap().unwrap();
+    assert_eq!(project.path, ".");
+    assert_eq!(project.game.name, "Itself");
 }

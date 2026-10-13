@@ -594,7 +594,10 @@ lets the agent edit a scene by writing a patch instead of driving a GUI.
 
 ### Game
 
-Engine-shaped: hierarchy, play/pause/step/stop transport, a game view with
+Proton's own engine, for a few kinds of game rather than every kind:
+hand-drawn and painted 2D on many parallax planes, lit pixel art, isometric
+rooms, low-poly 3D; Metroidvanias first, roguelites after. Engine-shaped:
+the world and its rooms, play/pause/step/stop transport, a game view with
 collision shapes and navmesh overlays, an inspector bound to the selected node,
 and Output / Debugger / Profiler / Network below. Hot reload preserves state.
 The agent's leverage here is **replay** — it changes a jump curve, then replays

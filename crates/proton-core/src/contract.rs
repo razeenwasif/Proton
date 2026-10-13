@@ -111,7 +111,8 @@ pub enum DocumentKind {
     Component,
     /// `scene.proton.json`
     Scene,
-    /// Engine-native scene files.
+    /// A game's folder: `game.json`, `world.json`, a `.room.json` per room
+    /// and a `.prefab.json` per prefab — Proton's own engine's files.
     Level,
     /// An `.edl` and its sidecar captions.
     Timeline,

@@ -2,6 +2,7 @@ import {orderingChecks} from './ordering.js';
 import {studyChecks} from './suite-study.js';
 import {texChecks} from './suite-tex.js';
 import {pdfChecks} from './suite-pdf.js';
+import {gameChecks} from './suite-game.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
 const layoutKeys = [...['chat', 'codex', 'codex.typeset', 'design', 'modeling', 'game', 'video', 'data', 'research', 'study', 'pdf'].map((mode) => `proton.panes.${mode}`),
@@ -2360,6 +2361,7 @@ await test('A long name in the project panel scrolls sideways instead of being c
 await studyChecks({test, assert, win, doc, $, settle, key, shown});
 await texChecks({test, assert, win, doc, $, settle, key, shown});
 await pdfChecks({test, assert, win, doc, $, settle, key, shown});
+await gameChecks({test, assert, win, doc, $, settle, key, shown});
 await orderingChecks(test, assert);
 document.querySelector('#status').textContent = `${passed} passed · ${failed} failed`;
 document.title = `Proton UI tests: ${passed} passed, ${failed} failed`;

@@ -907,54 +907,75 @@
     </section>
 
     <!-- ══ GAME ══════════════════════════════════════════════════ -->
-    <section class="workspace" data-ws="game" style="--col-l:226px; --col-r:268px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
-      <aside class="pane side">
-        <!-- Slot::Explorer, from Event::Level. Every row is a node really in
-             the project's `.tscn`; clicking one selects it and the inspector
-             on the right edits it, which writes Godot's file.
-
-             What was here listed a World, a Player, a CharacterBody2D, twelve
-             Drones and three profiler readings, for a project that did not
-             exist. The profiler is gone rather than replaced: it needs a
-             running engine, and there is not one. -->
-        <header>Hierarchy <span class="grow"></span><span class="chip" data-level-count></span></header>
-        <div class="scroll tree" data-hierarchy></div>
+    <!-- Proton's own engine (proton-game): a game's rooms drawn plane by
+         plane, edited and held until saved — on Codex's ground, laid out as
+         PDF and LaTeX are. With no game open, the games the project holds and
+         a new one to make take the whole page (game.js). -->
+    <section class="workspace game-home" data-ws="game" style="--col-l:300px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side game-side">
+        <header class="game-side-tabs" role="tablist" aria-label="The game">
+          <button class="dock-tab on" role="tab" aria-selected="true" data-game-side="world">World</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-game-side="layers">Layers</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-game-side="entities">Entities</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-game-side="assets">Assets</button>
+        </header>
+        <div class="scroll game-side-body" data-game-side-body></div>
       </aside>
 
       <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
-      <main class="pane">
-        <!-- No transport, no game view, no console.
-             Playing a scene, hot reload, a profiler and replaying recorded
-             input all need a Godot process to talk to. What was here mimed
-             all four: play/pause/step/stop buttons wired to nothing, a
-             "Playing · hot-reload on" chip, a drawn game frame with a red
-             rectangle for a player, "fps 161 · 6.2 ms", and a console with
-             invented lines about hot-reloading player.gd in 41 ms and a
-             suggestion nobody made.
-
-             The scene's text is the honest thing to show until an engine is
-             on the other end of a pipe. -->
-        <div class="canvas-bar">
-          <span class="chip accent" data-level-file>no scene</span>
+      <main class="pane game-main">
+        <div class="game-bar">
+          <button class="hbtn" data-game-leave title="Your games — the home page" aria-label="Your games"><svg class="i"><use href="#i-grid"/></svg></button>
+          <span class="game-name" data-game-name></span>
+          <div class="game-tabs" role="tablist" aria-label="Open rooms" data-game-tabs></div>
           <span class="grow"></span>
-          <span class="chip" data-level-selected></span>
+          <div class="game-seg" role="group" aria-label="Play" data-game-transport>
+            <button data-game-play title="Play from here" aria-label="Play" disabled><svg class="i"><use href="#i-play"/></svg></button>
+            <button data-game-pause title="Pause" aria-label="Pause" disabled><svg class="i"><use href="#i-pause"/></svg></button>
+            <button data-game-step title="One frame" aria-label="Step one frame" disabled><svg class="i"><use href="#i-step"/></svg></button>
+            <button data-game-stop title="Stop" aria-label="Stop" disabled><svg class="i"><use href="#i-stop"/></svg></button>
+          </div>
+          <button class="hbtn" data-game-undo title="Undo  ⌘Z" aria-label="Undo" disabled><svg class="i"><use href="#i-undo"/></svg></button>
+          <button class="hbtn" data-game-redo title="Redo  ⇧⌘Z" aria-label="Redo" disabled><svg class="i"><use href="#i-redo"/></svg></button>
+          <button class="hbtn" data-game-save title="Save  ⌘S — every changed room and file of the game" disabled>Save</button>
         </div>
-        <div class="scroll" data-level-source></div>
+        <!-- What is asked before a game with changes is left. -->
+        <div class="game-ask" data-game-ask hidden></div>
+        <div class="game-stage" data-game-stage tabindex="0" aria-label="The room">
+          <canvas class="game-overlay" data-game-overlay></canvas>
+          <div class="game-empty" data-game-stage-empty hidden></div>
+          <!-- The home page: the games here, and a new one. -->
+          <div class="game-open" data-game-open>
+            <div class="game-open-in" data-game-home></div>
+          </div>
+        </div>
       </main>
 
       <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
-      <aside class="pane">
-        <!-- The selected node's properties, as Godot wrote them. Typing here
-             splices the `.tscn`: the bytes that one value occupies are
-             replaced and nothing else in the file moves.
-
-             The Inspector/Signals/Agent tabs are gone — only one had anything
-             behind it — along with a hand-written diff of a `player.gd` that
-             does not exist. -->
-        <header>Inspector <span class="grow"></span><span class="chip" data-level-kind></span></header>
-        <div class="scroll">
-          <div data-level-empty class="empty">Nothing selected.</div>
-          <div data-level-props hidden></div>
+      <aside class="pane game-pane" id="game-pane" data-showing="inspector">
+        <!-- What is selected, how a run starts, and the agent. -->
+        <header class="game-pane-head" role="tablist" aria-label="Inspector, run and the agent">
+          <button class="dock-tab on" role="tab" aria-selected="true" data-game-panel="inspector">Inspector</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-game-panel="run">Run</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-game-panel="agent">Agent <span class="dot" data-game-agent-dot hidden></span></button>
+        </header>
+        <div class="scroll game-pane-body" data-game-body="inspector" data-game-inspector></div>
+        <div class="scroll game-pane-body" data-game-body="run" data-game-run hidden></div>
+        <div class="game-agent" data-game-body="agent" hidden>
+          <div class="scroll" data-agent-thread></div>
+          <div class="composer">
+            <div class="box">
+              <div class="txt" contenteditable="plaintext-only" role="textbox"
+                   aria-label="Ask about this game" data-agent-input
+                   data-placeholder="Ask about this game"></div>
+              <div class="foot">
+                <span class="grow"></span>
+                <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
+                <span class="send" data-agent-send role="button" tabindex="0"
+                      aria-label="Send"><svg class="i"><use href="#i-send"/></svg></span>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
     </section>

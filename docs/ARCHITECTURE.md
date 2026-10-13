@@ -2,8 +2,8 @@
 
 This document describes the implemented system and records its build history.
 All eleven modes read real documents. Modeling includes a WebGL renderer;
-Game and Video edit scenes and timelines but still need engine playback and
-media decoding. The design reference is [`DESIGN.md`](../design/DESIGN.md),
+Game is becoming an engine of Proton's own, and Video edits timelines but
+still needs media decoding. The design reference is [`DESIGN.md`](../design/DESIGN.md),
 and the tool choices are in [`STACK.md`](STACK.md).
 
 The capability table below describes current behavior. Milestone sections later
@@ -17,7 +17,7 @@ in this document retain historical decisions and measurements.
 | Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; figures and 3D scenes drawn in the Lab |
 | Design | CSS tokens and component markup, layers, source-linked artboard | Components requiring a build cannot be previewed directly |
 | Modeling | `.proton.json` scenes, OBJ geometry, transforms, modifiers, material graph, WebGL | Supported formats and viewport budget are bounded |
-| Game | Godot `.tscn` scene hierarchy and property editing | No engine playback process |
+| Game | Proton's own engine: a game's folder of JSON — game, world, rooms, prefabs — edited by ops held until saved, rooms as tabs over a stage of what is solid and where things stand | No renderer or runtime yet (G2–G5); 2D Metroidvania first |
 | Video | CMX3600 `.edl` timeline and `.srt` captions | No decoded video/program monitor |
 | Notebook | Notebooks of your own sources with a cited tutor on four engines; study guides, flashcards on FSRS, quizzes marked by another family, exams from past papers, audio overviews, slides | The tutor and studio spend each engine's plan, audio Fish credit |
 
@@ -95,7 +95,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-data` | Notebook documents and kernel integration |
 | `proton-design` | Theme tokens and component markup |
 | `proton-scene` / `proton-mesh` | Scene documents and material graphs / geometry and modifiers |
-| `proton-game` / `proton-video` | Godot scenes / EDL timelines and captions |
+| `proton-game` / `proton-video` | Game's engine — its project format, editable documents and template / EDL timelines and captions |
 | `proton-plugin` | Wasmtime plugin host and capability grants |
 | `proton-trace` | Code Visualizer client and sidecar integration |
 | `proton-shell` | Tauri window, IPC, native backdrop, packaging |
@@ -1488,6 +1488,50 @@ close themselves, ⌘/ to comment and ⌘⏎ to run. TeX JSON ate is mended in w
 is written about a problem, never in its code, where a tab before `out` is a
 tab.
 
+### Game
+
+Proton's own engine, specialised rather than general: hand-drawn and painted
+2D on dozens of parallax planes (Hollow Knight, Ori), pixel art lit like a
+modern game (Dead Cells), isometric rooms (Hades) and low-poly 3D (Tunic);
+Metroidvanias first, roguelites after. It replaced a Godot `.tscn` viewer: an
+embedded engine's scenes play in its own window and its runs are opaque to
+the agent, and these niches are narrow enough for an engine shaped to them.
+
+**The document.** A game is a folder: `game.json` (view, controller,
+abilities, input, where it starts), `world.json` (areas, and where each room
+sits on one canvas), `rooms/<id>.room.json` (planes of art at depths,
+collision as polylines, entities, lights, spawns) and `prefabs/*.prefab.json`.
+`proton-game::format` types it; every field defaults, so a hand-written file
+needs only what it means. The writer (`text.rs`) puts number arrays on one
+line, leaves out what is empty, and keeps the order the structs declare — by
+writing compact JSON and reading it back into an ordered tree, because
+`serde_json`'s `Value` sorts keys in this workspace (`preserve_order` is off,
+and turning it on would reorder every other mode's files).
+
+**Edits.** The window sends one gesture as `gameEdit {target, ops}`; an op's
+path addresses a list member by its id (`["planes", "#sky", "depth"]`), so an
+edit lands on the plane it meant even if the planes were reordered meanwhile.
+The batch is applied to a copy, read back as the document's type and checked,
+and replaces the document only if all of that holds. Each document keeps its
+own undo; the core keeps the order edits were made in, so ⌘Z undoes the
+newest wherever it was. Nothing is written until ⌘S, and unsaved rooms join
+the quit prompt. Every path a file names is held to the game's folder past
+symlinks (`path::inside`).
+
+**The editor** (`proton-core/src/game`, `ui/game.js`) is per project, as
+Modeling is. With no game open the home page lists the project's games and
+makes a new one from a template whose art is drawn in code. An open game has
+World / Layers / Entities / Assets on the left, its rooms as tabs over the
+stage, and Inspector / Run / Agent on the right. The stage draws a room's
+edge, collision, entities, spawns and lights (`ui/game-overlay.js`); clicking
+selects what is there.
+
+**What comes next** (the plan's G2–G14): a WebGL2 renderer for the planes,
+collision authoring, a fixed-point simulation in Rust run natively for tests
+and the agent and as WebAssembly in the window, importers (PSD, Aseprite,
+DragonBones, Spine, glTF), lighting, animation, combat, the world map with
+ability gates, hot reload and a web export.
+
 ### Trace
 
 Code Visualizer, sidecar first and native second — [`CODE-VISUALIZER.md`](CODE-VISUALIZER.md)
@@ -1552,7 +1596,7 @@ bearing rule of the entire project:
 | Codex | Source files |
 | Design | Component source + `theme.css` tokens |
 | Modeling | `scene.proton.json` + the `.obj` files it names |
-| Game | Engine-native scene files |
+| Game | `game.json`, `world.json`, `rooms/*.room.json`, `prefabs/*.prefab.json` |
 | Video | `.edl` + sidecar `.srt` |
 | Data | `.ipynb` + `.sql` |
 | Research | `research/<slug>/` — Markdown with TOML front matter, `tournament.jsonl`; papers as `literature/P003.md`, their PDFs beside them and out of Git |
@@ -2414,9 +2458,11 @@ These followed M0–M7. Game playback and Video decoding remain separate project
 
 *Where these stand.* All three now have their documents and the panels that
 read and write them: `scene.proton.json` with an outliner, viewport and shader
-graph; Godot's `.tscn` with a hierarchy and an inspector; a CMX3600 `.edl` and
-its `.srt` sidecar with a multitrack timeline and captions. The remaining runtime integrations are an engine process for
-Game and an ffmpeg process for Video. Modeling has since grown a mesh loader —
+graph; a game's folder with its world, rooms and an inspector (Game was a
+Godot `.tscn` viewer until it became an engine of Proton's own — § 3, Game);
+a CMX3600 `.edl` and its `.srt` sidecar with a multitrack timeline and
+captions. The remaining runtime work is Game's renderer and runtime and an
+ffmpeg process for Video. Modeling has since grown a mesh loader —
 `proton-mesh` reads a Wavefront OBJ, which keeps the diffable-document rule
 true all the way down, since the geometry file is text as well — and the
 viewport draws real surfaces up to a measured budget, with a non-destructive
@@ -2558,9 +2604,12 @@ Opened from the Finder or the Dock, the app is given launchd's PATH,
 `/usr/bin:/bin:/usr/sbin:/sbin`, and so is everything it starts by name —
 ffmpeg, pandoc, tesseract, git, a kernel's `!pip`. So the first thing `main`
 does, while it is the only thread, is ask a login shell that reads no rc files
-for its PATH (a fifth of a second here) and add the folders it lacks after its
-own; a PATH a terminal gave already has them and is left as it is
-(`proton_claude::pipe::launch_path`). The interactive login shell's PATH,
+for its PATH (a seventh of a second here) and add the folders it lacks after
+its own; a PATH a terminal gave already has them and is left as it is
+(`proton_claude::pipe::launch_path`). The answer is kept in
+`~/.proton/launch-path.json`, keyed by the shell and the times of
+`/etc/paths`, `/etc/paths.d` and the login files, and used while none of them
+changes; once the window is up the shell is asked again for the next launch. The interactive login shell's PATH,
 which has conda's and nvm's folders, takes seconds, so it is asked on a thread
 of its own at launch and given to what needs it: the engines, and a notebook's
 kernel, which runs with its own Python's folder ahead of it so that `!pip`

@@ -22,7 +22,10 @@ import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
 import type { ExperimentRow } from "./ExperimentRow";
-import type { GameNode } from "./GameNode";
+import type { GameFound } from "./GameFound";
+import type { GameProjectView } from "./GameProjectView";
+import type { GameRoom } from "./GameRoom";
+import type { GameTemplate } from "./GameTemplate";
 import type { Geometry } from "./Geometry";
 import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
@@ -524,27 +527,7 @@ shaders: Array<Shader>,
  * Every distinct mesh the scene names, so the front end can ask for
  * the ones it does not already hold.
  */
-meshes: Array<string>, } | { "type": "geometry" } & Geometry | { "type": "level", 
-/**
- * Empty when none is open.
- */
-path: string, nodes: Array<GameNode>, 
-/**
- * The file's text.
- *
- * Sent whole, like Design's component source and for the same reason:
- * what Game mode can honestly show in the middle of the screen is
- * Godot's file, until there is an engine process to run the scene.
- */
-source: string, 
-/**
- * Which one is selected, or `usize::MAX`.
- */
-selected: number, 
-/**
- * Why there is no scene, when there is a reason worth showing.
- */
-problem: string, } | { "type": "cut", 
+meshes: Array<string>, } | { "type": "geometry" } & Geometry | { "type": "gameHome", games: Array<GameFound>, templates: Array<GameTemplate>, } | { "type": "gameProject", project: GameProjectView | null, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "cut", 
 /**
  * Empty when none is open.
  */

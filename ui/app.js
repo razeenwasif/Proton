@@ -37,6 +37,7 @@ import { createLean } from "./lean.js";
 import { createTex } from "./tex.js";
 import { createTexVisual } from "./tex-visual.js";
 import { createPdf } from "./pdf.js";
+import { createGame } from "./game.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -504,7 +505,7 @@ function renderWindowGround(again = false) {
   if (!HAS_SHELL) return;
   // Chat, Data, Research and Notebook are drawn as Codex is — every pixel
   // the theme's ground — so they get the same opaque window.
-  const want = ["codex", "chat", "data", "research", "study", "tex", "pdf"].includes(activeMode) ? hexOf(token("--bg")) : null;
+  const want = ["codex", "chat", "data", "research", "study", "tex", "pdf", "game"].includes(activeMode) ? hexOf(token("--bg")) : null;
   if (!again && want === groundAsked) return;
   groundAsked = want;
   setOpaque(want);
@@ -548,6 +549,7 @@ function renderMode(mode) {
     renderSplits(lastSplits.views, lastSplits.focused, lastSplits.vertical);
   }
   if (mode === "data" && lastNotebook) renderNotebook(lastNotebook);
+  game.show(mode === "game");
   requestAnimationFrame(reportEveryViewport);
 }
 
@@ -899,6 +901,8 @@ const lean = createLean({ root: document, dispatch });
 const tex = createTex({ root: document, dispatch });
 const texVisual = createTexVisual({ root: document, dispatch });
 const pdf = createPdf({ root: document, dispatch, keys: showKeys });
+/* Game: Proton's own engine — the games here, a game's rooms, held until saved. */
+const game = createGame({ root: document, dispatch, keys: showKeys });
 /* Notebook: notebooks of your own sources, and the knowledge base they are
    chosen from. Drawn from what the core reads of them. */
 const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
@@ -2278,122 +2282,6 @@ document.addEventListener("change", (e) => {
 
   const rate = e.target.closest?.("[data-cut-rate]");
   if (rate) dispatch({ type: "setTimelineRate", fps: Number(rate.value) });
-});
-
-/* ── Game's hierarchy ────────────────────────────────
-
-   Every row is a node really in the project's `.tscn`. The inspector edits
-   Godot's file by splicing it; the pane in the middle shows the file's text,
-   which is the honest thing to show until there is an engine on the other end
-   of a pipe to actually run the scene. */
-
-let lastLevel = null;
-
-function renderHierarchy(event) {
-  const box = $("[data-hierarchy]");
-  if (!box) return;
-  const count = $("[data-level-count]");
-  const nodes = event.nodes ?? [];
-  if (count) count.textContent = nodes.length ? `${nodes.length}` : "";
-
-  const file = $("[data-level-file]");
-  if (file) {
-    file.textContent = event.path ? event.path.split(/[\\/]/).pop() : "no scene";
-    file.className = "chip" + (event.path ? " accent" : "");
-  }
-
-  if (!nodes.length) {
-    box.innerHTML = `<div class="empty">${escapeHtml(
-      event.problem || "No Godot scene in this project.",
-    )}${openFileAction("Open scene", ".tscn")}</div>`;
-    return;
-  }
-
-  box.innerHTML = nodes
-    .map((node, i) => {
-      const kids = node.children
-        ? `<span class="node-kids">${node.children}</span>`
-        : "";
-      // The Godot class beside the name, quiet, because in a Godot hierarchy
-      // that is how you tell a Sprite2D from an AnimatedSprite2D when both
-      // are called "Sprite".
-      return (
-        `<div class="row scene-node${i === event.selected ? " sel" : ""}" data-level-node="${i}"` +
-        ` style="padding-left:${8 + node.depth * 12}px"` +
-        ` title="${escapeHtml(node.kind || "instance")} · line ${node.line}">` +
-        `${escapeHtml(node.name)}<span class="lay-text">${escapeHtml(node.kind)}</span>` +
-        `<span class="grow"></span>${kids}</div>`
-      );
-    })
-    .join("");
-}
-
-/** The selected node's properties, exactly as Godot wrote their values. */
-function renderLevelInspector(event) {
-  const box = $("[data-level-props]");
-  const nothing = $("[data-level-empty]");
-  if (!box || !nothing) return;
-
-  const node = event.nodes?.[event.selected];
-  const picked = $("[data-level-selected]");
-  if (picked) picked.textContent = node ? `${node.kind} · ${node.name}` : "";
-  const kind = $("[data-level-kind]");
-  if (kind) kind.textContent = node?.kind ?? "";
-
-  box.hidden = !node;
-  nothing.hidden = !!node;
-  if (!node) return;
-
-  if (!node.properties.length) {
-    box.innerHTML = `<div class="empty">This node sets no properties.</div>`;
-    return;
-  }
-  // One text box per value, because a `.tscn` value is an expression —
-  // `Vector2(196, 286)`, `ExtResource("1_x8k")` — and a widget per type would
-  // have to understand a language this deliberately does not parse.
-  box.innerHTML = node.properties
-    .map(
-      (p) =>
-        `<div class="prop-row"><span class="lbl" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>` +
-        `<input class="num" data-level-prop="${escapeHtml(p.name)}" spellcheck="false"` +
-        ` style="text-align:left" value="${escapeHtml(p.value)}"></div>`,
-    )
-    .join("");
-}
-
-/** The scene file itself, which is what Game mode can honestly show. */
-function renderLevelSource(event) {
-  const box = $("[data-level-source]");
-  if (!box) return;
-  if (!event.path) {
-    box.innerHTML = `<div class="empty">${escapeHtml(
-      event.problem || "No Godot scene in this project.",
-    )}${openFileAction("Open scene", ".tscn")}</div>`;
-    return;
-  }
-  box.innerHTML =
-    `<div class="level-note">Godot's file. Running the scene, hot reload and the ` +
-    `profiler need an engine process; there is not one.</div>` +
-    `<pre class="level-src">${escapeHtml(event.source ?? "")}</pre>`;
-}
-
-document.addEventListener("click", (e) => {
-  const row = e.target.closest?.("[data-level-node]");
-  if (!row) return;
-  dispatch({ type: "selectGameNode", index: Number(row.dataset.levelNode) });
-});
-
-document.addEventListener("change", (e) => {
-  const field = e.target.closest?.("[data-level-prop]");
-  if (!field) return;
-  const index = lastLevel?.selected;
-  if (index === undefined || index < 0) return;
-  dispatch({
-    type: "setGameProperty",
-    index,
-    name: field.dataset.levelProp,
-    value: field.value,
-  });
 });
 
 /* ── Modeling's outliner ────────────────────────────────
@@ -5379,11 +5267,16 @@ function renderEvent(event) {
       renderCutSource(event);
       break;
 
-    case "level":
-      lastLevel = event;
-      renderHierarchy(event);
-      renderLevelInspector(event);
-      renderLevelSource(event);
+    case "gameHome":
+      game.home(event);
+      break;
+
+    case "gameProject":
+      game.project(event);
+      break;
+
+    case "gameRoom":
+      game.room(event);
       break;
 
     case "geometry":
@@ -5763,6 +5656,10 @@ document.addEventListener("keydown", (e) => {
 
   // The PDF mode's pages take their own keys — j and k, pages, zoom — when
   // nothing typed into has the keyboard; the rest go on to the core.
+  if (activeMode === "game" && !terminalFocused && game.key(e)) {
+    e.preventDefault();
+    return;
+  }
   if (activeMode === "pdf" && !terminalFocused && pdf?.key(e)) {
     e.preventDefault();
     return;
@@ -6810,6 +6707,8 @@ function paintAgent(event) {
   if (texDot && $("#tex-pane")?.dataset.showing !== "agent") texDot.hidden = event.activity === "idle";
   const pdfDot = $("[data-pdf-agent-dot]");
   if (pdfDot && $("#pdf-pane")?.dataset.showing !== "agent") pdfDot.hidden = event.activity === "idle";
+  const gameDot = $("[data-game-agent-dot]");
+  if (gameDot && $("#game-pane")?.dataset.showing !== "agent") gameDot.hidden = event.activity === "idle";
   // Which service answered. Worth a permanent chip rather than a setting you
   // have to go and look up: the two give different answers to the same
   // question, and a transcript you cannot attribute is one you cannot reason
@@ -6849,7 +6748,7 @@ function paintAgent(event) {
     send.classList.toggle("stop", event.activity !== "idle");
     send.setAttribute("aria-label", event.activity === "idle" ? "Send" : "Stop");
     // Codex's composer sends with Zed's paper plane; Chat keeps its arrow.
-    const idle = send.closest("#codex-dock, #tex-pane, #pdf-pane") ? "send" : "arrow-up";
+    const idle = send.closest("#codex-dock, #tex-pane, #pdf-pane, #game-pane") ? "send" : "arrow-up";
     send.innerHTML = `<svg class="i"><use href="#i-${
       event.activity === "idle" ? idle : "stop"
     }"/></svg>`;

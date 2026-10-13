@@ -24,9 +24,6 @@
 //! The simulation comes next, written once and run twice: natively in the
 //! core, where tests and the agent replay recorded input, and as WebAssembly
 //! in the window, where the game is played.
-//!
-//! [`tscn`] is the Godot reader this crate used to be. It goes once Game mode
-//! no longer reads `.tscn` files.
 
 pub mod doc;
 pub mod format;
@@ -35,8 +32,6 @@ pub mod project;
 #[cfg(feature = "editor")]
 pub mod template;
 pub mod text;
-mod tscn;
 
 pub use doc::{Doc, Document, Op};
 pub use project::{Project, Target};
-pub use tscn::{GameNode, Property, Scene};

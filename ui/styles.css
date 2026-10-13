@@ -2459,7 +2459,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="chat"],
 :root[data-mode="data"],
 :root[data-mode="research"],
-:root[data-mode="pdf"],
+:root:is([data-mode="pdf"], [data-mode="game"]),
 :root[data-mode="study"] {
   --z-ui:  calc(17.5px * var(--ui-scale));  /* tree, breadcrumb, headers */
   --z-sm:  calc(15px * var(--ui-scale));    /* the agent's prose */
@@ -2492,29 +2492,29 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .statusline,
 :root[data-mode="data"] .hint,
 :root[data-mode="research"] .chrome-rail,
-:root[data-mode="pdf"] .chrome-rail,
+:root:is([data-mode="pdf"], [data-mode="game"]) .chrome-rail,
 :root[data-mode="study"] .chrome-rail,
 :root[data-mode="research"] .rail,
-:root[data-mode="pdf"] .rail,
+:root:is([data-mode="pdf"], [data-mode="game"]) .rail,
 :root[data-mode="study"] .rail,
 :root[data-mode="research"] .statusline,
-:root[data-mode="pdf"] .statusline,
+:root:is([data-mode="pdf"], [data-mode="game"]) .statusline,
 :root[data-mode="study"] .statusline,
 :root[data-mode="research"] .hint,
-:root[data-mode="pdf"] .hint,
+:root:is([data-mode="pdf"], [data-mode="game"]) .hint,
 :root[data-mode="study"] .hint,
 /* The terminal is Codex's; in Chat, Data, Research and Notebook its toggle
    would open something that is not on screen. */
 :root[data-mode="chat"] .titlebar [data-term-toggle],
 :root[data-mode="data"] .titlebar [data-term-toggle],
 :root[data-mode="research"] .titlebar [data-term-toggle],
-:root[data-mode="pdf"] .titlebar [data-term-toggle],
+:root:is([data-mode="pdf"], [data-mode="game"]) .titlebar [data-term-toggle],
 :root[data-mode="study"] .titlebar [data-term-toggle] { display: none; }
 :root:is([data-mode="codex"], [data-mode="tex"]) .app,
 :root[data-mode="chat"] .app,
 :root[data-mode="data"] .app,
 :root[data-mode="research"] .app,
-:root[data-mode="pdf"] .app,
+:root:is([data-mode="pdf"], [data-mode="game"]) .app,
 :root[data-mode="study"] .app {
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2523,7 +2523,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="chat"] .body,
 :root[data-mode="data"] .body,
 :root[data-mode="research"] .body,
-:root[data-mode="pdf"] .body,
+:root:is([data-mode="pdf"], [data-mode="game"]) .body,
 :root[data-mode="study"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
 
 /* Opaque, as Zed is. The window's own fill may be a veil over the desktop;
@@ -2533,7 +2533,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="chat"] .titlebar,
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
-:root[data-mode="pdf"] .titlebar,
+:root:is([data-mode="pdf"], [data-mode="game"]) .titlebar,
 :root[data-mode="study"] .titlebar,
 .workspace[data-ws="codex"],
 .workspace[data-ws="data"] { background: var(--bg); }
@@ -2542,7 +2542,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="chat"] .titlebar,
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
-:root[data-mode="pdf"] .titlebar,
+:root:is([data-mode="pdf"], [data-mode="game"]) .titlebar,
 :root[data-mode="study"] .titlebar {
   grid-row: 1; grid-column: 2;
   display: flex; flex-direction: column; align-items: center; gap: 14px;
@@ -3103,10 +3103,10 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .res mark { color: var(--accent); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .preview { font: var(--z-2xs)/1.6 var(--zed); color: var(--code); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #telescope .chip { background: none; box-shadow: none; color: var(--faint); font: var(--z-2xs) var(--zed); }
-:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"], [data-mode="pdf"]) #whichkey .wk-head,
-:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"], [data-mode="pdf"]) #whichkey .wk-grid,
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"], [data-mode="pdf"], [data-mode="game"]) #whichkey .wk-head,
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"], [data-mode="pdf"], [data-mode="game"]) #whichkey .wk-grid,
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #cmdline { font-family: var(--zed); }
-:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"], [data-mode="pdf"]) #whichkey .wk-head { border-bottom-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+:root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"], [data-mode="pdf"], [data-mode="game"]) #whichkey .wk-head { border-bottom-color: color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) #cmdline .chip { background: none; box-shadow: none; color: var(--faint); }
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .cmp,
 :root:is([data-mode="codex"], [data-mode="data"], [data-mode="tex"]) .hov-body { font: var(--z-xs) var(--zed); }
@@ -5456,3 +5456,119 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .pdf-tab-lock { font-size: 10px; }
 .pdf-tool-checks { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font: var(--z-2xs) var(--zed); }
 .pdf-tool-checks label { display: flex; gap: 4px; align-items: center; }
+
+/* ── the Game mode ─────────────────────────────────────────────────────
+   Drawn as PDF is, on Codex's ground: the game's world, a room's layers and
+   entities, and its assets on the left; the rooms open as tabs over the
+   stage; what is selected, how a run starts and the agent on the right.
+   With no game open, the games here and a new one are the whole page. */
+.workspace[data-ws="game"] {
+  background: var(--bg);
+  --cc-bg: var(--bg);
+  --cc-side: var(--bg);
+  --cc-head: var(--head);
+  --cc-raise: color-mix(in srgb, var(--text) 6%, var(--bg));
+  --cc-raise-2: color-mix(in srgb, var(--text) 11%, var(--bg));
+  --cc-pop: var(--head);
+  --cc-code: var(--bg-deep);
+  --cc-line: color-mix(in srgb, var(--text) 8%, var(--bg-deep));
+  --cc-line-2: var(--row-on-edge);
+  --cc-text: var(--text);
+  --cc-soft: color-mix(in srgb, var(--text) 74%, var(--bg));
+  --cc-muted: var(--muted);
+  --cc-faint: var(--faint);
+  --cc-accent: var(--accent);
+  --cc-accent-2: color-mix(in srgb, var(--accent) 82%, var(--text));
+  --cc-accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --cc-on-accent: var(--bg-deep);
+  --cc-ok: var(--ok);
+  --cc-warn: var(--warn);
+  --cc-err: var(--err);
+  --cc-font: var(--zed);
+}
+.game-side-tabs { display: flex; gap: 2px; padding: 8px; overflow-x: auto; scrollbar-width: none; }
+.game-side-tabs .dock-tab { flex: none; padding-inline: 7px; font: var(--z-2xs) var(--zed); }
+.game-side-body { padding: 4px 8px 12px; font: var(--z-xs) var(--zed); color: var(--muted); }
+.game-main { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.game-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 40px; padding: 4px 10px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+.game-bar .grow { flex: 1 1 auto; }
+.game-bar .hbtn:disabled { opacity: .35; cursor: default; }
+.game-name { font: 600 var(--z-xs) var(--zed); color: var(--text); padding: 0 4px; white-space: nowrap; }
+.game-tabs { display: flex; gap: 2px; min-width: min(180px, 100%); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.game-tab { display: flex; align-items: center; gap: 6px; max-width: 220px; padding: 4px 6px 4px 10px; border-radius: 7px; color: var(--muted); font: var(--z-xs) var(--zed); cursor: pointer; white-space: nowrap; }
+.game-tab:hover { background: var(--row-hover); color: var(--text); }
+.game-tab.on { background: var(--row-on); color: var(--text); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
+.game-tab-name { overflow: hidden; text-overflow: ellipsis; }
+.game-tab .dot, .game-row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.game-tab-close { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--faint); font: 14px/1 var(--zed); cursor: pointer; flex: none; }
+.game-tab-close:hover { background: var(--row-hover); color: var(--text); }
+.game-seg { display: flex; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.game-seg button { display: grid; place-items: center; width: 28px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--faint); cursor: pointer; }
+.game-seg button .i { width: 14px; height: 14px; }
+.game-seg button:disabled { opacity: .45; cursor: default; }
+.game-ask { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); color: var(--text); font: var(--z-xs) var(--zed); }
+.game-ask[hidden] { display: none; }
+.game-ask .grow { flex: 1; }
+.game-ask button { padding: 4px 10px; }
+.game-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; outline: none; background: color-mix(in srgb, var(--text) 4%, var(--bg-deep)); }
+.game-overlay { position: absolute; inset: 0; display: block; }
+.game-overlay[hidden] { display: none; }
+.game-empty { position: absolute; inset: 0; display: grid; place-items: center; }
+.game-empty[hidden] { display: none; }
+.game-faint { margin: 6px 4px; color: var(--faint); font: var(--z-2xs)/1.5 var(--zed); }
+/* With no game open, the home page is the whole page. */
+.workspace[data-ws="game"].game-home { grid-template-columns: 0 0 minmax(0, 1fr) 0 0 !important; }
+.workspace[data-ws="game"].game-home > .game-side,
+.workspace[data-ws="game"].game-home > .game-pane,
+.workspace[data-ws="game"].game-home > .gutter,
+.workspace[data-ws="game"].game-home .game-bar { display: none; }
+.game-open { position: absolute; inset: 0; z-index: 2; overflow: auto; background: var(--bg); }
+.game-open[hidden] { display: none; }
+.game-open-in { max-width: 960px; margin: 6vh auto 40px; padding: 0 28px; display: grid; gap: 16px; }
+.game-home-head h3 { margin: 0; font: 600 var(--z-sm) var(--zed); color: var(--text); }
+.game-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.game-card { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--text) 10%, var(--bg-deep)); border-radius: 10px; background: color-mix(in srgb, var(--text) 3%, var(--bg)); color: var(--muted); text-align: left; font: var(--z-2xs) var(--zed); cursor: pointer; }
+.game-card:hover { border-color: var(--row-on-edge); background: var(--row-hover); }
+.game-card b { color: var(--text); font: 600 var(--z-xs) var(--zed); }
+.game-card-path { color: var(--faint); }
+.game-new { display: grid; gap: 10px; max-width: 420px; padding: 16px; border-radius: 10px; background: color-mix(in srgb, var(--text) 3%, var(--bg)); }
+.game-new h4 { margin: 0; font: 600 var(--z-xs) var(--zed); color: var(--text); }
+.game-new label { display: grid; gap: 4px; color: var(--muted); font: var(--z-2xs) var(--zed); }
+.game-new input, .game-new select { box-sizing: border-box; width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-xs) var(--zed); }
+.game-new button { justify-self: start; padding: 6px 14px; }
+.game-row { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 2px 8px; border-radius: 6px; color: var(--muted); cursor: pointer; }
+.game-row:hover { background: var(--row-hover); color: var(--text); }
+.game-row.on { background: var(--row-on); color: var(--text); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
+.game-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game-row-meta { flex: none; color: var(--faint); font: var(--z-2xs) var(--zed); }
+.game-sub { margin-left: 14px; padding-left: 6px; border-left: 1px solid color-mix(in srgb, var(--text) 10%, var(--bg-deep)); }
+.game-head { display: flex; align-items: center; gap: 6px; margin: 12px 8px 4px; font: 600 var(--z-2xs) var(--zed); color: var(--faint); text-transform: none; }
+.game-head.warn { color: var(--warn); }
+.game-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.game-problem { margin: 2px 8px; color: var(--muted); font: var(--z-2xs)/1.45 var(--zed); }
+.game-pane-head { display: flex; align-items: center; gap: 2px; padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }
+.game-pane-head .dock-tab { font: var(--z-xs) var(--zed); }
+.game-pane .dock-tab .dot { display: inline-block; width: 6px; height: 6px; margin-left: 4px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.game-pane .dock-tab .dot[hidden] { display: none; }
+.game-pane { display: flex; flex-direction: column; min-width: 0; }
+.game-pane-body { flex: 1 1 auto; min-height: 0; padding: 10px 12px; font: var(--z-xs)/1.5 var(--zed); color: var(--muted); }
+.game-pane-body[hidden] { display: none; }
+.game-agent { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.game-agent[hidden] { display: none; }
+.game-agent > [data-agent-thread] { flex: 1 1 auto; min-height: 0; }
+.game-insp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.game-insp-head h4 { flex: 1 1 auto; margin: 0; font: 600 var(--z-xs) var(--zed); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game-insp-head button { padding: 3px 10px; font: var(--z-2xs) var(--zed); }
+.game-fields { display: grid; gap: 8px; }
+.game-field { display: grid; grid-template-columns: 9em minmax(0, 1fr); align-items: center; gap: 2px 8px; font: var(--z-2xs) var(--zed); }
+.game-field > span:first-child { color: var(--muted); }
+.game-field small { grid-column: 2; color: var(--faint); font: var(--z-2xs)/1.4 var(--zed); }
+.game-field input[type="text"], .game-field input[type="number"], .game-field select { min-width: 0; width: 100%; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-2xs) var(--zed); }
+.game-field input[type="checkbox"] { justify-self: start; }
+.game-nums { display: flex; gap: 4px; min-width: 0; }
+.game-nums input { flex: 1 1 0; }
+.game-checks { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--muted); }
+.game-checks label { display: flex; gap: 4px; align-items: center; }
+.game-read { color: var(--text); overflow-wrap: anywhere; }
+.game-tool { display: grid; gap: 8px; margin: 0 0 18px; }
+.game-tool h4 { margin: 0; font: 600 var(--z-xs) var(--zed); color: var(--text); }

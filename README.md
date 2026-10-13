@@ -10,10 +10,11 @@ them, and an agent that can act in any of them.
 **M0 through M7 are built**, and every mode in the window now reads and writes
 a real document. The editor, Telescope and language servers, the agent, the
 Code Visualizer, the plugin host, Data mode and Design mode all ship; Modeling
-has its scene, outliner, viewport and shader graph; Game reads and writes a
-Godot project's scenes; Video reads and writes a cut and its captions. What is
-still to come is the machinery underneath two of them — a game engine and
-ffmpeg — and each of those is a real project of its own.
+has its scene, outliner, viewport and shader graph; Game is becoming an engine
+of Proton's own, for hand-drawn and pixel-art Metroidvanias first; Video reads
+and writes a cut and its captions. What is still to come is the machinery
+underneath two of them — the rest of that engine, and ffmpeg — and each of
+those is a real project of its own.
 
 ```bash
 git submodule update --init    # the Code Visualizer, vendored underneath M4
@@ -62,7 +63,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-plugin/` | The Wasmtime host, WIT interfaces and capability grants |
 | `crates/proton-trace/` | The Code Visualizer client |
 | `crates/proton-design/` | Theme tokens and component markup, for Design mode |
-| `crates/proton-game/` | Godot `.tscn` scenes, for Game mode |
+| `crates/proton-game/` | Game mode's engine: its project format, editable documents and template |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
 | `ui/` | The front end — the app's real chrome, and the interactive prototype — all eleven modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
@@ -215,10 +216,13 @@ real component source and design tokens.
 scene serialised to diffable JSON. An object names the `.obj` its geometry is
 in, a stack of operations says what to do to it, and the material graph is
 compiled into a program a WebGL renderer runs on every pixel.
-**Game** · a Godot project's scene tree and an inspector that edits the
-`.tscn` without reformatting it. The play transport, profiler, hot reload and
-the agent that verifies changes by replaying recorded input all need an engine
-process, and wait on one.
+**Game** · Proton's own engine, made for a few kinds of game: hand-drawn,
+painted and pixel-art 2D on dozens of parallax planes, low-poly 3D, isometric
+rooms; Metroidvanias first, roguelites after. A game is a folder of JSON — the
+game, its world, a file per room — edited by ops the core applies whole or not
+at all, undone wherever they were made and held until saved. The rooms open as
+tabs over a stage that draws what is solid and what stands where; playing them
+comes with the engine's runtime.
 **Video** · a multitrack timeline over a CMX3600 edit decision list, with the
 captions from the `.srt` beside it. Both files are spliced, never re-printed.
 There is no program monitor: a frame of the programme is a decoded frame of
@@ -521,11 +525,16 @@ Each file is read once and kept for as long as an object wears it, so an edit
 to a stack runs only the stack and the normals: 56 ms on that sphere, down
 from 122 ms when every edit re-read the file.
 
-Game reads a Godot project: `project.godot` says which scene starts, the
-hierarchy is that `.tscn`'s node tree, and the inspector edits it by splicing
-the file Godot will open next. What it cannot do is run one — the play
-transport, hot reload, the profiler and replaying recorded input all need an
-engine process on the other end of a pipe, and none of them is mimed.
+Game is an engine of Proton's own rather than an editor for somebody else's.
+An embedded engine's scenes play in its window and its runs are opaque to the
+agent; the kinds of game Proton is for — Hollow Knight's and Ori's painted
+planes, Dead Cells' lit pixels, Hades' and Tunic's isometric rooms — are
+narrow enough that an engine shaped to them is smaller than a general one.
+A game is `game.json`, `world.json` and a `.room.json` per room, written in
+the order the format declares with nothing empty said, so a diff of one reads
+as the change it was. A new game comes from a template whose art is drawn in
+code. What is still to come is the runtime: a simulation written once in
+Rust, run natively for tests and the agent and as WebAssembly in the window.
 
 Video reads a cut: an `.edl` is one line per event and four timecodes per line,
 plain text that has diffed in Git since before Git, and the timeline draws each
@@ -547,7 +556,7 @@ need ffmpeg in a process of its own — which the process model already accounts
 for and which is not installed here. None of it is mimed.
 
 So: no screen in this window claims to do something it cannot. What remains is
-two real projects — an engine process for Game and an ffmpeg sidecar for
+two real projects — the rest of Game's engine and an ffmpeg sidecar for
 Video.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.

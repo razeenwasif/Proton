@@ -41,6 +41,8 @@
     "pdf-ocr.js",
     "pdf-tools.js",
     "pdf-find.js",
+    "game.js",
+    "game-overlay.js",
     "highlight.js",
     "claude.js",
     "research.js",

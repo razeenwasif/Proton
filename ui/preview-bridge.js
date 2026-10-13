@@ -7,6 +7,7 @@ import {createResearchPreview} from './preview-research.js';
 import {createStudyPreview} from './preview-study.js';
 import {createTexPreview} from './preview-tex.js';
 import {createPdfPreview} from './preview-pdf.js';
+import {createGamePreview} from './preview-game.js';
 
 export function createPreview(deliver, mockLatency) {
   let mockMesh = () => null;
@@ -16,6 +17,7 @@ export function createPreview(deliver, mockLatency) {
   const study = createStudyPreview(deliver);
   const tex = createTexPreview(deliver);
   const pdfs = createPdfPreview(deliver);
+  const games = createGamePreview(deliver);
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
@@ -343,44 +345,6 @@ export function createPreview(deliver, mockLatency) {
     }
   };
 
-  // A Godot scene for the hierarchy, so Game mode can be designed against a
-  // real tree. Written out like every other fixture here; the real one is read
-  // from a `.tscn` by proton-game.
-  const levelSource = `[gd_scene load_steps=2 format=3 uid="uid://bq2x8k1n0v"]
-
-[ext_resource type="Texture2D" path="res://art/tiles.png" id="1_x8k"]
-
-[node name="World" type="Node2D"]
-
-[node name="Player" type="CharacterBody2D" parent="."]
-position = Vector2(196, 286)
-speed = 400.0
-
-[node name="Sprite" type="Sprite2D" parent="Player"]
-texture = ExtResource("1_x8k")
-
-[node name="Camera" type="Camera2D" parent="."]
-`;
-
-  const level = {
-    path: "C:/game/scenes/world.tscn",
-    problem: "",
-    selected: -1,
-    source: levelSource,
-    nodes: [
-      { name: "World", kind: "Node2D", path: "", parent: "", depth: 0, children: 2, line: 5,
-        properties: [] },
-      { name: "Player", kind: "CharacterBody2D", path: "Player", parent: ".", depth: 1,
-        children: 1, line: 7,
-        properties: [{ name: "position", value: "Vector2(196, 286)", line: 8 },
-                     { name: "speed", value: "400.0", line: 9 }] },
-      { name: "Sprite", kind: "Sprite2D", path: "Player/Sprite", parent: "Player", depth: 2,
-        children: 0, line: 11,
-        properties: [{ name: "texture", value: 'ExtResource("1_x8k")', line: 12 }] },
-      { name: "Camera", kind: "Camera2D", path: "Camera", parent: ".", depth: 1,
-        children: 0, line: 14, properties: [] },
-    ],
-  };
 
   // A cut and its captions, so Video mode can be designed against real
   // documents. Written out like every other fixture here; the real ones are
@@ -464,14 +428,6 @@ FCM: NON-DROP FRAME
 
   const cutEvent = () => ({ type: "cut", ...cut });
 
-  const levelEvent = () => ({
-    type: "level",
-    path: level.path,
-    nodes: level.nodes,
-    source: level.source,
-    selected: level.selected,
-    problem: level.problem,
-  });
 
   /* ── geometry ─────────────────────────────────────
    *
@@ -897,7 +853,7 @@ FCM: NON-DROP FRAME
         themeEvent(),
         artboardEvent(),
         sceneEvent(),
-        levelEvent(),
+        ...games.sync(),
         cutEvent(),
         settingsEvent(),
         chatsEvent(),
@@ -913,6 +869,7 @@ FCM: NON-DROP FRAME
     if (command.type.startsWith("study")) return study.command(command);
     if (command.type.startsWith("tex")) return tex.command(command);
     if (command.type.startsWith("pdf")) return pdfs.command(command);
+    if (command.type.startsWith("game")) return games.command(command);
     if (command.type === "runCell") {
       // The shape of a real run: the cell goes busy, and the answer arrives
       // later on its own — which is what the panel has to survive.
@@ -976,22 +933,6 @@ FCM: NON-DROP FRAME
       cut.rate = { fps, drop: cut.rate.drop };
       recount();
       return [cutEvent()];
-    }
-    if (command.type === "selectGameNode") {
-      level.selected = command.index;
-      return [levelEvent()];
-    }
-    if (command.type === "setGameProperty") {
-      const node = level.nodes[command.index];
-      const prop = node?.properties.find((one) => one.name === command.name);
-      if (prop) {
-        level.source = level.source.replace(
-          `${prop.name} = ${prop.value}`,
-          `${prop.name} = ${command.value}`,
-        );
-        prop.value = command.value;
-      }
-      return [levelEvent()];
     }
     if (command.type === "loadMesh") {
       return [geometryEvent(command.path)];
@@ -1450,7 +1391,7 @@ FCM: NON-DROP FRAME
     }
     if (command.type === "setMode") {
       state.mode = command.mode;
-      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "tex" ? tex.entered() : []), ...(state.mode === "pdf" ? pdfs.entered() : [])];
+      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "tex" ? tex.entered() : []), ...(state.mode === "pdf" ? pdfs.entered() : []), ...(state.mode === "game" ? games.sync() : [])];
     }
     // A real traced step, dumped from the core by
     // `crates/proton-core/tests/dump_step.rs`. Real rather than invented,
