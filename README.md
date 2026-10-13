@@ -65,6 +65,7 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-design/` | Theme tokens and component markup, for Design mode |
 | `crates/proton-game/` | Game mode's engine: its project format, editable documents, template, collision tracing and the fixed-point simulation |
 | `crates/proton-game-runtime/` | The simulation as WebAssembly, for the window's Play — built to `ui/game-runtime.wasm` by `scripts/game-wasm.mjs` |
+| `crates/proton-raster/` | Canvas mode's engine: layered pictures in 64-px tiles, blend modes, ops with undo, the `.canvas` folder format — in whole numbers only, so the window's WebAssembly and the core make the same pixels |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
 | `ui/` | The front end — the app's real chrome, and the interactive prototype — all eleven modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |

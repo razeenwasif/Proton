@@ -25,6 +25,7 @@ members = [
     "crates/proton-syntax",
     "crates/proton-term",
     "crates/proton-pdf",
+    "crates/proton-raster",
     "crates/proton-tex",
     "crates/proton-text",
     "crates/proton-trace",
@@ -83,6 +84,12 @@ ts-rs = "10"
 opt-level = 0
 
 [profile.dev.package."*"]
+opt-level = 2
+
+# Canvas's engine runs a brush's every dab under the session's lock, and in
+# every test: unoptimised it is twenty times slower. Workspace members are not
+# covered by "*" above.
+[profile.dev.package.proton-raster]
 opt-level = 2
 
 [profile.release]
