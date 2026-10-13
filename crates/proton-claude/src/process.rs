@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::pipe::{self, Pipe};
-pub use crate::pipe::{launch_path, login_path, login_vars, on_output, with_missing, Line};
+pub use crate::pipe::{launch_path, login_path, login_vars, on_output, refresh_launch_path, with_missing, Line};
 
 /// Where `claude` is: `PROTON_CLAUDE_BIN` if it is set, then where Claude
 /// Code's installer puts it, then the login shell's PATH and our own.

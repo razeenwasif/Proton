@@ -491,6 +491,8 @@ fn main() {
     // neither the first chat nor the first cell waits seconds for it.
     std::thread::spawn(|| {
         proton_claude::process::login_path();
+        // The PATH kept from the last launch, asked for again for the next.
+        proton_claude::process::refresh_launch_path();
     });
     tauri::Builder::default()
         .register_uri_scheme_protocol("artifact", |_, request| artifact_page(&request))

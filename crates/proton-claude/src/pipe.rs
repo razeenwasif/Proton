@@ -62,9 +62,98 @@ pub fn login_path() -> Option<&'static str> {
 /// an interactive one can take seconds, because it is asked before the
 /// window opens. What only an rc file adds — nvm, conda — is still found by
 /// [`login_path`], asked later and off the window's thread by what needs it.
+///
+/// Kept between launches, by what a login shell's PATH is made from: the
+/// shell, `/etc/paths` and `/etc/paths.d`, and the login files. With none of
+/// them changed, the PATH last asked for is used — a login shell before the
+/// window opens was a seventh of a second of every launch — and asked for
+/// again once the window is up ([`refresh_launch_path`]), for what a login
+/// file sources from elsewhere.
 pub fn launch_path() -> Option<OsString> {
-    let text = ask_shell(&["-l", "-c"], PATH_SCRIPT, Duration::from_secs(2))?;
-    with_missing(&std::env::var_os("PATH").unwrap_or_default(), &read_path(&text)?)
+    let given = std::env::var_os("PATH").unwrap_or_default();
+    let _ = GIVEN.set(given.clone());
+    let key = launch_key();
+    let kept = launch_kept().filter(|(was, _)| *was == key).map(|(_, path)| path);
+    let path = match kept {
+        Some(path) => {
+            let _ = KEPT_USED.set(true);
+            path
+        }
+        None => {
+            let path = read_path(&ask_shell(&["-l", "-c"], PATH_SCRIPT, Duration::from_secs(2), None)?)?;
+            keep_launch(&key, &path);
+            path
+        }
+    };
+    with_missing(&given, &path)
+}
+
+/// The PATH this process was given, before [`launch_path`] added to it.
+static GIVEN: OnceLock<OsString> = OnceLock::new();
+/// Whether [`launch_path`] used the PATH kept from an earlier launch.
+static KEPT_USED: OnceLock<bool> = OnceLock::new();
+
+/// Ask a login shell for its PATH again, as this process was given its own,
+/// and keep the answer for the next launch: when this one used what an
+/// earlier one kept. Off the window's thread, once the window is up.
+pub fn refresh_launch_path() {
+    if KEPT_USED.get() != Some(&true) {
+        return;
+    }
+    let given = GIVEN.get().cloned().unwrap_or_default();
+    let key = launch_key();
+    if let Some(path) = ask_shell(&["-l", "-c"], PATH_SCRIPT, Duration::from_secs(5), Some(&given)).as_deref().and_then(read_path) {
+        if launch_kept().map(|(_, was)| was) != Some(path.clone()) {
+            keep_launch(&key, &path);
+        }
+    }
+}
+
+fn launch_file() -> Option<PathBuf> {
+    Some(home()?.join(".proton").join("launch-path.json"))
+}
+
+fn launch_kept() -> Option<(String, String)> {
+    let text = std::fs::read_to_string(launch_file()?).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    Some((value["key"].as_str()?.to_string(), value["path"].as_str()?.to_string()))
+}
+
+fn keep_launch(key: &str, path: &str) {
+    let Some(file) = launch_file() else { return };
+    let Some(dir) = file.parent() else { return };
+    let _ = std::fs::create_dir_all(dir);
+    let part = file.with_extension("json.part");
+    let text = serde_json::json!({ "key": key, "path": path }).to_string();
+    if std::fs::write(&part, text).is_ok() {
+        let _ = std::fs::rename(&part, &file);
+    }
+}
+
+/// What a login shell's PATH is made from, as a string that changes when any
+/// of it does: the shell, and the times of path_helper's lists and of the
+/// login files zsh and bash read.
+fn launch_key() -> String {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let home = home().unwrap_or_default();
+    let dot = std::env::var_os("ZDOTDIR").map(PathBuf::from).unwrap_or_else(|| home.clone());
+    let mut files: Vec<PathBuf> = ["/etc/paths", "/etc/zshenv", "/etc/zprofile", "/etc/zlogin", "/etc/profile"].iter().map(PathBuf::from).collect();
+    files.extend([".zshenv", ".zprofile", ".zlogin"].iter().map(|name| dot.join(name)));
+    files.extend([".bash_profile", ".bash_login", ".profile"].iter().map(|name| home.join(name)));
+    let mut listed: Vec<PathBuf> = std::fs::read_dir("/etc/paths.d").map(|dir| dir.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+    listed.sort();
+    files.extend(listed);
+    let mut key = shell;
+    for file in files {
+        let at = std::fs::metadata(&file)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        key.push_str(&format!("|{}:{at}", file.display()));
+    }
+    key
 }
 
 /// `ours`, then whatever of `more` it lacks, in `more`'s order; `None` when
@@ -102,17 +191,22 @@ fn read_path(text: &str) -> Option<String> {
 /// is where nvm and its kind put themselves; the caller's markers keep
 /// whatever the rc files print out of the answer.
 fn ask_login_shell(script: &str) -> Option<String> {
-    ask_shell(&["-i", "-l", "-c"], script, Duration::from_secs(3))
+    ask_shell(&["-i", "-l", "-c"], script, Duration::from_secs(3), None)
 }
 
-/// What the user's shell, started with `flags`, prints for `script`, or
-/// nothing if it has not answered within `wait`.
-fn ask_shell(flags: &[&str], script: &str, wait: Duration) -> Option<String> {
+/// What the user's shell, started with `flags` — and `path` for its PATH,
+/// when given — prints for `script`, or nothing if it has not answered
+/// within `wait`.
+fn ask_shell(flags: &[&str], script: &str, wait: Duration, path: Option<&OsStr>) -> Option<String> {
     if cfg!(windows) {
         return None;
     }
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let mut child = Command::new(shell)
+    let mut command = Command::new(shell);
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
+    let mut child = command
         .args(flags)
         .arg(script)
         .stdin(Stdio::null())
@@ -410,8 +504,15 @@ mod tests {
         println!("{:?} in {:?}", path, started.elapsed());
         let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
         assert!(std::env::split_paths(&ours).all(|dir| dirs.contains(&dir)), "something of ours went");
-        let login = read_path(&ask_shell(&["-l", "-c"], PATH_SCRIPT, Duration::from_secs(2)).unwrap()).unwrap();
+        let login = read_path(&ask_shell(&["-l", "-c"], PATH_SCRIPT, Duration::from_secs(2), None).unwrap()).unwrap();
         assert!(std::env::split_paths(&login).all(|dir| dir.as_os_str().is_empty() || dirs.contains(&dir)));
+        // Kept for the next launch, which asks no shell before its window.
+        assert_eq!(launch_kept().map(|(key, _)| key), Some(launch_key()), "the PATH was not kept");
+        let again = Instant::now();
+        assert_eq!(launch_path(), Some(path));
+        println!("kept: {:?}", again.elapsed());
+        assert!(again.elapsed() < Duration::from_millis(50), "the kept PATH was not used");
+        refresh_launch_path();
     }
 
     /// Asks the real login shell; run by hand.
