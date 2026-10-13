@@ -241,3 +241,28 @@ Take these in the installed app:
 - **PDF library: nothing redrawn while searching.** Its search hides books instead of drawing the shelves again.
 - **PDF: thumbnails capped.** The sidebar and the grid keep 150 thumbnails, the least lately drawn let go.
 - **`[profile.release]`:** `strip = true`, `lto = "thin"`.
+
+### The larger fixes, 13 October
+
+- **PDF engine** (`bd87ad1`). Each change keeps the objects it changed, as they were and as they became, so undo and redo put them back instead of replaying from the file as opened. A save's update is written from the objects that may differ from the disk (kept as a set, cleared on save), against a skeleton of the file's trailer and cross-reference — no copy of the opened document to compare. A version's view is serialised only when the window asks for it.
+  - Measured in release, on a copy of the same 38 MB book (machine under load):
+    - the view's bytes: 190 ms → 22 ms;
+    - undo: 73 ms → 20 µs.
+  - Still there: `apply` clones the document (87 ms unloaded) and compares its objects (about 40 ms). Comments as overlays were not done; with views this cheap they are not worth the second drawing path.
+- **Agent transcript deltas** (`83b839c`). While an answer streams, the core sends the conversation from the first entry that differs from what the window was sent (each entry hashed), with `from`. A sync, a new chat or one opened sends it whole; the window splices the rest onto its copy.
+- **Notebook per-cell events** (`4ed20d8`). A kernel message sends `notebookCells` with only the cells it changed; the window draws only them. `Notebook::cell` reads one cell out of the JSON instead of every cell's outputs. A `run_cell` the agent waits on reads its one cell on each beat.
+- **Terminal rows and frame coalescing** (`c1c554d`). A poll's screen leaves out (`null`) every row whose hash is what the window has; a sync, a resize, scrolling and opening send it whole. The window paints the terminal and the conversation's threads at once, then at most once more a frame with whatever came last (`framePainter`), so a window that falls behind catches up in one paint.
+- **Search indexes kept** (`5eac0d8`).
+  - A notebook's sources' library is built once and shared (`Arc`) until a source's kept words change.
+  - The investigation's papers' library, once until a paper or its text does.
+  - The workspace library's walk keeps each unchanged file (path, size, mtime) as the last walk read it, with its vectors, and asks the embedder only for new passages. Measured with a local model over 40 notes: one note edited, the re-walk took 32 ms against 2.2 s, and the vector cache grew by one row.
+  - The vector cache is appended to, a batch at a time (a row cut short by a crash is trimmed first), not rewritten whole after every batch; the wanted keys are a `HashSet`.
+- **No login shell before the window** (`2670144`). The PATH a login shell adds is kept in `~/.proton/launch-path.json`, keyed by the shell and the times of `/etc/paths`, `/etc/paths.d` and the login files, and asked for again in the background after launch for the next one. Kept: 0.1 ms, against 0.13–0.15 s asked.
+- **Git status off the lock** (`510f237`). The panel gets the branch at once with the changes as last asked; git is asked on a worker and its answer sent when it differs. A project in a folder of a bigger repository asks only about that folder (a `:(top,literal)` pathspec).
+
+Not done, measured or decided against:
+
+- **Lazy workspaces.** Building all six saved workspaces measured 11 ms cold and under 3 ms warm, in release. Not worth making every workspace optional across the session.
+- **Modes imported on first entry.** In WebKit, every mode's `create…()` call is about 1 ms (4 ms together) and parsing their modules about 5 ms. Under 10 ms at boot does not pay for events arriving at a mode not yet loaded.
+- **The plugin host behind a feature.** Its types (`Command`, `Theme`, `Outcome`) come from the WIT through wasmtime's `bindgen!`, so a build without it needs hand-written stand-ins. On by default it changes nothing; off by default it removes plugin commands. Left for the owner to choose.
+- **Memory-mapping books for the PDF library's first walk.** A book that iCloud syncs or truncates while mapped would kill the app with SIGBUS. Reading it once on a worker, cached after, is the safer cost.
