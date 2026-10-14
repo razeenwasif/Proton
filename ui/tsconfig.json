@@ -53,6 +53,7 @@
     "raster-transform.js",
     "raster-runtime.js",
     "raster-render.js",
+    "raster-frames.js",
     "highlight.js",
     "claude.js",
     "research.js",

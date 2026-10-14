@@ -58,6 +58,16 @@ test('the window\'s WebAssembly makes the canvas the core makes', async () => {
   const composite = new Uint8Array(rr.memory.buffer, at, width * height * 4);
   equal(hash(composite), fixture.composite, 'the layers lay together differently here');
   for (const [x, y, want] of fixture.pick) equal(rr.rr_pick(x, y) >>> 0, want, `the pixel at ${x}, ${y}`);
+  // Another frame shown, then with its onion skin; a frame's thumbnail.
+  rr.rr_frame(1);
+  equal(rr.rr_shown(), 1);
+  rr.rr_dirty();
+  equal(hash(new Uint8Array(rr.memory.buffer, rr.rr_composite(), width * height * 4)), fixture.frame1, 'frame 2 lays together differently here');
+  rr.rr_onion(1, 1, 128, 1);
+  rr.rr_dirty();
+  equal(hash(new Uint8Array(rr.memory.buffer, rr.rr_composite(), width * height * 4)), fixture.onion, 'onion skin lays together differently here');
+  const thumb = rr.rr_thumb(2, 20, 14);
+  equal(hash(new Uint8Array(rr.memory.buffer, thumb, 20 * 14 * 4)), fixture.thumb, 'a frame\'s thumbnail differs here');
 });
 
 test('an op the canvas cannot take is refused with why, and memory stops at a gigabyte', async () => {
@@ -103,7 +113,8 @@ test('a stroke drawn in pieces in the WebAssembly is the stroke the core makes w
     const h = (BigInt(rr.rr_hash_hi() >>> 0) << 32n | BigInt(rr.rr_hash_lo() >>> 0)).toString(16).padStart(16, '0');
     equal(h, fixture.hashes[i], `stroke ${i}, drawn in pieces, touched different pixels from the core's whole`);
   });
-  equal(strokes, 3);
+  // One of them on a layer in another frame.
+  equal(strokes, 4);
   const dirty = rr.rr_dirty();
   equal(new Uint32Array(rr.memory.buffer, dirty, 1)[0] > 0, true);
   const at = rr.rr_composite();

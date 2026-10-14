@@ -3,4 +3,4 @@
 /**
  * What a canvas is written out as.
  */
-export type RasterFormat = "png" | "psd";
+export type RasterFormat = "png" | "psd" | "sheet";

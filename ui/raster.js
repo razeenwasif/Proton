@@ -19,7 +19,14 @@
  * them — is the edit sent. A brush's points carry the pen's pressure, from a
  * browser's pen or, in the app, from the shell's word of a tablet
  * (`raster-input.js`). A shape is shown as it is dragged and sent when let
- * go; a fill and a colour picked are a click. */
+ * go; a fill and a colour picked are a click.
+ *
+ * A canvas may be an animation: frames, each layer's pixels in each its
+ * cels. The window shows one frame and draws in it — an op names the cel,
+ * the layer's id and the frame (`raster-frames.js`) — with the frames
+ * either side shown faintly under each layer if onion skin is on. The
+ * timeline under the picture shows every frame small, plays them, and adds,
+ * copies, moves and takes them out. */
 
 import { escapeHtml as esc } from "./html.js";
 import { copyRasterImage, pasteRasterImage, putRasterBlob, readRaster } from "./bridge.js";
@@ -28,6 +35,7 @@ import { createRasterRuntime, FRAME_BUDGET, keepTiles, nextBudget } from "./rast
 import { createRasterRender } from "./raster-render.js";
 import { begin as beginTransform, commit as commitTransform, corners, drag as dragTransform, handles, hit, wholeMove } from "./raster-transform.js";
 import { createSync } from "./raster-sync.js";
+import { celId, frameOf, runOf, start as startRun, step as stepRun, thumbSize } from "./raster-frames.js";
 import { fit, q8, toCanvas, toStage, zoomAt } from "./raster-view.js";
 
 /** @typedef {import('./bindings/RasterFound').RasterFound} Found */
@@ -36,6 +44,7 @@ import { fit, q8, toCanvas, toStage, zoomAt } from "./raster-view.js";
 /** @typedef {import('./bindings/RasterOp').RasterOp} Op */
 /** @typedef {import('./bindings/RasterBlend').RasterBlend} Blend */
 /** @typedef {import('./bindings/RasterBrush').RasterBrush} Brush */
+/** @typedef {import('./bindings/RasterTag').RasterTag} Tag */
 /** @typedef {import('./raster-input.js').Curve} Curve */
 /** @typedef {{pointer: number, from: [number, number], to: [number, number], points: [number, number][], mode: string}} Selecting */
 /** @typedef {{layer: number, rect: import('./raster-transform.js').Rect, t: import('./raster-transform.js').Transform, free: boolean,
@@ -62,6 +71,7 @@ const KEYS = /** @type {[string, string][]} */ ([
   ["v", "move what is selected — all of the layer if nothing is"], ["⌘T", "scale and turn it: ↩ keeps it, ⎋ leaves it"],
   ["p", "pixel-perfect"], ["m ⇧M", "mirror across, down"], ["⇧G", "the pixel grid"], ["⌥ click", "pick a colour"],
   ["⎋", "take back the stroke being drawn"], ["⌘S", "save the canvas"], ["⌘Z ⇧⌘Z", "undo, redo"], ["f", "the whole canvas"], ["1", "100 %"],
+  [", .", "the frame before, after"], ["↩", "play the frames, or stop"], ["⇧N", "a copy of this frame, after it"], ["⇧O", "onion skin: the frames either side, faintly"],
   ["two fingers", "move over the canvas"], ["pinch ⌘ wheel", "zoom"], ["␣ drag", "move over the canvas"], ["?", "these keys"],
 ]);
 
@@ -101,15 +111,27 @@ function brushOf(b, fallback) {
   };
 }
 
+/** Ops that change the frames or the tags. */
+const FRAME_OPS = ["addFrame", "removeFrame", "moveFrame", "setDuration", "setTags"];
+
 /** Ops that change the layers themselves, not only their pixels. @param {Op} op */
 const changesLayers = (op) =>
-  ["addLayer", "removeLayer", "moveLayer", "setLayer", "setPalette", "paste", "orient", "resize", "crop", "upscale"].includes(op.op) ||
+  ["addLayer", "removeLayer", "moveLayer", "setLayer", "setPalette", "paste", "orient", "resize", "crop", "upscale", ...FRAME_OPS].includes(op.op) ||
   (op.op === "replaceColor" && op.swatch !== undefined && op.swatch !== null) ||
   (op.op === "filter" && op.filter.kind === "quantize" && Boolean(op.filter.keep));
 
 /** Each sprite template's size in its own pixels, a clear cell round it
  *  included — proton-raster's `gen::sprite`. */
 const SPRITES = /** @type {Record<string, [number, number]>} */ ({ ship: [14, 14], creature: [14, 12], item: [12, 12] });
+
+/** How strongly the nearest frame shows in onion skin, of 255. */
+const ONION_OPACITY = 110;
+/** Where onion skin's settings are kept between launches: this window only. */
+const ONION_KEPT = "proton.canvas.onion";
+/** A thumbnail in the timeline, at most this many pixels a side. */
+const THUMB = 40;
+/** Tags' colours in the timeline, by their place. */
+const TAG_COLOURS = ["#b0303f", "#2f6fb0", "#3e9e5c", "#e8743b", "#6b3fa0", "#1f5f5b", "#e07ab8", "#f4c95d"];
 
 /** A seed nobody chose. */
 const newSeed = () => Math.floor(Math.random() * 2 ** 32) >>> 0;
@@ -195,6 +217,40 @@ export function createRaster(host) {
   let ants = { version: -1, segments: new Int32Array(0), march: 0, timer: 0 };
   /** The core's version the copy was last loaded at. */
   let loaded = -1;
+  /** The frame shown and drawn in, from 0. */
+  let frame = 0;
+  /** Onion skin as last set. */
+  let onion = (() => {
+    const fallback = { on: false, before: 1, after: 1, tint: true };
+    try {
+      const kept = JSON.parse(localStorage.getItem(ONION_KEPT) ?? "null");
+      const n = (/** @type {unknown} */ v, /** @type {number} */ d) => (Number.isInteger(v) ? Math.min(3, Math.max(0, Number(v))) : d);
+      return kept ? { on: Boolean(kept.on), before: n(kept.before, 1), after: n(kept.after, 1), tint: kept.tint !== false } : fallback;
+    } catch {
+      return fallback;
+    }
+  })();
+  const keepOnion = () => {
+    try {
+      localStorage.setItem(ONION_KEPT, JSON.stringify(onion));
+    } catch {
+      // Not kept: this window remembers it still.
+    }
+  };
+  /** Frames playing: the timer, which way, when the next is due.
+   *  @type {{timer: number, forward: boolean, due: number} | null} */
+  let playing = null;
+  /** The tag playing goes round, by name; "" for every frame. */
+  let playTag = "";
+  /** Frames whose thumbnails are out of date. @type {Set<number>} */
+  const staleThumbs = new Set();
+  let thumbTimer = 0;
+  /** The frame being dragged to another place in the timeline. @type {number | null} */
+  let draggingFrame = null;
+  /** What the timeline's strip was last made for. */
+  let stripKey = "";
+  /** Edits of the frames or tags sent and not yet answered, by number. @type {Set<number>} */
+  const frameEdits = new Set();
   /** The Make panel's settings: which generator and which filter, and each
    *  one's own. */
   let make = {
@@ -249,7 +305,7 @@ export function createRaster(host) {
       `<header class="raster-home-head"><h3>Canvases</h3></header>` +
       (canvases.length
         ? `<div class="raster-cards">${canvases
-            .map((c) => `<button class="raster-card" data-raster-open-path="${esc(c.path)}"><b>${esc(c.name)}</b><span>${c.preset === "pixel" ? "Pixel" : "Paint"} · ${c.size[0]} × ${c.size[1]}</span><span class="raster-card-path">${esc(c.path)}</span></button>`)
+            .map((c) => `<button class="raster-card" data-raster-open-path="${esc(c.path)}"><b>${esc(c.name)}</b><span>${c.preset === "pixel" ? "Pixel" : "Paint"} · ${c.size[0]} × ${c.size[1]}${(c.frames ?? 1) > 1 ? ` · ${c.frames} frames` : ""}</span><span class="raster-card-path">${esc(c.path)}</span></button>`)
             .join("")}</div>`
         : `<p class="raster-faint">No canvas in this project yet.</p>`) +
       (images.length
@@ -257,7 +313,7 @@ export function createRaster(host) {
             .map((path) => `<button class="raster-image" data-raster-import-path="${esc(path)}" title="Make a canvas of it">${esc(path)}</button>`)
             .join("")}</div>`
         : "") +
-      `<p class="raster-faint">Drop a PNG or a Photoshop file here to make a canvas of it.</p>` +
+      `<p class="raster-faint">Drop a PNG, a Photoshop or an Aseprite file here to make a canvas of it.</p>` +
       `<form class="raster-new" data-raster-new>` +
       `<h4>New canvas</h4>` +
       `<label>Name <input name="name" data-raster-new-name placeholder="Hero sprite" autocomplete="off" spellcheck="false" required></label>` +
@@ -279,7 +335,7 @@ export function createRaster(host) {
    *  brought in: as layers on the canvas open, or each as a canvas.
    *  @param {DragEvent} e @param {boolean} layer */
   async function dropped(e, layer) {
-    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => /\.(png|psd)$/i.test(f.name) || f.type === "image/png");
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => /\.(png|psd|aseprite|ase)$/i.test(f.name) || f.type === "image/png");
     if (!files.length) return;
     e.preventDefault();
     for (const file of files) {
@@ -477,6 +533,10 @@ export function createRaster(host) {
   /* ── layers ──────────────────────────────────────────────────── */
 
   /** The layer chosen, or the top one. */
+  /** A layer's cel in the frame shown: what an edit of its pixels names.
+   *  @param {Layer} l */
+  const cel = (l) => celId(l.id, frame);
+
   function current() {
     if (!view) return null;
     return view.layers.find((l) => l.id === chosen) ?? view.layers[view.layers.length - 1] ?? null;
@@ -581,6 +641,7 @@ export function createRaster(host) {
       `<label class="raster-field raster-check"><input type="checkbox" data-raster-field="alphaLock"${l.alphaLock ? " checked" : ""}> <span>Keep its shape — draw only where it has something</span></label>` +
       `<label class="raster-field raster-check"><input type="checkbox" data-raster-field="locked"${l.locked ? " checked" : ""}> <span>Locked</span></label>` +
       `</div>` +
+      animationFields() +
       `<h5 class="raster-layer-head">Canvas</h5>` +
       `<div class="raster-fields raster-buttons" data-raster-canvas-tools>` +
       `<button class="cc-quiet" data-raster-canvas="ccw" title="Turn it a quarter to the left">↺</button><button class="cc-quiet" data-raster-canvas="cw" title="Turn it a quarter to the right">↻</button>` +
@@ -592,7 +653,12 @@ export function createRaster(host) {
       `<h6 class="raster-sub">Written out, beside it</h6><div class="raster-buttons">` +
       `<select data-raster-export-scale aria-label="How large">${[1, 2, 4, 8].map((n) => `<option value="${n}"${n === exportScale ? " selected" : ""}>×${n}</option>`).join("")}</select>` +
       `<button class="cc-quiet" data-raster-export="png" title="Flattened, each pixel a square as large as asked">PNG</button>` +
-      `<button class="cc-quiet" data-raster-export="psd" title="Its layers, their opacity and how they blend">PSD</button></div>` +
+      `<button class="cc-quiet" data-raster-export="psd" title="Its layers, their opacity and how they blend — of the frame shown">PSD</button>` +
+      (frames().length > 1
+        ? `<select data-raster-sheet-columns aria-label="How the sheet lays the frames"><option value="0">Grid</option><option value="${frames().length}">Row</option></select>` +
+          `<button class="cc-quiet" data-raster-export="sheet" title="Every frame on one sheet, and a JSON of where each is, how long it shows and the tags — as Aseprite writes it">Sheet</button>`
+        : "") +
+      `</div>` +
       (games.length
         ? `<h6 class="raster-sub">To a game</h6><div class="raster-buttons"><select data-raster-send-game aria-label="Which game">${games
             .map((g) => `<option value="${esc(g)}">${esc(g || "this project")}</option>`)
@@ -604,7 +670,48 @@ export function createRaster(host) {
         ? `<div class="raster-buttons"><select data-raster-bring aria-label="Which picture">${images.map((path) => `<option value="${esc(path)}">${esc(path)}</option>`).join("")}</select>` +
           `<button class="cc-quiet" data-raster-bring-in>Bring in</button></div>`
         : "") +
-      `<p class="raster-faint">Or drop a PNG or a Photoshop file on the canvas, or paste a picture with ⌘V.</p>`;
+      `<p class="raster-faint">Or drop a PNG, a Photoshop or an Aseprite file on the canvas, or paste a picture with ⌘V.</p>`;
+  }
+
+  /** The inspector's animation: onion skin's reach, the frame's time for
+   *  every frame, and the tags — each a name over a run of frames. */
+  function animationFields() {
+    if (!view) return "";
+    const n = frames().length;
+    const reach = (/** @type {string} */ which, /** @type {number} */ value, /** @type {string} */ label) =>
+      `<label class="raster-field"><span>${label}</span><select data-raster-onion="${which}">${[0, 1, 2, 3].map((k) => `<option value="${k}"${k === value ? " selected" : ""}>${k}</option>`).join("")}</select></label>`;
+    const directions = [["forward", "On"], ["reverse", "Back"], ["pingPong", "To the end and back"], ["pingPongReverse", "Back and on again"]];
+    return (
+      `<h5 class="raster-layer-head">Animation</h5>` +
+      `<div class="raster-fields" data-raster-animation>` +
+      `<p class="raster-faint">Frame ${frame + 1} of ${n}, shown ${frames()[frame] ?? 100} ms.${n > 1 ? "" : " ＋ or ⇧N under the picture adds a frame."}</p>` +
+      (n > 1 ? `<div class="raster-buttons"><button class="cc-quiet" data-raster-anim="time-all" title="Every frame shown as long as this one">Every frame ${frames()[frame] ?? 100} ms</button></div>` : "") +
+      `<label class="raster-field raster-check"><input type="checkbox" data-raster-onion="on"${onion.on ? " checked" : ""}> <span>Onion skin — ⇧O</span></label>` +
+      reach("before", onion.before, "Frames before") +
+      reach("after", onion.after, "Frames after") +
+      `<label class="raster-field raster-check"><input type="checkbox" data-raster-onion="tint"${onion.tint ? " checked" : ""}> <span>Tinted — before red, after blue</span></label>` +
+      `</div>` +
+      (n > 1
+        ? `<h6 class="raster-sub">Tags</h6><div class="raster-tags" data-raster-tags>` +
+          tags()
+            .map(
+              (t, i) =>
+                `<div class="raster-tag" data-raster-tag="${i}" style="--tag:${TAG_COLOURS[i % TAG_COLOURS.length]}">` +
+                `<input type="text" value="${esc(t.name)}" data-raster-tag-field="name" aria-label="Its name" spellcheck="false">` +
+                `<input type="number" min="1" max="${n}" value="${t.from + 1}" data-raster-tag-field="from" aria-label="Its first frame">–` +
+                `<input type="number" min="1" max="${n}" value="${t.to + 1}" data-raster-tag-field="to" aria-label="Its last frame">` +
+                `<select data-raster-tag-field="direction" aria-label="How it plays">${directions.map(([v, label]) => `<option value="${v}"${v === t.direction ? " selected" : ""}>${label}</option>`).join("")}</select>` +
+                `<button class="hbtn" data-raster-tag-remove="${i}" title="Take the tag away" aria-label="Take the tag away">✕</button></div>`,
+            )
+            .join("") +
+          `<button class="cc-quiet" data-raster-anim="tag-add" title="A tag over this frame, to widen">＋ A tag here</button></div>`
+        : "")
+    );
+  }
+
+  /** The tags made so, as one edit. @param {Tag[]} next */
+  function setTags(next) {
+    edit({ op: "setTags", tags: next }, "tags");
   }
 
   /** The select tool's and the wand's fields.
@@ -672,7 +779,20 @@ export function createRaster(host) {
       return;
     }
     const exporting = /** @type {HTMLElement | null} */ (target.closest("[data-raster-export]"))?.dataset.rasterExport;
-    if (exporting) send({ type: "rasterExport", format: exporting, scale: exportScale });
+    if (exporting) {
+      const columns = Number(/** @type {HTMLSelectElement | null} */ (inspector.querySelector("[data-raster-sheet-columns]"))?.value ?? 0);
+      send({ type: "rasterExport", format: exporting, scale: exportScale, frame, columns: exporting === "sheet" ? columns : undefined });
+    }
+    const anim = /** @type {HTMLElement | null} */ (target.closest("[data-raster-anim]"))?.dataset.rasterAnim;
+    if (anim === "time-all" && view) edit({ op: "setDuration", from: 0, to: frames().length - 1, duration: frames()[frame] ?? 100 }, "frame times");
+    if (anim === "tag-add" && view) {
+      // A name not taken, over the frame shown.
+      let k = tags().length + 1;
+      while (tags().some((t) => t.name === `Tag ${k}`)) k += 1;
+      setTags([...tags(), { name: `Tag ${k}`, from: frame, to: frame, direction: "forward", repeat: 0 }]);
+    }
+    const untag = /** @type {HTMLElement | null} */ (target.closest("[data-raster-tag-remove]"))?.dataset.rasterTagRemove;
+    if (untag !== undefined) setTags(tags().filter((_, i) => i !== Number(untag)));
     if (target.closest("[data-raster-send]")) {
       const game = /** @type {HTMLSelectElement | null} */ (inspector.querySelector("[data-raster-send-game]"))?.value ?? "";
       const layers = Boolean(/** @type {HTMLInputElement | null} */ (inspector.querySelector("[data-raster-send-layers]"))?.checked);
@@ -718,12 +838,38 @@ export function createRaster(host) {
     const box = inspector.querySelector("[data-raster-opacity]");
     if (box) box.textContent = `${Math.round((opacity / 255) * 100)} %`;
     copy.meta(view.layers.map((l) => (l.id === id ? { ...l, opacity } : l)), view.palette);
+    markThumbs([frame]);
     paint();
   });
   inspector.addEventListener("change", (e) => {
     const field = /** @type {HTMLInputElement} */ (e.target);
     if (field.matches("[data-raster-export-scale]")) {
       exportScale = Number(field.value) || 1;
+      return;
+    }
+    const onionField = field.dataset.rasterOnion;
+    if (onionField) {
+      if (onionField === "on" || onionField === "tint") onion = { ...onion, [onionField]: field.checked };
+      else onion = { ...onion, [onionField]: Math.min(3, Math.max(0, Math.round(Number(field.value)) || 0)) };
+      keepOnion();
+      applyOnion();
+      renderTimeline();
+      return;
+    }
+    const tagField = field.dataset.rasterTagField;
+    if (tagField) {
+      const i = Number(field.closest("[data-raster-tag]")?.getAttribute("data-raster-tag"));
+      const n = frames().length;
+      const next = tags().map((t, k) => {
+        if (k !== i) return t;
+        if (tagField === "name") return field.value.trim() ? { ...t, name: field.value.trim() } : t;
+        if (tagField === "direction") return { ...t, direction: /** @type {Tag["direction"]} */ (field.value) };
+        const v = Math.min(n, Math.max(1, Math.round(Number(field.value)) || 1)) - 1;
+        // From never past to: the other end goes with it.
+        return tagField === "from" ? { ...t, from: v, to: Math.max(v, t.to) } : { ...t, to: v, from: Math.min(v, t.from) };
+      });
+      if (JSON.stringify(next) !== JSON.stringify(tags())) setTags(next);
+      else renderInspector();
       return;
     }
     const option = field.dataset.rasterOption;
@@ -816,13 +962,13 @@ export function createRaster(host) {
       const [sw, sh] = SPRITES[make.template] ?? [14, 14];
       const r = selectedRect() ?? [0, 0, view.width, view.height];
       const at = [Math.round(r[0] + (r[2] - sw * make.scale) / 2), Math.round(r[1] + (r[3] - sh * make.scale) / 2)];
-      return /** @type {Op} */ ({ op: "generate", layer: layer.id, generator: { kind: "sprite", template: make.template, seed, at, scale: make.scale, color: make.ownColor ? color : undefined } });
+      return /** @type {Op} */ ({ op: "generate", layer: cel(layer), generator: { kind: "sprite", template: make.template, seed, at, scale: make.scale, color: make.ownColor ? color : undefined } });
     }
     if (make.generator === "noise") {
       const colors = make.colors === "palette" && view.palette.length >= 2 ? view.palette : copy.ramp({ base: color, steps: make.steps, shift: 25, spread: 26000 });
-      return /** @type {Op} */ ({ op: "generate", layer: layer.id, generator: { kind: "noise", noise: make.noise, seed, cell: make.cell, octaves: make.octaves, colors, mix: make.mix, dither: make.dither } });
+      return /** @type {Op} */ ({ op: "generate", layer: cel(layer), generator: { kind: "noise", noise: make.noise, seed, cell: make.cell, octaves: make.octaves, colors, mix: make.mix, dither: make.dither } });
     }
-    return /** @type {Op} */ ({ op: "generate", layer: layer.id, generator: { kind: "cave", seed, density: make.density, steps: make.rounds, cell: make.caveCell, wrap: make.wrap, color } });
+    return /** @type {Op} */ ({ op: "generate", layer: cel(layer), generator: { kind: "cave", seed, density: make.density, steps: make.rounds, cell: make.caveCell, wrap: make.wrap, color } });
   }
 
   /** The filter the Make panel is set to, as an op on the layer chosen. */
@@ -834,7 +980,7 @@ export function createRaster(host) {
       : make.filter === "shadow" ? { kind: "shadow", dx: make.dx, dy: make.dy, color: [0, 0, 0, Math.round((make.shade * 255) / 100)], blur: make.blur }
       : make.filter === "pixelate" ? { kind: "pixelate", size: make.size }
       : { kind: "quantize", colors: make.count, palette: make.toPalette, dither: make.ditherColours, keep: make.keep };
-    return /** @type {Op} */ ({ op: "filter", layer: layer.id, filter });
+    return /** @type {Op} */ ({ op: "filter", layer: cel(layer), filter });
   }
 
   /** What a part of the panel makes, by name. @param {string} part */
@@ -948,7 +1094,10 @@ export function createRaster(host) {
       const bytes = await readRaster(view.generation, layer, tiles);
       return { lastSeq: new DataView(bytes).getUint32(16, true), bytes };
     },
-    put: (layer, bytes, keep) => copy?.put(layer, keepTiles(bytes, keep).bytes),
+    put: (layer, bytes, keep) => {
+      copy?.put(layer, keepTiles(bytes, keep).bytes);
+      if (layer !== 0) markThumbs([frameOf(layer)]);
+    },
     // After whatever the core said with it — a new size, new layers — and
     // once a version, however many ask.
     reload: async () => {
@@ -968,7 +1117,12 @@ export function createRaster(host) {
     if (making) leaveMade();
     const made = copy.apply(op);
     // Refused here too: sent all the same, unpredicted, so the core says why.
-    return send_(op, label, "hash" in made ? made.hash : null, "hash" in made ? copy.touched() : []);
+    const n = send_(op, label, "hash" in made ? made.hash : null, "hash" in made ? copy.touched() : []);
+    if (FRAME_OPS.includes(op.op) && "hash" in made) {
+      frameEdits.add(n);
+      framesChanged();
+    }
+    return n;
   }
 
   /** An edit made here, sent numbered. @param {Op} op @param {string} label
@@ -978,6 +1132,9 @@ export function createRaster(host) {
     const n = sync.next();
     sync.sent(n, hash, touched, changesLayers(op));
     send({ type: "rasterEdit", generation: view.generation, seq: n, op, label });
+    // The frames whose pictures changed, small in the timeline too.
+    if (hash === null) staleAll();
+    else markThumbs(touched.filter(([l]) => l !== 0).map(([l]) => frameOf(l)));
     paint();
     return n;
   }
@@ -994,7 +1151,7 @@ export function createRaster(host) {
       console.warn("proton: canvas", error);
     }
     if (blob) send({ type: "rasterImport", blob, layer: true, above: layer?.id });
-    else edit({ op: "paste", above: layer?.id }, "paste");
+    else edit({ op: "paste", above: layer?.id, frame }, "paste");
   }
 
   /** A change to the whole canvas — turned, mirrored, resized, cropped —
@@ -1084,12 +1241,12 @@ export function createRaster(host) {
     cancel();
     const layer = current();
     if (!layer || layer.locked) return false;
-    const lifted = copy.lift(layer.id);
+    const lifted = copy.lift(cel(layer));
     if (!lifted.width) return false;
     gpu?.float(lifted.pixels, lifted.width, lifted.height);
-    copy.preview({ op: "clear", layer: layer.id });
+    copy.preview({ op: "clear", layer: cel(layer) });
     const rect = { x: lifted.x, y: lifted.y, width: lifted.width, height: lifted.height };
-    moving = { layer: layer.id, rect, t: beginTransform(rect), free, drag: null };
+    moving = { layer: cel(layer), rect, t: beginTransform(rect), free, drag: null };
     renderInspector();
     paint();
     return true;
@@ -1121,6 +1278,7 @@ export function createRaster(host) {
   function applied(event) {
     later(async () => {
       if (!view || event.generation !== view.generation) return;
+      for (const n of frameEdits) if (n <= event.seq) frameEdits.delete(n);
       // The core's version too: a copy loaded at an older one is behind.
       view = { ...view, version: event.version, dirty: event.dirty, canUndo: event.canUndo, canRedo: event.canRedo };
       // A copy made by the core: its pixels to the system's clipboard too.
@@ -1154,8 +1312,12 @@ export function createRaster(host) {
     if (!view) return;
     loaded = view.version;
     const next = await createRasterRuntime();
-    next.open({ width: view.width, height: view.height, preset: view.preset, palette: view.palette, layers: view.layers, generation: view.generation });
+    next.open({ width: view.width, height: view.height, preset: view.preset, palette: view.palette, layers: view.layers, generation: view.generation, frames: view.frames, tags: view.tags });
+    frame = Math.min(frame, frames().length - 1);
+    next.frame(frame);
     copy = next;
+    applyOnion();
+    staleAll();
     copyOf = view.generation;
     // A new copy counts its selection's changes from nothing again.
     ants.version = -1;
@@ -1163,6 +1325,275 @@ export function createRaster(host) {
     for (const [layer, tiles] of view.tiles) await fetchTiles(layer, tiles);
     paint();
   }
+
+  /* ── frames: the timeline, playing, onion skin ─────────────── */
+
+  const timeline = q("[data-raster-timeline]");
+  /** How long each frame shows: one for a still picture. */
+  const frames = () => (view?.frames?.length ? view.frames : [100]);
+  /** @returns {Tag[]} */
+  const tags = () => view?.tags ?? [];
+
+  /** Show frame `f` — laid together, told to the core, marked in the
+   *  timeline. Anything under way in the frame left is kept or taken back
+   *  first. @param {number} f @param {boolean} [keepPlaying] */
+  function showFrame(f, keepPlaying = false) {
+    if (!view || !copy) return;
+    const next = Math.max(0, Math.min(frames().length - 1, f));
+    if (!keepPlaying) stop();
+    if (next !== frame || copy.shown() !== next) {
+      finishTransform();
+      cancel();
+      if (making) leaveMade();
+      frame = next;
+      copy.frame(frame);
+      // Told once it stays: not at every step of a playing.
+      if (!playing) send({ type: "rasterShow", frame });
+    }
+    renderTimeline();
+    if (!playing) renderInspector();
+    paint();
+  }
+
+  /** Onion skin as set, to the copy: none while frames play. */
+  function applyOnion() {
+    const on = onion.on && !playing;
+    copy?.onion(on ? onion.before : 0, on ? onion.after : 0, ONION_OPACITY, onion.tint);
+    paint();
+  }
+
+  /** The tag playing goes round, if it is still there. */
+  const playingTag = () => tags().find((t) => t.name === playTag) ?? null;
+
+  /** Play the frames — a tag's, or all — from the one shown, each for its
+   *  time, round and round until stopped. */
+  function play() {
+    if (!view || !copy || frames().length < 2) return;
+    stop();
+    finishTransform();
+    cancel();
+    const first = startRun(runOf(frames().length, playingTag()), frame);
+    playing = { timer: 0, forward: first.forward, due: performance.now() };
+    applyOnion();
+    showFrame(first.frame, true);
+    schedule();
+  }
+
+  /** The next frame, when the one shown has had its time. */
+  function schedule() {
+    if (!playing) return;
+    const now = performance.now();
+    // Fallen far behind — a long frame, a hidden window — it goes on from now.
+    if (playing.due < now - 250) playing.due = now;
+    playing.due += frames()[frame] ?? 100;
+    playing.timer = window.setTimeout(() => {
+      if (!playing || !view) return;
+      const next = stepRun(runOf(frames().length, playingTag()), frame, playing.forward);
+      playing.forward = next.forward;
+      showFrame(next.frame, true);
+      schedule();
+    }, Math.max(0, playing.due - now));
+  }
+
+  /** Stopped where it is. */
+  function stop() {
+    if (!playing) return;
+    clearTimeout(playing.timer);
+    playing = null;
+    applyOnion();
+    send({ type: "rasterShow", frame });
+    renderTimeline();
+    renderInspector();
+  }
+
+  /** The frames or tags changed here: the view takes them from the copy,
+   *  which has made the change, until the core says them too. */
+  function framesChanged() {
+    if (!view || !copy) return;
+    const info = copy.info();
+    view = { ...view, frames: info.frames, tags: info.tags };
+    if (frame >= info.frames.length) showFrame(info.frames.length - 1);
+    staleAll();
+    renderTimeline();
+    renderInspector();
+  }
+
+  /** Thumbnails to draw again. @param {number[]} list */
+  function markThumbs(list) {
+    for (const f of list) staleThumbs.add(f);
+    if (!thumbTimer && staleThumbs.size) thumbTimer = window.setTimeout(drawThumbs, 120);
+  }
+  const staleAll = () => markThumbs(frames().map((_, i) => i));
+
+  /** The thumbnails out of date, drawn from the copy. */
+  function drawThumbs() {
+    thumbTimer = 0;
+    if (!view || !copy) return staleThumbs.clear();
+    const [w, h] = thumbSize(view.width, view.height, THUMB);
+    for (const f of staleThumbs) {
+      const c = /** @type {HTMLCanvasElement | null} */ (timeline.querySelector(`[data-raster-thumb="${f}"]`));
+      const g = c?.getContext("2d");
+      if (!c || !g || f >= frames().length) continue;
+      c.width = w;
+      c.height = h;
+      g.putImageData(new ImageData(copy.thumb(f, w, h), w, h), 0, 0);
+    }
+    staleThumbs.clear();
+  }
+
+  /** The timeline: the frame shown, how long it shows, playing, onion
+   *  skin, the frames small with their tags over them. */
+  function renderTimeline() {
+    timeline.hidden = !view;
+    if (!view) {
+      stripKey = "";
+      timeline.innerHTML = "";
+      return;
+    }
+    const n = frames().length;
+    const key = JSON.stringify([view.generation, view.width, view.height, frames(), tags()]);
+    if (key !== stripKey) {
+      stripKey = key;
+      const cell = 52;
+      const gap = 4;
+      const bars = tags()
+        .map((t, i) => {
+          const colour = TAG_COLOURS[i % TAG_COLOURS.length];
+          return `<button class="raster-tl-tag${t.name === playTag ? " on" : ""}" data-raster-tag-play="${esc(t.name)}" style="left:${t.from * (cell + gap)}px;width:${(t.to - t.from + 1) * (cell + gap) - gap}px;--tag:${colour}" title="Play “${esc(t.name)}”, frames ${t.from + 1}–${t.to + 1}">${esc(t.name)}</button>`;
+        })
+        .join("");
+      timeline.innerHTML =
+        `<div class="raster-tl-bar">` +
+        `<button class="hbtn" data-raster-frame-act="prev" title="The frame before  ," aria-label="The frame before">⏮</button>` +
+        `<button class="hbtn" data-raster-frame-act="play" title="Play  ↩" aria-label="Play">▶</button>` +
+        `<button class="hbtn" data-raster-frame-act="next" title="The frame after  ." aria-label="The frame after">⏭</button>` +
+        `<span class="raster-tl-count" data-raster-frame-count></span>` +
+        `<label class="raster-tl-ms" title="How long this frame shows"><input type="number" min="1" max="60000" data-raster-frame-ms aria-label="Milliseconds this frame shows"> ms</label>` +
+        `<span class="grow"></span>` +
+        (tags().length ? `<select data-raster-play-tag aria-label="What plays"><option value="">Every frame</option>${tags().map((t) => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("")}</select>` : "") +
+        `<button class="hbtn raster-toggle" data-raster-frame-act="onion" title="Onion skin: the frames either side, faintly  ⇧O" aria-label="Onion skin">◐</button>` +
+        `<span class="raster-tl-sep"></span>` +
+        `<button class="hbtn" data-raster-frame-act="add" title="A new, clear frame after this one" aria-label="New frame">＋</button>` +
+        `<button class="hbtn" data-raster-frame-act="copy" title="A copy of this frame, after it  ⇧N" aria-label="Copy the frame">⧉</button>` +
+        `<button class="hbtn" data-raster-frame-act="remove" title="Take this frame out" aria-label="Take the frame out"${n < 2 ? " disabled" : ""}>✕</button>` +
+        `</div>` +
+        `<div class="raster-tl-strip" data-raster-strip>` +
+        (bars ? `<div class="raster-tl-tags" style="width:${n * (cell + gap)}px">${bars}</div>` : "") +
+        `<div class="raster-tl-frames">${frames()
+          .map((ms, i) => `<button class="raster-tl-frame" data-raster-frame="${i}" draggable="true" title="Frame ${i + 1}: ${ms} ms — drag it to move it"><canvas data-raster-thumb="${i}" width="1" height="1"></canvas><span>${i + 1}</span></button>`)
+          .join("")}</div></div>`;
+      staleAll();
+    }
+    // What changes as frames are shown and played, without making it again.
+    for (const b of timeline.querySelectorAll("[data-raster-frame]")) b.classList.toggle("on", Number(/** @type {HTMLElement} */ (b).dataset.rasterFrame) === frame);
+    const count = timeline.querySelector("[data-raster-frame-count]");
+    if (count) count.textContent = `${frame + 1} / ${n}`;
+    const ms = /** @type {HTMLInputElement | null} */ (timeline.querySelector("[data-raster-frame-ms]"));
+    if (ms && document.activeElement !== ms) ms.value = String(frames()[frame] ?? 100);
+    const playButton = timeline.querySelector('[data-raster-frame-act="play"]');
+    if (playButton) {
+      playButton.textContent = playing ? "⏸" : "▶";
+      playButton.setAttribute("aria-label", playing ? "Stop" : "Play");
+      /** @type {HTMLButtonElement} */ (playButton).disabled = n < 2;
+    }
+    timeline.querySelector('[data-raster-frame-act="onion"]')?.setAttribute("aria-pressed", String(onion.on));
+    const which = /** @type {HTMLSelectElement | null} */ (timeline.querySelector("[data-raster-play-tag]"));
+    if (which) which.value = playingTag() ? playTag : "";
+    for (const b of timeline.querySelectorAll("[data-raster-tag-play]")) b.classList.toggle("on", /** @type {HTMLElement} */ (b).dataset.rasterTagPlay === playTag);
+    // The frame shown kept in sight.
+    const on = /** @type {HTMLElement | null} */ (timeline.querySelector(".raster-tl-frame.on"));
+    const strip = /** @type {HTMLElement | null} */ (timeline.querySelector("[data-raster-strip]"));
+    if (on && strip && (on.offsetLeft < strip.scrollLeft || on.offsetLeft + on.offsetWidth > strip.scrollLeft + strip.clientWidth)) strip.scrollLeft = on.offsetLeft - strip.clientWidth / 2;
+  }
+
+  /** A copy of the frame shown, after it, shown. */
+  function copyFrame() {
+    if (!view) return;
+    const at = frame + 1;
+    edit({ op: "addFrame", at, copy: frame }, "copy frame");
+    showFrame(at);
+  }
+
+  /** Onion skin on or off. */
+  function toggleOnion() {
+    onion = { ...onion, on: !onion.on };
+    keepOnion();
+    applyOnion();
+    renderTimeline();
+    renderInspector();
+  }
+
+  timeline.addEventListener("click", (e) => {
+    const target = /** @type {HTMLElement} */ (e.target);
+    const act = /** @type {HTMLElement | null} */ (target.closest("[data-raster-frame-act]"))?.dataset.rasterFrameAct;
+    const n = frames().length;
+    if (act === "prev") showFrame((frame + n - 1) % n);
+    if (act === "next") showFrame((frame + 1) % n);
+    if (act === "play") playing ? stop() : play();
+    if (act === "onion") toggleOnion();
+    if (act === "add") {
+      edit({ op: "addFrame", at: frame + 1 }, "new frame");
+      showFrame(frame + 1);
+    }
+    if (act === "copy") copyFrame();
+    if (act === "remove" && n > 1) {
+      edit({ op: "removeFrame", frame }, "remove frame");
+      showFrame(Math.min(frame, frames().length - 1));
+    }
+    const cell = /** @type {HTMLElement | null} */ (target.closest("[data-raster-frame]"));
+    if (cell) showFrame(Number(cell.dataset.rasterFrame));
+    const tagged = /** @type {HTMLElement | null} */ (target.closest("[data-raster-tag-play]"));
+    if (tagged) {
+      playTag = tagged.dataset.rasterTagPlay ?? "";
+      const tag = playingTag();
+      if (tag && (frame < tag.from || frame > tag.to)) showFrame(tag.from);
+      renderTimeline();
+    }
+  });
+  timeline.addEventListener("change", (e) => {
+    const field = /** @type {HTMLInputElement} */ (e.target);
+    if (field.matches("[data-raster-frame-ms]")) {
+      const ms = Math.round(Number(field.value));
+      if (ms >= 1 && ms <= 60000 && ms !== frames()[frame]) edit({ op: "setDuration", from: frame, to: frame, duration: ms }, "frame time");
+      else renderTimeline();
+    }
+    if (field.matches("[data-raster-play-tag]")) {
+      playTag = field.value;
+      if (playing) play();
+      renderTimeline();
+    }
+  });
+  timeline.addEventListener("keydown", (e) => {
+    // A time typed is kept on ↩, not taken for playing.
+    if (/** @type {HTMLElement} */ (e.target).matches("[data-raster-frame-ms]") && e.key === "Enter") {
+      /** @type {HTMLInputElement} */ (e.target).blur();
+      e.stopPropagation();
+    }
+  });
+  timeline.addEventListener("dragstart", (e) => {
+    const cell = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-raster-frame]"));
+    if (!cell) return;
+    draggingFrame = Number(cell.dataset.rasterFrame);
+    e.dataTransfer?.setData("text/plain", `frame ${draggingFrame + 1}`);
+  });
+  timeline.addEventListener("dragover", (e) => {
+    if (draggingFrame !== null && /** @type {HTMLElement} */ (e.target).closest("[data-raster-frame]")) e.preventDefault();
+  });
+  timeline.addEventListener("drop", (e) => {
+    const cell = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-raster-frame]"));
+    const from = draggingFrame;
+    draggingFrame = null;
+    if (!cell || from === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const to = Number(cell.dataset.rasterFrame);
+    if (to === from) return;
+    edit({ op: "moveFrame", frame: from, to }, "move frame");
+    showFrame(to);
+  });
+  timeline.addEventListener("dragend", () => {
+    draggingFrame = null;
+  });
 
   /* ── the stage ───────────────────────────────────────────────── */
 
@@ -1463,13 +1894,15 @@ export function createRaster(host) {
         [x, y] = [from[0] + Math.sign(dx || 1) * side, from[1] + Math.sign(dy || 1) * side];
       }
     }
-    return /** @type {Op} */ ({ op: "shape", layer: layer.id, shape: tool, from, to: [x, y], filled: tool !== "line" && filled, tip: tip(), color });
+    return /** @type {Op} */ ({ op: "shape", layer: cel(layer), shape: tool, from, to: [x, y], filled: tool !== "line" && filled, tip: tip(), color });
   }
 
   stage.addEventListener("pointerdown", (e) => {
     stage.focus({ preventScroll: true });
     const c = camera();
     if (!c || !view || !copy) return;
+    // Drawing stops a playing, on the frame it stopped at.
+    if (playing && !space && e.button !== 1) stop();
     if (space || e.button === 1) {
       panning = { from: stagePoint(e), at: [c.x, c.y] };
       capture(e);
@@ -1500,7 +1933,7 @@ export function createRaster(host) {
     if (tool === "wand") {
       const layer = current();
       const [x, y] = pixel(p);
-      if (layer) select({ kind: "wand", layer: layer.id, x, y, ...wandOptions }, modeOf(e));
+      if (layer) select({ kind: "wand", layer: cel(layer), x, y, ...wandOptions }, modeOf(e));
       return;
     }
     if (tool === "move") {
@@ -1517,7 +1950,7 @@ export function createRaster(host) {
     if (!layer) return;
     if (tool === "fill") {
       const [x, y] = pixel(p);
-      edit({ op: "fill", layer: layer.id, x, y, color, ...fillOptions }, "fill");
+      edit({ op: "fill", layer: cel(layer), x, y, color, ...fillOptions }, "fill");
       return;
     }
     if (tool === "line" || tool === "rect" || tool === "ellipse") {
@@ -1543,11 +1976,11 @@ export function createRaster(host) {
     };
     const first = triple(e);
     try {
-      copy.strokeBegin(dabs ? { layer: layer.id, tool: erasing ? "eraser" : "pencil", brush, color } : { layer: layer.id, tool: erasing ? "eraser" : "pencil", tip: tip(), color, pixelPerfect: !erasing && pixelPerfect });
+      copy.strokeBegin(dabs ? { layer: cel(layer), tool: erasing ? "eraser" : "pencil", brush, color } : { layer: cel(layer), tool: erasing ? "eraser" : "pencil", tip: tip(), color, pixelPerfect: !erasing && pixelPerfect });
     } catch (error) {
       // A locked layer, say: the core is asked anyway, so it says why.
       drawing = null;
-      edit(dabs ? { op: "brush", layer: layer.id, erase: erasing, brush, color, points: first } : { op: "stroke", layer: layer.id, tool: erasing ? "eraser" : "pencil", tip: tip(), color, pixelPerfect, points: first }, erasing ? "erase" : "draw");
+      edit(dabs ? { op: "brush", layer: cel(layer), erase: erasing, brush, color, points: first } : { op: "stroke", layer: cel(layer), tool: erasing ? "eraser" : "pencil", tip: tip(), color, pixelPerfect, points: first }, erasing ? "erase" : "draw");
       return;
     }
     drawing.queued = first;
@@ -1683,7 +2116,7 @@ export function createRaster(host) {
       if (k === "d" && !e.shiftKey) return (select({ kind: "nothing" }), true);
       if (k === "i" && e.shiftKey) return (select({ kind: "invert" }), true);
       if ((k === "c" || k === "x") && !e.shiftKey && layer) {
-        pendingCopy = edit({ op: "copy", layer: layer.id, cut: k === "x" }, k === "x" ? "cut" : "copy") ?? 0;
+        pendingCopy = edit({ op: "copy", layer: cel(layer), cut: k === "x" }, k === "x" ? "cut" : "copy") ?? 0;
         return true;
       }
       if (k === "v" && !e.shiftKey) return (void pasteFromClipboard(), true);
@@ -1693,8 +2126,17 @@ export function createRaster(host) {
     if (typing || e.altKey || e.ctrlKey || e.metaKey || !view) return false;
     if (e.key === "Escape" && moving) return (endTransform(), true);
     if (e.key === "Enter" && moving) return (finishTransform(), true);
+    if (e.key === "Enter" && !drawing && !shaping && !selecting) return (playing ? stop() : play(), true);
+    if (e.key === "Escape" && playing) return (stop(), true);
+    if (e.key === "," || e.key === ".") {
+      const n = frames().length;
+      showFrame((frame + (e.key === "," ? n - 1 : 1)) % n);
+      return true;
+    }
+    if (e.key === "N") return (copyFrame(), true);
+    if (e.key === "O") return (toggleOnion(), true);
     if (e.key === "Escape" && (drawing || shaping || selecting)) return (cancel(), true);
-    if ((e.key === "Backspace" || e.key === "Delete") && current()) return (edit({ op: "clear", layer: /** @type {Layer} */ (current()).id }, "clear"), true);
+    if ((e.key === "Backspace" || e.key === "Delete") && current()) return (edit({ op: "clear", layer: cel(/** @type {Layer} */ (current())) }, "clear"), true);
     if (e.key === "?") return (host.keys?.("— Canvas's keys", KEYS), true);
     if (e.key === "f") return (refit(), true);
     if (e.key === "1") return (actualSize(), true);
@@ -1735,6 +2177,7 @@ export function createRaster(host) {
   function render() {
     renderHome();
     renderBar();
+    renderTimeline();
     renderAsk();
     renderLayers();
     renderInspector();
@@ -1756,6 +2199,17 @@ export function createRaster(host) {
     ants: () => antsNow().length / 4,
     /** Whether a transform is under way. */
     moving: () => Boolean(moving),
+    /** The frame shown, and whether frames are playing. */
+    frame: () => frame,
+    playing: () => Boolean(playing),
+    /** A pixel as it is shown — onion skin and all — premultiplied, once
+     *  laid together. @param {number} x @param {number} y */
+    seen: (x, y) => {
+      if (!copy) return null;
+      copy.dirty();
+      const at = (y * copy.width + x) * 4;
+      return Array.from(copy.composite().slice(at, at + 4));
+    },
     /** Where the middle of canvas pixel `x`, `y` is, in the window. @param {number} x @param {number} y */
     at: (x, y) => {
       const c = camera();
@@ -1783,15 +2237,21 @@ export function createRaster(host) {
         view = next;
         if (!view || opened) endTransform();
         if (!view) {
+          stop();
           cancel();
           sync.reset();
           copy = null;
           copyOf = 0;
           chosen = null;
           cam = null;
+          frame = 0;
         } else if (opened) {
+          stop();
+          frameEdits.clear();
           chosen = null;
           cam = null;
+          frame = view.frame ?? 0;
+          playTag = "";
           cancel();
           sync.reset();
           if (view.preset === "pixel" && view.palette.length) color = rgba(view.palette[0]);
@@ -1808,8 +2268,20 @@ export function createRaster(host) {
           cam = null;
           await reload();
         } else if (copy) {
-          // The same canvas: its layers or palette may have changed.
-          copy.meta(view.layers, view.palette);
+          // The same canvas: its layers, palette, frames or tags may have
+          // changed — by undo, say, which then sends the tiles that moved.
+          // While frames changed here are on their way, this copy is ahead
+          // of what the core says of them, and keeps its own until the core
+          // has them too: put back to the core's, a copied frame's pixels
+          // would go.
+          const before = copy.info();
+          if (frameEdits.size) view = { ...view, frames: before.frames, tags: before.tags };
+          copy.meta(view.layers, view.palette, frameEdits.size ? undefined : frames(), frameEdits.size ? undefined : tags());
+          if (frame >= frames().length) {
+            frame = frames().length - 1;
+            copy.frame(frame);
+          }
+          if (before.frames.length !== frames().length) staleAll();
         }
         if (chosen !== null && !view?.layers.some((l) => l.id === chosen)) chosen = null;
         render();
@@ -1821,6 +2293,7 @@ export function createRaster(host) {
     show(on) {
       shown = on;
       if (on) paint();
+      else stop();
     },
     key,
     /** For tests: a pixel of everything laid together, as this window has it. @param {number} x @param {number} y */

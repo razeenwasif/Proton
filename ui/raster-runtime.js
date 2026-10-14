@@ -9,6 +9,7 @@
 
 /** @typedef {import('./bindings/RasterLayer').RasterLayer} Layer */
 /** @typedef {import('./bindings/RasterOp').RasterOp} Op */
+/** @typedef {import('./bindings/RasterTag').RasterTag} Tag */
 
 const ABI = 1;
 
@@ -69,18 +70,41 @@ export async function createRasterRuntime() {
   const text = (/** @type {unknown} */ value) => new TextEncoder().encode(JSON.stringify(value));
 
   return {
-    /** A canvas to mirror, with no pixels yet.
-     *  @param {{width: number, height: number, preset: string, palette: number[][], layers: Layer[], generation: number}} canvas */
+    /** A canvas to mirror, with no pixels yet: its frames' times and tags
+     *  too, one frame if not said.
+     *  @param {{width: number, height: number, preset: string, palette: number[][], layers: Layer[], generation: number, frames?: number[], tags?: Tag[]}} canvas */
     open(canvas) {
       if (pass(rr.rr_open, text(canvas)) !== 0) throw new Error(why());
       width = canvas.width;
       height = canvas.height;
     },
-    /** The layers or palette changed. @param {Layer[]} layers @param {number[][]} [palette] */
-    meta(layers, palette) {
-      if (pass(rr.rr_meta, text({ layers, palette })) !== 0) throw new Error(why());
+    /** The layers, palette, frames or tags changed: what is not given is as
+     *  it was. @param {Layer[]} layers @param {number[][]} [palette] @param {number[]} [frames] @param {Tag[]} [tags] */
+    meta(layers, palette, frames, tags) {
+      if (pass(rr.rr_meta, text({ layers, palette, frames, tags })) !== 0) throw new Error(why());
     },
-    /** Tiles of a layer, as `read_raster` sends them. @param {number} layer @param {ArrayBuffer} bytes */
+    /** Show frame `frame` (from 0): laid together again. @param {number} frame */
+    frame(frame) {
+      rr.rr_frame(frame);
+    },
+    /** The frame shown. */
+    shown() {
+      return rr.rr_shown() >>> 0;
+    },
+    /** Other frames shown faintly under each layer: how many before and
+     *  after, how strongly the nearest (0–255), tinted — those before red,
+     *  after blue — or not. @param {number} before @param {number} after @param {number} opacity @param {boolean} tint */
+    onion(before, after, opacity, tint) {
+      rr.rr_onion(before, after, opacity, tint ? 1 : 0);
+    },
+    /** A frame laid together at `w` × `h`, straight RGBA, copied: the
+     *  timeline's picture of it. @param {number} frame @param {number} w @param {number} h */
+    thumb(frame, w, h) {
+      const at = rr.rr_thumb(frame, w, h);
+      return new Uint8ClampedArray(rr.memory.buffer, at, w * h * 4).slice();
+    },
+    /** Tiles of a cel — a layer's own id is its first frame — as
+     *  `read_raster` sends them. @param {number} layer @param {ArrayBuffer} bytes */
     put(layer, bytes) {
       if (pass(rr.rr_put, new Uint8Array(bytes), layer) !== 0) throw new Error(why());
     },
@@ -168,9 +192,10 @@ export async function createRasterRuntime() {
       const v = rr.rr_layer_pixel(layer, x, y) >>> 0;
       return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, v >>> 24];
     },
-    /** The size, the layers, the palette, and which tiles each layer has —
-     *  the selection's as layer 0.
-     *  @returns {{width: number, height: number, layers: Layer[], palette: number[][], tiles: [number, number[]][]}} */
+    /** The size, the layers, the palette, the frames and tags, the frame
+     *  shown, and which tiles each cel has — the selection's as layer 0, a
+     *  later frame's cel only when it has any.
+     *  @returns {{width: number, height: number, layers: Layer[], palette: number[][], frames: number[], tags: Tag[], shown: number, tiles: [number, number[]][]}} */
     info() {
       const at = rr.rr_info();
       const length = new DataView(rr.memory.buffer).getUint32(at, true);

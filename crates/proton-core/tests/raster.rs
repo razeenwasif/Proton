@@ -154,7 +154,7 @@ fn a_save_is_written_on_a_worker_and_said_when_it_is_done() {
     assert!(!after.dirty && !after.saving && noticed);
     assert!(space.unsaved().is_empty());
     let read = proton_raster::file::load(&root.join("hero-sprite.canvas")).unwrap();
-    assert_eq!(read.layers[0].grid.pixel(63, 31), [9, 99, 199, 255]);
+    assert_eq!(read.layers[0].grid().pixel(63, 31), [9, 99, 199, 255]);
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn quitting_saves_what_is_unsaved_at_once() {
     assert!(space.save_unsaved().is_empty());
     assert!(space.unsaved().is_empty());
     let read = proton_raster::file::load(&root.join("hero-sprite.canvas")).unwrap();
-    assert_eq!((read.layers[0].grid.pixel(1, 1), read.layers[0].grid.pixel(2, 2)), ([200, 10, 10, 255], [10, 200, 10, 255]));
+    assert_eq!((read.layers[0].grid().pixel(1, 1), read.layers[0].grid().pixel(2, 2)), ([200, 10, 10, 255], [10, 200, 10, 255]));
 }
 
 #[test]
@@ -208,12 +208,12 @@ fn a_canvas_is_written_out_as_a_png_and_a_psd_beside_its_folder() {
     let (mut space, root, shown) = with_canvas("export");
     let id = shown.layers[0].id;
     space.apply(fill(shown.generation, 1, id, [2, 2, 4, 4], [200, 30, 30, 255]));
-    let events = space.apply(Command::RasterExport { format: proton_core::raster::RasterFormat::Png, scale: Some(4) });
+    let events = space.apply(Command::RasterExport { format: proton_core::raster::RasterFormat::Png, scale: Some(4), frame: None, columns: None });
     assert!(warned(&events).is_none(), "{events:?}");
     let (w, h, rgba) = proton_raster::file::decode_png(&std::fs::read(root.join("hero-sprite@4x.png")).unwrap()).unwrap();
     assert_eq!((w, h, &rgba[((10 * 256 + 10) * 4) as usize..((10 * 256 + 10) * 4 + 4) as usize]), (256, 256, &[200u8, 30, 30, 255][..]));
     assert!(images(&events).unwrap().contains(&"hero-sprite@4x.png".to_string()), "the home page does not offer it back");
-    space.apply(Command::RasterExport { format: proton_core::raster::RasterFormat::Psd, scale: None });
+    space.apply(Command::RasterExport { format: proton_core::raster::RasterFormat::Psd, scale: None, frame: None, columns: None });
     let picture = proton_raster::port::read(&std::fs::read(root.join("hero-sprite.psd")).unwrap(), "x").unwrap();
     assert_eq!((picture.width, picture.parts.len(), picture.parts[0].name.as_str()), (64, 1, "Sprite"));
 }
@@ -247,7 +247,7 @@ fn a_picture_comes_in_as_a_canvas_or_as_layers_one_undo_away() {
     assert_eq!(view(&undone).unwrap().unwrap().layers.len(), 1, "one undo takes the layer back");
     // What cannot be read is said.
     let gif = space.raster_put_blob(b"GIF89a....".to_vec()).unwrap();
-    assert!(warned(&space.apply(Command::RasterImport { path: None, blob: Some(gif), layer: true, above: None, name: None })).unwrap().contains("only PNG and Photoshop"));
+    assert!(warned(&space.apply(Command::RasterImport { path: None, blob: Some(gif), layer: true, above: None, name: None })).unwrap().contains("only PNG, Photoshop and Aseprite"));
     assert!(warned(&space.apply(Command::RasterImport { path: None, blob: Some(999), layer: true, above: None, name: None })).unwrap().contains("gone"));
     assert!(warned(&space.apply(Command::RasterImport { path: Some("../elsewhere.png".into()), blob: None, layer: true, above: None, name: None })).is_some());
 }
@@ -365,4 +365,154 @@ fn the_agent_makes_from_seeds_filters_and_ramps_and_writes_the_canvas_out() {
     space.run_tool("canvas_export", &json!({"format": "psd"})).unwrap();
     let picture = proton_raster::port::read(&std::fs::read(root.join("ships.psd")).unwrap(), "x").unwrap();
     assert_eq!(picture.parts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Sprite", "Sky"]);
+}
+
+/// Frames as the window makes them: edits numbered, each answered.
+fn edit(space: &mut Workspace, generation: u32, seq: u32, op: Op) -> Vec<Event> {
+    space.apply(Command::RasterEdit { generation, seq, op, label: "frames".into() })
+}
+
+#[test]
+fn an_animation_is_edited_saved_opened_and_written_out_as_a_sheet() {
+    let (mut space, root, shown) = with_canvas("frames");
+    let (g, id) = (shown.generation, shown.layers[0].id);
+    assert_eq!((shown.frames.clone(), shown.frame), (vec![100], 0));
+    space.apply(fill(g, 1, id, [0, 0, 8, 8], [200, 30, 40, 255]));
+    let events = edit(&mut space, g, 2, Op::AddFrame { at: None, copy: Some(0) });
+    assert!(applied(&events).2.is_none());
+    let view2 = view(&events).unwrap().unwrap();
+    assert_eq!(view2.frames, [100, 100]);
+    // The copy's cel is listed with its tiles, under its own id.
+    let cel = proton_raster::cel_id(id, 1);
+    assert!(view2.tiles.iter().any(|(l, t)| *l == cel && t == &vec![0]), "{:?}", view2.tiles);
+    space.apply(fill(g, 3, cel, [8, 0, 8, 8], [40, 60, 220, 255]));
+    edit(&mut space, g, 4, Op::SetDuration { from: 1, to: 1, duration: 60 });
+    edit(&mut space, g, 5, Op::SetTags { tags: vec![proton_raster::Tag { name: "blink".into(), from: 0, to: 1, direction: proton_raster::Direction::PingPong, repeat: 0 }] });
+    // The window says which frame it shows; a frame's PNG is named for it.
+    space.apply(Command::RasterShow { frame: 1 });
+    let events = space.apply(Command::RasterExport { format: proton_core::raster::RasterFormat::Png, scale: None, frame: None, columns: None });
+    assert!(said(&events).iter().any(|s| s.contains("hero-sprite-2.png")), "{:?}", said(&events));
+    let (_, _, png) = proton_raster::file::decode_png(&std::fs::read(root.join("hero-sprite-2.png")).unwrap()).unwrap();
+    assert_eq!((&png[..4], &png[8 * 4..8 * 4 + 4]), (&[200, 30, 40, 255][..], &[40, 60, 220, 255][..]));
+    // A sheet of both, and the JSON that says where each is.
+    let events = space.apply(Command::RasterExport { format: proton_core::raster::RasterFormat::Sheet, scale: Some(2), frame: None, columns: None });
+    assert!(said(&events).iter().any(|s| s.contains("hero-sprite@2x-sheet.png and its JSON, 2 frames")), "{:?}", said(&events));
+    let json: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("hero-sprite@2x-sheet.json")).unwrap()).unwrap();
+    assert_eq!((json["frames"][1]["frame"]["x"].as_u64(), json["frames"][1]["duration"].as_u64()), (Some(128), Some(60)));
+    assert_eq!(json["meta"]["frameTags"][0]["direction"], "pingpong");
+    assert!(warned(&space.apply(Command::RasterExport { format: proton_core::raster::RasterFormat::Png, scale: None, frame: Some(5), columns: None })).unwrap().contains("no frame 6"));
+    // Saved, closed and opened: the frames and tags as they were, the home
+    // page counting them.
+    space.apply(Command::RasterSave);
+    let saved = (0..200).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        space.apply(Command::Poll).iter().any(|e| matches!(e, Event::RasterCanvas { canvas: Some(c) } if !c.dirty && !c.saving))
+    });
+    assert!(saved);
+    let events = space.apply(Command::RasterClose { discard: false });
+    let found = events.iter().find_map(|e| match e {
+        Event::RasterHome { canvases, .. } => canvases.iter().find(|c| c.path == "hero-sprite.canvas").map(|c| c.frames),
+        _ => None,
+    });
+    assert_eq!(found, Some(2));
+    let events = space.apply(Command::RasterOpen { path: "hero-sprite.canvas".into() });
+    let back = view(&events).unwrap().unwrap();
+    assert_eq!((back.frames.clone(), back.tags.len(), back.frame), (vec![100, 60], 1, 0));
+}
+
+/// A two-frame Aseprite file: one RGBA layer, a pixel moving right.
+fn aseprite_bytes() -> Vec<u8> {
+    let chunk = |kind: u16, body: Vec<u8>| -> Vec<u8> { [((body.len() + 6) as u32).to_le_bytes().to_vec(), kind.to_le_bytes().to_vec(), body].concat() };
+    let layer = {
+        let mut b = Vec::new();
+        for w in [1u16, 0, 0, 0, 0, 0] {
+            b.extend(w.to_le_bytes());
+        }
+        b.extend([255, 0, 0, 0]);
+        b.extend(4u16.to_le_bytes());
+        b.extend(b"Walk");
+        chunk(0x2004, b)
+    };
+    let cel = |x: i16| {
+        let mut b = vec![0, 0];
+        b.extend(x.to_le_bytes());
+        b.extend(0i16.to_le_bytes());
+        b.push(255);
+        b.extend(0u16.to_le_bytes());
+        b.extend([0; 7]);
+        b.extend(1u16.to_le_bytes());
+        b.extend(1u16.to_le_bytes());
+        b.extend([250, 220, 30, 255]);
+        chunk(0x2005, b)
+    };
+    let frames = [vec![layer, cel(0)], vec![cel(1)]];
+    let mut body = Vec::new();
+    for (i, chunks) in frames.iter().enumerate() {
+        let content = chunks.concat();
+        body.extend(((content.len() + 16) as u32).to_le_bytes());
+        body.extend(0xf1fau16.to_le_bytes());
+        body.extend((chunks.len() as u16).to_le_bytes());
+        body.extend((if i == 0 { 90u16 } else { 120 }).to_le_bytes());
+        body.extend([0, 0]);
+        body.extend((chunks.len() as u32).to_le_bytes());
+        body.extend(content);
+    }
+    let mut head = ((body.len() + 128) as u32).to_le_bytes().to_vec();
+    head.extend(0xa5e0u16.to_le_bytes());
+    for w in [2u16, 4, 2, 32] {
+        head.extend(w.to_le_bytes());
+    }
+    head.extend(1u32.to_le_bytes());
+    head.resize(128, 0);
+    head.extend(body);
+    head
+}
+
+#[test]
+fn an_aseprite_file_comes_in_as_an_animated_canvas() {
+    let root = project("aseprite");
+    std::fs::write(root.join("walk.aseprite"), aseprite_bytes()).unwrap();
+    let mut space = Workspace::rooted(&root);
+    let events = space.apply(Command::SetMode { mode: ModeId::Raster });
+    assert_eq!(images(&events), Some(vec!["walk.aseprite".to_string()]));
+    let events = space.apply(Command::RasterImport { path: Some("walk.aseprite".into()), blob: None, layer: false, above: None, name: None });
+    assert!(warned(&events).is_none(), "{events:?}");
+    let shown = view(&events).unwrap().unwrap();
+    assert_eq!((shown.path.as_str(), shown.frames.clone(), shown.layers[0].name.as_str()), ("walk.canvas", vec![90, 120], "Walk"));
+    let canvas = proton_raster::file::load(&root.join("walk.canvas")).unwrap();
+    assert_eq!((canvas.layers[0].cels[0].pixel(0, 0), canvas.layers[0].cels[1].pixel(1, 0), canvas.layers[0].cels[1].pixel(0, 0)), ([250, 220, 30, 255], [250, 220, 30, 255], [0; 4]));
+    // Brought in as a layer of a still canvas: its first frame, and a note.
+    let made = space.apply(Command::RasterNew { name: "Still".into(), preset: Preset::Pixel, width: 4, height: 2, folder: None });
+    assert!(warned(&made).is_none());
+    let events = space.apply(Command::RasterImport { path: Some("walk.aseprite".into()), blob: None, layer: true, above: None, name: None });
+    assert!(warned(&events).unwrap().contains("2 frames and the canvas 1"));
+}
+
+#[test]
+fn the_agent_animates_a_canvas_in_frames_it_names() {
+    let root = project("agent-frames");
+    let mut space = Workspace::rooted(&root);
+    space.apply(Command::SetMode { mode: ModeId::Raster });
+    space.run_tool("canvas_new", &serde_json::json!({"name": "Blob", "width": 8})).unwrap();
+    space.run_tool("canvas_draw", &serde_json::json!({"marks": [{"rect": [1, 1, 3, 3], "fill": true, "color": "#e8743b"}]})).unwrap();
+    let info = space.run_tool("canvas_info", &serde_json::json!({})).unwrap();
+    assert!(info.contains("One frame"), "{info}");
+    let said = space.run_tool("canvas_frames", &serde_json::json!({"add": {"copy": 1, "count": 2}, "duration": {"ms": 80}, "tags": [{"name": "bob", "from": 1, "to": 3, "direction": "pingpong"}]})).unwrap();
+    assert!(said.contains("Added 2 frames at 2, copies of frame 1") && said.contains("3 frames now"), "{said}");
+    // Drawn in frame 3, which the others do not see.
+    let drew = space.run_tool("canvas_draw", &serde_json::json!({"frame": 3, "marks": [{"pixels": [[6, 6]], "color": "#ffffff"}]})).unwrap();
+    assert!(drew.contains("in frame 3"), "{drew}");
+    let info = space.run_tool("canvas_info", &serde_json::json!({"pixels": {"frame": 3, "rect": [5, 5, 3, 3]}})).unwrap();
+    assert!(info.contains("An animation of 3 frames, each shown 80 ms") && info.contains("\"bob\" frames 1–3 pingpong") && info.contains("in frame 3"), "{info}");
+    let first = space.run_tool("canvas_info", &serde_json::json!({"pixels": {"frame": 1, "rect": [5, 5, 3, 3]}})).unwrap();
+    assert!(first.ends_with("...\n...\n..."), "{first}");
+    assert!(space.run_tool("canvas_draw", &serde_json::json!({"frame": 9, "marks": [{"pixels": [[0, 0]]}]})).unwrap_err().contains("no frame 9"));
+    // One undo takes back all the call made.
+    space.apply(Command::RasterUndo);
+    space.apply(Command::RasterUndo);
+    let info = space.run_tool("canvas_info", &serde_json::json!({})).unwrap();
+    assert!(info.contains("One frame"), "{info}");
+    let wrote = space.run_tool("canvas_export", &serde_json::json!({"format": "sheet"})).unwrap();
+    assert!(wrote.contains("blob-sheet.png"), "{wrote}");
+    assert!(root.join("blob-sheet.json").exists());
 }

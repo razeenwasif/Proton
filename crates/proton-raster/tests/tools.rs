@@ -32,7 +32,7 @@ fn painted(c: &Canvas, layer: u32) -> Vec<(i32, i32)> {
     let mut out = Vec::new();
     for y in 0..c.height {
         for x in 0..c.width {
-            if l.grid.pixel(x, y)[3] > 0 {
+            if l.grid().pixel(x, y)[3] > 0 {
                 out.push((x as i32, y as i32));
             }
         }
@@ -62,7 +62,7 @@ fn a_stroke_paints_where_it_crosses_itself_once_and_mirrors() {
     let half = [255, 0, 0, 128];
     c.apply(&Op::Stroke { layer: id, tool: Tool::Pencil, tip: tip(1), color: half, pixel_perfect: false, points: points(&[(0, 3), (6, 3), (3, 0), (3, 6)]) }).unwrap();
     // Where the line crosses back over itself it is no darker.
-    assert_eq!(c.layer(id).unwrap().grid.pixel(3, 3), half);
+    assert_eq!(c.layer(id).unwrap().grid().pixel(3, 3), half);
     let (mut m, id) = canvas(16, 16);
     let mirrored = Tip { size: 1, round: false, mirror: [Some(16), None] };
     m.apply(&Op::Stroke { layer: id, tool: Tool::Pencil, tip: mirrored, color: RED, pixel_perfect: false, points: points(&[(2, 5)]) }).unwrap();
@@ -78,8 +78,8 @@ fn an_eraser_clears_and_alpha_lock_keeps_the_shape() {
     c.apply(&Op::SetLayer { layer: id, name: None, opacity: None, blend: None, hidden: None, locked: None, alpha_lock: Some(true) }).unwrap();
     // Locked to its shape: the pencil colours only what is there.
     c.apply(&pencil(id, &[(3, 3), (6, 6)], false)).unwrap();
-    assert_eq!(c.layer(id).unwrap().grid.pixel(3, 3), RED);
-    assert_eq!(c.layer(id).unwrap().grid.pixel(5, 5), [0, 0, 0, 0]);
+    assert_eq!(c.layer(id).unwrap().grid().pixel(3, 3), RED);
+    assert_eq!(c.layer(id).unwrap().grid().pixel(5, 5), [0, 0, 0, 0]);
     c.apply(&Op::SetLayer { layer: id, name: None, opacity: None, blend: None, hidden: None, locked: Some(true), alpha_lock: None }).unwrap();
     assert!(c.apply(&pencil(id, &[(1, 1)], false)).unwrap_err().contains("locked"));
 }
@@ -92,14 +92,14 @@ fn a_bucket_spreads_to_what_is_like_it() {
     c.apply(&Op::FillRect { layer: id, rect: [7, 7, 1, 1], color: [0, 0, 0, 0] }).unwrap();
     // Inside, four-connected: the corner gap is diagonal, so it stays in.
     c.apply(&Op::Fill { layer: id, x: 4, y: 4, color: RED, tolerance: 0, contiguous: true, diagonal: false }).unwrap();
-    assert_eq!(c.layer(id).unwrap().grid.pixel(4, 4), RED);
-    assert_eq!(c.layer(id).unwrap().grid.pixel(0, 0), [0, 0, 0, 0], "four-connected fill leaked through a diagonal");
+    assert_eq!(c.layer(id).unwrap().grid().pixel(4, 4), RED);
+    assert_eq!(c.layer(id).unwrap().grid().pixel(0, 0), [0, 0, 0, 0], "four-connected fill leaked through a diagonal");
     // Eight-connected, it gets out through the corner.
     let (mut d, id2) = canvas(10, 10);
     d.apply(&Op::Shape { layer: id2, shape: ShapeKind::Rect, from: [2, 2], to: [7, 7], filled: false, tip: tip(1), color: BLUE }).unwrap();
     d.apply(&Op::FillRect { layer: id2, rect: [7, 7, 1, 1], color: [0, 0, 0, 0] }).unwrap();
     d.apply(&Op::Fill { layer: id2, x: 4, y: 4, color: RED, tolerance: 0, contiguous: true, diagonal: true }).unwrap();
-    assert_eq!(d.layer(id2).unwrap().grid.pixel(0, 0), RED);
+    assert_eq!(d.layer(id2).unwrap().grid().pixel(0, 0), RED);
     // Everywhere like it, not only what touches it.
     let (mut g, id3) = canvas(6, 1);
     for x in [0, 2, 4] {
@@ -107,13 +107,13 @@ fn a_bucket_spreads_to_what_is_like_it() {
     }
     g.apply(&Op::Fill { layer: id3, x: 0, y: 0, color: RED, tolerance: 0, contiguous: false, diagonal: false }).unwrap();
     assert_eq!(painted(&g, id3), [(0, 0), (2, 0), (4, 0)]);
-    assert_eq!(g.layer(id3).unwrap().grid.pixel(4, 0), RED);
+    assert_eq!(g.layer(id3).unwrap().grid().pixel(4, 0), RED);
     // Within a tolerance, a near colour is the same colour.
     let (mut t, id4) = canvas(2, 1);
     t.apply(&Op::FillRect { layer: id4, rect: [0, 0, 1, 1], color: [100, 100, 100, 255] }).unwrap();
     t.apply(&Op::FillRect { layer: id4, rect: [1, 0, 1, 1], color: [104, 100, 97, 255] }).unwrap();
     t.apply(&Op::Fill { layer: id4, x: 0, y: 0, color: RED, tolerance: 4, contiguous: true, diagonal: false }).unwrap();
-    assert_eq!(t.layer(id4).unwrap().grid.pixel(1, 0), RED);
+    assert_eq!(t.layer(id4).unwrap().grid().pixel(1, 0), RED);
     // Filling with the colour already there changes nothing.
     let (applied, _) = t.apply(&Op::Fill { layer: id4, x: 0, y: 0, color: RED, tolerance: 0, contiguous: true, diagonal: false }).unwrap();
     assert!(!applied.changed);
@@ -150,8 +150,8 @@ fn a_colour_replaced_everywhere_with_its_swatch_is_one_edit() {
     let applied = history.apply(&mut c, &Op::ReplaceColor { from: BLUE, to: green, layer: None, swatch: Some(0) }, "recolour").unwrap();
     assert!(applied.meta && applied.touched.len() == 4, "{applied:?}");
     assert_eq!(c.palette[0], green);
-    assert_eq!(c.layer(ink).unwrap().grid.pixel(101, 6), green);
-    assert_eq!(c.layer(id).unwrap().grid.pixel(129, 0), green);
+    assert_eq!(c.layer(ink).unwrap().grid().pixel(101, 6), green);
+    assert_eq!(c.layer(id).unwrap().grid().pixel(129, 0), green);
     history.undo(&mut c);
     assert_eq!(c.hash(), before, "one undo did not take the whole recolour back");
     assert!(c.apply(&Op::ReplaceColor { from: BLUE, to: green, layer: None, swatch: Some(9) }).is_err());

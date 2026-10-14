@@ -95,7 +95,7 @@ fn every_blend_mode_lands_within_a_shade_of_the_w3c_formula() {
             let back = [rng.next(), rng.next(), rng.next(), rng.next()];
             let src = [rng.next(), rng.next(), rng.next(), rng.next()];
             let opacity = if rng.next() < 128 { 255 } else { rng.next() };
-            let got = flatten(&one_pixel(back, src, opacity, mode));
+            let got = flatten(&one_pixel(back, src, opacity, mode), 0);
             let want = composite(back, src, opacity, mode);
             assert!((got[3] as f64 - want[3]).abs() <= 1.0, "{mode:?} alpha: {back:?} under {src:?}@{opacity}: {} vs {:.2}", got[3], want[3]);
             // Colour is only as exact as the alpha it is divided by.
@@ -141,7 +141,7 @@ fn a_stack_of_every_mode_flattens_to_the_same_pixels_every_time() {
         c.apply(&Op::FillRect { layer: id, rect: [i * 2, i, 14, 12], color: [rng.next(), rng.next(), rng.next(), 128 + rng.next() / 2] }).unwrap();
         c.apply(&Op::SetLayer { layer: id, name: None, opacity: Some(200), blend: Some(mode), hidden: None, locked: None, alpha_lock: None }).unwrap();
     }
-    let flat = flatten(&c);
+    let flat = flatten(&c, 0);
     let mut h = proton_raster::fixed::Hash::default();
     h.bytes(&flat);
     assert_eq!(h.hex(), GOLDEN, "the flattened stack changed");
@@ -176,17 +176,17 @@ fn a_fill_clips_to_the_canvas_tidies_clear_tiles_and_keeps_alpha_locked_shapes()
     // Rows 60–69, across: they straddle the tiles' edge at 64, so all four
     // tiles of the 2 × 2 grid.
     assert_eq!(applied.touched, [(id, 0), (id, 1), (id, 2), (id, 3)]);
-    assert_eq!(c.layers[0].grid.pixel(99, 69), [10, 20, 30, 255]);
-    assert_eq!(c.layers[0].grid.pixel(0, 59), [0, 0, 0, 0]);
+    assert_eq!(c.layers[0].grid().pixel(99, 69), [10, 20, 30, 255]);
+    assert_eq!(c.layers[0].grid().pixel(0, 59), [0, 0, 0, 0]);
     // Cleared again: the tiles are let go.
     c.apply(&Op::FillRect { layer: id, rect: [0, 0, 100, 70], color: [0, 0, 0, 0] }).unwrap();
-    assert!(c.layers[0].grid.tiles.iter().all(Option::is_none));
+    assert!(c.layers[0].grid().tiles.iter().all(Option::is_none));
     // Alpha-locked: colour changes only where there is something.
     c.apply(&Op::FillRect { layer: id, rect: [0, 0, 4, 4], color: [9, 9, 9, 100] }).unwrap();
     c.apply(&Op::SetLayer { layer: id, name: None, opacity: None, blend: None, hidden: None, locked: None, alpha_lock: Some(true) }).unwrap();
     c.apply(&Op::FillRect { layer: id, rect: [0, 0, 8, 8], color: [200, 100, 0, 255] }).unwrap();
-    assert_eq!(c.layers[0].grid.pixel(3, 3), [200, 100, 0, 100]);
-    assert_eq!(c.layers[0].grid.pixel(6, 6), [0, 0, 0, 0]);
+    assert_eq!(c.layers[0].grid().pixel(3, 3), [200, 100, 0, 100]);
+    assert_eq!(c.layers[0].grid().pixel(6, 6), [0, 0, 0, 0]);
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn undo_and_redo_go_back_to_the_same_pixels_and_saved_is_saved_again() {
     history.apply(&mut c, &Op::SetLayer { layer: added, name: None, opacity: Some(90), blend: Some(Blend::Multiply), hidden: None, locked: None, alpha_lock: None }, "blend").unwrap();
     history.apply(&mut c, &Op::MoveLayer { layer: added, to: 0 }, "move").unwrap();
     history.apply(&mut c, &Op::RemoveLayer { layer: base }, "remove").unwrap();
-    let end = (c.hash(), flatten(&c));
+    let end = (c.hash(), flatten(&c, 0));
     assert_ne!(c.state, saved, "changed, but not unsaved");
     let mut undone = Vec::new();
     while let Some((applied, label)) = history.undo(&mut c) {
@@ -213,7 +213,7 @@ fn undo_and_redo_go_back_to_the_same_pixels_and_saved_is_saved_again() {
     assert_eq!(c.hash(), start, "undo did not go back to the start");
     assert_eq!(c.state, saved, "undone to the saved state, but unsaved");
     while history.redo(&mut c).is_some() {}
-    assert_eq!((c.hash(), flatten(&c)), end, "redo did not come back to the end");
+    assert_eq!((c.hash(), flatten(&c, 0)), end, "redo did not come back to the end");
     // A new change after an undo drops what could have been redone.
     history.undo(&mut c);
     history.apply(&mut c, &Op::SetPalette { colors: vec![[1, 2, 3, 255]] }, "palette").unwrap();

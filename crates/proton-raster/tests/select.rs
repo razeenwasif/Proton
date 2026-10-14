@@ -95,43 +95,43 @@ fn every_edit_keeps_to_the_selection() {
     let (mut c, id) = canvas(64, 64, Preset::Pixel);
     c.apply(&select(Area::Rect { rect: [10, 10, 20, 20] }, Mode::Replace)).unwrap();
     c.apply(&Op::FillRect { layer: id, rect: [0, 0, 64, 64], color: RED }).unwrap();
-    assert_eq!((c.layers[0].grid.pixel(15, 15), c.layers[0].grid.pixel(5, 5)), (RED, [0; 4]));
+    assert_eq!((c.layers[0].grid().pixel(15, 15), c.layers[0].grid().pixel(5, 5)), (RED, [0; 4]));
     let tip = Tip { size: 1, round: false, mirror: [None, None] };
     c.apply(&Op::Stroke { layer: id, tool: Tool::Pencil, tip: tip.clone(), color: BLUE, pixel_perfect: false, points: vec![2 * 256, 20 * 256, 65535, 60 * 256, 20 * 256, 65535] }).unwrap();
-    assert_eq!((c.layers[0].grid.pixel(20, 20), c.layers[0].grid.pixel(40, 20)), (BLUE, [0; 4]));
+    assert_eq!((c.layers[0].grid().pixel(20, 20), c.layers[0].grid().pixel(40, 20)), (BLUE, [0; 4]));
     c.apply(&Op::Shape { layer: id, shape: ShapeKind::Line, from: [0, 25], to: [63, 25], filled: false, tip, color: BLUE }).unwrap();
-    assert_eq!(c.layers[0].grid.pixel(50, 25), [0; 4]);
+    assert_eq!(c.layers[0].grid().pixel(50, 25), [0; 4]);
     c.apply(&Op::Fill { layer: id, x: 50, y: 50, color: BLUE, tolerance: 0, contiguous: true, diagonal: false }).unwrap();
-    assert_eq!(c.layers[0].grid.pixel(50, 50), [0; 4], "a bucket outside the selection");
+    assert_eq!(c.layers[0].grid().pixel(50, 50), [0; 4], "a bucket outside the selection");
     let brush = Brush { size: 30, hardness: 100, spacing: 10, flow: 255, opacity: 255, size_pressure: 0, flow_pressure: 0, opacity_pressure: 0 };
     c.apply(&Op::Brush { layer: id, erase: false, brush, color: BLUE, points: vec![32 * 256, 32 * 256, 65535] }).unwrap();
-    assert_eq!((c.layers[0].grid.pixel(28, 28), c.layers[0].grid.pixel(34, 34)), (BLUE, [0; 4]));
+    assert_eq!((c.layers[0].grid().pixel(28, 28), c.layers[0].grid().pixel(34, 34)), (BLUE, [0; 4]));
     // Half selected, half painted, and no darker for it.
     let (mut s, id) = canvas(32, 32, Preset::Paint);
     s.apply(&Op::Select { area: Area::Rect { rect: [0, 0, 32, 32] }, mode: Mode::Replace, feather: 0, smooth: false }).unwrap();
     s.apply(&Op::Select { area: Area::Rect { rect: [0, 0, 32, 32] }, mode: Mode::Intersect, feather: 0, smooth: false }).unwrap();
     s.selection = proton_raster::select::from_dense(32, 32, &[128u8; 32 * 32]);
     s.apply(&Op::FillRect { layer: id, rect: [0, 0, 32, 32], color: RED }).unwrap();
-    assert_eq!(s.layers[0].grid.pixel(3, 3), [220, 40, 40, 128]);
+    assert_eq!(s.layers[0].grid().pixel(3, 3), [220, 40, 40, 128]);
 }
 
 #[test]
 fn copied_pixels_paste_as_a_layer_and_a_cut_clears_them() {
     let (mut c, id) = canvas(64, 64, Preset::Paint);
     c.apply(&Op::FillRect { layer: id, rect: [0, 0, 64, 64], color: RED }).unwrap();
-    assert!(c.apply(&Op::Paste { above: None }).is_err(), "nothing copied yet");
+    assert!(c.apply(&Op::Paste { above: None, frame: 0 }).is_err(), "nothing copied yet");
     c.apply(&select(Area::Rect { rect: [8, 8, 8, 8] }, Mode::Replace)).unwrap();
     let (copied, _) = c.apply(&Op::Copy { layer: id, cut: false }).unwrap();
     assert!(!copied.changed, "copying changes nothing");
-    let (pasted, _) = c.apply(&Op::Paste { above: Some(id) }).unwrap();
+    let (pasted, _) = c.apply(&Op::Paste { above: Some(id), frame: 0 }).unwrap();
     let new = pasted.made.unwrap();
     let layer = c.layer(new).unwrap();
-    assert_eq!((layer.info.name.as_str(), layer.grid.pixel(10, 10), layer.grid.pixel(30, 30)), ("Pasted", RED, [0; 4]));
+    assert_eq!((layer.info.name.as_str(), layer.grid().pixel(10, 10), layer.grid().pixel(30, 30)), ("Pasted", RED, [0; 4]));
     let (cut, _) = c.apply(&Op::Copy { layer: id, cut: true }).unwrap();
     assert!(cut.changed);
-    assert_eq!((c.layer(id).unwrap().grid.pixel(10, 10), c.layer(id).unwrap().grid.pixel(30, 30)), ([0; 4], RED));
+    assert_eq!((c.layer(id).unwrap().grid().pixel(10, 10), c.layer(id).unwrap().grid().pixel(30, 30)), ([0; 4], RED));
     c.apply(&Op::Clear { layer: new }).unwrap();
-    assert_eq!(c.layer(new).unwrap().grid.pixel(10, 10), [0; 4]);
+    assert_eq!(c.layer(new).unwrap().grid().pixel(10, 10), [0; 4]);
 }
 
 #[test]
@@ -145,14 +145,14 @@ fn moved_pixels_carry_their_selection_and_one_undo_puts_both_back() {
     let one = 65536i64;
     let applied = h.apply(&mut c, &Op::Transform { layer: id, bounds: [14, 24, 6, 6], inverse: [one, 0, -10 * one, 0, one, -20 * one], smooth: false }, "move").unwrap();
     assert!(applied.touched.iter().any(|t| t.0 == SELECTION) && applied.touched.iter().any(|t| t.0 == id));
-    assert_eq!((c.layers[0].grid.pixel(15, 25), c.layers[0].grid.pixel(5, 5)), (RED, [0; 4]));
+    assert_eq!((c.layers[0].grid().pixel(15, 25), c.layers[0].grid().pixel(5, 5)), (RED, [0; 4]));
     assert_eq!((sel(&c, 15, 25), sel(&c, 5, 5)), (255, 0));
     h.undo(&mut c);
     assert_eq!(c.hash(), before);
     // With nothing selected, the whole layer moves.
     h.apply(&mut c, &select(Area::Nothing, Mode::Replace), "deselect").unwrap();
     h.apply(&mut c, &Op::Transform { layer: id, bounds: [0, 0, 64, 64], inverse: [one, 0, -one, 0, one, 0], smooth: false }, "move").unwrap();
-    assert_eq!((c.layers[0].grid.pixel(5, 4), c.layers[0].grid.pixel(4, 4)), (RED, [0; 4]));
+    assert_eq!((c.layers[0].grid().pixel(5, 4), c.layers[0].grid().pixel(4, 4)), (RED, [0; 4]));
 }
 
 #[test]
@@ -168,19 +168,19 @@ fn the_canvas_turns_flips_resizes_and_crops_and_undo_puts_it_back() {
     assert_eq!(c.hash(), start, "four quarter turns are no turn");
     h.apply(&mut c, &Op::Orient { turns: 1, flip: false }, "turn").unwrap();
     assert_eq!((c.width, c.height), (24, 40));
-    assert_eq!(c.layers[0].grid.pixel(23, 0), RED, "the top-left corner turned to the top right");
+    assert_eq!(c.layers[0].grid().pixel(23, 0), RED, "the top-left corner turned to the top right");
     assert_eq!(sel(&c, 23, 0), 255, "the selection turns with it");
     h.undo(&mut c);
     assert_eq!((c.width, c.height, c.hash()), (40, 24, start));
     h.apply(&mut c, &Op::Orient { turns: 0, flip: true }, "flip").unwrap();
-    assert_eq!(c.layers[0].grid.pixel(39, 0), RED);
+    assert_eq!(c.layers[0].grid().pixel(39, 0), RED);
     h.apply(&mut c, &Op::Orient { turns: 0, flip: true }, "flip").unwrap();
     assert_eq!(c.hash(), start, "two flips are none");
     h.apply(&mut c, &Op::Resize { width: 80, height: 48, smooth: false }, "resize").unwrap();
-    assert_eq!((c.layers[0].grid.pixel(5, 3), c.layers[0].grid.pixel(6, 4)), (RED, [0; 4]));
+    assert_eq!((c.layers[0].grid().pixel(5, 3), c.layers[0].grid().pixel(6, 4)), (RED, [0; 4]));
     h.undo(&mut c);
     h.apply(&mut c, &Op::Crop { rect: [1, 1, 10, 10] }, "crop").unwrap();
-    assert_eq!((c.width, c.height, c.layers[0].grid.pixel(0, 0), c.layers[0].grid.pixel(2, 0)), (10, 10, RED, [0; 4]));
+    assert_eq!((c.width, c.height, c.layers[0].grid().pixel(0, 0), c.layers[0].grid().pixel(2, 0)), (10, 10, RED, [0; 4]));
     h.undo(&mut c);
     assert_eq!(c.hash(), start);
     assert!(c.apply(&Op::Resize { width: 2000, height: 10, smooth: false }).is_err(), "past a pixel canvas's most");
@@ -206,7 +206,7 @@ fn a_smooth_turn_and_a_feathered_selection_make_what_they_always_made() {
     c.apply(&Op::Transform { layer: id, bounds: [0, 0, 96, 96], inverse, smooth: true }).unwrap();
     c.apply(&Op::Select { area: Area::Ellipse { rect: [10, 20, 60, 40] }, mode: Mode::Replace, feather: 6, smooth: true }).unwrap();
     c.apply(&Op::Select { area: Area::Lasso { points: [5, 5, 90, 30, 40, 90].map(|v| v * 256).to_vec() }, mode: Mode::Add, feather: 0, smooth: true }).unwrap();
-    let hashes = format!("{:016x} {:016x}", c.layers[0].grid.tiles.iter().fold(0u64, |h, t| h.rotate_left(5) ^ t.as_ref().map_or(0, |t| t.hash())), c.hash());
+    let hashes = format!("{:016x} {:016x}", c.layers[0].grid().tiles.iter().fold(0u64, |h, t| h.rotate_left(5) ^ t.as_ref().map_or(0, |t| t.hash())), c.hash());
     if std::env::var("PROTON_BLESS").is_ok() {
         println!("sampled and selected: {hashes}");
         return;
@@ -227,7 +227,7 @@ fn ops_applied_together_are_one_step_and_none_if_one_is_refused() {
     ];
     let applied = h.record(&mut c, "marks", |c| c.apply_all(&ops)).unwrap();
     assert!(applied.meta && applied.made == Some(id + 1));
-    assert_eq!((c.layers[1].grid.pixel(1, 1), c.layers[1].grid.pixel(5, 5)), (BLUE, [0; 4]), "the last mark kept to the selection the third made");
+    assert_eq!((c.layers[1].grid().pixel(1, 1), c.layers[1].grid().pixel(5, 5)), (BLUE, [0; 4]), "the last mark kept to the selection the third made");
     assert_eq!(h.steps(), 1);
     h.undo(&mut c);
     assert_eq!(c.hash(), before, "one undo did not take every mark back");

@@ -145,32 +145,64 @@ fn normal(back: &mut [u64], src: [u8; 4], a_s: u64) {
     back[3] = a_s + div_m(a_b * (M - a_s));
 }
 
-/// Every shown layer's tile `index`, laid bottom to top over nothing.
-pub fn tile(canvas: &Canvas, index: u32) -> Accum {
-    region(canvas, index, [0, 0, TILE, TILE])
+/// Every shown layer's tile `index` in `frame`, laid bottom to top over
+/// nothing.
+pub fn tile(canvas: &Canvas, frame: u32, index: u32) -> Accum {
+    region(canvas, frame, index, [0, 0, TILE, TILE])
 }
 
 /// Part of tile `index` — left, top, right and bottom within it, the right
-/// and bottom past the end — every shown layer laid bottom to top over
-/// nothing: the part's width a row. What a brush's dabs changed is laid
-/// together again without the rest of the tile.
-pub fn region(canvas: &Canvas, index: u32, part: [u32; 4]) -> Accum {
+/// and bottom past the end — every shown layer's cel in `frame` laid bottom
+/// to top over nothing: the part's width a row. What a brush's dabs changed
+/// is laid together again without the rest of the tile.
+pub fn region(canvas: &Canvas, frame: u32, index: u32, part: [u32; 4]) -> Accum {
     let (w, h) = (part[2] - part[0], part[3] - part[1]);
-    fold(canvas, index, part, 0, canvas.layers.len() as u32, vec![0; (w * h * 4) as usize])
+    fold(canvas, frame, index, part, 0, canvas.layers.len() as u32, vec![0; (w * h * 4) as usize], &[])
+}
+
+/// Another frame's cel shown faintly under a layer's own, to animate by:
+/// which frame, how strongly (0 to 255), and the colour it is tinted toward,
+/// half way — none for its own colours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Onion {
+    pub frame: u32,
+    pub opacity: u8,
+    pub tint: Option<[u8; 3]>,
 }
 
 /// Part of tile `index`, the layers from place `from` up to (not including)
-/// place `to` laid over `acc` — what the layers under them made of that
-/// part. Laying a stack together is a fold from the bottom, so stopping it
-/// at a layer and going on later from what it made is the same arithmetic.
-pub fn fold(canvas: &Canvas, index: u32, part: [u32; 4], from: u32, to: u32, mut acc: Accum) -> Accum {
+/// place `to` in `frame` laid over `acc` — what the layers under them made
+/// of that part. Laying a stack together is a fold from the bottom, so
+/// stopping it at a layer and going on later from what it made is the same
+/// arithmetic. Each layer's cels in the frames `onion` names are laid under
+/// its own first, the farthest first: what the window shows, never a file.
+#[allow(clippy::too_many_arguments)]
+pub fn fold(canvas: &Canvas, frame: u32, index: u32, part: [u32; 4], from: u32, to: u32, mut acc: Accum, onion: &[Onion]) -> Accum {
     let w = part[2] - part[0];
     let h = part[3] - part[1];
     for layer in canvas.layers.iter().take(to as usize).skip(from as usize) {
         if layer.info.hidden || layer.info.opacity == 0 {
             continue;
         }
-        let Some(t) = layer.grid.tile(index) else { continue };
+        for skin in onion {
+            let Some(t) = layer.cels.get(skin.frame as usize).and_then(|g| g.tile(index)) else { continue };
+            let opacity = crate::fixed::mul255(layer.info.opacity as u32, skin.opacity as u32) as u8;
+            for y in 0..h {
+                let start = Tile::at(part[0], part[1] + y);
+                let row = &t.px[start..start + (w * 4) as usize];
+                let at = (y * w * 4) as usize;
+                for (p, back) in row.chunks_exact(4).zip(acc[at..at + (w * 4) as usize].chunks_exact_mut(4)) {
+                    if p[3] != 0 {
+                        let c = match skin.tint {
+                            Some(t) => [((p[0] as u32 + t[0] as u32) / 2) as u8, ((p[1] as u32 + t[1] as u32) / 2) as u8, ((p[2] as u32 + t[2] as u32) / 2) as u8, p[3]],
+                            None => [p[0], p[1], p[2], p[3]],
+                        };
+                        over(back, c, opacity, Blend::Normal);
+                    }
+                }
+            }
+        }
+        let Some(t) = layer.cels.get(frame as usize).and_then(|g| g.tile(index)) else { continue };
         for y in 0..h {
             let from = Tile::at(part[0], part[1] + y);
             let row = &t.px[from..from + (w * 4) as usize];
@@ -230,15 +262,14 @@ pub fn straight(acc: &[u64]) -> Vec<u8> {
     out
 }
 
-/// The whole canvas, flattened: straight RGBA, row by row.
-pub fn flatten(canvas: &Canvas) -> Vec<u8> {
+/// One frame of the canvas, flattened: straight RGBA, row by row.
+pub fn flatten(canvas: &Canvas, frame: u32) -> Vec<u8> {
     let (w, h) = (canvas.width, canvas.height);
     let mut out = vec![0u8; (w * h * 4) as usize];
-    let Some(first) = canvas.layers.first() else { return out };
-    let grid = &first.grid;
+    let grid = crate::tile::Grid::new(w, h);
     for index in 0..grid.cols * grid.rows {
         let (x, y, tw, th) = grid.bounds(index);
-        let px = straight(&tile(canvas, index));
+        let px = straight(&tile(canvas, frame, index));
         for row in 0..th {
             let from = ((row * TILE) * 4) as usize;
             let to = (((y + row) * w + x) * 4) as usize;

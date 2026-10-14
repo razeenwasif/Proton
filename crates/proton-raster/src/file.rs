@@ -2,9 +2,11 @@
 //!
 //! ```text
 //! Name.canvas/
-//!   canvas.json        size, preset, palette, layers and how each is drawn
-//!   layers/<id>.png    each layer, the canvas's full size
-//!   flat.png           every layer laid together (Pixel canvases)
+//!   canvas.json        size, preset, palette, layers and how each is drawn,
+//!                      and for an animation its frames' times and its tags
+//!   layers/<id>.png    each layer, the canvas's full size — in the first frame
+//!   layers/<id>-<n>.png  a layer in frame n (from 2), when it has pixels there
+//!   flat.png           every layer laid together (Pixel canvases), first frame
 //! ```
 //!
 //! Plain files rather than one container: another program opens a layer as
@@ -16,19 +18,25 @@
 //! shows in a diff; a pixel layer of 256 colours or fewer is written indexed.
 //! `canvas.json` is written last, so a folder whose save was cut short still
 //! names only layers that are whole.
+//!
+//! A still picture is written as format 1, as it always was; a canvas with
+//! frames or tags as format 2, which a Proton from before frames refuses
+//! rather than opening its first frame and saving the rest away.
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::blend;
-use crate::canvas::{Blend, Canvas, Layer, LayerInfo, Preset};
+use crate::canvas::{Blend, Canvas, Layer, LayerInfo, Preset, Tag, FRAMES_MOST};
 use crate::tile::{Grid, Tile};
 
 pub const MANIFEST: &str = "canvas.json";
 pub const FLAT: &str = "flat.png";
 /// The version of this layout: what a reader checks before trusting a folder.
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
+/// The version a still picture is written as: readable by every Proton.
+pub const FORMAT_STILL: u32 = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -41,11 +49,16 @@ struct Manifest {
     layers: Vec<Entry>,
     /// Frames of animation; one until a canvas has more.
     frames: u32,
+    /// How long each frame is shown, in milliseconds.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    durations: Vec<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<Tag>,
 }
 
 impl Default for Manifest {
     fn default() -> Manifest {
-        Manifest { format: FORMAT, preset: Preset::Pixel, size: [0, 0], palette: Vec::new(), layers: Vec::new(), frames: 1 }
+        Manifest { format: FORMAT, preset: Preset::Pixel, size: [0, 0], palette: Vec::new(), layers: Vec::new(), frames: 1, durations: Vec::new(), tags: Vec::new() }
     }
 }
 
@@ -60,6 +73,10 @@ struct Entry {
     hidden: bool,
     locked: bool,
     alpha_lock: bool,
+    /// Its file in each frame after the first, in order; empty where it has
+    /// no pixels.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cels: Vec<String>,
 }
 
 /// A layer's file, in the folder.
@@ -67,28 +84,63 @@ pub fn layer_file(id: u32) -> String {
     format!("layers/{id}.png")
 }
 
+/// A layer's file in a frame (from 0).
+pub fn cel_file(id: u32, frame: u32) -> String {
+    match frame {
+        0 => layer_file(id),
+        f => format!("layers/{id}-{}.png", f + 1),
+    }
+}
+
+/// Whether a file in `layers/` is one this format names: `<id>.png` or
+/// `<id>-<n>.png`.
+fn ours(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".png") else { return false };
+    let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+    match stem.split_once('-') {
+        Some((id, n)) => digits(id) && digits(n),
+        None => digits(stem),
+    }
+}
+
 /// Write `canvas` into `dir`, made if it is not there; the files written.
 pub fn save(dir: &Path, canvas: &Canvas) -> Result<Vec<String>, String> {
     std::fs::create_dir_all(dir.join("layers")).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut written = Vec::new();
+    let mut cels: Vec<Vec<String>> = Vec::new();
     for layer in &canvas.layers {
-        let rel = layer_file(layer.info.id);
-        write(&dir.join(&rel), &layer_png(canvas, layer)?)?;
-        written.push(rel);
+        let mut later = Vec::new();
+        for (frame, grid) in layer.cels.iter().enumerate() {
+            // The first frame always, as a still picture's; a later one
+            // only where it has pixels.
+            if frame > 0 && grid.tiles.iter().all(Option::is_none) {
+                later.push(String::new());
+                continue;
+            }
+            let rel = cel_file(layer.info.id, frame as u32);
+            write(&dir.join(&rel), &layer_png(canvas, grid)?)?;
+            if frame > 0 {
+                later.push(rel.clone());
+            }
+            written.push(rel);
+        }
+        cels.push(later);
     }
     if canvas.preset == Preset::Pixel {
         write(&dir.join(FLAT), &flat_png(canvas)?)?;
         written.push(FLAT.to_string());
     }
+    let still = !canvas.animated() && canvas.frames == [crate::canvas::DURATION];
     let manifest = Manifest {
-        format: FORMAT,
+        format: if still { FORMAT_STILL } else { FORMAT },
         preset: canvas.preset,
         size: [canvas.width, canvas.height],
         palette: canvas.palette.iter().map(|c| hex(*c)).collect(),
         layers: canvas
             .layers
             .iter()
-            .map(|l| Entry {
+            .zip(cels)
+            .map(|(l, cels)| Entry {
                 id: l.info.id,
                 name: l.info.name.clone(),
                 file: layer_file(l.info.id),
@@ -97,9 +149,12 @@ pub fn save(dir: &Path, canvas: &Canvas) -> Result<Vec<String>, String> {
                 hidden: l.info.hidden,
                 locked: l.info.locked,
                 alpha_lock: l.info.alpha_lock,
+                cels,
             })
             .collect(),
-        frames: 1,
+        frames: canvas.frames.len() as u32,
+        durations: if still { Vec::new() } else { canvas.frames.clone() },
+        tags: canvas.tags.clone(),
     };
     write(&dir.join(MANIFEST), crate::text::to_text(&manifest)?.as_bytes())?;
     written.push(MANIFEST.to_string());
@@ -107,8 +162,7 @@ pub fn save(dir: &Path, canvas: &Canvas) -> Result<Vec<String>, String> {
     if let Ok(entries) = std::fs::read_dir(dir.join("layers")) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let ours = name.strip_suffix(".png").is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()));
-            if ours && !written.contains(&format!("layers/{name}")) {
+            if ours(&name) && !written.contains(&format!("layers/{name}")) {
                 let _ = std::fs::remove_file(entry.path());
             }
         }
@@ -127,18 +181,39 @@ pub fn load(dir: &Path) -> Result<Canvas, String> {
     let mut canvas = Canvas::new(width, height, manifest.preset)?;
     canvas.layers.clear();
     canvas.palette = manifest.palette.iter().map(|c| unhex(c)).collect::<Result<_, _>>()?;
-    for entry in manifest.layers {
-        if canvas.layer(entry.id).is_some() || entry.id == 0 {
-            return Err(format!("{MANIFEST} names layer {} twice", entry.id));
+    let frames = manifest.frames.max(1);
+    if frames > FRAMES_MOST {
+        return Err(format!("{MANIFEST} has {frames} frames; a canvas has at most {FRAMES_MOST}"));
+    }
+    canvas.frames = match manifest.durations.len() as u32 {
+        0 => vec![crate::canvas::DURATION; frames as usize],
+        n if n == frames => manifest.durations.iter().map(|d| (*d).clamp(1, crate::canvas::DURATION_MOST)).collect(),
+        n => return Err(format!("{MANIFEST} has {frames} frames and {n} durations")),
+    };
+    canvas.tags = manifest.tags.into_iter().filter(|t| t.from <= t.to && t.to < frames).collect();
+    let read = |file: &str| -> Result<Grid, String> {
+        if !file.starts_with("layers/") || file.contains("..") {
+            return Err(format!("{file} is not a layer of this canvas"));
         }
-        if !entry.file.starts_with("layers/") || entry.file.contains("..") {
-            return Err(format!("{} is not a layer of this canvas", entry.file));
-        }
-        let bytes = std::fs::read(dir.join(&entry.file)).map_err(|e| format!("{}: {e}", entry.file))?;
+        let bytes = std::fs::read(dir.join(file)).map_err(|e| format!("{file}: {e}"))?;
         let (w, h, rgba) = decode_png(&bytes)?;
         if (w, h) != (width, height) {
-            return Err(format!("{} is {w}×{h}, not the canvas's {width}×{height}", entry.file));
+            return Err(format!("{file} is {w}×{h}, not the canvas's {width}×{height}"));
         }
+        Ok(grid_of(width, height, &rgba))
+    };
+    for entry in manifest.layers {
+        if canvas.layer(entry.id).is_some() || entry.id == 0 || entry.id >= crate::canvas::FRAME_STEP {
+            return Err(format!("{MANIFEST} names layer {} twice, or a layer it cannot be", entry.id));
+        }
+        if entry.cels.len() as u32 > frames - 1 {
+            return Err(format!("{MANIFEST} gives {} more frames of {} than the canvas has", entry.cels.len(), entry.name));
+        }
+        let mut cels = vec![read(&entry.file)?];
+        for file in &entry.cels {
+            cels.push(if file.is_empty() { Grid::new(width, height) } else { read(file)? });
+        }
+        cels.resize(frames as usize, Grid::new(width, height));
         let info = LayerInfo {
             id: entry.id,
             name: entry.name,
@@ -148,7 +223,7 @@ pub fn load(dir: &Path) -> Result<Canvas, String> {
             locked: entry.locked,
             alpha_lock: entry.alpha_lock,
         };
-        canvas.layers.push(Layer { info, grid: grid_of(width, height, &rgba) });
+        canvas.layers.push(Layer { info, cels });
     }
     if canvas.layers.is_empty() {
         return Err(format!("{MANIFEST} has no layers"));
@@ -175,13 +250,13 @@ pub fn grid_of(width: u32, height: u32, rgba: &[u8]) -> Grid {
     grid
 }
 
-/// A layer as one image, the canvas's size.
-pub fn pixels(canvas: &Canvas, layer: &Layer) -> Vec<u8> {
+/// A layer's pixels in one frame as one image, the canvas's size.
+pub fn pixels(canvas: &Canvas, grid: &Grid) -> Vec<u8> {
     let (w, h) = (canvas.width, canvas.height);
     let mut out = vec![0u8; (w * h * 4) as usize];
-    for index in 0..layer.grid.cols * layer.grid.rows {
-        let Some(tile) = layer.grid.tile(index) else { continue };
-        let (x, y, tw, th) = layer.grid.bounds(index);
+    for index in 0..grid.cols * grid.rows {
+        let Some(tile) = grid.tile(index) else { continue };
+        let (x, y, tw, th) = grid.bounds(index);
         for row in 0..th {
             let to = (((y + row) * w + x) * 4) as usize;
             let from = Tile::at(0, row);
@@ -191,9 +266,10 @@ pub fn pixels(canvas: &Canvas, layer: &Layer) -> Vec<u8> {
     out
 }
 
-/// A layer's file: indexed when a pixel layer has 256 colours or fewer.
-pub fn layer_png(canvas: &Canvas, layer: &Layer) -> Result<Vec<u8>, String> {
-    let rgba = pixels(canvas, layer);
+/// A layer's file in one frame: indexed when a pixel layer has 256 colours
+/// or fewer.
+pub fn layer_png(canvas: &Canvas, grid: &Grid) -> Result<Vec<u8>, String> {
+    let rgba = pixels(canvas, grid);
     if canvas.preset == Preset::Pixel {
         if let Some(png) = encode_indexed(canvas.width, canvas.height, &rgba)? {
             return Ok(png);
@@ -202,9 +278,9 @@ pub fn layer_png(canvas: &Canvas, layer: &Layer) -> Result<Vec<u8>, String> {
     encode_png(canvas.width, canvas.height, &rgba)
 }
 
-/// Every layer laid together.
+/// Every layer laid together, in the first frame.
 pub fn flat_png(canvas: &Canvas) -> Result<Vec<u8>, String> {
-    let rgba = blend::flatten(canvas);
+    let rgba = blend::flatten(canvas, 0);
     if canvas.preset == Preset::Pixel {
         if let Some(png) = encode_indexed(canvas.width, canvas.height, &rgba)? {
             return Ok(png);

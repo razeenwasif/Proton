@@ -585,10 +585,12 @@ impl Agent {
                 name: "canvas_info".into(),
                 description: "The canvas open in Canvas mode: its name and size, whether it is pixel art or a \
                               painting, its palette by swatch number, its layers top first with their ids, where \
-                              each has pixels, its opacity, blend and locks, and what is selected — or, with none \
-                              open, the project's canvases. With `pixels`, a part of it as a grid of letters, one \
-                              a colour with a legend, '.' for clear: how to see pixel art before changing it. x \
-                              runs right and y down from 0 at the top left. Read-only; call it first."
+                              each has pixels, its opacity, blend and locks, what is selected, and for an \
+                              animation its frames (counted from 1), how long each shows, its tags and the frame \
+                              the person is on — or, with none open, the project's canvases. With `pixels`, a \
+                              part of it as a grid of letters, one a colour with a legend, '.' for clear: how to \
+                              see pixel art before changing it. x runs right and y down from 0 at the top left. \
+                              Read-only; call it first."
                     .into(),
                 input_schema: json!({
                     "type": "object",
@@ -598,6 +600,7 @@ impl Agent {
                             "description": "Show pixels: everything laid together, or one layer.",
                             "properties": {
                                 "layer": { "type": "integer", "description": "A layer's id. Omit for everything laid together." },
+                                "frame": { "type": "integer", "description": "Which frame, from 1. Defaults to the one the person is on." },
                                 "rect": { "type": "array", "items": { "type": "integer" }, "description": "[x, y, width, height]; omit for the whole canvas. At most 128 × 128 for pixel art, 64 × 64 for a painting." }
                             }
                         }
@@ -630,7 +633,8 @@ impl Agent {
                               true for solid; {\"fill\": [x, y], \"color\": c} a bucket; {\"erase\": [x, y, w, \
                               h]}; or one of the engine's ops as the window sends them. A colour c is \"#rrggbb\", \
                               \"#rrggbbaa\", [r, g, b, a] or a palette swatch's number. On the top layer unless a \
-                              layer (id or name) or a new_layer is given. Every mark keeps to what is selected. \
+                              layer (id or name) or a new_layer is given, in the frame the person is on unless \
+                              frame is given. Every mark keeps to what is selected. \
                               The marks are one step of the person's undo, applied together or not at all, on \
                               their screen at once and held until the person saves."
                     .into(),
@@ -639,7 +643,8 @@ impl Agent {
                     "properties": {
                         "marks": { "type": "array", "items": { "type": "object" } },
                         "layer": { "description": "A layer's id or name. Defaults to the top layer." },
-                        "new_layer": { "type": "string", "description": "Make a layer of this name on top, and draw on it." }
+                        "new_layer": { "type": "string", "description": "Make a layer of this name on top, and draw on it." },
+                        "frame": { "type": "integer", "description": "The frame to draw in, from 1. Defaults to the one the person is on." }
                     },
                     "required": ["marks"]
                 }),
@@ -657,9 +662,9 @@ impl Agent {
                               {\"kind\": \"shadow\", \"dx\": n, \"dy\": n, \"color\": c, \"blur\": n}, {\"kind\": \
                               \"pixelate\", \"size\": n} or {\"kind\": \"quantize\", \"colors\": n, \"palette\": \
                               bool, \"dither\": 0|2|4|8, \"keep\": bool}. ramp: {\"base\": c, \"steps\": n}. A \
-                              generator or filter works on the top layer unless layer or new_layer says, and \
-                              keeps to what is selected. One step of the person's undo, on their screen at once \
-                              and held until the person saves."
+                              generator or filter works on the top layer unless layer or new_layer says, in the \
+                              frame the person is on unless frame says, and keeps to what is selected. One step \
+                              of the person's undo, on their screen at once and held until the person saves."
                     .into(),
                 input_schema: json!({
                     "type": "object",
@@ -668,22 +673,75 @@ impl Agent {
                         "filter": { "type": "object" },
                         "ramp": { "type": "object" },
                         "layer": { "description": "A layer's id or name. Defaults to the top layer." },
-                        "new_layer": { "type": "string", "description": "Make a layer of this name on top, and work on it." }
+                        "new_layer": { "type": "string", "description": "Make a layer of this name on top, and work on it." },
+                        "frame": { "type": "integer", "description": "The frame to work in, from 1. Defaults to the one the person is on." }
+                    }
+                }),
+            },
+            Tool {
+                name: "canvas_frames".into(),
+                description: "Animate the open canvas: frames added (empty, or copies of a frame — every layer's \
+                              pixels in it — to change a little for the next pose), taken out or moved, how long \
+                              each shows, and tags naming runs of frames (\"idle\", \"run\") that play as one \
+                              animation and become a game's animations. Frames are counted from 1. Whatever is \
+                              given is done in this order — add, remove, move, duration, tags — as one step of \
+                              the person's undo, held until they save. Draw in a frame with canvas_draw's frame."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "add": {
+                            "type": "object",
+                            "description": "New frames: copies of `copy` put straight after it, or empty at the end — or at `at`.",
+                            "properties": {
+                                "copy": { "type": "integer", "description": "The frame to copy." },
+                                "at": { "type": "integer", "description": "Where the first new frame goes: it becomes this frame." },
+                                "count": { "type": "integer", "description": "How many, 1 to 64. Defaults to 1." }
+                            }
+                        },
+                        "remove": { "type": "integer", "description": "A frame to take out." },
+                        "move": { "type": "object", "properties": { "frame": { "type": "integer" }, "to": { "type": "integer" } } },
+                        "duration": {
+                            "type": "object",
+                            "description": "How long frames show: from to to (all if not said), each ms milliseconds.",
+                            "properties": { "from": { "type": "integer" }, "to": { "type": "integer" }, "ms": { "type": "integer" } },
+                            "required": ["ms"]
+                        },
+                        "tags": {
+                            "type": "array",
+                            "description": "Every tag the canvas is to have, replacing those it has; [] takes them away.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string" },
+                                    "from": { "type": "integer" },
+                                    "to": { "type": "integer" },
+                                    "direction": { "type": "string", "enum": ["forward", "reverse", "pingpong", "pingpong_reverse"] },
+                                    "repeat": { "type": "integer", "description": "Times it plays; 0 or none for as long as it is shown." }
+                                },
+                                "required": ["name", "from", "to"]
+                            }
+                        }
                     }
                 }),
             },
             Tool {
                 name: "canvas_export".into(),
-                description: "Write the open canvas out: a PNG beside its folder (flattened, each pixel scale × \
-                              scale), or a layered PSD; or, with game, into that game's art folder — layered, \
-                              each layer a plane at the depth its name gives in square brackets, or flat — and \
-                              into its room when that game is open in Game mode. Files are written at once."
+                description: "Write the open canvas out: a frame of it as a PNG beside its folder (flattened, \
+                              each pixel scale × scale) or a layered PSD, or every frame on a sprite sheet with a \
+                              JSON of where each frame is, how long it shows and the tags (Aseprite's layout, \
+                              which game engines read); or, with game, into that game's art folder — layered, \
+                              each layer a plane at the depth its name gives in square brackets, or flat, and an \
+                              animation's sheet beside it — and into its room when that game is open in Game \
+                              mode. Files are written at once."
                     .into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
-                        "format": { "type": "string", "enum": ["png", "psd"] },
-                        "scale": { "type": "integer", "description": "PNG: each pixel this many pixels square, 1 to 16." },
+                        "format": { "type": "string", "enum": ["png", "psd", "sheet"] },
+                        "scale": { "type": "integer", "description": "PNG and sheet: each pixel this many pixels square, 1 to 16." },
+                        "frame": { "type": "integer", "description": "PNG and PSD: which frame, from 1. Defaults to the one the person is on." },
+                        "columns": { "type": "integer", "description": "Sheet: frames to a row. Omit for as near a square as they make." },
                         "game": { "type": "string", "description": "The game's folder in the project, as canvas_info or Game mode names it; \"\" for a project that is itself a game." },
                         "layers": { "type": "boolean", "description": "With game: as layers (the default), or flat." }
                     }
@@ -1262,7 +1320,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 27);
+        assert_eq!(tools.len(), 28);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the

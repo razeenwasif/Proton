@@ -6,6 +6,10 @@
 //! it was. What one changed is reported as the tiles it touched, by layer —
 //! what the window must be told of, and what is hashed to check that the
 //! window, which painted the same op on its own copy, made the same pixels.
+//!
+//! An op that draws names the cel it draws on, as `layer`: a layer's own id
+//! is its cel in the first frame, and its cel in another frame is the id
+//! [`cel_id`] makes — so a still picture's ops are what they always were.
 
 use std::sync::Arc;
 
@@ -13,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::brush::{self, Brush, Dabs};
-use crate::canvas::{Blend, Canvas, Layer, SELECTION};
+use crate::canvas::{cel_id, cel_of, Blend, Canvas, Cel, Layer, Tag, DURATION, DURATION_MOST, FRAMES_MOST, SELECTION, TAGS_MOST};
 use crate::fill;
 use crate::filter::{self, Filter};
 use crate::gen::{self, Generator};
@@ -158,11 +162,13 @@ pub enum Op {
         cut: bool,
     },
     /// What was copied, as a new layer where it was, over `above` (on top if
-    /// not said).
+    /// not said), in frame `frame` (from 0) and clear in the others.
     Paste {
         #[serde(default)]
         #[ts(optional)]
         above: Option<u32>,
+        #[serde(default)]
+        frame: u32,
     },
     /// What is selected of a layer — all of it, with nothing selected —
     /// moved, scaled or turned: each pixel of `bounds` (left, top, width,
@@ -215,6 +221,29 @@ pub enum Op {
         #[ts(optional)]
         swatch: Option<u32>,
     },
+    /// A new frame at place `at` (after the last if not said): clear, or
+    /// with every layer's pixels in frame `copy` and shown as long. A copy
+    /// of a tag's last frame put straight after it joins the tag.
+    AddFrame {
+        #[serde(default)]
+        #[ts(optional)]
+        at: Option<u32>,
+        #[serde(default)]
+        #[ts(optional)]
+        copy: Option<u32>,
+    },
+    /// A frame taken out, and every layer's pixels in it.
+    RemoveFrame { frame: u32 },
+    /// A frame moved to place `to`, its pixels with it. Tags keep their
+    /// places.
+    MoveFrame { frame: u32, to: u32 },
+    /// How long frames `from` to `to` are each shown, in milliseconds.
+    SetDuration { from: u32, to: u32, duration: u32 },
+    /// The canvas's tags, all of them.
+    SetTags { tags: Vec<Tag> },
+    /// One cel's pixels made another's — the same layer in another frame,
+    /// or another layer.
+    CopyCel { from: u32, to: u32 },
 }
 
 /// What an op changed.
@@ -351,7 +380,7 @@ impl Canvas {
                 }
             }
             Op::FillRect { layer, rect, color } => {
-                let target = self.layer(*layer).ok_or_else(|| format!("there is no layer {layer}"))?;
+                let target = self.cel(*layer).ok_or_else(|| missing(*layer))?;
                 if target.info.locked {
                     return Err(format!("{} is locked", target.info.name));
                 }
@@ -359,7 +388,7 @@ impl Canvas {
                 let [x, y, w, h] = rect.map(|v| v as i64);
                 let tiles = target.grid.covering(x, y, w, h);
                 let sel = self.selecting().then(|| self.selection.clone());
-                let target = self.layer_mut(*layer).expect("found above");
+                let target = self.cel_mut(*layer).expect("found above");
                 for index in tiles {
                     let before = target.grid.tile(index).cloned();
                     let (tx, ty, tw, th) = target.grid.bounds(index);
@@ -407,14 +436,14 @@ impl Canvas {
                 }
                 let mut dabs = Dabs::new(brush.clone(), self.width, self.height);
                 dabs.add(points);
-                let target = self.layer(*layer).ok_or_else(|| format!("there is no layer {layer}"))?;
+                let target = self.cel(*layer).ok_or_else(|| missing(*layer))?;
                 if target.info.locked {
                     return Err(format!("{} is locked", target.info.name));
                 }
                 let lock = target.info.alpha_lock;
                 let (width, height) = (self.width, self.height);
                 let sel = self.selecting().then(|| self.selection.clone());
-                let target = self.layer_mut(*layer).expect("found above");
+                let target = self.cel_mut(*layer).expect("found above");
                 for index in dabs.mask.tiles() {
                     let before = target.grid.tile(index).cloned();
                     let mut after = brush::paint(&dabs.mask, index, before.as_ref(), None, *erase, *color, lock, width, height);
@@ -430,8 +459,8 @@ impl Canvas {
                 }
             }
             Op::Fill { layer, x, y, color, tolerance, contiguous, diagonal } => {
-                let target = self.layer(*layer).ok_or_else(|| format!("there is no layer {layer}"))?;
-                let mask = fill::flood(&target.grid, *x, *y, *tolerance, *contiguous, *diagonal);
+                let target = self.cel(*layer).ok_or_else(|| missing(*layer))?;
+                let mask = fill::flood(target.grid, *x, *y, *tolerance, *contiguous, *diagonal);
                 self.lay(*layer, &mask, Tool::Pencil, *color, &mut patch, &mut applied)?;
             }
             Op::Shape { layer, shape, from, to, filled, tip, color } => {
@@ -472,19 +501,22 @@ impl Canvas {
             }
             Op::Clear { layer } => {
                 let target = self.unlocked(*layer)?;
-                let left = select::split(&target.grid, &self.selection, self.selecting()).1;
+                let left = select::split(target.grid, &self.selection, self.selecting()).1;
                 self.set_grid(*layer, left, &mut patch, &mut applied);
             }
             Op::Copy { layer, cut } => {
-                let target = if *cut { self.unlocked(*layer)? } else { self.layer(*layer).ok_or_else(|| format!("there is no layer {layer}"))? };
-                let (lifted, left) = select::split(&target.grid, &self.selection, self.selecting());
+                let target = if *cut { self.unlocked(*layer)? } else { self.cel(*layer).ok_or_else(|| missing(*layer))? };
+                let (lifted, left) = select::split(target.grid, &self.selection, self.selecting());
                 self.clip = Some(lifted);
                 if *cut {
                     self.set_grid(*layer, left, &mut patch, &mut applied);
                 }
             }
-            Op::Paste { above } => {
+            Op::Paste { above, frame } => {
                 let clip = self.clip.clone().ok_or("nothing is copied")?;
+                if *frame as usize >= self.frames.len() {
+                    return Err(format!("there is no frame {}", frame + 1));
+                }
                 let at = match above {
                     Some(id) => Some(self.place(*id).ok_or_else(|| format!("there is no layer {id}"))? + 1),
                     None => None,
@@ -492,7 +524,7 @@ impl Canvas {
                 patch.layers = Some((self.layers.clone(), self.next_id));
                 let id = self.push_layer("Pasted".into());
                 let mut layer = self.layers.pop().expect("just pushed");
-                layer.grid = clip;
+                layer.cels[*frame as usize] = clip;
                 applied.touched = present(&layer);
                 let at = at.map_or(self.layers.len(), |a| (a as usize).min(self.layers.len()));
                 self.layers.insert(at, layer);
@@ -506,7 +538,7 @@ impl Canvas {
                 }
                 let target = self.unlocked(*layer)?;
                 let selecting = self.selecting();
-                let (lifted, left) = select::split(&target.grid, &self.selection, selecting);
+                let (lifted, left) = select::split(target.grid, &self.selection, selecting);
                 let [x, y, w, h] = bounds.map(|v| v as i64);
                 let edges = [x, y, x.saturating_add(w), y.saturating_add(h)];
                 let moved = sample::transform(&lifted, self.width, self.height, edges, inverse, *smooth);
@@ -519,12 +551,12 @@ impl Canvas {
             Op::Generate { layer, generator } => {
                 let target = self.unlocked(*layer)?;
                 let made = gen::make(self, generator)?;
-                let laid = sample::over(&target.grid, &made);
+                let laid = sample::over(target.grid, &made);
                 self.held(*layer, laid, &mut patch, &mut applied);
             }
             Op::Filter { layer, filter } => {
                 let target = self.unlocked(*layer)?;
-                let (made, kept) = filter::apply(&target.grid, &self.palette, filter)?;
+                let (made, kept) = filter::apply(target.grid, &self.palette, filter)?;
                 self.held(*layer, made, &mut patch, &mut applied);
                 if let Some(colors) = kept.filter(|c| *c != self.palette) {
                     patch.palette = Some(std::mem::replace(&mut self.palette, colors));
@@ -572,21 +604,22 @@ impl Canvas {
                         return Err(format!("the palette has no swatch {i}"));
                     }
                 }
+                // On one cel, or on every layer not locked in every frame.
                 let ids: Vec<u32> = match layer {
                     Some(id) => {
-                        let target = self.layer(*id).ok_or_else(|| format!("there is no layer {id}"))?;
+                        let target = self.cel(*id).ok_or_else(|| missing(*id))?;
                         if target.info.locked {
                             return Err(format!("{} is locked", target.info.name));
                         }
                         vec![*id]
                     }
-                    None => self.layers.iter().filter(|l| !l.info.locked).map(|l| l.info.id).collect(),
+                    None => self.layers.iter().filter(|l| !l.info.locked).flat_map(|l| (0..l.cels.len() as u32).map(move |f| cel_id(l.info.id, f))).collect(),
                 };
                 // A swatch recoloured is the palette's colour everywhere; a
                 // colour replaced on its own keeps to the selection.
                 let sel = (swatch.is_none() && self.selecting()).then(|| self.selection.clone());
                 for id in ids {
-                    let target = self.layer_mut(id).expect("found above");
+                    let target = self.cel_mut(id).expect("found above");
                     for index in 0..target.grid.cols * target.grid.rows {
                         let Some(before) = target.grid.tile(index).cloned() else { continue };
                         if !before.px.chunks_exact(4).any(|p| p == from) {
@@ -620,6 +653,131 @@ impl Canvas {
                     }
                 }
             }
+            Op::AddFrame { at, copy } => {
+                let n = self.frames.len() as u32;
+                if n >= FRAMES_MOST {
+                    return Err(format!("a canvas has at most {FRAMES_MOST} frames"));
+                }
+                if let Some(c) = copy.filter(|&c| c >= n) {
+                    return Err(format!("there is no frame {}", c + 1));
+                }
+                let at = at.unwrap_or(n).min(n);
+                let before = self.restack(&mut patch);
+                let (w, h) = (self.width, self.height);
+                for layer in &mut self.layers {
+                    let cel = match copy {
+                        Some(c) => layer.cels[*c as usize].clone(),
+                        None => Grid::new(w, h),
+                    };
+                    layer.cels.insert(at as usize, cel);
+                }
+                self.frames.insert(at as usize, copy.map_or(DURATION, |c| self.frames[c as usize]));
+                for tag in &mut self.tags {
+                    let joins = copy.is_some_and(|c| c + 1 == at && tag.from <= c && tag.to == c);
+                    if tag.from >= at {
+                        tag.from += 1;
+                    }
+                    if tag.to >= at || joins {
+                        tag.to += 1;
+                    }
+                }
+                applied.touched = differ(&before, &self.layers);
+                applied.meta = true;
+                applied.changed = true;
+            }
+            Op::RemoveFrame { frame } => {
+                let n = self.frames.len() as u32;
+                if *frame >= n {
+                    return Err(format!("there is no frame {}", frame + 1));
+                }
+                if n == 1 {
+                    return Err("a canvas keeps at least one frame".into());
+                }
+                let before = self.restack(&mut patch);
+                for layer in &mut self.layers {
+                    layer.cels.remove(*frame as usize);
+                }
+                self.frames.remove(*frame as usize);
+                let f = *frame;
+                self.tags.retain(|t| !(t.from == f && t.to == f));
+                for tag in &mut self.tags {
+                    if tag.from > f {
+                        tag.from -= 1;
+                    }
+                    if tag.to >= f {
+                        tag.to -= 1;
+                    }
+                }
+                applied.touched = differ(&before, &self.layers);
+                applied.meta = true;
+                applied.changed = true;
+            }
+            Op::MoveFrame { frame, to } => {
+                let n = self.frames.len() as u32;
+                if *frame >= n {
+                    return Err(format!("there is no frame {}", frame + 1));
+                }
+                let to = (*to).min(n - 1);
+                if to != *frame {
+                    let before = self.restack(&mut patch);
+                    for layer in &mut self.layers {
+                        let cel = layer.cels.remove(*frame as usize);
+                        layer.cels.insert(to as usize, cel);
+                    }
+                    let d = self.frames.remove(*frame as usize);
+                    self.frames.insert(to as usize, d);
+                    applied.touched = differ(&before, &self.layers);
+                    applied.meta = true;
+                    applied.changed = true;
+                }
+            }
+            Op::SetDuration { from, to, duration } => {
+                let n = self.frames.len() as u32;
+                if from > to || *to >= n {
+                    return Err(format!("frames {} to {} are not frames of this canvas", from + 1, to + 1));
+                }
+                if !(1..=DURATION_MOST).contains(duration) {
+                    return Err(format!("a frame is shown for 1 to {DURATION_MOST} milliseconds"));
+                }
+                if self.frames[*from as usize..=*to as usize].iter().any(|d| d != duration) {
+                    patch.frames = Some((self.frames.clone(), self.tags.clone()));
+                    for d in &mut self.frames[*from as usize..=*to as usize] {
+                        *d = *duration;
+                    }
+                    applied.meta = true;
+                    applied.changed = true;
+                }
+            }
+            Op::SetTags { tags } => {
+                let n = self.frames.len() as u32;
+                if tags.len() as u32 > TAGS_MOST {
+                    return Err(format!("a canvas has at most {TAGS_MOST} tags"));
+                }
+                let mut kept = Vec::with_capacity(tags.len());
+                for t in tags {
+                    let name = t.name.trim();
+                    if name.is_empty() {
+                        return Err("a tag needs a name".into());
+                    }
+                    if t.from > t.to || t.to >= n {
+                        return Err(format!("{name}: frames {} to {} are not frames of this canvas", t.from + 1, t.to + 1));
+                    }
+                    if t.repeat > 0xffff {
+                        return Err(format!("{name}: a tag repeats at most 65535 times"));
+                    }
+                    kept.push(Tag { name: name.to_string(), ..t.clone() });
+                }
+                if kept != self.tags {
+                    patch.frames = Some((self.frames.clone(), std::mem::replace(&mut self.tags, kept)));
+                    applied.meta = true;
+                    applied.changed = true;
+                }
+            }
+            Op::CopyCel { from, to } => {
+                let source = self.cel(*from).ok_or_else(|| missing(*from))?.grid.clone();
+                self.unlocked(*to)?;
+                self.set_grid(*to, source, &mut patch, &mut applied);
+            }
         }
         if applied.changed {
             self.advance();
@@ -630,14 +788,14 @@ impl Canvas {
     /// What `mask` covers on a layer, painted by `tool` in `color`: each tile
     /// that changed remembered for undo and told as touched.
     fn lay(&mut self, layer: u32, mask: &Mask, tool: Tool, color: [u8; 4], patch: &mut Patch, applied: &mut Applied) -> Result<(), String> {
-        let target = self.layer(layer).ok_or_else(|| format!("there is no layer {layer}"))?;
+        let target = self.cel(layer).ok_or_else(|| missing(layer))?;
         if target.info.locked {
             return Err(format!("{} is locked", target.info.name));
         }
         let lock = target.info.alpha_lock;
         let (width, height) = (self.width, self.height);
         let sel = self.selecting().then(|| self.selection.clone());
-        let target = self.layer_mut(layer).expect("found above");
+        let target = self.cel_mut(layer).expect("found above");
         for index in mask.tiles() {
             let before = target.grid.tile(index).cloned();
             let mut after = stroke::paint(mask, index, before.as_ref(), tool, color, lock, width, height);
@@ -696,6 +854,10 @@ impl Canvas {
             inverse.palette = Some(std::mem::replace(&mut self.palette, palette));
             applied.meta = true;
         }
+        if let Some((frames, tags)) = patch.frames {
+            inverse.frames = Some((std::mem::replace(&mut self.frames, frames), std::mem::replace(&mut self.tags, tags)));
+            applied.meta = true;
+        }
         for (layer, index, tile) in patch.tiles {
             if let Some(grid) = self.grid_mut(layer) {
                 let now = grid.tile(index).cloned();
@@ -710,11 +872,12 @@ impl Canvas {
 
 impl Canvas {
     /// Layers made from pictures brought in — a name, opacity, whether
-    /// hidden, how they blend, and their pixels, bottom to top — put over
-    /// layer `above` (on top if none): what changed, and how to take it
-    /// back. Not an op: pixels from outside are the core's to bring in, and
-    /// the window is sent them.
-    pub fn bring_in(&mut self, layers: Vec<(String, u8, bool, Blend, Grid)>, above: Option<u32>) -> Result<(Applied, Patch), String> {
+    /// hidden, how they blend, and their pixels frame by frame from the
+    /// first (clear in frames past them), bottom to top — put over layer
+    /// `above` (on top if none): what changed, and how to take it back. Not
+    /// an op: pixels from outside are the core's to bring in, and the window
+    /// is sent them.
+    pub fn bring_in(&mut self, layers: Vec<(String, u8, bool, Blend, Vec<Grid>)>, above: Option<u32>) -> Result<(Applied, Patch), String> {
         if layers.is_empty() {
             return Err("there is nothing to bring in".into());
         }
@@ -724,16 +887,23 @@ impl Canvas {
             Some(id) => (self.place(id).ok_or_else(|| format!("there is no layer {id}"))? + 1) as usize,
             None => self.layers.len(),
         };
-        for (n, (name, opacity, hidden, blend, grid)) in layers.into_iter().enumerate() {
-            if grid.width != self.width || grid.height != self.height {
+        for (n, (name, opacity, hidden, blend, cels)) in layers.into_iter().enumerate() {
+            if cels.iter().any(|g| g.width != self.width || g.height != self.height) {
+                self.restore(patch);
                 return Err("a layer brought in is not the canvas's size".into());
+            }
+            if cels.len() > self.frames.len() {
+                self.restore(patch);
+                return Err(format!("a layer brought in has {} frames, more than the canvas's {}", cels.len(), self.frames.len()));
             }
             let id = self.push_layer(if name.trim().is_empty() { format!("Layer {}", self.next_id) } else { name });
             let mut layer = self.layers.pop().expect("just pushed");
             layer.info.opacity = opacity;
             layer.info.hidden = hidden;
             layer.info.blend = blend;
-            layer.grid = grid;
+            for (frame, grid) in cels.into_iter().enumerate() {
+                layer.cels[frame] = grid;
+            }
             applied.touched.extend(present(&layer));
             applied.made = Some(id);
             self.layers.insert((start + n).min(self.layers.len()), layer);
@@ -743,9 +913,9 @@ impl Canvas {
         Ok((applied, patch))
     }
 
-    /// A layer that may be drawn on.
-    fn unlocked(&self, id: u32) -> Result<&Layer, String> {
-        let target = self.layer(id).ok_or_else(|| format!("there is no layer {id}"))?;
+    /// A cel that may be drawn on.
+    fn unlocked(&self, id: u32) -> Result<Cel<'_>, String> {
+        let target = self.cel(id).ok_or_else(|| missing(id))?;
         if target.info.locked {
             return Err(format!("{} is locked", target.info.name));
         }
@@ -755,8 +925,8 @@ impl Canvas {
     /// A layer's pixels replaced by `grid`: each tile that differs
     /// remembered and told.
     fn set_grid(&mut self, id: u32, grid: Grid, patch: &mut Patch, applied: &mut Applied) {
-        let Some(target) = self.layer_mut(id) else { return };
-        for index in tiles_between(&target.grid, &grid) {
+        let Some(target) = self.cel_mut(id) else { return };
+        for index in tiles_between(target.grid, &grid) {
             patch.tiles.push((id, index, target.grid.tile(index).cloned()));
             target.grid.put(index, grid.tile(index).cloned());
             applied.touched.push((id, index));
@@ -767,7 +937,7 @@ impl Canvas {
     /// A layer's pixels replaced by `grid` where the selection lets them be,
     /// and as they were where it does not.
     fn held(&mut self, id: u32, grid: Grid, patch: &mut Patch, applied: &mut Applied) {
-        let grid = match (self.selecting(), self.layer(id)) {
+        let grid = match (self.selecting(), self.cel(id)) {
             (true, Some(target)) => {
                 let mut kept = grid;
                 for index in 0..kept.cols * kept.rows {
@@ -805,7 +975,9 @@ impl Canvas {
         patch.selection = Some(self.selection.clone());
         patch.size = Some((self.width, self.height));
         for layer in &mut self.layers {
-            layer.grid = remake(&layer.grid);
+            for cel in &mut layer.cels {
+                *cel = remake(cel);
+            }
         }
         self.selection = select::compact(remake(&self.selection));
         (self.width, self.height) = (width, height);
@@ -814,6 +986,25 @@ impl Canvas {
         applied.meta = true;
         applied.changed = true;
         Ok(())
+    }
+}
+
+impl Canvas {
+    /// The layers and frames remembered before frames are added, taken out
+    /// or moved; the layers as they were, to tell what changed.
+    fn restack(&mut self, patch: &mut Patch) -> Vec<Layer> {
+        let before = self.layers.clone();
+        patch.layers = Some((before.clone(), self.next_id));
+        patch.frames = Some((self.frames.clone(), self.tags.clone()));
+        before
+    }
+}
+
+/// Why an op names nothing on the canvas: a layer, or a layer in a frame.
+fn missing(id: u32) -> String {
+    match cel_of(id) {
+        (layer, 0) => format!("there is no layer {layer}"),
+        (layer, frame) => format!("there is no layer {layer} in frame {}", frame + 1),
     }
 }
 
@@ -829,17 +1020,19 @@ pub fn tiles_between(a: &Grid, b: &Grid) -> Vec<u32> {
         .collect()
 }
 
-/// The tiles a layer has, as (layer, index).
+/// The tiles a layer has in any frame, as (cel, index).
 pub fn present(layer: &Layer) -> Vec<(u32, u32)> {
-    let id = layer.info.id;
-    (0..layer.grid.cols * layer.grid.rows).filter(|&i| layer.grid.tile(i).is_some()).map(|i| (id, i)).collect()
+    layer.present()
 }
 
-/// The tiles that differ between two stacks of layers, by layer id: a layer
-/// in only one of them differs wherever it has pixels, and one that moved, or
-/// is drawn differently, wherever it has them.
+/// The tiles that differ between two stacks of layers, by cel: a layer in
+/// only one of them differs wherever it has pixels, and one that moved, or
+/// is drawn differently, wherever it has them. Frames are compared place by
+/// place, so a frame added, taken out or moved differs wherever what is in
+/// a place now is not what was.
 pub fn differ(a: &[Layer], b: &[Layer]) -> Vec<(u32, u32)> {
     let mut out = Vec::new();
+    let mut seen: Vec<u32> = Vec::new();
     let same = |x: Option<&Arc<Tile>>, y: Option<&Arc<Tile>>| match (x, y) {
         (None, None) => true,
         (Some(x), Some(y)) => Arc::ptr_eq(x, y),
@@ -847,21 +1040,28 @@ pub fn differ(a: &[Layer], b: &[Layer]) -> Vec<(u32, u32)> {
     };
     for layer in a.iter().chain(b.iter()) {
         let id = layer.info.id;
-        if out.iter().any(|(l, _)| *l == id) {
+        if seen.contains(&id) {
             continue;
         }
+        seen.push(id);
         let (x, y) = (a.iter().find(|l| l.info.id == id), b.iter().find(|l| l.info.id == id));
         match (x, y) {
             (Some(x), Some(y)) => {
                 let place = |s: &[Layer]| s.iter().position(|l| l.info.id == id);
                 let shows = x.info.hidden != y.info.hidden || x.info.opacity != y.info.opacity || x.info.blend != y.info.blend || place(a) != place(b);
-                for i in 0..x.grid.cols * x.grid.rows {
-                    if shows && (x.grid.tile(i).is_some() || y.grid.tile(i).is_some()) || !same(x.grid.tile(i), y.grid.tile(i)) {
-                        out.push((id, i));
+                for frame in 0..x.cels.len().max(y.cels.len()) {
+                    let (gx, gy) = (x.cels.get(frame), y.cels.get(frame));
+                    let n = gx.map_or(0, |g| g.cols * g.rows).max(gy.map_or(0, |g| g.cols * g.rows));
+                    let cel = cel_id(id, frame as u32);
+                    for i in 0..n {
+                        let (tx, ty) = (gx.and_then(|g| g.tile(i)), gy.and_then(|g| g.tile(i)));
+                        if shows && (tx.is_some() || ty.is_some()) || !same(tx, ty) {
+                            out.push((cel, i));
+                        }
                     }
                 }
             }
-            (Some(only), None) | (None, Some(only)) => out.extend(present(only)),
+            (Some(only), None) | (None, Some(only)) => out.extend(only.present()),
             (None, None) => {}
         }
     }

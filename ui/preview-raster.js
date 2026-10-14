@@ -17,10 +17,10 @@ const PALETTE16 = ["1b1b23", "3d3d4f", "6e6e86", "a8a8bf", "f2f2f7", "5a1f2e", "
 
 /** @param {(event: any) => void} _deliver */
 export function createRasterPreview(_deliver) {
-  /** @type {{path: string, name: string, preset: string, size: [number, number]}[]} */
+  /** @type {{path: string, name: string, preset: string, size: [number, number], frames?: number}[]} */
   const canvases = [];
   /** @type {{path: string, name: string, preset: string, width: number, height: number, core: Runtime,
-   *          ops: {op: any, label: string}[], undone: {op: any, label: string}[], saved: number, generation: number, version: number, lastSeq: number} | null} */
+   *          ops: {op: any, label: string}[], undone: {op: any, label: string}[], saved: number, generation: number, version: number, lastSeq: number, frame?: number} | null} */
   let open = null;
   let generations = 0;
 
@@ -42,7 +42,7 @@ export function createRasterPreview(_deliver) {
       type: "rasterCanvas",
       canvas: {
         path: open.path, name: open.name, preset: open.preset, width: info.width, height: info.height,
-        palette: info.palette, layers: info.layers, tiles: info.tiles, generation: open.generation, version: open.version,
+        palette: info.palette, layers: info.layers, frames: info.frames, tags: info.tags, frame: open.frame ?? 0, tiles: info.tiles, generation: open.generation, version: open.version,
         dirty: open.ops.length !== open.saved, canUndo: open.ops.length > 0, canRedo: open.undone.length > 0,
         undo: open.ops[open.ops.length - 1]?.label ?? null, redo: open.undone[open.undone.length - 1]?.label ?? null, saving: false,
       },
@@ -85,7 +85,7 @@ export function createRasterPreview(_deliver) {
           const path = `${command.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "canvas"}.canvas`;
           if (canvases.some((c) => c.path === path)) return [{ type: "notice", text: `${path} is already there`, level: "warn" }];
           generations += 1;
-          canvases.push({ path, name: path.replace(/\.canvas$/, ""), preset: command.preset, size: [command.width, command.height] });
+          canvases.push({ path, name: path.replace(/\.canvas$/, ""), preset: command.preset, size: [command.width, command.height], frames: 1 });
           open = { path, name: path.replace(/\.canvas$/, ""), preset: command.preset, width: command.width, height: command.height, core: await made(command.preset, command.width, command.height, []), ops: [], undone: [], saved: 0, generation: generations, version: 0, lastSeq: 0 };
           return [home(), canvasEvent()];
         }
@@ -106,7 +106,7 @@ export function createRasterPreview(_deliver) {
           // What the core tells of with the canvas: its layers, palette and size.
           const shape = () => {
             const info = /** @type {NonNullable<typeof open>} */ (open).core.info();
-            return JSON.stringify([info.layers, info.palette, info.width, info.height]);
+            return JSON.stringify([info.layers, info.palette, info.width, info.height, info.frames, info.tags]);
           };
           const before = shape();
           const done = open.core.apply(command.op);
@@ -121,6 +121,9 @@ export function createRasterPreview(_deliver) {
           const meta = shape() !== before;
           return [answer({ hash: done.hash }), ...(meta ? [canvasEvent()] : [])];
         }
+        case "rasterShow":
+          if (open) open.frame = command.frame;
+          return [];
         case "rasterUndo":
           return step(true);
         case "rasterRedo":

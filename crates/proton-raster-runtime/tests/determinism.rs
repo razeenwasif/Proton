@@ -5,7 +5,8 @@
 
 use proton_raster::filter::Filter;
 use proton_raster::gen::{noise, sprite, Generator, Mix};
-use proton_raster::{Area, Blend, Brush, Mode, Op, ShapeKind, Tip, Tool};
+use proton_raster::blend::Onion;
+use proton_raster::{cel_id, Area, Blend, Brush, Direction, Mode, Op, ShapeKind, Tag, Tip, Tool};
 use serde_json::{json, Value};
 
 fn ops() -> Vec<Op> {
@@ -49,7 +50,7 @@ fn ops() -> Vec<Op> {
     out.push(Op::FillRect { layer: 2, rect: [0, 0, 100, 70], color: [200, 30, 160, 230] });
     out.push(Op::Brush { layer: 1, erase: false, brush: brush(18, 50, 200, 255, 50), color: [10, 250, 40, 255], points: zigzag(2, 30, 30, 3) });
     out.push(Op::Copy { layer: 1, cut: true });
-    out.push(Op::Paste { above: Some(1) });
+    out.push(Op::Paste { above: Some(1), frame: 0 });
     out.push(sel(Area::Wand { layer: 2, x: 70, y: 40, tolerance: 20, contiguous: true, diagonal: true }, Mode::Intersect, 0, false));
     let one = 65536i64;
     out.push(Op::Transform { layer: 2, bounds: [0, 0, 100, 70], inverse: [58000, 21000, -9 * one, -21000, 58000, 15 * one], smooth: true });
@@ -67,6 +68,19 @@ fn ops() -> Vec<Op> {
     out.push(Op::Filter { layer: 4, filter: Filter::Shadow { dx: 3, dy: -2, color: [10, 0, 30, 140], blur: 4 } });
     out.push(Op::Filter { layer: 6, filter: Filter::Pixelate { size: 3 } });
     out.push(Op::Filter { layer: 1, filter: Filter::Quantize { colors: 6, palette: false, dither: 8, keep: true } });
+    // Frames: copied and added, drawn on, timed, tagged, moved, a cel copied
+    // to another, one taken out.
+    out.push(Op::AddFrame { at: None, copy: Some(0) });
+    out.push(Op::AddFrame { at: Some(1), copy: None });
+    out.push(Op::FillRect { layer: cel_id(1, 1), rect: [20, 10, 30, 30], color: [250, 100, 0, 255] });
+    out.push(Op::Brush { layer: cel_id(2, 2), erase: false, brush: brush(12, 60, 200, 255, 40), color: [20, 220, 240, 255], points: zigzag(8, 50, 20, 4) });
+    out.push(Op::Stroke { layer: cel_id(4, 1), tool: Tool::Pencil, tip: tip(2, false, [None, None]), color: [255, 255, 255, 255], pixel_perfect: false, points: zigzag(30, 20, 15, 3) });
+    out.push(Op::SetDuration { from: 1, to: 2, duration: 70 });
+    out.push(Op::SetTags { tags: vec![Tag { name: "run".into(), from: 0, to: 2, direction: Direction::PingPong, repeat: 2 }] });
+    out.push(Op::MoveFrame { frame: 2, to: 0 });
+    out.push(Op::CopyCel { from: cel_id(1, 2), to: cel_id(4, 1) });
+    out.push(Op::AddFrame { at: None, copy: None });
+    out.push(Op::RemoveFrame { frame: 3 });
     out
 }
 
@@ -79,11 +93,19 @@ fn zigzag(x: i32, y: i32, n: i32, dx: i32) -> Vec<i32> {
 /// The layers of a canvas laid together as the window's composite is: every
 /// tile, premultiplied.
 fn composite_of(c: &proton_raster::Canvas) -> Vec<u8> {
+    composite_at(c, 0, &[])
+}
+
+/// A frame of a canvas laid together as the window shows it, its onion
+/// skin under each layer.
+fn composite_at(c: &proton_raster::Canvas, frame: u32, onion: &[Onion]) -> Vec<u8> {
     let grid = proton_raster::Grid::new(c.width, c.height);
     let mut out = vec![0u8; (c.width * c.height * 4) as usize];
+    let t = proton_raster::TILE;
     for index in 0..grid.cols * grid.rows {
         let (x, y, w, h) = grid.bounds(index);
-        let px = proton_raster::blend::premultiplied(&proton_raster::blend::tile(c, index));
+        let acc = proton_raster::blend::fold(c, frame, index, [0, 0, t, t], 0, c.layers.len() as u32, vec![0; (t * t * 4) as usize], onion);
+        let px = proton_raster::blend::premultiplied(&acc);
         for row in 0..h {
             let from = (row * proton_raster::TILE * 4) as usize;
             let to = (((y + row) * c.width + x) * 4) as usize;
@@ -120,9 +142,24 @@ fn the_window_and_the_core_make_the_same_canvas() {
     for op in ops() {
         core.apply(&op).unwrap();
     }
-    let flat = hash(&proton_raster::blend::flatten(&core));
-    let fixture = json!({"open": opening, "ops": ops(), "hashes": hashes, "composite": composite, "flat": flat,
-        "pick": [[15, 20, proton_raster_runtime::pick(15, 20)], [70, 40, proton_raster_runtime::pick(70, 40)]]});
+    let flat = hash(&proton_raster::blend::flatten(&core, 0));
+    assert_eq!(composite, hash(&composite_of(&core)), "the window's composite is not the core's");
+    let pick = [[15, 20, proton_raster_runtime::pick(15, 20)], [70, 40, proton_raster_runtime::pick(70, 40)]];
+    // Another frame shown, then with its onion skin; and a frame's thumbnail.
+    proton_raster_runtime::show_frame(1);
+    proton_raster_runtime::dirty();
+    let frame1 = hash(&proton_raster_runtime::composite());
+    assert_eq!(frame1, hash(&composite_at(&core, 1, &[])));
+    proton_raster_runtime::onion(1, 1, 128, true);
+    proton_raster_runtime::dirty();
+    let onion = hash(&proton_raster_runtime::composite());
+    let skins = [Onion { frame: 0, opacity: 128, tint: Some([255, 40, 40]) }, Onion { frame: 2, opacity: 128, tint: Some([40, 90, 255]) }];
+    assert_eq!(onion, hash(&composite_at(&core, 1, &skins)));
+    assert_ne!(onion, frame1);
+    let thumb = hash(&proton_raster_runtime::thumb(2, 20, 14));
+    assert_eq!(core.frames, [70, 100, 70]);
+    let fixture = json!({"open": opening, "ops": ops(), "hashes": hashes, "composite": composite, "flat": flat, "pick": pick,
+        "frame1": frame1, "onion": onion, "thumb": thumb});
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/ui/fixtures/raster-ops.json");
     if std::env::var_os("PROTON_BLESS").is_some() {
         std::fs::write(&path, serde_json::to_string_pretty(&fixture).unwrap() + "\n").unwrap();

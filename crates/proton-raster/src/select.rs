@@ -231,8 +231,8 @@ pub fn shape(canvas: &Canvas, area: &Area, smooth: bool) -> Result<Vec<u8>, Stri
             });
         }
         Area::Wand { layer, x, y, tolerance, contiguous, diagonal } => {
-            let target = canvas.layer(*layer).ok_or_else(|| format!("there is no layer {layer}"))?;
-            let mask = fill::flood(&target.grid, *x, *y, *tolerance, *contiguous, *diagonal);
+            let target = canvas.grid(*layer).filter(|_| *layer != crate::canvas::SELECTION).ok_or_else(|| format!("there is no layer {layer}"))?;
+            let mask = fill::flood(target, *x, *y, *tolerance, *contiguous, *diagonal);
             for index in mask.tiles() {
                 let (x0, y0) = ((index % mask.cols()) * TILE, (index / mask.cols()) * TILE);
                 for ty in 0..TILE.min(h.saturating_sub(y0)) {

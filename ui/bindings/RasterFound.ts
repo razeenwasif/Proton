@@ -8,4 +8,8 @@ export type RasterFound = {
 /**
  * Its folder, as the project names it.
  */
-path: string, name: string, preset: RasterPreset, size: [number, number], };
+path: string, name: string, preset: RasterPreset, size: [number, number], 
+/**
+ * How many frames it has: one for a still picture.
+ */
+frames: number, };

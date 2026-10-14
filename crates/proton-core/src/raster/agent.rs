@@ -1,6 +1,7 @@
-//! The agent's canvas tools: the open canvas read — its layers, palette and
-//! selection, and its pixels as a grid of letters, so pixel art can be seen —
-//! a canvas made, drawn on, made from seeds, and written out.
+//! The agent's canvas tools: the open canvas read — its layers, palette,
+//! frames and selection, and its pixels as a grid of letters, so pixel art
+//! can be seen — a canvas made, drawn on, made from seeds, animated, and
+//! written out. Frames are counted from 1 here, as the person sees them.
 //!
 //! An edit is the person's kind of edit: a call's marks are one step of
 //! their undo, held until they save, on their screen at once — the window is
@@ -12,14 +13,14 @@ use std::path::Path;
 
 use proton_raster::filter::Filter;
 use proton_raster::gen::{color, Generator};
-use proton_raster::{blend, select, Blend, Canvas, Op, Preset, ShapeKind, Tip, Tool, SELECTION};
+use proton_raster::{blend, cel_id, cel_of, select, Blend, Canvas, Direction, Op, Preset, ShapeKind, Tag, Tip, Tool, SELECTION};
 use serde_json::{json, Value};
 
 use super::{by_layer, find, Raster, RasterFormat};
 use crate::bus::{Command, Event, NoticeLevel};
 
 /// The tools answered here, by name.
-pub const TOOLS: [&str; 5] = ["canvas_info", "canvas_new", "canvas_draw", "canvas_generate", "canvas_export"];
+pub const TOOLS: [&str; 6] = ["canvas_info", "canvas_new", "canvas_draw", "canvas_generate", "canvas_frames", "canvas_export"];
 
 /// The symbols a grid of pixels is written in, a colour each.
 const SYMBOLS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -84,9 +85,19 @@ fn any_seed() -> u32 {
     proton_raster::gen::rng::hash(nanos as u32, (nanos >> 32) as i64, 1)
 }
 
-/// Pixels of `canvas` within `area` — of one layer, or everything laid
-/// together — as rows of symbols and a legend of what each is.
-fn grid(canvas: &Canvas, layer: Option<u32>, area: [u32; 4]) -> Result<String, String> {
+/// A frame as the agent names it — from 1 — as the engine counts it, from 0.
+fn frame_of(value: &Value, frames: u32, what: &str) -> Result<u32, String> {
+    let n = value.as_u64().ok_or_else(|| format!("{what} is a frame's number, from 1"))?;
+    if n == 0 || n > frames as u64 {
+        return Err(format!("{what}: there is no frame {n}; the canvas has {frames} (counted from 1)"));
+    }
+    Ok(n as u32 - 1)
+}
+
+/// Pixels of `canvas` in `frame` within `area` — of one layer, or
+/// everything laid together — as rows of symbols and a legend of what each
+/// is.
+fn grid(canvas: &Canvas, layer: Option<u32>, frame: u32, area: [u32; 4]) -> Result<String, String> {
     let most = if canvas.preset == Preset::Pixel { GRID_PIXEL } else { GRID_PAINT };
     let [x0, y0, w, h] = area;
     if w > most || h > most {
@@ -95,11 +106,11 @@ fn grid(canvas: &Canvas, layer: Option<u32>, area: [u32; 4]) -> Result<String, S
     let flat;
     let px: Box<dyn Fn(u32, u32) -> [u8; 4]> = match layer {
         Some(id) => {
-            let g = canvas.grid(id).ok_or_else(|| format!("there is no layer {id}"))?;
+            let g = canvas.grid(cel_id(id, frame)).ok_or_else(|| format!("there is no layer {id}"))?;
             Box::new(move |x, y| g.pixel(x, y))
         }
         None => {
-            flat = blend::flatten(canvas);
+            flat = blend::flatten(canvas, frame);
             let width = canvas.width;
             Box::new(move |x, y| {
                 let at = ((y * width + x) * 4) as usize;
@@ -133,7 +144,8 @@ fn grid(canvas: &Canvas, layer: Option<u32>, area: [u32; 4]) -> Result<String, S
         rows.push(row);
     }
     let used: Vec<String> = legend.iter().enumerate().filter(|(i, _)| rows.iter().any(|r| r.contains(SYMBOLS[*i] as char))).map(|(i, c)| format!("{}={}", SYMBOLS[i] as char, hex(*c))).collect();
-    let mut out = format!("Pixels x {x0}–{} by y {y0}–{} ({}), '.' clear; {}:\n", x0 + w - 1, y0 + h - 1, layer.map_or("everything laid together".to_string(), |id| format!("layer {id}")), used.join(" "));
+    let in_frame = if canvas.frames.len() > 1 { format!(" in frame {}", frame + 1) } else { String::new() };
+    let mut out = format!("Pixels x {x0}–{} by y {y0}–{} ({}{in_frame}), '.' clear; {}:\n", x0 + w - 1, y0 + h - 1, layer.map_or("everything laid together".to_string(), |id| format!("layer {id}")), used.join(" "));
     out.push_str(&rows.join("\n"));
     Ok(out)
 }
@@ -158,7 +170,11 @@ impl Raster {
             if canvases.is_empty() {
                 out.push_str(" There is none in the project; canvas_new makes one.");
             } else {
-                let _ = write!(out, " The project's canvases: {}. The person opens one from Canvas's home page (⌃=), or canvas_new makes another.", canvases.iter().map(|c| format!("{} ({:?} {}×{})", c.path, c.preset, c.size[0], c.size[1]).to_lowercase()).collect::<Vec<_>>().join(", "));
+                let _ = write!(
+                    out,
+                    " The project's canvases: {}. The person opens one from Canvas's home page (⌃=), or canvas_new makes another.",
+                    canvases.iter().map(|c| format!("{} ({:?} {}×{}{})", c.path, c.preset, c.size[0], c.size[1], if c.frames > 1 { format!(", {} frames", c.frames) } else { String::new() }).to_lowercase()).collect::<Vec<_>>().join(", ")
+                );
             }
             if !images.is_empty() {
                 let _ = write!(out, " Pictures it could bring in: {}.", images.join(", "));
@@ -178,6 +194,16 @@ impl Raster {
         );
         if let Some(label) = undo {
             let _ = write!(out, " ⌘Z would undo: {label}.");
+        }
+        let frames = c.frames.len();
+        if frames > 1 {
+            let times = if c.frames.iter().all(|d| *d == c.frames[0]) { format!("each shown {} ms", c.frames[0]) } else { format!("shown {} ms", c.frames.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")) };
+            let _ = write!(out, "\nAn animation of {frames} frames, {times}; the person is on frame {}, which is what canvas_draw and canvas_generate change unless given `frame`.", open.frame + 1);
+            if !c.tags.is_empty() {
+                let _ = write!(out, " Tags: {}.", c.tags.iter().map(|t| format!("\"{}\" frames {}–{} {}", t.name, t.from + 1, t.to + 1, proton_raster::port::direction_name(t.direction))).collect::<Vec<_>>().join(", "));
+            }
+        } else {
+            out.push_str("\nOne frame: a still picture; canvas_frames adds more to animate it.");
         }
         if c.palette.is_empty() {
             out.push_str("\nNo palette.");
@@ -203,7 +229,12 @@ impl Raster {
             if i.alpha_lock {
                 flags.push("draws only where it has pixels".into());
             }
-            let pixels = select::bounds(&layer.grid).map_or("empty".to_string(), |b| format!("pixels within [{}, {}, {}, {}]", b[0], b[1], b[2], b[3]));
+            let here = &layer.cels[open.frame.min(frames as u32 - 1) as usize];
+            let mut pixels = select::bounds(here).map_or("empty".to_string(), |b| format!("pixels within [{}, {}, {}, {}]", b[0], b[1], b[2], b[3]));
+            if frames > 1 {
+                let with: Vec<String> = layer.cels.iter().enumerate().filter(|(_, g)| g.tiles.iter().any(Option::is_some)).map(|(f, _)| (f + 1).to_string()).collect();
+                let _ = write!(pixels, " in frame {} (it has pixels in frames {})", open.frame + 1, if with.is_empty() { "none".into() } else { with.join(", ") });
+            }
             let _ = write!(out, "\n- layer {} \"{}\": {}{}", i.id, i.name, pixels, if flags.is_empty() { String::new() } else { format!("; {}", flags.join(", ")) });
         }
         match c.selecting().then(|| select::bounds(&c.selection)).flatten() {
@@ -221,7 +252,7 @@ impl Raster {
         if let Some(open) = &self.open {
             let c = &open.canvas;
             if c.preset == Preset::Pixel && c.width <= 64 && c.height <= 64 {
-                if let Ok(g) = grid(c, None, [0, 0, c.width, c.height]) {
+                if let Ok(g) = grid(c, None, open.frame, [0, 0, c.width, c.height]) {
                     out.push('\n');
                     out.push_str(&g);
                 }
@@ -245,14 +276,19 @@ impl Raster {
         match name {
             "canvas_draw" => self.tool_draw(input),
             "canvas_generate" => self.tool_generate(input),
+            "canvas_frames" => self.tool_frames(input),
             "canvas_export" => {
                 let format = match input.get("format").and_then(Value::as_str) {
                     Some("png") | None => RasterFormat::Png,
                     Some("psd") => RasterFormat::Psd,
-                    Some(other) => return Err(format!("canvas_export: {other:?} is not a format: png or psd")),
+                    Some("sheet") => RasterFormat::Sheet,
+                    Some(other) => return Err(format!("canvas_export: {other:?} is not a format: png, psd or sheet")),
                 };
                 let scale = input.get("scale").and_then(Value::as_u64).unwrap_or(1) as u32;
-                let events = self.export(format, scale);
+                let frames = self.open.as_ref().map_or(1, |o| o.canvas.frames.len() as u32);
+                let frame = input.get("frame").map(|f| frame_of(f, frames, "canvas_export: `frame`")).transpose()?;
+                let columns = input.get("columns").and_then(Value::as_u64).unwrap_or(0).min(1000) as u32;
+                let events = self.export(format, scale, frame, columns);
                 let said = events.iter().find_map(|e| match e {
                     Event::Notice { text, level } => Some((text.clone(), *level)),
                     _ => None,
@@ -274,6 +310,10 @@ impl Raster {
         if let (Some(ask), Some(open)) = (input.get("pixels"), &self.open) {
             let c = &open.canvas;
             let layer = ask.get("layer").and_then(Value::as_u64).map(|n| n as u32);
+            let frame = match ask.get("frame") {
+                Some(f) => frame_of(f, c.frames.len() as u32, "canvas_info: `pixels.frame`")?,
+                None => open.frame,
+            };
             let area = match ask.get("rect") {
                 Some(r) => {
                     let [x, y, w, h] = rect(r)?;
@@ -286,7 +326,7 @@ impl Raster {
                 return Err("that rect is off the canvas".into());
             }
             out.push('\n');
-            out.push_str(&grid(c, layer.filter(|&l| l != SELECTION), area)?);
+            out.push_str(&grid(c, layer.filter(|&l| l != SELECTION), frame, area)?);
         }
         Ok(out)
     }
@@ -322,9 +362,20 @@ impl Raster {
         ))
     }
 
-    /// The layer a call draws on: the one named (by id or name), a new one,
-    /// or the top one. The ops to make a new one go first.
+    /// The layer a call draws on — the one named (by id or name), a new one,
+    /// or the top one — in the frame named, or the one the person is on: as
+    /// a cel's id. The ops to make a new layer go first.
     fn target(&self, input: &Value, ops: &mut Vec<Op>) -> Result<u32, String> {
+        let open = self.open.as_ref().ok_or("no canvas is open")?;
+        let frame = match input.get("frame") {
+            Some(f) => frame_of(f, open.canvas.frames.len() as u32, "`frame`")?,
+            None => open.frame,
+        };
+        Ok(cel_id(self.layer_named(input, ops)?, frame))
+    }
+
+    /// The layer a call names, a new one, or the top one.
+    fn layer_named(&self, input: &Value, ops: &mut Vec<Op>) -> Result<u32, String> {
         let c = &self.open.as_ref().ok_or("no canvas is open")?.canvas;
         if let Some(name) = input.get("new_layer").and_then(Value::as_str) {
             ops.push(Op::AddLayer { name: name.to_string(), at: None });
@@ -413,14 +464,13 @@ impl Raster {
             }
         }
         let applied = self.edit_all("the agent's drawing", &ops).map_err(|why| format!("canvas_draw drew nothing: {why}"))?;
-        let name = self.open.as_ref().and_then(|o| o.canvas.layer(applied.made.unwrap_or(layer)).map(|l| l.info.name.clone())).unwrap_or_default();
         if !applied.changed {
             return Ok("Drawn, but nothing changed: those pixels were already so.".into());
         }
         Ok(format!(
-            "Drew {count} mark{} on layer {} \"{name}\". It is one step of the person's undo, on their screen now and held until they save — say what you drew rather than that a file was written.",
+            "Drew {count} mark{} on {}. It is one step of the person's undo, on their screen now and held until they save — say what you drew rather than that a file was written.",
             if count == 1 { "" } else { "s" },
-            applied.made.unwrap_or(layer)
+            self.where_drawn(layer)
         ))
     }
 
@@ -481,12 +531,105 @@ impl Raster {
         if ops.is_empty() {
             return Err("canvas_generate: give a generator, a filter or a ramp".into());
         }
-        let applied = self.edit_all("the agent's making", &ops).map_err(|why| format!("canvas_generate made nothing: {why}"))?;
-        let on = layer.map(|l| applied.made.unwrap_or(l)).and_then(|l| self.open.as_ref().and_then(|o| o.canvas.layer(l)).map(|x| format!(" on layer {} \"{}\"", x.info.id, x.info.name))).unwrap_or_default();
+        self.edit_all("the agent's making", &ops).map_err(|why| format!("canvas_generate made nothing: {why}"))?;
+        let on = layer.map(|l| format!(" on {}", self.where_drawn(l))).unwrap_or_default();
         Ok(format!(
             "Made {}{on}. It is one step of the person's undo, on their screen now and held until they save; the same seed makes the same pixels again.",
             said.join(", then ")
         ))
+    }
+}
+
+impl Raster {
+    /// A cel as the agent is told of it: its layer, by id and name, and
+    /// its frame when there are more than one.
+    fn where_drawn(&self, cel: u32) -> String {
+        let (id, frame) = cel_of(cel);
+        let Some(c) = self.open.as_ref().map(|o| &o.canvas) else { return format!("layer {id}") };
+        let name = c.layer(id).map(|l| l.info.name.clone()).unwrap_or_default();
+        if c.frames.len() > 1 {
+            format!("layer {id} \"{name}\" in frame {}", frame + 1)
+        } else {
+            format!("layer {id} \"{name}\"")
+        }
+    }
+
+    /// Frames added, taken out, moved and timed, and tags set: one step.
+    fn tool_frames(&mut self, input: &Value) -> Result<String, String> {
+        let c = &self.open.as_ref().ok_or("no canvas is open")?.canvas;
+        let mut frames = c.frames.len() as u32;
+        let mut ops = Vec::new();
+        let mut said = Vec::new();
+        if let Some(add) = input.get("add") {
+            let count = add.get("count").and_then(Value::as_u64).unwrap_or(1).clamp(1, 64) as u32;
+            let copy = match add.get("copy") {
+                Some(f) => Some(frame_of(f, frames, "canvas_frames: `add.copy`")?),
+                None => None,
+            };
+            // After the frame copied, or at the end.
+            let at = match add.get("at") {
+                Some(Value::Number(n)) => (n.as_u64().unwrap_or(1).max(1) as u32 - 1).min(frames),
+                _ => copy.map_or(frames, |c| c + 1),
+            };
+            for i in 0..count {
+                ops.push(Op::AddFrame { at: Some(at + i), copy });
+            }
+            frames += count;
+            said.push(format!(
+                "added {} frame{} at {}{}",
+                count,
+                if count == 1 { "" } else { "s" },
+                at + 1,
+                copy.map_or(String::new(), |c| format!(", copies of frame {}", c + 1))
+            ));
+        }
+        if let Some(f) = input.get("remove") {
+            let frame = frame_of(f, frames, "canvas_frames: `remove`")?;
+            ops.push(Op::RemoveFrame { frame });
+            frames -= 1;
+            said.push(format!("took out frame {}", frame + 1));
+        }
+        if let Some(m) = input.get("move") {
+            let frame = frame_of(m.get("frame").unwrap_or(&Value::Null), frames, "canvas_frames: `move.frame`")?;
+            let to = frame_of(m.get("to").unwrap_or(&Value::Null), frames, "canvas_frames: `move.to`")?;
+            ops.push(Op::MoveFrame { frame, to });
+            said.push(format!("moved frame {} to {}", frame + 1, to + 1));
+        }
+        if let Some(d) = input.get("duration") {
+            let ms = d.get("ms").and_then(Value::as_u64).ok_or("canvas_frames: `duration.ms` is how long each frame shows, in milliseconds")? as u32;
+            let from = d.get("from").map(|f| frame_of(f, frames, "canvas_frames: `duration.from`")).transpose()?.unwrap_or(0);
+            let to = d.get("to").map(|f| frame_of(f, frames, "canvas_frames: `duration.to`")).transpose()?.unwrap_or(frames - 1);
+            ops.push(Op::SetDuration { from, to, duration: ms });
+            said.push(format!("frames {}–{} each shown {ms} ms", from + 1, to + 1));
+        }
+        if let Some(list) = input.get("tags").and_then(Value::as_array) {
+            let mut tags = Vec::new();
+            for t in list {
+                let name = t.get("name").and_then(Value::as_str).ok_or("canvas_frames: a tag needs a `name`")?;
+                let from = frame_of(t.get("from").unwrap_or(&Value::Null), frames, "canvas_frames: a tag's `from`")?;
+                let to = frame_of(t.get("to").unwrap_or(&Value::Null), frames, "canvas_frames: a tag's `to`")?;
+                let direction = match t.get("direction").and_then(Value::as_str) {
+                    None | Some("forward") => Direction::Forward,
+                    Some("reverse") => Direction::Reverse,
+                    Some("pingpong") => Direction::PingPong,
+                    Some("pingpong_reverse") => Direction::PingPongReverse,
+                    Some(other) => return Err(format!("canvas_frames: {other:?} is not a direction: forward, reverse, pingpong or pingpong_reverse")),
+                };
+                let repeat = t.get("repeat").and_then(Value::as_u64).unwrap_or(0).min(65535) as u32;
+                tags.push(Tag { name: name.to_string(), from, to, direction, repeat });
+            }
+            said.push(if tags.is_empty() { "took away the tags".to_string() } else { format!("tagged {}", tags.iter().map(|t| format!("\"{}\" {}–{}", t.name, t.from + 1, t.to + 1)).collect::<Vec<_>>().join(", ")) });
+            ops.push(Op::SetTags { tags });
+        }
+        if ops.is_empty() {
+            return Err("canvas_frames: give add, remove, move, duration or tags".into());
+        }
+        let applied = self.edit_all("the agent's frames", &ops).map_err(|why| format!("canvas_frames changed nothing: {why}"))?;
+        if !applied.changed {
+            return Ok("Nothing changed: the frames were already so.".into());
+        }
+        let now = self.open.as_ref().map_or(0, |o| o.canvas.frames.len());
+        Ok(format!("{}. The canvas has {now} frame{} now; one step of the person's undo, held until they save.", capital(&said.join("; ")), if now == 1 { "" } else { "s" }))
     }
 }
 

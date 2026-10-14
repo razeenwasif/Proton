@@ -11,9 +11,11 @@
 //! ```text
 //! rr_abi() → 1
 //! rr_alloc(len) → ptr, rr_free(ptr, len)
-//! rr_open(ptr, len) → 0 | -1       a canvas: size, preset, palette, layers, generation (JSON)
-//! rr_meta(ptr, len) → 0 | -1       its layers or palette changed (JSON)
-//! rr_put(layer, ptr, len) → 0 | -1 a read_raster payload: tiles of one layer
+//! rr_open(ptr, len) → 0 | -1       a canvas: size, preset, palette, layers,
+//!                                  frames, tags, generation (JSON)
+//! rr_meta(ptr, len) → 0 | -1       its layers, palette, frames or tags changed (JSON)
+//! rr_put(layer, ptr, len) → 0 | -1 a read_raster payload: tiles of one cel —
+//!                                  a layer's own id is its first frame's
 //! rr_apply(ptr, len) → 0 | -1      an op, made here first (JSON); its hash kept
 //! rr_hash_lo(), rr_hash_hi()       the hash of the tiles the last op touched
 //! rr_dirty() → ptr                 what was laid together again since the last
@@ -23,8 +25,17 @@
 //! rr_dirty_some(budget) → ptr      as rr_dirty, laying no more than `budget`
 //!                                  pixel-layers; the rest waits for the next
 //! rr_pending() → u32               how many parts wait
-//! rr_composite() → ptr             the layers laid together: premultiplied RGBA,
-//!                                  row by row, the canvas's size
+//! rr_composite() → ptr             the layers laid together in the frame shown:
+//!                                  premultiplied RGBA, row by row, the canvas's size
+//! rr_frame(frame)                  the frame shown (from 0), all laid together again
+//! rr_shown() → u32                 the frame shown
+//! rr_onion(before, after, opacity, tint)  other frames shown faintly under each
+//!                                  layer: how many before and after, how
+//!                                  strongly the nearest (0–255, fading with
+//!                                  distance), and whether tinted — those
+//!                                  before red, those after blue
+//! rr_thumb(frame, w, h) → ptr      a frame laid together, `w` × `h`, straight
+//!                                  RGBA: the timeline's picture of it
 //! rr_pick(x, y) → u32              a pixel of that, straight RGBA, little-endian
 //! rr_layer_pixel(layer, x, y) → u32 a pixel of one layer
 //! rr_stroke_begin(ptr, len) → 0|-1 a pencil or eraser begun (JSON: layer, tool,
@@ -65,9 +76,10 @@ use std::sync::Arc;
 
 use std::collections::BTreeMap;
 
+use proton_raster::blend::Onion;
 use proton_raster::history::Patch;
 use proton_raster::tile::{Tile, TILE, TILE_BYTES};
-use proton_raster::{blend, brush, select, stroke, Brush, Canvas, Dabs, Grid, Layer, LayerInfo, Op, Preset, Stroke, Tip, Tool, SELECTION};
+use proton_raster::{blend, brush, cel_of, select, stroke, Brush, Canvas, Dabs, Grid, Layer, LayerInfo, Op, Preset, Stroke, Tag, Tip, Tool, SELECTION};
 use serde::Deserialize;
 
 pub const ABI: u32 = 1;
@@ -89,6 +101,43 @@ struct Live {
     bases: BTreeMap<u32, Option<Arc<Tile>>>,
     /// The selection the stroke keeps to, if anything is selected.
     sel: Option<Grid>,
+}
+
+impl Held {
+    /// Whether a cel is seen: in the frame shown, or in its onion skin.
+    fn seen(&self, id: u32) -> bool {
+        let frame = cel_of(id).1;
+        frame == self.shown || self.onion.iter().any(|o| o.frame == frame)
+    }
+
+    /// The frames onion skin shows, for the frame shown and the frames
+    /// there are.
+    fn reskin(&mut self) {
+        let frames = self.canvas.as_ref().map_or(1, |c| c.frames.len() as u32);
+        self.shown = self.shown.min(frames - 1);
+        let s = self.skin;
+        let reach = s.before.max(s.after).max(1);
+        let mut onion = Vec::new();
+        for d in (1..=reach).rev() {
+            let opacity = (s.opacity as u32 * (reach + 1 - d) / reach) as u8;
+            if d <= s.before && self.shown >= d {
+                onion.push(Onion { frame: self.shown - d, opacity, tint: s.tint.then_some([255, 40, 40]) });
+            }
+            if d <= s.after && self.shown + d < frames {
+                onion.push(Onion { frame: self.shown + d, opacity, tint: s.tint.then_some([40, 90, 255]) });
+            }
+        }
+        self.onion = onion;
+    }
+
+    /// Everything laid together again: the frame shown, or what is seen
+    /// with it, changed.
+    fn redo_all(&mut self) {
+        self.below = None;
+        if let Some(canvas) = self.canvas.as_ref() {
+            self.dirty = (0..tiles_of(canvas)).map(|i| (i, WHOLE)).collect();
+        }
+    }
 }
 
 impl Live {
@@ -133,10 +182,29 @@ fn mark(dirty: &mut BTreeMap<u32, [u32; 4]>, index: u32, part: [u32; 4]) {
     *r = [r[0].min(part[0]), r[1].min(part[1]), r[2].max(part[2]), r[3].max(part[3])];
 }
 
+/// What onion skin the window asked for.
+#[derive(Default, Clone, Copy)]
+struct Skin {
+    before: u32,
+    after: u32,
+    opacity: u8,
+    tint: bool,
+}
+
+/// The most frames onion skin reaches each way.
+pub const ONION_MOST: u32 = 5;
+
 #[derive(Default)]
 struct Held {
     canvas: Option<Canvas>,
     generation: u32,
+    /// The frame laid together and shown.
+    shown: u32,
+    skin: Skin,
+    /// The frames shown faintly under each layer, the farthest first.
+    onion: Vec<Onion>,
+    /// What `rr_thumb` gave.
+    thumb: Vec<u8>,
     /// Premultiplied RGBA, the canvas's size.
     composite: Vec<u8>,
     /// Tiles to lay together again, and which part of each.
@@ -229,6 +297,11 @@ pub struct Opening {
     #[serde(default)]
     pub palette: Vec<[u8; 4]>,
     pub layers: Vec<LayerInfo>,
+    /// How long each frame is shown; one frame if not said.
+    #[serde(default)]
+    pub frames: Vec<u32>,
+    #[serde(default)]
+    pub tags: Vec<Tag>,
     #[serde(default)]
     pub generation: u32,
 }
@@ -238,7 +311,12 @@ pub fn open(bytes: &[u8]) -> Result<(), String> {
     let o: Opening = serde_json::from_slice(bytes).map_err(|e| format!("not a canvas: {e}"))?;
     let mut canvas = Canvas::new(o.width, o.height, o.preset)?;
     canvas.palette = o.palette;
-    canvas.layers = o.layers.into_iter().map(|info| Layer { info, grid: Grid::new(o.width, o.height) }).collect();
+    if !o.frames.is_empty() {
+        canvas.frames = o.frames;
+    }
+    canvas.tags = o.tags;
+    let frames = canvas.frames.len();
+    canvas.layers = o.layers.into_iter().map(|info| Layer { info, cels: vec![Grid::new(o.width, o.height); frames] }).collect();
     canvas.next_id = canvas.layers.iter().map(|l| l.info.id).max().unwrap_or(0) + 1;
     HELD.with(|h| {
         let mut h = h.borrow_mut();
@@ -250,6 +328,7 @@ pub fn open(bytes: &[u8]) -> Result<(), String> {
         h.preview = None;
         h.selection_version += 1;
         h.canvas = Some(canvas);
+        h.reskin();
     });
     Ok(())
 }
@@ -272,10 +351,15 @@ struct Meta {
     layers: Vec<LayerInfo>,
     #[serde(default)]
     palette: Option<Vec<[u8; 4]>>,
+    #[serde(default)]
+    frames: Option<Vec<u32>>,
+    #[serde(default)]
+    tags: Option<Vec<Tag>>,
 }
 
-/// The layers or palette changed: kept layers keep their pixels, new ones
-/// start clear — the safe half of `rr_meta`.
+/// The layers, palette, frames or tags changed: kept layers keep their
+/// pixels, place by place, and new ones start clear; what has moved since
+/// is fetched — the safe half of `rr_meta`.
 pub fn meta(bytes: &[u8]) -> Result<(), String> {
     let m: Meta = serde_json::from_slice(bytes).map_err(|e| format!("not a layer list: {e}"))?;
     HELD.with(|h| {
@@ -285,23 +369,38 @@ pub fn meta(bytes: &[u8]) -> Result<(), String> {
         let before = canvas.layers.clone();
         // What is under a stroke may now be other layers, or seen otherwise.
         held.below = None;
+        if let Some(frames) = m.frames.filter(|f| !f.is_empty()) {
+            canvas.frames = frames;
+        }
+        if let Some(tags) = m.tags {
+            canvas.tags = tags;
+        }
+        let (width, height, frames) = (canvas.width, canvas.height, canvas.frames.len());
         let mut old = std::mem::take(&mut canvas.layers);
         canvas.layers = m
             .layers
             .into_iter()
-            .map(|info| match old.iter().position(|l| l.info.id == info.id) {
-                Some(i) => Layer { info, grid: old.swap_remove(i).grid },
-                None => Layer { info, grid: Grid::new(canvas.width, canvas.height) },
+            .map(|info| {
+                let mut cels = match old.iter().position(|l| l.info.id == info.id) {
+                    Some(i) => old.swap_remove(i).cels,
+                    None => Vec::new(),
+                };
+                cels.resize(frames, Grid::new(width, height));
+                Layer { info, cels }
             })
             .collect();
         canvas.next_id = canvas.layers.iter().map(|l| l.info.id).max().unwrap_or(0) + 1;
         if let Some(palette) = m.palette {
             canvas.palette = palette;
         }
+        held.reskin();
         // Laid together again only where what is seen changed: a layer
         // renamed changes nothing on the canvas.
-        for (_, index) in proton_raster::op::differ(&before, &canvas.layers) {
-            mark(&mut held.dirty, index, WHOLE);
+        let changed = proton_raster::op::differ(&before, &held.canvas.as_ref().expect("open").layers);
+        for (cel, index) in changed {
+            if held.seen(cel) {
+                mark(&mut held.dirty, index, WHOLE);
+            }
         }
         Ok(())
     })
@@ -335,6 +434,7 @@ pub fn put(layer: u32, bytes: &[u8]) -> Result<(), String> {
             held.selection_version += 1;
         }
         let (width, height) = (canvas.width, canvas.height);
+        let seen = layer != SELECTION && (cel_of(layer).1 == held.shown || held.onion.iter().any(|o| o.frame == cel_of(layer).1));
         let target = canvas.grid_mut(layer).ok_or_else(|| format!("there is no layer {layer}"))?;
         let mut at = 24usize;
         for _ in 0..count {
@@ -354,7 +454,9 @@ pub fn put(layer: u32, bytes: &[u8]) -> Result<(), String> {
                 target.put(index, tile);
                 continue;
             }
-            mark(&mut held.dirty, index, WHOLE);
+            if seen {
+                mark(&mut held.dirty, index, WHOLE);
+            }
             if let Some(below) = held.below.as_mut() {
                 below.tiles.remove(&index);
             }
@@ -391,9 +493,11 @@ pub fn apply(bytes: &[u8]) -> Result<u64, String> {
         let held = &mut *h;
         let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
         let size = (canvas.width, canvas.height);
+        let before_frames = canvas.frames.len();
         let (applied, _) = canvas.apply(&op)?;
         held.below = None;
         held.hash = canvas.hash_touched(&applied.touched);
+        let frames = canvas.frames.len();
         if (canvas.width, canvas.height) != size {
             // Turned, resized or cropped: everything laid together again.
             held.composite = vec![0; (canvas.width * canvas.height * 4) as usize];
@@ -402,10 +506,16 @@ pub fn apply(bytes: &[u8]) -> Result<u64, String> {
             held.preview = None;
             held.selection_version += 1;
         }
+        if matches!(op, Op::AddFrame { .. } | Op::RemoveFrame { .. } | Op::MoveFrame { .. }) || frames != before_frames {
+            // What is in the frame shown, and around it, may all be other
+            // frames' now: laid together again.
+            held.reskin();
+            held.redo_all();
+        }
         for &(layer, index) in &applied.touched {
             if layer == SELECTION {
                 held.selection_version += 1;
-            } else {
+            } else if held.seen(layer) {
                 mark(&mut held.dirty, index, WHOLE);
             }
         }
@@ -451,6 +561,8 @@ pub fn dirty_some(budget: u64) -> Vec<u32> {
         let Some(canvas) = held.canvas.as_ref() else { return vec![0] };
         let grid = Grid::new(canvas.width, canvas.height);
         let layers = canvas.layers.len() as u32;
+        let (frame, onion) = (held.shown, &held.onion);
+        let skins = 1 + onion.len() as u64;
         let mut rects = vec![0u32];
         let mut spent = 0u64;
         while let Some((index, part)) = held.dirty.pop_first() {
@@ -463,11 +575,11 @@ pub fn dirty_some(budget: u64) -> Vec<u32> {
             // What this part costs: its pixels through every layer with any
             // there — or, under a stroke, through the stroke's layer and
             // those over it, and the layers under it once for the whole tile.
-            let present = canvas.layers.iter().filter(|l| !l.info.hidden && l.grid.tile(index).is_some()).count() as u64;
+            let present = canvas.layers.iter().filter(|l| !l.info.hidden && l.cels.get(frame as usize).and_then(|g| g.tile(index)).is_some()).count() as u64;
             let cost = match held.below.as_ref() {
-                Some(b) if b.tiles.contains_key(&index) => (w * h) as u64 * (layers - b.place) as u64,
-                Some(b) => (TILE * TILE) as u64 * b.place as u64 + (w * h) as u64 * (layers - b.place) as u64,
-                None => (w * h) as u64 * present.max(1),
+                Some(b) if b.tiles.contains_key(&index) => (w * h) as u64 * (layers - b.place) as u64 * skins,
+                Some(b) => ((TILE * TILE) as u64 * b.place as u64 + (w * h) as u64 * (layers - b.place) as u64) * skins,
+                None => (w * h) as u64 * present.max(1) * skins,
             };
             if spent > 0 && spent.saturating_add(cost) > budget {
                 held.dirty.insert(index, part);
@@ -477,7 +589,7 @@ pub fn dirty_some(budget: u64) -> Vec<u32> {
             let acc = match held.below.as_mut() {
                 Some(below) => {
                     if !below.tiles.contains_key(&index) {
-                        let under = blend::fold(canvas, index, WHOLE, 0, below.place, vec![0; (TILE * TILE * 4) as usize]);
+                        let under = blend::fold(canvas, frame, index, WHOLE, 0, below.place, vec![0; (TILE * TILE * 4) as usize], onion);
                         below.tiles.insert(index, under.into_iter().map(|v| v as u16).collect());
                         below.order.push_back(index);
                         while below.order.len() > BELOW_MOST {
@@ -492,9 +604,9 @@ pub fn dirty_some(budget: u64) -> Vec<u32> {
                         let from = Tile::at(part[0], part[1] + row);
                         acc.extend(under[from..from + (w * 4) as usize].iter().map(|&v| v as u64));
                     }
-                    blend::fold(canvas, index, part, below.place, layers, acc)
+                    blend::fold(canvas, frame, index, part, below.place, layers, acc, onion)
                 }
-                None => blend::region(canvas, index, part),
+                None => blend::fold(canvas, frame, index, part, 0, layers, vec![0; (w * h * 4) as usize], onion),
             };
             let px = blend::premultiplied(&acc);
             for row in 0..h {
@@ -552,7 +664,7 @@ pub fn pick(x: u32, y: u32) -> u32 {
         }
         let grid = Grid::new(canvas.width, canvas.height);
         let (index, tx, ty) = grid.locate(x, y);
-        let acc = blend::tile(canvas, index);
+        let acc = blend::tile(canvas, h.shown, index);
         let i = Tile::at(tx, ty);
         let px = blend::straight(&acc[i..i + 4]);
         u32::from_le_bytes([px[0], px[1], px[2], px[3]])
@@ -585,14 +697,16 @@ pub fn info() -> serde_json::Value {
     HELD.with(|h| {
         let h = h.borrow();
         let Some(canvas) = h.canvas.as_ref() else { return serde_json::Value::Null };
+        let cels = canvas.layers.iter().flat_map(|l| l.cels.iter().enumerate().map(|(f, g)| (proton_raster::cel_id(l.info.id, f as u32), g)));
         let tiles: Vec<(u32, Vec<u32>)> = canvas
             .selecting()
             .then_some((SELECTION, &canvas.selection))
             .into_iter()
-            .chain(canvas.layers.iter().map(|l| (l.info.id, &l.grid)))
+            .chain(cels)
             .map(|(id, g)| (id, (0..g.cols * g.rows).filter(|&i| g.tile(i).is_some()).collect()))
+            .filter(|(id, t): &(u32, Vec<u32>)| cel_of(*id).1 == 0 || !t.is_empty())
             .collect();
-        serde_json::json!({ "width": canvas.width, "height": canvas.height, "layers": canvas.infos(), "palette": canvas.palette, "tiles": tiles })
+        serde_json::json!({ "width": canvas.width, "height": canvas.height, "layers": canvas.infos(), "palette": canvas.palette, "frames": canvas.frames, "tags": canvas.tags, "shown": h.shown, "tiles": tiles })
     })
 }
 
@@ -645,7 +759,7 @@ pub fn stroke_begin(bytes: &[u8]) -> Result<(), String> {
         let mut h = h.borrow_mut();
         let held = &mut *h;
         let canvas = held.canvas.as_ref().ok_or("no canvas is open")?;
-        let layer = canvas.layer(b.layer).ok_or_else(|| format!("there is no layer {}", b.layer))?;
+        let layer = canvas.cel(b.layer).ok_or_else(|| format!("there is no layer {}", b.layer))?;
         if layer.info.locked {
             return Err(format!("{} is locked", layer.info.name));
         }
@@ -665,7 +779,9 @@ pub fn stroke_begin(bytes: &[u8]) -> Result<(), String> {
         let sel = canvas.selecting().then(|| canvas.selection.clone());
         held.live = Some(Live { layer: b.layer, tool: b.tool, color: b.color, lock: layer.info.alpha_lock, marks, bases: BTreeMap::new(), sel });
         // Worth keeping only with layers under it.
-        held.below = canvas.place(b.layer).filter(|&place| place > 0).map(|place| Below { place, tiles: BTreeMap::new(), order: VecDeque::new() });
+        // Only for a stroke on the frame shown: one elsewhere is not laid together.
+        let here = cel_of(b.layer).1 == held.shown;
+        held.below = canvas.place(cel_of(b.layer).0).filter(|&place| place > 0 && here).map(|place| Below { place, tiles: BTreeMap::new(), order: VecDeque::new() });
         Ok(())
     })
 }
@@ -694,14 +810,17 @@ pub fn stroke_add(points: &[i32]) -> Result<(), String> {
                 d.take_rects().into_iter().map(|(i, r)| (i, Some(r))).collect()
             }
         };
-        let target = canvas.layer_mut(live.layer).ok_or("the stroke's layer has gone")?;
-        let (width, height) = (target.grid.width, target.grid.height);
+        let seen = cel_of(live.layer).1 == held.shown || held.onion.iter().any(|o| o.frame == cel_of(live.layer).1);
+        let target = canvas.grid_mut(live.layer).ok_or("the stroke's layer has gone")?;
+        let (width, height) = (target.width, target.height);
         for (index, part) in changed {
-            let base = live.bases.entry(index).or_insert_with(|| target.grid.tile(index).cloned()).clone();
-            let now = target.grid.tile(index).cloned();
+            let base = live.bases.entry(index).or_insert_with(|| target.tile(index).cloned()).clone();
+            let now = target.tile(index).cloned();
             let painted = live.paint(index, base.as_ref(), part.map(|p| (&now, p)), width, height);
-            target.grid.put(index, painted);
-            mark(&mut held.dirty, index, part.unwrap_or(WHOLE));
+            target.put(index, painted);
+            if seen {
+                mark(&mut held.dirty, index, part.unwrap_or(WHOLE));
+            }
         }
         Ok(())
     })
@@ -734,7 +853,7 @@ pub fn stroke_end() -> Result<Op, String> {
         let live = held.live.take().ok_or("no stroke is being drawn")?;
         held.below = None;
         let canvas = held.canvas.as_ref().ok_or("no canvas is open")?;
-        let grid = &canvas.layer(live.layer).ok_or("the stroke's layer has gone")?.grid;
+        let grid = canvas.grid(live.layer).ok_or("the stroke's layer has gone")?;
         // Touched as the core will count it: a tile whose pixels differ from
         // what was under the stroke.
         let touched: Vec<(u32, u32)> = live.bases.iter().filter(|(&i, base)| grid.tile(i).cloned() != **base).map(|(&i, _)| (live.layer, i)).collect();
@@ -771,9 +890,9 @@ pub fn stroke_cancel() {
         let held = &mut *h;
         let Some(live) = held.live.take() else { return };
         held.below = None;
-        let Some(target) = held.canvas.as_mut().and_then(|c| c.layer_mut(live.layer)) else { return };
+        let Some(target) = held.canvas.as_mut().and_then(|c| c.grid_mut(live.layer)) else { return };
         for (index, base) in live.bases {
-            target.grid.put(index, base);
+            target.put(index, base);
             mark(&mut held.dirty, index, WHOLE);
         }
     })
@@ -798,12 +917,15 @@ pub fn preview(bytes: &[u8]) -> Result<(), String> {
         }
         let (state, made, clip) = (canvas.state, canvas.made, canvas.clip.clone());
         held.below = None;
+        if matches!(op, Op::AddFrame { .. } | Op::RemoveFrame { .. } | Op::MoveFrame { .. }) {
+            return Err("a change to the frames is not previewed".into());
+        }
         let (applied, patch) = canvas.apply(&op)?;
         (canvas.state, canvas.made, canvas.clip) = (state, made, clip);
         for &(layer, index) in &applied.touched {
             if layer == SELECTION {
                 held.selection_version += 1;
-            } else {
+            } else if held.seen(layer) {
                 mark(&mut held.dirty, index, WHOLE);
             }
         }
@@ -882,8 +1004,8 @@ pub fn lift(layer: u32) -> Vec<u8> {
         let h = h.borrow();
         let mut out = vec![0u8; 16];
         let Some(canvas) = h.canvas.as_ref() else { return out };
-        let Some(target) = canvas.layer(layer) else { return out };
-        let (lifted, _) = select::split(&target.grid, &canvas.selection, canvas.selecting());
+        let Some(target) = canvas.grid(layer).filter(|_| layer != SELECTION) else { return out };
+        let (lifted, _) = select::split(target, &canvas.selection, canvas.selecting());
         let Some([x, y, w, ht]) = select::bounds(&lifted) else { return out };
         for (i, v) in [x, y, w, ht].into_iter().enumerate() {
             out[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
@@ -946,6 +1068,80 @@ pub extern "C" fn rr_ramp(ptr: *const u8, len: usize) -> *const u8 {
         h.ramp = (text.len() as u32).to_le_bytes().to_vec();
         h.ramp.extend(text);
         h.ramp.as_ptr()
+    })
+}
+
+/// Show frame `frame` (from 0): laid together again, its onion skin with it.
+pub fn show_frame(frame: u32) {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let frames = h.canvas.as_ref().map_or(1, |c| c.frames.len() as u32);
+        let frame = frame.min(frames - 1);
+        if frame != h.shown {
+            h.shown = frame;
+            h.reskin();
+            h.redo_all();
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_frame(frame: u32) {
+    show_frame(frame);
+}
+
+#[no_mangle]
+pub extern "C" fn rr_shown() -> u32 {
+    HELD.with(|h| h.borrow().shown)
+}
+
+/// Onion skin: how many frames before and after, how strongly, tinted or
+/// not; none with both counts 0.
+pub fn onion(before: u32, after: u32, opacity: u32, tint: bool) {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        h.skin = Skin { before: before.min(ONION_MOST), after: after.min(ONION_MOST), opacity: opacity.min(255) as u8, tint };
+        h.reskin();
+        h.redo_all();
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_onion(before: u32, after: u32, opacity: u32, tint: u32) {
+    onion(before, after, opacity, tint != 0);
+}
+
+/// A frame laid together at `w` × `h`, each pixel the one at its middle —
+/// straight RGBA, for the timeline.
+pub fn thumb(frame: u32, w: u32, h: u32) -> Vec<u8> {
+    HELD.with(|held| {
+        let held = held.borrow();
+        let (w, h) = (w.clamp(1, 256), h.clamp(1, 256));
+        let mut out = vec![0u8; (w * h * 4) as usize];
+        let Some(canvas) = held.canvas.as_ref() else { return out };
+        let grid = Grid::new(canvas.width, canvas.height);
+        for y in 0..h {
+            let sy = ((2 * y + 1) * canvas.height / (2 * h)).min(canvas.height - 1);
+            for x in 0..w {
+                let sx = ((2 * x + 1) * canvas.width / (2 * w)).min(canvas.width - 1);
+                let (index, tx, ty) = grid.locate(sx, sy);
+                let acc = blend::region(canvas, frame, index, [tx, ty, tx + 1, ty + 1]);
+                let px = blend::straight(&acc);
+                let at = ((y * w + x) * 4) as usize;
+                out[at..at + 4].copy_from_slice(&px);
+            }
+        }
+        out
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_thumb(frame: u32, w: u32, h: u32) -> *const u8 {
+    let bytes = thumb(frame, w, h);
+    HELD.with(|held| {
+        let mut held = held.borrow_mut();
+        held.thumb = bytes;
+        held.thumb.as_ptr()
     })
 }
 

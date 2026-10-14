@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
-use proton_raster::{file, Canvas, History, LayerInfo, Op, Preset, Tile, SELECTION};
+use proton_raster::{cel_id, file, Canvas, History, LayerInfo, Op, Preset, Tag, Tile, SELECTION};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -50,6 +50,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::RasterSave
             | Command::RasterExport { .. }
             | Command::RasterImport { .. }
+            | Command::RasterShow { .. }
     )
 }
 
@@ -60,6 +61,8 @@ pub fn handles(command: &Command) -> bool {
 pub enum RasterFormat {
     Png,
     Psd,
+    /// Every frame on one sheet, and a JSON of where each is.
+    Sheet,
 }
 
 /// A canvas found in the project, for the home page.
@@ -72,10 +75,12 @@ pub struct RasterFound {
     pub name: String,
     pub preset: Preset,
     pub size: [u32; 2],
+    /// How many frames it has: one for a still picture.
+    pub frames: u32,
 }
 
 /// The canvas open: everything but its pixels, which the window fetches by
-/// the tiles each layer has.
+/// the tiles each layer has in each frame.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
@@ -88,7 +93,14 @@ pub struct RasterView {
     pub palette: Vec<[u8; 4]>,
     /// Bottom to top.
     pub layers: Vec<LayerInfo>,
-    /// Each layer's tiles that hold anything, by index: what to fetch.
+    /// How long each frame is shown, in milliseconds: one for each frame.
+    pub frames: Vec<u32>,
+    pub tags: Vec<Tag>,
+    /// The frame the window last said it shows.
+    pub frame: u32,
+    /// Each cel's tiles that hold anything, by index: what to fetch. A
+    /// layer's own id is its first frame; a later frame's cel is listed
+    /// only when it has pixels.
     pub tiles: Vec<(u32, Vec<u32>)>,
     pub generation: u32,
     #[ts(type = "number")]
@@ -130,6 +142,8 @@ struct Open {
     version: u64,
     last_seq: u32,
     saving: Option<Saving>,
+    /// The frame the window shows.
+    frame: u32,
 }
 
 impl std::fmt::Debug for Open {
@@ -232,7 +246,13 @@ impl Raster {
             Command::RasterUndo => self.step(true),
             Command::RasterRedo => self.step(false),
             Command::RasterSave => self.save(),
-            Command::RasterExport { format, scale } => self.export(format, scale.unwrap_or(1)),
+            Command::RasterExport { format, scale, frame, columns } => self.export(format, scale.unwrap_or(1), frame, columns.unwrap_or(0)),
+            Command::RasterShow { frame } => {
+                if let Some(open) = &mut self.open {
+                    open.frame = frame.min(open.canvas.frames.len() as u32 - 1);
+                }
+                Vec::new()
+            }
             Command::RasterImport { path, blob, layer, above, name } => self.import(root, path.as_deref(), blob, layer, above, name),
             _ => Vec::new(),
         }
@@ -256,6 +276,7 @@ impl Raster {
             version: 0,
             last_seq: 0,
             saving: None,
+            frame: 0,
         });
     }
 
@@ -426,13 +447,17 @@ impl Raster {
                 height: c.height,
                 palette: c.palette.clone(),
                 layers: c.infos(),
+                frames: c.frames.clone(),
+                tags: c.tags.clone(),
+                frame: open.frame.min(c.frames.len() as u32 - 1),
                 // The selection first, as layer 0, when anything is selected.
                 tiles: c
                     .selecting()
                     .then_some((SELECTION, &c.selection))
                     .into_iter()
-                    .chain(c.layers.iter().map(|l| (l.info.id, &l.grid)))
-                    .map(|(id, g)| (id, (0..g.cols * g.rows).filter(|&i| g.tile(i).is_some()).collect()))
+                    .chain(c.layers.iter().flat_map(|l| l.cels.iter().enumerate().map(|(f, g)| (cel_id(l.info.id, f as u32), g))))
+                    .map(|(id, g)| (id, (0..g.cols * g.rows).filter(|&i| g.tile(i).is_some()).collect::<Vec<u32>>()))
+                    .filter(|(id, tiles)| proton_raster::cel_of(*id).1 == 0 || !tiles.is_empty())
                     .collect(),
                 generation: open.generation,
                 version: open.version,
@@ -518,7 +543,8 @@ fn slug(name: &str) -> String {
 }
 
 /// The project's canvases — `*.canvas` folders, a few levels down, not
-/// inside what is hidden or built — and its PNGs and PSDs outside them.
+/// inside what is hidden or built — and its PNGs, PSDs and Aseprite files
+/// outside them.
 fn find(root: &Path) -> (Vec<RasterFound>, Vec<String>) {
     const SKIP: &[&str] = &["node_modules", "target", "dist", "build", "vendor"];
     let mut out = Vec::new();
@@ -538,7 +564,7 @@ fn find(root: &Path) -> (Vec<RasterFound>, Vec<String>) {
                 continue;
             }
             if !path.is_dir() {
-                let picture = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("png") || e.eq_ignore_ascii_case("psd"));
+                let picture = path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["png", "psd", "aseprite", "ase"].iter().any(|k| e.eq_ignore_ascii_case(k)));
                 if picture && images.len() < 500 {
                     images.push(path.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default());
                 }
@@ -549,11 +575,13 @@ fn find(root: &Path) -> (Vec<RasterFound>, Vec<String>) {
                     let meta: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
                     let preset = serde_json::from_value(meta["preset"].clone()).unwrap_or_default();
                     let size = serde_json::from_value(meta["size"].clone()).unwrap_or([0, 0]);
+                    let frames = meta["frames"].as_u64().unwrap_or(1).max(1) as u32;
                     out.push(RasterFound {
                         path: path.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default(),
                         name: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
                         preset,
                         size,
+                        frames,
                     });
                 }
             } else if depth < 3 {

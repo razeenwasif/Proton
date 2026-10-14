@@ -50,12 +50,12 @@ fn a_brush_stroke_drawn_in_pieces_is_the_stroke_made_whole() {
 
 /// How many pixels of a row a layer has anything in.
 fn across(c: &Canvas, layer: u32, y: u32) -> u32 {
-    (0..c.width).filter(|&x| c.layer(layer).unwrap().grid.pixel(x, y)[3] > 0).count() as u32
+    (0..c.width).filter(|&x| c.layer(layer).unwrap().grid().pixel(x, y)[3] > 0).count() as u32
 }
 
 /// How many pixels of a column.
 fn down(c: &Canvas, layer: u32, x: u32) -> u32 {
-    (0..c.height).filter(|&y| c.layer(layer).unwrap().grid.pixel(x, y)[3] > 0).count() as u32
+    (0..c.height).filter(|&y| c.layer(layer).unwrap().grid().pixel(x, y)[3] > 0).count() as u32
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn pressure_makes_a_line_thinner_and_lighter() {
     c.apply(&Op::Brush { layer: id, erase: false, brush: brush(), color: INK, points }).unwrap();
     let (thin, thick) = (down(&c, id, 40), down(&c, id, 180));
     assert!(thin < thick && thick >= 22, "{thin} then {thick}");
-    let (light, dark) = (c.layer(id).unwrap().grid.pixel(40, 50)[3], c.layer(id).unwrap().grid.pixel(180, 50)[3]);
+    let (light, dark) = (c.layer(id).unwrap().grid().pixel(40, 50)[3], c.layer(id).unwrap().grid().pixel(180, 50)[3]);
     assert!(light < dark, "{light} then {dark}");
     // No pressure, and a brush whose size hangs wholly on it, lays nothing.
     let mut none = Canvas::new(64, 64, Preset::Paint).unwrap();
@@ -84,8 +84,8 @@ fn a_soft_eraser_takes_away_as_much_as_it_would_cover() {
     c.apply(&Op::FillRect { layer: id, rect: [0, 0, 64, 64], color: [200, 50, 50, 255] }).unwrap();
     let hard = Brush { size: 10, hardness: 100, spacing: 10, flow: 255, opacity: 128, size_pressure: 0, flow_pressure: 0, opacity_pressure: 0 };
     c.apply(&Op::Brush { layer: id, erase: true, brush: hard.clone(), color: INK, points: vec![32 * 256, 32 * 256, 65535] }).unwrap();
-    assert_eq!(c.layer(id).unwrap().grid.pixel(32, 32), [200, 50, 50, 127]);
-    assert_eq!(c.layer(id).unwrap().grid.pixel(2, 2), [200, 50, 50, 255]);
+    assert_eq!(c.layer(id).unwrap().grid().pixel(32, 32), [200, 50, 50, 127]);
+    assert_eq!(c.layer(id).unwrap().grid().pixel(2, 2), [200, 50, 50, 255]);
     // Alpha-locked, the brush only recolours what is there.
     let mut l = Canvas::new(64, 64, Preset::Paint).unwrap();
     let id = l.layers[0].info.id;
@@ -93,8 +93,8 @@ fn a_soft_eraser_takes_away_as_much_as_it_would_cover() {
     l.apply(&Op::SetLayer { layer: id, name: None, opacity: None, blend: None, hidden: None, locked: None, alpha_lock: Some(true) }).unwrap();
     let solid = Brush { opacity: 255, size: 20, ..hard };
     l.apply(&Op::Brush { layer: id, erase: false, brush: solid, color: INK, points: vec![32 * 256, 32 * 256, 65535] }).unwrap();
-    assert_eq!(l.layer(id).unwrap().grid.pixel(28, 32), INK);
-    assert_eq!(l.layer(id).unwrap().grid.pixel(36, 32), [0, 0, 0, 0]);
+    assert_eq!(l.layer(id).unwrap().grid().pixel(28, 32), INK);
+    assert_eq!(l.layer(id).unwrap().grid().pixel(36, 32), [0, 0, 0, 0]);
     assert_eq!(across(&l, id, 32), 32);
 }
 

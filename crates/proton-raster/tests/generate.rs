@@ -119,13 +119,13 @@ fn a_wrapped_cave_tiles_and_one_not_wrapped_is_walled() {
 fn an_outline_is_exactly_the_pixels_beside_the_shape() {
     let (mut c, id) = canvas(32, 32, Preset::Pixel);
     c.apply(&Op::Shape { layer: id, shape: proton_raster::ShapeKind::Ellipse, from: [6, 8], to: [24, 22], filled: true, tip: proton_raster::Tip { size: 1, round: false, mirror: [None, None] }, color: [200, 60, 60, 255] }).unwrap();
-    let before = c.layers[0].grid.clone();
+    let before = c.layers[0].grid().clone();
     c.apply(&Op::Filter { layer: id, filter: Filter::Outline { color: INK, diagonal: false, inside: false } }).unwrap();
     let solid = |x: i32, y: i32| x >= 0 && y >= 0 && x < 32 && y < 32 && before.pixel(x as u32, y as u32)[3] >= 128;
     for y in 0..32 {
         for x in 0..32 {
             let beside = !solid(x, y) && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| solid(x + dx, y + dy));
-            let now = c.layers[0].grid.pixel(x as u32, y as u32);
+            let now = c.layers[0].grid().pixel(x as u32, y as u32);
             assert_eq!(now == INK, beside, "at {x}, {y}");
         }
     }
@@ -135,7 +135,7 @@ fn an_outline_is_exactly_the_pixels_beside_the_shape() {
 fn colours_brought_down_are_no_more_than_asked_and_kept_as_the_palette() {
     let (mut c, id) = canvas(64, 64, Preset::Pixel);
     c.apply(&Op::Generate { layer: id, generator: Generator::Noise { noise: noise::Kind::Value, seed: 1, cell: 16, octaves: 4, colors: vec![[255, 0, 0, 255], [0, 0, 255, 255]], mix: Mix::Smooth, dither: 4, rect: None } }).unwrap();
-    let colours = |c: &Canvas| (0..64).flat_map(|y| (0..64).map(move |x| (x, y))).map(|(x, y)| c.layers[0].grid.pixel(x, y)).collect::<BTreeSet<_>>();
+    let colours = |c: &Canvas| (0..64).flat_map(|y| (0..64).map(move |x| (x, y))).map(|(x, y)| c.layers[0].grid().pixel(x, y)).collect::<BTreeSet<_>>();
     assert!(colours(&c).len() > 20, "the smooth noise has few colours to start with");
     let mut h = History::new(Preset::Pixel);
     let applied = h.apply(&mut c, &Op::Filter { layer: id, filter: Filter::Quantize { colors: 5, palette: false, dither: 0, keep: true } }, "colours").unwrap();
@@ -163,7 +163,7 @@ fn scale2x_keeps_a_diagonal_a_diagonal_and_the_canvas_grows() {
     assert_eq!((c.width, c.height), (32, 32));
     // A one-pixel diagonal doubled is a two-pixel-wide diagonal, not stairs
     // of 2 × 2 blocks: the corners between steps are filled.
-    let g = &c.layers[0].grid;
+    let g = &c.layers[0].grid();
     assert_eq!(g.pixel(10, 10), INK);
     assert_eq!(g.pixel(11, 10), INK, "Scale2x left a stair");
     assert_eq!(g.pixel(13, 10)[3], 0);
@@ -180,12 +180,12 @@ fn a_shadow_falls_under_and_pixelate_makes_squares() {
     let (mut c, id) = canvas(32, 32, Preset::Paint);
     c.apply(&Op::FillRect { layer: id, rect: [8, 8, 8, 8], color: [250, 250, 250, 255] }).unwrap();
     c.apply(&Op::Filter { layer: id, filter: Filter::Shadow { dx: 3, dy: 2, color: [0, 0, 0, 160], blur: 0 } }).unwrap();
-    let g = &c.layers[0].grid;
+    let g = &c.layers[0].grid();
     assert_eq!(g.pixel(10, 10), [250, 250, 250, 255], "the shadow went over");
     assert_eq!(g.pixel(17, 16), [0, 0, 0, 160]);
     assert_eq!(g.pixel(7, 7)[3], 0);
     c.apply(&Op::Filter { layer: id, filter: Filter::Pixelate { size: 4 } }).unwrap();
-    let g = &c.layers[0].grid;
+    let g = &c.layers[0].grid();
     for by in 0..8 {
         for bx in 0..8 {
             let first = g.pixel(bx * 4, by * 4);
@@ -199,7 +199,7 @@ fn a_generator_keeps_to_the_selection() {
     let (mut c, id) = canvas(40, 40, Preset::Pixel);
     c.apply(&Op::Select { area: Area::Rect { rect: [0, 0, 20, 40] }, mode: Mode::Replace, feather: 0, smooth: false }).unwrap();
     c.apply(&Op::Generate { layer: id, generator: Generator::Cave { seed: 2, density: 100, steps: 0, cell: 1, wrap: false, color: INK, floor: None, rect: Some([0, 0, 40, 40]) } }).unwrap();
-    assert_eq!((c.layers[0].grid.pixel(5, 5), c.layers[0].grid.pixel(30, 5)), (INK, [0; 4]));
+    assert_eq!((c.layers[0].grid().pixel(5, 5), c.layers[0].grid().pixel(30, 5)), (INK, [0; 4]));
     assert!(c.apply(&Op::Generate { layer: id, generator: Generator::Noise { noise: noise::Kind::Value, seed: 1, cell: 4, octaves: 1, colors: vec![INK], mix: Mix::Nearest, dither: 4, rect: None } }).is_err(), "noise in one colour");
 }
 

@@ -90,7 +90,7 @@ fn clear_tiles_are_not_kept_and_a_removed_layers_file_goes_with_it() {
     save(&dir, &c).unwrap();
     let back = load(&dir).unwrap();
     // The highlights cover two of the six tiles; the rest are not kept.
-    assert_eq!(back.layers[1].grid.tiles.iter().filter(|t| t.is_some()).count(), 2);
+    assert_eq!(back.layers[1].grid().tiles.iter().filter(|t| t.is_some()).count(), 2);
     c.apply(&Op::RemoveLayer { layer: 2 }).unwrap();
     std::fs::write(dir.join("layers/notes.png"), b"theirs").unwrap();
     save(&dir, &c).unwrap();

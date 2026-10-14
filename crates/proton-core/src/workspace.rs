@@ -1570,7 +1570,8 @@ impl Workspace {
             | Command::RasterRedo
             | Command::RasterSave
             | Command::RasterExport { .. }
-            | Command::RasterImport { .. } => Vec::new(),
+            | Command::RasterImport { .. }
+            | Command::RasterShow { .. } => Vec::new(),
             // PDF is the window's too: the session answers it.
             Command::PdfOpen { .. }
             | Command::PdfClose { .. }

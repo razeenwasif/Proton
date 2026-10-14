@@ -5656,6 +5656,33 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .raster-ask .grow { flex: 1; }
 .raster-ask button { padding: 4px 10px; }
 .raster-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; outline: none; touch-action: none; background: var(--bg-deep); }
+/* The timeline: the frames under the picture, small, a bar of what to do with them above. */
+.raster-timeline { flex: none; display: flex; flex-direction: column; border-top: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); background: var(--bg); }
+.raster-timeline[hidden] { display: none; }
+.workspace[data-ws="raster"].raster-home .raster-timeline { display: none; }
+.raster-tl-bar { display: flex; align-items: center; gap: 4px 6px; min-height: 32px; padding: 2px 10px; }
+.raster-tl-bar .grow { flex: 1 1 auto; }
+.raster-tl-bar .hbtn:disabled { opacity: .35; cursor: default; }
+.raster-tl-bar select { max-width: 140px; font: var(--z-2xs) var(--zed); }
+.raster-tl-count { min-width: 52px; color: var(--text); font: var(--z-2xs) var(--zed); font-variant-numeric: tabular-nums; }
+.raster-tl-ms { display: flex; align-items: center; gap: 4px; color: var(--faint); font: var(--z-2xs) var(--zed); }
+.raster-tl-ms input { width: 58px; font: var(--z-2xs) var(--zed); }
+.raster-tl-sep { width: 1px; align-self: stretch; margin: 6px 2px; background: color-mix(in srgb, var(--text) 10%, transparent); }
+.raster-tl-strip { position: relative; overflow-x: auto; overflow-y: hidden; padding: 0 10px 8px; }
+.raster-tl-tags { position: relative; height: 16px; margin-bottom: 3px; }
+.raster-tl-tag { position: absolute; top: 0; height: 15px; padding: 0 6px; border: 0; border-radius: 4px; background: color-mix(in srgb, var(--tag) 70%, var(--bg)); color: #fff; font: 600 var(--z-2xs) var(--zed); line-height: 15px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; opacity: .75; }
+.raster-tl-tag.on, .raster-tl-tag:hover { opacity: 1; box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 45%, transparent); }
+.raster-tl-frames { display: flex; gap: 4px; }
+.raster-tl-frame { flex: none; width: 52px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px 2px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); font: var(--z-2xs) var(--zed); cursor: pointer; }
+.raster-tl-frame:hover { background: var(--row-hover); color: var(--text); }
+.raster-tl-frame.on { background: var(--row-on); color: var(--text); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
+.raster-tl-frame canvas { width: auto; height: auto; max-width: 44px; max-height: 44px; image-rendering: pixelated; background: repeating-conic-gradient(#5c5c61 0 25%, #45454a 0 50%) 0 0 / 8px 8px; }
+/* The inspector's tags: a name, the frames it runs over, how it plays. */
+.raster-tags { display: flex; flex-direction: column; gap: 4px; }
+.raster-tag { display: flex; align-items: center; gap: 4px; padding-left: 6px; border-left: 3px solid var(--tag); color: var(--faint); font: var(--z-2xs) var(--zed); }
+.raster-tag input[type="text"] { flex: 1 1 auto; min-width: 0; }
+.raster-tag input[type="number"] { width: 40px; }
+.raster-tag select { max-width: 92px; }
 .raster-gl { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .raster-gl[hidden] { display: none; }
 .raster-empty { position: absolute; inset: 0; display: grid; place-items: center; }

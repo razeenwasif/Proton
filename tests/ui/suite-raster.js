@@ -556,4 +556,98 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
     await win.pushEvents([{type: 'rasterCanvas', canvas: null}]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
+
+  await test('The timeline shows every frame, draws in the one shown, copies one with ⇧N, plays round a tag, and onion skin shows the frames either side', async () => {
+    await win.dispatch({type: 'setMode', mode: 'raster'}); await settle();
+    // A stand-in core of its own: three frames, a dot at another place in each.
+    const anim = await createRasterRuntime();
+    const g = 9;
+    const STEP = 65536;
+    anim.open({width: 32, height: 16, preset: 'pixel', palette: [], layers: [layer(1, 'Sprite')], generation: g, frames: [100, 80, 120], tags: [{name: 'blink', from: 1, to: 2, direction: 'pingPong', repeat: 0}]});
+    anim.apply({op: 'fillRect', layer: 1, rect: [0, 0, 4, 4], color: [200, 30, 40, 255]});
+    anim.apply({op: 'fillRect', layer: 1 + STEP, rect: [8, 0, 4, 4], color: [40, 60, 220, 255]});
+    anim.apply({op: 'fillRect', layer: 1 + 2 * STEP, rect: [16, 0, 4, 4], color: [40, 200, 60, 255]});
+    let v = 1;
+    let last = 0;
+    win.rasterRead = (/** @type {number} */ gen, /** @type {number} */ l, /** @type {number[]} */ tiles) => (gen === g ? tilesPayload(anim, gen, l, tiles, v, last) : null);
+    const viewNow = () => {
+      const info = anim.info();
+      return {type: 'rasterCanvas', canvas: {path: 'walk.canvas', name: 'walk', preset: 'pixel', width: info.width, height: info.height, palette: info.palette, layers: info.layers,
+        frames: info.frames, tags: info.tags, frame: 0, tiles: info.tiles, generation: g, version: v, dirty: v > 1, canUndo: v > 1, canRedo: false, undo: null, redo: null, saving: false}};
+    };
+    /** The stand-in core makes the last edit, and says the canvas when it changed the frames. */
+    const reply = async (/** @type {number} */ from) => {
+      await settle();
+      const edit = sent(from, 'rasterEdit').at(-1);
+      if (!edit) throw new Error(`no edit was sent, only ${JSON.stringify(win.commands.slice(from).map((/** @type {any} */ c) => c.type))}`);
+      const made = anim.apply(edit.op);
+      v += 1;
+      last = edit.seq;
+      const meta = ['addFrame', 'removeFrame', 'moveFrame', 'setDuration', 'setTags'].includes(edit.op.op);
+      await win.pushEvents([{type: 'rasterApplied', generation: g, seq: edit.seq, version: v, hash: made.hash, refused: made.refused ?? null, dirty: true, canUndo: true, canRedo: false}, ...(meta ? [viewNow()] : [])]);
+      await settle(); await probe().settled();
+      return edit;
+    };
+    await win.pushEvents([home, viewNow()]); await settle(); await probe().settled();
+    const cells = () => [...ws().querySelectorAll('[data-raster-frame]')];
+    assert(cells().length === 3 && shown($('[data-raster-timeline]')), `the timeline shows ${cells().length} frames`);
+    assert(ws().querySelector('[data-raster-tag-play="blink"]'), 'the tag is not over its frames');
+    assert(JSON.stringify(probe().pick(1, 1)) === '[200,30,40,255]' && JSON.stringify(probe().pick(9, 1)) === '[0,0,0,0]', `frame 1 is not shown: ${probe().pick(1, 1)}`);
+    // Frame 2, by its thumbnail: shown, its time in the bar, and told to the core.
+    let before = win.commands.length;
+    cells()[1].click(); await settle();
+    assert(probe().frame() === 1 && JSON.stringify(probe().pick(9, 1)) === '[40,60,220,255]' && JSON.stringify(probe().pick(1, 1)) === '[0,0,0,0]', `frame 2 is not shown: ${probe().pick(9, 1)}`);
+    assert(sent(before, 'rasterShow')[0]?.frame === 1, 'the core was not told the frame shown');
+    assert($('[data-raster-frame-count]').textContent === '2 / 3' && $('[data-raster-frame-ms]').value === '80', `the bar says ${$('[data-raster-frame-count]').textContent}, ${$('[data-raster-frame-ms]').value} ms`);
+    const thumb = /** @type {HTMLCanvasElement} */ (ws().querySelector('[data-raster-thumb="1"]'));
+    for (let i = 0; i < 20 && thumb.width === 1; i++) await new Promise((done) => setTimeout(done, 25));
+    assert(thumb.width === 40 && thumb.height === 20, `frame 2's thumbnail is ${thumb.width} × ${thumb.height}`);
+    // A stroke drawn there names the layer in frame 2, and frame 1 is untouched.
+    press('b');
+    before = win.commands.length;
+    await drag([[24, 10], [26, 10]]);
+    const stroke = await reply(before);
+    assert(stroke.op.op === 'stroke' && stroke.op.layer === 1 + STEP, `the stroke named layer ${stroke.op.layer}`);
+    press(',');
+    await settle();
+    assert(probe().frame() === 0 && JSON.stringify(probe().pick(25, 10)) === '[0,0,0,0]', 'the stroke went into frame 1 too');
+    // Onion skin: frame 2's dot faintly under frame 1's layer, tinted blue.
+    press('O'); await frame();
+    const faint = probe().seen(9, 1);
+    assert(faint && faint[3] > 30 && faint[3] < 120 && faint[2] > faint[0], `onion skin shows ${faint}`);
+    assert(JSON.stringify(probe().pick(9, 1)) === '[0,0,0,0]', 'onion skin changed the picture itself');
+    press('O'); await frame();
+    assert(JSON.stringify(probe().seen(9, 1)) === '[0,0,0,0]', 'onion skin did not go');
+    // ⇧N: a copy of the frame shown after it, in the timeline at once.
+    press('.'); await settle();
+    before = win.commands.length;
+    press('N'); await settle();
+    assert(cells().length === 4 && probe().frame() === 2, `⇧N left ${cells().length} frames, frame ${probe().frame() + 1} shown`);
+    const copied = await reply(before);
+    assert(copied.op.op === 'addFrame' && copied.op.at === 2 && copied.op.copy === 1, `⇧N sent ${JSON.stringify(copied.op)}`);
+    assert(JSON.stringify(probe().pick(9, 1)) === '[40,60,220,255]' && cells().length === 4, 'the copy is not frame 2 again');
+    // Played round "blink" — frames 2 to 4 now — and stopped with ↩ where it is.
+    ws().querySelector('[data-raster-tag-play="blink"]').click(); await settle();
+    press('Enter');
+    assert(probe().playing(), '↩ did not play');
+    const seen = new Set();
+    for (let i = 0; i < 40; i++) {
+      seen.add(probe().frame());
+      await new Promise((done) => setTimeout(done, 20));
+    }
+    before = win.commands.length;
+    press('Enter'); await settle();
+    assert(!probe().playing() && [...seen].every((f) => f >= 1 && f <= 3) && seen.size >= 2, `played frames ${[...seen]}`);
+    assert(sent(before, 'rasterShow')[0]?.frame === probe().frame(), 'the frame stopped at was not told');
+    // A sheet of every frame.
+    $('[data-raster-panel="inspector"]').click(); await settle();
+    before = win.commands.length;
+    ws().querySelector('[data-raster-export="sheet"]').click(); await settle();
+    const sheet = sent(before, 'rasterExport')[0];
+    assert(sheet?.format === 'sheet' && sheet.columns === 0, `the sheet sent ${JSON.stringify(sheet)}`);
+    win.rasterRead = undefined;
+    await win.pushEvents([{type: 'rasterCanvas', canvas: null}]); await settle();
+    assert(!shown($('[data-raster-timeline]')), 'the timeline stayed with no canvas open');
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
 }

@@ -1,7 +1,8 @@
 //! A canvas out to other files and in from them: written beside its folder
-//! as a PNG or a PSD; sent to a game; and pictures — a project's PNGs and
-//! PSDs, or what the window was handed by a paste or a drop — brought in as a
-//! canvas of their own or as layers, one step of undo.
+//! as a PNG or a PSD of a frame, or a sprite sheet of every frame; sent to a
+//! game; and pictures — a project's PNGs, PSDs and Aseprite files, or what
+//! the window was handed by a paste or a drop — brought in as a canvas of
+//! their own or as layers, one step of undo.
 
 use std::path::{Path, PathBuf};
 
@@ -53,10 +54,10 @@ fn in_project(root: &Path, rel: &str) -> Result<PathBuf, String> {
 /// palette, in the order first met.
 fn palette_of(canvas: &proton_raster::Canvas) -> Vec<[u8; 4]> {
     let mut colours: Vec<[u8; 4]> = Vec::new();
-    for layer in &canvas.layers {
+    for grid in canvas.layers.iter().flat_map(|l| l.cels.iter()) {
         for y in 0..canvas.height {
             for x in 0..canvas.width {
-                let p = layer.grid.pixel(x, y);
+                let p = grid.pixel(x, y);
                 if p[3] == 255 && !colours.contains(&p) {
                     if colours.len() == 32 {
                         return Vec::new();
@@ -100,21 +101,47 @@ impl Raster {
         file::encode_png(w, h, &rgba).ok()
     }
 
-    /// Write the open canvas beside its folder.
-    pub(super) fn export(&self, format: RasterFormat, scale: u32) -> Vec<Event> {
+    /// Write the open canvas beside its folder: frame `frame` (the one
+    /// shown if not said) as a PNG or a PSD, or every frame as a sheet.
+    pub(super) fn export(&self, format: RasterFormat, scale: u32, frame: Option<u32>, columns: u32) -> Vec<Event> {
         let Some(open) = &self.open else { return vec![notice("no canvas is open".into(), NoticeLevel::Warn)] };
         let dir = open.dir.parent().unwrap_or(&open.dir).to_path_buf();
         let stem = slug(&open.name);
+        let frames = open.canvas.frames.len() as u32;
+        let frame = frame.unwrap_or(open.frame);
+        if frame >= frames {
+            return vec![notice(format!("there is no frame {}; the canvas has {frames}", frame + 1), NoticeLevel::Warn)];
+        }
+        let scale = scale.clamp(1, 16);
+        let scaled = if scale > 1 { format!("{stem}@{scale}x") } else { stem.clone() };
+        // A frame of an animation is named for its place in it.
+        let framed = |s: &str| if frames > 1 { format!("{s}-{}", frame + 1) } else { s.to_string() };
         let (path, bytes) = match format {
-            RasterFormat::Png => {
-                let scale = scale.clamp(1, 16);
-                let stem = if scale > 1 { format!("{stem}@{scale}x") } else { stem };
-                (dir.join(format!("{stem}.png")), port::png(&open.canvas, scale))
+            RasterFormat::Png => (dir.join(format!("{}.png", framed(&scaled))), port::png(&open.canvas, frame, scale)),
+            RasterFormat::Psd => (dir.join(format!("{}.psd", framed(&stem))), Ok(port::psd(&open.canvas, frame))),
+            RasterFormat::Sheet => {
+                let image = format!("{scaled}-sheet.png");
+                match port::sheet(&open.canvas, &image, columns, scale) {
+                    Ok((png, json)) => {
+                        let json_path = dir.join(format!("{scaled}-sheet.json"));
+                        if let Err(why) = std::fs::write(&json_path, json) {
+                            return vec![notice(format!("{} was not written: {why}", json_path.display()), NoticeLevel::Error)];
+                        }
+                        (dir.join(image), Ok(png))
+                    }
+                    Err(why) => (dir.join(image), Err(why)),
+                }
             }
-            RasterFormat::Psd => (dir.join(format!("{stem}.psd")), Ok(port::psd(&open.canvas))),
         };
         match bytes.and_then(|b| std::fs::write(&path, b).map_err(|e| e.to_string())) {
-            Ok(()) => vec![notice(format!("wrote {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), NoticeLevel::Info)],
+            Ok(()) => {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let said = match format {
+                    RasterFormat::Sheet => format!("wrote {name} and its JSON, {frames} frame{}", if frames == 1 { "" } else { "s" }),
+                    _ => format!("wrote {name}"),
+                };
+                vec![notice(said, NoticeLevel::Info)]
+            }
             Err(why) => vec![notice(format!("{} was not written: {why}", path.display()), NoticeLevel::Error)],
         }
     }
@@ -130,8 +157,15 @@ impl Raster {
         let art = dir.join("art");
         std::fs::create_dir_all(&art).map_err(|e| format!("{}: {e}", art.display()))?;
         let stem = slug(&open.name);
-        let (name, bytes) = if layers { (format!("{stem}.psd"), port::psd(&open.canvas)) } else { (format!("{stem}.png"), port::png(&open.canvas, 1)?) };
+        let (name, bytes) = if layers { (format!("{stem}.psd"), port::psd(&open.canvas, open.frame)) } else { (format!("{stem}.png"), port::png(&open.canvas, open.frame, 1)?) };
         std::fs::write(art.join(&name), bytes).map_err(|e| format!("{name}: {e}"))?;
+        // An animation's every frame, beside it, for the game to animate by.
+        if open.canvas.frames.len() > 1 {
+            let image = format!("{stem}-sheet.png");
+            let (png, json) = port::sheet(&open.canvas, &image, 0, 1)?;
+            std::fs::write(art.join(&image), png).map_err(|e| format!("{image}: {e}"))?;
+            std::fs::write(art.join(format!("{stem}-sheet.json")), json).map_err(|e| format!("{stem}-sheet.json: {e}"))?;
+        }
         Ok((dir, format!("art/{name}")))
     }
 
@@ -164,16 +198,32 @@ impl Raster {
         if layer {
             let Some(open) = &mut self.open else { return warn("open a canvas to bring a picture in as a layer".into()) };
             let (w, h) = (open.canvas.width, open.canvas.height);
-            // A picture smaller than the canvas is put in its middle; a
-            // Photoshop file's layers where its own canvas has them.
+            let frames = open.canvas.frames.len();
+            if picture.frames.len() > frames {
+                events.push(notice(format!("{name} has {} frames and the canvas {frames}; the frames past them were left out", picture.frames.len()), NoticeLevel::Warn));
+            }
+            // A still picture smaller than the canvas is put in its middle —
+            // in the frame shown; a Photoshop or Aseprite file's layers where
+            // its own canvas has them, frame by frame.
             let centre = |pw: u32, ph: u32| if pw <= w && ph <= h { [(w - pw) as i32 / 2, (h - ph) as i32 / 2] } else { [0, 0] };
-            let lone = picture.parts.len() == 1 && picture.parts[0].left == 0 && picture.parts[0].top == 0;
+            let still = picture.frames.len() <= 1;
+            let lone = still && picture.parts.len() == 1 && picture.parts[0].cels[0].as_ref().is_some_and(|c| c.left == 0 && c.top == 0);
+            let shown = open.frame as usize;
             let grids = picture
                 .parts
                 .iter()
                 .map(|p| {
-                    let at = if lone { centre(p.width, p.height) } else { [p.left, p.top] };
-                    (p.name.clone(), p.opacity, !p.visible, p.blend, port::grid_of(p, w, h, at))
+                    let cels = if still {
+                        let mut cels = vec![proton_raster::Grid::new(w, h); shown + 1];
+                        if let Some(image) = &p.cels[0] {
+                            let at = if lone { centre(image.width, image.height) } else { [image.left, image.top] };
+                            cels[shown] = port::grid_of(image, w, h, at);
+                        }
+                        cels
+                    } else {
+                        port::cels_of(p, w, h, picture.frames.len().min(frames) as u32)
+                    };
+                    (p.name.clone(), p.opacity, !p.visible, p.blend, cels)
                 })
                 .collect();
             let label = if picture.parts.len() == 1 { format!("bring in {name}") } else { format!("bring in {} layers", picture.parts.len()) };
@@ -196,7 +246,7 @@ impl Raster {
                 Ok(c) => c,
                 Err(why) => return warn(why),
             };
-            if preset == Preset::Pixel {
+            if preset == Preset::Pixel && canvas.palette.is_empty() {
                 canvas.palette = palette_of(&canvas);
             }
             let base = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());

@@ -1670,7 +1670,8 @@ canvas too large for it fails with a reason; the probe confirms WebKit grows
 it that far and no further, under the app's CSP.
 
 **On disk** a canvas is a folder, `Name.canvas/`: `canvas.json` (size, preset,
-palette, layers) written last and in declared order, a full-size PNG a layer —
+palette, layers, and an animation's frames and tags) written last and in
+declared order, a full-size PNG a layer in each frame —
 indexed for a pixel layer of 256 colours or fewer — and `flat.png` for pixel
 canvases. The same pixels write the same bytes, so a layer nobody touched
 never shows in a diff. ⌘S writes on a worker from a snapshot that shares the
@@ -1844,8 +1845,53 @@ are one step of the person's undo, held until they save and kept to what is
 selected; the window is sent the layers and the tiles that changed, as
 undo sends them.
 
-**What comes next** (the plan's P8): pixel animation — frames and cels, a
-timeline, onion skin, sprite sheets — and Game's Aseprite import after it.
+**Frames** (P8). A canvas may be an animation: frames, each shown for its
+own time, and every layer's pixels in each frame — its cels. A cel is known
+by a number, as a layer is: the layer's id and 65 536 times its frame, so a
+layer's own id is its first frame and everything that addresses tiles by
+layer — the window's fetches, the hash on every answer, undo's patches —
+addresses cels unchanged. An op that draws names the cel it draws in; ops
+add a frame (clear, or a copy of one, sharing its tiles until drawn on),
+take one out, move one, set how long frames show, set the tags, and copy one
+cel over another. Tags are runs of frames with a name and a way to play —
+on, back, to the end and back — that become a game's animations; a copy of
+a tag's last frame put straight after it joins the tag. Frames are compared
+place by place, so a frame added or moved tells the window every tile now
+different at each place, and the window, which made the same op on its
+own copy, agrees. A still picture is what it was: its hash, its folder
+(format 1) and its ops are unchanged, and a canvas with frames is written
+as format 2, which an older Proton refuses rather than opening its first
+frame and saving the rest away. A later frame's layer file is
+`layers/<id>-<n>.png`, written only where it has pixels.
+
+The window shows one frame and draws in it. The timeline under the picture
+shows every frame small (`rr_thumb`), plays them — every frame, or a tag's,
+each for its time, round until stopped (`ui/raster-frames.js`, tested in
+node) — and adds, copies (⇧N), moves (drag) and takes out frames; `,` and
+`.` step through them, ↩ plays and stops. Onion skin (⇧O) lays the frames
+either side faintly under each layer — the frames before tinted red, after
+blue, fading with distance — in the composite only, never the picture: the
+eyedropper, an export and the core never see it. While frames changed here
+are on their way, the window keeps its own copy's frames rather than an
+older word from the core, which would put a copied frame's pixels away. The
+core is told the frame shown (`RasterShow`), which is what the agent draws
+in unless told another.
+
+Out, a frame is written as a PNG (`name-3.png`) or a PSD of that frame, and
+every frame as a sprite sheet — in a row, or as near a square as they make,
+larger by whole pixels if asked — with the JSON Aseprite writes beside one:
+each frame's place and time, the tags and their direction, the layers. Sent
+to a game, an animation's sheet and JSON go into `art/` beside the frame.
+In, an Aseprite file (`aseprite.rs`, read as its published format describes
+it: RGBA, grayscale or indexed pixels, raw, zlib-compressed or linked cels,
+layers in groups, tags, the palette in its new chunk or its old) comes in as
+a canvas of its frames, tags and palette; what Canvas cannot hold is said —
+a tilemap or reference layer left out, a group's opacity laid onto its
+layers, a blend mode Canvas lacks — and a cel's opacity is laid into its
+pixels' alpha, which draws the same. The reader is shared with Game, whose
+animation import (G9) comes next. The agent animates with `canvas_frames` —
+frames added, copied, taken out, moved and timed, and tags, counted from 1 —
+and draws, makes and exports in a frame by `frame`.
 
 ### Trace
 

@@ -20,7 +20,9 @@
 //!
 //! - [`fixed`]: rounding, square roots and hashing in whole numbers.
 //! - [`tile`]: pixels in 64 × 64 tiles, shared until changed; empty ones absent.
-//! - [`canvas`]: the document — its size, preset, palette and layers.
+//! - [`canvas`]: the document — its size, preset, palette and layers, and
+//!   for an animation its frames and tags; a layer's pixels in each frame
+//!   are its cels.
 //! - [`blend`]: the layers composited, mode by mode, as the W3C defines them.
 //! - [`op`]: every change, as a value: applied whole or not at all.
 //! - [`stroke`], [`fill`]: what a pencil, a shape or a bucket covers, as a
@@ -36,9 +38,13 @@
 //! - [`file`]: a canvas on disk, a folder of PNGs and a `canvas.json` (`io`).
 //! - [`psd`], [`psd_write`]: Photoshop's layered files, read and written
 //!   (`io`) — Canvas's import and export, and Game's importer's.
-//! - [`port`]: a canvas out as a PNG or a PSD, and a PNG or a PSD in as a
-//!   canvas or as layers (`io`).
+//! - [`port`]: a canvas out as a PNG, a PSD or a sprite sheet, and a PNG, a
+//!   PSD or an Aseprite file in as a canvas or as layers (`io`).
+//! - [`aseprite`]: Aseprite's files, read — Canvas's import, and Game's
+//!   animations (`io`).
 
+#[cfg(feature = "io")]
+pub mod aseprite;
 pub mod blend;
 pub mod brush;
 pub mod canvas;
@@ -63,7 +69,7 @@ pub mod text;
 pub mod tile;
 
 pub use brush::{Brush, Dabs};
-pub use canvas::{Blend, Canvas, Layer, LayerInfo, Preset, SELECTION};
+pub use canvas::{cel_id, cel_of, Blend, Canvas, Direction, Layer, LayerInfo, Preset, Tag, SELECTION};
 pub use filter::Filter;
 pub use gen::Generator;
 pub use select::{Area, Mode};

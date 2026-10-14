@@ -1374,23 +1374,37 @@ pub enum Command {
     RasterRedo,
     /// Write the canvas, on a worker.
     RasterSave,
-    /// The canvas written out beside its folder: flattened as a PNG, each
-    /// pixel `scale` pixels square, or layered as a Photoshop file.
+    /// The canvas written out beside its folder: a frame (`frame`, from 0;
+    /// the first if not said) flattened as a PNG, each pixel `scale` pixels
+    /// square, or layered as a Photoshop file; or every frame on a sprite
+    /// sheet, `columns` to a row (0 or none: as near a square as they make),
+    /// with the JSON that says where each is.
     RasterExport {
         format: crate::raster::RasterFormat,
         #[serde(default)]
         #[ts(optional)]
         scale: Option<u32>,
+        #[serde(default)]
+        #[ts(optional)]
+        frame: Option<u32>,
+        #[serde(default)]
+        #[ts(optional)]
+        columns: Option<u32>,
     },
-    /// The canvas into a game (`game`, its folder in the project): written to
-    /// its `art/` — layered, a `.psd` whose layers become planes, or flat, a
-    /// `.png` — and imported into its room when it is the game open.
+    /// The frame the window shows (from 0): what the agent draws on when it
+    /// is not told another.
+    RasterShow { frame: u32 },
+    /// The canvas into a game (`game`, its folder in the project): the frame
+    /// shown written to its `art/` — layered, a `.psd` whose layers become
+    /// planes, or flat, a `.png` — and imported into its room when it is the
+    /// game open; an animation's sprite sheet and its JSON written beside it.
     RasterSend {
         game: String,
         #[serde(default)]
         layers: bool,
     },
-    /// A picture brought in — a PNG or PSD in the project (`path`), or bytes
+    /// A picture brought in — a PNG, PSD or Aseprite file in the project
+    /// (`path`), or bytes
     /// the window handed over (`blob`, from `put_raster_blob` or a paste) — as
     /// layers over layer `above` on the canvas open, or, not `layer`, as a
     /// canvas of its own.

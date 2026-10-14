@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::canvas::{Canvas, Layer, Preset};
+use crate::canvas::{Canvas, Layer, Preset, Tag};
 use crate::op::{Applied, Op};
 use crate::tile::{Grid, Tile, TILE_BYTES};
 
@@ -20,7 +20,9 @@ pub struct Patch {
     /// The layer stack and the next layer id, when the layers themselves changed.
     pub layers: Option<(Vec<Layer>, u32)>,
     pub palette: Option<Vec<[u8; 4]>>,
-    /// Tiles as they were: layer, index, tile.
+    /// How long each frame was shown, and the tags, when either changed.
+    pub frames: Option<(Vec<u32>, Vec<Tag>)>,
+    /// Tiles as they were: cel, index, tile.
     pub tiles: Vec<(u32, u32, Option<Arc<Tile>>)>,
     /// The selection as it was, when it changed.
     pub selection: Option<Grid>,
@@ -37,6 +39,9 @@ impl Patch {
         }
         if self.palette.is_none() {
             self.palette = later.palette;
+        }
+        if self.frames.is_none() {
+            self.frames = later.frames;
         }
         if self.selection.is_none() {
             self.selection = later.selection;
@@ -171,7 +176,7 @@ fn cost(patch: &Patch, canvas: &Canvas) -> u64 {
     let mut bytes = 0;
     for (layer, index, tile) in &patch.tiles {
         if let Some(tile) = tile {
-            let shared = canvas.layer(*layer).and_then(|l| l.grid.tile(*index)).is_some_and(|now| Arc::ptr_eq(now, tile));
+            let shared = canvas.grid(*layer).and_then(|g| g.tile(*index)).is_some_and(|now| Arc::ptr_eq(now, tile));
             if !shared {
                 bytes += TILE_BYTES as u64;
             }
@@ -190,11 +195,16 @@ fn cost(patch: &Patch, canvas: &Canvas) -> u64 {
     if let Some((layers, _)) = &patch.layers {
         for layer in layers {
             let now = canvas.layer(layer.info.id);
-            for index in 0..layer.grid.cols * layer.grid.rows {
-                if let Some(tile) = layer.grid.tile(index) {
-                    let shared = now.and_then(|l| l.grid.tile(index)).is_some_and(|t| Arc::ptr_eq(t, tile));
-                    if !shared {
-                        bytes += TILE_BYTES as u64;
+            for (frame, grid) in layer.cels.iter().enumerate() {
+                // A frame moved is shared at another place; counted as
+                // held, the history lets go a little sooner than it must.
+                let then = now.and_then(|l| l.cels.get(frame));
+                for index in 0..grid.cols * grid.rows {
+                    if let Some(tile) = grid.tile(index) {
+                        let shared = then.and_then(|g| g.tile(index)).is_some_and(|t| Arc::ptr_eq(t, tile));
+                        if !shared {
+                            bytes += TILE_BYTES as u64;
+                        }
                     }
                 }
             }
