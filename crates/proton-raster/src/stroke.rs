@@ -9,9 +9,10 @@
 //! of an L when the next pixel comes, and the window's picture follows,
 //! exactly as the core's will be when it makes the whole stroke at once.
 //!
-//! The mask counts how many stamps cover each pixel rather than whether one
-//! does, so a pixel stamped by two places on the path and taken back by one
-//! stays covered.
+//! A pencil's mask counts how many stamps cover each pixel rather than
+//! whether one does, so a pixel stamped by two places on the path and taken
+//! back by one stays covered. A brush's (`brush.rs`) holds how much each
+//! pixel is covered instead, 0 to 65535.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -63,7 +64,28 @@ impl Mask {
     }
 
     pub fn covered(&self, index: u32, x: u32, y: u32) -> bool {
-        self.tiles.get(&index).is_some_and(|c| c[(y * TILE + x) as usize] > 0)
+        self.get(index, x, y) > 0
+    }
+
+    /// The number over pixel `x`, `y` of tile `index`.
+    pub fn get(&self, index: u32, x: u32, y: u32) -> u16 {
+        self.tiles.get(&index).map_or(0, |c| c[(y * TILE + x) as usize])
+    }
+
+    /// Tile `index`'s numbers, row by row, made if it has none: for a brush's
+    /// dab, which sets a run of them at a time.
+    pub fn tile_mut(&mut self, index: u32) -> &mut [u16] {
+        self.tiles.entry(index).or_insert_with(|| vec![0; (TILE * TILE) as usize])
+    }
+
+    /// Whether tile `index` has numbers at all.
+    pub fn has(&self, index: u32) -> bool {
+        self.tiles.contains_key(&index)
+    }
+
+    /// Tiles across.
+    pub fn cols(&self) -> u32 {
+        self.cols
     }
 
     /// Every tile it has ever stamped, in order.

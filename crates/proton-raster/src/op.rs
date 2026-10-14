@@ -12,6 +12,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::brush::{self, Brush, Dabs};
 use crate::canvas::{Blend, Canvas, Layer};
 use crate::fill;
 use crate::fixed::Hash;
@@ -90,6 +91,18 @@ pub enum Op {
         color: [u8; 4],
         #[serde(default)]
         pixel_perfect: bool,
+        points: Vec<i32>,
+    },
+    /// A brush drawn through `points`, as a stroke's: dabs a spacing apart,
+    /// sized and weighted by each point's pressure. Erasing, it takes away
+    /// what is there by as much as it would have covered.
+    #[serde(rename_all = "camelCase")]
+    Brush {
+        layer: u32,
+        #[serde(default)]
+        erase: bool,
+        brush: Brush,
+        color: [u8; 4],
         points: Vec<i32>,
     },
     /// A paint bucket at pixel `x`, `y`: what is like it, within
@@ -282,6 +295,31 @@ impl Canvas {
                 let mut stroke = Stroke::new(tip.clone(), *pixel_perfect, self.width, self.height);
                 stroke.add(points);
                 self.lay(*layer, &stroke.mask, *tool, *color, &mut patch, &mut applied)?;
+            }
+            Op::Brush { layer, erase, brush, color, points } => {
+                brush.check()?;
+                if points.len() % 3 != 0 || points.len() as u32 > 3 * POINTS {
+                    return Err(format!("a stroke is points of three numbers, at most {POINTS} of them"));
+                }
+                let mut dabs = Dabs::new(brush.clone(), self.width, self.height);
+                dabs.add(points);
+                let target = self.layer(*layer).ok_or_else(|| format!("there is no layer {layer}"))?;
+                if target.info.locked {
+                    return Err(format!("{} is locked", target.info.name));
+                }
+                let lock = target.info.alpha_lock;
+                let (width, height) = (self.width, self.height);
+                let target = self.layer_mut(*layer).expect("found above");
+                for index in dabs.mask.tiles() {
+                    let before = target.grid.tile(index).cloned();
+                    let after = brush::paint(&dabs.mask, index, before.as_ref(), None, *erase, *color, lock, width, height);
+                    if after != before {
+                        target.grid.put(index, after);
+                        patch.tiles.push((*layer, index, before));
+                        applied.touched.push((*layer, index));
+                        applied.changed = true;
+                    }
+                }
             }
             Op::Fill { layer, x, y, color, tolerance, contiguous, diagonal } => {
                 let target = self.layer(*layer).ok_or_else(|| format!("there is no layer {layer}"))?;

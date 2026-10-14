@@ -217,8 +217,12 @@ impl Raster {
     fn show(&mut self, root: &Path, dir: PathBuf, canvas: Canvas) {
         self.generations += 1;
         let name = dir.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        // `inside` gives the folder under the project's real path, which a
+        // root reached through a link (macOS's /var, say) does not begin.
+        let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let rel = dir.strip_prefix(root).or_else(|_| dir.strip_prefix(&real));
         self.open = Some(Open {
-            shown: dir.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| dir.display().to_string()),
+            shown: rel.map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| dir.display().to_string()),
             dir,
             name,
             history: History::new(canvas.preset),

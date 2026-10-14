@@ -6,7 +6,10 @@
  * engine's composite — `UNPACK_ROW_LENGTH` and the skips pick a rectangle out
  * of the whole without copying it — and drawn over a checkerboard where the
  * picture is clear. Pixels are sampled nearest at 100 % and above, so pixel
- * art stays pixels; a pixel canvas always is. */
+ * art stays pixels; a pixel canvas always is. A paint canvas seen smaller
+ * than itself is sampled from mipmaps, made again only once the picture is
+ * still — never a frame of a stroke — and until then from the picture
+ * itself. */
 
 const VERTEX = `#version 300 es
 in vec2 a_corner;
@@ -71,6 +74,10 @@ export function createRasterRender(canvas, hooks = {}) {
   /** @type {WebGLTexture | null} */
   let texture = null;
   let size = [0, 0];
+  /** How many sizes the texture has: 1, or a mipmap's whole chain. */
+  let levels = 1;
+  /** Whether the mipmaps are of an older picture. */
+  let stale = false;
   let lost = false;
   canvas.addEventListener("webglcontextlost", (e) => {
     e.preventDefault();
@@ -79,13 +86,16 @@ export function createRasterRender(canvas, hooks = {}) {
   });
 
   return {
-    /** A texture for a canvas of this size, clear. @param {number} w @param {number} h */
-    resize(w, h) {
+    /** A texture for a canvas of this size, clear; with mipmaps for one seen
+     *  small. @param {number} w @param {number} h @param {boolean} [mipmaps] */
+    resize(w, h, mipmaps = false) {
       if (lost) return;
       if (texture) gl.deleteTexture(texture);
       texture = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, Math.max(1, w), Math.max(1, h));
+      levels = mipmaps ? Math.floor(Math.log2(Math.max(1, w, h))) + 1 : 1;
+      stale = levels > 1;
+      gl.texStorage2D(gl.TEXTURE_2D, levels, gl.RGBA8, Math.max(1, w), Math.max(1, h));
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       size = [w, h];
@@ -106,10 +116,11 @@ export function createRasterRender(canvas, hooks = {}) {
       gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
       gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
       gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+      stale = levels > 1;
     },
     /** The picture where the view puts it, on the ground colour.
      *  @param {{zoom: number, x: number, y: number}} view @param {number} width @param {number} height
-     *  @param {number} ratio @param {{ground: number[], light: number[], dark: number[], pixel: boolean, grid?: boolean}} look */
+     *  @param {number} ratio @param {{ground: number[], light: number[], dark: number[], pixel: boolean, grid?: boolean, still?: boolean}} look */
     draw(view, width, height, ratio, look) {
       if (lost) return;
       const w = Math.round(width * ratio);
@@ -130,7 +141,13 @@ export function createRasterRender(canvas, hooks = {}) {
       gl.bindTexture(gl.TEXTURE_2D, texture);
       const nearest = look.pixel || view.zoom >= 1;
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      // Seen small and still: the mipmaps, made again if the picture changed.
+      const small = view.zoom < 1 && levels > 1;
+      if (small && stale && look.still) {
+        gl.generateMipmap(gl.TEXTURE_2D);
+        stale = false;
+      }
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, small && !stale ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
       gl.uniform1i(u.tex, 0);
       gl.uniform4f(u.rect, view.x, view.y, size[0] * view.zoom, size[1] * view.zoom);
       gl.uniform2f(u.stage, width, height);

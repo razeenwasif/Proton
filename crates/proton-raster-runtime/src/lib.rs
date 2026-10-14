@@ -16,14 +16,20 @@
 //! rr_put(layer, ptr, len) → 0 | -1 a read_raster payload: tiles of one layer
 //! rr_apply(ptr, len) → 0 | -1      an op, made here first (JSON); its hash kept
 //! rr_hash_lo(), rr_hash_hi()       the hash of the tiles the last op touched
-//! rr_dirty() → ptr                 tiles laid together again since the last call:
-//!                                  [count, (x, y, width, height)…] as u32s
+//! rr_dirty() → ptr                 what was laid together again since the last
+//!                                  call — whole tiles, or the parts of them a
+//!                                  brush changed: [count, (x, y, width,
+//!                                  height)…] as u32s
+//! rr_dirty_some(budget) → ptr      as rr_dirty, laying no more than `budget`
+//!                                  pixel-layers; the rest waits for the next
+//! rr_pending() → u32               how many parts wait
 //! rr_composite() → ptr             the layers laid together: premultiplied RGBA,
 //!                                  row by row, the canvas's size
 //! rr_pick(x, y) → u32              a pixel of that, straight RGBA, little-endian
 //! rr_layer_pixel(layer, x, y) → u32 a pixel of one layer
 //! rr_stroke_begin(ptr, len) → 0|-1 a pencil or eraser begun (JSON: layer, tool,
-//!                                  tip, color, pixelPerfect)
+//!                                  tip, color, pixelPerfect) — or a brush
+//!                                  (JSON: layer, tool, brush, color)
 //! rr_stroke_add(ptr, n) → 0|-1      n numbers: x, y (1/256 px), pressure, …
 //! rr_stroke_end() → ptr            the stroke as an op (JSON: length, then
 //!                                  bytes); its hash kept, as rr_apply's
@@ -42,18 +48,23 @@
 //! ```
 
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use std::collections::BTreeMap;
 
 use proton_raster::history::Patch;
-use proton_raster::stroke::paint;
-use proton_raster::tile::{Tile, TILE_BYTES};
-use proton_raster::{blend, Canvas, Grid, Layer, LayerInfo, Op, Preset, Stroke, Tip, Tool};
+use proton_raster::tile::{Tile, TILE, TILE_BYTES};
+use proton_raster::{blend, brush, stroke, Brush, Canvas, Dabs, Grid, Layer, LayerInfo, Op, Preset, Stroke, Tip, Tool};
 use serde::Deserialize;
 
 pub const ABI: u32 = 1;
+
+/// What a stroke being drawn covers: a pencil's pixels, or a brush's dabs.
+enum Marks {
+    Pencil(Stroke),
+    Brush(Dabs),
+}
 
 /// A stroke as it is drawn: the tiles as they were under it, and what it
 /// covers so far.
@@ -62,8 +73,46 @@ struct Live {
     tool: Tool,
     color: [u8; 4],
     lock: bool,
-    stroke: Stroke,
+    marks: Marks,
     bases: BTreeMap<u32, Option<Arc<Tile>>>,
+}
+
+impl Live {
+    /// Tile `index` as the stroke so far leaves it, from what was under it —
+    /// or, given the tile as it is and a part of it, only that part made
+    /// again, for a brush.
+    fn paint(&self, index: u32, base: Option<&Arc<Tile>>, part: Option<(&Option<Arc<Tile>>, [u32; 4])>, width: u32, height: u32) -> Option<Arc<Tile>> {
+        match &self.marks {
+            Marks::Pencil(s) => stroke::paint(&s.mask, index, base, self.tool, self.color, self.lock, width, height),
+            Marks::Brush(d) => brush::paint(&d.mask, index, base, part, self.tool == Tool::Eraser, self.color, self.lock, width, height),
+        }
+    }
+}
+
+/// What the layers under a stroke's layer lay together to, tile by tile,
+/// while the stroke is drawn. They do not change under it, so a frame lays
+/// together only the stroke's layer and those over it, from this: painting
+/// on the top layer of sixteen costs one layer a frame, not sixteen. Kept as
+/// laid together, at 16 bits a channel; at most [`BELOW_MOST`] tiles, the
+/// oldest let go first.
+struct Below {
+    /// The stroke's layer's place, from the bottom: the layers under it.
+    place: u32,
+    tiles: BTreeMap<u32, Vec<u16>>,
+    order: VecDeque<u32>,
+}
+
+/// 256 tiles of 64 × 64 at 16 bits a channel: 8 MB.
+const BELOW_MOST: usize = 256;
+
+/// A whole tile, as a part of it.
+const WHOLE: [u32; 4] = [0, 0, TILE, TILE];
+
+/// Part of tile `index` to lay together again, joined to any part already
+/// waiting.
+fn mark(dirty: &mut BTreeMap<u32, [u32; 4]>, index: u32, part: [u32; 4]) {
+    let r = dirty.entry(index).or_insert(part);
+    *r = [r[0].min(part[0]), r[1].min(part[1]), r[2].max(part[2]), r[3].max(part[3])];
 }
 
 #[derive(Default)]
@@ -72,14 +121,16 @@ struct Held {
     generation: u32,
     /// Premultiplied RGBA, the canvas's size.
     composite: Vec<u8>,
-    /// Tiles to lay together again.
-    dirty: BTreeSet<u32>,
+    /// Tiles to lay together again, and which part of each.
+    dirty: BTreeMap<u32, [u32; 4]>,
     /// The rectangles the last `rr_dirty` laid together, as u32s.
     rects: Vec<u32>,
     /// What `rr_info` last said: length, then JSON.
     info: Vec<u8>,
     /// A stroke being drawn.
     live: Option<Live>,
+    /// What is under it, laid together.
+    below: Option<Below>,
     /// What a preview changed, to put back.
     preview: Option<Patch>,
     /// The tiles the last op touched, as u32s: count, then layer and index.
@@ -165,10 +216,11 @@ pub fn open(bytes: &[u8]) -> Result<(), String> {
     canvas.next_id = canvas.layers.iter().map(|l| l.info.id).max().unwrap_or(0) + 1;
     HELD.with(|h| {
         let mut h = h.borrow_mut();
-        let all: BTreeSet<u32> = (0..tiles_of(&canvas)).collect();
         h.composite = vec![0; (o.width * o.height * 4) as usize];
-        h.dirty = all;
+        h.dirty = (0..tiles_of(&canvas)).map(|i| (i, WHOLE)).collect();
         h.generation = o.generation;
+        h.live = None;
+        h.below = None;
         h.canvas = Some(canvas);
     });
     Ok(())
@@ -203,6 +255,8 @@ pub fn meta(bytes: &[u8]) -> Result<(), String> {
         let held = &mut *h;
         let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
         let before = canvas.layers.clone();
+        // What is under a stroke may now be other layers, or seen otherwise.
+        held.below = None;
         let mut old = std::mem::take(&mut canvas.layers);
         canvas.layers = m
             .layers
@@ -218,7 +272,9 @@ pub fn meta(bytes: &[u8]) -> Result<(), String> {
         }
         // Laid together again only where what is seen changed: a layer
         // renamed changes nothing on the canvas.
-        held.dirty.extend(proton_raster::op::differ(&before, &canvas.layers).into_iter().map(|(_, i)| i));
+        for (_, index) in proton_raster::op::differ(&before, &canvas.layers) {
+            mark(&mut held.dirty, index, WHOLE);
+        }
         Ok(())
     })
 }
@@ -262,13 +318,16 @@ pub fn put(layer: u32, bytes: &[u8]) -> Result<(), String> {
             if index >= target.grid.cols * target.grid.rows {
                 continue;
             }
-            held.dirty.insert(index);
+            mark(&mut held.dirty, index, WHOLE);
+            if let Some(below) = held.below.as_mut() {
+                below.tiles.remove(&index);
+            }
             // Under a stroke being drawn, the tile fetched is what the stroke
             // is over: the picture is made again from it and the stroke.
             if let Some(live) = held.live.as_mut().filter(|l| l.layer == layer) {
                 if let Some(base) = live.bases.get_mut(&index) {
-                    *base = tile;
-                    let painted = paint(&live.stroke.mask, index, base.as_ref(), live.tool, live.color, live.lock, target.grid.width, target.grid.height);
+                    *base = tile.clone();
+                    let painted = live.paint(index, tile.as_ref(), None, target.grid.width, target.grid.height);
                     target.grid.put(index, painted);
                     continue;
                 }
@@ -296,8 +355,11 @@ pub fn apply(bytes: &[u8]) -> Result<u64, String> {
         let held = &mut *h;
         let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
         let (applied, _) = canvas.apply(&op)?;
+        held.below = None;
         held.hash = canvas.hash_touched(&applied.touched);
-        held.dirty.extend(applied.touched.iter().map(|(_, i)| *i));
+        for &(_, index) in &applied.touched {
+            mark(&mut held.dirty, index, WHOLE);
+        }
         held.touched = flat(&applied.touched);
         Ok(held.hash)
     })
@@ -323,26 +385,96 @@ pub extern "C" fn rr_hash_hi() -> u32 {
 
 /// Lay the dirty tiles together into the composite; their rectangles.
 pub fn dirty() -> Vec<u32> {
+    dirty_some(u64::MAX)
+}
+
+/// Lay together what is dirty, as much as `budget` allows — counted in
+/// pixels laid, one for each layer a pixel is laid through — and leave the
+/// rest for the next call; the rectangles laid. At least one part is always
+/// laid. A frame given a budget is never long, whatever the canvas: a stroke
+/// under fifteen layers has its ink catch up a frame later rather than drop
+/// one, and a large canvas opened shows tile by tile instead of all at once
+/// after a wait.
+pub fn dirty_some(budget: u64) -> Vec<u32> {
     HELD.with(|h| {
         let mut h = h.borrow_mut();
         let held = &mut *h;
         let Some(canvas) = held.canvas.as_ref() else { return vec![0] };
         let grid = Grid::new(canvas.width, canvas.height);
+        let layers = canvas.layers.len() as u32;
         let mut rects = vec![0u32];
-        for index in std::mem::take(&mut held.dirty) {
-            let (x, y, w, th) = grid.bounds(index);
-            let px = blend::premultiplied(&blend::tile(canvas, index));
-            for row in 0..th {
-                let from = Tile::at(0, row);
-                let to = (((y + row) * canvas.width + x) * 4) as usize;
+        let mut spent = 0u64;
+        while let Some((index, part)) = held.dirty.pop_first() {
+            let (x, y, tw, th) = grid.bounds(index);
+            let part = [part[0], part[1], part[2].min(tw), part[3].min(th)];
+            if part[0] >= part[2] || part[1] >= part[3] {
+                continue;
+            }
+            let (w, h) = (part[2] - part[0], part[3] - part[1]);
+            // What this part costs: its pixels through every layer with any
+            // there — or, under a stroke, through the stroke's layer and
+            // those over it, and the layers under it once for the whole tile.
+            let present = canvas.layers.iter().filter(|l| !l.info.hidden && l.grid.tile(index).is_some()).count() as u64;
+            let cost = match held.below.as_ref() {
+                Some(b) if b.tiles.contains_key(&index) => (w * h) as u64 * (layers - b.place) as u64,
+                Some(b) => (TILE * TILE) as u64 * b.place as u64 + (w * h) as u64 * (layers - b.place) as u64,
+                None => (w * h) as u64 * present.max(1),
+            };
+            if spent > 0 && spent.saturating_add(cost) > budget {
+                held.dirty.insert(index, part);
+                break;
+            }
+            spent += cost;
+            let acc = match held.below.as_mut() {
+                Some(below) => {
+                    if !below.tiles.contains_key(&index) {
+                        let under = blend::fold(canvas, index, WHOLE, 0, below.place, vec![0; (TILE * TILE * 4) as usize]);
+                        below.tiles.insert(index, under.into_iter().map(|v| v as u16).collect());
+                        below.order.push_back(index);
+                        while below.order.len() > BELOW_MOST {
+                            if let Some(gone) = below.order.pop_front() {
+                                below.tiles.remove(&gone);
+                            }
+                        }
+                    }
+                    let under = &below.tiles[&index];
+                    let mut acc = Vec::with_capacity((w * h * 4) as usize);
+                    for row in 0..h {
+                        let from = Tile::at(part[0], part[1] + row);
+                        acc.extend(under[from..from + (w * 4) as usize].iter().map(|&v| v as u64));
+                    }
+                    blend::fold(canvas, index, part, below.place, layers, acc)
+                }
+                None => blend::region(canvas, index, part),
+            };
+            let px = blend::premultiplied(&acc);
+            for row in 0..h {
+                let from = (row * w * 4) as usize;
+                let to = (((y + part[1] + row) * canvas.width + x + part[0]) * 4) as usize;
                 held.composite[to..to + (w * 4) as usize].copy_from_slice(&px[from..from + (w * 4) as usize]);
             }
-            rects.extend([x, y, w, th]);
+            rects.extend([x + part[0], y + part[1], w, h]);
             rects[0] += 1;
         }
         held.rects = rects.clone();
         rects
     })
+}
+
+/// How many parts of tiles wait to be laid together.
+pub fn pending() -> u32 {
+    HELD.with(|h| h.borrow().dirty.len() as u32)
+}
+
+#[no_mangle]
+pub extern "C" fn rr_dirty_some(budget: u32) -> *const u32 {
+    dirty_some(budget as u64);
+    HELD.with(|h| h.borrow().rects.as_ptr())
+}
+
+#[no_mangle]
+pub extern "C" fn rr_pending() -> u32 {
+    pending()
 }
 
 #[no_mangle]
@@ -437,13 +569,17 @@ pub extern "C" fn rr_touched() -> *const u32 {
     HELD.with(|h| h.borrow().touched.as_ptr())
 }
 
-/// A stroke begun, as the window starts one.
+/// A stroke begun, as the window starts one: a pencil's or an eraser's tip,
+/// or a brush — an eraser with a brush erases softly.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Begin {
     pub layer: u32,
     pub tool: Tool,
-    pub tip: Tip,
+    #[serde(default)]
+    pub tip: Option<Tip>,
+    #[serde(default)]
+    pub brush: Option<Brush>,
     pub color: [u8; 4],
     #[serde(default)]
     pub pixel_perfect: bool,
@@ -462,17 +598,22 @@ pub fn stroke_begin(bytes: &[u8]) -> Result<(), String> {
         if layer.info.locked {
             return Err(format!("{} is locked", layer.info.name));
         }
-        if !(1..=Tip::MOST).contains(&b.tip.size) {
-            return Err(format!("a tip is 1 to {} pixels across", Tip::MOST));
-        }
-        held.live = Some(Live {
-            layer: b.layer,
-            tool: b.tool,
-            color: b.color,
-            lock: layer.info.alpha_lock,
-            stroke: Stroke::new(b.tip, b.pixel_perfect, canvas.width, canvas.height),
-            bases: BTreeMap::new(),
-        });
+        let marks = match (b.brush, b.tip) {
+            (Some(brush), _) => {
+                brush.check()?;
+                Marks::Brush(Dabs::new(brush, canvas.width, canvas.height))
+            }
+            (None, Some(tip)) => {
+                if !(1..=Tip::MOST).contains(&tip.size) {
+                    return Err(format!("a tip is 1 to {} pixels across", Tip::MOST));
+                }
+                Marks::Pencil(Stroke::new(tip, b.pixel_perfect, canvas.width, canvas.height))
+            }
+            (None, None) => return Err("a stroke needs a tip or a brush".into()),
+        };
+        held.live = Some(Live { layer: b.layer, tool: b.tool, color: b.color, lock: layer.info.alpha_lock, marks, bases: BTreeMap::new() });
+        // Worth keeping only with layers under it.
+        held.below = canvas.place(b.layer).filter(|&place| place > 0).map(|place| Below { place, tiles: BTreeMap::new(), order: VecDeque::new() });
         Ok(())
     })
 }
@@ -492,24 +633,38 @@ pub fn stroke_add(points: &[i32]) -> Result<(), String> {
         let held = &mut *h;
         let live = held.live.as_mut().ok_or("no stroke is being drawn")?;
         let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
-        let changed = live.stroke.add(points);
+        // A pencil's tiles are made again whole — a corner taken back can be
+        // anywhere in one; a brush's only where its dabs fell.
+        let changed: Vec<(u32, Option<[u32; 4]>)> = match &mut live.marks {
+            Marks::Pencil(s) => s.add(points).into_iter().map(|i| (i, None)).collect(),
+            Marks::Brush(d) => {
+                d.add(points);
+                d.take_rects().into_iter().map(|(i, r)| (i, Some(r))).collect()
+            }
+        };
         let target = canvas.layer_mut(live.layer).ok_or("the stroke's layer has gone")?;
-        for index in changed {
-            let base = live.bases.entry(index).or_insert_with(|| target.grid.tile(index).cloned());
-            let painted = paint(&live.stroke.mask, index, base.as_ref(), live.tool, live.color, live.lock, target.grid.width, target.grid.height);
+        let (width, height) = (target.grid.width, target.grid.height);
+        for (index, part) in changed {
+            let base = live.bases.entry(index).or_insert_with(|| target.grid.tile(index).cloned()).clone();
+            let now = target.grid.tile(index).cloned();
+            let painted = live.paint(index, base.as_ref(), part.map(|p| (&now, p)), width, height);
             target.grid.put(index, painted);
-            held.dirty.insert(index);
+            mark(&mut held.dirty, index, part.unwrap_or(WHOLE));
         }
         Ok(())
     })
 }
 
+/// More of the stroke: `n` numbers at `ptr`.
+///
+/// # Safety
+/// `ptr` is where the window wrote `n` numbers, in memory `rr_alloc` gave.
 #[no_mangle]
-pub extern "C" fn rr_stroke_add(ptr: *const i32, n: usize) -> i32 {
+pub unsafe extern "C" fn rr_stroke_add(ptr: *const i32, n: usize) -> i32 {
     let points = if ptr.is_null() || n == 0 {
         &[][..]
     } else {
-        // SAFETY: the window passes `n` numbers it wrote where `rr_alloc` gave.
+        // SAFETY: as the caller promises.
         unsafe { std::slice::from_raw_parts(ptr, n) }
     };
     match stroke_add(points) {
@@ -525,6 +680,7 @@ pub fn stroke_end() -> Result<Op, String> {
         let mut h = h.borrow_mut();
         let held = &mut *h;
         let live = held.live.take().ok_or("no stroke is being drawn")?;
+        held.below = None;
         let canvas = held.canvas.as_ref().ok_or("no canvas is open")?;
         let grid = &canvas.layer(live.layer).ok_or("the stroke's layer has gone")?.grid;
         // Touched as the core will count it: a tile whose pixels differ from
@@ -532,7 +688,10 @@ pub fn stroke_end() -> Result<Op, String> {
         let touched: Vec<(u32, u32)> = live.bases.iter().filter(|(&i, base)| grid.tile(i).cloned() != **base).map(|(&i, _)| (live.layer, i)).collect();
         held.hash = canvas.hash_touched(&touched);
         held.touched = flat(&touched);
-        Ok(Op::Stroke { layer: live.layer, tool: live.tool, tip: live.stroke.tip.clone(), color: live.color, pixel_perfect: live.stroke.pixel_perfect, points: live.stroke.points })
+        Ok(match live.marks {
+            Marks::Pencil(s) => Op::Stroke { layer: live.layer, tool: live.tool, tip: s.tip, color: live.color, pixel_perfect: s.pixel_perfect, points: s.points },
+            Marks::Brush(d) => Op::Brush { layer: live.layer, erase: live.tool == Tool::Eraser, brush: d.brush, color: live.color, points: d.points },
+        })
     })
 }
 
@@ -559,10 +718,11 @@ pub fn stroke_cancel() {
         let mut h = h.borrow_mut();
         let held = &mut *h;
         let Some(live) = held.live.take() else { return };
+        held.below = None;
         let Some(target) = held.canvas.as_mut().and_then(|c| c.layer_mut(live.layer)) else { return };
         for (index, base) in live.bases {
             target.grid.put(index, base);
-            held.dirty.insert(index);
+            mark(&mut held.dirty, index, WHOLE);
         }
     })
 }
@@ -582,10 +742,13 @@ pub fn preview(bytes: &[u8]) -> Result<(), String> {
         let held = &mut *h;
         let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
         let (state, made) = (canvas.state, canvas.made);
+        held.below = None;
         let (applied, patch) = canvas.apply(&op)?;
         canvas.state = state;
         canvas.made = made;
-        held.dirty.extend(applied.touched.iter().map(|(_, i)| *i));
+        for &(_, index) in &applied.touched {
+            mark(&mut held.dirty, index, WHOLE);
+        }
         held.preview = Some(patch);
         Ok(())
     })
@@ -605,8 +768,11 @@ pub fn preview_clear() {
         let mut h = h.borrow_mut();
         let held = &mut *h;
         let (Some(patch), Some(canvas)) = (held.preview.take(), held.canvas.as_mut()) else { return };
+        held.below = None;
         let (_, applied) = canvas.restore(patch);
-        held.dirty.extend(applied.touched.iter().map(|(_, i)| *i));
+        for &(_, index) in &applied.touched {
+            mark(&mut held.dirty, index, WHOLE);
+        }
     })
 }
 

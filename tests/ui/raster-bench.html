@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Canvas brush bench</title>
+<!-- The Canvas brush bench (raster-bench-run.js) in a browser: served from
+     the repository's root, its result left in window.benchDone. -->
+<pre id="out"></pre>
+<script type="module">
+  import {bench} from './raster-bench-run.js';
+  const out = document.getElementById('out');
+  const lines = [];
+  window.benchDone = fetch('../../ui/raster-runtime.wasm')
+    .then((r) => r.arrayBuffer())
+    .then((bytes) => bench(bytes, () => performance.now(), (line) => { lines.push(line); out.textContent = lines.join('\n'); }))
+    .then((over) => ({over, lines}));
+</script>

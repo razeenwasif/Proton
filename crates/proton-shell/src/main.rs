@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod backdrop;
+mod pen;
 mod transport;
 mod window;
 
@@ -619,6 +620,8 @@ fn main() {
             println!("[shell] backdrop: {applied}");
             app.manage(Surface::new(applied));
             keep_drawing(&window);
+            // A tablet's pressure, which WebKit does not give the page.
+            pen::watch(&window);
 
             spawn_poll(app.handle().clone());
 

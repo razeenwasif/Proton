@@ -12,6 +12,21 @@
 
 const ABI = 1;
 
+/** Pixels laid through layers in a frame, to begin with: about two
+ *  milliseconds of the engine's work. */
+export const FRAME_BUDGET = 400_000;
+/** The most a frame is given: about five milliseconds — inside a 120 Hz
+ *  frame, with room for the rest of it. */
+const FRAME_MOST = 900_000;
+
+/** The next frame's budget, from this one's and whether work was left over:
+ *  more while the ink falls behind the pen, back down as it catches up — so a stroke under many layers keeps up at the cost of a longer
+ *  frame, and a light one keeps its frames short.
+ *  @param {number} budget @param {boolean} behind */
+export function nextBudget(budget, behind) {
+  return behind ? Math.min(FRAME_MOST, Math.round(budget * 1.3)) : Math.max(FRAME_BUDGET, Math.round(budget / 1.15));
+}
+
 /** The module, compiled once a window. @type {Promise<WebAssembly.Module> | null} */
 let compiled = null;
 
@@ -82,7 +97,10 @@ export async function createRasterRuntime() {
       const words = new Uint32Array(rr.memory.buffer, at + 4, count * 2);
       return Array.from({ length: count }, (_, i) => /** @type {[number, number]} */ ([words[2 * i], words[2 * i + 1]]));
     },
-    /** A pencil or eraser begun. @param {{layer: number, tool: string, tip: {size: number, round: boolean, mirror: (number | null)[]}, color: number[], pixelPerfect: boolean}} stroke */
+    /** A pencil or eraser begun with a tip, or a brush (an eraser with a
+     *  brush erases softly).
+     *  @param {{layer: number, tool: string, color: number[], tip?: {size: number, round: boolean, mirror: (number | null)[]}, pixelPerfect?: boolean,
+     *           brush?: import('./bindings/RasterBrush').RasterBrush}} stroke */
     strokeBegin(stroke) {
       if (pass(rr.rr_stroke_begin, text(stroke)) !== 0) throw new Error(why());
     },
@@ -117,11 +135,18 @@ export async function createRasterRuntime() {
     clearPreview() {
       rr.rr_preview_clear();
     },
-    /** Tiles laid together again since last asked: their rectangles, as x, y, w, h. */
-    dirty() {
-      const at = rr.rr_dirty();
+    /** Tiles laid together again since last asked: their rectangles, as x,
+     *  y, w, h. Given a budget — pixels laid through layers — no more than
+     *  that, the rest left for the next call (`pending`).
+     *  @param {number} [budget] */
+    dirty(budget) {
+      const at = budget === undefined ? rr.rr_dirty() : rr.rr_dirty_some(Math.min(budget, 0xffffffff) >>> 0);
       const count = new Uint32Array(rr.memory.buffer, at, 1)[0];
       return Array.from(new Uint32Array(rr.memory.buffer, at + 4, count * 4));
+    },
+    /** How many parts of tiles wait to be laid together. */
+    pending() {
+      return rr.rr_pending() >>> 0;
     },
     /** The layers laid together: premultiplied RGBA, row by row. A view —
      *  read it before the next call. */

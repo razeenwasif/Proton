@@ -243,6 +243,79 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
     press('G'); await settle();
     assert($('[data-raster-grid]').getAttribute('aria-pressed') === 'true', 'G did not show the grid');
     press('G'); await settle();
+  });
+
+  /** A stroke drawn as a tablet's pen draws it in the app: the shell tells of
+   *  the pressure (`__protonPen`) just before each of WebKit's mouse events.
+   *  @param {number[][]} points x, y, pressure 0 to 1 @param {string} [pointerType] */
+  const penDrag = async (points, pointerType = 'mouse') => {
+    const stage = $('[data-raster-stage]');
+    const fire = (/** @type {string} */ type, /** @type {number[]} */ p) => {
+      const [x, y] = probe().at(p[0], p[1]);
+      if (pointerType === 'mouse' && type !== 'pointerup') win.__protonPen('d', p[2]);
+      stage.dispatchEvent(new win.PointerEvent(type, {clientX: x, clientY: y, pointerId: 7, pointerType, pressure: p[2], button: 0, buttons: 1, bubbles: true, cancelable: true}));
+    };
+    fire('pointerdown', points[0]);
+    for (const p of points.slice(1)) {
+      fire('pointermove', p);
+      await frame();
+    }
+    if (pointerType === 'mouse') win.__protonPen('u', 0);
+    fire('pointerup', points[points.length - 1]);
+    await frame();
+  };
+
+  await test('A brush takes its size from the pen\'s pressure — the shell\'s word of a tablet, or a browser\'s pen — a mouse presses fully, and the eraser end erases', async () => {
+    win.localStorage.removeItem('proton.canvas.brushes');
+    // n is the brush on a pixel canvas; the Ink brush's size is nearly all pressure.
+    press('n'); await settle();
+    assert($('[data-raster-tool="brush"]').getAttribute('aria-pressed') === 'true' && ws().querySelector('.raster-tool-head').textContent === 'Brush', 'n did not take the brush');
+    const preset = /** @type {HTMLSelectElement} */ (ws().querySelector('[data-raster-option="brush.preset"]'));
+    preset.value = 'ink';
+    preset.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(/** @type {HTMLInputElement} */ (ws().querySelector('[data-raster-option="brush.size"]')).value === '6', 'the Ink brush was not chosen');
+    assert(JSON.parse(win.localStorage.getItem('proton.canvas.brushes') ?? '{}').brush?.size === 6, 'the brush chosen was not kept');
+    const input = /** @type {HTMLInputElement} */ ($('[data-raster-color]'));
+    input.value = '#00ff00';
+    input.dispatchEvent(new win.Event('input', {bubbles: true}));
+    // Light at the left, hard at the right.
+    let before = win.commands.length;
+    const fetched = reads();
+    await penDrag(Array.from({length: 13}, (_, i) => [16 + i * 2, 50, 0.08 + i * 0.075]));
+    let edit = await answer(before);
+    const pressures = edit.op.points.filter((/** @type {number} */ _, /** @type {number} */ i) => i % 3 === 2);
+    assert(edit.op.op === 'brush' && !edit.op.erase && edit.op.brush.size === 6 && pressures[0] < 8000 && pressures.at(-1) > 60000, `the brush stroke sent was ${JSON.stringify(edit.op).slice(0, 240)}`);
+    const green = (/** @type {number} */ x, /** @type {number} */ y) => {
+      const c = probe().pick(x, y);
+      return c[1] > 120 && c[2] < 150;
+    };
+    const across = (/** @type {number} */ x) => Array.from({length: 20}, (_, i) => 40 + i).filter((y) => green(x, y)).length;
+    assert(across(18) <= 2 && across(40) >= 4, `pressure did not size the brush: ${across(18)} px at the light end, ${across(40)} at the hard end`);
+    assert(reads() === fetched && JSON.stringify(probe().sync()) === '{"inflight":[],"stale":[]}', `a brush stroke the core agreed with was fetched again: ${JSON.stringify(probe().sync())}`);
+    // A mouse, the shell saying nothing: full pressure.
+    before = win.commands.length;
+    await drag([[16, 70], [30, 70]]);
+    edit = await answer(before);
+    assert(edit.op.op === 'brush' && edit.op.points.every((/** @type {number} */ v, /** @type {number} */ i) => i % 3 !== 2 || v === 65535), 'a mouse did not press fully');
+    // A browser that knows the pen gives its pressure on the event.
+    before = win.commands.length;
+    await penDrag([[60, 70, 0.5], [70, 70, 0.5]], 'pen');
+    edit = await answer(before);
+    assert(edit.op.points[2] === 32768, `a browser pen's pressure was ${edit.op.points[2]}`);
+    // The eraser end near the tablet erases, whatever the tool — softly, as
+    // a brush, while the brush is the tool; a pixel at a time with the pencil.
+    win.__protonPen('e', 0);
+    before = win.commands.length;
+    await penDrag([[20, 70, 1], [26, 70, 1]]);
+    edit = await answer(before);
+    assert(edit.op.op === 'brush' && edit.op.erase === true, `the eraser end sent ${JSON.stringify(edit.op).slice(0, 120)}`);
+    assert(probe().pick(22, 70)[3] < 255, 'the eraser end did not erase');
+    press('b');
+    before = win.commands.length;
+    await penDrag([[40, 76, 1], [44, 76, 1]]);
+    edit = await answer(before);
+    assert(edit.op.op === 'stroke' && edit.op.tool === 'eraser', `the eraser end with the pencil sent ${JSON.stringify(edit.op).slice(0, 120)}`);
+    win.__protonPen('a', 0);
     win.rasterRead = undefined;
     await win.pushEvents([{type: 'rasterCanvas', canvas: null}]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();

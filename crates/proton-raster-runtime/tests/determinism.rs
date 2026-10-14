@@ -3,7 +3,7 @@
 //! same composite. This writes the fixture the node test runs through
 //! `ui/raster-runtime.wasm` (`PROTON_BLESS=1`) and otherwise checks it.
 
-use proton_raster::{Blend, Op, ShapeKind, Tip, Tool};
+use proton_raster::{Blend, Brush, Op, ShapeKind, Tip, Tool};
 use serde_json::{json, Value};
 
 fn ops() -> Vec<Op> {
@@ -33,6 +33,12 @@ fn ops() -> Vec<Op> {
     out.push(Op::Shape { layer: 2, shape: ShapeKind::Rect, from: [60, 40], to: [80, 55], filled: true, tip: tip(1, false, [None, None]), color: [255, 128, 0, 200] });
     out.push(Op::Shape { layer: 2, shape: ShapeKind::Ellipse, from: [10, 30], to: [45, 60], filled: false, tip: tip(1, false, [Some(100), None]), color: [255, 255, 255, 255] });
     out.push(Op::ReplaceColor { from: [40, 60, 90, 255], to: [41, 61, 91, 255], layer: None, swatch: None });
+    // Brushes: hard and soft, pressure on size, flow and opacity, an eraser.
+    let brush = |size, hardness, flow, opacity, pressure| Brush { size, hardness, spacing: 9, flow, opacity, size_pressure: pressure, flow_pressure: pressure / 2, opacity_pressure: pressure / 3 };
+    out.push(Op::Brush { layer: 1, erase: false, brush: brush(14, 90, 255, 255, 80), color: [240, 30, 90, 255], points: zigzag(4, 20, 30, 3) });
+    out.push(Op::Brush { layer: 2, erase: false, brush: brush(40, 0, 50, 200, 60), color: [30, 200, 240, 220], points: zigzag(10, 40, 12, 8) });
+    out.push(Op::Brush { layer: 1, erase: true, brush: brush(22, 40, 160, 255, 30), color: [0, 0, 0, 255], points: zigzag(50, 5, 20, 2) });
+    out.push(Op::Brush { layer: 6, erase: false, brush: brush(3, 100, 255, 255, 100), color: [255, 255, 255, 255], points: zigzag(60, 50, 25, 1) });
     out
 }
 
@@ -40,6 +46,23 @@ fn ops() -> Vec<Op> {
 /// a fraction of a pixel off each time, at a pressure that rises.
 fn zigzag(x: i32, y: i32, n: i32, dx: i32) -> Vec<i32> {
     (0..n).flat_map(|i| [(x + i * dx) * 256 + (i * 37) % 256, (y + if i % 2 == 0 { 0 } else { 3 + i % 4 }) * 256 + (i * 91) % 256, (i * 1200).min(65535)]).collect()
+}
+
+/// The layers of a canvas laid together as the window's composite is: every
+/// tile, premultiplied.
+fn composite_of(c: &proton_raster::Canvas) -> Vec<u8> {
+    let grid = proton_raster::Grid::new(c.width, c.height);
+    let mut out = vec![0u8; (c.width * c.height * 4) as usize];
+    for index in 0..grid.cols * grid.rows {
+        let (x, y, w, h) = grid.bounds(index);
+        let px = proton_raster::blend::premultiplied(&proton_raster::blend::tile(c, index));
+        for row in 0..h {
+            let from = (row * proton_raster::TILE * 4) as usize;
+            let to = (((y + row) * c.width + x) * 4) as usize;
+            out[to..to + (w * 4) as usize].copy_from_slice(&px[from..from + (w * 4) as usize]);
+        }
+    }
+    out
 }
 
 fn hex(h: u64) -> String {
@@ -99,12 +122,27 @@ fn a_stroke_drawn_in_pieces_is_the_stroke_made_whole() {
         // Something under it, so the eraser and alpha-lock have work.
         let ground = Op::FillRect { layer: 1, rect: [0, 0, w as i32 / 2, h as i32], color: [9, 99, 199, 200] };
         let tool = if round % 3 == 0 { Tool::Eraser } else { Tool::Pencil };
+        // Every other round a brush, soft or hard, its size and strength on
+        // the pressure.
+        let brush = (round % 2 == 1).then(|| Brush {
+            size: 1 + rng.next() % 60,
+            hardness: (rng.next() % 101) as u8,
+            spacing: 1 + (rng.next() % 40) as u8,
+            flow: 1 + (rng.next() % 255) as u8,
+            opacity: 1 + (rng.next() % 255) as u8,
+            size_pressure: (rng.next() % 101) as u8,
+            flow_pressure: (rng.next() % 101) as u8,
+            opacity_pressure: (rng.next() % 101) as u8,
+        });
         let tip = Tip { size: 1 + rng.next() % 6, round: rng.next() % 2 == 0, mirror: [(rng.next() % 2 == 0).then_some(w as i32), (rng.next() % 3 == 0).then_some(h as i32 - 1)] };
         let perfect = rng.next() % 2 == 0;
         let n = 1 + rng.next() % 60;
         let points: Vec<i32> = (0..n).flat_map(|_| [(rng.next() % (w * 256 + 2000)) as i32 - 1000, (rng.next() % (h * 256 + 2000)) as i32 - 1000, (rng.next() % 65536) as i32]).collect();
         let color = [(rng.next() % 256) as u8, 30, 200, 128 + (rng.next() % 128) as u8];
-        let whole = Op::Stroke { layer: 1, tool, tip: tip.clone(), color, pixel_perfect: perfect, points: points.clone() };
+        let whole = match &brush {
+            Some(b) => Op::Brush { layer: 1, erase: tool == Tool::Eraser, brush: b.clone(), color, points: points.clone() },
+            None => Op::Stroke { layer: 1, tool, tip: tip.clone(), color, pixel_perfect: perfect, points: points.clone() },
+        };
 
         // Made whole, natively.
         let mut core = proton_raster::Canvas::new(w, h, proton_raster::Preset::Paint).unwrap();
@@ -116,18 +154,27 @@ fn a_stroke_drawn_in_pieces_is_the_stroke_made_whole() {
         // Drawn in pieces of any size, as the window draws it.
         proton_raster_runtime::open(opening.to_string().as_bytes()).unwrap();
         proton_raster_runtime::apply(serde_json::to_string(&ground).unwrap().as_bytes()).unwrap();
-        let begin = serde_json::json!({"layer": 1, "tool": tool, "tip": tip, "color": color, "pixelPerfect": perfect});
+        let begin = match &brush {
+            Some(b) => serde_json::json!({"layer": 1, "tool": tool, "brush": b, "color": color}),
+            None => serde_json::json!({"layer": 1, "tool": tool, "tip": tip, "color": color, "pixelPerfect": perfect}),
+        };
         proton_raster_runtime::stroke_begin(begin.to_string().as_bytes()).unwrap();
         let mut at = 0;
         while at < points.len() {
             let take = 3 * (1 + rng.next() as usize % 7);
             let end = (at + take).min(points.len());
             proton_raster_runtime::stroke_add(&points[at..end]).unwrap();
+            // A frame: what changed laid together, as the window does.
+            proton_raster_runtime::dirty();
             at = end;
         }
         let op = proton_raster_runtime::stroke_end().unwrap();
         assert_eq!(op, whole, "round {round}: the op given back is not the stroke drawn");
         assert_eq!(proton_raster_runtime::last_hash(), want, "round {round}: the stroke drawn in pieces touched different pixels");
         assert_eq!(proton_raster_runtime::canvas_hash(), core.hash(), "round {round}: the canvas drawn in pieces differs from the one made whole");
+        // And what the window shows, laid together a part at a time, is the
+        // whole canvas laid together at once.
+        proton_raster_runtime::dirty();
+        assert!(proton_raster_runtime::composite() == composite_of(&core), "round {round}: the picture laid together in parts differs");
     }
 }

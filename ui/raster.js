@@ -14,14 +14,17 @@
  * (`raster-sync.js` keeps the rules). What the core changes itself (undo,
  * redo, the agent) arrives as the tiles it changed, fetched the same way.
  *
- * A pencil is drawn as the pen moves: its points go to the copy a frame at a
- * time, and the finished stroke — every point, as the copy saw them — is the
- * edit sent. A shape is shown as it is dragged and sent when let go; a fill
- * and a colour picked are a click. */
+ * A pencil or a brush is drawn as the pen moves: its points go to the copy a
+ * frame at a time, and the finished stroke — every point, as the copy saw
+ * them — is the edit sent. A brush's points carry the pen's pressure, from a
+ * browser's pen or, in the app, from the shell's word of a tablet
+ * (`raster-input.js`). A shape is shown as it is dragged and sent when let
+ * go; a fill and a colour picked are a click. */
 
 import { escapeHtml as esc } from "./html.js";
 import { readRaster } from "./bridge.js";
-import { createRasterRuntime, keepTiles } from "./raster-runtime.js";
+import { createPen, createStabiliser, curved } from "./raster-input.js";
+import { createRasterRuntime, FRAME_BUDGET, keepTiles, nextBudget } from "./raster-runtime.js";
 import { createRasterRender } from "./raster-render.js";
 import { createSync } from "./raster-sync.js";
 import { fit, q8, toCanvas, toStage, zoomAt } from "./raster-view.js";
@@ -31,6 +34,8 @@ import { fit, q8, toCanvas, toStage, zoomAt } from "./raster-view.js";
 /** @typedef {import('./bindings/RasterLayer').RasterLayer} Layer */
 /** @typedef {import('./bindings/RasterOp').RasterOp} Op */
 /** @typedef {import('./bindings/RasterBlend').RasterBlend} Blend */
+/** @typedef {import('./bindings/RasterBrush').RasterBrush} Brush */
+/** @typedef {import('./raster-input.js').Curve} Curve */
 
 const BLENDS = /** @type {[Blend, string][]} */ ([
   ["normal", "Normal"], ["multiply", "Multiply"], ["screen", "Screen"], ["overlay", "Overlay"],
@@ -46,14 +51,45 @@ const SIZES = {
 };
 
 const KEYS = /** @type {[string, string][]} */ ([
-  ["b e g i", "pencil, eraser, fill, pick a colour"], ["l r o", "line, rectangle, ellipse"], ["[ ]", "a smaller, a larger tip"],
+  ["b", "brush on a paint canvas, pencil on a pixel one"], ["n", "the other of the two"], ["e g i", "eraser, fill, pick a colour"],
+  ["l r o", "line, rectangle, ellipse"], ["[ ]", "a smaller, a larger tip or brush"], ["the pen's eraser end", "erases while it is near"],
   ["p", "pixel-perfect"], ["m ⇧M", "mirror across, down"], ["⇧G", "the pixel grid"], ["⌥ click", "pick a colour"],
   ["⎋", "take back the stroke being drawn"], ["⌘S", "save the canvas"], ["⌘Z ⇧⌘Z", "undo, redo"], ["f", "the whole canvas"], ["1", "100 %"],
   ["two fingers", "move over the canvas"], ["pinch ⌘ wheel", "zoom"], ["␣ drag", "move over the canvas"], ["?", "these keys"],
 ]);
 
-/** The tools, by the key that takes each. */
-const TOOL_KEYS = /** @type {Record<string, string>} */ ({ b: "pencil", e: "eraser", g: "fill", i: "pick", l: "line", r: "rect", o: "ellipse" });
+/** The tools, by the key that takes each: b is the brush on a paint canvas
+ *  and the pencil on a pixel one. @param {string | undefined} preset */
+const toolKeys = (preset) => /** @type {Record<string, string>} */ ({
+  ...(preset === "paint" ? { b: "brush", n: "pencil" } : { b: "pencil", n: "brush" }),
+  e: "eraser", g: "fill", i: "pick", l: "line", r: "rect", o: "ellipse",
+});
+
+/** Brushes to start from: a round one whose size follows the pen, an inking
+ *  pen, a soft airbrush whose flow does, and a marker that builds up to its
+ *  opacity and no further. */
+const BRUSHES = /** @type {Record<string, {name: string, brush: Brush}>} */ ({
+  round: { name: "Round", brush: { size: 16, hardness: 85, spacing: 8, flow: 255, opacity: 255, sizePressure: 60, flowPressure: 0, opacityPressure: 0 } },
+  ink: { name: "Ink", brush: { size: 6, hardness: 100, spacing: 4, flow: 255, opacity: 255, sizePressure: 90, flowPressure: 0, opacityPressure: 0 } },
+  soft: { name: "Soft", brush: { size: 80, hardness: 0, spacing: 10, flow: 40, opacity: 255, sizePressure: 0, flowPressure: 80, opacityPressure: 0 } },
+  marker: { name: "Marker", brush: { size: 24, hardness: 70, spacing: 6, flow: 255, opacity: 160, sizePressure: 20, flowPressure: 0, opacityPressure: 60 } },
+});
+
+/** Where a person's brushes are kept between launches: in this window only. */
+const BRUSHES_KEPT = "proton.canvas.brushes";
+
+/** A brush with every number in its range, from whatever was kept.
+ *  @param {any} b @param {Brush} fallback @returns {Brush} */
+function brushOf(b, fallback) {
+  const n = (/** @type {string} */ key, /** @type {number} */ lo, /** @type {number} */ hi) => {
+    const v = Math.round(Number(b?.[key]));
+    return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : /** @type {any} */ (fallback)[key];
+  };
+  return {
+    size: n("size", 1, 1000), hardness: n("hardness", 0, 100), spacing: n("spacing", 1, 200), flow: n("flow", 1, 255), opacity: n("opacity", 1, 255),
+    sizePressure: n("sizePressure", 0, 100), flowPressure: n("flowPressure", 0, 100), opacityPressure: n("opacityPressure", 0, 100),
+  };
+}
 
 /** Ops that change the layers themselves, not only their pixels. @param {Op} op */
 const changesLayers = (op) => ["addLayer", "removeLayer", "moveLayer", "setLayer", "setPalette"].includes(op.op) || (op.op === "replaceColor" && op.swatch !== undefined && op.swatch !== null);
@@ -89,10 +125,38 @@ export function createRaster(host) {
   let pixelPerfect = true;
   let mirror = [false, false];
   let fillOptions = { tolerance: 0, contiguous: true, diagonal: false };
+  /** The brush, the paint eraser's own, the stabiliser's string (0 to 100)
+   *  and the pressure curve: a person's, kept between launches. */
+  let brushes = (() => {
+    /** @type {{brush: Brush, eraser: Brush, stabiliser: number, curve: Curve}} */
+    const start = { brush: BRUSHES.round.brush, eraser: { ...BRUSHES.round.brush, size: 40, hardness: 60, sizePressure: 40 }, stabiliser: 0, curve: "linear" };
+    try {
+      const kept = JSON.parse(localStorage.getItem(BRUSHES_KEPT) ?? "null");
+      if (!kept) return start;
+      const curve = /** @type {Curve} */ (["soft", "linear", "firm"].includes(kept.curve) ? kept.curve : "linear");
+      return { brush: brushOf(kept.brush, start.brush), eraser: brushOf(kept.eraser, start.eraser), stabiliser: Math.min(100, Math.max(0, Math.round(Number(kept.stabiliser)) || 0)), curve };
+    } catch {
+      return start;
+    }
+  })();
+  const keepBrushes = () => {
+    try {
+      localStorage.setItem(BRUSHES_KEPT, JSON.stringify(brushes));
+    } catch {
+      // Kept only for convenience: a window that cannot keep it starts afresh.
+    }
+  };
+  /** The pen: how hard it presses, from the shell's word of a tablet. */
+  const stylus = createPen();
+  /** @type {any} */ (host.root.defaultView ?? window).__protonPen = (/** @type {string} */ what, /** @type {number} */ p) => stylus.native(what, p);
+  /** How much laying together a frame may do; more while it falls behind. */
+  let budget = FRAME_BUDGET;
   let filled = false;
   let grid = false;
   /** The pixel under the pointer, for the cursor. @type {[number, number] | null} */
   let hover = null;
+  /** The point under the pointer, for a brush's cursor. @type {[number, number] | null} */
+  let hoverAt = null;
   let asking = false;
   /** How the canvas is seen; refitted until the person moves it.
    *  @type {{zoom: number, x: number, y: number, moved: boolean} | null} */
@@ -390,12 +454,14 @@ export function createRaster(host) {
         ? number("tolerance", fillOptions.tolerance, 0, 255, "Tolerance") + check("contiguous", fillOptions.contiguous, "Only what touches it") + check("diagonal", fillOptions.diagonal, "Across corners too")
         : tool === "pick"
           ? `<p class="raster-faint">A click takes the colour there, every layer laid together. ⌥ with any tool does too.</p>`
+          : soft()
+            ? brushFields(number)
           : number("size", tipSize, 1, 64, "Size") + check("round", round, "Round") +
             (tool === "pencil" ? check("pixelPerfect", pixelPerfect, "Pixel-perfect — no corners on steps") : "") +
             (tool === "rect" || tool === "ellipse" ? check("filled", filled, "Filled") : "") +
             check("mirrorX", mirror[0], "Mirror across the middle") + check("mirrorY", mirror[1], "Mirror down the middle");
     box.innerHTML =
-      `<h5 class="raster-tool-head">${esc({ pencil: "Pencil", eraser: "Eraser", fill: "Fill", pick: "Pick a colour", line: "Line", rect: "Rectangle", ellipse: "Ellipse" }[tool] ?? tool)}</h5>` +
+      `<h5 class="raster-tool-head">${esc({ pencil: "Pencil", brush: "Brush", eraser: "Eraser", fill: "Fill", pick: "Pick a colour", line: "Line", rect: "Rectangle", ellipse: "Ellipse" }[tool] ?? tool)}</h5>` +
       `<div class="raster-fields" data-raster-options>${options}</div>` +
       `<h5 class="raster-layer-head">Layer</h5>` +
       `<header class="raster-insp-head"><h4>${esc(l.name)}</h4></header>` +
@@ -408,11 +474,57 @@ export function createRaster(host) {
       `</div>`;
   }
 
+  /** Whether the tool lays dabs — the brush, and the eraser on a paint
+   *  canvas — rather than pixels. */
+  function soft() {
+    return tool === "brush" || (tool === "eraser" && view?.preset === "paint");
+  }
+
+  /** The brush the tool uses: the brush's, or the paint eraser's own. */
+  const brushFor = () => (tool === "eraser" ? "eraser" : "brush");
+
+  /** The brush's fields in the inspector.
+   *  @param {(name: string, value: number, min: number, max: number, label: string) => string} number */
+  function brushFields(number) {
+    const b = brushes[brushFor()];
+    const same = (/** @type {Brush} */ x) => /** @type {(keyof Brush)[]} */ (Object.keys(x)).every((k) => x[k] === b[k]);
+    const preset = Object.entries(BRUSHES).find(([, p]) => same(p.brush))?.[0] ?? "";
+    const pct = (/** @type {number} */ v) => `${Math.round((v / 255) * 100)} %`;
+    const range = (/** @type {string} */ name, /** @type {number} */ value, /** @type {number} */ min, /** @type {number} */ max, /** @type {string} */ label, /** @type {string} */ shown) =>
+      `<label class="raster-field"><span>${label}</span><input type="range" min="${min}" max="${max}" value="${value}" data-raster-option="${name}"><small>${shown}</small></label>`;
+    return (
+      `<label class="raster-field"><span>Brush</span><select data-raster-option="brush.preset"><option value=""${preset ? "" : " selected"}>Your own</option>` +
+      Object.entries(BRUSHES).map(([k, p]) => `<option value="${k}"${k === preset ? " selected" : ""}>${p.name}</option>`).join("") +
+      `</select></label>` +
+      number("brush.size", b.size, 1, 1000, "Size") +
+      range("brush.hardness", b.hardness, 0, 100, "Hardness", `${b.hardness} %`) +
+      range("brush.spacing", b.spacing, 1, 200, "Spacing", `${b.spacing} %`) +
+      range("brush.flow", b.flow, 1, 255, "Flow", pct(b.flow)) +
+      range("brush.opacity", b.opacity, 1, 255, "Opacity", pct(b.opacity)) +
+      `<h6 class="raster-sub">From the pen's pressure</h6>` +
+      range("brush.sizePressure", b.sizePressure, 0, 100, "Size", `${b.sizePressure} %`) +
+      range("brush.flowPressure", b.flowPressure, 0, 100, "Flow", `${b.flowPressure} %`) +
+      range("brush.opacityPressure", b.opacityPressure, 0, 100, "Opacity", `${b.opacityPressure} %`) +
+      `<label class="raster-field"><span>Curve</span><select data-raster-option="curve">` +
+      [["soft", "Soft — a light touch goes far"], ["linear", "Even"], ["firm", "Firm — press for more"]].map(([v, name]) => `<option value="${v}"${v === brushes.curve ? " selected" : ""}>${name}</option>`).join("") +
+      `</select></label>` +
+      range("stabiliser", brushes.stabiliser, 0, 100, "Stabiliser", `${brushes.stabiliser}`)
+    );
+  }
+
   const inspector = q("[data-raster-inspector]");
   // While opacity is dragged, only this window's copy shows it; one edit
   // goes to the core when it is let go.
   inspector.addEventListener("input", (e) => {
     const field = /** @type {HTMLInputElement} */ (e.target);
+    // A brush's slider says its number as it moves; it is kept when let go.
+    const option = field.dataset.rasterOption;
+    if (option && field.type === "range") {
+      const shown = field.nextElementSibling;
+      const v = Number(field.value);
+      if (shown) shown.textContent = option === "brush.flow" || option === "brush.opacity" ? `${Math.round((v / 255) * 100)} %` : option === "stabiliser" ? `${v}` : `${v} %`;
+      return;
+    }
     if (field.dataset.rasterField !== "opacity" || !view || !copy) return;
     const id = Number(field.closest("[data-raster-fields]")?.getAttribute("data-raster-fields"));
     const opacity = Number(field.value);
@@ -424,6 +536,24 @@ export function createRaster(host) {
   inspector.addEventListener("change", (e) => {
     const field = /** @type {HTMLInputElement} */ (e.target);
     const option = field.dataset.rasterOption;
+    if (option?.startsWith("brush.") || option === "stabiliser" || option === "curve") {
+      const which = brushFor();
+      const key = option.slice("brush.".length);
+      if (option === "brush.preset") {
+        const chosen = BRUSHES[field.value];
+        if (chosen) brushes = { ...brushes, [which]: { ...chosen.brush } };
+      } else if (option === "stabiliser") {
+        brushes = { ...brushes, stabiliser: Math.min(100, Math.max(0, Math.round(Number(field.value)) || 0)) };
+      } else if (option === "curve") {
+        brushes = { ...brushes, curve: /** @type {Curve} */ (field.value) };
+      } else {
+        brushes = { ...brushes, [which]: brushOf({ ...brushes[which], [key]: Number(field.value) }, brushes[which]) };
+      }
+      keepBrushes();
+      renderInspector();
+      paint();
+      return;
+    }
     if (option) {
       const n = Math.round(Number(field.value));
       if (option === "size") tipSize = Math.min(64, Math.max(1, n || 1));
@@ -534,7 +664,7 @@ export function createRaster(host) {
     next.open({ width: view.width, height: view.height, preset: view.preset, palette: view.palette, layers: view.layers, generation: view.generation });
     copy = next;
     copyOf = view.generation;
-    gpu?.resize(view.width, view.height);
+    gpu?.resize(view.width, view.height, view.preset === "paint");
     for (const [layer, tiles] of view.tiles) await fetchTiles(layer, tiles);
     paint();
   }
@@ -588,12 +718,16 @@ export function createRaster(host) {
     const [w, h] = stageSize();
     // What changed since the last frame, laid together and uploaded; read
     // from the copy's memory before anything else is asked of it.
-    const rects = copy.dirty();
+    const rects = copy.dirty(budget);
     if (rects.length) gpu?.upload(rects, copy.composite());
+    // What did not fit this frame is laid in the next, given more.
+    const behind = copy.pending() > 0;
+    budget = nextBudget(budget, behind);
     const ratio = window.devicePixelRatio || 1;
-    gpu?.draw(c, w, h, ratio, { ...colors(), pixel: view.preset === "pixel", grid });
+    gpu?.draw(c, w, h, ratio, { ...colors(), pixel: view.preset === "pixel", grid, still: !drawing && !behind });
     drawCursor(c, w, h, ratio);
     renderBar();
+    if (behind) paint();
   }
 
   /** Where the tip will land, over the picture: its outline, and the
@@ -627,6 +761,20 @@ export function createRaster(host) {
       g.setLineDash([]);
     }
     if (!hover || tool === "pick" || tool === "fill") return;
+    if (soft() && hoverAt) {
+      // A brush's size at full pressure, about where the pen is.
+      const [x, y] = toStage(c, hoverAt[0], hoverAt[1]);
+      const r = Math.max(2, (brushes[brushFor()].size * c.zoom) / 2);
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.strokeStyle = "rgba(0, 0, 0, 0.6)";
+      g.lineWidth = 3;
+      g.stroke();
+      g.strokeStyle = "rgba(255, 255, 255, 0.85)";
+      g.lineWidth = 1;
+      g.stroke();
+      return;
+    }
     const n = tipSize;
     const start = -Math.floor((n - 1) / 2);
     const [x, y] = toStage(c, hover[0] + start, hover[1] + start);
@@ -661,8 +809,11 @@ export function createRaster(host) {
   let panning = null;
   stage.addEventListener("keydown", (e) => { if (e.key === " ") space = true; });
   stage.addEventListener("keyup", (e) => { if (e.key === " ") space = false; });
-  /** A stroke being drawn: the pointer drawing it, and points not yet given to the copy.
-   *  @type {{pointer: number, queued: number[]} | null} */
+  /** A stroke being drawn: the pointer drawing it, points not yet given to
+   *  the copy, where its pressure comes from, its stabiliser, and the pen's
+   *  last point (canvas pixels and pressure).
+   *  @type {{pointer: number, queued: number[], source: "pointer" | "native" | "none",
+   *          steady: ReturnType<typeof createStabiliser> | null, last: [number, number, number] | null} | null} */
   let drawing = null;
   /** A shape being dragged: where it began. @type {{pointer: number, from: [number, number]} | null} */
   let shaping = null;
@@ -684,12 +835,16 @@ export function createRaster(host) {
     return toCanvas(c, sx, sy);
   };
   const pixel = (/** @type {[number, number]} */ p) => /** @type {[number, number]} */ ([Math.floor(p[0]), Math.floor(p[1])]);
-  /** A point as the engine takes it: x, y in 1/256 px and pressure. @param {PointerEvent} e */
+  /** A pointer event's point as the engine takes it — x, y in 1/256 px and
+   *  a pressure from 0 to 65535 — through the stroke's stabiliser: none,
+   *  while its string is slack. @param {PointerEvent} e */
   const triple = (e) => {
     const p = at(e);
-    if (!p) return [];
-    const pressure = e.pointerType === "pen" ? Math.round(Math.min(1, Math.max(0, e.pressure)) * 65535) : 65535;
-    return [q8(p[0]), q8(p[1]), pressure];
+    if (!p || !drawing) return [];
+    const pressure = curved(stylus.pressure(drawing.source, e), brushes.curve);
+    drawing.last = [p[0], p[1], pressure];
+    const steady = drawing.steady ? drawing.steady.add(p[0], p[1], pressure) : [p[0], p[1], pressure];
+    return steady.length ? [q8(steady[0]), q8(steady[1]), steady[2]] : [];
   };
   /** @returns {import('./bindings/RasterTip').RasterTip} */
   const tip = () => ({ size: tipSize, round, mirror: [mirror[0] && view ? view.width : null, mirror[1] && view ? view.height : null] });
@@ -755,14 +910,29 @@ export function createRaster(host) {
       paint();
       return;
     }
+    // The pen's eraser end erases, whatever the tool.
+    const erasing = tool === "eraser" || stylus.erasing();
+    const dabs = tool === "brush" || (erasing && view.preset === "paint");
+    const brush = brushes[erasing ? "eraser" : "brush"];
+    const source = stylus.source(e);
+    drawing = {
+      pointer: e.pointerId,
+      queued: [],
+      source,
+      // A string in screen pixels, held at its length however the canvas is seen.
+      steady: dabs && brushes.stabiliser > 0 ? createStabiliser((brushes.stabiliser * 0.3) / (c.zoom || 1)) : null,
+      last: null,
+    };
+    const first = triple(e);
     try {
-      copy.strokeBegin({ layer: layer.id, tool, tip: tip(), color, pixelPerfect: tool === "pencil" && pixelPerfect });
+      copy.strokeBegin(dabs ? { layer: layer.id, tool: erasing ? "eraser" : "pencil", brush, color } : { layer: layer.id, tool: erasing ? "eraser" : "pencil", tip: tip(), color, pixelPerfect: !erasing && pixelPerfect });
     } catch (error) {
       // A locked layer, say: the core is asked anyway, so it says why.
-      edit({ op: "stroke", layer: layer.id, tool: /** @type {any} */ (tool), tip: tip(), color, pixelPerfect, points: triple(e) }, tool);
+      drawing = null;
+      edit(dabs ? { op: "brush", layer: layer.id, erase: erasing, brush, color, points: first } : { op: "stroke", layer: layer.id, tool: erasing ? "eraser" : "pencil", tip: tip(), color, pixelPerfect, points: first }, erasing ? "erase" : "draw");
       return;
     }
-    drawing = { pointer: e.pointerId, queued: triple(e) };
+    drawing.queued = first;
     capture(e);
     paint();
   });
@@ -776,6 +946,7 @@ export function createRaster(host) {
     }
     const p = at(e);
     hover = p ? pixel(p) : null;
+    hoverAt = p;
     if (drawing && e.pointerId === drawing.pointer) {
       // Every point the pointer passed through, not only the last a frame.
       const all = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
@@ -790,10 +961,14 @@ export function createRaster(host) {
   /** The stroke being drawn, finished and sent. */
   function finishStroke() {
     if (!drawing || !copy) return;
+    // A stabilised line drawn on to where the pen was lifted.
+    const rest = drawing.steady && drawing.last ? drawing.steady.end(...drawing.last) : [];
+    if (rest.length) drawing.queued.push(q8(rest[0]), q8(rest[1]), rest[2]);
     if (drawing.queued.length) copy.strokeAdd(Int32Array.from(drawing.queued));
     drawing = null;
     const { op, hash } = copy.strokeEnd();
-    send_(op, op.op === "stroke" && op.tool === "eraser" ? "erase" : "draw", hash, copy.touched());
+    const erased = (op.op === "stroke" && op.tool === "eraser") || (op.op === "brush" && op.erase);
+    send_(op, erased ? "erase" : op.op === "brush" ? "paint" : "draw", hash, copy.touched());
   }
 
   /** The shape being dragged, sent. @param {PointerEvent} e */
@@ -867,9 +1042,19 @@ export function createRaster(host) {
     if (e.key === "?") return (host.keys?.("— Canvas's keys", KEYS), true);
     if (e.key === "f") return (refit(), true);
     if (e.key === "1") return (actualSize(), true);
-    if (TOOL_KEYS[e.key]) return (useTool(TOOL_KEYS[e.key]), true);
+    const keys = toolKeys(view.preset);
+    if (keys[e.key]) return (useTool(keys[e.key]), true);
     if (e.key === "[" || e.key === "]") {
-      tipSize = Math.min(64, Math.max(1, tipSize + (e.key === "]" ? 1 : -1)));
+      if (soft()) {
+        // A brush by a quarter at a time, so a tap goes as far at 4 px as at 400.
+        const which = brushFor();
+        const size = brushes[which].size;
+        const next = e.key === "]" ? Math.max(size + 1, Math.round(size * 1.25)) : Math.min(size - 1, Math.round(size / 1.25));
+        brushes = { ...brushes, [which]: brushOf({ ...brushes[which], size: next }, brushes[which]) };
+        keepBrushes();
+      } else {
+        tipSize = Math.min(64, Math.max(1, tipSize + (e.key === "]" ? 1 : -1)));
+      }
       renderInspector();
       paint();
       return true;
@@ -945,6 +1130,10 @@ export function createRaster(host) {
           cancel();
           sync.reset();
           if (view.preset === "pixel" && view.palette.length) color = rgba(view.palette[0]);
+          // A pencil for a pixel canvas, a brush for a paint one.
+          tool = view.preset === "paint" ? "brush" : "pencil";
+          ws.dataset.tool = tool;
+          for (const b of ws.querySelectorAll("[data-raster-tool]")) b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.rasterTool === tool));
           await reload();
         } else if (copy) {
           // The same canvas: its layers or palette may have changed.

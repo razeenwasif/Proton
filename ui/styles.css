@@ -5728,4 +5728,5 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .raster-palette-hint { margin: 10px 2px 0; color: var(--faint); font: var(--z-2xs)/1.5 var(--zed); }
 .raster-tool-head { margin: 0 0 8px; font: 600 var(--z-2xs) var(--zed); color: var(--faint); }
 .raster-layer-head { margin: 18px 0 8px; font: 600 var(--z-2xs) var(--zed); color: var(--faint); }
+.raster-sub { margin: 6px 0 0; font: 500 var(--z-2xs) var(--zed); color: var(--faint); }
 .raster-field input[type="number"] { min-width: 0; width: 100%; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-2xs) var(--zed); }

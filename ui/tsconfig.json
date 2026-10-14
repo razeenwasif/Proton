@@ -49,6 +49,7 @@
     "raster.js",
     "raster-view.js",
     "raster-sync.js",
+    "raster-input.js",
     "raster-runtime.js",
     "raster-render.js",
     "highlight.js",

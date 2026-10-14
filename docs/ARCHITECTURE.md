@@ -1704,9 +1704,50 @@ edit the core had made — is fetched again rather than put. An edit to the
 layers themselves that disagrees still loads the canvas again whole. ⎋ or
 ⌘Z while drawing takes the stroke back and sends nothing.
 
-**What comes next** (the plan's P3–P8): pressure brushes and pen input,
-selections and transforms, procedural generators and filters, import and
-export (PSD, sending art to a game), the agent's tools, and pixel animation.
+**Brushes** (`brush.rs`) lay round dabs a spacing apart along the path —
+the distance to the next carried from one segment to the next, so where they
+fall depends only on the points, never on how many came at a time. A dab's
+size, flow and most cover each hang as much as the brush says on the pen's
+pressure; its falloff runs from solid out to its hardness, then by
+smoothstep to nothing, at least a pixel soft, read from tables made with
+integer roots. A brush's mask holds how much each pixel is covered: a dab
+raises it toward the stroke's opacity by its flow — Photoshop's flow and
+opacity — so dabs build up and a stroke crossing itself never covers more
+than its opacity. A soft eraser takes away as much as the brush would cover.
+Four brushes to start from (Round, Ink, Soft, Marker), a pressure curve
+(soft, even, firm) and a stabiliser — a string the brush is pulled along by,
+which a wobble shorter than it never reaches — are the window's; the curve
+and the string are applied once, in the window, before either copy sees the
+points.
+
+**The pen.** WebKit on the Mac gives a page no pen: a tablet's pen — a
+drawing tablet's, or Sidecar's Apple Pencil — arrives as a mouse, with no
+pressure and no coalesced events (a probe of this WebKit, 2026-10-14, sent it
+tablet-point events with pressure and tilt and saw neither on the page). So
+the shell (`pen.rs`) watches the app's own events with a local AppKit
+monitor and, for a tablet's, calls the page's `__protonPen` through the
+WKWebView before the event goes on to it; both reach the page in that order,
+so the pressure is there when the pointer event comes. A browser that does
+know a pen gives its pressure on the event; a mouse presses fully. The pen's
+eraser end, near the tablet, erases with whatever tool is chosen.
+
+**Keeping up with the pen** (`tests/ui/raster-bench.mjs`, and the same in
+WebKit through `raster-bench.html`): a 4096 × 4096 canvas of sixteen layers
+with pixels under the stroke, a 200 px soft brush on the pressure, a pen
+moving a thousand pixels a second. Laying the layers together is the cost,
+so the window does less of it: only the part of a tile a frame's dabs
+changed; under a stroke, the layers below its layer laid together once a
+tile and kept (a fold stopped part-way — the same arithmetic); and a budget
+a frame, what does not fit waiting for the next, which is given more while
+the ink is behind. Painting on the top layer, frames take 3 ms at the 95th
+percentile in WebKit, the ink at most a frame behind; under fifteen layers
+mostly in blend modes, 6 ms, the ink at most two frames behind. The same
+budget lets a large canvas opened show tile by tile. Seen smaller than
+itself, a paint canvas is drawn from mipmaps made again once it is still.
+
+**What comes next** (the plan's P4–P8): selections and transforms,
+procedural generators and filters, import and export (PSD, sending art to a
+game), the agent's tools, and pixel animation.
 
 ### Trace
 
