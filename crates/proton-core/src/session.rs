@@ -673,6 +673,17 @@ impl Session {
         self.active().game_file(key)
     }
 
+    /// A picture the window hands over — pasted, dropped — kept by Canvas in
+    /// the project on screen, to bring in: its number.
+    pub fn raster_put_blob(&mut self, bytes: Vec<u8>) -> Result<u32, String> {
+        self.active_mut().raster_put_blob(bytes)
+    }
+
+    /// What Canvas last copied there, as a PNG, for the system's clipboard.
+    pub fn raster_clip_png(&self) -> Option<Vec<u8>> {
+        self.active().raster_clip_png()
+    }
+
     /// Tiles of the canvas open in the project on screen, shared.
     pub fn raster_tiles(&self, generation: u32, layer: u32, tiles: &[u32]) -> Option<crate::raster::RasterTiles> {
         self.active().raster_tiles(generation, layer, tiles)

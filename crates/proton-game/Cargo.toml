@@ -9,16 +9,17 @@ description = "Game mode: Proton's own 2D-first engine — its project format, e
 
 [features]
 default = ["editor"]
-# What only the editor needs: writing PNGs for the template, and the importers.
+# What only the editor needs: writing PNGs for the template, and the importers
+# — whose PSD and PNG reading is Canvas's engine's (proton-raster's `io`).
 # The runtime the window and exported games run is built without it.
-editor = ["dep:png", "dep:flate2"]
+editor = ["dep:png", "dep:proton-raster"]
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 ts-rs = { workspace = true }
 png = { version = "0.17", optional = true }
-flate2 = { version = "1.1", optional = true }
+proton-raster = { workspace = true, optional = true }
 
 [dev-dependencies]
 png = "0.17"

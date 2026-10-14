@@ -261,9 +261,8 @@ fn layer_info_body(info: &mut Read, gray: bool, notes: &mut Vec<String>) -> Resu
             notes.push(format!("{} is a {kind} layer, which is not applied", rec.name));
             continue;
         }
-        if w == 0 || h == 0 {
-            continue;
-        }
+        // A layer with nothing on it is still a layer — Canvas keeps it;
+        // Game's importer makes nothing of it.
         if rec.effects {
             notes.push(format!("{}'s layer effects (shadows, glows, strokes) are left out: rasterize them to keep them", rec.name));
         }

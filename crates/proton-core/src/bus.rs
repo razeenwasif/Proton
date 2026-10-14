@@ -1374,6 +1374,43 @@ pub enum Command {
     RasterRedo,
     /// Write the canvas, on a worker.
     RasterSave,
+    /// The canvas written out beside its folder: flattened as a PNG, each
+    /// pixel `scale` pixels square, or layered as a Photoshop file.
+    RasterExport {
+        format: crate::raster::RasterFormat,
+        #[serde(default)]
+        #[ts(optional)]
+        scale: Option<u32>,
+    },
+    /// The canvas into a game (`game`, its folder in the project): written to
+    /// its `art/` — layered, a `.psd` whose layers become planes, or flat, a
+    /// `.png` — and imported into its room when it is the game open.
+    RasterSend {
+        game: String,
+        #[serde(default)]
+        layers: bool,
+    },
+    /// A picture brought in — a PNG or PSD in the project (`path`), or bytes
+    /// the window handed over (`blob`, from `put_raster_blob` or a paste) — as
+    /// layers over layer `above` on the canvas open, or, not `layer`, as a
+    /// canvas of its own.
+    RasterImport {
+        #[serde(default)]
+        #[ts(optional)]
+        path: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        blob: Option<u32>,
+        #[serde(default)]
+        layer: bool,
+        #[serde(default)]
+        #[ts(optional)]
+        above: Option<u32>,
+        /// What a picture handed over is called: a dropped file's name.
+        #[serde(default)]
+        #[ts(optional)]
+        name: Option<String>,
+    },
 
     /* ── cuts and captions ────────────────────── */
     /// Point Video mode at an `.edl`. Answered with `Event::Cut`.
@@ -2603,8 +2640,9 @@ pub enum Event {
         #[ts(type = "number")]
         revision: u64,
     },
-    /// The project's canvases, for Canvas mode's home page.
-    RasterHome { canvases: Vec<crate::raster::RasterFound> },
+    /// The project's canvases, for Canvas mode's home page; its PNGs and
+    /// PSDs, to bring in; and its games, to send a canvas to.
+    RasterHome { canvases: Vec<crate::raster::RasterFound>, images: Vec<String>, games: Vec<String> },
     /// The canvas open — its layers, palette and which tiles hold anything —
     /// or none.
     RasterCanvas { canvas: Option<crate::raster::RasterView> },

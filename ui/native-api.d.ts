@@ -9,6 +9,9 @@ export interface NativeApi {
     invoke(name: 'read_lab', args: {key: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'read_game', args: {key: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'read_raster', args: {generation: number, layer: number, tiles: number[]}): Promise<ArrayBuffer | number[]>;
+    invoke(name: 'put_raster_blob', body: Uint8Array): Promise<number>;
+    invoke(name: 'paste_raster_image'): Promise<number | null>;
+    invoke(name: 'copy_raster_image'): Promise<boolean>;
     invoke(name: 'backdrop'): Promise<string>;
     invoke(name: 'set_backdrop', args: {material: string}): Promise<string>;
     invoke(name: 'set_opaque', args: {color: string | null}): Promise<void>;

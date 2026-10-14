@@ -496,6 +496,54 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
     edit = await answerWithCanvas(before);
     assert(edit.op.op === 'upscale' && edit.op.factor === 2 && $('[data-raster-size]').textContent.includes('160 × 192'), `×2 sent ${JSON.stringify(edit.op)}; the canvas is ${$('[data-raster-size]').textContent}`);
     assert(JSON.stringify(probe().pick(80, 96)) === JSON.stringify(core.pick(80, 96)), 'the copy is not the core\'s grown canvas');
+  });
+
+  await test('Pictures come in from the project, a drop and the clipboard, and a canvas goes out as a PNG, a PSD or to a game', async () => {
+    const invoked = (/** @type {string} */ name, /** @type {number} */ from) => (win.invokes ?? []).slice(from).filter((/** @type {any} */ c) => c.name === name);
+    // The home page's pictures, and the games to send to.
+    await win.pushEvents([{...home, images: ['art/leaf.png', 'art/scene.psd'], games: ['crossroads']}]); await settle();
+    const pictures = [...ws().querySelectorAll('[data-raster-import-path]')];
+    assert(pictures.length === 2, `the home page offers ${pictures.length} pictures`);
+    $('[data-raster-panel="inspector"]').click(); await settle();
+    // Written out: a PNG four times the size, a PSD; sent to a game; one brought in.
+    const scale = /** @type {HTMLSelectElement} */ (ws().querySelector('[data-raster-export-scale]'));
+    scale.value = '4';
+    scale.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    let before = win.commands.length;
+    ws().querySelector('[data-raster-export="png"]').click();
+    ws().querySelector('[data-raster-export="psd"]').click();
+    ws().querySelector('[data-raster-send]').click();
+    ws().querySelector('[data-raster-bring-in]').click(); await settle();
+    const out = sent(before, 'rasterExport');
+    assert(out.length === 2 && out[0].format === 'png' && out[0].scale === 4 && out[1].format === 'psd', `exports sent ${JSON.stringify(out)}`);
+    assert(sent(before, 'rasterSend')[0]?.game === 'crossroads' && sent(before, 'rasterSend')[0]?.layers === true, `sent ${JSON.stringify(sent(before, 'rasterSend'))}`);
+    const brought = sent(before, 'rasterImport')[0];
+    assert(brought?.path === 'art/leaf.png' && brought.layer === true, `brought in ${JSON.stringify(brought)}`);
+    // A PNG dropped on the canvas: its bytes handed over raw, then brought in.
+    const png = await (await win.fetch('/tests/ui/fixtures/game/art/player.png')).arrayBuffer();
+    const file = new win.File([png], 'leaf.png', {type: 'image/png'});
+    const drop = new win.DataTransfer();
+    drop.items.add(file);
+    before = win.commands.length;
+    let invokes = (win.invokes ?? []).length;
+    $('[data-raster-stage]').dispatchEvent(new win.DragEvent('drop', {dataTransfer: drop, bubbles: true, cancelable: true}));
+    for (let i = 0; i < 20 && !sent(before, 'rasterImport').length; i++) await settle();
+    const handed = invoked('put_raster_blob', invokes)[0];
+    assert(handed && handed.args instanceof win.Uint8Array && handed.args.byteLength === png.byteLength, `the drop was handed over as ${handed && Object.prototype.toString.call(handed.args)}`);
+    const dropped = sent(before, 'rasterImport')[0];
+    assert(dropped?.blob === win.rasterBlobs.length && dropped.layer === true && dropped.name === 'leaf.png', `the drop brought in ${JSON.stringify(dropped)}`);
+    // ⌘C: the core's copy, then its pixels to the system's clipboard.
+    before = win.commands.length;
+    invokes = (win.invokes ?? []).length;
+    press('c', {metaKey: true});
+    await answer(before);
+    assert(invoked('copy_raster_image', invokes).length === 1, 'the copy was not put on the clipboard');
+    // ⌘V with another app's picture there: brought in, not Canvas's copy pasted.
+    win.rasterPaste = () => 9;
+    before = win.commands.length;
+    press('v', {metaKey: true}); await settle(); await settle();
+    assert(sent(before, 'rasterImport')[0]?.blob === 9 && !sent(before, 'rasterEdit').length, `⌘V with a picture sent ${JSON.stringify(win.commands.slice(before).map((/** @type {any} */ c) => c.type))}`);
+    win.rasterPaste = undefined;
     win.rasterRead = undefined;
     await win.pushEvents([{type: 'rasterCanvas', canvas: null}]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();

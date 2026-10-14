@@ -19,4 +19,9 @@ planes: Array<string>, items: Array<string>,
 /**
  * The images it wrote.
  */
-files: Array<string>, };
+files: Array<string>, 
+/**
+ * The file's size and time when imported, to tell cheaply when it has
+ * changed since.
+ */
+stamp: string, };

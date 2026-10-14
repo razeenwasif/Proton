@@ -9,12 +9,13 @@ description = "Canvas mode's engine: layered raster images in tiles, changed by 
 
 [features]
 default = ["io"]
-# Reading and writing files: the core's. The window's WebAssembly is built
-# without it.
-io = ["dep:png"]
+# Reading and writing files — canvases, PNGs, Photoshop's PSDs: the core's,
+# and Game's importer's. The window's WebAssembly is built without it.
+io = ["dep:png", "dep:flate2"]
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 ts-rs = { workspace = true }
 png = { version = "0.17", optional = true }
+flate2 = { version = "1.1", optional = true }

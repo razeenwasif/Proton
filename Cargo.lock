@@ -4428,6 +4428,7 @@ version = "0.0.1"
 dependencies = [
  "flate2",
  "png 0.17.16",
+ "proton-raster",
  "serde",
  "serde_json",
  "ts-rs",
@@ -4544,6 +4545,7 @@ dependencies = [
 name = "proton-raster"
 version = "0.0.1"
 dependencies = [
+ "flate2",
  "png 0.17.16",
  "serde",
  "serde_json",

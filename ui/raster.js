@@ -22,7 +22,7 @@
  * go; a fill and a colour picked are a click. */
 
 import { escapeHtml as esc } from "./html.js";
-import { readRaster } from "./bridge.js";
+import { copyRasterImage, pasteRasterImage, putRasterBlob, readRaster } from "./bridge.js";
 import { createPen, createStabiliser, curved } from "./raster-input.js";
 import { createRasterRuntime, FRAME_BUDGET, keepTiles, nextBudget } from "./raster-runtime.js";
 import { createRasterRender } from "./raster-render.js";
@@ -125,6 +125,14 @@ export function createRaster(host) {
 
   /** @type {Found[]} */
   let canvases = [];
+  /** The project's PNGs and PSDs, to bring in, and its games, to send to. @type {string[]} */
+  let images = [];
+  /** @type {string[]} */
+  let games = [];
+  /** How large a PNG is written, a pixel canvas's pixels made squares. */
+  let exportScale = 1;
+  /** The copy whose answer puts its pixels on the system's clipboard. */
+  let pendingCopy = 0;
   /** The canvas open, as the core last said. @type {View | null} */
   let view = null;
   /** This window's copy of it. @type {Awaited<ReturnType<typeof createRasterRuntime>> | null} */
@@ -244,6 +252,12 @@ export function createRaster(host) {
             .map((c) => `<button class="raster-card" data-raster-open-path="${esc(c.path)}"><b>${esc(c.name)}</b><span>${c.preset === "pixel" ? "Pixel" : "Paint"} · ${c.size[0]} × ${c.size[1]}</span><span class="raster-card-path">${esc(c.path)}</span></button>`)
             .join("")}</div>`
         : `<p class="raster-faint">No canvas in this project yet.</p>`) +
+      (images.length
+        ? `<h4 class="raster-home-sub">Pictures here</h4><div class="raster-images">${images
+            .map((path) => `<button class="raster-image" data-raster-import-path="${esc(path)}" title="Make a canvas of it">${esc(path)}</button>`)
+            .join("")}</div>`
+        : "") +
+      `<p class="raster-faint">Drop a PNG or a Photoshop file here to make a canvas of it.</p>` +
       `<form class="raster-new" data-raster-new>` +
       `<h4>New canvas</h4>` +
       `<label>Name <input name="name" data-raster-new-name placeholder="Hero sprite" autocomplete="off" spellcheck="false" required></label>` +
@@ -257,6 +271,32 @@ export function createRaster(host) {
   ws.addEventListener("click", (e) => {
     const card = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-raster-open-path]"));
     if (card) send({ type: "rasterOpen", path: card.dataset.rasterOpenPath });
+    const picture = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-raster-import-path]"));
+    if (picture) send({ type: "rasterImport", path: picture.dataset.rasterImportPath, layer: false });
+  });
+
+  /** Files dropped — PNGs and Photoshop files — handed to the core and
+   *  brought in: as layers on the canvas open, or each as a canvas.
+   *  @param {DragEvent} e @param {boolean} layer */
+  async function dropped(e, layer) {
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => /\.(png|psd)$/i.test(f.name) || f.type === "image/png");
+    if (!files.length) return;
+    e.preventDefault();
+    for (const file of files) {
+      try {
+        const blob = await putRasterBlob(new Uint8Array(await file.arrayBuffer()));
+        send({ type: "rasterImport", blob, layer, above: layer ? current()?.id : undefined, name: file.name });
+      } catch (error) {
+        console.warn("proton: canvas", error);
+      }
+    }
+  }
+  const carriesFiles = (/** @type {DragEvent} */ e) => [...(e.dataTransfer?.items ?? [])].some((i) => i.kind === "file");
+  ws.addEventListener("dragover", (e) => {
+    if (carriesFiles(e)) e.preventDefault();
+  });
+  ws.addEventListener("drop", (e) => {
+    void dropped(e, Boolean(view));
   });
   ws.addEventListener("change", (e) => {
     const radio = /** @type {HTMLInputElement} */ (e.target);
@@ -548,7 +588,23 @@ export function createRaster(host) {
       `<button class="cc-quiet" data-raster-canvas="flipY" title="Mirror it down">⇵</button><button class="cc-quiet" data-raster-canvas="crop" title="Cut it to what is selected"${antsNow().length ? "" : " disabled"}>Crop</button>` +
       `<button class="cc-quiet" data-raster-canvas="up2" title="Twice the size by Scale2x, a pixel picture's edges kept crisp">×2</button><button class="cc-quiet" data-raster-canvas="up3" title="Three times the size by Scale3x">×3</button></div>` +
       `<div class="raster-fields raster-resize"><label class="raster-field"><span>Size</span><span class="raster-size-pair"><input type="number" min="1" max="${view.preset === "pixel" ? 1024 : 4096}" value="${view.width}" data-raster-resize="width" aria-label="Width"> × <input type="number" min="1" max="${view.preset === "pixel" ? 1024 : 4096}" value="${view.height}" data-raster-resize="height" aria-label="Height"></span></label>` +
-      `<button class="cc-quiet" data-raster-canvas="resize">Resize</button></div>`;
+      `<button class="cc-quiet" data-raster-canvas="resize">Resize</button></div>` +
+      `<h6 class="raster-sub">Written out, beside it</h6><div class="raster-buttons">` +
+      `<select data-raster-export-scale aria-label="How large">${[1, 2, 4, 8].map((n) => `<option value="${n}"${n === exportScale ? " selected" : ""}>×${n}</option>`).join("")}</select>` +
+      `<button class="cc-quiet" data-raster-export="png" title="Flattened, each pixel a square as large as asked">PNG</button>` +
+      `<button class="cc-quiet" data-raster-export="psd" title="Its layers, their opacity and how they blend">PSD</button></div>` +
+      (games.length
+        ? `<h6 class="raster-sub">To a game</h6><div class="raster-buttons"><select data-raster-send-game aria-label="Which game">${games
+            .map((g) => `<option value="${esc(g)}">${esc(g || "this project")}</option>`)
+            .join("")}</select><label class="raster-check"><input type="checkbox" data-raster-send-layers checked> <span>Its layers as planes</span></label>` +
+          `<button class="cc-quiet" data-raster-send title="Into the game's art, and into its room when it is the game open">Send</button></div>`
+        : "") +
+      `<h6 class="raster-sub">Brought in, as a layer</h6>` +
+      (images.length
+        ? `<div class="raster-buttons"><select data-raster-bring aria-label="Which picture">${images.map((path) => `<option value="${esc(path)}">${esc(path)}</option>`).join("")}</select>` +
+          `<button class="cc-quiet" data-raster-bring-in>Bring in</button></div>`
+        : "") +
+      `<p class="raster-faint">Or drop a PNG or a Photoshop file on the canvas, or paste a picture with ⌘V.</p>`;
   }
 
   /** The select tool's and the wand's fields.
@@ -615,6 +671,17 @@ export function createRaster(host) {
       paint();
       return;
     }
+    const exporting = /** @type {HTMLElement | null} */ (target.closest("[data-raster-export]"))?.dataset.rasterExport;
+    if (exporting) send({ type: "rasterExport", format: exporting, scale: exportScale });
+    if (target.closest("[data-raster-send]")) {
+      const game = /** @type {HTMLSelectElement | null} */ (inspector.querySelector("[data-raster-send-game]"))?.value ?? "";
+      const layers = Boolean(/** @type {HTMLInputElement | null} */ (inspector.querySelector("[data-raster-send-layers]"))?.checked);
+      send({ type: "rasterSend", game, layers });
+    }
+    if (target.closest("[data-raster-bring-in]")) {
+      const path = /** @type {HTMLSelectElement | null} */ (inspector.querySelector("[data-raster-bring]"))?.value;
+      if (path) send({ type: "rasterImport", path, layer: true, above: current()?.id });
+    }
     const whichCanvas = /** @type {HTMLElement | null} */ (target.closest("[data-raster-canvas]"))?.dataset.rasterCanvas;
     if (!whichCanvas || !view) return;
     if (whichCanvas === "ccw") whole({ op: "orient", turns: 3, flip: false }, "turn left");
@@ -655,6 +722,10 @@ export function createRaster(host) {
   });
   inspector.addEventListener("change", (e) => {
     const field = /** @type {HTMLInputElement} */ (e.target);
+    if (field.matches("[data-raster-export-scale]")) {
+      exportScale = Number(field.value) || 1;
+      return;
+    }
     const option = field.dataset.rasterOption;
     if (option?.startsWith("brush.") || option === "stabiliser" || option === "curve") {
       const which = brushFor();
@@ -897,17 +968,33 @@ export function createRaster(host) {
     if (making) leaveMade();
     const made = copy.apply(op);
     // Refused here too: sent all the same, unpredicted, so the core says why.
-    send_(op, label, "hash" in made ? made.hash : null, "hash" in made ? copy.touched() : []);
+    return send_(op, label, "hash" in made ? made.hash : null, "hash" in made ? copy.touched() : []);
   }
 
   /** An edit made here, sent numbered. @param {Op} op @param {string} label
    *  @param {string | null} hash @param {[number, number][]} touched */
   function send_(op, label, hash, touched) {
-    if (!view) return;
+    if (!view) return 0;
     const n = sync.next();
     sync.sent(n, hash, touched, changesLayers(op));
     send({ type: "rasterEdit", generation: view.generation, seq: n, op, label });
     paint();
+    return n;
+  }
+
+  /** ⌘V: a picture another app copied, brought in as a layer — or, when
+   *  the clipboard holds Canvas's own copy or no picture, that copy pasted. */
+  async function pasteFromClipboard() {
+    const layer = current();
+    /** @type {number | null} */
+    let blob = null;
+    try {
+      blob = await pasteRasterImage();
+    } catch (error) {
+      console.warn("proton: canvas", error);
+    }
+    if (blob) send({ type: "rasterImport", blob, layer: true, above: layer?.id });
+    else edit({ op: "paste", above: layer?.id }, "paste");
   }
 
   /** A change to the whole canvas — turned, mirrored, resized, cropped —
@@ -1036,6 +1123,11 @@ export function createRaster(host) {
       if (!view || event.generation !== view.generation) return;
       // The core's version too: a copy loaded at an older one is behind.
       view = { ...view, version: event.version, dirty: event.dirty, canUndo: event.canUndo, canRedo: event.canRedo };
+      // A copy made by the core: its pixels to the system's clipboard too.
+      if (pendingCopy && event.seq === pendingCopy) {
+        pendingCopy = 0;
+        if (!event.refused) copyRasterImage().catch(() => {});
+      }
       renderBar();
       await sync.answered(event);
     });
@@ -1590,8 +1682,11 @@ export function createRaster(host) {
       if (k === "a" && !e.shiftKey) return (select({ kind: "all" }), true);
       if (k === "d" && !e.shiftKey) return (select({ kind: "nothing" }), true);
       if (k === "i" && e.shiftKey) return (select({ kind: "invert" }), true);
-      if ((k === "c" || k === "x") && !e.shiftKey && layer) return (edit({ op: "copy", layer: layer.id, cut: k === "x" }, k === "x" ? "cut" : "copy"), true);
-      if (k === "v" && !e.shiftKey) return (edit({ op: "paste", above: layer?.id }, "paste"), true);
+      if ((k === "c" || k === "x") && !e.shiftKey && layer) {
+        pendingCopy = edit({ op: "copy", layer: layer.id, cut: k === "x" }, k === "x" ? "cut" : "copy") ?? 0;
+        return true;
+      }
+      if (k === "v" && !e.shiftKey) return (void pasteFromClipboard(), true);
       if (k === "t" && !e.shiftKey) return (startTransform(true), true);
       return false;
     }
@@ -1675,7 +1770,10 @@ export function createRaster(host) {
     /** @param {{canvases: Found[]}} event */
     home(event) {
       canvases = event.canvases ?? [];
+      images = /** @type {any} */ (event).images ?? [];
+      games = /** @type {any} */ (event).games ?? [];
       renderHome();
+      renderInspector();
     },
     /** @param {{canvas: View | null}} event */
     canvas(event) {

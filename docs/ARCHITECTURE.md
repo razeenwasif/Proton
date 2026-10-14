@@ -1806,8 +1806,29 @@ is shown on the window's copy as its settings change (`rr_preview`) and is
 one edit when kept, held to what is selected; leaving the tab, or drawing,
 takes back what was only shown.
 
-**What comes next** (the plan's P6–P8): import and export (PSD, sending art
-to a game), the agent's tools, and pixel animation.
+**In and out** (`port.rs`; the PSD reader and writer and the PNG code now
+`proton-raster`'s `io`, which Game's importer uses). A canvas is written
+beside its folder as a flattened PNG — each pixel a square of 1, 2, 4 or 8
+for pixel art — or a layered PSD: each layer trimmed, its opacity, whether
+it is shown and its blend mode by Photoshop's key, and a merged image that
+keeps its transparency (four channels, the layer count negative, as Adobe
+describes it), run-length encoded; it reads back through our own reader as
+the canvas it was. Sent to a game, it is written into the game's `art/` —
+layered, each layer a plane by the depth its name gives, or flat — and
+imported into the room when that game is the one open. A PNG or a PSD in
+the project comes in as a canvas of its own (a pixel canvas when small, its
+few colours the palette) or as layers on the open one, one step of undo: a
+PSD's layers where its canvas had them, a single picture in the middle. A
+picture dropped on the window is handed to the core as the request's raw
+body (`put_raster_blob`), not JSON; ⌘V asks the shell, which reads the
+system's pasteboard itself — WebKit gives a page no clipboard image without
+something editable focused — as a PNG, or a TIFF made one. ⌘C puts Canvas's
+copy on the pasteboard as a PNG for other apps and remembers the change
+count, so ⌘V with nothing copied since pastes Canvas's own copy, where it
+was.
+
+**What comes next** (the plan's P7–P8): the agent's tools, and pixel
+animation.
 
 ### Trace
 

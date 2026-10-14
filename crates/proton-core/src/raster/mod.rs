@@ -29,6 +29,8 @@ use ts_rs::TS;
 use crate::bus::{Command, Event, NoticeLevel};
 use crate::workspace::notice;
 
+mod port;
+
 /// A canvas's folder ends so.
 pub const EXTENSION: &str = "canvas";
 
@@ -43,7 +45,18 @@ pub fn handles(command: &Command) -> bool {
             | Command::RasterUndo
             | Command::RasterRedo
             | Command::RasterSave
+            | Command::RasterExport { .. }
+            | Command::RasterImport { .. }
     )
+}
+
+/// What a canvas is written out as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "lowercase")]
+pub enum RasterFormat {
+    Png,
+    Psd,
 }
 
 /// A canvas found in the project, for the home page.
@@ -128,6 +141,10 @@ pub struct Raster {
     open: Option<Open>,
     /// The last generation given out, across every canvas opened here.
     generations: u32,
+    /// Pictures the window handed over — pasted, dropped — by number, the
+    /// newest few kept, to bring in.
+    blobs: std::collections::BTreeMap<u32, Vec<u8>>,
+    next_blob: u32,
 }
 
 impl Raster {
@@ -210,6 +227,8 @@ impl Raster {
             Command::RasterUndo => self.step(true),
             Command::RasterRedo => self.step(false),
             Command::RasterSave => self.save(),
+            Command::RasterExport { format, scale } => self.export(format, scale.unwrap_or(1)),
+            Command::RasterImport { path, blob, layer, above, name } => self.import(root, path.as_deref(), blob, layer, above, name),
             _ => Vec::new(),
         }
     }
@@ -384,7 +403,9 @@ impl Raster {
     }
 
     pub fn home_event(&self, root: &Path) -> Event {
-        Event::RasterHome { canvases: find(root) }
+        let (canvases, images) = find(root);
+        let games = crate::game::found(root).into_iter().map(|g| g.path).collect();
+        Event::RasterHome { canvases, images, games }
     }
 
     pub fn canvas_event(&self) -> Event {
@@ -491,11 +512,12 @@ fn slug(name: &str) -> String {
     }
 }
 
-/// The project's canvases: `*.canvas` folders, a few levels down, not inside
-/// what is hidden or built.
-fn find(root: &Path) -> Vec<RasterFound> {
+/// The project's canvases — `*.canvas` folders, a few levels down, not
+/// inside what is hidden or built — and its PNGs and PSDs outside them.
+fn find(root: &Path) -> (Vec<RasterFound>, Vec<String>) {
     const SKIP: &[&str] = &["node_modules", "target", "dist", "build", "vendor"];
     let mut out = Vec::new();
+    let mut images = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0u32)];
     let mut looked = 0;
     while let Some((dir, depth)) = stack.pop() {
@@ -507,7 +529,14 @@ fn find(root: &Path) -> Vec<RasterFound> {
             }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || !path.is_dir() || SKIP.contains(&name.as_str()) {
+            if name.starts_with('.') || SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            if !path.is_dir() {
+                let picture = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("png") || e.eq_ignore_ascii_case("psd"));
+                if picture && images.len() < 500 {
+                    images.push(path.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default());
+                }
                 continue;
             }
             if path.extension().and_then(|e| e.to_str()) == Some(EXTENSION) {
@@ -528,5 +557,6 @@ fn find(root: &Path) -> Vec<RasterFound> {
         }
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
-    out
+    images.sort();
+    (out, images)
 }

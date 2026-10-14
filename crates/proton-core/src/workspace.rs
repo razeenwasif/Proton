@@ -653,9 +653,40 @@ impl Workspace {
         match command {
             // Game mode's own, answered by its module as PDF's and
             // Notebook's are by theirs.
+            // Art sent to a game is Canvas's to write and, when that game is
+            // the one open, Game's to import.
+            Command::RasterSend { game, layers } => {
+                let root = self.root().to_path_buf();
+                match self.raster.send(&root, &game, layers) {
+                    Ok((dir, source)) => {
+                        let mut events = vec![notice(format!("wrote {source} in {}", if game.is_empty() { "the game" } else { game.as_str() }), NoticeLevel::Info)];
+                        let open = self.game.root().and_then(|r| std::fs::canonicalize(r).ok());
+                        if open.is_some_and(|r| r == dir) {
+                            match self.game.import_art(&source, None, None, false) {
+                                Ok(done) => {
+                                    events.push(notice(done.said, NoticeLevel::Info));
+                                    events.extend(done.notes.into_iter().map(|n| notice(n, NoticeLevel::Warn)));
+                                    events.extend(done.events);
+                                }
+                                Err(why) => events.push(notice(format!("{source} was written but not imported: {why}"), NoticeLevel::Warn)),
+                            }
+                        } else {
+                            events.push(notice("open that game in Game mode and import it from its Assets".into(), NoticeLevel::Info));
+                        }
+                        events.push(self.tree_event());
+                        events
+                    }
+                    Err(why) => vec![notice(why, NoticeLevel::Warn)],
+                }
+            }
             command if crate::raster::handles(&command) => {
                 let root = self.root().to_path_buf();
+                let wrote = matches!(command, Command::RasterExport { .. });
                 let mut events = self.raster.apply(&root, command);
+                if wrote {
+                    // A file written beside the canvas: another to bring in.
+                    events.push(self.raster.home_event(&root));
+                }
                 if events.iter().any(|e| matches!(e, Event::RasterHome { .. })) {
                     // A canvas made is files the tree and git see.
                     events.push(self.tree_event());
@@ -1554,7 +1585,9 @@ impl Workspace {
             | Command::RasterEdit { .. }
             | Command::RasterUndo
             | Command::RasterRedo
-            | Command::RasterSave => Vec::new(),
+            | Command::RasterSave
+            | Command::RasterExport { .. }
+            | Command::RasterImport { .. } => Vec::new(),
             // PDF is the window's too: the session answers it.
             Command::PdfOpen { .. }
             | Command::PdfClose { .. }
@@ -4040,6 +4073,16 @@ impl Workspace {
     /// Where an image of the open game is: see `game::Game::file`.
     pub fn game_file(&self, key: &str) -> Option<PathBuf> {
         self.game.file(key)
+    }
+
+    /// A picture the window hands over, kept to bring in: its number.
+    pub fn raster_put_blob(&mut self, bytes: Vec<u8>) -> Result<u32, String> {
+        self.raster.put_blob(bytes)
+    }
+
+    /// What Canvas last copied, as a PNG, for the system's clipboard.
+    pub fn raster_clip_png(&self) -> Option<Vec<u8>> {
+        self.raster.clip_png()
     }
 
     /// Tiles of the open canvas, shared: see `raster::Raster::tiles`.

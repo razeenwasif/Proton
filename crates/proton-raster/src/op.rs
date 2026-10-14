@@ -672,6 +672,40 @@ impl Canvas {
 }
 
 impl Canvas {
+    /// Layers made from pictures brought in — a name, opacity, whether
+    /// hidden, how they blend, and their pixels, bottom to top — put over
+    /// layer `above` (on top if none): what changed, and how to take it
+    /// back. Not an op: pixels from outside are the core's to bring in, and
+    /// the window is sent them.
+    pub fn bring_in(&mut self, layers: Vec<(String, u8, bool, Blend, Grid)>, above: Option<u32>) -> Result<(Applied, Patch), String> {
+        if layers.is_empty() {
+            return Err("there is nothing to bring in".into());
+        }
+        let mut patch = Patch { layers: Some((self.layers.clone(), self.next_id)), ..Patch::default() };
+        let mut applied = Applied { meta: true, changed: true, ..Applied::default() };
+        let start = match above {
+            Some(id) => (self.place(id).ok_or_else(|| format!("there is no layer {id}"))? + 1) as usize,
+            None => self.layers.len(),
+        };
+        for (n, (name, opacity, hidden, blend, grid)) in layers.into_iter().enumerate() {
+            if grid.width != self.width || grid.height != self.height {
+                return Err("a layer brought in is not the canvas's size".into());
+            }
+            let id = self.push_layer(if name.trim().is_empty() { format!("Layer {}", self.next_id) } else { name });
+            let mut layer = self.layers.pop().expect("just pushed");
+            layer.info.opacity = opacity;
+            layer.info.hidden = hidden;
+            layer.info.blend = blend;
+            layer.grid = grid;
+            applied.touched.extend(present(&layer));
+            applied.made = Some(id);
+            self.layers.insert((start + n).min(self.layers.len()), layer);
+        }
+        self.advance();
+        patch.tiles.clear();
+        Ok((applied, patch))
+    }
+
     /// A layer that may be drawn on.
     fn unlocked(&self, id: u32) -> Result<&Layer, String> {
         let target = self.layer(id).ok_or_else(|| format!("there is no layer {id}"))?;

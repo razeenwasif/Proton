@@ -15,9 +15,12 @@
 //! What comes out is files to write and planes to put in a room. Writing them
 //! and changing the room are the editor's; nothing here touches the disk.
 
-pub mod psd;
+// Photoshop's files and PNGs are read and written by Canvas's engine; the
+// game's importer lays them out as rooms.
+pub use proton_raster::file::{decode_png, encode_png};
+pub use proton_raster::psd;
 #[doc(hidden)]
-pub mod psd_write;
+pub use proton_raster::psd_write;
 
 use crate::format::{Blend, Chunk, Image, Item, Plane};
 
@@ -341,39 +344,6 @@ fn normal_map(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
         }
     }
     out
-}
-
-/// RGBA, 8 bits a channel, as a PNG.
-pub fn encode_png(w: u32, h: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut out, w, h);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.set_compression(png::Compression::Fast);
-        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-        writer.write_image_data(rgba).map_err(|e| e.to_string())?;
-    }
-    Ok(out)
-}
-
-/// A PNG as straight RGBA, 8 bits a channel, whatever it was stored as.
-pub fn decode_png(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
-    let mut decoder = png::Decoder::new(bytes);
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = decoder.read_info().map_err(|e| format!("not a PNG that can be read: {e}"))?;
-    let mut buffer = vec![0; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buffer).map_err(|e| format!("not a PNG that can be read: {e}"))?;
-    let (w, h) = (info.width, info.height);
-    let n = (w * h) as usize;
-    let rgba = match info.color_type {
-        png::ColorType::Rgba => buffer[..n * 4].to_vec(),
-        png::ColorType::Rgb => buffer[..n * 3].chunks(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
-        png::ColorType::GrayscaleAlpha => buffer[..n * 2].chunks(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
-        png::ColorType::Grayscale => buffer[..n].iter().flat_map(|&g| [g, g, g, 255]).collect(),
-        png::ColorType::Indexed => return Err("an indexed PNG that did not expand: save it as RGBA".into()),
-    };
-    Ok((w, h, rgba))
 }
 
 #[cfg(test)]

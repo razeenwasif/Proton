@@ -34,6 +34,10 @@
 //!   brought to a few colours; Scale2x and Scale3x.
 //! - [`history`]: undo and redo by the tiles each change touched.
 //! - [`file`]: a canvas on disk, a folder of PNGs and a `canvas.json` (`io`).
+//! - [`psd`], [`psd_write`]: Photoshop's layered files, read and written
+//!   (`io`) — Canvas's import and export, and Game's importer's.
+//! - [`port`]: a canvas out as a PNG or a PSD, and a PNG or a PSD in as a
+//!   canvas or as layers (`io`).
 
 pub mod blend;
 pub mod brush;
@@ -46,6 +50,12 @@ pub mod fixed;
 pub mod gen;
 pub mod history;
 pub mod op;
+#[cfg(feature = "io")]
+pub mod port;
+#[cfg(feature = "io")]
+pub mod psd;
+#[cfg(feature = "io")]
+pub mod psd_write;
 pub mod sample;
 pub mod select;
 pub mod stroke;

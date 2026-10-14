@@ -72,6 +72,21 @@ impl History {
         Ok(applied)
     }
 
+    /// A change that is not an op — layers brought in from a file — made
+    /// and remembered as one step, as an op's would be.
+    pub fn record(&mut self, canvas: &mut Canvas, label: &str, change: impl FnOnce(&mut Canvas) -> Result<(Applied, Patch), String>) -> Result<Applied, String> {
+        let before = canvas.state;
+        let (applied, patch) = change(canvas)?;
+        if applied.changed {
+            self.redo.clear();
+            let bytes = cost(&patch, canvas);
+            self.bytes += bytes;
+            self.undo.push_back(Step { label: label.to_string(), before, after: canvas.state, patch, bytes });
+            self.trim();
+        }
+        Ok(applied)
+    }
+
     /// Take back the newest step; what it changed, and its name.
     pub fn undo(&mut self, canvas: &mut Canvas) -> Option<(Applied, String)> {
         let step = self.undo.pop_back()?;

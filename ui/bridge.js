@@ -101,6 +101,27 @@ export async function readRaster(generation, layer, tiles) {
   return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
 }
 
+/** A picture handed to the core — an image dropped on Canvas — as the
+ *  request's raw body: its number, to bring in. @param {Uint8Array} bytes @returns {Promise<number>} */
+export async function putRasterBlob(bytes) {
+  // The browser preview has no core to keep it.
+  if (!tauri) throw new Error("bringing a picture in needs the app");
+  return tauri.core.invoke("put_raster_blob", bytes);
+}
+
+/** ⌘V in Canvas: a picture another app copied, kept by the core — its
+ *  number — or none, for Canvas's own copy. @returns {Promise<number | null>} */
+export async function pasteRasterImage() {
+  if (!tauri) return null;
+  return tauri.core.invoke("paste_raster_image");
+}
+
+/** Canvas's copy put on the system's clipboard as a PNG. @returns {Promise<boolean>} */
+export async function copyRasterImage() {
+  if (!tauri) return false;
+  return tauri.core.invoke("copy_raster_image");
+}
+
 /** @param {string} key */
 export async function readGeometry(key) {
   if (!tauri) {

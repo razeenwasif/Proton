@@ -169,6 +169,11 @@ pub struct Game {
 }
 
 impl Game {
+    /// The open game's folder.
+    pub fn root(&self) -> Option<&Path> {
+        self.project.as_ref().map(|p| p.root())
+    }
+
     pub fn is_open(&self) -> bool {
         self.project.is_some()
     }
@@ -641,6 +646,12 @@ fn slug(name: &str) -> String {
         true => "game".into(),
         false => out,
     }
+}
+
+/// The games in a project, for another mode to name them — Canvas sends art
+/// to one.
+pub fn found(root: &Path) -> Vec<GameFound> {
+    find(root)
 }
 
 /// The games in a project: itself, or folders up to two below it — a

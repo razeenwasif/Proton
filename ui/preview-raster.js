@@ -34,7 +34,7 @@ export function createRasterPreview(_deliver) {
     return core;
   }
 
-  const home = () => ({ type: "rasterHome", canvases: canvases.map((c) => ({ ...c })) });
+  const home = () => ({ type: "rasterHome", canvases: canvases.map((c) => ({ ...c })), images: [], games: [] });
   const canvasEvent = () => {
     if (!open) return { type: "rasterCanvas", canvas: null };
     const info = open.core.info();

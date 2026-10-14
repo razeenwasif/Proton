@@ -73,6 +73,13 @@ window.__TAURI__ = {
       if (!bytes) throw new Error(`layer ${args.layer} of canvas ${args.generation} is not open`);
       return bytes;
     }
+    // Pictures handed to the core, kept as a test can look at them.
+    if (name === 'put_raster_blob') {
+      (window.rasterBlobs ??= []).push(args);
+      return window.rasterBlobs.length;
+    }
+    if (name === 'paste_raster_image') return window.rasterPaste?.() ?? null;
+    if (name === 'copy_raster_image') return true;
     // The open game's images: the fixture game's, from the server.
     if (name === 'read_game') {
       // A test's own files first: an image cut up, say.

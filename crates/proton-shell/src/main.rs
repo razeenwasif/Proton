@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod backdrop;
+mod pasteboard;
 mod pen;
 mod transport;
 mod window;
@@ -334,6 +335,50 @@ fn read_raster(generation: u32, layer: u32, tiles: Vec<u32>, session: State<'_, 
     Ok(tauri::ipc::Response::new(out))
 }
 
+/// Bytes the page hands over — an image dropped on Canvas — kept by the core
+/// to bring in: its number, for `RasterImport`. The bytes come as the
+/// request's raw body, not JSON: a picture is megabytes.
+#[tauri::command]
+fn put_raster_blob(request: tauri::ipc::Request<'_>, session: State<'_, Mutex<BridgeSession>>) -> Result<u32, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("a picture comes as raw bytes".into());
+    };
+    let mut held = match session.lock() {
+        Ok(it) => it,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    held.session.raster_put_blob(bytes.clone())
+}
+
+/// ⌘V in Canvas: a picture another app copied, kept by the core to bring in
+/// — its number — or none, for Canvas to paste its own copy.
+#[tauri::command]
+fn paste_raster_image(session: State<'_, Mutex<BridgeSession>>) -> Result<Option<u32>, String> {
+    let Some(png) = pasteboard::take() else { return Ok(None) };
+    let mut held = match session.lock() {
+        Ok(it) => it,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    held.session.raster_put_blob(png).map(Some)
+}
+
+/// ⌘C or ⌘X in Canvas, once the core has made the copy: its pixels put on
+/// the system's clipboard as a PNG, for other apps. Whether there were any.
+#[tauri::command]
+fn copy_raster_image(session: State<'_, Mutex<BridgeSession>>) -> bool {
+    let png = match session.lock() {
+        Ok(it) => it.session.raster_clip_png(),
+        Err(poisoned) => poisoned.into_inner().session.raster_clip_png(),
+    };
+    match png {
+        Some(png) => {
+            pasteboard::put(&png);
+            true
+        }
+        None => false,
+    }
+}
+
 /// Give the core a heartbeat.
 ///
 /// Everything a language server says arrives on a thread the core cannot see,
@@ -594,6 +639,9 @@ fn main() {
             read_lab,
             read_game,
             read_raster,
+            put_raster_blob,
+            paste_raster_image,
+            copy_raster_image,
             quit
         ])
         .setup(|app| {

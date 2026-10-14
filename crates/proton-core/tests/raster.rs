@@ -25,7 +25,7 @@ fn view(events: &[Event]) -> Option<Option<RasterView>> {
 
 fn home(events: &[Event]) -> Option<Vec<String>> {
     events.iter().find_map(|e| match e {
-        Event::RasterHome { canvases } => Some(canvases.iter().map(|c| format!("{} {:?} {}×{}", c.path, c.preset, c.size[0], c.size[1])).collect()),
+        Event::RasterHome { canvases, .. } => Some(canvases.iter().map(|c| format!("{} {:?} {}×{}", c.path, c.preset, c.size[0], c.size[1])).collect()),
         _ => None,
     })
 }
@@ -184,4 +184,99 @@ fn a_canvas_with_changes_is_not_closed_or_left_for_another() {
     let reopened = view(&again).unwrap().unwrap();
     assert!(reopened.generation > shown.generation && !reopened.dirty && reopened.tiles.iter().all(|(_, t)| t.is_empty()));
     assert!(warned(&space.apply(Command::RasterOpen { path: "notes".into() })).unwrap().contains("not a canvas"));
+}
+
+fn said(events: &[Event]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Notice { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn images(events: &[Event]) -> Option<Vec<String>> {
+    events.iter().find_map(|e| match e {
+        Event::RasterHome { images, .. } => Some(images.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_canvas_is_written_out_as_a_png_and_a_psd_beside_its_folder() {
+    let (mut space, root, shown) = with_canvas("export");
+    let id = shown.layers[0].id;
+    space.apply(fill(shown.generation, 1, id, [2, 2, 4, 4], [200, 30, 30, 255]));
+    let events = space.apply(Command::RasterExport { format: proton_core::raster::RasterFormat::Png, scale: Some(4) });
+    assert!(warned(&events).is_none(), "{events:?}");
+    let (w, h, rgba) = proton_raster::file::decode_png(&std::fs::read(root.join("hero-sprite@4x.png")).unwrap()).unwrap();
+    assert_eq!((w, h, &rgba[((10 * 256 + 10) * 4) as usize..((10 * 256 + 10) * 4 + 4) as usize]), (256, 256, &[200u8, 30, 30, 255][..]));
+    assert!(images(&events).unwrap().contains(&"hero-sprite@4x.png".to_string()), "the home page does not offer it back");
+    space.apply(Command::RasterExport { format: proton_core::raster::RasterFormat::Psd, scale: None });
+    let picture = proton_raster::port::read(&std::fs::read(root.join("hero-sprite.psd")).unwrap(), "x").unwrap();
+    assert_eq!((picture.width, picture.parts.len(), picture.parts[0].name.as_str()), (64, 1, "Sprite"));
+}
+
+#[test]
+fn a_picture_comes_in_as_a_canvas_or_as_layers_one_undo_away() {
+    let root = project("import");
+    // A small PNG in the project: a canvas of its own, its few colours the palette.
+    let mut rgba = vec![0u8; 20 * 10 * 4];
+    for i in 0..20 * 10 {
+        rgba[i * 4..i * 4 + 4].copy_from_slice(if i % 3 == 0 { &[10, 200, 30, 255] } else { &[250, 250, 250, 255] });
+    }
+    std::fs::create_dir_all(root.join("art")).unwrap();
+    std::fs::write(root.join("art/leaf.png"), proton_raster::file::encode_png(20, 10, &rgba).unwrap()).unwrap();
+    let mut space = Workspace::rooted(&root);
+    let events = space.apply(Command::SetMode { mode: ModeId::Raster });
+    assert_eq!(images(&events), Some(vec!["art/leaf.png".to_string()]));
+    let events = space.apply(Command::RasterImport { path: Some("art/leaf.png".into()), blob: None, layer: false, above: None, name: None });
+    assert!(warned(&events).is_none(), "{events:?}");
+    let shown = view(&events).unwrap().expect("the picture is open as a canvas");
+    assert_eq!((shown.path.as_str(), shown.preset, shown.width, shown.palette.len()), ("art/leaf.canvas", Preset::Pixel, 20, 2));
+    // Bytes handed over — a paste — come in as a layer in the middle.
+    let blob = space.raster_put_blob(proton_raster::file::encode_png(4, 2, &[255u8; 32]).unwrap()).unwrap();
+    let events = space.apply(Command::RasterImport { path: None, blob: Some(blob), layer: true, above: None, name: None });
+    let at_canvas = events.iter().position(|e| matches!(e, Event::RasterCanvas { .. })).expect("the layers are said");
+    let at_changed = events.iter().position(|e| matches!(e, Event::RasterChanged { .. })).expect("the tiles are pushed");
+    assert!(at_canvas < at_changed, "the layer must reach the window before its tiles");
+    let shown = view(&events).unwrap().unwrap();
+    assert_eq!((shown.layers.len(), shown.layers[1].name.as_str(), shown.can_undo), (2, "Pasted", true));
+    let undone = space.apply(Command::RasterUndo);
+    assert_eq!(view(&undone).unwrap().unwrap().layers.len(), 1, "one undo takes the layer back");
+    // What cannot be read is said.
+    let gif = space.raster_put_blob(b"GIF89a....".to_vec()).unwrap();
+    assert!(warned(&space.apply(Command::RasterImport { path: None, blob: Some(gif), layer: true, above: None, name: None })).unwrap().contains("only PNG and Photoshop"));
+    assert!(warned(&space.apply(Command::RasterImport { path: None, blob: Some(999), layer: true, above: None, name: None })).unwrap().contains("gone"));
+    assert!(warned(&space.apply(Command::RasterImport { path: Some("../elsewhere.png".into()), blob: None, layer: true, above: None, name: None })).is_some());
+}
+
+#[test]
+fn a_canvas_sent_to_the_game_open_is_written_into_its_art_and_imported() {
+    let root = project("send");
+    let mut space = Workspace::rooted(&root);
+    space.apply(Command::SetMode { mode: ModeId::Game });
+    let events = space.apply(Command::GameNew { name: "Crossroads".into(), template: "metroidvania".into(), folder: None });
+    assert!(warned(&events).is_none(), "{events:?}");
+    let game = events
+        .iter()
+        .find_map(|e| match e {
+            Event::GameHome { games, .. } => games.first().map(|g| g.path.clone()),
+            _ => None,
+        })
+        .expect("the game is listed");
+    space.apply(Command::SetMode { mode: ModeId::Raster });
+    let events = space.apply(Command::RasterNew { name: "Far Hills [800]".into(), preset: Preset::Paint, width: 128, height: 64, folder: None });
+    let shown = view(&events).unwrap().unwrap();
+    space.apply(fill(shown.generation, 1, shown.layers[0].id, [0, 30, 128, 34], [60, 90, 70, 255]));
+    // A layer named as Game reads planes: its depth in square brackets.
+    let rename = Op::SetLayer { layer: shown.layers[0].id, name: Some("Far hills [800]".into()), opacity: None, blend: None, hidden: None, locked: None, alpha_lock: None };
+    space.apply(Command::RasterEdit { generation: shown.generation, seq: 2, op: rename, label: "rename".into() });
+    let events = space.apply(Command::RasterSend { game: game.clone(), layers: true });
+    assert!(warned(&events).is_none(), "{events:?}");
+    let dir = if game.is_empty() { root.clone() } else { root.join(&game) };
+    assert!(dir.join("art/far-hills-800.psd").exists(), "{:?}", said(&events));
+    assert!(said(&events).iter().any(|s| s.contains("import")), "the game open did not import it: {:?}", said(&events));
+    assert!(warned(&space.apply(Command::RasterSend { game: "nowhere".into(), layers: false })).is_some());
 }

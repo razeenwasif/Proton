@@ -1,8 +1,15 @@
-//! A `.psd` writer, for tests and fixtures only: the reader is checked
-//! against files this makes, so it writes the format as Adobe describes it —
+//! A `.psd` writer: Canvas's export of a layered canvas, and the files the
+//! reader is tested against. It writes the format as Adobe describes it —
 //! records bottom to top, a group as an end marker, its layers and then its
-//! own record, names padded to four bytes, each channel raw, run-length or
-//! zipped — and nothing a test does not ask for. Not a way to save art.
+//! own record, names padded to four bytes (and whole in `luni`), each channel
+//! raw, run-length or zipped — and a merged image with its transparency, so a
+//! viewer that reads only that shows the picture as it is. The fields a test
+//! may want wrong (a mask, tags, the header) are here for the reader's tests;
+//! an export does not use them.
+
+/// A layer mask to write: where (left, top), its width and height, its
+/// value outside itself, and its values.
+pub type Mask = ([i32; 2], u32, u32, u8, Vec<u8>);
 
 /// A layer to write.
 #[derive(Debug, Clone)]
@@ -22,7 +29,7 @@ pub struct Layer {
     /// Also say the name as `luni`, as Photoshop does for any name.
     pub unicode: bool,
     /// A layer mask: left, top, width, height, its value outside, its values.
-    pub mask: Option<([i32; 2], u32, u32, u8, Vec<u8>)>,
+    pub mask: Option<Mask>,
     /// Tagged blocks to add, by key, with stand-in contents: `lfx2` for
     /// effects, `SoLd` a smart object, `levl` a Levels adjustment…
     pub tags: Vec<[u8; 4]>,
@@ -84,11 +91,29 @@ impl Default for Header {
 /// A `.psd` of `width` × `height` holding `entries`; with none, a flat file
 /// whose merged image is `flat` (RGB, row by row) or white.
 pub fn write(width: u32, height: u32, entries: &[Entry], header: Header, flat: Option<&[u8]>) -> Vec<u8> {
+    let n = (width * height) as usize;
+    let planes: Vec<Vec<u8>> = (0..3).map(|c| (0..n).map(|i| flat.map(|f| f[i * 3 + c]).unwrap_or(255)).collect()).collect();
+    assemble(width, height, entries, header, planes, false)
+}
+
+/// A layered document to save: `entries`, and the picture they make —
+/// `merged`, straight RGBA, `width` × `height` — kept with its transparency
+/// (four channels, and the layer count negative, as Adobe's description has
+/// it), run-length encoded.
+pub fn export(width: u32, height: u32, entries: &[Entry], merged: &[u8]) -> Vec<u8> {
+    let n = (width * height) as usize;
+    let planes: Vec<Vec<u8>> = (0..4).map(|c| (0..n).map(|i| merged[i * 4 + c]).collect()).collect();
+    assemble(width, height, entries, Header::default(), planes, true)
+}
+
+/// The file: its header, its layers, and its merged image of `planes` —
+/// raw when there are three, run-length with a fourth for transparency.
+fn assemble(width: u32, height: u32, entries: &[Entry], header: Header, planes: Vec<Vec<u8>>, transparent: bool) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend(b"8BPS");
     out.extend(header.version.to_be_bytes());
     out.extend([0u8; 6]);
-    out.extend(3u16.to_be_bytes());
+    out.extend((planes.len() as u16).to_be_bytes());
     out.extend(height.to_be_bytes());
     out.extend(width.to_be_bytes());
     out.extend(header.depth.to_be_bytes());
@@ -101,7 +126,9 @@ pub fn write(width: u32, height: u32, entries: &[Entry], header: Header, flat: O
     let mut section = Vec::new();
     if !records.is_empty() {
         let mut info = Vec::new();
-        info.extend((records.len() as i16).to_be_bytes());
+        // Negative: the merged image's first extra channel is its transparency.
+        let count = records.len() as i16;
+        info.extend(if transparent { -count } else { count }.to_be_bytes());
         let mut data = Vec::new();
         for record in &records {
             let (head, channels) = record_bytes(record);
@@ -119,12 +146,21 @@ pub fn write(width: u32, height: u32, entries: &[Entry], header: Header, flat: O
     out.extend((section.len() as u32).to_be_bytes());
     out.extend(section);
 
-    // The merged image, raw.
-    out.extend(0u16.to_be_bytes());
-    let n = (width * height) as usize;
-    for c in 0..3 {
-        for i in 0..n {
-            out.push(flat.map(|f| f[i * 3 + c]).unwrap_or(255));
+    // The merged image: raw, or run-length — every row's length, channel by
+    // channel, and then the rows.
+    if transparent {
+        out.extend(1u16.to_be_bytes());
+        let rows: Vec<Vec<u8>> = planes.iter().flat_map(|p| p.chunks((width as usize).max(1)).map(pack).collect::<Vec<_>>()).collect();
+        for row in &rows {
+            out.extend((row.len() as u16).to_be_bytes());
+        }
+        for row in rows {
+            out.extend(row);
+        }
+    } else {
+        out.extend(0u16.to_be_bytes());
+        for plane in planes {
+            out.extend(plane);
         }
     }
     out
