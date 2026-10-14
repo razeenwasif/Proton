@@ -2,7 +2,7 @@
 // room, what is drawn and in what order, and what a point is over.
 import {test} from 'node:test';
 import {equal, deepEqual, ok} from 'node:assert/strict';
-import {boxInRoom, corner, factor, fitCam, frameSprite, layout, pickItem, restingFrame, shift, toPlane, viewOf} from '../../ui/game-scene.js';
+import {boxInRoom, corner, factor, fitCam, flickerOf, frameSprite, GLOW, hazeOf, layout, lightingOf, pickItem, restingFrame, shift, toPlane, viewOf} from '../../ui/game-scene.js';
 
 const plane = (id, depth, items, more = {}) => ({id, name: id, depth, parallax: null, tint: null, fog: 0, lit: false, blend: 'normal', gameplay: false, items, ...more});
 const item = (id, image, at, more = {}) => ({id, image, at, scale: 1, rot: 0, flip: false, opacity: 1, blend: 'normal', ...more});
@@ -138,4 +138,40 @@ test('an animation\'s frame is the part of its sheet it is, on its feet, flipped
   deepEqual(boxInRoom([0, 8, 4, 16], [100, 200], [6, 24], true), [102, 184, 4, 16]);
   equal(restingFrame(anim, {}), 0, 'a clip called idle, whatever its case');
   equal(restingFrame(anim, {idle: 'run'}), 1, 'the prefab\'s choice');
+});
+
+test('light: a lit plane\'s art is lit, a light glows where its plane puts it, fog hazes by depth, and lights waver alike', () => {
+  const lamp = (id, plane, at, more = {}) => ({id, plane, at, radius: 400, color: '#ff0000', intensity: 1, flicker: 0, glow: 0, height: 80, ...more});
+  const lit = {...room,
+    planes: [plane('far', 1000, [item('hill', 'hill.png', [100, 500])]), plane('main', 0, [item('rock', 'rock.png', [1000, 1500])], {gameplay: true, lit: true})],
+    lights: [lamp('torch', 'main', [1100, 1500], {glow: 0.5, intensity: 2}), lamp('moon', 'far', [100, 100])],
+    ambience: {ambient: '#202020', particles: [], fog: {color: '#8090a0', near: 200, far: 1800, amount: 0.8}}};
+  const drawn = layout(lit, how);
+  deepEqual(drawn.map((d) => [d.key, Boolean(d.lit)]), [['hill.png', false], ['rock.png', true], [GLOW, false]]);
+  const halo = drawn[2];
+  deepEqual([halo.blend, halo.tint, halo.opacity, halo.w], ['add', [1, 0, 0, 1], 1, 480]);
+  // The far plane hazed by its depth: (1000 − 200) / 1600 of 0.8; the play plane never.
+  deepEqual(hazeOf(lit, lit.planes[0]).map((v) => Math.round(v * 1000) / 1000), [0.502, 0.565, 0.627, 0.4]);
+  deepEqual(hazeOf(lit, lit.planes[1]), [0, 0, 0, 0]);
+  deepEqual(hazeOf(lit, plane('own', 1000, [], {tint: '#000000', fog: 0.3})), [0, 0, 0, 0.3], 'a plane\'s own haze is kept');
+  // The lights: the nearest the camera first, the moon where the far plane's parallax puts it.
+  const {ambient, lights} = lightingOf(lit, how);
+  deepEqual(ambient.map((v) => Math.round(v * 255)), [32, 32, 32]);
+  const [dx, dy] = shift(factor(lit.planes[0], 1000), corner(lit, how.view, how.center));
+  deepEqual(lights.map((l) => [l.x, l.y, l.color[0]]), [[1100, 1500, 2], [100 + dx, 100 + dy, 1]]);
+  equal(lightingOf({...lit, ambience: {particles: []}}, how).ambient.join(), '1,1,1', 'white when not said');
+  equal(lightingOf({...lit, lights: Array.from({length: 20}, (_, i) => lamp(`l${i}`, 'main', [i * 100, 0]))}, how).lights.length, 16);
+  // Wavering: the same at the same time, within its amount, still without a clock.
+  const torch = lamp('torch', 'main', [0, 0], {flicker: 0.4});
+  equal(flickerOf(torch, 1.25), flickerOf(torch, 1.25));
+  equal(flickerOf(torch, undefined), 1);
+  for (let t = 0; t < 5; t += 0.37) ok(flickerOf(torch, t) >= 0.6 - 1e-9 && flickerOf(torch, t) <= 1 + 1e-9);
+});
+
+test('a piece of an image cut up carries its normal map when it is loaded', () => {
+  const parts = new Map([['big.img.json', {size: [200, 100], chunks: [{file: 'a.png', at: [0, 0], size: [100, 100]}, {file: 'b.png', at: [100, 0], size: [100, 100]}],
+    normal: [{file: 'a.normal.png', at: [0, 0], size: [100, 100]}, {file: 'b.normal.png', at: [100, 0], size: [100, 100]}]}]]);
+  const r = {...room, planes: [plane('main', 0, [item('big', 'big.img.json', [0, 0])], {gameplay: true, lit: true})]};
+  const sized = new Map([['a.png', [100, 100]], ['b.png', [100, 100]], ['a.normal.png', [100, 100]]]);
+  deepEqual(layout(r, {...how, sizes: sized, parts}).map((d) => [d.key, d.normal ?? null, d.lit]), [['a.png', 'a.normal.png', true], ['b.png', null, true]]);
 });

@@ -50,6 +50,19 @@ test('Game mode\'s renderer draws its art, hazed by its plane, over the ground',
   // by the other program, and flipped about its feet.
   expect(result.skel.map((p, i) => near(p, [[0, 0, 255], [0, 255, 0], [255, 0, 0], [255, 0, 0]][i]))).toEqual([true, true, true, true]);
   expect(result.flipped.map((p, i) => near(p, [[0, 0, 255], [0, 255, 0]][i]))).toEqual([true, true]);
+  // Light: red where the light falls, the dim ambient beyond its reach;
+  // unlit art as painted.
+  expect([near(result.lit[0], [255, 26, 26]), near(result.lit[1], [26, 26, 26]), near(result.unlit, [255, 255, 255])]).toEqual([true, true, true]);
+  // A normal map: lit from the side it faces, not from behind.
+  expect(result.normal[0][0]).toBeGreaterThan(150);
+  expect(near(result.normal[1], [26, 26, 26])).toBe(true);
+  // Bloom spills only when the picture is finished, and not at low quality.
+  expect(result.bloom[0][0]).toBeGreaterThan(20);
+  expect([result.bloom[1][0], result.bloom[2][0]]).toEqual([0, 0]);
+  // The grade turns red to cyan; the vignette darkens the corner alone.
+  expect(near(result.graded, [0, 255, 255])).toBe(true);
+  expect(near(result.vignette[0], [255, 255, 255])).toBe(true);
+  expect(result.vignette[1][0]).toBeLessThan(160);
 });
 
 test('Game mode\'s runtime compiles and runs under the app\'s own CSP, which still refuses eval', async ({page}) => {

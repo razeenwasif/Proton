@@ -30,7 +30,9 @@ import { momentOf, pose, restingClip } from "./game-skel.js";
  *  frame of an animation, the part of its sheet it is, as `uv` (0–1); a
  *  skeleton, its model and pose and where it stands, as `skel` — its key
  *  then its atlas.
+ *  Lit, it is shaded by the room's lights, through its `normal` map if it has one.
  *  @typedef {{key: string, plane: string, item: string | null, x: number, y: number, w: number, h: number, rot: number, flip: boolean, opacity: number, tint: [number, number, number, number], blend: string, whole?: {x: number, y: number, w: number, h: number}, uv?: [number, number, number, number],
+ *             lit?: boolean, normal?: string,
  *             skel?: {model: import('./bindings/GameSkel').GameSkel, posed: import('./game-skel.js').Pose, at: number[], pivot: number[]}}} Sprite */
 /** An animation, as its `.anim.json` says it. @typedef {import('./bindings/GameAnim').GameAnim} Anim */
 /** Something standing on the play plane: an image, an animation's frame or a
@@ -38,7 +40,15 @@ import { momentOf, pose, restingClip } from "./game-skel.js";
  *  @typedef {{key: string, at: number[], pivot: number[], flip?: boolean, frame?: number | null, clips?: Record<string, string | undefined>}} Standing */
 
 /** How an image is cut up: its size, and where each piece goes in it (an `.img.json`).
- *  @typedef {{size: [number, number], chunks: {file: string, at: [number, number], size: [number, number]}[]}} Parts */
+ *  Its normal map, when it has one, is cut the same way.
+ *  @typedef {{size: [number, number], chunks: {file: string, at: [number, number], size: [number, number]}[], normal?: {file: string, at: [number, number], size: [number, number]}[]}} Parts */
+/** A light as the renderer takes it: where in room pixels, its reach, how high, its colour times its intensity.
+ *  @typedef {{x: number, y: number, radius: number, height: number, color: number[]}} Lamp */
+
+/** The key a light's glow is drawn by: the renderer's own texture. */
+export const GLOW = "__glow";
+/** The most lights a frame is lit by (the renderer's). */
+const LIGHTS = 16;
 
 /** How fast a plane moves against the play plane. @param {Plane} plane @param {number} focal */
 export function factor(plane, focal) {
@@ -93,7 +103,7 @@ export function rgb(hex) {
  *  @param {Room} room
  *  @param {{focal: number, view: [number, number], center: [number, number], sizes: Map<string, [number, number]>,
  *           hidden?: Set<string>, solo?: string | null, sprites?: Standing[],
- *           parts?: Map<string, Parts>, anims?: Map<string, Anim>, skels?: Map<string, import('./bindings/GameSkel').GameSkel>, tick?: number}} how
+ *           parts?: Map<string, Parts>, anims?: Map<string, Anim>, skels?: Map<string, import('./bindings/GameSkel').GameSkel>, tick?: number, time?: number}} how
  *  @returns {Sprite[]} */
 export function layout(room, how) {
   const at = corner(room, how.view, how.center);
@@ -102,7 +112,8 @@ export function layout(room, how) {
   for (const plane of room.planes) {
     if (how.solo ? plane.id !== how.solo : how.hidden?.has(plane.id)) continue;
     const [dx, dy] = shift(factor(plane, how.focal), at);
-    const tint = plane.tint && plane.fog > 0 ? /** @type {[number, number, number, number]} */ ([...rgb(plane.tint), Math.min(1, plane.fog)]) : /** @type {[number, number, number, number]} */ ([0, 0, 0, 0]);
+    const tint = hazeOf(room, plane);
+    const first = out.length;
     for (const item of plane.items) {
       const blend = item.blend !== "normal" ? item.blend : plane.blend;
       const parts = how.parts?.get(item.image);
@@ -143,8 +154,61 @@ export function layout(room, how) {
           rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal" });
       }
     }
+    // A lit plane's art is shaded by the lights.
+    if (plane.lit) for (let k = first; k < out.length; k++) out[k].lit = true;
+    // The glow of the lights standing on it, in the air before it.
+    for (const l of room.lights ?? []) {
+      if (l.plane !== plane.id || !(l.glow > 0)) continue;
+      const r = l.radius * 0.6;
+      const [x, y] = [l.at[0] + dx, l.at[1] + dy];
+      out.push({ key: GLOW, plane: plane.id, item: null, x: x - r, y: y - r, w: r * 2, h: r * 2, rot: 0, flip: false,
+        opacity: Math.min(1, l.glow * l.intensity * flickerOf(l, how.time)), tint: [...rgb(l.color), 1], blend: "add" });
+    }
   }
   return out;
+}
+
+/** A plane's haze: its own tint, by its amount — or, without one, the
+ *  room's fog by its depth: none nearer than `near`, `amount` at `far`.
+ *  @param {Room} room @param {Plane} plane @returns {[number, number, number, number]} */
+export function hazeOf(room, plane) {
+  if (plane.tint && plane.fog > 0) return [...rgb(plane.tint), Math.min(1, plane.fog)];
+  const fog = room.ambience?.fog;
+  if (!fog || plane.gameplay) return [0, 0, 0, 0];
+  const t = Math.max(0, Math.min(1, (plane.depth - fog.near) / Math.max(1, fog.far - fog.near))) * fog.amount;
+  return t > 0 ? [...rgb(fog.color), Math.min(1, t)] : [0, 0, 0, 0];
+}
+
+/** How bright a wavering light is at `time` seconds (1 when still): a few
+ *  sines out of step, the same every time for the same light.
+ *  @param {{id: string, flicker: number}} light @param {number} [time] */
+export function flickerOf(light, time) {
+  if (!light.flicker || time === undefined) return 1;
+  let h = 0;
+  for (const c of light.id) h = (h * 31 + c.charCodeAt(0)) % 997;
+  const wave = 0.5 * Math.sin(time * 11 + h) + 0.3 * Math.sin(time * 17.3 + h * 1.7) + 0.2 * Math.sin(time * 31.7 + h * 2.3);
+  return 1 - light.flicker * (0.5 + 0.5 * wave);
+}
+
+/** A room's light for the camera at `center`: its ambient colour (white,
+ *  the art as painted, when not said), and its lights where their planes'
+ *  parallax puts them, the nearest the camera's middle first, at most as
+ *  many as the renderer takes.
+ *  @param {Room} room @param {{focal: number, view: [number, number], center: [number, number], time?: number}} how
+ *  @returns {{ambient: number[], lights: Lamp[]}} */
+export function lightingOf(room, how) {
+  const at = corner(room, how.view, how.center);
+  const planes = new Map(room.planes.map((p) => [p.id, p]));
+  const lights = (room.lights ?? [])
+    .map((l) => {
+      const plane = planes.get(l.plane);
+      const [dx, dy] = plane ? shift(factor(plane, how.focal), at) : [0, 0];
+      const k = l.intensity * flickerOf(l, how.time);
+      return { x: l.at[0] + dx, y: l.at[1] + dy, radius: l.radius, height: l.height ?? 80, color: rgb(l.color).map((c) => c * k) };
+    })
+    .sort((a, b) => Math.hypot(a.x - how.center[0], a.y - how.center[1]) - Math.hypot(b.x - how.center[0], b.y - how.center[1]))
+    .slice(0, LIGHTS);
+  return { ambient: rgb(room.ambience?.ambient ?? "#ffffff"), lights };
 }
 
 /** An animation as its file says it, every list it may leave out when
@@ -216,6 +280,7 @@ function pieces(item, parts, sizes, plane, x, y, tint, blend) {
   const out = [];
   for (const c of parts.chunks) {
     if (!sizes.has(c.file)) continue;
+    const normal = parts.normal?.find((n) => n.at[0] === c.at[0] && n.at[1] === c.at[1])?.file;
     const [w, h] = [c.size[0] * s, c.size[1] * s];
     const left = item.flip ? whole.w - c.at[0] * s - w : c.at[0] * s;
     // From the whole's middle to the piece's, turned with the whole.
@@ -223,7 +288,8 @@ function pieces(item, parts, sizes, plane, x, y, tint, blend) {
     const dy = c.at[1] * s + h / 2 - whole.h / 2;
     const cx = whole.x + whole.w / 2 + dx * cos - dy * sin;
     const cy = whole.y + whole.h / 2 + dx * sin + dy * cos;
-    out.push({ key: c.file, plane, item: item.id, x: cx - w / 2, y: cy - h / 2, w, h, rot: item.rot, flip: item.flip, opacity: item.opacity, tint, blend, whole });
+    out.push({ key: c.file, plane, item: item.id, x: cx - w / 2, y: cy - h / 2, w, h, rot: item.rot, flip: item.flip, opacity: item.opacity, tint, blend, whole,
+      ...(normal && sizes.has(normal) ? { normal } : {}) });
   }
   return out;
 }

@@ -238,6 +238,19 @@
       "grants": "dash"
     }
   ],
+  "lights": [
+    {
+      "id": "shrine_light",
+      "plane": "main",
+      "at": [2500, 1240],
+      "radius": 600,
+      "color": "#9fc4ff",
+      "intensity": 1.4,
+      "flicker": 0,
+      "glow": 0.5,
+      "height": 80
+    }
+  ],
   "spawns": [
     {
       "id": "west",
@@ -245,6 +258,6 @@
     }
   ],
   "ambience": {
-    "ambient": "#1a2030"
+    "ambient": "#6a7590"
   }
 }

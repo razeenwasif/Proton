@@ -17,7 +17,7 @@
  * its sheet; the cues its frames say are shown as they are said, and its
  * boxes — hitboxes red, hurtboxes green — drawn over it when asked. */
 
-import { boxInRoom, layout } from "./game-scene.js";
+import { boxInRoom, layout, lightingOf } from "./game-scene.js";
 import { boxesOf, momentOf, pose } from "./game-skel.js";
 
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
@@ -55,6 +55,8 @@ function compile() {
  *   anims?: Map<string, import('./game-scene.js').Anim>,
  *   skels?: Map<string, import('./bindings/GameSkel').GameSkel>,
  *   boxes?: () => boolean,
+ *   post?: () => {bloom: number, vignette: number, grade: string | null, quality: "low" | "medium" | "high"},
+ *   times?: () => boolean,
  *   want: (keys: string[]) => void,
  *   stageSize: () => number[],
  *   focal: () => number,
@@ -92,6 +94,8 @@ export function createPlayer(host) {
   let before = null;
   /** The last cue said, and the tick it was said at. @type {{name: string, tick: number} | null} */
   let cue = null;
+  /** How long frames take, eased: between frames, and drawing one (ms). */
+  const times = { frame: 0, draw: 0, last: 0 };
 
   /** Why the runtime's last call failed. */
   function why() {
@@ -181,9 +185,16 @@ export function createPlayer(host) {
       drawn.push({ key: world.sprites[now[o]], at, pivot: [now[o + 3], now[o + 4]], flip: Boolean(now[o + 5]), frame: now[o + 6] >= 0 ? now[o + 6] : null });
     }
     host.want([...room.planes.flatMap((p) => p.items.map((i) => i.image)), ...drawn.map((d) => d.key)]);
-    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, anims: host.anims, skels: host.skels, tick: world.tick, sprites: drawn });
+    // Lights waver by the run's own clock, so a run played back wavers alike.
+    const time = (now[1] + alpha) / Math.max(1, world.tick);
+    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, anims: host.anims, skels: host.skels, tick: world.tick, time, sprites: drawn });
     const ratio = window.devicePixelRatio || 1;
-    host.gpu()?.draw(sprites, view, width, height, ratio, host.ground());
+    const began = performance.now();
+    host.gpu()?.draw(sprites, view, width, height, ratio, host.ground(), { ...lightingOf(room, { focal: host.focal(), view: world.view, center, time }), post: host.post?.() ?? null });
+    const spent = performance.now() - began;
+    times.draw = times.draw ? times.draw * 0.9 + spent * 0.1 : spent;
+    if (times.last) times.frame = times.frame ? times.frame * 0.9 + (began - times.last) * 0.1 : began - times.last;
+    times.last = began;
     // Over it: what is outside the game's view, a door's fade, and a readout.
     const c = host.canvas;
     c.width = Math.round(width * ratio);
@@ -245,6 +256,10 @@ export function createPlayer(host) {
     g.fillStyle = "rgba(255, 255, 255, 0.7)";
     const said = cue && now[1] - cue.tick < CUE_SHOWN ? ` · ${cue.name}` : "";
     g.fillText(`${room.id} · ${now[1]}${playback ? " · playing back" : ""}${now[6] ? ` · ${now[6]} hurt` : ""}${said}`, box[0] + 8, box[1] + 16);
+    if (host.times?.()) {
+      // The draw's own cost is the GPU's work handed over, not waited for.
+      g.fillText(`${times.frame.toFixed(1)} ms a frame · ${times.draw.toFixed(1)} ms to draw · ${sprites.length} sprites`, box[0] + 8, box[1] + 30);
+    }
   }
 
   /** Whether a key is Proton's even while the game plays: ⌘ with anything
@@ -352,5 +367,7 @@ export function createPlayer(host) {
     frame: () => (now ? [...now] : null),
     /** The last cue said, for tests. */
     cue: () => cue?.name ?? null,
+    /** How long frames take, for tests and the readout. */
+    times: () => ({ ...times }),
   };
 }

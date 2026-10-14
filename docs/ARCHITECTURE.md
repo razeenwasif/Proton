@@ -1695,10 +1695,33 @@ Chromium and WebKit). The inspector poses a clip small on a 2D canvas, each
 triangle drawn from the atlas by the map that takes it where its points
 land; the Run tab's boxes follow the bones.
 
-**What comes next** (the plan's G8–G14): Spine skeletons once its licence is
-decided, lighting and atmosphere, combat on the boxes animations and
-skeletons now carry, the world map with ability gates, hot reload and a web
-export.
+**Light and atmosphere** (G8). A lit plane's art — and what stands on it,
+the player included — is the room's ambient colour (white, the art as
+painted, when not said) plus each light's colour times its intensity,
+falling off to nothing at its reach: where the art has a normal map (one an
+import made from its brightness, cut the same way) shaded by the angle the
+light meets it at from its height before the planes, and otherwise lit
+straight on. Up to sixteen lights a frame, nearest the camera first, each
+where its plane's parallax puts it, in the fragment shader of both programs
+(skeletons too). A light can glow — a halo laid additively in the air before
+its plane — and flicker, by a few sines out of step on the run's own clock,
+so a run played back wavers alike. A room's fog hazes planes by depth (none
+nearer than `near`, `amount` at `far`) where a plane has no haze of its own.
+Afterwards, when finished: the picture is drawn into a texture, its bright
+part blurred small (at half or a quarter size) and laid back over it, its
+colours looked up in a grade — a strip of a 3D table, n² by n, as colour
+editors export — and its corners darkened. Play finishes by the window's
+quality (low draws plain); the editor shows the finish on ⇧P. The light tool
+(`l`) places a light where it is clicked; glow, height, fog and the finish
+are fields; the Run tab reads out frame times. Lights stay out of the sim:
+the cooked world and every run's hash are what they were. The renderer's
+probes — lit and unlit, a normal map lit from the side it faces, bloom only
+when finished, a grade turning red to cyan, the vignette — give the same
+pixels in Chromium and WebKit.
+
+**What comes next** (the plan's G10–G14): combat on the boxes animations and
+skeletons now carry, game feel and audio, the world map with ability gates,
+hot reload and a web export. (Spine was dropped by the user's choice.)
 
 ### Canvas
 

@@ -491,4 +491,84 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     await win.pushEvents([project(), room('crossroads_01')]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
+
+  await test('Lights are placed with l and set in the inspector, fog and the finish are fields, ⇧P shows the finish, and a run says its frame times', async () => {
+    await win.dispatch({type: 'setMode', mode: 'game'}); await settle();
+    await win.pushEvents([project(), room('crossroads_01')]); await settle();
+    // l, then a click: a light on the play plane, where the click was.
+    press('l'); await settle();
+    assert($('[data-game-tool="light"]').getAttribute('aria-pressed') === 'true', 'l did not take the light tool');
+    const canvas = $('[data-game-overlay]');
+    const box = canvas.getBoundingClientRect();
+    let before = win.commands.length;
+    canvas.dispatchEvent(new win.PointerEvent('pointerdown', {clientX: box.left + box.width / 2, clientY: box.top + box.height / 2, bubbles: true, pointerId: 1, button: 0}));
+    canvas.dispatchEvent(new win.PointerEvent('pointerup', {clientX: box.left + box.width / 2, clientY: box.top + box.height / 2, bubbles: true, pointerId: 1, button: 0}));
+    await settle();
+    const placed = sent(before, 'gameEdit')[0];
+    const value = placed?.ops[0].value;
+    assert(placed?.ops[0].op === 'insert' && placed.ops[0].path.join() === 'lights' && value.plane === 'main' && value.id === 'light_2' && value.glow === 0.3,
+      `the light placed was ${JSON.stringify(placed)}`);
+    assert(Math.abs(value.at[0] - 1920) < 60 && Math.abs(value.at[1] - 1080) < 60, `the light went to ${value.at}`);
+    assert($('[data-game-tool="select"]').getAttribute('aria-pressed') === 'true', 'the tool stayed on lights after one');
+    // The template's lantern: its glow and height are fields.
+    $('[data-game-side="entities"]').click(); await settle();
+    ws().querySelector('[data-game-pick="light"][data-game-pick-id="lantern"]').click(); await settle();
+    const glow = /** @type {HTMLInputElement} */ (ws().querySelector('[data-game-field=\'["lights","#lantern","glow"]\']'));
+    assert(glow?.value === '0.35' && ws().querySelector('[data-game-field=\'["lights","#lantern","height"]\']'), 'the light has no glow or height to set');
+    // The room's fog: blank, its colour makes the whole of it; cleared, takes it away.
+    press('Escape'); await settle();
+    const bare = structuredClone(fixture.rooms[0]);
+    bare.ambience.fog = null;
+    await win.pushEvents([{type: 'gameRoom', room: bare, revision: 30}]); await settle();
+    const fog = /** @type {HTMLInputElement} */ (ws().querySelector('[data-game-field=\'["ambience","fog","color"]\']'));
+    before = win.commands.length;
+    fog.value = '#405060';
+    fog.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const made = sent(before, 'gameEdit')[0]?.ops[0];
+    assert(made?.path.join() === 'ambience,fog' && made.value.color === '#405060' && made.value.far === 3000, `fog's colour sent ${JSON.stringify(made)}`);
+    await win.pushEvents([room('crossroads_01', 31)]); await settle();
+    const fogged = /** @type {HTMLInputElement} */ (ws().querySelector('[data-game-field=\'["ambience","fog","color"]\']'));
+    assert(fogged.value === '#8fa3c7' && ws().querySelector('[data-game-field=\'["ambience","fog","far"]\']'), 'the template\'s fog is not shown');
+    before = win.commands.length;
+    fogged.value = '';
+    fogged.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(JSON.stringify(sent(before, 'gameEdit')[0]?.ops) === '[{"op":"set","path":["ambience","fog"],"value":null}]', 'clearing the fog did not take it away');
+    // The finish: the game's fields; no grade is none.
+    $('[data-game-side="world"]').click(); await settle();
+    ws().querySelector('[data-game-pick="game"]').click(); await settle();
+    const grade = /** @type {HTMLSelectElement} */ (ws().querySelector('[data-game-field=\'["post","grade"]\']'));
+    assert(grade && ws().querySelector('[data-game-field=\'["post","bloom"]\']') && ws().querySelector('[data-game-field=\'["post","vignette"]\']'), 'the finish is not in the game\'s settings');
+    grade.value = 'art/sky.png';
+    grade.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    before = win.commands.length;
+    grade.value = '';
+    grade.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(sent(before, 'gameEdit')[0]?.ops[0].value === null, 'no grade was sent as something');
+    press('P'); await settle();
+    assert($('[data-game-post]').getAttribute('aria-pressed') === 'true', '⇧P did not show the finish');
+    press('P'); await settle();
+    // The Run tab: the finish's quality kept; a run's frame times read out.
+    $('[data-game-panel="run"]').click(); await settle();
+    const quality = /** @type {HTMLSelectElement} */ ($('[data-game-quality]'));
+    quality.value = 'high';
+    quality.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(win.localStorage.getItem('proton.game.quality') === 'high', 'the quality was not kept');
+    const times = /** @type {HTMLInputElement} */ ($('[data-game-times]'));
+    times.checked = true;
+    times.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const world = await (await fetch('/tests/ui/fixtures/game-world.json')).text();
+    await win.pushEvents([{type: 'gamePlay', world, start: [0, ...JSON.parse(world).rooms[0].spawns[0][1], 0], rooms: fixture.rooms, keys: [], replay: [[0, 40]]}]);
+    const frame = () => new Promise((done) => win.requestAnimationFrame(() => done(undefined)));
+    for (let i = 0; i < 60 && !(ws().gameProbe.frame()?.[1] > 20); i++) await frame();
+    assert(ws().gameProbe.frame()?.[1] > 20, 'the run did not go');
+    const took = ws().gameProbe.times();
+    assert(took.frame > 0 && took.draw >= 0, `the run's frame times are ${JSON.stringify(took)}`);
+    $('[data-game-stop]').click(); await settle();
+    times.checked = false;
+    times.dispatchEvent(new win.Event('change', {bubbles: true}));
+    quality.value = 'medium';
+    quality.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    await win.pushEvents([project(), room('crossroads_01')]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
 }

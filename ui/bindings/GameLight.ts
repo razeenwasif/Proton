@@ -8,4 +8,14 @@ plane: string, at: [number, number], radius: number, color: string, intensity: n
 /**
  * How much it wavers, 0 to 1: a torch rather than a lamp.
  */
-flicker: number, };
+flicker: number, 
+/**
+ * How brightly the air round it glows, 0 to 1: a halo laid over the
+ * picture, as a lamp in mist has.
+ */
+glow: number, 
+/**
+ * How far in front of the planes it hangs, in pixels: low, it rakes
+ * across what a normal map raises; high, it falls flat on it.
+ */
+height: number, };

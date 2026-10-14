@@ -192,9 +192,15 @@ fn first_room() -> Room {
             Entity { id: "dash_gate".into(), prefab: "ability_gate".into(), rect: Some([2640, 1000, 60, 260]), requires: vec!["dash".into()], ..Entity::default() },
             Entity { id: "bench".into(), prefab: "save_point".into(), at: Some([700, 1800]), ..Entity::default() },
         ],
-        lights: vec![Light { id: "lantern".into(), plane: "main".into(), at: [1000, 1560], radius: 520, color: "#ffd9a0".into(), intensity: 1.2, flicker: 0.1 }],
+        lights: vec![Light { id: "lantern".into(), plane: "main".into(), at: [1000, 1560], radius: 520, color: "#ffd9a0".into(), intensity: 1.2, flicker: 0.1, glow: 0.35, ..Light::default() }],
         spawns: vec![Spawn { id: "start".into(), at: [400, 1800] }, Spawn { id: "east".into(), at: [3700, 1700] }],
-        ambience: Ambience { ambient: Some("#1d2433".into()), particles: vec![Emitter { preset: "motes".into(), plane: "main".into() }] },
+        // Dusk: what no light reaches is dim, not black, and the far hills
+        // fade into the evening air.
+        ambience: Ambience {
+            ambient: Some("#7b8299".into()),
+            particles: vec![Emitter { preset: "motes".into(), plane: "main".into() }],
+            fog: Some(Fog { color: "#8fa3c7".into(), near: 400.0, far: 3000.0, amount: 0.5 }),
+        },
         ..Room::default()
     }
 }
@@ -227,7 +233,9 @@ fn second_room() -> Room {
             Entity { id: "dash_shrine".into(), prefab: "ability_pickup".into(), at: Some([2500, 1300]), grants: Some("dash".into()), ..Entity::default() },
         ],
         spawns: vec![Spawn { id: "west".into(), at: [120, 1400] }],
-        ambience: Ambience { ambient: Some("#1a2030".into()), particles: Vec::new() },
+        // A cooler room, the shrine lit from within.
+        lights: vec![Light { id: "shrine_light".into(), plane: "main".into(), at: [2500, 1240], radius: 600, color: "#9fc4ff".into(), intensity: 1.4, glow: 0.5, ..Light::default() }],
+        ambience: Ambience { ambient: Some("#6a7590".into()), particles: Vec::new(), fog: None },
         ..Room::default()
     }
 }

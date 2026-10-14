@@ -128,17 +128,29 @@ export function draw(g, room, view, c, selected, also = {}) {
   g.lineWidth = 1;
   g.strokeRect(Math.round(view.x) + 0.5, Math.round(view.y) + 0.5, Math.round(w * view.scale), Math.round(h * view.scale));
 
-  // Light, under everything that stands in it.
+  // Light, under everything that stands in it: drawn as light by the GPU
+  // when there is one, so here only where it is and, chosen, how far it
+  // reaches; without one, a glow to stand for it.
   for (const l of room.lights) {
     const [x, y] = toStage(view, l.at);
     const r = Math.max(2, l.radius * view.scale);
-    const glow = g.createRadialGradient(x, y, 0, x, y, r);
-    glow.addColorStop(0, withAlpha(l.color, 0.28));
-    glow.addColorStop(1, withAlpha(l.color, 0));
-    g.fillStyle = glow;
-    g.beginPath();
-    g.arc(x, y, r, 0, Math.PI * 2);
-    g.fill();
+    if (!also.art) {
+      const glow = g.createRadialGradient(x, y, 0, x, y, r);
+      glow.addColorStop(0, withAlpha(l.color, 0.28));
+      glow.addColorStop(1, withAlpha(l.color, 0));
+      g.fillStyle = glow;
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    } else if (is("light", l.id)) {
+      g.strokeStyle = c.accent;
+      g.lineWidth = 1;
+      g.setLineDash([4, 4]);
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.stroke();
+      g.setLineDash([]);
+    }
     g.fillStyle = is("light", l.id) ? c.accent : l.color;
     g.beginPath();
     g.arc(x, y, is("light", l.id) ? 5 : 3.5, 0, Math.PI * 2);

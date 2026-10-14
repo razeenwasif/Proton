@@ -552,6 +552,12 @@ pub struct Light {
     pub intensity: f64,
     /// How much it wavers, 0 to 1: a torch rather than a lamp.
     pub flicker: f64,
+    /// How brightly the air round it glows, 0 to 1: a halo laid over the
+    /// picture, as a lamp in mist has.
+    pub glow: f64,
+    /// How far in front of the planes it hangs, in pixels: low, it rakes
+    /// across what a normal map raises; high, it falls flat on it.
+    pub height: f64,
 }
 
 impl Default for Light {
@@ -564,6 +570,8 @@ impl Default for Light {
             color: "#ffd9a0".into(),
             intensity: 1.0,
             flicker: 0.0,
+            glow: 0.0,
+            height: 80.0,
         }
     }
 }
@@ -577,13 +585,35 @@ pub struct Spawn {
     pub at: [i32; 2],
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/", rename = "GameAmbience")]
 #[serde(default, rename_all = "camelCase")]
 pub struct Ambience {
-    /// The light where no light falls, `#rrggbb`.
+    /// The light where no light falls on a lit plane, `#rrggbb`; white —
+    /// the art as painted — when not said.
     pub ambient: Option<String>,
     pub particles: Vec<Emitter>,
+    /// Air that hazes what is far: a plane deeper than `near` is hazed
+    /// toward `color`, more with depth, to `amount` at `far`. A plane's own
+    /// haze, when it has one, is kept.
+    pub fog: Option<Fog>,
+}
+
+/// Distance's haze, by depth.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameFog")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Fog {
+    pub color: String,
+    pub near: f64,
+    pub far: f64,
+    pub amount: f64,
+}
+
+impl Default for Fog {
+    fn default() -> Fog {
+        Fog { color: "#8fa3c7".into(), near: 0.0, far: 2000.0, amount: 0.6 }
+    }
 }
 
 /// Particles that hang in a room: motes, rain, falling leaves.

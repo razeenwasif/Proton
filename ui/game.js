@@ -18,7 +18,7 @@
 
 import { escapeHtml as esc } from "./html.js";
 import { draw, handle, pick, toRoom, toStage } from "./game-overlay.js";
-import { animOf, corner, fitCam, layout, maskOf, pickItem, restingFrame, rgb, toPlane, viewOf } from "./game-scene.js";
+import { animOf, corner, fitCam, layout, lightingOf, maskOf, pickItem, restingFrame, rgb, toPlane, viewOf } from "./game-scene.js";
 import { createGameRender } from "./game-render.js";
 import { createPlayer } from "./game-play.js";
 import { pose, restingClip, skelOf, skin } from "./game-skel.js";
@@ -36,7 +36,8 @@ import { readGame } from "./bridge.js";
 const KEYS = /** @type {[string, string][]} */ ([
   ["⌘S", "save every changed room and file"], ["⌘Z ⇧⌘Z", "undo, redo — wherever the change was"],
   ["⎋", "select nothing; with nothing selected, clear the agent's run"], ["⌫", "remove what is selected"], ["[ ]", "the room tab before, after"],
-  ["1 2 3 4", "World, Layers, Entities, Assets"], ["v p", "select; draw collision"], ["↩ ⎋", "end the line; drop it"],
+  ["1 2 3 4", "World, Layers, Entities, Assets"], ["v p l", "select; draw collision; place a light"], ["↩ ⎋", "end the line; drop it"],
+  ["⇧P", "bloom, grade and vignette, as Play shows them"],
   ["⌥ click", "a point on the selected line"], ["double-click", "take a point away"], ["f", "the whole room"], ["two fingers", "move over the room"],
   ["pinch ⌘ wheel", "zoom"], ["␣ drag", "move over the room"], ["▶", "play the room — the game has the keys; ⎋ stops"], ["?", "these keys"],
 ]);
@@ -120,6 +121,12 @@ export function createGame(host) {
   let startPaused = false;
   /** Why the last run could not start, shown in the Run tab. */
   let playError = "";
+  /** Whether the editor shows bloom, the grade and the vignette, as Play does. */
+  let postShown = false;
+  /** How much a run's picture is finished: low draws it plain. */
+  let quality = /** @type {"low" | "medium" | "high"} */ (["low", "medium", "high"].includes(pref("quality", "medium")) ? pref("quality", "medium") : "medium");
+  /** Whether a run shows how long its frames take. */
+  let showTimes = pref("times", "") === "1";
   /** Whether Play draws animations' boxes. */
   let showBoxes = pref("boxes", "") === "1";
   /** The inspector's preview of an animation: which clip, and its timer. */
@@ -500,9 +507,10 @@ export function createGame(host) {
           .then((bytes) => JSON.parse(new TextDecoder().decode(bytes)))
           .then((sheet) => {
             const chunks = (sheet.chunks ?? []).filter((/** @type {any} */ c) => c && typeof c.file === "string");
-            parts.set(key, { size: sheet.size ?? [0, 0], chunks });
+            const normal = (sheet.normal ?? []).filter((/** @type {any} */ c) => c && typeof c.file === "string");
+            parts.set(key, { size: sheet.size ?? [0, 0], chunks, normal });
             images.set(key, sheet.size ?? [0, 0]);
-            loadKeys(chunks.map((/** @type {any} */ c) => c.file));
+            loadKeys([...chunks, ...normal].map((/** @type {any} */ c) => c.file));
           })
           .catch(() => failed.add(key))
           .finally(() => {
@@ -516,7 +524,7 @@ export function createGame(host) {
       readGame(key)
         .then((bytes) => createImageBitmap(new Blob([bytes])))
         .then((bitmap) => {
-          gpu?.upload(key, bitmap, filter);
+          gpu?.upload(key, bitmap, key === project?.game.post.grade ? "linear" : filter);
           images.set(key, [bitmap.width, bitmap.height]);
           const mask = maskOf(bitmap);
           if (mask) masks.set(key, mask);
@@ -671,6 +679,22 @@ export function createGame(host) {
     return r ? layout(r, how()) : [];
   }
 
+  /** The finish shown in the editor, or not. */
+  function togglePost() {
+    postShown = !postShown;
+    q("[data-game-post]").setAttribute("aria-pressed", String(postShown));
+    paint();
+  }
+  q("[data-game-post]").addEventListener("click", () => togglePost());
+
+  /** What a picture is finished with, as the game says and this window's
+   *  quality allows. */
+  function post() {
+    const p = project?.game.post;
+    if (p?.grade) loadKeys([p.grade]);
+    return { bloom: p?.bloom ?? 0, vignette: p?.vignette ?? 0, grade: p?.grade ?? null, quality };
+  }
+
   /** The selected image's box in room pixels, when an image is selected. */
   function selectedBox() {
     if (selected?.kind !== "item") return null;
@@ -710,7 +734,7 @@ export function createGame(host) {
     const shade = colors();
     const r = draft ?? room;
     load(r);
-    gpu?.draw(drawn(), view, width, height, ratio, rgb(shade.ground));
+    gpu?.draw(drawn(), view, width, height, ratio, rgb(shade.ground), { ...lightingOf(r, how()), post: postShown ? post() : null });
     canvas.width = Math.round(width * ratio);
     canvas.height = Math.round(height * ratio);
     canvas.style.width = `${width}px`;
@@ -738,6 +762,8 @@ export function createGame(host) {
     anims,
     skels,
     boxes: () => showBoxes,
+    post: () => post(),
+    times: () => showTimes,
     want: (keys) => loadKeys(keys),
     stageSize,
     focal: () => project?.game.view.focal ?? 1000,
@@ -831,6 +857,20 @@ export function createGame(host) {
     }
     if (e.button === 1 || space) {
       drag = { kind: "pan", from: [sx, sy], at: [sx, sy], moved: false, base: [...c.center], picked: null };
+      return;
+    }
+    if (tool === "light") {
+      // A light on the play plane, where the click is; selected, to set.
+      const plane = room.planes.find((p) => p.gameplay) ?? room.planes[0];
+      if (!plane) return;
+      const [rx, ry] = toRoom(view, sx, sy);
+      const at = toPlane(room, plane, how(), [rx, ry]).map(Math.round);
+      let n = room.lights.length + 1;
+      while (room.lights.some((l) => l.id === `light_${n}`)) n++;
+      const id = `light_${n}`;
+      send({ type: "gameEdit", target: `room:${room.id}`, ops: [{ op: "insert", path: ["lights"], value: { id, plane: plane.id, at, radius: 400, color: "#ffd9a0", intensity: 1, glow: 0.3 } }], label: "place a light" });
+      selected = { kind: "light", id };
+      useTool("select");
       return;
     }
     if (tool === "pen") {
@@ -1094,6 +1134,9 @@ export function createGame(host) {
           { label: "Jump buffer frames", path: ["controller", "jump", "buffer"], value: game.controller.jump.buffer, type: "number" },
           { label: "Dash distance", path: ["controller", "dash", "distance"], value: game.controller.dash.distance, type: "number" },
           { label: "Air jumps", path: ["controller", "airJumps"], value: game.controller.airJumps, type: "number" },
+          { label: "Bloom", path: ["post", "bloom"], value: game.post.bloom, type: "number", hint: "0 to 1: how far bright light spills" },
+          { label: "Vignette", path: ["post", "vignette"], value: game.post.vignette, type: "number", hint: "0 to 1: how dark the corners go" },
+          { label: "Grade", path: ["post", "grade"], value: game.post.grade ?? "", type: "select", options: [["", "None"], ...project.assets.filter((a) => /\.png$/i.test(a)).map((a) => /** @type {[string, string]} */ ([a, a]))], hint: "a colour table: an n²×n strip, as editors export" },
         ],
       };
     }
@@ -1181,7 +1224,9 @@ export function createGame(host) {
           { label: "Reach", path: [...at, "radius"], value: l.radius, type: "number" },
           { label: "Colour", path: [...at, "color"], value: l.color, type: "color" },
           { label: "Brightness", path: [...at, "intensity"], value: l.intensity, type: "number" },
-          { label: "Flicker", path: [...at, "flicker"], value: l.flicker, type: "number" },
+          { label: "Flicker", path: [...at, "flicker"], value: l.flicker, type: "number", hint: "0 to 1: a torch wavers" },
+          { label: "Glow", path: [...at, "glow"], value: l.glow ?? 0, type: "number", hint: "0 to 1: a halo in the air round it" },
+          { label: "Height", path: [...at, "height"], value: l.height ?? 80, type: "number", hint: "in front of the planes: low rakes across a normal map" },
         ],
       };
     }
@@ -1222,7 +1267,15 @@ export function createGame(host) {
       target,
       fields: [
         { label: "Size", path: ["size"], value: room.size, type: "pair" },
-        { label: "Dark", path: ["ambience", "ambient"], value: room.ambience.ambient, type: "color", hint: "the light where no light falls" },
+        { label: "Dark", path: ["ambience", "ambient"], value: room.ambience.ambient, type: "color", hint: "the light where no light falls, on a lit plane — white when blank" },
+        { label: "Fog", path: ["ambience", "fog", "color"], value: room.ambience.fog?.color ?? null, type: "color", hint: "far planes hazed toward it, by depth" },
+        ...(room.ambience.fog
+          ? /** @type {Field[]} */ ([
+              { label: "Fog from", path: ["ambience", "fog", "near"], value: room.ambience.fog.near, type: "number", hint: "a plane this deep starts to haze" },
+              { label: "Fog to", path: ["ambience", "fog", "far"], value: room.ambience.fog.far, type: "number", hint: "and is as hazed as it gets here" },
+              { label: "Fog amount", path: ["ambience", "fog", "amount"], value: room.ambience.fog.amount, type: "number" },
+            ])
+          : []),
       ],
     };
   }
@@ -1586,8 +1639,20 @@ export function createGame(host) {
       renderInspector();
       return;
     }
-    send({ type: "gameEdit", target, ops: [{ op: "set", path: JSON.parse(field.dataset.gameField ?? "[]"), value }], label: "inspector" });
+    send({ type: "gameEdit", target, ops: opsFor(JSON.parse(field.dataset.gameField ?? "[]"), value), label: "inspector" });
   });
+
+  /** The ops a field's new value makes: most set it; fog's colour makes or
+   *  takes away the room's fog whole, and no grade is none, not "".
+   *  @param {string[]} path @param {any} value */
+  function opsFor(path, value) {
+    if (path.join("/") === "ambience/fog/color") {
+      if (value === null) return [{ op: "set", path: ["ambience", "fog"], value: null }];
+      if (!room?.ambience.fog) return [{ op: "set", path: ["ambience", "fog"], value: { color: value, near: 400, far: 3000, amount: 0.5 } }];
+    }
+    if (path.join("/") === "post/grade" && value === "") return [{ op: "set", path, value: null }];
+    return [{ op: "set", path, value }];
+  }
   q("[data-game-inspector]").addEventListener("click", (e) => {
     const target = /** @type {HTMLElement} */ (e.target);
     if (target.closest("[data-game-remove]")) removeSelected();
@@ -1625,6 +1690,10 @@ export function createGame(host) {
       `<section class="game-tool"><h4>Play</h4>` +
       `<p class="game-faint">▶ over the stage plays the room on screen. The game has the keys while it runs; Esc stops it, and the run is kept here.</p>` +
       `<label class="game-field game-check"><input type="checkbox" data-game-boxes${showBoxes ? " checked" : ""}> <span>Boxes — an animation's hitboxes and hurtboxes, over the run</span></label>` +
+      `<label class="game-field"><span>Finish</span><select data-game-quality>${[["low", "Low — no bloom, grade or vignette"], ["medium", "Medium — bloom at a quarter size"], ["high", "High — bloom at half size"]]
+        .map(([v, label]) => `<option value="${v}"${v === quality ? " selected" : ""}>${label}</option>`)
+        .join("")}</select></label>` +
+      `<label class="game-field game-check"><input type="checkbox" data-game-times${showTimes ? " checked" : ""}> <span>Frame times, over the run</span></label>` +
       (playError ? `<p class="game-error" role="alert">${esc(playError)}</p>` : "") +
       `<p class="game-faint" data-game-tick></p></section>` +
       `<section class="game-tool"><h4>Runs</h4>${
@@ -1650,6 +1719,19 @@ export function createGame(host) {
     }
   });
   q("[data-game-run]").addEventListener("change", (e) => {
+    const finish = /** @type {HTMLSelectElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-quality]"));
+    if (finish) {
+      quality = /** @type {"low" | "medium" | "high"} */ (finish.value);
+      keep("quality", quality);
+      paint();
+      return;
+    }
+    const times = /** @type {HTMLInputElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-times]"));
+    if (times) {
+      showTimes = times.checked;
+      keep("times", showTimes ? "1" : "");
+      return;
+    }
     const boxes = /** @type {HTMLInputElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-boxes]"));
     if (boxes) {
       showBoxes = boxes.checked;
@@ -1689,6 +1771,8 @@ export function createGame(host) {
     if (e.key === "Escape") return (select(null), true);
     if (e.key === "v") return (useTool("select"), true);
     if (e.key === "p") return (useTool("pen"), true);
+    if (e.key === "l") return (useTool("light"), true);
+    if (e.key === "P") return (togglePost(), true);
     if (e.key === "f") return (refit(), true);
     if (e.key === "Backspace" || e.key === "Delete") return (removeSelected(), true);
     if (e.key === "[" || e.key === "]") {
@@ -1723,6 +1807,7 @@ export function createGame(host) {
     drawn: () => drawn().map((d) => d.key),
     frame: () => player?.frame() ?? null,
     cue: () => player?.cue() ?? null,
+    times: () => player?.times() ?? null,
   };
 
   return {
