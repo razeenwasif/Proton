@@ -1,6 +1,6 @@
 {
-  "composite": "afd95153711388ac",
-  "flat": "de15c8b818f2e964",
+  "composite": "d9fc7cf50f093151",
+  "flat": "a47450d34fa55be9",
   "hashes": [
     "a5fbe81a74dae0c1",
     "88d4c5bf137aa7ab",
@@ -62,7 +62,20 @@
     "8a4f1c723b8d4e0d",
     "6ebe45fb46d403d5",
     "fe4dad82fb8d4e0d",
-    "ac43a4165106763a"
+    "ac43a4165106763a",
+    "7b0c48175c61c9ba",
+    "f8ca727e2d61c9ba",
+    "7cea6278c561c9ba",
+    "0765f43bb6562c2b",
+    "26c4e0aaa1c75eaa",
+    "a2687b911b00fc0f",
+    "a2959ce36a67b3d8",
+    "d93b83e6d261c9ba",
+    "1ee989ec74659248",
+    "956a1e80ae52ca21",
+    "93f194e83e00e169",
+    "4ec74a260cbd0c11",
+    "271f026c6a66975d"
   ],
   "open": {
     "generation": 1,
@@ -1479,18 +1492,266 @@
         12936,
         28800
       ]
+    },
+    {
+      "area": {
+        "kind": "ellipse",
+        "rect": [
+          10,
+          5,
+          60,
+          50
+        ]
+      },
+      "feather": 0,
+      "mode": "replace",
+      "op": "select",
+      "smooth": true
+    },
+    {
+      "area": {
+        "kind": "lasso",
+        "points": [
+          5197,
+          2637,
+          23117,
+          5197,
+          12877,
+          16717,
+          1357,
+          10317
+        ]
+      },
+      "feather": 3,
+      "mode": "subtract",
+      "op": "select",
+      "smooth": true
+    },
+    {
+      "area": {
+        "kind": "rect",
+        "rect": [
+          60,
+          30,
+          30,
+          30
+        ]
+      },
+      "feather": 0,
+      "mode": "add",
+      "op": "select",
+      "smooth": false
+    },
+    {
+      "color": [
+        200,
+        30,
+        160,
+        230
+      ],
+      "layer": 2,
+      "op": "fillRect",
+      "rect": [
+        0,
+        0,
+        100,
+        70
+      ]
+    },
+    {
+      "brush": {
+        "flow": 200,
+        "flowPressure": 25,
+        "hardness": 50,
+        "opacity": 255,
+        "opacityPressure": 16,
+        "size": 18,
+        "sizePressure": 50,
+        "spacing": 9
+      },
+      "color": [
+        10,
+        250,
+        40,
+        255
+      ],
+      "erase": false,
+      "layer": 1,
+      "op": "brush",
+      "points": [
+        512,
+        7680,
+        0,
+        1317,
+        8795,
+        1200,
+        2122,
+        7862,
+        2400,
+        2927,
+        9233,
+        3600,
+        3732,
+        7788,
+        4800,
+        4537,
+        8903,
+        6000,
+        5342,
+        7714,
+        7200,
+        5891,
+        9341,
+        8400,
+        6696,
+        7896,
+        9600,
+        7501,
+        8755,
+        10800,
+        8306,
+        7822,
+        12000,
+        9111,
+        9449,
+        13200,
+        9916,
+        7748,
+        14400,
+        10721,
+        8863,
+        15600,
+        11270,
+        7930,
+        16800,
+        12075,
+        9301,
+        18000,
+        12880,
+        7856,
+        19200,
+        13685,
+        8715,
+        20400,
+        14490,
+        7782,
+        21600,
+        15295,
+        9409,
+        22800,
+        16100,
+        7708,
+        24000,
+        16649,
+        8823,
+        25200,
+        17454,
+        7890,
+        26400,
+        18259,
+        9261,
+        27600,
+        19064,
+        7816,
+        28800,
+        19869,
+        8931,
+        30000,
+        20674,
+        7742,
+        31200,
+        21479,
+        9369,
+        32400,
+        22028,
+        7924,
+        33600,
+        22833,
+        8783,
+        34800
+      ]
+    },
+    {
+      "cut": true,
+      "layer": 1,
+      "op": "copy"
+    },
+    {
+      "above": 1,
+      "op": "paste"
+    },
+    {
+      "area": {
+        "contiguous": true,
+        "diagonal": true,
+        "kind": "wand",
+        "layer": 2,
+        "tolerance": 20,
+        "x": 70,
+        "y": 40
+      },
+      "feather": 0,
+      "mode": "intersect",
+      "op": "select",
+      "smooth": false
+    },
+    {
+      "bounds": [
+        0,
+        0,
+        100,
+        70
+      ],
+      "inverse": [
+        58000,
+        21000,
+        -589824,
+        -21000,
+        58000,
+        983040
+      ],
+      "layer": 2,
+      "op": "transform",
+      "smooth": true
+    },
+    {
+      "area": {
+        "kind": "invert"
+      },
+      "feather": 0,
+      "mode": "replace",
+      "op": "select",
+      "smooth": false
+    },
+    {
+      "layer": 4,
+      "op": "clear"
+    },
+    {
+      "area": {
+        "kind": "nothing"
+      },
+      "feather": 0,
+      "mode": "replace",
+      "op": "select",
+      "smooth": false
+    },
+    {
+      "flip": true,
+      "op": "orient",
+      "turns": 2
     }
   ],
   "pick": [
     [
       15,
       20,
-      4151278058
+      3375281622
     ],
     [
       70,
       40,
-      4286414715
+      4287367770
     ]
   ]
 }

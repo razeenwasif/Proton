@@ -39,8 +39,18 @@
 //! rr_preview_clear()               what was previewed taken away
 //! rr_touched() → ptr               the tiles the last op touched:
 //!                                  [count, (layer, index)…] as u32s
-//! rr_info() → ptr                  the layers, palette and which tiles each layer
-//!                                  has, as JSON: length, then bytes
+//! rr_info() → ptr                  the size, layers, palette and which tiles each
+//!                                  layer has (the selection as layer 0), as
+//!                                  JSON: length, then bytes
+//! rr_width(), rr_height() → u32    the canvas's size now
+//! rr_selection_version() → u32     a number that changes when the selection does
+//! rr_outline() → ptr               the selection's edges, for marching ants:
+//!                                  [count, (x0, y0, x1, y1)…] as i32s
+//! rr_lift(layer) → ptr             what of a layer is selected — all of it with
+//!                                  nothing selected — for a transform's preview:
+//!                                  [x, y, width, height] as u32s, then that
+//!                                  rectangle premultiplied, RGBA; width 0 if
+//!                                  there is nothing
 //! rr_tile(layer, index) → ptr | 0   a tile's RGBA (0: clear) — for a second
 //!                                  copy standing in for the core, in the
 //!                                  browser preview and the window's tests
@@ -55,7 +65,7 @@ use std::collections::BTreeMap;
 
 use proton_raster::history::Patch;
 use proton_raster::tile::{Tile, TILE, TILE_BYTES};
-use proton_raster::{blend, brush, stroke, Brush, Canvas, Dabs, Grid, Layer, LayerInfo, Op, Preset, Stroke, Tip, Tool};
+use proton_raster::{blend, brush, select, stroke, Brush, Canvas, Dabs, Grid, Layer, LayerInfo, Op, Preset, Stroke, Tip, Tool, SELECTION};
 use serde::Deserialize;
 
 pub const ABI: u32 = 1;
@@ -75,6 +85,8 @@ struct Live {
     lock: bool,
     marks: Marks,
     bases: BTreeMap<u32, Option<Arc<Tile>>>,
+    /// The selection the stroke keeps to, if anything is selected.
+    sel: Option<Grid>,
 }
 
 impl Live {
@@ -82,9 +94,13 @@ impl Live {
     /// or, given the tile as it is and a part of it, only that part made
     /// again, for a brush.
     fn paint(&self, index: u32, base: Option<&Arc<Tile>>, part: Option<(&Option<Arc<Tile>>, [u32; 4])>, width: u32, height: u32) -> Option<Arc<Tile>> {
-        match &self.marks {
+        let painted = match &self.marks {
             Marks::Pencil(s) => stroke::paint(&s.mask, index, base, self.tool, self.color, self.lock, width, height),
             Marks::Brush(d) => brush::paint(&d.mask, index, base, part, self.tool == Tool::Eraser, self.color, self.lock, width, height),
+        };
+        match &self.sel {
+            Some(sel) => select::clip(sel, index, base, painted),
+            None => painted,
         }
     }
 }
@@ -137,6 +153,12 @@ struct Held {
     touched: Vec<u32>,
     /// What `rr_stroke_end` gave: length, then the op as JSON.
     ended: Vec<u8>,
+    /// Bumped whenever the selection may have changed.
+    selection_version: u32,
+    /// What `rr_outline` gave.
+    outline: Vec<i32>,
+    /// What `rr_lift` gave.
+    lifted: Vec<u8>,
     hash: u64,
     error: Vec<u8>,
 }
@@ -221,6 +243,8 @@ pub fn open(bytes: &[u8]) -> Result<(), String> {
         h.generation = o.generation;
         h.live = None;
         h.below = None;
+        h.preview = None;
+        h.selection_version += 1;
         h.canvas = Some(canvas);
     });
     Ok(())
@@ -303,7 +327,11 @@ pub fn put(layer: u32, bytes: &[u8]) -> Result<(), String> {
             return Err("tiles of a canvas since closed".into());
         }
         let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
-        let target = canvas.layer_mut(layer).ok_or_else(|| format!("there is no layer {layer}"))?;
+        if layer == SELECTION {
+            held.selection_version += 1;
+        }
+        let (width, height) = (canvas.width, canvas.height);
+        let target = canvas.grid_mut(layer).ok_or_else(|| format!("there is no layer {layer}"))?;
         let mut at = 24usize;
         for _ in 0..count {
             let (index, present) = (word(at)?, word(at + 4)?);
@@ -315,7 +343,11 @@ pub fn put(layer: u32, bytes: &[u8]) -> Result<(), String> {
             } else {
                 None
             };
-            if index >= target.grid.cols * target.grid.rows {
+            if index >= target.cols * target.rows {
+                continue;
+            }
+            if layer == SELECTION {
+                target.put(index, tile);
                 continue;
             }
             mark(&mut held.dirty, index, WHOLE);
@@ -327,12 +359,12 @@ pub fn put(layer: u32, bytes: &[u8]) -> Result<(), String> {
             if let Some(live) = held.live.as_mut().filter(|l| l.layer == layer) {
                 if let Some(base) = live.bases.get_mut(&index) {
                     *base = tile.clone();
-                    let painted = live.paint(index, tile.as_ref(), None, target.grid.width, target.grid.height);
-                    target.grid.put(index, painted);
+                    let painted = live.paint(index, tile.as_ref(), None, width, height);
+                    target.put(index, painted);
                     continue;
                 }
             }
-            target.grid.put(index, tile);
+            target.put(index, tile);
         }
         Ok(())
     })
@@ -354,11 +386,24 @@ pub fn apply(bytes: &[u8]) -> Result<u64, String> {
         let mut h = h.borrow_mut();
         let held = &mut *h;
         let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
+        let size = (canvas.width, canvas.height);
         let (applied, _) = canvas.apply(&op)?;
         held.below = None;
         held.hash = canvas.hash_touched(&applied.touched);
-        for &(_, index) in &applied.touched {
-            mark(&mut held.dirty, index, WHOLE);
+        if (canvas.width, canvas.height) != size {
+            // Turned, resized or cropped: everything laid together again.
+            held.composite = vec![0; (canvas.width * canvas.height * 4) as usize];
+            held.dirty = (0..tiles_of(canvas)).map(|i| (i, WHOLE)).collect();
+            held.live = None;
+            held.preview = None;
+            held.selection_version += 1;
+        }
+        for &(layer, index) in &applied.touched {
+            if layer == SELECTION {
+                held.selection_version += 1;
+            } else {
+                mark(&mut held.dirty, index, WHOLE);
+            }
         }
         held.touched = flat(&applied.touched);
         Ok(held.hash)
@@ -519,7 +564,7 @@ pub extern "C" fn rr_pick(x: u32, y: u32) -> u32 {
 pub extern "C" fn rr_layer_pixel(layer: u32, x: u32, y: u32) -> u32 {
     HELD.with(|h| {
         let h = h.borrow();
-        h.canvas.as_ref().and_then(|c| c.layer(layer)).map(|l| u32::from_le_bytes(l.grid.pixel(x, y))).unwrap_or(0)
+        h.canvas.as_ref().and_then(|c| c.grid(layer)).map(|g| u32::from_le_bytes(g.pixel(x, y))).unwrap_or(0)
     })
 }
 
@@ -527,7 +572,7 @@ pub extern "C" fn rr_layer_pixel(layer: u32, x: u32, y: u32) -> u32 {
 pub extern "C" fn rr_tile(layer: u32, index: u32) -> *const u8 {
     HELD.with(|h| {
         let h = h.borrow();
-        h.canvas.as_ref().and_then(|c| c.layer(layer)).and_then(|l| l.grid.tile(index)).map(|t| t.px.as_ptr()).unwrap_or(std::ptr::null())
+        h.canvas.as_ref().and_then(|c| c.grid(layer)).and_then(|g| g.tile(index)).map(|t| t.px.as_ptr()).unwrap_or(std::ptr::null())
     })
 }
 
@@ -537,11 +582,13 @@ pub fn info() -> serde_json::Value {
         let h = h.borrow();
         let Some(canvas) = h.canvas.as_ref() else { return serde_json::Value::Null };
         let tiles: Vec<(u32, Vec<u32>)> = canvas
-            .layers
-            .iter()
-            .map(|l| (l.info.id, (0..l.grid.cols * l.grid.rows).filter(|&i| l.grid.tile(i).is_some()).collect()))
+            .selecting()
+            .then_some((SELECTION, &canvas.selection))
+            .into_iter()
+            .chain(canvas.layers.iter().map(|l| (l.info.id, &l.grid)))
+            .map(|(id, g)| (id, (0..g.cols * g.rows).filter(|&i| g.tile(i).is_some()).collect()))
             .collect();
-        serde_json::json!({ "layers": canvas.infos(), "palette": canvas.palette, "tiles": tiles })
+        serde_json::json!({ "width": canvas.width, "height": canvas.height, "layers": canvas.infos(), "palette": canvas.palette, "tiles": tiles })
     })
 }
 
@@ -611,7 +658,8 @@ pub fn stroke_begin(bytes: &[u8]) -> Result<(), String> {
             }
             (None, None) => return Err("a stroke needs a tip or a brush".into()),
         };
-        held.live = Some(Live { layer: b.layer, tool: b.tool, color: b.color, lock: layer.info.alpha_lock, marks, bases: BTreeMap::new() });
+        let sel = canvas.selecting().then(|| canvas.selection.clone());
+        held.live = Some(Live { layer: b.layer, tool: b.tool, color: b.color, lock: layer.info.alpha_lock, marks, bases: BTreeMap::new(), sel });
         // Worth keeping only with layers under it.
         held.below = canvas.place(b.layer).filter(|&place| place > 0).map(|place| Below { place, tiles: BTreeMap::new(), order: VecDeque::new() });
         Ok(())
@@ -741,13 +789,19 @@ pub fn preview(bytes: &[u8]) -> Result<(), String> {
         let mut h = h.borrow_mut();
         let held = &mut *h;
         let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
-        let (state, made) = (canvas.state, canvas.made);
+        if matches!(op, Op::Orient { .. } | Op::Resize { .. } | Op::Crop { .. }) {
+            return Err("a change to the canvas's size is not previewed".into());
+        }
+        let (state, made, clip) = (canvas.state, canvas.made, canvas.clip.clone());
         held.below = None;
         let (applied, patch) = canvas.apply(&op)?;
-        canvas.state = state;
-        canvas.made = made;
-        for &(_, index) in &applied.touched {
-            mark(&mut held.dirty, index, WHOLE);
+        (canvas.state, canvas.made, canvas.clip) = (state, made, clip);
+        for &(layer, index) in &applied.touched {
+            if layer == SELECTION {
+                held.selection_version += 1;
+            } else {
+                mark(&mut held.dirty, index, WHOLE);
+            }
         }
         held.preview = Some(patch);
         Ok(())
@@ -770,8 +824,12 @@ pub fn preview_clear() {
         let (Some(patch), Some(canvas)) = (held.preview.take(), held.canvas.as_mut()) else { return };
         held.below = None;
         let (_, applied) = canvas.restore(patch);
-        for &(_, index) in &applied.touched {
-            mark(&mut held.dirty, index, WHOLE);
+        for &(layer, index) in &applied.touched {
+            if layer == SELECTION {
+                held.selection_version += 1;
+            } else {
+                mark(&mut held.dirty, index, WHOLE);
+            }
         }
     })
 }
@@ -779,6 +837,78 @@ pub fn preview_clear() {
 #[no_mangle]
 pub extern "C" fn rr_preview_clear() {
     preview_clear();
+}
+
+/// The canvas's size now: a turn or a crop changes it.
+#[no_mangle]
+pub extern "C" fn rr_width() -> u32 {
+    HELD.with(|h| h.borrow().canvas.as_ref().map_or(0, |c| c.width))
+}
+
+#[no_mangle]
+pub extern "C" fn rr_height() -> u32 {
+    HELD.with(|h| h.borrow().canvas.as_ref().map_or(0, |c| c.height))
+}
+
+#[no_mangle]
+pub extern "C" fn rr_selection_version() -> u32 {
+    HELD.with(|h| h.borrow().selection_version)
+}
+
+/// The selection's edges, for marching ants: x0, y0, x1, y1 a segment.
+pub fn outline() -> Vec<i32> {
+    HELD.with(|h| h.borrow().canvas.as_ref().map(|c| select::outline(&c.selection)).unwrap_or_default())
+}
+
+#[no_mangle]
+pub extern "C" fn rr_outline() -> *const i32 {
+    let segments = outline();
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        h.outline = vec![(segments.len() / 4) as i32];
+        h.outline.extend(segments);
+        h.outline.as_ptr()
+    })
+}
+
+/// What of a layer is selected — all of it, with nothing selected — as the
+/// window shows it moving: where, and its pixels premultiplied.
+pub fn lift(layer: u32) -> Vec<u8> {
+    HELD.with(|h| {
+        let h = h.borrow();
+        let mut out = vec![0u8; 16];
+        let Some(canvas) = h.canvas.as_ref() else { return out };
+        let Some(target) = canvas.layer(layer) else { return out };
+        let (lifted, _) = select::split(&target.grid, &canvas.selection, canvas.selecting());
+        let Some([x, y, w, ht]) = select::bounds(&lifted) else { return out };
+        for (i, v) in [x, y, w, ht].into_iter().enumerate() {
+            out[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        out.resize(16 + (w * ht * 4) as usize, 0);
+        for index in lifted.covering(x as i64, y as i64, w as i64, ht as i64) {
+            let Some(t) = lifted.tile(index) else { continue };
+            let (tx, ty, tw, th) = lifted.bounds(index);
+            for row in ty.max(y)..(ty + th).min(y + ht) {
+                for col in tx.max(x)..(tx + tw).min(x + w) {
+                    let p = t.get(col - tx, row - ty);
+                    let at = 16 + (((row - y) * w + (col - x)) * 4) as usize;
+                    let a = p[3] as u32;
+                    out[at..at + 4].copy_from_slice(&[proton_raster::fixed::mul255(p[0] as u32, a) as u8, proton_raster::fixed::mul255(p[1] as u32, a) as u8, proton_raster::fixed::mul255(p[2] as u32, a) as u8, p[3]]);
+                }
+            }
+        }
+        out
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn rr_lift(layer: u32) -> *const u8 {
+    let bytes = lift(layer);
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        h.lifted = bytes;
+        h.lifted.as_ptr()
+    })
 }
 
 /// The whole canvas as one number, for tests.

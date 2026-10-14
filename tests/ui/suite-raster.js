@@ -33,7 +33,7 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
   win.rasterRead = (/** @type {number} */ g, /** @type {number} */ l, /** @type {number[]} */ tiles) => (g === generation ? tilesPayload(core, g, l, tiles, version, lastSeq) : null);
   const viewOf = (/** @type {Record<string, any>} */ extra = {}) => {
     const info = core.info();
-    return {type: 'rasterCanvas', canvas: {path: 'hero.canvas', name: 'hero', preset: 'pixel', width: 96, height: 80, palette: info.palette, layers: info.layers,
+    return {type: 'rasterCanvas', canvas: {path: 'hero.canvas', name: 'hero', preset: 'pixel', width: info.width, height: info.height, palette: info.palette, layers: info.layers,
       tiles: info.tiles, generation, version, dirty: false, canUndo: false, canRedo: false, undo: null, redo: null, saving: false, ...extra}};
   };
   const home = {type: 'rasterHome', canvases: [{path: 'hero.canvas', name: 'hero', preset: 'pixel', size: [96, 80]}]};
@@ -150,7 +150,10 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
   };
   /** The core's answer to the last edit sent: the stand-in core makes it too. */
   const answer = async (/** @type {number} */ from, /** @type {string} */ [wrong] = []) => {
+    // Commands go out a moment after the key or the click that sends them.
+    await settle();
     const edit = sent(from, 'rasterEdit').at(-1);
+    if (!edit) throw new Error(`no edit was sent, only ${JSON.stringify(win.commands.slice(from).map((/** @type {any} */ c) => c.type))}`);
     const made = core.apply(edit.op);
     version += 1;
     lastSeq = edit.seq;
@@ -316,6 +319,124 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
     edit = await answer(before);
     assert(edit.op.op === 'stroke' && edit.op.tool === 'eraser', `the eraser end with the pencil sent ${JSON.stringify(edit.op).slice(0, 120)}`);
     win.__protonPen('a', 0);
+  });
+
+  /** The core's answer to the last edit, with the canvas it now is — for an
+   *  edit to the layers or the canvas's size. @param {number} from */
+  const answerWithCanvas = async (from) => {
+    await settle();
+    const edit = sent(from, 'rasterEdit').at(-1);
+    const made = core.apply(edit.op);
+    version += 1;
+    lastSeq = edit.seq;
+    await win.pushEvents([{type: 'rasterApplied', generation, seq: edit.seq, version, hash: made.hash ?? '', refused: made.refused ?? null, dirty: true, canUndo: true, canRedo: false}, viewOf({dirty: true, canUndo: true})]);
+    await settle(); await probe().settled(); await settle(); await probe().settled();
+    return edit;
+  };
+
+  await test('A selection holds edits to it, ⇧ adds to it, ⌘D and ⌘A change it, and its ants go round it', async () => {
+    const stage = $('[data-raster-stage]');
+    press('s'); await settle();
+    assert($('[data-raster-tool="select"]').getAttribute('aria-pressed') === 'true', 's did not take the select tool');
+    let before = win.commands.length;
+    await drag([[10, 10], [20, 14], [29, 19]]);
+    let edit = await answer(before);
+    assert(edit.op.op === 'select' && edit.op.area.kind === 'rect' && edit.op.area.rect.join() === '10,10,20,10' && edit.op.mode === 'replace', `the selection sent was ${JSON.stringify(edit.op)}`);
+    assert(JSON.stringify(probe().sync()) === '{"inflight":[],"stale":[]}', `the selection made here is not the core's: ${JSON.stringify(probe().sync())}`);
+    assert(probe().ants() === 4, `the ants go along ${probe().ants()} edges, not a rectangle's four`);
+    // The pencil across it changes only what is selected.
+    press('b');
+    const input = /** @type {HTMLInputElement} */ ($('[data-raster-color]'));
+    input.value = '#ff00ff';
+    input.dispatchEvent(new win.Event('input', {bubbles: true}));
+    const outside = JSON.stringify(probe().pick(5, 15));
+    before = win.commands.length;
+    await drag([[2, 15], [40, 15]]);
+    await answer(before);
+    assert(JSON.stringify(probe().pick(15, 15)) === '[255,0,255,255]' && JSON.stringify(probe().pick(5, 15)) === outside, `the stroke did not keep to the selection: ${probe().pick(15, 15)} ${probe().pick(5, 15)}`);
+    assert(probe().sync().stale.length === 0, 'a stroke held to the selection was not the core\'s');
+    // ⇧ adds an ellipse: s takes the select tool, and again its next shape.
+    press('s'); press('s'); await settle();
+    before = win.commands.length;
+    await drag([[50, 40], [60, 50]], {shiftKey: true});
+    edit = await answer(before);
+    assert(edit.op.area.kind === 'ellipse' && edit.op.mode === 'add', `⇧ with the second shape sent ${JSON.stringify(edit.op)}`);
+    before = win.commands.length;
+    press('d', {metaKey: true});
+    edit = await answer(before);
+    assert(edit.op.area.kind === 'nothing' && probe().ants() === 0, '⌘D did not select nothing');
+    before = win.commands.length;
+    press('a', {metaKey: true});
+    edit = await answer(before);
+    assert(edit.op.area.kind === 'all' && probe().ants() === 4, `⌘A did not select all: ${probe().ants()} edges`);
+    before = win.commands.length;
+    press('d', {metaKey: true});
+    await answer(before);
+    stage.focus();
+  });
+
+  await test('The move tool moves what is selected, ⌘T keeps a move on ↩, ⌘C ⌘V paste a layer, ⌫ clears, and the canvas turns', async () => {
+    // Nothing selected, and a red square to move.
+    if (probe().ants()) {
+      const from = win.commands.length;
+      press('d', {metaKey: true});
+      await answer(from);
+    }
+    core.apply({op: 'fillRect', layer: 1, rect: [50, 50, 10, 10], color: [255, 0, 0, 255]});
+    version += 1;
+    await win.pushEvents([{type: 'rasterChanged', generation, version, tiles: [[1, [0]]], meta: false}]); await settle(); await probe().settled();
+    press('s'); await settle();
+    const shape = /** @type {HTMLSelectElement} */ (ws().querySelector('[data-raster-option="select.shape"]'));
+    shape.value = 'rect';
+    shape.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    let before = win.commands.length;
+    await drag([[50, 50], [59, 59]]);
+    await answer(before);
+    press('v'); await settle();
+    before = win.commands.length;
+    await drag([[55, 55], [60, 57], [65, 60]], {up: false});
+    assert(probe().moving(), 'the move tool did not lift what is selected');
+    assert(JSON.stringify(probe().pick(55, 55)) !== '[255,0,0,255]', 'what was lifted is still shown where it was');
+    const [ux, uy] = probe().at(65, 60);
+    $('[data-raster-stage]').dispatchEvent(new win.PointerEvent('pointerup', {clientX: ux, clientY: uy, pointerId: 7, pointerType: 'mouse', button: 0, bubbles: true}));
+    await frame();
+    let edit = await answer(before);
+    assert(edit.op.op === 'transform' && edit.op.bounds.join() === '60,55,10,10' && edit.op.inverse.join() === `65536,0,${-10 * 65536},0,65536,${-5 * 65536}` && edit.op.smooth === false,
+      `the move sent was ${JSON.stringify(edit.op)}`);
+    assert(JSON.stringify(probe().pick(62, 57)) === '[255,0,0,255]' && !probe().moving(), `the square did not move: ${probe().pick(62, 57)}`);
+    assert(JSON.stringify(probe().sync()) === '{"inflight":[],"stale":[]}', `the move made here is not the core's: ${JSON.stringify(probe().sync())}`);
+    // ⌘T: moved inside, kept on ↩.
+    press('t', {metaKey: true}); await settle();
+    assert(probe().moving() && ws().querySelector('[data-raster-transform="keep"]'), '⌘T did not begin a transform');
+    before = win.commands.length;
+    await drag([[65, 60], [67, 60]]);
+    assert(!sent(before, 'rasterEdit').length, 'a ⌘T move was sent before ↩');
+    press('Enter');
+    edit = await answer(before);
+    assert(edit.op.op === 'transform' && edit.op.bounds.join() === '62,55,10,10', `↩ kept ${JSON.stringify(edit.op)}`);
+    // Copied and pasted as a layer over the one chosen; then cleared.
+    const layers = ws().querySelectorAll('[data-raster-layer]').length;
+    before = win.commands.length;
+    press('c', {metaKey: true});
+    edit = await answer(before);
+    assert(edit.op.op === 'copy' && edit.op.cut === false, `⌘C sent ${JSON.stringify(edit.op)}`);
+    before = win.commands.length;
+    press('v', {metaKey: true});
+    edit = await answerWithCanvas(before);
+    assert(edit.op.op === 'paste' && ws().querySelectorAll('[data-raster-layer]').length === layers + 1, `⌘V sent ${JSON.stringify(edit.op)}, and the layers are ${ws().querySelectorAll('[data-raster-layer]').length}`);
+    assert(JSON.stringify(probe().sync()) === '{"inflight":[],"stale":[]}', `the paste made here is not the core's: ${JSON.stringify(probe().sync())}`);
+    before = win.commands.length;
+    press('Backspace');
+    edit = await answer(before);
+    assert(edit.op.op === 'clear', `⌫ sent ${JSON.stringify(edit.op)}`);
+    // The canvas turned: made by the core, the copy loaded again at its new size.
+    const fetched = reads();
+    before = win.commands.length;
+    ws().querySelector('[data-raster-canvas="cw"]').click(); await settle();
+    edit = await answerWithCanvas(before);
+    assert(edit.op.op === 'orient' && edit.op.turns === 1, `the turn sent was ${JSON.stringify(edit.op)}`);
+    assert($('[data-raster-size]').textContent.includes('80 × 96') && reads() > fetched, `the turned canvas was not loaded again: ${$('[data-raster-size]').textContent}, ${reads() - fetched} reads`);
+    assert(JSON.stringify(probe().pick(79, 0)) === JSON.stringify(core.pick(79, 0)), `the copy is not the core's turned canvas: ${probe().pick(79, 0)} against ${core.pick(79, 0)}`);
     win.rasterRead = undefined;
     await win.pushEvents([{type: 'rasterCanvas', canvas: null}]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();

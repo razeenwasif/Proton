@@ -35,13 +35,21 @@ test('an answer that agrees fetches nothing; one that does not fetches what the 
   deepEqual(sync.state(), {inflight: [], stale: []});
 });
 
-test('a refusal fetches what the edit touched; one refused here first is not waited on', async () => {
-  const {sync, asked} = harness();
+test('a refusal fetches what the edit touched; one not made here loads the canvas again when the core makes it', async () => {
+  const {sync, asked, reloads} = harness();
   sync.sent(1, 'aa', [[2, 4]]);
   await sync.answered({seq: 1, hash: '', refused: 'locked'});
   deepEqual(asked, [[2, [4]]]);
-  sync.sent(2, null, [[2, 5]]);
-  deepEqual(sync.state().inflight, []);
+  // Refused here and there: nothing to do.
+  sync.sent(2, null, []);
+  await sync.answered({seq: 2, hash: '', refused: 'locked'});
+  equal(reloads(), 0);
+  // Not made here — a canvas turned, say — and made there: all of it again.
+  sync.sent(3, null, [], true);
+  deepEqual(sync.state().inflight, [3], 'an edit not made here is waited on');
+  await sync.answered({seq: 3, hash: 'turned'});
+  equal(reloads(), 1);
+  deepEqual(sync.state(), {inflight: [], stale: []});
 });
 
 test('a stale tile waits while an edit on its way touches it', async () => {

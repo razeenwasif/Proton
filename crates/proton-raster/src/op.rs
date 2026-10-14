@@ -13,12 +13,14 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::brush::{self, Brush, Dabs};
-use crate::canvas::{Blend, Canvas, Layer};
+use crate::canvas::{Blend, Canvas, Layer, SELECTION};
 use crate::fill;
 use crate::fixed::Hash;
 use crate::history::Patch;
+use crate::sample;
+use crate::select::{self, Area, Mode, FEATHER_MOST};
 use crate::stroke::{self, Mask, Stroke, Tip, Tool};
-use crate::tile::Tile;
+use crate::tile::{Grid, Tile};
 
 /// The most points one stroke may carry: minutes of a pen at 240 a second.
 pub const POINTS: u32 = 200_000;
@@ -131,6 +133,66 @@ pub enum Op {
         tip: Tip,
         color: [u8; 4],
     },
+    /// What is selected: `area` joined to it by `mode`, its edge feathered
+    /// by `feather` pixels. Smooth, an ellipse's or a lasso's edge is soft by
+    /// a pixel; a pixel canvas's are hard.
+    #[serde(rename_all = "camelCase")]
+    Select {
+        area: Area,
+        #[serde(default)]
+        mode: Mode,
+        #[serde(default)]
+        feather: u32,
+        #[serde(default)]
+        smooth: bool,
+    },
+    /// What is selected of a layer cleared — all of it, with nothing selected.
+    Clear { layer: u32 },
+    /// What is selected of a layer copied, to paste — all of it, with
+    /// nothing selected; cut, it is cleared as well.
+    Copy {
+        layer: u32,
+        #[serde(default)]
+        cut: bool,
+    },
+    /// What was copied, as a new layer where it was, over `above` (on top if
+    /// not said).
+    Paste {
+        #[serde(default)]
+        #[ts(optional)]
+        above: Option<u32>,
+    },
+    /// What is selected of a layer — all of it, with nothing selected —
+    /// moved, scaled or turned: each pixel of `bounds` (left, top, width,
+    /// height) sampled from where `inverse` says it came from (see
+    /// `sample::Inverse`), by the nearest pixel or, smooth, the four about
+    /// it, and laid over what was left. The selection moves with it.
+    Transform {
+        layer: u32,
+        bounds: [i32; 4],
+        #[ts(type = "number[]")]
+        inverse: [i64; 6],
+        #[serde(default)]
+        smooth: bool,
+    },
+    /// The whole canvas turned clockwise by `turns` quarters, then, if
+    /// `flip`, mirrored left to right.
+    Orient {
+        turns: u8,
+        #[serde(default)]
+        flip: bool,
+    },
+    /// The whole canvas resized: its every layer, by the nearest pixel or,
+    /// smooth, weighed.
+    Resize {
+        width: u32,
+        height: u32,
+        #[serde(default)]
+        smooth: bool,
+    },
+    /// The canvas cut to `rect` (left, top, width, height) — or grown, a
+    /// rectangle past its edges adding clear pixels.
+    Crop { rect: [i32; 4] },
     /// One colour made another, on one layer or on every layer not locked —
     /// and a palette's swatch with it, so recolouring a swatch is one edit.
     #[serde(rename_all = "camelCase")]
@@ -250,40 +312,36 @@ impl Canvas {
                 let lock = target.info.alpha_lock;
                 let [x, y, w, h] = rect.map(|v| v as i64);
                 let tiles = target.grid.covering(x, y, w, h);
+                let sel = self.selecting().then(|| self.selection.clone());
                 let target = self.layer_mut(*layer).expect("found above");
                 for index in tiles {
                     let before = target.grid.tile(index).cloned();
                     let (tx, ty, tw, th) = target.grid.bounds(index);
-                    let mut changed = false;
-                    {
-                        let tile = target.grid.tile_mut(index);
-                        for py in 0..th {
-                            for px in 0..tw {
-                                let (cx, cy) = ((tx + px) as i64, (ty + py) as i64);
-                                if cx < x || cy < y || cx >= x + w || cy >= y + h {
-                                    continue;
-                                }
-                                let old = tile.get(px, py);
-                                let new = if lock {
-                                    if old[3] == 0 { old } else { [color[0], color[1], color[2], old[3]] }
-                                } else {
-                                    *color
-                                };
-                                if new != old {
-                                    tile.set(px, py, new);
-                                    changed = true;
-                                }
+                    let mut tile = before.as_deref().cloned().unwrap_or_default();
+                    for py in 0..th {
+                        for px in 0..tw {
+                            let (cx, cy) = ((tx + px) as i64, (ty + py) as i64);
+                            if cx < x || cy < y || cx >= x + w || cy >= y + h {
+                                continue;
                             }
+                            let old = tile.get(px, py);
+                            let new = if lock {
+                                if old[3] == 0 { old } else { [color[0], color[1], color[2], old[3]] }
+                            } else {
+                                *color
+                            };
+                            tile.set(px, py, new);
                         }
                     }
-                    target.grid.tidy(index);
-                    if changed {
+                    let mut after = (!tile.is_clear()).then(|| Arc::new(tile));
+                    if let Some(sel) = &sel {
+                        after = select::clip(sel, index, before.as_ref(), after);
+                    }
+                    if after != before {
+                        target.grid.put(index, after);
                         patch.tiles.push((*layer, index, before));
                         applied.touched.push((*layer, index));
                         applied.changed = true;
-                    } else {
-                        // Made to look at it, and nothing differed: as it was.
-                        target.grid.put(index, before);
                     }
                 }
             }
@@ -309,10 +367,14 @@ impl Canvas {
                 }
                 let lock = target.info.alpha_lock;
                 let (width, height) = (self.width, self.height);
+                let sel = self.selecting().then(|| self.selection.clone());
                 let target = self.layer_mut(*layer).expect("found above");
                 for index in dabs.mask.tiles() {
                     let before = target.grid.tile(index).cloned();
-                    let after = brush::paint(&dabs.mask, index, before.as_ref(), None, *erase, *color, lock, width, height);
+                    let mut after = brush::paint(&dabs.mask, index, before.as_ref(), None, *erase, *color, lock, width, height);
+                    if let Some(sel) = &sel {
+                        after = select::clip(sel, index, before.as_ref(), after);
+                    }
                     if after != before {
                         target.grid.put(index, after);
                         patch.tiles.push((*layer, index, before));
@@ -345,6 +407,92 @@ impl Canvas {
                 }
                 self.lay(*layer, &mask, Tool::Pencil, *color, &mut patch, &mut applied)?;
             }
+            Op::Select { area, mode, feather, smooth } => {
+                if *feather > FEATHER_MOST {
+                    return Err(format!("a feather is at most {FEATHER_MOST} pixels"));
+                }
+                let mut shape = select::shape(self, area, *smooth)?;
+                let alpha = match area {
+                    Area::All | Area::Nothing | Area::Invert => shape,
+                    _ => {
+                        select::feather(&mut shape, self.width, self.height, *feather);
+                        let mut now = select::dense(&self.selection);
+                        select::combine(&mut now, &shape, *mode);
+                        now
+                    }
+                };
+                let grid = select::from_dense(self.width, self.height, &alpha);
+                self.select(grid, &mut patch, &mut applied);
+            }
+            Op::Clear { layer } => {
+                let target = self.unlocked(*layer)?;
+                let left = select::split(&target.grid, &self.selection, self.selecting()).1;
+                self.set_grid(*layer, left, &mut patch, &mut applied);
+            }
+            Op::Copy { layer, cut } => {
+                let target = if *cut { self.unlocked(*layer)? } else { self.layer(*layer).ok_or_else(|| format!("there is no layer {layer}"))? };
+                let (lifted, left) = select::split(&target.grid, &self.selection, self.selecting());
+                self.clip = Some(lifted);
+                if *cut {
+                    self.set_grid(*layer, left, &mut patch, &mut applied);
+                }
+            }
+            Op::Paste { above } => {
+                let clip = self.clip.clone().ok_or("nothing is copied")?;
+                let at = match above {
+                    Some(id) => Some(self.place(*id).ok_or_else(|| format!("there is no layer {id}"))? + 1),
+                    None => None,
+                };
+                patch.layers = Some((self.layers.clone(), self.next_id));
+                let id = self.push_layer("Pasted".into());
+                let mut layer = self.layers.pop().expect("just pushed");
+                layer.grid = clip;
+                applied.touched = present(&layer);
+                let at = at.map_or(self.layers.len(), |a| (a as usize).min(self.layers.len()));
+                self.layers.insert(at, layer);
+                applied.made = Some(id);
+                applied.meta = true;
+                applied.changed = true;
+            }
+            Op::Transform { layer, bounds, inverse, smooth } => {
+                if !sample::sane(inverse) {
+                    return Err("a transform that large cannot be sampled".into());
+                }
+                let target = self.unlocked(*layer)?;
+                let selecting = self.selecting();
+                let (lifted, left) = select::split(&target.grid, &self.selection, selecting);
+                let [x, y, w, h] = bounds.map(|v| v as i64);
+                let edges = [x, y, x.saturating_add(w), y.saturating_add(h)];
+                let moved = sample::transform(&lifted, self.width, self.height, edges, inverse, *smooth);
+                self.set_grid(*layer, sample::over(&left, &moved), &mut patch, &mut applied);
+                if selecting {
+                    let carried = sample::transform(&self.selection, self.width, self.height, edges, inverse, *smooth);
+                    self.select(select::compact(carried), &mut patch, &mut applied);
+                }
+            }
+            Op::Orient { turns, flip } => {
+                if turns % 4 != 0 || *flip {
+                    let (w, h) = if turns % 2 == 1 { (self.height, self.width) } else { (self.width, self.height) };
+                    let (turns, flip) = (*turns, *flip);
+                    self.reshape(w, h, |g| sample::orient(g, turns, flip), &mut patch, &mut applied)?;
+                }
+            }
+            Op::Resize { width, height, smooth } => {
+                if (*width, *height) != (self.width, self.height) {
+                    let (w, h, smooth) = (*width, *height, *smooth);
+                    self.reshape(w, h, |g| sample::resize(g, w, h, smooth), &mut patch, &mut applied)?;
+                }
+            }
+            Op::Crop { rect } => {
+                let [x, y, w, h] = *rect;
+                if (x, y, w, h) != (0, 0, self.width as i32, self.height as i32) {
+                    if w <= 0 || h <= 0 {
+                        return Err("a canvas needs a width and a height".into());
+                    }
+                    let r = [x as i64, y as i64, w as i64, h as i64];
+                    self.reshape(w as u32, h as u32, |g| sample::crop(g, r), &mut patch, &mut applied)?;
+                }
+            }
             Op::ReplaceColor { from, to, layer, swatch } => {
                 if let Some(i) = swatch {
                     if *i as usize >= self.palette.len() {
@@ -361,6 +509,9 @@ impl Canvas {
                     }
                     None => self.layers.iter().filter(|l| !l.info.locked).map(|l| l.info.id).collect(),
                 };
+                // A swatch recoloured is the palette's colour everywhere; a
+                // colour replaced on its own keeps to the selection.
+                let sel = (swatch.is_none() && self.selecting()).then(|| self.selection.clone());
                 for id in ids {
                     let target = self.layer_mut(id).expect("found above");
                     for index in 0..target.grid.cols * target.grid.rows {
@@ -374,7 +525,14 @@ impl Canvas {
                                 p.copy_from_slice(to);
                             }
                         }
-                        target.grid.put(index, (!tile.is_clear()).then(|| Arc::new(tile)));
+                        let mut after = (!tile.is_clear()).then(|| Arc::new(tile));
+                        if let Some(sel) = &sel {
+                            after = select::clip(sel, index, Some(&before), after);
+                        }
+                        if after.as_ref().is_some_and(|a| Arc::ptr_eq(a, &before)) {
+                            continue;
+                        }
+                        target.grid.put(index, after);
                         patch.tiles.push((id, index, Some(before)));
                         applied.touched.push((id, index));
                         applied.changed = true;
@@ -405,10 +563,14 @@ impl Canvas {
         }
         let lock = target.info.alpha_lock;
         let (width, height) = (self.width, self.height);
+        let sel = self.selecting().then(|| self.selection.clone());
         let target = self.layer_mut(layer).expect("found above");
         for index in mask.tiles() {
             let before = target.grid.tile(index).cloned();
-            let after = stroke::paint(mask, index, before.as_ref(), tool, color, lock, width, height);
+            let mut after = stroke::paint(mask, index, before.as_ref(), tool, color, lock, width, height);
+            if let Some(sel) = &sel {
+                after = select::clip(sel, index, before.as_ref(), after);
+            }
             if after != before {
                 target.grid.put(index, after);
                 patch.tiles.push((layer, index, before));
@@ -429,7 +591,7 @@ impl Canvas {
         for (layer, index) in sorted {
             h.word(layer as u64);
             h.word(index as u64);
-            h.word(self.layer(layer).map(|l| l.grid.hash(index)).unwrap_or(crate::tile::CLEAR));
+            h.word(self.grid(layer).map(|g| g.hash(index)).unwrap_or(crate::tile::CLEAR));
         }
         h.0
     }
@@ -439,9 +601,20 @@ impl Canvas {
     pub fn restore(&mut self, patch: Patch) -> (Patch, Applied) {
         let mut inverse = Patch::default();
         let mut applied = Applied { changed: true, ..Applied::default() };
+        if let Some((w, h)) = patch.size {
+            inverse.size = Some((self.width, self.height));
+            (self.width, self.height) = (w, h);
+            self.clip = None;
+            applied.meta = true;
+        }
+        if let Some(sel) = patch.selection {
+            let old = std::mem::replace(&mut self.selection, sel);
+            applied.touched.extend(tiles_between(&old, &self.selection).into_iter().map(|i| (SELECTION, i)));
+            inverse.selection = Some(old);
+        }
         if let Some((layers, next_id)) = patch.layers {
             let old = std::mem::replace(&mut self.layers, layers);
-            applied.touched = differ(&old, &self.layers);
+            applied.touched.extend(differ(&old, &self.layers));
             inverse.layers = Some((old, self.next_id));
             self.next_id = next_id;
             applied.meta = true;
@@ -451,15 +624,85 @@ impl Canvas {
             applied.meta = true;
         }
         for (layer, index, tile) in patch.tiles {
-            if let Some(target) = self.layer_mut(layer) {
-                let now = target.grid.tile(index).cloned();
-                target.grid.put(index, tile);
+            if let Some(grid) = self.grid_mut(layer) {
+                let now = grid.tile(index).cloned();
+                grid.put(index, tile);
                 inverse.tiles.push((layer, index, now));
                 applied.touched.push((layer, index));
             }
         }
         (inverse, applied)
     }
+}
+
+impl Canvas {
+    /// A layer that may be drawn on.
+    fn unlocked(&self, id: u32) -> Result<&Layer, String> {
+        let target = self.layer(id).ok_or_else(|| format!("there is no layer {id}"))?;
+        if target.info.locked {
+            return Err(format!("{} is locked", target.info.name));
+        }
+        Ok(target)
+    }
+
+    /// A layer's pixels replaced by `grid`: each tile that differs
+    /// remembered and told.
+    fn set_grid(&mut self, id: u32, grid: Grid, patch: &mut Patch, applied: &mut Applied) {
+        let Some(target) = self.layer_mut(id) else { return };
+        for index in tiles_between(&target.grid, &grid) {
+            patch.tiles.push((id, index, target.grid.tile(index).cloned()));
+            target.grid.put(index, grid.tile(index).cloned());
+            applied.touched.push((id, index));
+            applied.changed = true;
+        }
+    }
+
+    /// A new selection: the old remembered, and the tiles that differ told
+    /// as the window's layer 0.
+    fn select(&mut self, grid: Grid, patch: &mut Patch, applied: &mut Applied) {
+        let changed = tiles_between(&self.selection, &grid);
+        if changed.is_empty() {
+            return;
+        }
+        patch.selection.get_or_insert_with(|| self.selection.clone());
+        self.selection = grid;
+        applied.touched.extend(changed.into_iter().map(|i| (SELECTION, i)));
+        applied.changed = true;
+    }
+
+    /// The canvas made `width` by `height`, every layer and the selection
+    /// by `remake`: all of it remembered, and all of it told.
+    fn reshape(&mut self, width: u32, height: u32, remake: impl Fn(&Grid) -> Grid, patch: &mut Patch, applied: &mut Applied) -> Result<(), String> {
+        let most = self.preset.most();
+        if width == 0 || height == 0 || width > most || height > most {
+            return Err(format!("a {} canvas is 1 to {most} pixels a side", crate::canvas::name(self.preset)));
+        }
+        patch.layers = Some((self.layers.clone(), self.next_id));
+        patch.selection = Some(self.selection.clone());
+        patch.size = Some((self.width, self.height));
+        for layer in &mut self.layers {
+            layer.grid = remake(&layer.grid);
+        }
+        self.selection = select::compact(remake(&self.selection));
+        (self.width, self.height) = (width, height);
+        self.clip = None;
+        applied.touched = self.layers.iter().flat_map(present).collect();
+        applied.meta = true;
+        applied.changed = true;
+        Ok(())
+    }
+}
+
+/// The tiles two grids of a size hold differently.
+pub fn tiles_between(a: &Grid, b: &Grid) -> Vec<u32> {
+    let n = (a.cols * a.rows).max(b.cols * b.rows);
+    (0..n)
+        .filter(|&i| match (a.tile(i), b.tile(i)) {
+            (None, None) => false,
+            (Some(x), Some(y)) => !Arc::ptr_eq(x, y) && x.px != y.px,
+            _ => true,
+        })
+        .collect()
 }
 
 /// The tiles a layer has, as (layer, index).

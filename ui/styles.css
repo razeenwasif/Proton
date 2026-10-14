@@ -5729,4 +5729,10 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .raster-tool-head { margin: 0 0 8px; font: 600 var(--z-2xs) var(--zed); color: var(--faint); }
 .raster-layer-head { margin: 18px 0 8px; font: 600 var(--z-2xs) var(--zed); color: var(--faint); }
 .raster-sub { margin: 6px 0 0; font: 500 var(--z-2xs) var(--zed); color: var(--faint); }
+.raster-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.raster-buttons button { padding: 3px 10px; font: var(--z-2xs) var(--zed); }
+.raster-resize { margin-top: 8px; }
+.raster-size-pair { display: flex; align-items: center; gap: 6px; color: var(--faint); }
+.raster-size-pair input { width: 0; flex: 1; }
+.raster-resize > button { justify-self: start; padding: 3px 10px; font: var(--z-2xs) var(--zed); }
 .raster-field input[type="number"] { min-width: 0; width: 100%; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--text) 14%, var(--bg-deep)); border-radius: 6px; background: var(--bg-deep); color: var(--text); font: var(--z-2xs) var(--zed); }

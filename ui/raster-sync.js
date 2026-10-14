@@ -15,11 +15,15 @@
  * - a tile that arrives older than the last edit sent to it — the core
  *   numbers what it read it after — is not put, and is fetched again.
  *
+ * An edit sent without a prediction — refused by this copy, or one it does
+ * not make itself, like turning the canvas — touched nothing this copy
+ * knows of: when the core makes it, the copy is loaded again.
+ *
  * No DOM and no WebAssembly here: `fetch` and `put` are given, so the node
  * tests drive it with stand-ins. */
 
 /** @typedef {[number, number]} TileKey [layer, index] */
-/** @typedef {{seq: number, hash: string, touched: TileKey[], meta: boolean}} Sent */
+/** @typedef {{seq: number, hash: string | null, touched: TileKey[], meta: boolean}} Sent */
 
 /**
  * @param {{
@@ -101,9 +105,7 @@ export function createSync(io) {
      *  @param {number} n @param {string | null} hash @param {TileKey[]} touched @param {boolean} meta */
     sent(n, hash, touched, meta = false) {
       for (const t of touched) lastTouch.set(key(t), n);
-      // An edit this copy refused too is not waited on: there is nothing
-      // here to check against.
-      if (hash !== null) inflight.push({ seq: n, hash, touched, meta });
+      inflight.push({ seq: n, hash, touched, meta });
     },
     /** The core's answer. @param {{seq: number, hash: string, refused?: string | null}} answer */
     async answered(answer) {
@@ -111,6 +113,14 @@ export function createSync(io) {
       if (at < 0) return;
       // Answered in order: what was sent before it was answered too.
       const mine = inflight.splice(0, at + 1)[at];
+      if (mine.hash === null) {
+        // Not made here: made there, the copy is behind by all of it.
+        if (!answer.refused) {
+          reset();
+          await io.reload();
+        }
+        return;
+      }
       if (!answer.refused && answer.hash === mine.hash) {
         await pump();
         return;

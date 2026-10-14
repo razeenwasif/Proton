@@ -1745,9 +1745,46 @@ mostly in blend modes, 6 ms, the ink at most two frames behind. The same
 budget lets a large canvas opened show tile by tile. Seen smaller than
 itself, a paint canvas is drawn from mipmaps made again once it is still.
 
-**What comes next** (the plan's P4–P8): selections and transforms,
-procedural generators and filters, import and export (PSD, sending art to a
-game), the agent's tools, and pixel animation.
+**Selections** (`select.rs`) are how much of each pixel an edit may change:
+the alpha of a grid the canvas's size, none at all when nothing is selected.
+A rectangle is whole pixels; an ellipse or a lasso is made from the spans it
+crosses, four rows and columns of samples a pixel on a paint canvas (soft by
+a pixel) and the pixel's middle on a pixel one (hard); the wand is the
+bucket's flood. A feather blurs the shape before it joins what was
+selected — in its place, added (⇧), taken away (⌥) or kept where both are
+(⇧⌥). Wholly selected tiles share one tile, so selecting all of a large
+canvas costs one. Every edit — pencil, brush, bucket, shapes, a colour
+replaced — is held to it a tile at a time, what it made mixed with what was
+there by how selected each pixel is, colours weighed by alpha so a soft edge
+does not darken. To the window the selection is layer 0: its tiles are
+hashed with an edit's, fetched when they disagree, pushed by undo, and
+loaded with the canvas, so the two copies' selections cannot drift apart.
+The window draws marching ants along its edges (`rr_outline`).
+
+**Moving pixels** (`sample.rs`): ⌫ clears what is selected; ⌘C copies it and
+⌘X cuts it into the canvas's clipboard, and ⌘V pastes that as a new layer
+where it was. The move tool, and ⌘T with handles to scale (in proportion
+unless ⇧) and turn (by fifteen degrees with ⇧), lift what is selected — all
+of the layer when nothing is — onto a texture of its own, and the GPU draws
+it where the transform puts it over what is left; nothing is sampled until
+it is kept (↩, or letting go of the move tool). Then it is one op carrying
+the transform inverted, in 1/65536, made once in the window
+(`raster-transform.js`), so both copies sample the same places: the nearest
+pixel on a pixel canvas, the four about it on a paint one, and rows copied
+for a move by whole pixels. The selection moves with what it selected.
+
+**The whole canvas** turns by quarters and mirrors exactly, resizes (halving
+by averaging first while it is twice the size or more), and crops to what is
+selected; each is undone like any edit. A change to the canvas's size is not
+made in the window's copy: the core makes it, and the copy is loaded again
+at the new size — as it is after any edit the copy could not make itself,
+which the window now waits on and follows with a reload when the core makes
+it. In WebKit, on a 4096 × 4096 canvas, selecting an ellipse takes about
+70 ms, moving the whole layer 45 ms, and turning it smoothly half a second.
+
+**What comes next** (the plan's P5–P8): procedural generators and filters,
+import and export (PSD, sending art to a game), the agent's tools, and pixel
+animation.
 
 ### Trace
 

@@ -286,6 +286,8 @@ fn the_engine_holds_no_floats_unordered_maps_or_pointer_sized_arithmetic() {
         ("stroke.rs", include_str!("../src/stroke.rs")),
         ("fill.rs", include_str!("../src/fill.rs")),
         ("brush.rs", include_str!("../src/brush.rs")),
+        ("select.rs", include_str!("../src/select.rs")),
+        ("sample.rs", include_str!("../src/sample.rs")),
     ];
     for (name, source) in engine {
         let code: String = source.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");

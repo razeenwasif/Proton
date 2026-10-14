@@ -27,6 +27,8 @@
 //!   mask, and painting it.
 //! - [`brush`]: dabs along a path, sized and weighted by the pen's pressure,
 //!   building up a stroke's cover toward its opacity.
+//! - [`select`], [`sample`]: what is selected and edits held to it; pixels
+//!   moved, turned, resized and cropped.
 //! - [`history`]: undo and redo by the tiles each change touched.
 //! - [`file`]: a canvas on disk, a folder of PNGs and a `canvas.json` (`io`).
 
@@ -39,12 +41,15 @@ pub mod fill;
 pub mod fixed;
 pub mod history;
 pub mod op;
+pub mod sample;
+pub mod select;
 pub mod stroke;
 pub mod text;
 pub mod tile;
 
 pub use brush::{Brush, Dabs};
-pub use canvas::{Blend, Canvas, Layer, LayerInfo, Preset};
+pub use canvas::{Blend, Canvas, Layer, LayerInfo, Preset, SELECTION};
+pub use select::{Area, Mode};
 pub use history::History;
 pub use op::{Applied, Op, ShapeKind};
 pub use stroke::{Stroke, Tip, Tool};

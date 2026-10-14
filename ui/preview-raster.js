@@ -41,7 +41,7 @@ export function createRasterPreview(_deliver) {
     return {
       type: "rasterCanvas",
       canvas: {
-        path: open.path, name: open.name, preset: open.preset, width: open.width, height: open.height,
+        path: open.path, name: open.name, preset: open.preset, width: info.width, height: info.height,
         palette: info.palette, layers: info.layers, tiles: info.tiles, generation: open.generation, version: open.version,
         dirty: open.ops.length !== open.saved, canUndo: open.ops.length > 0, canRedo: open.undone.length > 0,
         undo: open.ops[open.ops.length - 1]?.label ?? null, redo: open.undone[open.undone.length - 1]?.label ?? null, saving: false,
@@ -103,7 +103,12 @@ export function createRasterPreview(_deliver) {
         case "rasterEdit": {
           if (!open || command.generation !== open.generation) return [];
           open.lastSeq = command.seq;
-          const before = JSON.stringify(open.core.info().layers);
+          // What the core tells of with the canvas: its layers and its size.
+          const shape = () => {
+            const info = /** @type {NonNullable<typeof open>} */ (open).core.info();
+            return JSON.stringify([info.layers, info.width, info.height]);
+          };
+          const before = shape();
           const done = open.core.apply(command.op);
           const answer = (/** @type {any} */ extra) => ({
             type: "rasterApplied", generation: open?.generation, seq: command.seq, version: open?.version, dirty: open ? open.ops.length !== open.saved : false,
@@ -113,7 +118,7 @@ export function createRasterPreview(_deliver) {
           open.ops.push({ op: command.op, label: command.label || "edit" });
           open.undone = [];
           open.version += 1;
-          const meta = JSON.stringify(open.core.info().layers) !== before;
+          const meta = shape() !== before;
           return [answer({ hash: done.hash }), ...(meta ? [canvasEvent()] : [])];
         }
         case "rasterUndo":

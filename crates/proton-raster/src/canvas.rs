@@ -141,7 +141,19 @@ pub struct Canvas {
     pub state: u64,
     /// The last state given out, so no two states share a number.
     pub made: u64,
+    /// What is selected, as the alpha of a grid the canvas's size: how much
+    /// of each pixel an edit may change. A grid with no tiles selects
+    /// nothing, and then every edit changes everywhere. Not saved; undone and
+    /// redone as edits are. To the window it is layer 0, fetched and checked
+    /// as layers' tiles are.
+    pub selection: Grid,
+    /// Pixels copied, to paste: as they were and where they were, a grid the
+    /// canvas's size. Not saved, not undone.
+    pub clip: Option<Grid>,
 }
+
+/// The id the window knows the selection by, as if it were a layer.
+pub const SELECTION: u32 = 0;
 
 impl Canvas {
     /// A canvas of one empty layer.
@@ -152,7 +164,7 @@ impl Canvas {
         if width > preset.most() || height > preset.most() {
             return Err(format!("a {} canvas is at most {} pixels a side", name(preset), preset.most()));
         }
-        let mut canvas = Canvas { width, height, preset, palette: Vec::new(), layers: Vec::new(), next_id: 1, state: 0, made: 0 };
+        let mut canvas = Canvas { width, height, preset, palette: Vec::new(), layers: Vec::new(), next_id: 1, state: 0, made: 0, selection: Grid::new(width, height), clip: None };
         canvas.push_layer(if preset == Preset::Pixel { "Sprite" } else { "Background" }.into());
         Ok(canvas)
     }
@@ -171,6 +183,26 @@ impl Canvas {
 
     pub fn layer_mut(&mut self, id: u32) -> Option<&mut Layer> {
         self.layers.iter_mut().find(|l| l.info.id == id)
+    }
+
+    /// A layer's pixels by its id — or, for [`SELECTION`], the selection's.
+    pub fn grid(&self, id: u32) -> Option<&Grid> {
+        if id == SELECTION {
+            return Some(&self.selection);
+        }
+        self.layer(id).map(|l| &l.grid)
+    }
+
+    pub fn grid_mut(&mut self, id: u32) -> Option<&mut Grid> {
+        if id == SELECTION {
+            return Some(&mut self.selection);
+        }
+        self.layer_mut(id).map(|l| &mut l.grid)
+    }
+
+    /// Whether anything is selected: edits are then held to it.
+    pub fn selecting(&self) -> bool {
+        self.selection.tiles.iter().any(Option::is_some)
     }
 
     /// Where a layer is in the stack, from the bottom.
@@ -205,6 +237,11 @@ impl Canvas {
             h.word(i.opacity as u64 | (i.blend as u64) << 8 | (i.hidden as u64) << 16 | (i.locked as u64) << 17 | (i.alpha_lock as u64) << 18);
             for index in 0..layer.grid.cols * layer.grid.rows {
                 h.word(layer.grid.hash(index));
+            }
+        }
+        if self.selecting() {
+            for index in 0..self.selection.cols * self.selection.rows {
+                h.word(self.selection.hash(index));
             }
         }
         h.0

@@ -26,6 +26,7 @@ import { readRaster } from "./bridge.js";
 import { createPen, createStabiliser, curved } from "./raster-input.js";
 import { createRasterRuntime, FRAME_BUDGET, keepTiles, nextBudget } from "./raster-runtime.js";
 import { createRasterRender } from "./raster-render.js";
+import { begin as beginTransform, commit as commitTransform, corners, drag as dragTransform, handles, hit, wholeMove } from "./raster-transform.js";
 import { createSync } from "./raster-sync.js";
 import { fit, q8, toCanvas, toStage, zoomAt } from "./raster-view.js";
 
@@ -36,6 +37,9 @@ import { fit, q8, toCanvas, toStage, zoomAt } from "./raster-view.js";
 /** @typedef {import('./bindings/RasterBlend').RasterBlend} Blend */
 /** @typedef {import('./bindings/RasterBrush').RasterBrush} Brush */
 /** @typedef {import('./raster-input.js').Curve} Curve */
+/** @typedef {{pointer: number, from: [number, number], to: [number, number], points: [number, number][], mode: string}} Selecting */
+/** @typedef {{layer: number, rect: import('./raster-transform.js').Rect, t: import('./raster-transform.js').Transform, free: boolean,
+ *            drag: {pointer: number, handle: import('./raster-transform.js').Handle, from: [number, number], start: import('./raster-transform.js').Transform} | null}} Moving */
 
 const BLENDS = /** @type {[Blend, string][]} */ ([
   ["normal", "Normal"], ["multiply", "Multiply"], ["screen", "Screen"], ["overlay", "Overlay"],
@@ -53,6 +57,9 @@ const SIZES = {
 const KEYS = /** @type {[string, string][]} */ ([
   ["b", "brush on a paint canvas, pencil on a pixel one"], ["n", "the other of the two"], ["e g i", "eraser, fill, pick a colour"],
   ["l r o", "line, rectangle, ellipse"], ["[ ]", "a smaller, a larger tip or brush"], ["the pen's eraser end", "erases while it is near"],
+  ["s", "select — a rectangle; again for an ellipse, a lasso"], ["w", "the magic wand"], ["⇧ ⌥ while selecting", "add to it, take from it; both, keep where both are"],
+  ["⌘A ⌘D ⇧⌘I", "select all, nothing, the rest"], ["⌫", "clear what is selected"], ["⌘C ⌘X ⌘V", "copy, cut, paste as a layer"],
+  ["v", "move what is selected — all of the layer if nothing is"], ["⌘T", "scale and turn it: ↩ keeps it, ⎋ leaves it"],
   ["p", "pixel-perfect"], ["m ⇧M", "mirror across, down"], ["⇧G", "the pixel grid"], ["⌥ click", "pick a colour"],
   ["⎋", "take back the stroke being drawn"], ["⌘S", "save the canvas"], ["⌘Z ⇧⌘Z", "undo, redo"], ["f", "the whole canvas"], ["1", "100 %"],
   ["two fingers", "move over the canvas"], ["pinch ⌘ wheel", "zoom"], ["␣ drag", "move over the canvas"], ["?", "these keys"],
@@ -62,8 +69,11 @@ const KEYS = /** @type {[string, string][]} */ ([
  *  and the pencil on a pixel one. @param {string | undefined} preset */
 const toolKeys = (preset) => /** @type {Record<string, string>} */ ({
   ...(preset === "paint" ? { b: "brush", n: "pencil" } : { b: "pencil", n: "brush" }),
-  e: "eraser", g: "fill", i: "pick", l: "line", r: "rect", o: "ellipse",
+  e: "eraser", g: "fill", i: "pick", l: "line", r: "rect", o: "ellipse", s: "select", w: "wand", v: "move",
 });
+
+/** The shapes the select tool makes, in the order s steps through them. */
+const SELECT_SHAPES = /** @type {const} */ (["rect", "ellipse", "lasso"]);
 
 /** Brushes to start from: a round one whose size follows the pen, an inking
  *  pen, a soft airbrush whose flow does, and a marker that builds up to its
@@ -92,7 +102,7 @@ function brushOf(b, fallback) {
 }
 
 /** Ops that change the layers themselves, not only their pixels. @param {Op} op */
-const changesLayers = (op) => ["addLayer", "removeLayer", "moveLayer", "setLayer", "setPalette"].includes(op.op) || (op.op === "replaceColor" && op.swatch !== undefined && op.swatch !== null);
+const changesLayers = (op) => ["addLayer", "removeLayer", "moveLayer", "setLayer", "setPalette", "paste", "orient", "resize", "crop"].includes(op.op) || (op.op === "replaceColor" && op.swatch !== undefined && op.swatch !== null);
 
 /** `#rrggbb` of a colour. @param {number[]} c */
 const hex = (c) => `#${c.slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")}`;
@@ -151,6 +161,22 @@ export function createRaster(host) {
   /** @type {any} */ (host.root.defaultView ?? window).__protonPen = (/** @type {string} */ what, /** @type {number} */ p) => stylus.native(what, p);
   /** How much laying together a frame may do; more while it falls behind. */
   let budget = FRAME_BUDGET;
+  /** The select tool's shape, how a selection joins what is selected, and
+   *  its feather; the wand's own. */
+  let selectShape = /** @type {"rect" | "ellipse" | "lasso"} */ ("rect");
+  let selectOptions = { mode: "replace", feather: 0 };
+  let wandOptions = { tolerance: 16, contiguous: true, diagonal: false };
+  /** A selection being dragged out. @type {Selecting | null} */
+  let selecting = null;
+  /** A transform being made — of what is selected on a layer, or all of it:
+   *  the layer, what was lifted and where, the transform so far, whether it
+   *  has handles (⌘T) or is the move tool's, and a drag under way.
+   *  @type {Moving | null} */
+  let moving = null;
+  /** The selection's edges as the copy last gave them, and the ants' march. */
+  let ants = { version: -1, segments: new Int32Array(0), march: 0, timer: 0 };
+  /** The core's version the copy was last loaded at. */
+  let loaded = -1;
   let filled = false;
   let grid = false;
   /** The pixel under the pointer, for the cursor. @type {[number, number] | null} */
@@ -243,6 +269,9 @@ export function createRaster(host) {
   }
   /** @param {string} which */
   function useTool(which) {
+    // s again: the next shape.
+    if (which === "select" && tool === "select") selectShape = SELECT_SHAPES[(SELECT_SHAPES.indexOf(selectShape) + 1) % SELECT_SHAPES.length];
+    finishTransform();
     cancel();
     tool = which;
     ws.dataset.tool = which;
@@ -454,6 +483,10 @@ export function createRaster(host) {
         ? number("tolerance", fillOptions.tolerance, 0, 255, "Tolerance") + check("contiguous", fillOptions.contiguous, "Only what touches it") + check("diagonal", fillOptions.diagonal, "Across corners too")
         : tool === "pick"
           ? `<p class="raster-faint">A click takes the colour there, every layer laid together. ⌥ with any tool does too.</p>`
+          : tool === "select" || tool === "wand"
+            ? selectFields(number, check)
+          : tool === "move"
+            ? `<p class="raster-faint">Drag to move what is selected — all of the layer when nothing is. ⌘T scales and turns it.</p>`
           : soft()
             ? brushFields(number)
           : number("size", tipSize, 1, 64, "Size") + check("round", round, "Round") +
@@ -461,8 +494,13 @@ export function createRaster(host) {
             (tool === "rect" || tool === "ellipse" ? check("filled", filled, "Filled") : "") +
             check("mirrorX", mirror[0], "Mirror across the middle") + check("mirrorY", mirror[1], "Mirror down the middle");
     box.innerHTML =
-      `<h5 class="raster-tool-head">${esc({ pencil: "Pencil", brush: "Brush", eraser: "Eraser", fill: "Fill", pick: "Pick a colour", line: "Line", rect: "Rectangle", ellipse: "Ellipse" }[tool] ?? tool)}</h5>` +
-      `<div class="raster-fields" data-raster-options>${options}</div>` +
+      (moving?.free
+        ? `<h5 class="raster-tool-head">Transform</h5><div class="raster-fields raster-buttons" data-raster-transform-tools>` +
+          `<button class="cc-primary" data-raster-transform="keep" title="↩">Keep it</button><button class="cc-quiet" data-raster-transform="leave" title="⎋">Leave it</button>` +
+          `<button class="cc-quiet" data-raster-transform="flipX" title="Mirror it across">⇋</button><button class="cc-quiet" data-raster-transform="flipY" title="Mirror it down">⇵</button></div>` +
+          `<p class="raster-faint">Drag inside to move it, a corner to scale it (⇧: not in proportion), a side one way, outside to turn it (⇧: by fifteen degrees).</p>`
+        : `<h5 class="raster-tool-head">${esc({ pencil: "Pencil", brush: "Brush", eraser: "Eraser", fill: "Fill", pick: "Pick a colour", line: "Line", rect: "Rectangle", ellipse: "Ellipse", select: "Select", wand: "Magic wand", move: "Move" }[tool] ?? tool)}</h5>` +
+          `<div class="raster-fields" data-raster-options>${options}</div>`) +
       `<h5 class="raster-layer-head">Layer</h5>` +
       `<header class="raster-insp-head"><h4>${esc(l.name)}</h4></header>` +
       `<div class="raster-fields" data-raster-fields="${l.id}">` +
@@ -471,7 +509,29 @@ export function createRaster(host) {
       `<label class="raster-field"><span>Blend</span><select data-raster-field="blend">${BLENDS.map(([b, name]) => `<option value="${b}"${b === l.blend ? " selected" : ""}>${name}</option>`).join("")}</select></label>` +
       `<label class="raster-field raster-check"><input type="checkbox" data-raster-field="alphaLock"${l.alphaLock ? " checked" : ""}> <span>Keep its shape — draw only where it has something</span></label>` +
       `<label class="raster-field raster-check"><input type="checkbox" data-raster-field="locked"${l.locked ? " checked" : ""}> <span>Locked</span></label>` +
-      `</div>`;
+      `</div>` +
+      `<h5 class="raster-layer-head">Canvas</h5>` +
+      `<div class="raster-fields raster-buttons" data-raster-canvas-tools>` +
+      `<button class="cc-quiet" data-raster-canvas="ccw" title="Turn it a quarter to the left">↺</button><button class="cc-quiet" data-raster-canvas="cw" title="Turn it a quarter to the right">↻</button>` +
+      `<button class="cc-quiet" data-raster-canvas="half" title="Turn it half round">180°</button><button class="cc-quiet" data-raster-canvas="flipX" title="Mirror it across">⇋</button>` +
+      `<button class="cc-quiet" data-raster-canvas="flipY" title="Mirror it down">⇵</button><button class="cc-quiet" data-raster-canvas="crop" title="Cut it to what is selected"${antsNow().length ? "" : " disabled"}>Crop</button></div>` +
+      `<div class="raster-fields raster-resize"><label class="raster-field"><span>Size</span><span class="raster-size-pair"><input type="number" min="1" max="${view.preset === "pixel" ? 1024 : 4096}" value="${view.width}" data-raster-resize="width" aria-label="Width"> × <input type="number" min="1" max="${view.preset === "pixel" ? 1024 : 4096}" value="${view.height}" data-raster-resize="height" aria-label="Height"></span></label>` +
+      `<button class="cc-quiet" data-raster-canvas="resize">Resize</button></div>`;
+  }
+
+  /** The select tool's and the wand's fields.
+   *  @param {(name: string, value: number, min: number, max: number, label: string) => string} number
+   *  @param {(name: string, on: boolean, label: string) => string} check */
+  function selectFields(number, check) {
+    const choose = (/** @type {string} */ name, /** @type {string} */ value, /** @type {string[][]} */ options, /** @type {string} */ label) =>
+      `<label class="raster-field"><span>${label}</span><select data-raster-option="${name}">${options.map(([v, text]) => `<option value="${v}"${v === value ? " selected" : ""}>${text}</option>`).join("")}</select></label>`;
+    return (
+      (tool === "select"
+        ? choose("select.shape", selectShape, [["rect", "Rectangle"], ["ellipse", "Ellipse"], ["lasso", "Lasso"]], "Shape")
+        : number("wand.tolerance", wandOptions.tolerance, 0, 255, "Tolerance") + check("wand.contiguous", wandOptions.contiguous, "Only what touches it") + check("wand.diagonal", wandOptions.diagonal, "Across corners too")) +
+      choose("select.mode", selectOptions.mode, [["replace", "In place of what is selected"], ["add", "Added — ⇧"], ["subtract", "Taken away — ⌥"], ["intersect", "Where both are — ⇧⌥"]], "Joins") +
+      number("select.feather", selectOptions.feather, 0, 250, "Feather")
+    );
   }
 
   /** Whether the tool lays dabs — the brush, and the eraser on a paint
@@ -513,6 +573,33 @@ export function createRaster(host) {
   }
 
   const inspector = q("[data-raster-inspector]");
+  inspector.addEventListener("click", (e) => {
+    const target = /** @type {HTMLElement} */ (e.target);
+    const t = /** @type {HTMLElement | null} */ (target.closest("[data-raster-transform]"))?.dataset.rasterTransform;
+    if (t === "keep") return finishTransform();
+    if (t === "leave") return endTransform();
+    if ((t === "flipX" || t === "flipY") && moving) {
+      moving.t = t === "flipX" ? { ...moving.t, sx: -moving.t.sx } : { ...moving.t, sy: -moving.t.sy };
+      paint();
+      return;
+    }
+    const whichCanvas = /** @type {HTMLElement | null} */ (target.closest("[data-raster-canvas]"))?.dataset.rasterCanvas;
+    if (!whichCanvas || !view) return;
+    if (whichCanvas === "ccw") whole({ op: "orient", turns: 3, flip: false }, "turn left");
+    if (whichCanvas === "cw") whole({ op: "orient", turns: 1, flip: false }, "turn right");
+    if (whichCanvas === "half") whole({ op: "orient", turns: 2, flip: false }, "turn round");
+    if (whichCanvas === "flipX") whole({ op: "orient", turns: 0, flip: true }, "mirror across");
+    if (whichCanvas === "flipY") whole({ op: "orient", turns: 2, flip: true }, "mirror down");
+    if (whichCanvas === "crop") {
+      const rect = selectedRect();
+      if (rect) whole({ op: "crop", rect: /** @type {[number, number, number, number]} */ (rect) }, "crop");
+    }
+    if (whichCanvas === "resize") {
+      const size = (/** @type {string} */ which) => Math.round(Number(/** @type {HTMLInputElement | null} */ (inspector.querySelector(`[data-raster-resize="${which}"]`))?.value));
+      const [width, height] = [size("width"), size("height")];
+      if (width > 0 && height > 0) whole({ op: "resize", width, height, smooth: view.preset === "paint" }, "resize");
+    }
+  });
   // While opacity is dragged, only this window's copy shows it; one edit
   // goes to the core when it is let go.
   inspector.addEventListener("input", (e) => {
@@ -552,6 +639,17 @@ export function createRaster(host) {
       keepBrushes();
       renderInspector();
       paint();
+      return;
+    }
+    if (option?.startsWith("select.") || option?.startsWith("wand.")) {
+      const n = Math.round(Number(field.value));
+      if (option === "select.shape") selectShape = /** @type {"rect" | "ellipse" | "lasso"} */ (field.value);
+      if (option === "select.mode") selectOptions = { ...selectOptions, mode: field.value };
+      if (option === "select.feather") selectOptions = { ...selectOptions, feather: Math.min(250, Math.max(0, n || 0)) };
+      if (option === "wand.tolerance") wandOptions = { ...wandOptions, tolerance: Math.min(255, Math.max(0, n || 0)) };
+      if (option === "wand.contiguous") wandOptions = { ...wandOptions, contiguous: field.checked };
+      if (option === "wand.diagonal") wandOptions = { ...wandOptions, diagonal: field.checked };
+      renderInspector();
       return;
     }
     if (option) {
@@ -609,13 +707,21 @@ export function createRaster(host) {
       return { lastSeq: new DataView(bytes).getUint32(16, true), bytes };
     },
     put: (layer, bytes, keep) => copy?.put(layer, keepTiles(bytes, keep).bytes),
-    reload: () => reload(),
+    // After whatever the core said with it — a new size, new layers — and
+    // once a version, however many ask.
+    reload: async () => {
+      later(async () => {
+        if (view && loaded !== view.version) await reload();
+      });
+    },
     painted: () => paint(),
   });
 
   /** An op: made on this window's copy, then sent. @param {Op} op @param {string} label */
   function edit(op, label) {
     if (!view || !copy) return;
+    // A transform under way is kept first: it is what the person sees.
+    if (moving) finishTransform();
     const made = copy.apply(op);
     // Refused here too: sent all the same, unpredicted, so the core says why.
     send_(op, label, "hash" in made ? made.hash : null, "hash" in made ? copy.touched() : []);
@@ -631,11 +737,132 @@ export function createRaster(host) {
     paint();
   }
 
+  /** A change to the whole canvas — turned, mirrored, resized, cropped —
+   *  made by the core alone; the copy is loaded again after, at its new
+   *  size. @param {Op} op @param {string} label */
+  function whole(op, label) {
+    if (!view) return;
+    finishTransform();
+    cancel();
+    send_(op, label, null, []);
+  }
+
+  /** How a selection joins what is selected: ⇧ adds, ⌥ takes away, both
+   *  keep only where both are; otherwise as the inspector says.
+   *  @param {MouseEvent} e */
+  const modeOf = (e) => (e.shiftKey && e.altKey ? "intersect" : e.shiftKey ? "add" : e.altKey ? "subtract" : selectOptions.mode);
+
+  /** A selection made. @param {any} area @param {string} [mode] */
+  function select(area, mode = "replace") {
+    if (!view) return;
+    edit(/** @type {Op} */ ({ op: "select", area, mode, feather: selectOptions.feather, smooth: view.preset === "paint" }), area.kind === "nothing" ? "select nothing" : "select");
+  }
+
+  /** The whole pixels from one point's to another's, both in: left, top,
+   *  width, height. @param {[number, number]} a @param {[number, number]} b */
+  const pixelRect = (a, b) => {
+    const [x0, y0] = pixel([Math.min(a[0], b[0]), Math.min(a[1], b[1])]);
+    const [x1, y1] = pixel([Math.max(a[0], b[0]), Math.max(a[1], b[1])]);
+    return [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
+  };
+
+  /** The selection being dragged out, made. */
+  function finishSelecting() {
+    const s = selecting;
+    selecting = null;
+    if (!s || !view) return paint();
+    const small = !cam || Math.hypot((s.to[0] - s.from[0]) * cam.zoom, (s.to[1] - s.from[1]) * cam.zoom) < 3;
+    if (selectShape === "lasso") {
+      if (s.points.length >= 3 && !small) select({ kind: "lasso", points: s.points.flatMap(([x, y]) => [q8(x), q8(y)]) }, s.mode);
+      else if (s.mode === "replace") select({ kind: "nothing" });
+      return paint();
+    }
+    // A click selects nothing, as a drag of no size would.
+    if (small) {
+      if (s.mode === "replace") select({ kind: "nothing" });
+      return paint();
+    }
+    select({ kind: selectShape, rect: pixelRect(s.from, s.to) }, s.mode);
+  }
+
+  /** The selection's edges, from the copy when it has changed. */
+  function antsNow() {
+    if (!copy) return new Int32Array(0);
+    const v = copy.selectionVersion();
+    if (v !== ants.version) {
+      ants.version = v;
+      ants.segments = copy.outline();
+      // Crop needs something selected to crop to.
+      const crop = /** @type {HTMLButtonElement | null} */ (ws.querySelector('[data-raster-canvas="crop"]'));
+      if (crop) crop.disabled = !ants.segments.length;
+    }
+    return ants.segments;
+  }
+
+  /** The rectangle round what is selected, by its edges: left, top, width,
+   *  height; none when nothing is. */
+  function selectedRect() {
+    const segs = antsNow();
+    if (!segs.length) return null;
+    let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < segs.length; i += 2) {
+      x0 = Math.min(x0, segs[i]);
+      x1 = Math.max(x1, segs[i]);
+      y0 = Math.min(y0, segs[i + 1]);
+      y1 = Math.max(y1, segs[i + 1]);
+    }
+    return x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : null;
+  }
+
+  /** What is selected of the layer chosen — all of it, with nothing
+   *  selected — lifted to be moved: drawn by the GPU where it is going, what
+   *  is left of the layer shown under it. Whether there was anything.
+   *  @param {boolean} free with handles, to scale and turn it */
+  function startTransform(free) {
+    if (moving) return true;
+    if (!view || !copy) return false;
+    cancel();
+    const layer = current();
+    if (!layer || layer.locked) return false;
+    const lifted = copy.lift(layer.id);
+    if (!lifted.width) return false;
+    gpu?.float(lifted.pixels, lifted.width, lifted.height);
+    copy.preview({ op: "clear", layer: layer.id });
+    const rect = { x: lifted.x, y: lifted.y, width: lifted.width, height: lifted.height };
+    moving = { layer: layer.id, rect, t: beginTransform(rect), free, drag: null };
+    renderInspector();
+    paint();
+    return true;
+  }
+
+  /** The transform kept, as one edit. */
+  function finishTransform() {
+    if (!moving || !view) return;
+    const { layer, rect, t } = moving;
+    endTransform();
+    if (wholeMove(t) && t.dx === 0 && t.dy === 0) return;
+    const made = commitTransform(t, rect, view.width, view.height);
+    const label = wholeMove(t) ? "move" : "transform";
+    // Moved wholly off the canvas, or squashed to nothing: gone.
+    edit(/** @type {Op} */ (made ? { op: "transform", layer, bounds: made.bounds, inverse: made.inverse, smooth: view.preset === "paint" && !wholeMove(t) } : { op: "clear", layer }), label);
+  }
+
+  /** The transform left: everything as it was. */
+  function endTransform() {
+    if (!moving) return;
+    moving = null;
+    copy?.clearPreview();
+    gpu?.float(null);
+    renderInspector();
+    paint();
+  }
+
   /** The core's answer to an edit. @param {any} event */
   function applied(event) {
     later(async () => {
       if (!view || event.generation !== view.generation) return;
-      view = { ...view, dirty: event.dirty, canUndo: event.canUndo, canRedo: event.canRedo };
+      // The core's version too: a copy loaded at an older one is behind.
+      view = { ...view, version: event.version, dirty: event.dirty, canUndo: event.canUndo, canRedo: event.canRedo };
       renderBar();
       await sync.answered(event);
     });
@@ -660,10 +887,13 @@ export function createRaster(host) {
   /** This window's copy made again from the core's canvas. */
   async function reload() {
     if (!view) return;
+    loaded = view.version;
     const next = await createRasterRuntime();
     next.open({ width: view.width, height: view.height, preset: view.preset, palette: view.palette, layers: view.layers, generation: view.generation });
     copy = next;
     copyOf = view.generation;
+    // A new copy counts its selection's changes from nothing again.
+    ants.version = -1;
     gpu?.resize(view.width, view.height, view.preset === "paint");
     for (const [layer, tiles] of view.tiles) await fetchTiles(layer, tiles);
     paint();
@@ -724,7 +954,8 @@ export function createRaster(host) {
     const behind = copy.pending() > 0;
     budget = nextBudget(budget, behind);
     const ratio = window.devicePixelRatio || 1;
-    gpu?.draw(c, w, h, ratio, { ...colors(), pixel: view.preset === "pixel", grid, still: !drawing && !behind });
+    const float = moving ? { corners: corners(moving.t, moving.rect).map(([x, y]) => toStage(c, x, y)), nearest: view.preset === "pixel" } : undefined;
+    gpu?.draw(c, w, h, ratio, { ...colors(), pixel: view.preset === "pixel", grid, still: !drawing && !behind && !moving, float });
     drawCursor(c, w, h, ratio);
     renderBar();
     if (behind) paint();
@@ -760,7 +991,10 @@ export function createRaster(host) {
       g.stroke();
       g.setLineDash([]);
     }
-    if (!hover || tool === "pick" || tool === "fill") return;
+    drawSelection(g, c);
+    if (moving) return drawTransform(g, c);
+    if (selecting) return drawSelecting(g, c, selecting);
+    if (!hover || tool === "pick" || tool === "fill" || tool === "select" || tool === "wand" || tool === "move") return;
     if (soft() && hoverAt) {
       // A brush's size at full pressure, about where the pen is.
       const [x, y] = toStage(c, hoverAt[0], hoverAt[1]);
@@ -783,6 +1017,93 @@ export function createRaster(host) {
     g.strokeStyle = "rgba(0, 0, 0, 0.6)";
     g.strokeRect(Math.round(x) - 0.5, Math.round(y) - 0.5, Math.round(n * c.zoom) + 1, Math.round(n * c.zoom) + 1);
   }
+  /** The marching ants round what is selected.
+   *  @param {CanvasRenderingContext2D} g @param {{zoom: number, x: number, y: number}} c */
+  function drawSelection(g, c) {
+    const segs = antsNow();
+    if (!segs.length || moving) return;
+    g.save();
+    g.beginPath();
+    for (let i = 0; i < segs.length; i += 4) {
+      const [x0, y0] = toStage(c, segs[i], segs[i + 1]);
+      const [x1, y1] = toStage(c, segs[i + 2], segs[i + 3]);
+      g.moveTo(Math.round(x0) + 0.5, Math.round(y0) + 0.5);
+      g.lineTo(Math.round(x1) + 0.5, Math.round(y1) + 0.5);
+    }
+    g.lineWidth = 1;
+    g.setLineDash([4, 4]);
+    g.lineDashOffset = ants.march;
+    g.strokeStyle = "rgba(0, 0, 0, 0.9)";
+    g.stroke();
+    g.lineDashOffset = ants.march + 4;
+    g.strokeStyle = "rgba(255, 255, 255, 0.95)";
+    g.stroke();
+    g.restore();
+    // They march while they are shown.
+    if (!ants.timer && shown) {
+      ants.timer = window.setTimeout(() => {
+        ants.timer = 0;
+        ants.march = (ants.march + 1) % 8;
+        paint();
+      }, 100);
+    }
+  }
+
+  /** A selection being dragged out, as its shape.
+   *  @param {CanvasRenderingContext2D} g @param {{zoom: number, x: number, y: number}} c @param {Selecting} s */
+  function drawSelecting(g, c, s) {
+    g.save();
+    g.beginPath();
+    if (selectShape === "lasso") {
+      s.points.forEach(([x, y], i) => {
+        const [sx, sy] = toStage(c, x, y);
+        if (i === 0) g.moveTo(sx, sy);
+        else g.lineTo(sx, sy);
+      });
+      g.closePath();
+    } else {
+      const [x, y, w, h] = pixelRect(s.from, s.to);
+      const [sx, sy] = toStage(c, x, y);
+      if (selectShape === "ellipse") g.ellipse(sx + (w * c.zoom) / 2, sy + (h * c.zoom) / 2, (w * c.zoom) / 2, (h * c.zoom) / 2, 0, 0, Math.PI * 2);
+      else g.rect(Math.round(sx) + 0.5, Math.round(sy) + 0.5, Math.round(w * c.zoom), Math.round(h * c.zoom));
+    }
+    g.lineWidth = 1;
+    g.setLineDash([4, 4]);
+    g.strokeStyle = "rgba(0, 0, 0, 0.9)";
+    g.stroke();
+    g.lineDashOffset = 4;
+    g.strokeStyle = "rgba(255, 255, 255, 0.95)";
+    g.stroke();
+    g.restore();
+  }
+
+  /** What is being moved: its box, and with ⌘T its handles.
+   *  @param {CanvasRenderingContext2D} g @param {{zoom: number, x: number, y: number}} c */
+  function drawTransform(g, c) {
+    if (!moving) return;
+    const [a, b, cc, d] = corners(moving.t, moving.rect).map(([x, y]) => toStage(c, x, y));
+    g.save();
+    g.beginPath();
+    g.moveTo(a[0], a[1]);
+    g.lineTo(b[0], b[1]);
+    g.lineTo(d[0], d[1]);
+    g.lineTo(cc[0], cc[1]);
+    g.closePath();
+    g.lineWidth = 1;
+    g.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    g.stroke();
+    if (moving.free) {
+      for (const [, hx, hy] of handles(moving.t, moving.rect)) {
+        const [x, y] = toStage(c, hx, hy);
+        g.fillStyle = "rgba(255, 255, 255, 0.95)";
+        g.strokeStyle = "rgba(0, 0, 0, 0.7)";
+        g.fillRect(Math.round(x) - 3.5, Math.round(y) - 3.5, 7, 7);
+        g.strokeRect(Math.round(x) - 3.5, Math.round(y) - 3.5, 7, 7);
+      }
+    }
+    g.restore();
+  }
+
   new ResizeObserver(() => paint()).observe(stage);
 
   /** A stage point, from a pointer. @param {MouseEvent} e @returns {[number, number]} */
@@ -894,6 +1215,35 @@ export function createRaster(host) {
     if (e.pointerType === "pen") pen = true;
     const p = at(e);
     if (!p) return;
+    // A transform under way takes the pointer: a handle, inside to move it,
+    // outside to turn it.
+    if (moving) {
+      const handle = moving.free ? hit(moving.t, moving.rect, p[0], p[1], 8 / c.zoom) : "move";
+      moving.drag = { pointer: e.pointerId, handle, from: p, start: moving.t };
+      capture(e);
+      return;
+    }
+    if (tool === "select") {
+      selecting = { pointer: e.pointerId, from: p, to: p, points: [p], mode: modeOf(e) };
+      capture(e);
+      paint();
+      return;
+    }
+    if (tool === "wand") {
+      const layer = current();
+      const [x, y] = pixel(p);
+      if (layer) select({ kind: "wand", layer: layer.id, x, y, ...wandOptions }, modeOf(e));
+      return;
+    }
+    if (tool === "move") {
+      if (startTransform(false)) {
+        // Lifted just now, by startTransform.
+        const m = /** @type {Moving} */ (/** @type {unknown} */ (moving));
+        m.drag = { pointer: e.pointerId, handle: "move", from: p, start: m.t };
+        capture(e);
+      }
+      return;
+    }
     if (tool === "pick" || e.altKey) return pickAt(p);
     const layer = current();
     if (!layer) return;
@@ -947,6 +1297,21 @@ export function createRaster(host) {
     const p = at(e);
     hover = p ? pixel(p) : null;
     hoverAt = p;
+    if (moving?.drag && e.pointerId === moving.drag.pointer && p && view) {
+      const d = moving.drag;
+      let t = dragTransform(d.start, moving.rect, d.handle, d.from, p, { free: e.shiftKey, snap: e.shiftKey });
+      // The move tool, and a pixel canvas, move by whole pixels.
+      if (d.handle === "move" && (!moving.free || view.preset === "pixel")) t = { ...t, dx: Math.round(t.dx), dy: Math.round(t.dy) };
+      moving.t = t;
+      paint();
+      return;
+    }
+    if (selecting && e.pointerId === selecting.pointer && p) {
+      selecting.to = p;
+      if (selectShape === "lasso") selecting.points.push(p);
+      paint();
+      return;
+    }
     if (drawing && e.pointerId === drawing.pointer) {
       // Every point the pointer passed through, not only the last a frame.
       const all = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
@@ -991,12 +1356,19 @@ export function createRaster(host) {
       copy?.clearPreview();
       shaping = null;
     }
+    selecting = null;
     paint();
   }
 
   const end = (/** @type {PointerEvent} */ e) => {
     if (e.pointerType === "pen") pen = false;
     panning = null;
+    if (moving?.drag && e.pointerId === moving.drag.pointer) {
+      moving.drag = null;
+      // The move tool's move is kept when let go; ⌘T's waits for ↩.
+      if (!moving.free) finishTransform();
+    }
+    if (selecting && e.pointerId === selecting.pointer) finishSelecting();
     if (drawing && e.pointerId === drawing.pointer) finishStroke();
     if (shaping && e.pointerId === shaping.pointer) finishShape(e);
   };
@@ -1033,12 +1405,24 @@ export function createRaster(host) {
     if (e.metaKey && !e.altKey && !e.ctrlKey) {
       const k = e.key.toLowerCase();
       if (k === "s" && view) return (send({ type: "rasterSave" }), true);
-      if (k === "z" && view && !typing && (drawing || shaping)) return (cancel(), true);
+      if (k === "z" && view && !typing && moving) return (endTransform(), true);
+      if (k === "z" && view && !typing && (drawing || shaping || selecting)) return (cancel(), true);
       if (k === "z" && view && !typing) return (send({ type: e.shiftKey ? "rasterRedo" : "rasterUndo" }), true);
+      if (!view || typing) return false;
+      const layer = current();
+      if (k === "a" && !e.shiftKey) return (select({ kind: "all" }), true);
+      if (k === "d" && !e.shiftKey) return (select({ kind: "nothing" }), true);
+      if (k === "i" && e.shiftKey) return (select({ kind: "invert" }), true);
+      if ((k === "c" || k === "x") && !e.shiftKey && layer) return (edit({ op: "copy", layer: layer.id, cut: k === "x" }, k === "x" ? "cut" : "copy"), true);
+      if (k === "v" && !e.shiftKey) return (edit({ op: "paste", above: layer?.id }, "paste"), true);
+      if (k === "t" && !e.shiftKey) return (startTransform(true), true);
       return false;
     }
     if (typing || e.altKey || e.ctrlKey || e.metaKey || !view) return false;
-    if (e.key === "Escape" && (drawing || shaping)) return (cancel(), true);
+    if (e.key === "Escape" && moving) return (endTransform(), true);
+    if (e.key === "Enter" && moving) return (finishTransform(), true);
+    if (e.key === "Escape" && (drawing || shaping || selecting)) return (cancel(), true);
+    if ((e.key === "Backspace" || e.key === "Delete") && current()) return (edit({ op: "clear", layer: /** @type {Layer} */ (current()).id }, "clear"), true);
     if (e.key === "?") return (host.keys?.("— Canvas's keys", KEYS), true);
     if (e.key === "f") return (refit(), true);
     if (e.key === "1") return (actualSize(), true);
@@ -1095,6 +1479,10 @@ export function createRaster(host) {
     pick: (x, y) => copy?.pick(x, y) ?? null,
     settled: () => queue.then(() => sync.settled()),
     sync: () => sync.state(),
+    /** How many edges the marching ants go along. */
+    ants: () => antsNow().length / 4,
+    /** Whether a transform is under way. */
+    moving: () => Boolean(moving),
     /** Where the middle of canvas pixel `x`, `y` is, in the window. @param {number} x @param {number} y */
     at: (x, y) => {
       const c = camera();
@@ -1117,6 +1505,7 @@ export function createRaster(host) {
         const next = event.canvas ?? null;
         const opened = next && next.generation !== copyOf;
         view = next;
+        if (!view || opened) endTransform();
         if (!view) {
           cancel();
           sync.reset();
@@ -1134,6 +1523,13 @@ export function createRaster(host) {
           tool = view.preset === "paint" ? "brush" : "pencil";
           ws.dataset.tool = tool;
           for (const b of ws.querySelectorAll("[data-raster-tool]")) b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.rasterTool === tool));
+          await reload();
+        } else if (copy && (copy.width !== view.width || copy.height !== view.height)) {
+          // Turned, resized or cropped: the copy is loaded again at its size.
+          endTransform();
+          cancel();
+          sync.reset();
+          cam = null;
           await reload();
         } else if (copy) {
           // The same canvas: its layers or palette may have changed.

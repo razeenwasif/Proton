@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::canvas::{Canvas, Layer, Preset};
 use crate::op::{Applied, Op};
-use crate::tile::{Tile, TILE_BYTES};
+use crate::tile::{Grid, Tile, TILE_BYTES};
 
 /// What a change replaced, to put back.
 #[derive(Debug, Clone, Default)]
@@ -22,6 +22,10 @@ pub struct Patch {
     pub palette: Option<Vec<[u8; 4]>>,
     /// Tiles as they were: layer, index, tile.
     pub tiles: Vec<(u32, u32, Option<Arc<Tile>>)>,
+    /// The selection as it was, when it changed.
+    pub selection: Option<Grid>,
+    /// The canvas's size as it was, when it changed.
+    pub size: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +135,16 @@ fn cost(patch: &Patch, canvas: &Canvas) -> u64 {
             let shared = canvas.layer(*layer).and_then(|l| l.grid.tile(*index)).is_some_and(|now| Arc::ptr_eq(now, tile));
             if !shared {
                 bytes += TILE_BYTES as u64;
+            }
+        }
+    }
+    if let Some(sel) = &patch.selection {
+        for index in 0..sel.cols * sel.rows {
+            if let Some(tile) = sel.tile(index) {
+                let shared = canvas.selection.tile(index).is_some_and(|now| Arc::ptr_eq(now, tile)) || Arc::ptr_eq(tile, crate::select::full());
+                if !shared {
+                    bytes += TILE_BYTES as u64;
+                }
             }
         }
     }

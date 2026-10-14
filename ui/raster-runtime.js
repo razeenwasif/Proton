@@ -87,7 +87,11 @@ export async function createRasterRuntime() {
     /** An op, made here: the hash of what it touched, or why it was refused.
      *  @param {Op} op @returns {{hash: string} | {refused: string}} */
     apply(op) {
-      if (pass(rr.rr_apply, text(op)) !== 0) return { refused: why() };
+      const result = pass(rr.rr_apply, text(op));
+      // A turn or a crop changes the size the composite is read at.
+      width = rr.rr_width();
+      height = rr.rr_height();
+      if (result !== 0) return { refused: why() };
       return { hash: ((BigInt(rr.rr_hash_hi() >>> 0) << 32n) | BigInt(rr.rr_hash_lo() >>> 0)).toString(16).padStart(16, "0") };
     },
     /** The tiles the last op or stroke touched, as [layer, index] pairs. @returns {[number, number][]} */
@@ -164,8 +168,9 @@ export async function createRasterRuntime() {
       const v = rr.rr_layer_pixel(layer, x, y) >>> 0;
       return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, v >>> 24];
     },
-    /** The layers, the palette, and which tiles each layer has.
-     *  @returns {{layers: Layer[], palette: number[][], tiles: [number, number[]][]}} */
+    /** The size, the layers, the palette, and which tiles each layer has —
+     *  the selection's as layer 0.
+     *  @returns {{width: number, height: number, layers: Layer[], palette: number[][], tiles: [number, number[]][]}} */
     info() {
       const at = rr.rr_info();
       const length = new DataView(rr.memory.buffer).getUint32(at, true);
@@ -175,6 +180,25 @@ export async function createRasterRuntime() {
     tile(layer, index) {
       const at = rr.rr_tile(layer, index);
       return at ? new Uint8Array(rr.memory.buffer, at, 64 * 64 * 4).slice() : null;
+    },
+    /** A number that changes whenever the selection may have. */
+    selectionVersion() {
+      return rr.rr_selection_version() >>> 0;
+    },
+    /** The selection's edges, for marching ants: x0, y0, x1, y1 a segment,
+     *  in canvas pixels. */
+    outline() {
+      const at = rr.rr_outline();
+      const count = new Int32Array(rr.memory.buffer, at, 1)[0];
+      return new Int32Array(rr.memory.buffer, at + 4, count * 4).slice();
+    },
+    /** What of a layer is selected — all of it with nothing selected — for a
+     *  transform's preview: where it is, and its pixels premultiplied.
+     *  @param {number} layer @returns {{x: number, y: number, width: number, height: number, pixels: Uint8Array}} */
+    lift(layer) {
+      const at = rr.rr_lift(layer);
+      const [x, y, w, h] = new Uint32Array(rr.memory.buffer, at, 4);
+      return { x, y, width: w, height: h, pixels: new Uint8Array(rr.memory.buffer, at + 16, w * h * 4).slice() };
     },
     get width() {
       return width;

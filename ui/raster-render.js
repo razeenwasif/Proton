@@ -9,7 +9,11 @@
  * art stays pixels; a pixel canvas always is. A paint canvas seen smaller
  * than itself is sampled from mipmaps, made again only once the picture is
  * still — never a frame of a stroke — and until then from the picture
- * itself. */
+ * itself.
+ *
+ * While pixels are being moved, scaled or turned, they are lifted onto a
+ * texture of their own and drawn over the picture where the transform puts
+ * them — the GPU's preview; the pixels are made once, when it is let go. */
 
 const VERTEX = `#version 300 es
 in vec2 a_corner;
@@ -44,6 +48,24 @@ void main() {
   o = vec4(seen, 1.0);
 }`;
 
+// What is being moved: a quad at four stage points, premultiplied, laid over.
+const FLOAT_VERTEX = `#version 300 es
+in vec2 a_at;
+in vec2 a_uv;
+uniform vec2 u_stage;
+out vec2 v_uv;
+void main() {
+  gl_Position = vec4(a_at / u_stage * vec2(2.0, -2.0) + vec2(-1.0, 1.0), 0.0, 1.0);
+  v_uv = a_uv;
+}`;
+
+const FLOAT_FRAGMENT = `#version 300 es
+precision mediump float;
+uniform sampler2D u_tex;
+in vec2 v_uv;
+out vec4 o;
+void main() { o = texture(u_tex, v_uv); }`;
+
 /** @param {HTMLCanvasElement} canvas @param {{onLost?: () => void}} [hooks] */
 export function createRasterRender(canvas, hooks = {}) {
   const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: false });
@@ -55,11 +77,28 @@ export function createRasterRender(canvas, hooks = {}) {
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? "shader");
     return s;
   };
-  const program = /** @type {WebGLProgram} */ (gl.createProgram());
-  gl.attachShader(program, compile(gl.VERTEX_SHADER, VERTEX));
-  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAGMENT));
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? "program");
+  const link = (/** @type {string} */ vertex, /** @type {string} */ fragment) => {
+    const made = /** @type {WebGLProgram} */ (gl.createProgram());
+    gl.attachShader(made, compile(gl.VERTEX_SHADER, vertex));
+    gl.attachShader(made, compile(gl.FRAGMENT_SHADER, fragment));
+    gl.linkProgram(made);
+    if (!gl.getProgramParameter(made, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(made) ?? "program");
+    return made;
+  };
+  const program = link(VERTEX, FRAGMENT);
+  const floater = link(FLOAT_VERTEX, FLOAT_FRAGMENT);
+  const floatVao = gl.createVertexArray();
+  const floatBuffer = gl.createBuffer();
+  gl.bindVertexArray(floatVao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, floatBuffer);
+  const floatAt = gl.getAttribLocation(floater, "a_at");
+  const floatUv = gl.getAttribLocation(floater, "a_uv");
+  gl.enableVertexAttribArray(floatAt);
+  gl.vertexAttribPointer(floatAt, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(floatUv);
+  gl.vertexAttribPointer(floatUv, 2, gl.FLOAT, false, 16, 8);
+  /** @type {WebGLTexture | null} */
+  let floating = null;
   const where = (/** @type {string} */ name) => gl.getUniformLocation(program, name);
   const u = { rect: where("u_rect"), stage: where("u_stage"), size: where("u_size"), check: where("u_check"), light: where("u_light"), dark: where("u_dark"), tex: where("u_tex"), line: where("u_line") };
   const corners = gl.createBuffer();
@@ -118,9 +157,26 @@ export function createRasterRender(canvas, hooks = {}) {
       gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
       stale = levels > 1;
     },
-    /** The picture where the view puts it, on the ground colour.
+    /** Pixels being moved, premultiplied, `w` by `h` — or none.
+     *  @param {Uint8Array | null} pixels @param {number} [w] @param {number} [h] */
+    float(pixels, w = 0, h = 0) {
+      if (lost) return;
+      if (floating) gl.deleteTexture(floating);
+      floating = null;
+      if (!pixels || !w || !h) return;
+      floating = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, floating);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    },
+    /** The picture where the view puts it, on the ground colour, and what
+     *  is being moved where its four corners are (stage pixels: top left,
+     *  top right, bottom left, bottom right).
      *  @param {{zoom: number, x: number, y: number}} view @param {number} width @param {number} height
-     *  @param {number} ratio @param {{ground: number[], light: number[], dark: number[], pixel: boolean, grid?: boolean, still?: boolean}} look */
+     *  @param {number} ratio @param {{ground: number[], light: number[], dark: number[], pixel: boolean, grid?: boolean, still?: boolean,
+     *          float?: {corners: number[][], nearest: boolean}}} look */
     draw(view, width, height, ratio, look) {
       if (lost) return;
       const w = Math.round(width * ratio);
@@ -161,6 +217,24 @@ export function createRasterRender(canvas, hooks = {}) {
       // only a shade over the picture.
       gl.uniform1f(u.line, look.grid && view.zoom >= 6 ? 1 / (view.zoom * ratio) : 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      if (floating && look.float) {
+        const [a, b, c, d] = look.float.corners;
+        gl.useProgram(floater);
+        gl.bindVertexArray(floatVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, floatBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([a[0], a[1], 0, 0, b[0], b[1], 1, 0, c[0], c[1], 0, 1, d[0], d[1], 1, 1]), gl.DYNAMIC_DRAW);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, floating);
+        const filter = look.float.nearest ? gl.NEAREST : gl.LINEAR;
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+        gl.uniform1i(gl.getUniformLocation(floater, "u_tex"), 0);
+        gl.uniform2f(gl.getUniformLocation(floater, "u_stage"), width, height);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        gl.disable(gl.BLEND);
+      }
     },
     /** One pixel of the drawn frame, as RGBA — for tests. @param {number} x @param {number} y */
     probe(x, y) {
@@ -170,6 +244,7 @@ export function createRasterRender(canvas, hooks = {}) {
     },
     destroy() {
       if (texture) gl.deleteTexture(texture);
+      if (floating) gl.deleteTexture(floating);
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     },
   };

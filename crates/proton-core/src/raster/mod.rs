@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
-use proton_raster::{file, Canvas, History, LayerInfo, Op, Preset, Tile};
+use proton_raster::{file, Canvas, History, LayerInfo, Op, Preset, Tile, SELECTION};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -374,11 +374,12 @@ impl Raster {
         }
     }
 
-    /// Tiles of a layer, for `read_raster`: shared, not copied.
+    /// Tiles of a layer — or of the selection, layer 0 — for `read_raster`:
+    /// shared, not copied.
     pub fn tiles(&self, generation: u32, layer: u32, indices: &[u32]) -> Option<RasterTiles> {
         let open = self.open.as_ref().filter(|o| o.generation == generation)?;
-        let layer = open.canvas.layer(layer)?;
-        let tiles = indices.iter().filter(|&&i| i < layer.grid.cols * layer.grid.rows).map(|&i| (i, layer.grid.tile(i).cloned())).collect();
+        let grid = open.canvas.grid(layer)?;
+        let tiles = indices.iter().filter(|&&i| i < grid.cols * grid.rows).map(|&i| (i, grid.tile(i).cloned())).collect();
         Some(RasterTiles { generation, version: open.version, last_seq: open.last_seq, tiles })
     }
 
@@ -399,10 +400,13 @@ impl Raster {
                 height: c.height,
                 palette: c.palette.clone(),
                 layers: c.infos(),
+                // The selection first, as layer 0, when anything is selected.
                 tiles: c
-                    .layers
-                    .iter()
-                    .map(|l| (l.info.id, (0..l.grid.cols * l.grid.rows).filter(|&i| l.grid.tile(i).is_some()).collect()))
+                    .selecting()
+                    .then_some((SELECTION, &c.selection))
+                    .into_iter()
+                    .chain(c.layers.iter().map(|l| (l.info.id, &l.grid)))
+                    .map(|(id, g)| (id, (0..g.cols * g.rows).filter(|&i| g.tile(i).is_some()).collect()))
                     .collect(),
                 generation: open.generation,
                 version: open.version,
