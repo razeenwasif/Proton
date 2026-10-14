@@ -213,3 +213,27 @@ fn a_smooth_turn_and_a_feathered_selection_make_what_they_always_made() {
     }
     assert_eq!(hashes, "8da9340e23f43107 793d953ed014af14");
 }
+
+#[test]
+fn ops_applied_together_are_one_step_and_none_if_one_is_refused() {
+    let (mut c, id) = canvas(32, 32, Preset::Pixel);
+    let mut h = History::new(Preset::Pixel);
+    let before = c.hash();
+    let ops = vec![
+        Op::AddLayer { name: "Ink".into(), at: None },
+        Op::FillRect { layer: id, rect: [0, 0, 4, 4], color: RED },
+        Op::Select { area: Area::Rect { rect: [0, 0, 2, 2] }, mode: Mode::Replace, feather: 0, smooth: false },
+        Op::FillRect { layer: id + 1, rect: [0, 0, 32, 32], color: BLUE },
+    ];
+    let applied = h.record(&mut c, "marks", |c| c.apply_all(&ops)).unwrap();
+    assert!(applied.meta && applied.made == Some(id + 1));
+    assert_eq!((c.layers[1].grid.pixel(1, 1), c.layers[1].grid.pixel(5, 5)), (BLUE, [0; 4]), "the last mark kept to the selection the third made");
+    assert_eq!(h.steps(), 1);
+    h.undo(&mut c);
+    assert_eq!(c.hash(), before, "one undo did not take every mark back");
+    // A batch with a refusal in it changes nothing.
+    let bad = vec![Op::FillRect { layer: id, rect: [0, 0, 4, 4], color: RED }, Op::RemoveLayer { layer: 99 }];
+    let why = c.apply_all(&bad).unwrap_err();
+    assert!(why.contains("mark 2 of 2"), "{why}");
+    assert_eq!(c.hash(), before);
+}

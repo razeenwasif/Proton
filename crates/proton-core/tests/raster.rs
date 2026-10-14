@@ -279,4 +279,90 @@ fn a_canvas_sent_to_the_game_open_is_written_into_its_art_and_imported() {
     assert!(dir.join("art/far-hills-800.psd").exists(), "{:?}", said(&events));
     assert!(said(&events).iter().any(|s| s.contains("import")), "the game open did not import it: {:?}", said(&events));
     assert!(warned(&space.apply(Command::RasterSend { game: "nowhere".into(), layers: false })).is_some());
+    // The agent sends it too, flat this time.
+    let said = space.run_tool("canvas_export", &serde_json::json!({"game": game, "layers": false})).unwrap();
+    assert!(said.contains("far-hills-800.png") && said.contains("imported"), "{said}");
+    assert!(dir.join("art/far-hills-800.png").exists());
+}
+
+/* ── the agent's tools, through the seam the agent uses ─────────── */
+
+use serde_json::json;
+
+#[test]
+fn the_agent_makes_a_canvas_sees_it_and_draws_on_it_in_one_step_of_undo() {
+    let root = project("agent-draw");
+    let mut space = Workspace::rooted(&root);
+    space.apply(Command::SetMode { mode: ModeId::Raster });
+    let none = space.run_tool("canvas_info", &json!({})).unwrap();
+    assert!(none.contains("No canvas is open") && none.contains("canvas_new"), "{none}");
+    assert!(space.run_tool("canvas_draw", &json!({"marks": [{"pixels": [[0, 0]]}]})).unwrap_err().contains("No canvas is open"));
+    let made = space.run_tool("canvas_new", &json!({"name": "Knight", "preset": "pixel", "width": 16})).unwrap();
+    assert!(made.contains("16 × 16") && made.contains("palette of sixteen"), "{made}");
+    let info = space.run_tool("canvas_info", &json!({})).unwrap();
+    assert!(info.contains("Palette, by swatch: 0 #1b1b23") && info.contains("layer 1 \"Sprite\": empty") && info.contains("Nothing is selected"), "{info}");
+    // A few marks of each kind, one call.
+    let drew = space
+        .run_tool(
+            "canvas_draw",
+            &json!({"marks": [
+                {"rect": [2, 2, 6, 5], "fill": true, "color": "#b0303f"},
+                {"pixels": [[3, 3], [6, 3]], "color": 4},
+                {"line": [[2, 10], [9, 10]], "color": [20, 20, 20]},
+                {"ellipse": [10, 1, 5, 5], "color": "#f4c95d"},
+                {"fill": [12, 3], "color": "#f4c95d"},
+                {"erase": [2, 2, 1, 1]}
+            ]}),
+        )
+        .unwrap();
+    assert!(drew.contains("Drew 7 marks on layer 1") && drew.contains("held until they save"), "{drew}");
+    let seen = space.run_tool("canvas_info", &json!({"pixels": {"rect": [0, 0, 16, 12]}})).unwrap();
+    let rows: Vec<&str> = seen.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect();
+    assert_eq!(&rows[2][2..8], ".66666", "{seen}");
+    assert_eq!(&rows[3][2..8], "646646", "the swatch 4 pixels: {seen}");
+    assert_eq!(&rows[10][2..10], "xxxxxxxx".replace('x', &rows[10][2..3]), "{seen}");
+    assert!(seen.contains("6=#b0303f") && seen.contains("4=#f2f2f7"), "{seen}");
+    // One undo takes the whole call back.
+    let undone = space.apply(Command::RasterUndo);
+    assert!(view(&undone).unwrap().unwrap().tiles.iter().all(|(_, t)| t.is_empty()), "one undo did not take every mark back");
+    space.apply(Command::RasterRedo);
+    // A call with a mark that cannot be made draws none of them.
+    let refused = space.run_tool("canvas_draw", &json!({"layer": 99, "marks": [{"pixels": [[1, 1]]}]})).unwrap_err();
+    assert!(refused.contains("no layer 99"), "{refused}");
+    let refused = space.run_tool("canvas_draw", &json!({"marks": [{"pixels": [[1, 1]], "color": "#fff"}, {"swirl": 3}]})).unwrap_err();
+    assert!(refused.contains("mark 2"), "{refused}");
+    // On a layer of its own, made in the same step.
+    let drew = space.run_tool("canvas_draw", &json!({"new_layer": "Shine", "marks": [{"pixels": [[4, 4]], "color": "#ffffff"}]})).unwrap();
+    assert!(drew.contains("on layer 2 \"Shine\""), "{drew}");
+    // @canvas sends the canvas, and small pixel art's pixels.
+    let asked = space.with_context("shade the knight in @canvas");
+    assert!(asked.contains("# @canvas") && asked.contains("Canvas knight") && asked.contains("Pixels x 0–15 by y 0–15"), "{asked}");
+}
+
+#[test]
+fn the_agent_makes_from_seeds_filters_and_ramps_and_writes_the_canvas_out() {
+    let root = project("agent-make");
+    let mut space = Workspace::rooted(&root);
+    space.apply(Command::SetMode { mode: ModeId::Raster });
+    space.run_tool("canvas_new", &json!({"name": "Ships", "width": 48})).unwrap();
+    let made = space
+        .run_tool("canvas_generate", &json!({"generator": {"kind": "sprite", "template": "ship", "seed": 42, "scale": 2}, "filter": {"kind": "outline", "color": "#000000"}}))
+        .unwrap();
+    assert!(made.contains("sprite with seed 42, then the outline filter"), "{made}");
+    let seen = space.run_tool("canvas_info", &json!({"pixels": {}})).unwrap();
+    let grid: Vec<&str> = seen.lines().rev().take(48).collect();
+    assert!(grid.iter().any(|r| r.chars().any(|c| c != '.')), "nothing was made: {seen}");
+    // The sprite is its own mirror, outline and all.
+    assert!(grid.iter().all(|r| r.chars().eq(r.chars().rev())), "the sprite is not symmetric: {seen}");
+    let ramped = space.run_tool("canvas_generate", &json!({"ramp": {"base": "#2f6fb0", "steps": 4}})).unwrap();
+    assert!(ramped.contains("a ramp of #2f6fb0") && ramped.contains("swatches 16 to 19"), "{ramped}");
+    let noise = space.run_tool("canvas_generate", &json!({"new_layer": "Sky", "generator": {"kind": "noise", "noise": "value", "cell": 8, "octaves": 2, "seed": 1}})).unwrap();
+    assert!(noise.contains("on layer 2 \"Sky\""), "{noise}");
+    assert!(space.run_tool("canvas_generate", &json!({"generator": {"kind": "comet"}})).unwrap_err().contains("not a generator"));
+    assert!(space.run_tool("canvas_generate", &json!({})).is_err());
+    let wrote = space.run_tool("canvas_export", &json!({"format": "png", "scale": 2})).unwrap();
+    assert!(wrote.contains("ships@2x.png") && root.join("ships@2x.png").exists(), "{wrote}");
+    space.run_tool("canvas_export", &json!({"format": "psd"})).unwrap();
+    let picture = proton_raster::port::read(&std::fs::read(root.join("ships.psd")).unwrap(), "x").unwrap();
+    assert_eq!(picture.parts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Sprite", "Sky"]);
 }

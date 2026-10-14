@@ -29,7 +29,10 @@ use ts_rs::TS;
 use crate::bus::{Command, Event, NoticeLevel};
 use crate::workspace::notice;
 
+mod agent;
 mod port;
+
+pub use agent::TOOLS;
 
 /// A canvas's folder ends so.
 pub const EXTENSION: &str = "canvas";
@@ -145,6 +148,8 @@ pub struct Raster {
     /// newest few kept, to bring in.
     blobs: std::collections::BTreeMap<u32, Vec<u8>>,
     next_blob: u32,
+    /// What the agent's last call changed on screen, for the window.
+    pending: Vec<Event>,
 }
 
 impl Raster {

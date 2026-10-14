@@ -580,6 +580,115 @@ impl Agent {
                     "required": ["source"]
                 }),
             },
+            // The canvas open in Canvas mode: the workspace's own (`raster::agent`).
+            Tool {
+                name: "canvas_info".into(),
+                description: "The canvas open in Canvas mode: its name and size, whether it is pixel art or a \
+                              painting, its palette by swatch number, its layers top first with their ids, where \
+                              each has pixels, its opacity, blend and locks, and what is selected — or, with none \
+                              open, the project's canvases. With `pixels`, a part of it as a grid of letters, one \
+                              a colour with a legend, '.' for clear: how to see pixel art before changing it. x \
+                              runs right and y down from 0 at the top left. Read-only; call it first."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "pixels": {
+                            "type": "object",
+                            "description": "Show pixels: everything laid together, or one layer.",
+                            "properties": {
+                                "layer": { "type": "integer", "description": "A layer's id. Omit for everything laid together." },
+                                "rect": { "type": "array", "items": { "type": "integer" }, "description": "[x, y, width, height]; omit for the whole canvas. At most 128 × 128 for pixel art, 64 × 64 for a painting." }
+                            }
+                        }
+                    }
+                }),
+            },
+            Tool {
+                name: "canvas_new".into(),
+                description: "Make a canvas in the project and open it on the person's screen: pixel art (a small \
+                              grid, a palette of sixteen to start; 32 × 32 if no size is given) or a painting \
+                              (1024 × 1024). It is written as a .canvas folder at once."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" },
+                        "preset": { "type": "string", "enum": ["pixel", "paint"] },
+                        "width": { "type": "integer" },
+                        "height": { "type": "integer", "description": "Defaults to the width." }
+                    },
+                    "required": ["name"]
+                }),
+            },
+            Tool {
+                name: "canvas_draw".into(),
+                description: "Draw on the open canvas, as the person draws: a list of marks, in pixels from the top \
+                              left — {\"pixels\": [[x, y], ...], \"color\": c} sets each pixel; {\"line\": \
+                              [[x, y], ...], \"color\": c, \"size\": n} a pencil through the points, steps without \
+                              corners; {\"rect\": [x, y, w, h]} and {\"ellipse\": [x, y, w, h]} with \"fill\": \
+                              true for solid; {\"fill\": [x, y], \"color\": c} a bucket; {\"erase\": [x, y, w, \
+                              h]}; or one of the engine's ops as the window sends them. A colour c is \"#rrggbb\", \
+                              \"#rrggbbaa\", [r, g, b, a] or a palette swatch's number. On the top layer unless a \
+                              layer (id or name) or a new_layer is given. Every mark keeps to what is selected. \
+                              The marks are one step of the person's undo, applied together or not at all, on \
+                              their screen at once and held until the person saves."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "marks": { "type": "array", "items": { "type": "object" } },
+                        "layer": { "description": "A layer's id or name. Defaults to the top layer." },
+                        "new_layer": { "type": "string", "description": "Make a layer of this name on top, and draw on it." }
+                    },
+                    "required": ["marks"]
+                }),
+            },
+            Tool {
+                name: "canvas_generate".into(),
+                description: "Make pixels from a seed on the open canvas, or change a layer by a filter, or add a \
+                              colour ramp to the palette — procedural, the same seed making the same pixels. \
+                              generator: {\"kind\": \"sprite\", \"template\": \"ship\"|\"creature\"|\"item\", \
+                              \"scale\": n, \"color\": c} (mirrored, outlined, shaded; centred if no \"at\"), \
+                              {\"kind\": \"noise\", \"noise\": \"value\"|\"gradient\", \"cell\": px, \"octaves\": \
+                              n, \"colors\": [c, ...], \"mix\": \"dither\"|\"nearest\"|\"smooth\"} or {\"kind\": \
+                              \"cave\", \"density\": 0-100, \"steps\": n, \"cell\": px, \"wrap\": bool, \"color\": \
+                              c}; a seed is chosen if none is given. filter: {\"kind\": \"outline\", \"color\": c}, \
+                              {\"kind\": \"shadow\", \"dx\": n, \"dy\": n, \"color\": c, \"blur\": n}, {\"kind\": \
+                              \"pixelate\", \"size\": n} or {\"kind\": \"quantize\", \"colors\": n, \"palette\": \
+                              bool, \"dither\": 0|2|4|8, \"keep\": bool}. ramp: {\"base\": c, \"steps\": n}. A \
+                              generator or filter works on the top layer unless layer or new_layer says, and \
+                              keeps to what is selected. One step of the person's undo, on their screen at once \
+                              and held until the person saves."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "generator": { "type": "object" },
+                        "filter": { "type": "object" },
+                        "ramp": { "type": "object" },
+                        "layer": { "description": "A layer's id or name. Defaults to the top layer." },
+                        "new_layer": { "type": "string", "description": "Make a layer of this name on top, and work on it." }
+                    }
+                }),
+            },
+            Tool {
+                name: "canvas_export".into(),
+                description: "Write the open canvas out: a PNG beside its folder (flattened, each pixel scale × \
+                              scale), or a layered PSD; or, with game, into that game's art folder — layered, \
+                              each layer a plane at the depth its name gives in square brackets, or flat — and \
+                              into its room when that game is open in Game mode. Files are written at once."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "format": { "type": "string", "enum": ["png", "psd"] },
+                        "scale": { "type": "integer", "description": "PNG: each pixel this many pixels square, 1 to 16." },
+                        "game": { "type": "string", "description": "The game's folder in the project, as canvas_info or Game mode names it; \"\" for a project that is itself a game." },
+                        "layers": { "type": "boolean", "description": "With game: as layers (the default), or flat." }
+                    }
+                }),
+            },
             Tool {
                 name: "diagnostics".into(),
                 description: "Errors and warnings the language server has reported for a \
@@ -1153,7 +1262,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 22);
+        assert_eq!(tools.len(), 27);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the
@@ -1180,7 +1289,7 @@ mod tests {
         // The PDF tools that change it have to say the change waits for the
         // person: told only "rotate the pages", a model reports a file
         // rewritten, and the person believes it.
-        for name in ["pdf_annotate", "pdf_pages", "game_edit", "game_import"] {
+        for name in ["pdf_annotate", "pdf_pages", "game_edit", "game_import", "canvas_draw", "canvas_generate"] {
             let changing = tools.iter().find(|t| t.name == name).unwrap();
             assert!(changing.description.contains("held until the person saves"), "{name}: {}", changing.description);
         }
@@ -1189,6 +1298,8 @@ mod tests {
         assert_eq!(declared, crate::pdf::TOOLS);
         let declared: Vec<&str> = tools.iter().map(|t| t.name.as_str()).filter(|n| n.starts_with("game_")).collect();
         assert_eq!(declared, crate::game::TOOLS);
+        let declared: Vec<&str> = tools.iter().map(|t| t.name.as_str()).filter(|n| n.starts_with("canvas_")).collect();
+        assert_eq!(declared, crate::raster::TOOLS);
         for tool in &tools {
             // A description written with line continuations and mangled into
             // one long line reads to the model as a run of whitespace in the

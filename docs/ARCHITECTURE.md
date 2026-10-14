@@ -1827,8 +1827,25 @@ copy on the pasteboard as a PNG for other apps and remembers the change
 count, so ⌘V with nothing copied since pastes Canvas's own copy, where it
 was.
 
-**What comes next** (the plan's P7–P8): the agent's tools, and pixel
-animation.
+**The agent's tools** (`raster/agent.rs`). `canvas_info` says the canvas —
+its size, palette by swatch number, layers top first with where each has
+pixels, what is selected — and, asked, a part of it as a grid of letters,
+one a colour with a legend, so a model can see pixel art before changing
+it; `@canvas` sends the same, with the whole grid for small pixel art.
+`canvas_new` makes one and opens it. `canvas_draw` takes marks in pixels —
+pixels set, a pencil line through points, rectangles and ellipses, a
+bucket, an erase, or any op as the window sends it — with colours as hex,
+RGBA or a swatch's number, on the top layer, a named one or a new one;
+`canvas_generate` runs a generator (a seed chosen if none is given and said
+back), a filter, or adds a ramp to the palette; `canvas_export` writes a PNG
+or PSD, or sends the canvas to a game and, when it is open, into its room.
+A call's marks are applied together or not at all (`Canvas::apply_all`) and
+are one step of the person's undo, held until they save and kept to what is
+selected; the window is sent the layers and the tiles that changed, as
+undo sends them.
+
+**What comes next** (the plan's P8): pixel animation — frames and cels, a
+timeline, onion skin, sprite sheets — and Game's Aseprite import after it.
 
 ### Trace
 

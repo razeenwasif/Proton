@@ -34,6 +34,8 @@ pub enum Mention {
     Pdf,
     /// The game open in Game mode, and the room on screen.
     Game,
+    /// The canvas open in Canvas mode — and small pixel art's pixels.
+    Canvas,
 }
 
 impl Mention {
@@ -45,11 +47,12 @@ impl Mention {
             Mention::Log => "@log",
             Mention::Pdf => "@pdf",
             Mention::Game => "@game",
+            Mention::Canvas => "@canvas",
         }
     }
 
     /// Every mention this build understands, for the composer's chips.
-    pub const ALL: [Mention; 5] = [Mention::Selection, Mention::Dataframe, Mention::Log, Mention::Pdf, Mention::Game];
+    pub const ALL: [Mention; 6] = [Mention::Selection, Mention::Dataframe, Mention::Log, Mention::Pdf, Mention::Game, Mention::Canvas];
 }
 
 /// The mentions in a question, in the order they were written, without repeats.
@@ -120,6 +123,8 @@ mod tests {
         assert_eq!(found("summarise @pdf, then @selection"), [Mention::Pdf, Mention::Selection]);
         assert_eq!(found("why can't I reach the ledge in @game?"), [Mention::Game]);
         assert!(found("@games are fun").is_empty());
+        assert_eq!(found("shade the sword in @canvas"), [Mention::Canvas]);
+        assert!(found("@canvases").is_empty());
         assert!(found("mail@pdf.org and @pdfs").is_empty());
     }
 

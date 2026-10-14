@@ -230,7 +230,44 @@ pub struct Applied {
     pub made: Option<u32>,
 }
 
+impl Applied {
+    /// A later op's changes joined to these.
+    pub fn absorb(&mut self, later: Applied) {
+        self.changed |= later.changed;
+        self.meta |= later.meta;
+        self.touched.extend(later.touched);
+        self.made = later.made.or(self.made);
+    }
+}
+
 impl Canvas {
+    /// Ops applied one after another as one change — all of them, or, if one
+    /// is refused, none: what is done is taken back and the refusal said.
+    pub fn apply_all(&mut self, ops: &[Op]) -> Result<(Applied, Patch), String> {
+        let (state, made) = (self.state, self.made);
+        let mut all = Applied::default();
+        let mut patch = Patch::default();
+        for (i, op) in ops.iter().enumerate() {
+            match self.apply(op) {
+                Ok((applied, p)) => {
+                    all.absorb(applied);
+                    patch.absorb(p);
+                }
+                Err(why) => {
+                    self.restore(patch);
+                    (self.state, self.made) = (state, made);
+                    return Err(format!("mark {} of {}: {why}", i + 1, ops.len()));
+                }
+            }
+        }
+        if all.changed {
+            // One change, one state: undoing it goes back to the one before.
+            self.made = made;
+            self.advance();
+        }
+        Ok((all, patch))
+    }
+
     /// Apply `op`, and say what it changed and how to take it back. The
     /// canvas's state moves on only if something changed.
     pub fn apply(&mut self, op: &Op) -> Result<(Applied, Patch), String> {

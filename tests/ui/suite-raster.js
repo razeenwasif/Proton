@@ -544,6 +544,14 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
     press('v', {metaKey: true}); await settle(); await settle();
     assert(sent(before, 'rasterImport')[0]?.blob === 9 && !sent(before, 'rasterEdit').length, `⌘V with a picture sent ${JSON.stringify(win.commands.slice(before).map((/** @type {any} */ c) => c.type))}`);
     win.rasterPaste = undefined;
+    // @canvas beside the agent puts the canvas in the question.
+    $('[data-raster-panel="agent"]').click(); await settle();
+    const chip = $('[data-raster-body="agent"] [data-mention="@canvas"]');
+    assert(chip && shown(chip), 'there is no @canvas chip beside the agent');
+    chip.click(); await settle();
+    assert($('[data-raster-body="agent"] [data-agent-input]').textContent.includes('@canvas'), 'the chip did not put @canvas in the question');
+    $('[data-raster-body="agent"] [data-agent-input]').textContent = '';
+    $('[data-raster-panel="inspector"]').click(); await settle();
     win.rasterRead = undefined;
     await win.pushEvents([{type: 'rasterCanvas', canvas: null}]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();

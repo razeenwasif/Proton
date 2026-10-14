@@ -655,30 +655,13 @@ impl Workspace {
             // Notebook's are by theirs.
             // Art sent to a game is Canvas's to write and, when that game is
             // the one open, Game's to import.
-            Command::RasterSend { game, layers } => {
-                let root = self.root().to_path_buf();
-                match self.raster.send(&root, &game, layers) {
-                    Ok((dir, source)) => {
-                        let mut events = vec![notice(format!("wrote {source} in {}", if game.is_empty() { "the game" } else { game.as_str() }), NoticeLevel::Info)];
-                        let open = self.game.root().and_then(|r| std::fs::canonicalize(r).ok());
-                        if open.is_some_and(|r| r == dir) {
-                            match self.game.import_art(&source, None, None, false) {
-                                Ok(done) => {
-                                    events.push(notice(done.said, NoticeLevel::Info));
-                                    events.extend(done.notes.into_iter().map(|n| notice(n, NoticeLevel::Warn)));
-                                    events.extend(done.events);
-                                }
-                                Err(why) => events.push(notice(format!("{source} was written but not imported: {why}"), NoticeLevel::Warn)),
-                            }
-                        } else {
-                            events.push(notice("open that game in Game mode and import it from its Assets".into(), NoticeLevel::Info));
-                        }
-                        events.push(self.tree_event());
-                        events
-                    }
-                    Err(why) => vec![notice(why, NoticeLevel::Warn)],
+            Command::RasterSend { game, layers } => match self.send_canvas(&game, layers) {
+                Ok((said, mut events)) => {
+                    events.insert(0, notice(said, NoticeLevel::Info));
+                    events
                 }
-            }
+                Err(why) => vec![notice(why, NoticeLevel::Warn)],
+            },
             command if crate::raster::handles(&command) => {
                 let root = self.root().to_path_buf();
                 let wrote = matches!(command, Command::RasterExport { .. });
@@ -4075,6 +4058,31 @@ impl Workspace {
         self.game.file(key)
     }
 
+    /// The open canvas into a game: written into its `art/` by Canvas and,
+    /// when it is the game open in Game mode, imported by Game. What was done
+    /// in words, and what the window is sent.
+    fn send_canvas(&mut self, game: &str, layers: bool) -> Result<(String, Vec<Event>), String> {
+        let root = self.root().to_path_buf();
+        let (dir, source) = self.raster.send(&root, game, layers)?;
+        let mut said = format!("wrote {source} in {}", if game.is_empty() { "the game" } else { game });
+        let mut events = Vec::new();
+        let open = self.game.root().and_then(|r| std::fs::canonicalize(r).ok());
+        if open.is_some_and(|r| r == dir) {
+            match self.game.import_art(&source, None, None, false) {
+                Ok(done) => {
+                    said = format!("{said}, and {}", done.said);
+                    events.extend(done.notes.into_iter().map(|n| notice(n, NoticeLevel::Warn)));
+                    events.extend(done.events);
+                }
+                Err(why) => said = format!("{said}, but did not import it: {why}"),
+            }
+        } else {
+            said.push_str("; it is imported from that game's Assets once it is open in Game mode");
+        }
+        events.push(self.tree_event());
+        Ok((said, events))
+    }
+
     /// A picture the window hands over, kept to bring in: its number.
     pub fn raster_put_blob(&mut self, bytes: Vec<u8>) -> Result<u32, String> {
         self.raster.put_blob(bytes)
@@ -4579,6 +4587,16 @@ impl Workspace {
             if crate::game::TOOLS.contains(&call.name.as_str()) {
                 events.extend(self.game.take_pending());
             }
+            // A canvas made, drawn on or written out: on screen at once.
+            if crate::raster::TOOLS.contains(&call.name.as_str()) {
+                let pending = self.raster.take_pending();
+                let files = pending.iter().any(|e| matches!(e, Event::RasterHome { .. }));
+                events.extend(pending);
+                if files {
+                    events.push(self.tree_event());
+                    events.push(self.repo_event());
+                }
+            }
             self.agent.answer(&call.id, answer);
         }
 
@@ -4801,7 +4819,7 @@ impl Workspace {
     /// would make a short question unreadable in the pane it is drawn in, and
     /// would leave the reader unable to tell which half of the sentence they
     /// wrote.
-    fn with_context(&self, text: &str) -> String {
+    pub fn with_context(&self, text: &str) -> String {
         let mentions = crate::mention::found(text);
         if mentions.is_empty() {
             return text.to_string();
@@ -4818,6 +4836,7 @@ impl Workspace {
                 crate::mention::Mention::Log => self.tex_log_text(),
                 crate::mention::Mention::Pdf => self.pdf_about.clone().unwrap_or_else(|| "No PDF is open in the PDF mode.".into()),
                 crate::mention::Mention::Game => self.game.about(),
+                crate::mention::Mention::Canvas => self.raster.about(self.root()),
             });
         }
         out
@@ -5211,6 +5230,22 @@ impl Workspace {
         match name {
             // The game open in Game mode, answered by its module.
             name if crate::game::TOOLS.contains(&name) => self.game.tool(name, input),
+            // The canvas open in Canvas mode — sent to a game by the workspace,
+            // which holds the game too.
+            "canvas_export" if input.get("game").is_some() => {
+                if !self.raster.is_open() {
+                    return Err("No canvas is open in Canvas mode.".into());
+                }
+                let game = input.get("game").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                let layers = input.get("layers").and_then(|v| v.as_bool()).unwrap_or(true);
+                let (said, events) = self.send_canvas(&game, layers)?;
+                self.raster.add_pending(events);
+                Ok(format!("{}.", said[..1].to_uppercase() + &said[1..]))
+            }
+            name if crate::raster::TOOLS.contains(&name) => {
+                let root = self.root().to_path_buf();
+                self.raster.tool(&root, name, input)
+            }
             "read_file" => {
                 let path = text("path")?;
                 let buffer = proton_text::Buffer::open(self.pickers.resolve(&path))

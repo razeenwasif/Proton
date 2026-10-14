@@ -28,6 +28,30 @@ pub struct Patch {
     pub size: Option<(u32, u32)>,
 }
 
+impl Patch {
+    /// A later change's patch joined to this one: what both changed, put
+    /// back to as it was before the first — so several ops are one step.
+    pub fn absorb(&mut self, later: Patch) {
+        if self.layers.is_none() {
+            self.layers = later.layers;
+        }
+        if self.palette.is_none() {
+            self.palette = later.palette;
+        }
+        if self.selection.is_none() {
+            self.selection = later.selection;
+        }
+        if self.size.is_none() {
+            self.size = later.size;
+        }
+        for (layer, index, tile) in later.tiles {
+            if !self.tiles.iter().any(|(l, i, _)| *l == layer && *i == index) {
+                self.tiles.push((layer, index, tile));
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Step {
     label: String,
