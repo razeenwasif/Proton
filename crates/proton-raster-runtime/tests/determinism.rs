@@ -3,6 +3,8 @@
 //! same composite. This writes the fixture the node test runs through
 //! `ui/raster-runtime.wasm` (`PROTON_BLESS=1`) and otherwise checks it.
 
+use proton_raster::filter::Filter;
+use proton_raster::gen::{noise, sprite, Generator, Mix};
 use proton_raster::{Area, Blend, Brush, Mode, Op, ShapeKind, Tip, Tool};
 use serde_json::{json, Value};
 
@@ -55,6 +57,16 @@ fn ops() -> Vec<Op> {
     out.push(Op::Clear { layer: 4 });
     out.push(sel(Area::Nothing, Mode::Replace, 0, false));
     out.push(Op::Orient { turns: 2, flip: true });
+    // Generators and filters, from seeds.
+    let ramp = proton_raster::gen::color::ramp([60, 140, 200, 255], 5, 30, 26000);
+    out.push(Op::Generate { layer: 4, generator: Generator::Noise { noise: noise::Kind::Gradient, seed: 9, cell: 20, octaves: 3, colors: ramp.clone(), mix: Mix::Dither, dither: 4, rect: Some([5, 5, 60, 40]) } });
+    out.push(Op::Generate { layer: 4, generator: Generator::Noise { noise: noise::Kind::Value, seed: 10, cell: 9, octaves: 2, colors: ramp, mix: Mix::Smooth, dither: 4, rect: Some([50, 30, 50, 40]) } });
+    out.push(Op::Generate { layer: 6, generator: Generator::Cave { seed: 11, density: 45, steps: 4, cell: 2, wrap: true, color: [40, 30, 50, 255], floor: Some([200, 190, 170, 255]), rect: Some([0, 40, 50, 30]) } });
+    out.push(Op::Generate { layer: 2, generator: Generator::Sprite { template: sprite::Kind::Creature, seed: 12, at: [70, 5], scale: 2, color: None } });
+    out.push(Op::Filter { layer: 2, filter: Filter::Outline { color: [0, 0, 0, 255], diagonal: true, inside: false } });
+    out.push(Op::Filter { layer: 4, filter: Filter::Shadow { dx: 3, dy: -2, color: [10, 0, 30, 140], blur: 4 } });
+    out.push(Op::Filter { layer: 6, filter: Filter::Pixelate { size: 3 } });
+    out.push(Op::Filter { layer: 1, filter: Filter::Quantize { colors: 6, palette: false, dither: 8, keep: true } });
     out
 }
 

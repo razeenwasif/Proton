@@ -29,6 +29,9 @@
 //!   building up a stroke's cover toward its opacity.
 //! - [`select`], [`sample`]: what is selected and edits held to it; pixels
 //!   moved, turned, resized and cropped.
+//! - [`gen`], [`filter`]: pictures made from a seed — sprites, noise, caves,
+//!   palette ramps — and layers made over: outlined, shadowed, pixelated,
+//!   brought to a few colours; Scale2x and Scale3x.
 //! - [`history`]: undo and redo by the tiles each change touched.
 //! - [`file`]: a canvas on disk, a folder of PNGs and a `canvas.json` (`io`).
 
@@ -38,7 +41,9 @@ pub mod canvas;
 #[cfg(feature = "io")]
 pub mod file;
 pub mod fill;
+pub mod filter;
 pub mod fixed;
+pub mod gen;
 pub mod history;
 pub mod op;
 pub mod sample;
@@ -49,6 +54,8 @@ pub mod tile;
 
 pub use brush::{Brush, Dabs};
 pub use canvas::{Blend, Canvas, Layer, LayerInfo, Preset, SELECTION};
+pub use filter::Filter;
+pub use gen::Generator;
 pub use select::{Area, Mode};
 pub use history::History;
 pub use op::{Applied, Op, ShapeKind};

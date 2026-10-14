@@ -181,6 +181,15 @@ export async function createRasterRuntime() {
       const at = rr.rr_tile(layer, index);
       return at ? new Uint8Array(rr.memory.buffer, at, 64 * 64 * 4).slice() : null;
     },
+    /** A colour's ramp, darkest first: `steps` colours, the hue turning
+     *  `shift` degrees, the lightness reaching `spread` (1/65536) each way.
+     *  @param {{base: number[], steps: number, shift: number, spread: number}} ask @returns {[number, number, number, number][]} */
+    ramp(ask) {
+      const at = pass(rr.rr_ramp, text(ask));
+      const length = new DataView(rr.memory.buffer).getUint32(at, true);
+      if (!length) throw new Error(why());
+      return JSON.parse(new TextDecoder().decode(new Uint8Array(rr.memory.buffer, at + 4, length)));
+    },
     /** A number that changes whenever the selection may have. */
     selectionVersion() {
       return rr.rr_selection_version() >>> 0;

@@ -15,6 +15,8 @@ use ts_rs::TS;
 use crate::brush::{self, Brush, Dabs};
 use crate::canvas::{Blend, Canvas, Layer, SELECTION};
 use crate::fill;
+use crate::filter::{self, Filter};
+use crate::gen::{self, Generator};
 use crate::fixed::Hash;
 use crate::history::Patch;
 use crate::sample;
@@ -193,6 +195,13 @@ pub enum Op {
     /// The canvas cut to `rect` (left, top, width, height) — or grown, a
     /// rectangle past its edges adding clear pixels.
     Crop { rect: [i32; 4] },
+    /// A generator's picture laid over a layer, held to what is selected.
+    Generate { layer: u32, generator: Generator },
+    /// A layer made over by a filter, held to what is selected.
+    Filter { layer: u32, filter: Filter },
+    /// The whole canvas `factor` (2 or 3) times the size by Scale2x or
+    /// Scale3x, a pixel picture's edges kept crisp.
+    Upscale { factor: u32 },
     /// One colour made another, on one layer or on every layer not locked —
     /// and a palette's swatch with it, so recolouring a swatch is one edit.
     #[serde(rename_all = "camelCase")]
@@ -470,6 +479,33 @@ impl Canvas {
                     self.select(select::compact(carried), &mut patch, &mut applied);
                 }
             }
+            Op::Generate { layer, generator } => {
+                let target = self.unlocked(*layer)?;
+                let made = gen::make(self, generator)?;
+                let laid = sample::over(&target.grid, &made);
+                self.held(*layer, laid, &mut patch, &mut applied);
+            }
+            Op::Filter { layer, filter } => {
+                let target = self.unlocked(*layer)?;
+                let (made, kept) = filter::apply(&target.grid, &self.palette, filter)?;
+                self.held(*layer, made, &mut patch, &mut applied);
+                if let Some(colors) = kept.filter(|c| *c != self.palette) {
+                    patch.palette = Some(std::mem::replace(&mut self.palette, colors));
+                    applied.meta = true;
+                    applied.changed = true;
+                }
+            }
+            Op::Upscale { factor } => {
+                if !(2..=3).contains(factor) {
+                    return Err("Scale2x and Scale3x grow a canvas 2 or 3 times".into());
+                }
+                let f = *factor;
+                let (w, h) = (self.width * f, self.height * f);
+                self.reshape(w, h, |g| filter::upscale(g, f), &mut patch, &mut applied)?;
+                // A selection grows square: Scale2x would round its corners.
+                let grown = sample::resize(&patch.selection.clone().unwrap_or_else(|| Grid::new(w / f, h / f)), w, h, false);
+                self.selection = select::compact(grown);
+            }
             Op::Orient { turns, flip } => {
                 if turns % 4 != 0 || *flip {
                     let (w, h) = if turns % 2 == 1 { (self.height, self.width) } else { (self.width, self.height) };
@@ -655,6 +691,23 @@ impl Canvas {
             applied.touched.push((id, index));
             applied.changed = true;
         }
+    }
+
+    /// A layer's pixels replaced by `grid` where the selection lets them be,
+    /// and as they were where it does not.
+    fn held(&mut self, id: u32, grid: Grid, patch: &mut Patch, applied: &mut Applied) {
+        let grid = match (self.selecting(), self.layer(id)) {
+            (true, Some(target)) => {
+                let mut kept = grid;
+                for index in 0..kept.cols * kept.rows {
+                    let made = select::clip(&self.selection, index, target.grid.tile(index), kept.tile(index).cloned());
+                    kept.put(index, made);
+                }
+                kept
+            }
+            _ => grid,
+        };
+        self.set_grid(id, grid, patch, applied);
     }
 
     /// A new selection: the old remembered, and the tiles that differ told

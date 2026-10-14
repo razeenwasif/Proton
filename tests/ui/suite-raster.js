@@ -437,6 +437,65 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
     assert(edit.op.op === 'orient' && edit.op.turns === 1, `the turn sent was ${JSON.stringify(edit.op)}`);
     assert($('[data-raster-size]').textContent.includes('80 × 96') && reads() > fetched, `the turned canvas was not loaded again: ${$('[data-raster-size]').textContent}, ${reads() - fetched} reads`);
     assert(JSON.stringify(probe().pick(79, 0)) === JSON.stringify(core.pick(79, 0)), `the copy is not the core's turned canvas: ${probe().pick(79, 0)} against ${core.pick(79, 0)}`);
+  });
+
+  await test('The Make panel shows a sprite before it is kept, keeps a filter, makes a ramp, and the canvas grows by Scale2x', async () => {
+    if (probe().ants()) {
+      const from = win.commands.length;
+      press('d', {metaKey: true});
+      await answer(from);
+    }
+    $('[data-raster-panel="make"]').click(); await settle();
+    const box = ws().querySelector('[data-raster-make]');
+    assert(shown(box) && box.querySelector('[data-make="generator"]'), 'the Make panel is not shown');
+    const set = async (/** @type {string} */ name, /** @type {string} */ value) => {
+      const field = /** @type {HTMLInputElement} */ (box.querySelector(`[data-make="${name}"]`));
+      field.value = value;
+      field.dispatchEvent(new win.Event('change', {bubbles: true}));
+      await settle();
+    };
+    // The sprite lands in the middle of the 80 × 96 canvas.
+    const middle = JSON.stringify(probe().pick(40, 48));
+    let before = win.commands.length;
+    await set('scale', '3');
+    await set('seed', '5');
+    assert(!sent(before, 'rasterEdit').length, 'a sprite shown was sent before it was kept');
+    assert(box.querySelector('[data-make-note]').textContent.includes('Showing the sprite'), `the panel does not say what it shows: ${box.querySelector('[data-make-note]').textContent}`);
+    const shownThere = JSON.stringify(probe().pick(40, 48));
+    box.querySelector('[data-make-action="keep-generator"]').click();
+    let edit = await answer(before);
+    assert(edit.op.op === 'generate' && edit.op.generator.kind === 'sprite' && edit.op.generator.seed === 5 && edit.op.generator.scale === 3 && edit.op.generator.at.join() === '19,27',
+      `the sprite kept was ${JSON.stringify(edit.op)}`);
+    assert(JSON.stringify(probe().pick(40, 48)) === shownThere && shownThere !== middle, `what was kept is not what was shown: ${probe().pick(40, 48)} against ${shownThere}, ${middle} before`);
+    assert(JSON.stringify(probe().sync()) === '{"inflight":[],"stale":[]}', `the sprite made here is not the core's: ${JSON.stringify(probe().sync())}`);
+    // Leaving the panel takes away what it shows.
+    await set('seed', '6');
+    $('[data-raster-panel="inspector"]').click(); await settle();
+    assert(JSON.stringify(probe().pick(40, 48)) === shownThere, 'a sprite shown stayed when the panel was left');
+    $('[data-raster-panel="make"]').click(); await settle();
+    // A filter: an outline round what is there.
+    before = win.commands.length;
+    await set('filter', 'outline');
+    ws().querySelector('[data-make-action="keep-filter"]').click();
+    edit = await answer(before);
+    assert(edit.op.op === 'filter' && edit.op.filter.kind === 'outline', `the filter kept was ${JSON.stringify(edit.op)}`);
+    assert(probe().sync().stale.length === 0, 'the outline made here is not the core\'s');
+    // A ramp of the colour drawn with, added to the palette.
+    $('[data-raster-side="palette"]').click(); await settle();
+    const swatches = view => view.canvas.palette.length;
+    const had = swatches(viewOf());
+    before = win.commands.length;
+    ws().querySelector('[data-raster-ramp]').click();
+    edit = await answerWithCanvas(before);
+    assert(edit.op.op === 'setPalette' && edit.op.colors.length > had && edit.op.colors.length <= had + 5, `the ramp sent ${JSON.stringify(edit.op).slice(0, 200)}`);
+    $('[data-raster-side="layers"]').click(); await settle();
+    // ×2: made by the core, the copy loaded again at twice the size.
+    $('[data-raster-panel="inspector"]').click(); await settle();
+    before = win.commands.length;
+    ws().querySelector('[data-raster-canvas="up2"]').click(); await settle();
+    edit = await answerWithCanvas(before);
+    assert(edit.op.op === 'upscale' && edit.op.factor === 2 && $('[data-raster-size]').textContent.includes('160 × 192'), `×2 sent ${JSON.stringify(edit.op)}; the canvas is ${$('[data-raster-size]').textContent}`);
+    assert(JSON.stringify(probe().pick(80, 96)) === JSON.stringify(core.pick(80, 96)), 'the copy is not the core\'s grown canvas');
     win.rasterRead = undefined;
     await win.pushEvents([{type: 'rasterCanvas', canvas: null}]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();

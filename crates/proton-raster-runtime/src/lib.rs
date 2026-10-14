@@ -43,6 +43,8 @@
 //!                                  layer has (the selection as layer 0), as
 //!                                  JSON: length, then bytes
 //! rr_width(), rr_height() → u32    the canvas's size now
+//! rr_ramp(ptr, len) → ptr          a colour's ramp (JSON: base, steps, shift,
+//!                                  spread): its colours as JSON, length first
 //! rr_selection_version() → u32     a number that changes when the selection does
 //! rr_outline() → ptr               the selection's edges, for marching ants:
 //!                                  [count, (x0, y0, x1, y1)…] as i32s
@@ -159,6 +161,8 @@ struct Held {
     outline: Vec<i32>,
     /// What `rr_lift` gave.
     lifted: Vec<u8>,
+    /// What `rr_ramp` gave: length, then JSON.
+    ramp: Vec<u8>,
     hash: u64,
     error: Vec<u8>,
 }
@@ -789,7 +793,7 @@ pub fn preview(bytes: &[u8]) -> Result<(), String> {
         let mut h = h.borrow_mut();
         let held = &mut *h;
         let canvas = held.canvas.as_mut().ok_or("no canvas is open")?;
-        if matches!(op, Op::Orient { .. } | Op::Resize { .. } | Op::Crop { .. }) {
+        if matches!(op, Op::Orient { .. } | Op::Resize { .. } | Op::Crop { .. } | Op::Upscale { .. }) {
             return Err("a change to the canvas's size is not previewed".into());
         }
         let (state, made, clip) = (canvas.state, canvas.made, canvas.clip.clone());
@@ -908,6 +912,40 @@ pub extern "C" fn rr_lift(layer: u32) -> *const u8 {
         let mut h = h.borrow_mut();
         h.lifted = bytes;
         h.lifted.as_ptr()
+    })
+}
+
+/// A ramp asked for: a colour, how many steps, how far the hue turns
+/// (degrees) and how far the lightness reaches each way (1/65536).
+#[derive(Deserialize)]
+pub struct Ramp {
+    pub base: [u8; 4],
+    pub steps: u32,
+    #[serde(default)]
+    pub shift: u32,
+    pub spread: u32,
+}
+
+/// A colour's ramp, darkest first — the safe half of `rr_ramp`.
+pub fn ramp(bytes: &[u8]) -> Result<Vec<[u8; 4]>, String> {
+    let r: Ramp = serde_json::from_slice(bytes).map_err(|e| format!("not a ramp: {e}"))?;
+    Ok(proton_raster::gen::color::ramp(r.base, r.steps, r.shift, r.spread))
+}
+
+#[no_mangle]
+pub extern "C" fn rr_ramp(ptr: *const u8, len: usize) -> *const u8 {
+    let text = match ramp(json(ptr, len)) {
+        Ok(colors) => serde_json::to_vec(&colors).unwrap_or_default(),
+        Err(why) => {
+            failed(why);
+            Vec::new()
+        }
+    };
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        h.ramp = (text.len() as u32).to_le_bytes().to_vec();
+        h.ramp.extend(text);
+        h.ramp.as_ptr()
     })
 }
 

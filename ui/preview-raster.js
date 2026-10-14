@@ -103,10 +103,10 @@ export function createRasterPreview(_deliver) {
         case "rasterEdit": {
           if (!open || command.generation !== open.generation) return [];
           open.lastSeq = command.seq;
-          // What the core tells of with the canvas: its layers and its size.
+          // What the core tells of with the canvas: its layers, palette and size.
           const shape = () => {
             const info = /** @type {NonNullable<typeof open>} */ (open).core.info();
-            return JSON.stringify([info.layers, info.width, info.height]);
+            return JSON.stringify([info.layers, info.palette, info.width, info.height]);
           };
           const before = shape();
           const done = open.core.apply(command.op);

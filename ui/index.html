@@ -1059,9 +1059,11 @@
       <aside class="pane raster-pane" id="raster-pane" data-showing="inspector">
         <header class="raster-pane-head" role="tablist" aria-label="Inspector and the agent">
           <button class="dock-tab on" role="tab" aria-selected="true" data-raster-panel="inspector">Inspector</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-raster-panel="make" title="Make: sprites, noise and caves from a seed; outlines, shadows, fewer colours">Make</button>
           <button class="dock-tab" role="tab" aria-selected="false" data-raster-panel="agent">Agent <span class="dot" data-raster-agent-dot hidden></span></button>
         </header>
         <div class="scroll raster-pane-body" data-raster-body="inspector" data-raster-inspector></div>
+        <div class="scroll raster-pane-body" data-raster-body="make" data-raster-make hidden></div>
         <div class="raster-agent" data-raster-body="agent" hidden>
           <div class="scroll" data-agent-thread></div>
           <div class="composer">

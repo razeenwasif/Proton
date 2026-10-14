@@ -1782,9 +1782,32 @@ which the window now waits on and follows with a reload when the core makes
 it. In WebKit, on a 4096 × 4096 canvas, selecting an ellipse takes about
 70 ms, moving the whole layer 45 ms, and turning it smoothly half a second.
 
-**What comes next** (the plan's P5–P8): procedural generators and filters,
-import and export (PSD, sending art to a game), the agent's tools, and pixel
-animation.
+**Making from a seed** (`gen/`, `filter.rs`; the Make tab beside the
+inspector). Procedural only, offline, the same pixels in every build from
+the same seed:
+- palette ramps, made in OKLab in whole numbers — a colour's darker and
+  lighter steps, the hue turning toward yellow as it lightens and away as it
+  darkens, chroma easing at the ends, held to what sRGB can show; sRGB's
+  curve and the sines are tables checked against their formulas in floats;
+- sprites from Proton's own half-templates (a ship, a creature, an item):
+  cells decided by the seed and mirrored, outlined where they meet nothing,
+  shaded from a ramp lighter toward the top;
+- value and gradient noise in octaves (fBm) laid out in a ramp or the
+  palette — banded, Bayer-dithered or smooth;
+- caves from a cellular automaton, walled at the edges or repeating as a
+  tile.
+
+Filters make a layer over: an outline round what is there or on its own
+edge, a drop shadow (offset, blurred), pixelate, and fewer colours — median
+cut, in a fixed order, or the palette's, dithered or not, kept as the
+palette if asked. Scale2x and Scale3x grow the canvas with a pixel picture's
+diagonals kept diagonal; the selection grows square. A generator or filter
+is shown on the window's copy as its settings change (`rr_preview`) and is
+one edit when kept, held to what is selected; leaving the tab, or drawing,
+takes back what was only shown.
+
+**What comes next** (the plan's P6–P8): import and export (PSD, sending art
+to a game), the agent's tools, and pixel animation.
 
 ### Trace
 

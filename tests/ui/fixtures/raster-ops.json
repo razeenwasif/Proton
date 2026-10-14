@@ -1,6 +1,6 @@
 {
-  "composite": "d9fc7cf50f093151",
-  "flat": "a47450d34fa55be9",
+  "composite": "e7a586a2b9696c3e",
+  "flat": "f27622d3318735c6",
   "hashes": [
     "a5fbe81a74dae0c1",
     "88d4c5bf137aa7ab",
@@ -75,7 +75,15 @@
     "956a1e80ae52ca21",
     "93f194e83e00e169",
     "4ec74a260cbd0c11",
-    "271f026c6a66975d"
+    "271f026c6a66975d",
+    "bfdea771790678a4",
+    "7972d683e6af27ec",
+    "bc4730d3a98d0ae5",
+    "3bd738d98a408ac7",
+    "70d54075550e29c7",
+    "3f4658d36688201d",
+    "afd80a0ba5464f6d",
+    "7e660ddb5d15c090"
   ],
   "open": {
     "generation": 1,
@@ -1740,18 +1748,215 @@
       "flip": true,
       "op": "orient",
       "turns": 2
+    },
+    {
+      "generator": {
+        "cell": 20,
+        "colors": [
+          [
+            17,
+            20,
+            65,
+            255
+          ],
+          [
+            36,
+            71,
+            126,
+            255
+          ],
+          [
+            48,
+            129,
+            189,
+            255
+          ],
+          [
+            103,
+            191,
+            231,
+            255
+          ],
+          [
+            207,
+            245,
+            254,
+            255
+          ]
+        ],
+        "dither": 4,
+        "kind": "noise",
+        "mix": "dither",
+        "noise": "gradient",
+        "octaves": 3,
+        "rect": [
+          5,
+          5,
+          60,
+          40
+        ],
+        "seed": 9
+      },
+      "layer": 4,
+      "op": "generate"
+    },
+    {
+      "generator": {
+        "cell": 9,
+        "colors": [
+          [
+            17,
+            20,
+            65,
+            255
+          ],
+          [
+            36,
+            71,
+            126,
+            255
+          ],
+          [
+            48,
+            129,
+            189,
+            255
+          ],
+          [
+            103,
+            191,
+            231,
+            255
+          ],
+          [
+            207,
+            245,
+            254,
+            255
+          ]
+        ],
+        "dither": 4,
+        "kind": "noise",
+        "mix": "smooth",
+        "noise": "value",
+        "octaves": 2,
+        "rect": [
+          50,
+          30,
+          50,
+          40
+        ],
+        "seed": 10
+      },
+      "layer": 4,
+      "op": "generate"
+    },
+    {
+      "generator": {
+        "cell": 2,
+        "color": [
+          40,
+          30,
+          50,
+          255
+        ],
+        "density": 45,
+        "floor": [
+          200,
+          190,
+          170,
+          255
+        ],
+        "kind": "cave",
+        "rect": [
+          0,
+          40,
+          50,
+          30
+        ],
+        "seed": 11,
+        "steps": 4,
+        "wrap": true
+      },
+      "layer": 6,
+      "op": "generate"
+    },
+    {
+      "generator": {
+        "at": [
+          70,
+          5
+        ],
+        "color": null,
+        "kind": "sprite",
+        "scale": 2,
+        "seed": 12,
+        "template": "creature"
+      },
+      "layer": 2,
+      "op": "generate"
+    },
+    {
+      "filter": {
+        "color": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "diagonal": true,
+        "inside": false,
+        "kind": "outline"
+      },
+      "layer": 2,
+      "op": "filter"
+    },
+    {
+      "filter": {
+        "blur": 4,
+        "color": [
+          10,
+          0,
+          30,
+          140
+        ],
+        "dx": 3,
+        "dy": -2,
+        "kind": "shadow"
+      },
+      "layer": 4,
+      "op": "filter"
+    },
+    {
+      "filter": {
+        "kind": "pixelate",
+        "size": 3
+      },
+      "layer": 6,
+      "op": "filter"
+    },
+    {
+      "filter": {
+        "colors": 6,
+        "dither": 8,
+        "keep": true,
+        "kind": "quantize",
+        "palette": false
+      },
+      "layer": 1,
+      "op": "filter"
     }
   ],
   "pick": [
     [
       15,
       20,
-      3375281622
+      4003250881
     ],
     [
       70,
       40,
-      4287367770
+      4290926190
     ]
   ]
 }

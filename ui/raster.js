@@ -102,7 +102,17 @@ function brushOf(b, fallback) {
 }
 
 /** Ops that change the layers themselves, not only their pixels. @param {Op} op */
-const changesLayers = (op) => ["addLayer", "removeLayer", "moveLayer", "setLayer", "setPalette", "paste", "orient", "resize", "crop"].includes(op.op) || (op.op === "replaceColor" && op.swatch !== undefined && op.swatch !== null);
+const changesLayers = (op) =>
+  ["addLayer", "removeLayer", "moveLayer", "setLayer", "setPalette", "paste", "orient", "resize", "crop", "upscale"].includes(op.op) ||
+  (op.op === "replaceColor" && op.swatch !== undefined && op.swatch !== null) ||
+  (op.op === "filter" && op.filter.kind === "quantize" && Boolean(op.filter.keep));
+
+/** Each sprite template's size in its own pixels, a clear cell round it
+ *  included — proton-raster's `gen::sprite`. */
+const SPRITES = /** @type {Record<string, [number, number]>} */ ({ ship: [14, 14], creature: [14, 12], item: [12, 12] });
+
+/** A seed nobody chose. */
+const newSeed = () => Math.floor(Math.random() * 2 ** 32) >>> 0;
 
 /** `#rrggbb` of a colour. @param {number[]} c */
 const hex = (c) => `#${c.slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")}`;
@@ -177,6 +187,21 @@ export function createRaster(host) {
   let ants = { version: -1, segments: new Int32Array(0), march: 0, timer: 0 };
   /** The core's version the copy was last loaded at. */
   let loaded = -1;
+  /** The Make panel's settings: which generator and which filter, and each
+   *  one's own. */
+  let make = {
+    generator: "sprite", filter: "outline", seed: newSeed(),
+    template: "ship", scale: 2, ownColor: false,
+    noise: "gradient", cell: 16, octaves: 4, colors: "ramp", steps: 5, mix: "dither", dither: 4,
+    density: 46, rounds: 4, caveCell: 1, wrap: false,
+    diagonal: false, inside: false,
+    dx: 2, dy: 2, blur: 0, shade: 50,
+    size: 4,
+    count: 8, toPalette: false, ditherColours: 0, keep: true,
+  };
+  /** What the Make panel shows on the copy, not kept yet: the op, its name,
+   *  and which part of the panel it is from. @type {{op: Op, label: string, part: string} | null} */
+  let making = null;
   let filled = false;
   let grid = false;
   /** The pixel under the pointer, for the cursor. @type {[number, number] | null} */
@@ -370,6 +395,7 @@ export function createRaster(host) {
             .join("")}</div>`
         : `<p class="raster-faint">No palette yet.</p>`) +
       `<div class="raster-palette-tools"><button class="cc-quiet" data-raster-swatch-add>Add ${hex(color)}</button>` +
+      `<button class="cc-quiet" data-raster-ramp title="Five steps of ${hex(color)}, darker and lighter, the hue turning as a painter's shading does">Ramp</button>` +
       (view.palette.some(same) ? `<button class="cc-quiet" data-raster-swatch-remove>Remove it</button>` : "") +
       `</div><p class="raster-palette-hint">Double-click a swatch to change its colour, and every pixel of it, as one edit.</p>`;
   }
@@ -385,6 +411,11 @@ export function createRaster(host) {
       return;
     }
     if (target.closest("[data-raster-swatch-add]")) edit({ op: "setPalette", colors: [...view.palette, color] }, "add a colour");
+    if (target.closest("[data-raster-ramp]") && copy) {
+      const ramp = copy.ramp({ base: color, steps: 5, shift: 25, spread: 24000 });
+      const fresh = ramp.filter((c) => !view?.palette.some((p) => p.every((v, i) => v === c[i])));
+      edit({ op: "setPalette", colors: [...view.palette, ...fresh] }, "ramp");
+    }
     if (target.closest("[data-raster-swatch-remove]")) edit({ op: "setPalette", colors: view.palette.filter((c) => !c.every((v, i) => v === color[i])) }, "remove a colour");
   });
   palette.addEventListener("dblclick", (e) => {
@@ -514,7 +545,8 @@ export function createRaster(host) {
       `<div class="raster-fields raster-buttons" data-raster-canvas-tools>` +
       `<button class="cc-quiet" data-raster-canvas="ccw" title="Turn it a quarter to the left">↺</button><button class="cc-quiet" data-raster-canvas="cw" title="Turn it a quarter to the right">↻</button>` +
       `<button class="cc-quiet" data-raster-canvas="half" title="Turn it half round">180°</button><button class="cc-quiet" data-raster-canvas="flipX" title="Mirror it across">⇋</button>` +
-      `<button class="cc-quiet" data-raster-canvas="flipY" title="Mirror it down">⇵</button><button class="cc-quiet" data-raster-canvas="crop" title="Cut it to what is selected"${antsNow().length ? "" : " disabled"}>Crop</button></div>` +
+      `<button class="cc-quiet" data-raster-canvas="flipY" title="Mirror it down">⇵</button><button class="cc-quiet" data-raster-canvas="crop" title="Cut it to what is selected"${antsNow().length ? "" : " disabled"}>Crop</button>` +
+      `<button class="cc-quiet" data-raster-canvas="up2" title="Twice the size by Scale2x, a pixel picture's edges kept crisp">×2</button><button class="cc-quiet" data-raster-canvas="up3" title="Three times the size by Scale3x">×3</button></div>` +
       `<div class="raster-fields raster-resize"><label class="raster-field"><span>Size</span><span class="raster-size-pair"><input type="number" min="1" max="${view.preset === "pixel" ? 1024 : 4096}" value="${view.width}" data-raster-resize="width" aria-label="Width"> × <input type="number" min="1" max="${view.preset === "pixel" ? 1024 : 4096}" value="${view.height}" data-raster-resize="height" aria-label="Height"></span></label>` +
       `<button class="cc-quiet" data-raster-canvas="resize">Resize</button></div>`;
   }
@@ -590,6 +622,7 @@ export function createRaster(host) {
     if (whichCanvas === "half") whole({ op: "orient", turns: 2, flip: false }, "turn round");
     if (whichCanvas === "flipX") whole({ op: "orient", turns: 0, flip: true }, "mirror across");
     if (whichCanvas === "flipY") whole({ op: "orient", turns: 2, flip: true }, "mirror down");
+    if (whichCanvas === "up2" || whichCanvas === "up3") whole({ op: "upscale", factor: whichCanvas === "up2" ? 2 : 3 }, whichCanvas === "up2" ? "grow ×2" : "grow ×3");
     if (whichCanvas === "crop") {
       const rect = selectedRect();
       if (rect) whole({ op: "crop", rect: /** @type {[number, number, number, number]} */ (rect) }, "crop");
@@ -678,6 +711,8 @@ export function createRaster(host) {
 
   /** The right pane's tab: the inspector or the agent. @param {string} which */
   function showPanel(which) {
+    if (which !== "make") leaveMade();
+    else renderMake();
     const pane = q("#raster-pane");
     pane.dataset.showing = which;
     for (const tab of pane.querySelectorAll("[data-raster-panel]")) {
@@ -696,6 +731,142 @@ export function createRaster(host) {
   q("#raster-pane").addEventListener("click", (e) => {
     const tab = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-raster-panel]"));
     if (tab) showPanel(tab.dataset.rasterPanel ?? "inspector");
+  });
+
+  /* ── the Make panel ──────────────────────────────────────────── */
+
+  /** The generator the Make panel is set to, as an op on the layer chosen. */
+  function generatorOp() {
+    const layer = current();
+    if (!layer || !view || !copy) return null;
+    const seed = make.seed >>> 0;
+    if (make.generator === "sprite") {
+      // In the middle of what is selected, or of the canvas.
+      const [sw, sh] = SPRITES[make.template] ?? [14, 14];
+      const r = selectedRect() ?? [0, 0, view.width, view.height];
+      const at = [Math.round(r[0] + (r[2] - sw * make.scale) / 2), Math.round(r[1] + (r[3] - sh * make.scale) / 2)];
+      return /** @type {Op} */ ({ op: "generate", layer: layer.id, generator: { kind: "sprite", template: make.template, seed, at, scale: make.scale, color: make.ownColor ? color : undefined } });
+    }
+    if (make.generator === "noise") {
+      const colors = make.colors === "palette" && view.palette.length >= 2 ? view.palette : copy.ramp({ base: color, steps: make.steps, shift: 25, spread: 26000 });
+      return /** @type {Op} */ ({ op: "generate", layer: layer.id, generator: { kind: "noise", noise: make.noise, seed, cell: make.cell, octaves: make.octaves, colors, mix: make.mix, dither: make.dither } });
+    }
+    return /** @type {Op} */ ({ op: "generate", layer: layer.id, generator: { kind: "cave", seed, density: make.density, steps: make.rounds, cell: make.caveCell, wrap: make.wrap, color } });
+  }
+
+  /** The filter the Make panel is set to, as an op on the layer chosen. */
+  function filterOp() {
+    const layer = current();
+    if (!layer) return null;
+    const filter =
+      make.filter === "outline" ? { kind: "outline", color, diagonal: make.diagonal, inside: make.inside }
+      : make.filter === "shadow" ? { kind: "shadow", dx: make.dx, dy: make.dy, color: [0, 0, 0, Math.round((make.shade * 255) / 100)], blur: make.blur }
+      : make.filter === "pixelate" ? { kind: "pixelate", size: make.size }
+      : { kind: "quantize", colors: make.count, palette: make.toPalette, dither: make.ditherColours, keep: make.keep };
+    return /** @type {Op} */ ({ op: "filter", layer: layer.id, filter });
+  }
+
+  /** What a part of the panel makes, by name. @param {string} part */
+  const madeLabel = (part) => (part === "generator" ? { sprite: "sprite", noise: "noise", cave: "caves" }[make.generator] : { outline: "outline", shadow: "shadow", pixelate: "pixelate", quantize: "fewer colours" }[make.filter]) ?? part;
+
+  /** A part of the panel shown on the copy, and not kept. @param {string} part */
+  function showMade(part) {
+    leaveMade();
+    const op = part === "generator" ? generatorOp() : filterOp();
+    if (!op || !copy) return;
+    try {
+      copy.preview(op);
+      making = { op, label: madeLabel(part), part };
+    } catch (error) {
+      making = null;
+      console.warn("proton: canvas", error);
+    }
+    renderMakeNote();
+    paint();
+  }
+
+  /** What was shown, taken away. */
+  function leaveMade() {
+    if (!making) return;
+    making = null;
+    copy?.clearPreview();
+    renderMakeNote();
+    paint();
+  }
+
+  /** A part of the panel kept, as one edit. @param {string} part */
+  function keepMade(part) {
+    const op = making?.part === part ? making.op : part === "generator" ? generatorOp() : filterOp();
+    leaveMade();
+    if (op) edit(op, madeLabel(part));
+  }
+
+  function renderMakeNote() {
+    const note = ws.querySelector("[data-make-note]");
+    if (note) note.textContent = making ? `Showing the ${making.label} on ${current()?.name ?? "the layer"}, not kept yet.` : "A change shows it on the layer chosen, held to what is selected.";
+  }
+
+  function renderMake() {
+    const box = q("[data-raster-make]");
+    if (!view) {
+      box.innerHTML = "";
+      return;
+    }
+    const field = (/** @type {string} */ name, /** @type {number} */ min, /** @type {number} */ max, /** @type {string} */ label) =>
+      `<label class="raster-field"><span>${label}</span><input type="number" min="${min}" max="${max}" value="${/** @type {any} */ (make)[name]}" data-make="${name}"></label>`;
+    const check = (/** @type {string} */ name, /** @type {string} */ label) =>
+      `<label class="raster-field raster-check"><input type="checkbox" data-make="${name}"${/** @type {any} */ (make)[name] ? " checked" : ""}> <span>${label}</span></label>`;
+    const choose = (/** @type {string} */ name, /** @type {string[][]} */ options, /** @type {string} */ label) =>
+      `<label class="raster-field"><span>${label}</span><select data-make="${name}">${options.map(([v, text]) => `<option value="${v}"${String(/** @type {any} */ (make)[name]) === v ? " selected" : ""}>${text}</option>`).join("")}</select></label>`;
+    const generator =
+      make.generator === "sprite"
+        ? choose("template", [["ship", "A ship"], ["creature", "A creature"], ["item", "An item"]], "Kind") + field("scale", 1, 16, "Scale") + check("ownColor", "In a ramp of the colour drawn with")
+        : make.generator === "noise"
+          ? choose("noise", [["gradient", "Gradient"], ["value", "Value"]], "Noise") + field("cell", 1, 512, "Cell") + field("octaves", 1, 8, "Octaves") +
+            choose("colors", [["ramp", "A ramp of the colour drawn with"], ["palette", "The palette"]], "Colours") + (make.colors === "ramp" ? field("steps", 2, 16, "Steps") : "") +
+            choose("mix", [["dither", "Dithered"], ["nearest", "Banded"], ["smooth", "Smooth"]], "Laid out") + (make.mix === "dither" ? choose("dither", [["2", "2 × 2"], ["4", "4 × 4"], ["8", "8 × 8"]], "Dither") : "")
+          : field("density", 1, 99, "Rock %") + field("rounds", 0, 10, "Rounds") + field("caveCell", 1, 64, "Cell") + check("wrap", "Repeats as a tile");
+    const filter =
+      make.filter === "outline" ? check("diagonal", "Across corners too") + check("inside", "On its own edge, not round it")
+      : make.filter === "shadow" ? field("dx", -64, 64, "Across") + field("dy", -64, 64, "Down") + field("blur", 0, 64, "Blur") + field("shade", 1, 100, "Strength %")
+      : make.filter === "pixelate" ? field("size", 2, 128, "Square")
+      : field("count", 2, 64, "Colours") + check("toPalette", "The palette's colours instead") +
+        choose("ditherColours", [["0", "Not dithered"], ["2", "Dithered 2 × 2"], ["4", "Dithered 4 × 4"], ["8", "Dithered 8 × 8"]], "Dither") + check("keep", "Keep them as the palette");
+    box.innerHTML =
+      `<h5 class="raster-tool-head">Make</h5><div class="raster-fields" data-make-part="generator">` +
+      choose("generator", [["sprite", "A sprite"], ["noise", "Noise"], ["cave", "Caves"]], "What") + generator +
+      `<label class="raster-field"><span>Seed</span><span class="raster-size-pair"><input type="number" min="0" max="4294967295" value="${make.seed}" data-make="seed"><button class="cc-quiet" data-make-action="reseed" title="Another seed">⟳</button></span></label>` +
+      `<div class="raster-buttons"><button class="cc-quiet" data-make-action="show-generator">Show it</button><button class="cc-primary" data-make-action="keep-generator">Keep it</button><button class="cc-quiet" data-make-action="leave">Leave it</button></div></div>` +
+      `<h5 class="raster-layer-head">Filter</h5><div class="raster-fields" data-make-part="filter">` +
+      choose("filter", [["outline", "Outline"], ["shadow", "Shadow"], ["pixelate", "Pixelate"], ["quantize", "Fewer colours"]], "What") + filter +
+      `<div class="raster-buttons"><button class="cc-quiet" data-make-action="show-filter">Show it</button><button class="cc-primary" data-make-action="keep-filter">Keep it</button><button class="cc-quiet" data-make-action="leave">Leave it</button></div></div>` +
+      `<p class="raster-faint" data-make-note></p>`;
+    renderMakeNote();
+  }
+
+  const makeBox = q("[data-raster-make]");
+  makeBox.addEventListener("change", (e) => {
+    const field = /** @type {HTMLInputElement} */ (e.target);
+    const name = field.dataset.make;
+    if (!name) return;
+    const was = /** @type {any} */ (make)[name];
+    /** @type {any} */ (make)[name] = field.type === "checkbox" ? field.checked : typeof was === "number" ? Math.round(Number(field.value)) || 0 : field.value;
+    const part = /** @type {HTMLElement | null} */ (field.closest("[data-make-part]"))?.dataset.makePart ?? "generator";
+    renderMake();
+    showMade(part);
+  });
+  makeBox.addEventListener("click", (e) => {
+    const action = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-make-action]"))?.dataset.makeAction;
+    if (action === "reseed") {
+      make = { ...make, seed: newSeed() };
+      renderMake();
+      showMade("generator");
+    }
+    if (action === "show-generator") showMade("generator");
+    if (action === "show-filter") showMade("filter");
+    if (action === "keep-generator") keepMade("generator");
+    if (action === "keep-filter") keepMade("filter");
+    if (action === "leave") leaveMade();
   });
 
   /* ── edits ───────────────────────────────────────────────────── */
@@ -722,6 +893,8 @@ export function createRaster(host) {
     if (!view || !copy) return;
     // A transform under way is kept first: it is what the person sees.
     if (moving) finishTransform();
+    // What the Make panel shows is taken away: it is not kept unless asked.
+    if (making) leaveMade();
     const made = copy.apply(op);
     // Refused here too: sent all the same, unpredicted, so the core says why.
     send_(op, label, "hash" in made ? made.hash : null, "hash" in made ? copy.touched() : []);
@@ -1212,6 +1385,9 @@ export function createRaster(host) {
     }
     if (e.button !== 0 || drawing || shaping) return;
     if (e.pointerType === "touch" && pen) return;
+    // What the Make panel shows goes before anything is drawn on it: taken
+    // away later, it would take the drawing with it.
+    leaveMade();
     if (e.pointerType === "pen") pen = true;
     const p = at(e);
     if (!p) return;
@@ -1357,6 +1533,7 @@ export function createRaster(host) {
       shaping = null;
     }
     selecting = null;
+    leaveMade();
     paint();
   }
 
@@ -1468,6 +1645,7 @@ export function createRaster(host) {
     renderInspector();
     renderPalette();
     renderColor();
+    if (q("#raster-pane").dataset.showing === "make") renderMake();
     paint();
   }
 
