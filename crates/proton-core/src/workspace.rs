@@ -4064,12 +4064,16 @@ impl Workspace {
     /// in words, and what the window is sent.
     fn send_canvas(&mut self, game: &str, layers: bool) -> Result<(String, Vec<Event>), String> {
         let root = self.root().to_path_buf();
-        let (dir, source) = self.raster.send(&root, game, layers)?;
-        let mut said = format!("wrote {source} in {}", if game.is_empty() { "the game" } else { game });
+        let (dir, source, sheet) = self.raster.send(&root, game, layers)?;
+        let mut said = match &sheet {
+            Some(json) => format!("wrote {source} and the sheet {json} in {}", if game.is_empty() { "the game" } else { game }),
+            None => format!("wrote {source} in {}", if game.is_empty() { "the game" } else { game }),
+        };
         let mut events = Vec::new();
         let open = self.game.root().and_then(|r| std::fs::canonicalize(r).ok());
         if open.is_some_and(|r| r == dir) {
-            match self.game.import_art(&source, None, None, false) {
+            // An animation comes in as one, not as its frame put in a room.
+            match self.game.import_art(sheet.as_deref().unwrap_or(&source), None, None, false) {
                 Ok(done) => {
                     said = format!("{said}, and {}", done.said);
                     events.extend(done.notes.into_iter().map(|n| notice(n, NoticeLevel::Warn)));

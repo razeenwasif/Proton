@@ -559,15 +559,19 @@ impl Agent {
             },
             Tool {
                 name: "game_import".into(),
-                description: "Bring a layered .psd, or a .png, from the open game's folder into a room. Each \
-                              group becomes a plane at the depth its name gives in square brackets — \
-                              \"Far hills [800]\" behind, \"Leaves [-150]\" in front, \"[still]\" for a sky \
-                              that does not move, \"[play]\" for art that joins the plane the game is played \
-                              on — and each layer an image, trimmed, cut into pieces when large. The images \
-                              are written into the game's art folder at once; the room's change is held \
-                              until the person saves and is one step of their undo. Importing the same file \
-                              again replaces what it made before. Says what was left out (effects, \
-                              adjustment layers, hidden layers) and why."
+                description: "Bring art from the open game's folder into the game. A layered .psd, or a .png, \
+                              goes into a room: each group becomes a plane at the depth its name gives in \
+                              square brackets — \"Far hills [800]\" behind, \"Leaves [-150]\" in front, \
+                              \"[still]\" for a sky that does not move, \"[play]\" for art that joins the plane \
+                              the game is played on — and each layer an image, trimmed, cut into pieces when \
+                              large; the room's change is held until the person saves and is one step of \
+                              their undo. An .aseprite file, or a sprite sheet's .json (Aseprite's, Canvas's), \
+                              becomes an animation, <name>.anim.json beside it: frames on sheets, its tags \
+                              clips, slices named hit…/hurt… boxes and one named feet or pivot where it \
+                              stands, a cel's text a cue; a prefab plays it once its sprite names it, each \
+                              state (idle, run, jump, fall, dash, wall, hurt) the clip of its name unless the \
+                              prefab's clips map says another. Files are written at once. Importing the same \
+                              file again replaces what it made before. Says what was left out and why."
                     .into(),
                 input_schema: json!({
                     "type": "object",

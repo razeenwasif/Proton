@@ -15,5 +15,7 @@ proton-game = { path = "../proton-game", default-features = false }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-# The template, to cook a world from in the tests — not in the wasm.
+# The template, to cook a world from in the tests — not in the wasm — and
+# Canvas's engine's Aseprite writer, to animate its player with.
 proton-game = { path = "../proton-game" }
+proton-raster = { workspace = true }

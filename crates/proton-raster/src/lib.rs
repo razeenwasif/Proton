@@ -45,6 +45,9 @@
 
 #[cfg(feature = "io")]
 pub mod aseprite;
+#[cfg(feature = "io")]
+#[doc(hidden)]
+pub mod ase_write;
 pub mod blend;
 pub mod brush;
 pub mod canvas;

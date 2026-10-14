@@ -488,3 +488,47 @@ fn the_agent_imports_art_and_is_told_what_was_left_out() {
     let after = space.run_tool("game_info", &json!({})).unwrap();
     assert!(after.contains("Imported art/cave.psd into crossroads_02: 2 planes"), "{after}");
 }
+
+/* ── animation ─────────────────────────────────────────────────────── */
+
+/// A run cycle of three frames, a tag for it, a cue on the second.
+fn run_cycle() -> Vec<u8> {
+    use proton_raster::ase_write::{cel, layer, tags, user_text, Ase};
+    let body = |x: i16| cel(0, x, 4, 255, 4, 8, &[90u8, 160, 220, 255].repeat(32), true);
+    Ase {
+        width: 16,
+        height: 12,
+        depth: 32,
+        transparent: 0,
+        frames: vec![
+            (100, vec![layer(1, 0, 0, 0, 255, "Body"), body(4), tags(&[(0, 0, 0, 0, "idle"), (1, 2, 0, 0, "run")])]),
+            (100, vec![body(6), user_text("step")]),
+            (100, vec![body(8)]),
+        ],
+    }
+    .bytes()
+}
+
+#[test]
+fn an_aseprite_file_becomes_an_animation_the_player_plays_and_the_agent_sees() {
+    let (mut space, root) = with_game("anim");
+    let game = root.join("crossroads");
+    std::fs::write(game.join("art/runner.aseprite"), run_cycle()).unwrap();
+    let events = space.apply(Command::GameImport { source: "art/runner.aseprite".into(), room: None, scale: None, normals: false });
+    let said: Vec<String> = events.iter().filter_map(|e| if let Event::Notice { text, .. } = e { Some(text.clone()) } else { None }).collect();
+    assert!(said.iter().any(|s| s.contains("made art/runner.anim.json of runner.aseprite: 3 frames, clips idle, run, 1 cue")), "{said:?}");
+    let shown = view(&events).unwrap().unwrap();
+    assert!(shown.assets.contains(&"art/runner.anim.json".to_string()) && !shown.assets.iter().any(|a| a.contains("runner.sheet")), "{:?}", shown.assets);
+    assert_eq!(shown.imports.iter().find(|i| i.source == "art/runner.aseprite").map(|i| i.anim.as_str()), Some("art/runner.anim.json"));
+    assert!(game.join("art/runner.sheet.png").is_file());
+    // The player plays it: its run, its cue, in the cooked world and the run.
+    space.apply(edit("prefab:player", vec![set(&["sprite"], json!("art/runner.anim.json"))]));
+    let played = space.apply(Command::GamePlay { room: None, at: None, abilities: vec![], recording: None });
+    let world = played.iter().find_map(|e| if let Event::GamePlay { world, .. } = e { Some(world.clone()) } else { None }).expect("a run");
+    let cooked: proton_game::sim::World = serde_json::from_str(&world).unwrap();
+    assert_eq!((cooked.anims.len(), cooked.cues.clone()), (1, vec!["step".to_string()]));
+    let summary = space.run_tool("game_info", &json!({})).unwrap();
+    assert!(summary.contains("Animation art/runner.anim.json: 3 frames of 16×12, clips idle (0–0, forward), run (1–2, forward)") && summary.contains("played by player"), "{summary}");
+    let run = space.run_tool("game_play", &json!({"inputs": [{"hold": ["right"], "ticks": 60}]})).unwrap();
+    assert!(run.contains("Cues said: step ×"), "{run}");
+}

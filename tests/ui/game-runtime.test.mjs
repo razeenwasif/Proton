@@ -11,7 +11,7 @@ const read = (path) => readFileSync(new URL(path, root));
 test('the replay ends in the WebAssembly where it ends natively', async () => {
   const {instance} = await WebAssembly.instantiate(read('ui/game-runtime.wasm'));
   const pg = instance.exports;
-  equal(pg.pg_abi(), 1);
+  equal(pg.pg_abi(), 2);
   const world = read('tests/ui/fixtures/game-world.json');
   const fixture = JSON.parse(read('tests/ui/fixtures/game-replay.json').toString());
   const at = pg.pg_alloc(world.length);
@@ -32,6 +32,34 @@ test('the replay ends in the WebAssembly where it ends natively', async () => {
   equal(frame[2], 1, 'the replay did not reach the second room');
   const hash = (BigInt(pg.pg_hash_hi() >>> 0) << 32n | BigInt(pg.pg_hash_lo() >>> 0)).toString(16).padStart(16, '0');
   equal(hash, fixture.hash, 'the WebAssembly run is not the native run');
+});
+
+test('an animated run shows the same frames and says the same cues here', async () => {
+  const {instance} = await WebAssembly.instantiate(read('ui/game-runtime.wasm'));
+  const pg = instance.exports;
+  const fixture = JSON.parse(read('tests/ui/fixtures/game-anim.json').toString());
+  const world = new TextEncoder().encode(fixture.world);
+  const at = pg.pg_alloc(world.length);
+  new Uint8Array(pg.memory.buffer, at, world.length).set(world);
+  equal(pg.pg_load(at, world.length), 0);
+  pg.pg_free(at, world.length);
+  const [room, x, y, abilities] = fixture.start;
+  equal(pg.pg_start(room, x, y, abilities), 0);
+  const HEADER = 12;
+  const frames = [];
+  let cues = 0;
+  let tick = 0;
+  for (const [held, n] of fixture.replay) {
+    for (let i = 0; i < n; i++) {
+      if (pg.pg_step(held) & 64) cues += new Uint32Array(pg.memory.buffer, pg.pg_cues(), 1)[0];
+      if (tick % 10 === 0) frames.push(new Int32Array(pg.memory.buffer, pg.pg_frame(), HEADER + 8)[HEADER + 6]);
+      tick++;
+    }
+  }
+  equal(cues, fixture.cues, 'the cues said');
+  equal(JSON.stringify(frames), JSON.stringify(fixture.frames), 'the frames shown');
+  const hash = (BigInt(pg.pg_hash_hi() >>> 0) << 32n | BigInt(pg.pg_hash_lo() >>> 0)).toString(16).padStart(16, '0');
+  equal(hash, fixture.hash, 'the animated run is not the native run');
 });
 
 test('a world that is not one is refused with a reason', async () => {

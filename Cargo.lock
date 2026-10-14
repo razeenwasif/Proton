@@ -4439,6 +4439,7 @@ name = "proton-game-runtime"
 version = "0.0.1"
 dependencies = [
  "proton-game",
+ "proton-raster",
  "serde_json",
 ]
 

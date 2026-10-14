@@ -373,4 +373,71 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     await win.pushEvents([project(), room('crossroads_01')]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
+
+  await test('An Aseprite file is imported as an animation, which its inspector plays, the player looks like, and a run plays frame by frame', async () => {
+    await win.dispatch({type: 'setMode', mode: 'game'}); await settle();
+    const frame = () => new Promise((done) => win.requestAnimationFrame(() => done(undefined)));
+    const sheet = await (await fetch('/tests/ui/fixtures/game/art/player.png')).arrayBuffer();
+    const anim = {format: 1, source: 'art/hero.aseprite', size: [24, 24], sheets: ['art/hero.sheet.png'],
+      frames: [0, 1, 2, 3, 4].map((i) => ({sheet: 0, rect: [i * 4, 0, 4, 16], offset: [8, 8], ms: 40, pivot: [12, 24]})),
+      clips: [{name: 'idle', from: 0, to: 0, direction: 'forward', repeat: 0}, {name: 'run', from: 1, to: 3, direction: 'pingPong', repeat: 0}, {name: 'jump', from: 4, to: 4, direction: 'forward', repeat: 1}],
+      boxes: [{name: 'hitbox', kind: 'hit', frames: [null, [0, 0, 8, 8], null, null, null]}], cues: [{frame: 2, name: 'step'}]};
+    win.gameFiles = {'art/hero.anim.json': JSON.stringify(anim), 'art/hero.sheet.png': sheet};
+    const assets = ['art/hero.aseprite', 'art/hero.anim.json', 'art/sky.png'];
+    await win.pushEvents([project({assets}), room('crossroads_01')]); await settle();
+    // The Aseprite file: offered as an animation, and imported as one.
+    $('[data-game-side="assets"]').click(); await settle();
+    ws().querySelector('[data-game-pick-id="art/hero.aseprite"]').click(); await settle();
+    const form = $('[data-game-import-form]');
+    assert(form && form.textContent.includes('Import as an animation') && !form.querySelector('[data-game-import-room]'), 'an .aseprite is not offered as an animation');
+    let before = win.commands.length;
+    form.querySelector('[data-game-import]').click(); await settle();
+    assert(sent(before, 'gameImport')[0]?.source === 'art/hero.aseprite', `Import sent ${JSON.stringify(sent(before, 'gameImport'))}`);
+    // The animation: its clips, one played small, frame by frame.
+    ws().querySelector('[data-game-pick-id="art/hero.anim.json"]').click();
+    const panel = () => $('[data-game-anim]');
+    for (let i = 0; i < 30 && !panel()?.querySelector('[data-game-preview-clip]'); i++) await settle();
+    assert(panel()?.querySelectorAll('[data-game-preview-clip]').length === 3 && panel().textContent.includes('hitbox (hit)') && panel().textContent.includes('step at frame 3'), `the animation says ${panel()?.textContent}`);
+    panel().querySelector('[data-game-preview-clip="run"]').click();
+    const shownFrames = new Set();
+    for (let i = 0; i < 40 && shownFrames.size < 3; i++) {
+      shownFrames.add($('[data-game-anim-preview]')?.dataset.frame);
+      await new Promise((done) => setTimeout(done, 15));
+    }
+    assert([...shownFrames].every((f) => ['1', '2', '3'].includes(f)) && shownFrames.size === 3, `the run played frames ${[...shownFrames]}`);
+    assert($('[data-game-anim-preview]').width === 144, `the preview is ${$('[data-game-anim-preview]').width} wide`);
+    before = win.commands.length;
+    panel().querySelector('[data-game-anim-player]').click(); await settle();
+    const given = sent(before, 'gameEdit')[0];
+    assert(given?.target === 'prefab:player' && given.ops[0].path.join() === 'sprite' && given.ops[0].value === 'art/hero.anim.json', `the player was given ${JSON.stringify(given)}`);
+    // The player looks like it: drawn at the start as the frame it rests on;
+    // its inspector chooses each state's clip.
+    const prefabs = fixture.prefabs.map((/** @type {any} */ p) => (p.id === 'player' ? {...p, sprite: 'art/hero.anim.json'} : p));
+    await win.pushEvents([project({assets, prefabs}), room('crossroads_01')]); await settle();
+    for (let i = 0; i < 30 && !ws().gameProbe.drawn().includes('art/hero.sheet.png'); i++) await settle();
+    assert(ws().gameProbe.drawn().includes('art/hero.sheet.png'), 'the player is not drawn from its sheet');
+    $('[data-game-side="world"]').click(); await settle();
+    ws().querySelector('[data-game-pick="prefab"][data-game-pick-id="player"]').click(); await settle();
+    const fall = /** @type {HTMLSelectElement} */ ($('[data-game-clip="fall"]'));
+    assert(fall && [...fall.options].map((o) => o.value).join() === ',idle,run,jump', 'the player\'s states cannot choose its clips');
+    before = win.commands.length;
+    fall.value = 'jump';
+    fall.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const chose = sent(before, 'gameEdit');
+    assert(chose.length === 1 && chose[0].target === 'prefab:player' && JSON.stringify(chose[0].ops[0]) === '{"op":"set","path":["clips"],"value":{"fall":"jump"}}', `choosing sent ${JSON.stringify(chose)}`);
+    // Played: the run shows its frames and says its cue.
+    const animated = JSON.parse(await (await fetch('/tests/ui/fixtures/game-anim.json')).text());
+    await win.pushEvents([{type: 'gamePlay', world: animated.world, start: animated.start, rooms: fixture.rooms, keys: [['ArrowRight', 2]], replay: [[2, 90]]}]);
+    const seen = new Set();
+    for (let i = 0; i < 200 && !(seen.has(2) && ws().gameProbe.cue() === 'step'); i++) {
+      const words = ws().gameProbe.frame();
+      if (words && words[8] > 0) seen.add(words[12 + 6]);
+      await frame();
+    }
+    assert(seen.has(1) && seen.has(2) && ws().gameProbe.cue() === 'step', `the run showed frames ${[...seen]}, said ${ws().gameProbe.cue()}`);
+    $('[data-game-stop]').click(); await settle();
+    win.gameFiles = undefined;
+    await win.pushEvents([project(), room('crossroads_01')]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
 }

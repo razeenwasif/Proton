@@ -413,6 +413,22 @@ impl Document for Prefab {
     }
 }
 
+impl Document for crate::format::Anim {
+    fn problems(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let frames = self.frames.len() as u32;
+        for c in &self.clips {
+            if c.from > c.to || c.to >= frames {
+                out.push(format!("clip {} runs over frames {} to {}, and there are {frames}", c.name, c.from, c.to));
+            }
+        }
+        if self.frames.iter().any(|f| f.rect[2] > 0 && f.sheet as usize >= self.sheets.len()) {
+            out.push("a frame is on a sheet the animation does not have".into());
+        }
+        out
+    }
+}
+
 impl Document for Image {
     fn problems(&self) -> Vec<String> {
         Vec::new()

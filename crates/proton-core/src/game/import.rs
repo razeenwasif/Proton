@@ -1,5 +1,6 @@
 //! Bringing art into the open game: a `.psd` or `.png` in its folder made
-//! into a room's planes (`proton_game::import` does the making).
+//! into a room's planes, or an Aseprite file or a sprite sheet's JSON made
+//! into an animation (`proton_game::import` does the making).
 //!
 //! The images are written at once — they are new files beside the game's
 //! art, and nothing else names them yet. The room's change is the person's
@@ -64,12 +65,16 @@ fn free(taken: &[String], base: &str) -> String {
 
 impl Game {
     /// Import `source` (in the game's folder) into a room: the one named, the
-    /// one on screen, or the one the game starts in.
+    /// one on screen, or the one the game starts in — or, an Aseprite file
+    /// or a sheet's JSON, as an animation.
     pub fn import_art(&mut self, source: &str, room: Option<&str>, scale: Option<f64>, normals: bool) -> Result<Done, String> {
         let project = self.project.as_ref().ok_or("no game is open")?;
         let root = project.root().to_path_buf();
         let path = proton_game::path::inside(&root, source)?;
         let bytes = std::fs::read(&path).map_err(|e| format!("{source}: {e}"))?;
+        if proton_game::import::anim::is_anim_source(source, &bytes) {
+            return self.import_anim(source, &bytes, &path);
+        }
         let previous = self.imports.sources.iter().find(|s| s.source == source).cloned();
         let id = room
             .map(str::to_string)
@@ -130,6 +135,7 @@ impl Game {
             items: added_items.clone(),
             files: files.clone(),
             stamp: stamp(&path).unwrap_or_default(),
+            anim: String::new(),
         };
         match self.imports.sources.iter_mut().find(|s| s.source == source) {
             Some(old) => *old = record,
@@ -168,6 +174,69 @@ impl Game {
             said.push_str(&format!(" — {} note{}", notes.len(), if notes.len() == 1 { "" } else { "s" }));
         }
         Ok(Done { said, notes, events })
+    }
+}
+
+impl Game {
+    /// An Aseprite file or a sheet's JSON made into an `.anim.json` beside
+    /// it, its sheets with it: files written at once, as art's images are —
+    /// nothing in a room changes. A prefab plays it once its sprite names it.
+    fn import_anim(&mut self, source: &str, bytes: &[u8], path: &Path) -> Result<Done, String> {
+        let project = self.project.as_ref().ok_or("no game is open")?;
+        let root = project.root().to_path_buf();
+        let made = proton_game::import::anim::import_anim(source, bytes)?;
+        let mut notes = made.notes.clone();
+        for sheet in &made.anim.sheets {
+            let written = made.files.iter().any(|(f, _)| f == sheet);
+            if !written && !proton_game::path::inside(&root, sheet).is_ok_and(|p| p.is_file()) {
+                notes.push(format!("{source} says its frames are on {sheet}, which is not in the game's folder"));
+            }
+        }
+        for (rel, data) in &made.files {
+            let at = proton_game::path::inside(&root, rel)?;
+            if std::fs::read(&at).ok().as_deref() == Some(data.as_slice()) {
+                continue;
+            }
+            proton_game::doc::write_atomically(&at, data).map_err(|e| format!("{rel}: {e}"))?;
+        }
+        let files: Vec<String> = made.files.iter().map(|(f, _)| f.clone()).collect();
+        let previous = self.imports.sources.iter().find(|s| s.source == source).cloned();
+        let unused: Vec<String> = previous.map(|p| p.files.into_iter().filter(|f| !files.contains(f)).collect()).unwrap_or_default();
+        let record = Imported { source: source.to_string(), hash: hash(bytes), files, stamp: stamp(path).unwrap_or_default(), anim: made.path.clone(), ..Imported::default() };
+        match self.imports.sources.iter_mut().find(|s| s.source == source) {
+            Some(old) => *old = record,
+            None => self.imports.sources.push(record),
+        }
+        let text = proton_game::doc::to_text(&self.imports);
+        proton_game::doc::write_atomically(&root.join(IMPORTS), text.as_bytes()).map_err(|e| format!("{IMPORTS}: {e}"))?;
+        if !unused.is_empty() {
+            notes.push(format!("the last import also wrote {}, which this one does not: delete {} if nothing else uses {}", unused.join(", "), if unused.len() == 1 { "it" } else { "them" }, if unused.len() == 1 { "it" } else { "them" }));
+        }
+        let a = &made.anim;
+        let file = source.rsplit('/').next().unwrap_or(source);
+        let users: Vec<String> = self
+            .project
+            .as_ref()
+            .map(|p| p.prefabs.iter().map(|d| d.get()).filter(|f| f.sprite.as_deref() == Some(made.path.as_str())).map(|f| f.id.clone()).collect())
+            .unwrap_or_default();
+        let mut said = format!(
+            "made {} of {file}: {} frame{}, clip{} {}{}{}",
+            made.path,
+            a.frames.len(),
+            if a.frames.len() == 1 { "" } else { "s" },
+            if a.clips.len() == 1 { "" } else { "s" },
+            a.clips.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", "),
+            if a.boxes.is_empty() { String::new() } else { format!(", box{} {}", if a.boxes.len() == 1 { "" } else { "es" }, a.boxes.iter().map(|b| b.name.as_str()).collect::<Vec<_>>().join(", ")) },
+            if a.cues.is_empty() { String::new() } else { format!(", {} cue{}", a.cues.len(), if a.cues.len() == 1 { "" } else { "s" }) },
+        );
+        said.push_str(&match users.as_slice() {
+            [] => " — a prefab plays it once its sprite is this file".to_string(),
+            ids => format!(" — played by {}", ids.join(", ")),
+        });
+        if !notes.is_empty() {
+            said.push_str(&format!(" — {} note{}", notes.len(), if notes.len() == 1 { "" } else { "s" }));
+        }
+        Ok(Done { said, notes, events: vec![self.project_event()] })
     }
 }
 

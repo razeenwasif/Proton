@@ -24,8 +24,12 @@
 /** The editor's camera: the room point at the stage's middle, and stage pixels a room pixel.
  *  @typedef {{center: [number, number], zoom: number}} Cam */
 /** One thing to draw, in room pixels. Rotation is about its middle. A piece
- *  of an image cut up carries the whole image's rectangle as `whole`.
- *  @typedef {{key: string, plane: string, item: string | null, x: number, y: number, w: number, h: number, rot: number, flip: boolean, opacity: number, tint: [number, number, number, number], blend: string, whole?: {x: number, y: number, w: number, h: number}}} Sprite */
+ *  of an image cut up carries the whole image's rectangle as `whole`; a
+ *  frame of an animation, the part of its sheet it is, as `uv` (0–1).
+ *  @typedef {{key: string, plane: string, item: string | null, x: number, y: number, w: number, h: number, rot: number, flip: boolean, opacity: number, tint: [number, number, number, number], blend: string, whole?: {x: number, y: number, w: number, h: number}, uv?: [number, number, number, number]}} Sprite */
+/** An animation, as its `.anim.json` says it. @typedef {import('./bindings/GameAnim').GameAnim} Anim */
+/** Something standing on the play plane: an image or an animation's frame, its feet at `at`.
+ *  @typedef {{key: string, at: number[], pivot: number[], flip?: boolean, frame?: number | null}} Standing */
 /** How an image is cut up: its size, and where each piece goes in it (an `.img.json`).
  *  @typedef {{size: [number, number], chunks: {file: string, at: [number, number], size: [number, number]}[]}} Parts */
 
@@ -77,11 +81,12 @@ export function rgb(hex) {
 
 /** Everything a room draws, back to front, in room pixels, for the game
  *  camera centred at `center`. `sizes` says how large each loaded image is;
- *  what has not loaded is left out until it has.
+ *  what has not loaded is left out until it has. An animation, by its key in
+ *  `anims`, is drawn as the frame its standing thing names.
  *  @param {Room} room
  *  @param {{focal: number, view: [number, number], center: [number, number], sizes: Map<string, [number, number]>,
- *           hidden?: Set<string>, solo?: string | null, sprites?: {key: string, at: number[], pivot: number[], flip?: boolean}[],
- *           parts?: Map<string, Parts>}} how
+ *           hidden?: Set<string>, solo?: string | null, sprites?: Standing[],
+ *           parts?: Map<string, Parts>, anims?: Map<string, Anim>}} how
  *  @returns {Sprite[]} */
 export function layout(room, how) {
   const at = corner(room, how.view, how.center);
@@ -109,6 +114,12 @@ export function layout(room, how) {
     // What stands in the room stands on the play plane, in front of its art.
     if (plane.gameplay) {
       for (const s of how.sprites ?? []) {
+        const anim = how.anims?.get(s.key);
+        if (anim) {
+          const drawn = frameSprite(anim, s, how.sizes, plane.id);
+          if (drawn) out.push(drawn);
+          continue;
+        }
         const size = how.sizes.get(s.key);
         if (!size) continue;
         // Flipped about its pivot, so it turns where it stands.
@@ -119,6 +130,44 @@ export function layout(room, how) {
     }
   }
   return out;
+}
+
+/** A frame of an animation, standing at `s.at` on its feet: the part of its
+ *  sheet it is, placed where it sits on the sprite's canvas — and flipped
+ *  about the feet, so it turns where it stands. None while its sheet has not
+ *  loaded, or for a frame with nothing in it.
+ *  @param {Anim} anim @param {Standing} s @param {Map<string, [number, number]>} sizes @param {string} plane
+ *  @returns {Sprite | null} */
+export function frameSprite(anim, s, sizes, plane) {
+  const f = anim.frames[Math.max(0, s.frame ?? 0)];
+  if (!f || !f.rect[2] || !f.rect[3]) return null;
+  const key = anim.sheets[f.sheet];
+  const sheet = key ? sizes.get(key) : undefined;
+  if (!key || !sheet) return null;
+  const [w, h] = [f.rect[2], f.rect[3]];
+  const x = s.flip ? s.at[0] + s.pivot[0] - f.offset[0] - w : s.at[0] - s.pivot[0] + f.offset[0];
+  const y = s.at[1] - s.pivot[1] + f.offset[1];
+  const uv = /** @type {[number, number, number, number]} */ ([f.rect[0] / sheet[0], f.rect[1] / sheet[1], (f.rect[0] + w) / sheet[0], (f.rect[1] + h) / sheet[1]]);
+  return { key, plane, item: null, x, y, w, h, rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal", uv };
+}
+
+/** Where a box over an animation's frame is in the room, for a thing
+ *  standing at `at` on `pivot`, flipped or not: left, top, width, height.
+ *  @param {number[]} rect on the sprite's canvas @param {number[]} at @param {number[]} pivot @param {boolean} flip */
+export function boxInRoom(rect, at, pivot, flip) {
+  const [bx, by, bw, bh] = rect;
+  const x = flip ? at[0] + pivot[0] - bx - bw : at[0] - pivot[0] + bx;
+  return [x, at[1] - pivot[1] + by, bw, bh];
+}
+
+/** The frame a thing standing still shows: its idle clip's first — the
+ *  clip a prefab names for idle, else one called idle, else the first.
+ *  @param {Anim} anim @param {Record<string, string | undefined> | undefined} clips */
+export function restingFrame(anim, clips) {
+  const name = clips?.idle;
+  const clip = anim.clips.find((c) => c.name === name) ?? anim.clips.find((c) => c.name.toLowerCase() === "idle") ?? anim.clips[0];
+  if (!clip) return 0;
+  return clip.direction === "reverse" || clip.direction === "pingPongReverse" ? clip.to : clip.from;
 }
 
 /** An image cut up, as its pieces: each placed, flipped and turned as its

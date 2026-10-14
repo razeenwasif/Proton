@@ -17,4 +17,10 @@ pivot: [number, number],
  * The box it collides and is hit with: width and height, centred on its
  * feet.
  */
-size: [number, number], health: number | null, behaviour: GameBehaviour, };
+size: [number, number], health: number | null, behaviour: GameBehaviour, 
+/**
+ * For an animated sprite, the clip each state plays — `idle`, `run`,
+ * `jump`, `fall`, `dash`, `wall`, `hurt` — where it is not the clip of
+ * the state's own name.
+ */
+clips: { [key in string]?: string }, };

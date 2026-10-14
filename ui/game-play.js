@@ -11,17 +11,25 @@
  * same place — the two builds checked against each other every time.
  *
  * The keys the game uses are the game's while it plays. ⌘S, ⌃ with a digit
- * and Esc still are Proton's: Esc stops. */
+ * and Esc still are Proton's: Esc stops.
+ *
+ * An animated thing's record names the frame it shows, which is drawn from
+ * its sheet; the cues its frames say are shown as they are said, and its
+ * boxes — hitboxes red, hurtboxes green — drawn over it when asked. */
 
-import { layout } from "./game-scene.js";
+import { boxInRoom, layout } from "./game-scene.js";
 
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
 
 /** The runtime's ABI, and the words in a frame's header and in each record
  *  (proton-game-runtime). */
-const ABI = 1;
+const ABI = 2;
 const HEADER = 12;
-const RECORD = 6;
+const RECORD = 8;
+/** What `pg_step` says when a frame with a cue was shown. */
+const CUE = 64;
+/** Ticks a cue stays in the readout. */
+const CUE_SHOWN = 45;
 const DOOR = 24;
 
 /** The module, compiled once a window. @type {Promise<WebAssembly.Module> | null} */
@@ -43,6 +51,8 @@ function compile() {
  *   gpu: () => ReturnType<typeof import('./game-render.js').createGameRender>,
  *   sizes: Map<string, [number, number]>,
  *   parts: Map<string, import('./game-scene.js').Parts>,
+ *   anims?: Map<string, import('./game-scene.js').Anim>,
+ *   boxes?: () => boolean,
  *   want: (keys: string[]) => void,
  *   stageSize: () => number[],
  *   focal: () => number,
@@ -78,6 +88,8 @@ export function createPlayer(host) {
   let now = null;
   /** @type {Int32Array | null} */
   let before = null;
+  /** The last cue said, and the tick it was said at. @type {{name: string, tick: number} | null} */
+  let cue = null;
 
   /** Why the runtime's last call failed. */
   function why() {
@@ -119,9 +131,15 @@ export function createPlayer(host) {
       if (run && run[0] === bits) run[1]++;
       else recording.push([bits, 1]);
     }
-    pg.pg_step(bits);
+    const happened = pg.pg_step(bits);
     before = now;
     now = frameWords();
+    if (happened & CUE) {
+      const at = pg.pg_cues();
+      const words = new Uint32Array(pg.memory.buffer, at, 1 + new Uint32Array(pg.memory.buffer, at, 1)[0]);
+      const said = [...words.slice(1)].map((i) => world?.cues?.[i] ?? "").filter(Boolean);
+      if (said.length) cue = { name: said.join(", "), tick: now[1] };
+    }
   }
 
   /** @param {number} t */
@@ -158,10 +176,10 @@ export function createPlayer(host) {
       const o = HEADER + i * RECORD;
       const p = before && before[2] === now[2] && before[8] > i ? HEADER + i * RECORD : -1;
       const at = p >= 0 && before ? [before[o + 1] + (now[o + 1] - before[o + 1]) * alpha, before[o + 2] + (now[o + 2] - before[o + 2]) * alpha] : [now[o + 1], now[o + 2]];
-      drawn.push({ key: world.sprites[now[o]], at, pivot: [now[o + 3], now[o + 4]], flip: Boolean(now[o + 5]) });
+      drawn.push({ key: world.sprites[now[o]], at, pivot: [now[o + 3], now[o + 4]], flip: Boolean(now[o + 5]), frame: now[o + 6] >= 0 ? now[o + 6] : null });
     }
     host.want([...room.planes.flatMap((p) => p.items.map((i) => i.image)), ...drawn.map((d) => d.key)]);
-    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, sprites: drawn });
+    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, anims: host.anims, sprites: drawn });
     const ratio = window.devicePixelRatio || 1;
     host.gpu()?.draw(sprites, view, width, height, ratio, host.ground());
     // Over it: what is outside the game's view, a door's fade, and a readout.
@@ -186,9 +204,24 @@ export function createPlayer(host) {
       g.fillRect(box[0], box[1], box[2], box[3]);
       g.globalAlpha = 1;
     }
+    // Boxes over what is drawn, when asked: where each is in this frame.
+    if (host.boxes?.()) {
+      for (const d of drawn) {
+        const anim = d.frame === null || d.frame === undefined ? null : host.anims?.get(d.key);
+        for (const b of anim?.boxes ?? []) {
+          const rect = d.frame === null || d.frame === undefined ? null : b.frames[d.frame];
+          if (!rect) continue;
+          const [x, y, w, h] = boxInRoom(rect, d.at, d.pivot, d.flip);
+          g.strokeStyle = b.kind === "hit" ? "#ff4d5e" : b.kind === "hurt" ? "#4dd88a" : "#f4c95d";
+          g.lineWidth = 1.5;
+          g.strokeRect(view.x + x * view.scale, view.y + y * view.scale, w * view.scale, h * view.scale);
+        }
+      }
+    }
     g.font = "11px ui-monospace, monospace";
     g.fillStyle = "rgba(255, 255, 255, 0.7)";
-    g.fillText(`${room.id} · ${now[1]}${playback ? " · playing back" : ""}${now[6] ? ` · ${now[6]} hurt` : ""}`, box[0] + 8, box[1] + 16);
+    const said = cue && now[1] - cue.tick < CUE_SHOWN ? ` · ${cue.name}` : "";
+    g.fillText(`${room.id} · ${now[1]}${playback ? " · playing back" : ""}${now[6] ? ` · ${now[6]} hurt` : ""}${said}`, box[0] + 8, box[1] + 16);
   }
 
   /** Whether a key is Proton's even while the game plays: ⌘ with anything
@@ -270,6 +303,7 @@ export function createPlayer(host) {
       recording = [];
       playback = event.replay ? { runs: event.replay, at: 0, left: event.replay[0]?.[1] ?? 0 } : null;
       before = null;
+      cue = null;
       now = frameWords();
       playing = true;
       paused = false;
@@ -293,5 +327,7 @@ export function createPlayer(host) {
     paused: () => paused,
     /** The frame's header and records, for tests. */
     frame: () => (now ? [...now] : null),
+    /** The last cue said, for tests. */
+    cue: () => cue?.name ?? null,
   };
 }

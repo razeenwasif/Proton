@@ -7,4 +7,8 @@ export type GameImportRow = { source: string, room: string, planes: number, item
 /**
  * Saved again since it was imported.
  */
-changed: boolean, };
+changed: boolean, 
+/**
+ * The animation it made, when it was brought in as one.
+ */
+anim: string, };

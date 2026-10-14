@@ -179,10 +179,13 @@ export function createGameRender(canvas, hooks = {}) {
         data[o + 1] = s.y;
         data[o + 2] = s.w;
         data[o + 3] = s.h;
-        data[o + 4] = s.flip ? 1 : 0;
-        data[o + 5] = 0;
-        data[o + 6] = s.flip ? 0 : 1;
-        data[o + 7] = 1;
+        // The part of its texture it is — a frame of a sheet — flipped by
+        // swapping its sides.
+        const uv = s.uv ?? [0, 0, 1, 1];
+        data[o + 4] = s.flip ? uv[2] : uv[0];
+        data[o + 5] = uv[1];
+        data[o + 6] = s.flip ? uv[0] : uv[2];
+        data[o + 7] = uv[3];
         data.set(s.tint, o + 8);
         data[o + 12] = s.opacity;
         data[o + 13] = (s.rot * Math.PI) / 180;

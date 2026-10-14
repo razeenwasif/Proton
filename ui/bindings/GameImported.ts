@@ -24,4 +24,8 @@ files: Array<string>,
  * The file's size and time when imported, to tell cheaply when it has
  * changed since.
  */
-stamp: string, };
+stamp: string, 
+/**
+ * The animation it made, when it was brought in as one.
+ */
+anim: string, };

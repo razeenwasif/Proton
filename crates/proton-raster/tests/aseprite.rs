@@ -2,154 +2,11 @@
 //! compressed and linked, tags, and pixels in RGBA, grayscale or a palette's
 //! indices — made here byte by byte as Aseprite's file format describes,
 //! since no art of anyone's is kept in the tests. What Canvas cannot hold is
-//! said.
+//! said. Slices and the text cels carry are kept for Game.
 
-use std::io::Write;
-
+use proton_raster::ase_write::{cel, layer, linked, old_palette, palette, slice, tags, user_text, Ase};
 use proton_raster::port::{self, Image};
 use proton_raster::{aseprite, Blend, Direction, Preset};
-
-/// A file being made: chunks frame by frame.
-struct Ase {
-    width: u16,
-    height: u16,
-    depth: u16,
-    transparent: u8,
-    frames: Vec<(u16, Vec<Vec<u8>>)>,
-}
-
-fn string(out: &mut Vec<u8>, s: &str) {
-    out.extend((s.len() as u16).to_le_bytes());
-    out.extend(s.as_bytes());
-}
-
-fn chunk(kind: u16, body: Vec<u8>) -> Vec<u8> {
-    let mut out = ((body.len() + 6) as u32).to_le_bytes().to_vec();
-    out.extend(kind.to_le_bytes());
-    out.extend(body);
-    out
-}
-
-/// flags: 1 visible, 8 background, 64 reference; kind: 0 image, 1 group, 2 tilemap.
-fn layer(flags: u16, kind: u16, level: u16, blend: u16, opacity: u8, name: &str) -> Vec<u8> {
-    let mut b = Vec::new();
-    for w in [flags, kind, level, 0, 0, blend] {
-        b.extend(w.to_le_bytes());
-    }
-    b.push(opacity);
-    b.extend([0; 3]);
-    string(&mut b, name);
-    if kind == 2 {
-        b.extend(0u32.to_le_bytes());
-    }
-    chunk(0x2004, b)
-}
-
-fn cel_head(layer: u16, x: i16, y: i16, opacity: u8, kind: u16) -> Vec<u8> {
-    let mut b = Vec::new();
-    b.extend(layer.to_le_bytes());
-    b.extend(x.to_le_bytes());
-    b.extend(y.to_le_bytes());
-    b.push(opacity);
-    b.extend(kind.to_le_bytes());
-    b.extend(0i16.to_le_bytes());
-    b.extend([0; 5]);
-    b
-}
-
-#[allow(clippy::too_many_arguments)]
-fn cel(layer: u16, x: i16, y: i16, opacity: u8, w: u16, h: u16, pixels: &[u8], compressed: bool) -> Vec<u8> {
-    let mut b = cel_head(layer, x, y, opacity, if compressed { 2 } else { 0 });
-    b.extend(w.to_le_bytes());
-    b.extend(h.to_le_bytes());
-    if compressed {
-        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        z.write_all(pixels).unwrap();
-        b.extend(z.finish().unwrap());
-    } else {
-        b.extend(pixels);
-    }
-    chunk(0x2005, b)
-}
-
-fn linked(layer: u16, frame: u16) -> Vec<u8> {
-    let mut b = cel_head(layer, 0, 0, 255, 1);
-    b.extend(frame.to_le_bytes());
-    chunk(0x2005, b)
-}
-
-fn tags(list: &[(u16, u16, u8, u16, &str)]) -> Vec<u8> {
-    let mut b = (list.len() as u16).to_le_bytes().to_vec();
-    b.extend([0; 8]);
-    for (from, to, direction, repeat, name) in list {
-        b.extend(from.to_le_bytes());
-        b.extend(to.to_le_bytes());
-        b.push(*direction);
-        b.extend(repeat.to_le_bytes());
-        b.extend([0; 6 + 3 + 1]);
-        string(&mut b, name);
-    }
-    chunk(0x2018, b)
-}
-
-fn palette(colors: &[[u8; 4]]) -> Vec<u8> {
-    let mut b = (colors.len() as u32).to_le_bytes().to_vec();
-    b.extend(0u32.to_le_bytes());
-    b.extend((colors.len() as u32 - 1).to_le_bytes());
-    b.extend([0; 8]);
-    for (i, c) in colors.iter().enumerate() {
-        // The second colour named, as Aseprite may.
-        b.extend((if i == 1 { 1u16 } else { 0 }).to_le_bytes());
-        b.extend(c);
-        if i == 1 {
-            string(&mut b, "Ink");
-        }
-    }
-    chunk(0x2019, b)
-}
-
-fn old_palette(colors: &[[u8; 3]]) -> Vec<u8> {
-    let mut b = 1u16.to_le_bytes().to_vec();
-    b.push(0);
-    b.push(colors.len() as u8);
-    for c in colors {
-        b.extend(c);
-    }
-    chunk(0x0004, b)
-}
-
-impl Ase {
-    fn bytes(&self) -> Vec<u8> {
-        let mut body = Vec::new();
-        for (duration, chunks) in &self.frames {
-            let content: Vec<u8> = chunks.concat();
-            body.extend(((content.len() + 16) as u32).to_le_bytes());
-            body.extend(0xf1fau16.to_le_bytes());
-            body.extend((chunks.len() as u16).to_le_bytes());
-            body.extend(duration.to_le_bytes());
-            body.extend([0; 2]);
-            body.extend((chunks.len() as u32).to_le_bytes());
-            body.extend(content);
-        }
-        let mut head = Vec::new();
-        head.extend(((body.len() + 128) as u32).to_le_bytes());
-        head.extend(0xa5e0u16.to_le_bytes());
-        for w in [self.frames.len() as u16, self.width, self.height, self.depth] {
-            head.extend(w.to_le_bytes());
-        }
-        head.extend(1u32.to_le_bytes()); // layer opacity is valid
-        head.extend(100u16.to_le_bytes());
-        head.extend([0; 8]);
-        head.push(self.transparent);
-        head.extend([0; 3]);
-        head.extend(0u16.to_le_bytes());
-        head.extend([1, 1]);
-        head.extend([0; 128 - 36]);
-        assert_eq!(head.len(), 128);
-        head.extend(body);
-        head
-    }
-}
 
 fn rgba(n: usize, c: [u8; 4]) -> Vec<u8> {
     c.repeat(n)
@@ -277,4 +134,39 @@ fn a_file_that_is_not_whole_is_refused_not_guessed() {
     // A cel claiming more pixels than it has.
     let short = Ase { width: 2, height: 2, depth: 32, transparent: 0, frames: vec![(80, vec![layer(1, 0, 0, 0, 255, "A"), cel(0, 0, 0, 255, 2, 2, &rgba(2, RED), true)])] };
     assert!(aseprite::read(&short.bytes()).is_err());
+}
+
+#[test]
+fn slices_and_the_text_cels_carry_are_kept() {
+    let bytes = Ase {
+        width: 16,
+        height: 16,
+        depth: 32,
+        transparent: 0,
+        frames: vec![
+            (
+                100,
+                vec![
+                    layer(1, 0, 0, 0, 255, "Body"),
+                    cel(0, 0, 0, 255, 2, 2, &rgba(4, RED), false),
+                    user_text("step"),
+                    slice("hitbox", &[(0, [2, 3, 8, 6], None), (1, [4, 3, 8, 6], None)]),
+                    user_text("hit"),
+                    slice("feet", &[(0, [6, 12, 4, 4], Some([2, 4]))]),
+                    tags(&[(0, 1, 0, 0, "walk")]),
+                    user_text("ignored: a tag's"),
+                ],
+            ),
+            (100, vec![cel(0, 1, 0, 255, 2, 2, &rgba(4, RED), true)]),
+        ],
+    }
+    .bytes();
+    let sprite = aseprite::read(&bytes).unwrap();
+    assert_eq!(sprite.texts, [aseprite::CelText { layer: 0, frame: 0, text: "step".into() }]);
+    assert_eq!(sprite.slices.len(), 2);
+    let hit = &sprite.slices[0];
+    assert_eq!((hit.name.as_str(), hit.text.as_deref(), hit.keys.len()), ("hitbox", Some("hit"), 2));
+    assert_eq!((hit.keys[1].frame, hit.keys[1].rect, hit.keys[1].pivot), (1, [4, 3, 8, 6], None));
+    assert_eq!(sprite.slices[1].keys[0].pivot, Some([2, 4]));
+    assert_eq!(sprite.tags[0].name, "walk");
 }

@@ -6,6 +6,7 @@
 //! rooms/<id>.room.json       a room: planes of art, collision, entities, lights
 //! prefabs/<id>.prefab.json   a thing rooms place: a sprite, a body, a behaviour
 //! art/…                      the images, and a sidecar for each
+//! art/…/<name>.anim.json     an animation: frames on sheets, clips, boxes, cues
 //! ```
 //!
 //! Every struct here defaults field by field, so a file written by hand needs
@@ -613,6 +614,10 @@ pub struct Prefab {
     pub size: [i32; 2],
     pub health: Option<i32>,
     pub behaviour: Behaviour,
+    /// For an animated sprite, the clip each state plays — `idle`, `run`,
+    /// `jump`, `fall`, `dash`, `wall`, `hurt` — where it is not the clip of
+    /// the state's own name.
+    pub clips: BTreeMap<String, String>,
 }
 
 impl Default for Prefab {
@@ -626,9 +631,14 @@ impl Default for Prefab {
             size: [32, 32],
             health: None,
             behaviour: Behaviour::default(),
+            clips: BTreeMap::new(),
         }
     }
 }
+
+/// The states an animated thing plays a clip in, in the order the sim
+/// numbers them.
+pub const STATES: [&str; 7] = ["idle", "run", "jump", "fall", "dash", "wall", "hurt"];
 
 /// What it does, from the behaviours built in. A game's own logic is a later
 /// question; these are what a first game needs.
@@ -691,6 +701,137 @@ pub struct Chunk {
     pub size: [u32; 2],
 }
 
+/* ── art/…/<name>.anim.json ───────────────────────────────────────── */
+
+/// An animation: its frames, each a rectangle of a sheet placed on the
+/// sprite's own canvas, and the clips — runs of frames with names — a
+/// prefab plays. Every importer — Aseprite's files, sprite sheets and their
+/// JSON — makes one of these, so the game reads one kind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameAnim")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Anim {
+    pub format: u32,
+    /// What it was made from: an `.aseprite`, a sheet's `.json`.
+    pub source: String,
+    /// The sprite's canvas, width and height: what a frame is placed on, and
+    /// what a prefab's pivot is measured on.
+    pub size: [u32; 2],
+    /// The images the frames are cut from, relative to the game's folder.
+    pub sheets: Vec<String>,
+    pub frames: Vec<AnimFrame>,
+    pub clips: Vec<Clip>,
+    /// Rectangles over the frames — a hitbox, a hurtbox — from slices.
+    pub boxes: Vec<AnimBox>,
+    /// Names said when a frame is shown: a footstep, a swing.
+    pub cues: Vec<Cue>,
+}
+
+impl Default for Anim {
+    fn default() -> Anim {
+        Anim { format: FORMAT, source: String::new(), size: [0, 0], sheets: Vec::new(), frames: Vec::new(), clips: Vec::new(), boxes: Vec::new(), cues: Vec::new() }
+    }
+}
+
+impl Anim {
+    /// The clip each state plays, by `STATES`' order: the prefab's choice,
+    /// the clip of the state's own name, a near one — a run walks when there
+    /// is no run, a fall is a jump coming down — and the first clip at last.
+    pub fn state_clips(&self, chosen: &BTreeMap<String, String>) -> Vec<Option<u32>> {
+        let by_name = |name: &str| self.clips.iter().position(|c| c.name.eq_ignore_ascii_case(name)).map(|i| i as u32);
+        let near: [&[&str]; 7] = [&["idle", "stand"], &["run", "walk", "move"], &["jump", "rise"], &["fall", "jump"], &["dash", "run", "walk"], &["wall", "slide", "fall"], &["hurt", "hit", "idle"]];
+        STATES
+            .iter()
+            .zip(near)
+            .map(|(state, names)| {
+                chosen
+                    .get(*state)
+                    .and_then(|c| by_name(c))
+                    .or_else(|| names.iter().find_map(|n| by_name(n)))
+                    .or_else(|| (!self.clips.is_empty()).then_some(0))
+            })
+            .collect()
+    }
+}
+
+/// A frame: where on which sheet, where on the sprite's canvas, how long.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameAnimFrame")]
+#[serde(default, rename_all = "camelCase")]
+pub struct AnimFrame {
+    /// Which sheet, by its place in `sheets`.
+    pub sheet: u32,
+    /// Left, top, width and height on the sheet.
+    pub rect: [u32; 4],
+    /// Where the rectangle's top left is on the sprite's canvas: a frame
+    /// trimmed of what is clear sits where it was.
+    pub offset: [i32; 2],
+    /// Milliseconds it is shown.
+    pub ms: u32,
+    /// Its feet on the sprite's canvas, when a slice says where they are in
+    /// this frame; else the prefab's pivot.
+    pub pivot: Option<[i32; 2]>,
+}
+
+/// A run of frames with a name, played as one animation.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameClip")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Clip {
+    pub name: String,
+    /// Its first and last frame, from 0.
+    pub from: u32,
+    pub to: u32,
+    pub direction: Direction,
+    /// How many times it plays before it holds its last frame; 0 for as long
+    /// as it is played.
+    pub repeat: u32,
+}
+
+/// The order a clip's frames play in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameDirection")]
+#[serde(rename_all = "camelCase")]
+pub enum Direction {
+    #[default]
+    Forward,
+    Reverse,
+    PingPong,
+    PingPongReverse,
+}
+
+/// A rectangle over the frames: where it is in each, on the sprite's canvas.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameAnimBox")]
+#[serde(default, rename_all = "camelCase")]
+pub struct AnimBox {
+    pub name: String,
+    pub kind: BoxKind,
+    /// Left, top, width and height in each frame; none where it is not.
+    pub frames: Vec<Option<[i32; 4]>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameBoxKind")]
+#[serde(rename_all = "lowercase")]
+pub enum BoxKind {
+    /// What hurts what it touches: a sword's swing.
+    Hit,
+    /// What can be hurt.
+    Hurt,
+    #[default]
+    Other,
+}
+
+/// A name said when a frame is shown.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameCue")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Cue {
+    pub frame: u32,
+    pub name: String,
+}
+
 /* ── import.json ──────────────────────────────────────────────────── */
 
 /// What art was brought in from where: importing a file again replaces what
@@ -729,6 +870,8 @@ pub struct Imported {
     /// The file's size and time when imported, to tell cheaply when it has
     /// changed since.
     pub stamp: String,
+    /// The animation it made, when it was brought in as one.
+    pub anim: String,
 }
 
 impl Default for Imported {
@@ -743,6 +886,7 @@ impl Default for Imported {
             items: Vec::new(),
             files: Vec::new(),
             stamp: String::new(),
+            anim: String::new(),
         }
     }
 }

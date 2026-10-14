@@ -1628,9 +1628,45 @@ jump height shows as a route that worked before the edit and fails after it.
 Its path is sent to the window (`GamePath`) and drawn over the rooms it
 crossed until ⎋. `@game` sends the summary and the room on screen.
 
-**What comes next** (the plan's G8–G14): lighting and atmosphere, animation
-(Aseprite, DragonBones, Spine), combat, the world map with ability gates, hot
-reload and a web export.
+**Animation** (G9a). Every importer makes one kind of file, an
+`.anim.json`: frames, each a rectangle of a sheet placed where it sits on the
+sprite's own canvas and shown for its milliseconds; clips, runs of frames
+played on, back, or to the end and back, as many times as they say; boxes
+over the frames; and cues, names said when a frame is shown. An Aseprite
+file (read by Canvas's reader, now with slices and user data) has each frame
+laid together by Canvas's compositor — hidden layers out, blend modes kept —
+trimmed of what is clear, the same picture kept once, and packed onto sheets
+of at most 2048 pixels a side with clear pixels between; its tags become
+clips; a slice called `hit…` or `attack…` a hitbox, `hurt…` a hurtbox, and
+one called `feet`, `pivot`, `origin` or `anchor` where the sprite stands in
+each frame; a cel's text a cue. A sprite sheet's JSON — Aseprite's, as an
+array or a map of frames (put back in their numbers' order), or Canvas's —
+is read as it is, the sheet left where it is; a frame turned on its sheet is
+refused. Canvas's Send makes an animated canvas the open game's animation
+rather than a still in its room. The images are written at once, as an
+import's are; `import.json` records what each made.
+
+A prefab plays an animation once its sprite names it: each state the sim
+knows — standing, running, rising, falling, dashing, on a wall, hurt — plays
+the clip of its name, or the one the prefab's `clips` map chooses, or the
+nearest (a fall is a jump coming down). The sim plays it in whole numbers:
+frame times cooked to ticks, the clip begun when the state changes, held on
+its last frame when played out, and its cues said as `Happened::Cue`, so a
+run's frames and cues are the same natively and in WebAssembly (a second
+committed replay checks it, frames and cues counted) and the agent's
+`game_play` says which cues it heard. A still player's run hashes as it did
+before animation, and its cooked world is byte for byte what it was. The
+runtime's ABI is 2: a record names its frame and clip, and `pg_cues` the
+cues of the last tick. The window draws a frame as a part of its sheet,
+flipped about the feet; the editor shows each thing as the frame it rests
+on; an animation's inspector plays any clip small and says its boxes, cues
+and who plays it; a prefab's says which clip each state plays; and the Run
+tab can draw hitboxes and hurtboxes over a run.
+
+**What comes next** (the plan's G8–G14): skeletal animation (DragonBones,
+then Spine after its licence is decided), lighting and atmosphere, combat on
+the boxes animations now carry, the world map with ability gates, hot reload
+and a web export.
 
 ### Canvas
 

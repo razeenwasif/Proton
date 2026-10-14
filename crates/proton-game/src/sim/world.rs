@@ -129,13 +129,39 @@ pub struct Moves {
 }
 
 /// What the player is: a box, `half` wide each side of its feet and `height`
-/// tall, drawn as `sprite` from `pivot`.
+/// tall, drawn as `sprite` from `pivot` — or, animated, as `anim` plays it,
+/// each state's clip by `states` (by [`crate::format::STATES`]' order).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Body {
     pub half: Fx,
     pub height: Fx,
     pub sprite: Option<u16>,
     pub pivot: [i32; 2],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anim: Option<u16>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub states: Vec<Option<u32>>,
+}
+
+/// An animation as a run plays it: each frame's ticks and feet, its clips,
+/// and the cues said at frames.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Animation {
+    /// Each frame: how many ticks it is shown, and its feet on the sprite.
+    pub frames: Vec<(u32, [i32; 2])>,
+    pub clips: Vec<Run>,
+    /// (frame, the cue's place in [`World::cues`]).
+    pub cues: Vec<(u32, u16)>,
+}
+
+/// A clip: its frames, which way they play (0 on, 1 back, 2 to the end and
+/// back, 3 back and on again), and how many times before it holds (0 never).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Run {
+    pub from: u32,
+    pub to: u32,
+    pub direction: u8,
+    pub repeat: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +177,12 @@ pub struct World {
     /// The images frames name, by index.
     pub sprites: Vec<String>,
     pub start: (u16, [Fx; 2]),
+    /// The animations bodies play.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anims: Vec<Animation>,
+    /// Cues' names, by index.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cues: Vec<String>,
 }
 
 impl World {
@@ -218,15 +250,49 @@ impl World {
             .iter()
             .map(|p| p.get())
             .find(|p| game.player.ends_with(&format!("{}.prefab.json", p.id)) || p.behaviour.kind == BehaviourKind::Player);
-        let body = match player {
+        let mut anims = Vec::new();
+        let mut cues: Vec<String> = Vec::new();
+        let mut body = match player {
             Some(p) => Body {
                 half: fx(p.size[0] as f64 / 2.0),
                 height: fx(p.size[1] as f64),
                 sprite: p.sprite.as_deref().map(&mut sprite),
                 pivot: p.pivot,
+                anim: None,
+                states: Vec::new(),
             },
-            None => Body { half: fx(16.0), height: fx(64.0), sprite: None, pivot: [16, 64] },
+            None => Body { half: fx(16.0), height: fx(64.0), sprite: None, pivot: [16, 64], anim: None, states: Vec::new() },
         };
+        // An animated player: its animation read now, its times in ticks.
+        if let Some(p) = player.filter(|p| p.sprite.as_deref().is_some_and(|s| s.ends_with(".anim.json"))) {
+            let rel = p.sprite.as_deref().unwrap_or_default();
+            let text = std::fs::read_to_string(project.root().join(rel)).map_err(|e| format!("the player's animation {rel} cannot be read: {e}"))?;
+            let anim: crate::format::Anim = crate::doc::parse(rel, &text)?;
+            if anim.frames.is_empty() || anim.clips.is_empty() {
+                return Err(format!("the player's animation {rel} has no frames or no clips"));
+            }
+            let mut cue = |name: &str| -> u16 {
+                match cues.iter().position(|c| c == name) {
+                    Some(i) => i as u16,
+                    None => {
+                        cues.push(name.to_string());
+                        (cues.len() - 1) as u16
+                    }
+                }
+            };
+            let frames = anim.frames.len() as u32;
+            anims.push(Animation {
+                frames: anim.frames.iter().map(|f| (((f.ms as f64 * t / 1000.0).round() as u32).max(1), f.pivot.unwrap_or(p.pivot))).collect(),
+                clips: anim
+                    .clips
+                    .iter()
+                    .map(|c| Run { from: c.from.min(frames - 1), to: c.to.min(frames - 1).max(c.from.min(frames - 1)), direction: c.direction as u8, repeat: c.repeat })
+                    .collect(),
+                cues: anim.cues.iter().filter(|c| c.frame < frames).map(|c| (c.frame, cue(&c.name))).collect(),
+            });
+            body.anim = Some(0);
+            body.states = anim.state_clips(&p.clips);
+        }
         let ids: Vec<String> = project.rooms.iter().map(|r| r.get().id.clone()).collect();
         let index = |id: &str| ids.iter().position(|r| r == id).map(|i| i as u16);
         let rect = |r: [i32; 4]| [fx(r[0] as f64), fx(r[1] as f64), fx(r[2] as f64), fx(r[3] as f64)];
@@ -319,6 +385,8 @@ impl World {
             abilities,
             sprites,
             start: (start_room, start_at),
+            anims,
+            cues,
         })
     }
 }

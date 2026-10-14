@@ -9,11 +9,16 @@
  * Nothing is kept here that the core does not say. An edit is sent as a
  * batch of ops on one of the game's documents (`gameEdit`); the core
  * applies it whole or not at all and sends the room back, so what is drawn
- * is always what would be saved. */
+ * is always what would be saved.
+ *
+ * An animation (`.anim.json`, made from an Aseprite file or a sprite sheet)
+ * is loaded as its sheets; what stands in a room is drawn as the frame it
+ * rests on, and Play draws the frame the run is at. Its inspector plays a
+ * clip small, and says its boxes and cues. */
 
 import { escapeHtml as esc } from "./html.js";
 import { draw, handle, pick, toRoom, toStage } from "./game-overlay.js";
-import { corner, fitCam, layout, maskOf, pickItem, rgb, toPlane, viewOf } from "./game-scene.js";
+import { corner, fitCam, layout, maskOf, pickItem, restingFrame, rgb, toPlane, viewOf } from "./game-scene.js";
 import { createGameRender } from "./game-render.js";
 import { createPlayer } from "./game-play.js";
 import { readGame } from "./bridge.js";
@@ -23,6 +28,8 @@ import { readGame } from "./bridge.js";
 /** @typedef {import('./bindings/GameFound').GameFound} Found */
 /** @typedef {import('./bindings/GameTemplate').GameTemplate} Template */
 /** @typedef {import('./game-overlay.js').Selected} Selected */
+/** @typedef {import('./bindings/GameAnim').GameAnim} Anim */
+/** @typedef {import('./bindings/GamePrefab').GamePrefab} Prefab */
 
 /** The Game mode's keys, as ? lists them. */
 const KEYS = /** @type {[string, string][]} */ ([
@@ -41,7 +48,16 @@ const SIDES = ["world", "layers", "entities", "assets"];
 /** Whether an asset is an image to place: a picture, or one cut into pieces. @param {string} a */
 const placeable = (a) => /\.(png|jpe?g|webp)$/i.test(a) || a.endsWith(".img.json");
 /** Whether an asset is art to bring in as planes. @param {string} a */
-const importable = (a) => /\.(psd|png)$/i.test(a);
+const importable = (a) => /\.(psd|png)$/i.test(a) || animatable(a);
+/** Whether an asset is made into an animation: an Aseprite file, or a sprite sheet's JSON. @param {string} a */
+const animatable = (a) => /\.(aseprite|ase)$/i.test(a) || (/\.json$/i.test(a) && !a.endsWith(".anim.json") && !a.endsWith(".img.json"));
+/** Whether an asset is an animation a prefab can play. @param {string} a */
+const animation = (a) => a.endsWith(".anim.json");
+
+/** The states an animated thing plays a clip in (proton-game's `STATES`), and what each is. */
+const STATES = /** @type {[string, string][]} */ ([
+  ["idle", "Standing"], ["run", "Running"], ["jump", "Rising"], ["fall", "Falling"], ["dash", "Dashing"], ["wall", "On a wall"], ["hurt", "Hurt"],
+]);
 
 /** How far a point is from a segment. @param {number} px @param {number} py @param {number[]} a @param {number[]} b */
 function segmentDistance(px, py, a, b) {
@@ -101,6 +117,10 @@ export function createGame(host) {
   let startPaused = false;
   /** Why the last run could not start, shown in the Run tab. */
   let playError = "";
+  /** Whether Play draws animations' boxes. */
+  let showBoxes = pref("boxes", "") === "1";
+  /** The inspector's preview of an animation: which clip, and its timer. */
+  let preview = { clip: "", timer: 0, frame: 0, forward: true };
   /** Where the agent's last run went, room by room: drawn until ⎋ or a run of
    *  the person's own. @type {{room: string, points: number[][], hurt: number[][]}[]} */
   let agentPath = [];
@@ -268,8 +288,12 @@ export function createGame(host) {
       const problems = project.problems.length
         ? `<h5 class="game-head warn">To fix</h5>${project.problems.map((p) => `<p class="game-problem">${esc(p)}</p>`).join("")}`
         : "";
+      const prefabRows = project.prefabs
+        .map((p) => row("prefab", p.id, p.name || p.id, esc(p.sprite && animation(p.sprite) ? "animated" : p.behaviour.kind)))
+        .join("");
       box.innerHTML =
         row("game", "game", "Game settings", project.gameDirty ? `<span class="dot"></span>` : "") +
+        (prefabRows ? `<h5 class="game-head">Prefabs</h5>${prefabRows}` : "") +
         areas
           .map((a) => `<h5 class="game-head"><i class="game-swatch" style="background:${esc(a.color || "transparent")}"></i>${esc(a.name || a.id)}</h5>${rooms(a.id)}`)
           .join("") +
@@ -356,7 +380,7 @@ export function createGame(host) {
     renderSide();
     renderInspector();
     paint();
-    if (what && (what.kind !== "asset" || importable(what.id)) && what.kind !== "game") showPanel("inspector");
+    if (what && (what.kind !== "asset" || importable(what.id) || animation(what.id))) showPanel("inspector");
   }
 
   /* ── the stage ───────────────────────────────────────────────── */
@@ -398,6 +422,10 @@ export function createGame(host) {
   /** Each image's opacity, small, so a click finds what is drawn there.
    *  @type {Map<string, {w: number, h: number, alpha: Uint8Array}>} */
   const masks = new Map();
+  /** Animations loaded, by their `.anim.json`. @type {Map<string, Anim>} */
+  const anims = new Map();
+  /** A sheet's pixels, for the inspector's preview to draw from. @type {Map<string, ImageBitmap>} */
+  const bitmaps = new Map();
   /** Whether an image is drawn at u, v. @param {string} key @param {number} u @param {number} v */
   const solid = (key, u, v) => {
     const m = masks.get(key);
@@ -424,6 +452,24 @@ export function createGame(host) {
     const filter = project?.game.view.filter === "nearest" ? "nearest" : "smooth";
     for (const key of wanted) {
       if (!key || images.has(key) || loading.has(key) || failed.has(key)) continue;
+      // An animation: what its frames are first, then its sheets.
+      if (key.endsWith(".anim.json")) {
+        loading.add(key);
+        readGame(key)
+          .then((bytes) => JSON.parse(new TextDecoder().decode(bytes)))
+          .then((anim) => {
+            anims.set(key, anim);
+            images.set(key, anim.size ?? [0, 0]);
+            loadKeys(anim.sheets ?? []);
+            if (selected?.kind === "asset" && selected.id === key) renderInspector();
+          })
+          .catch(() => failed.add(key))
+          .finally(() => {
+            loading.delete(key);
+            if (!playing()) paint();
+          });
+        continue;
+      }
       // An image cut up: what its pieces are first, then the pieces.
       if (key.endsWith(".img.json")) {
         loading.add(key);
@@ -462,18 +508,28 @@ export function createGame(host) {
   }
 
   /** What stands in the room drawn as its prefab's sprite: enemies, props,
-   *  and the player where a run starts. @param {Room} r */
+   *  and the player where a run starts — an animation as the frame it rests
+   *  on, on that frame's feet. @param {Room} r */
   function sprites(r) {
     if (!project) return [];
     const prefabs = new Map(project.prefabs.map((p) => [p.id, p]));
+    /** @type {import('./game-scene.js').Standing[]} */
     const out = [];
+    const standing = (/** @type {Prefab} */ prefab, /** @type {number[]} */ at) => {
+      if (!prefab.sprite) return;
+      const anim = anims.get(prefab.sprite);
+      if (!anim && animation(prefab.sprite)) return void loadKeys([prefab.sprite]);
+      const frame = anim ? restingFrame(anim, prefab.clips) : null;
+      const pivot = (anim && frame !== null ? anim.frames[frame]?.pivot : null) ?? prefab.pivot;
+      out.push({ key: prefab.sprite, at, pivot, frame });
+    };
     for (const e of r.entities) {
       const prefab = prefabs.get(e.prefab);
-      if (prefab?.sprite && e.at) out.push({ key: prefab.sprite, at: e.at, pivot: prefab.pivot });
+      if (prefab && e.at) standing(prefab, e.at);
     }
     const player = project.prefabs.find((p) => project && project.game.player.endsWith(`${p.id}.prefab.json`));
     const start = project.game.start.room === r.id ? r.spawns.find((s) => s.id === project?.game.start.spawn) : null;
-    if (player?.sprite && start) out.push({ key: player.sprite, at: start.at, pivot: player.pivot });
+    if (player && start) standing(player, start.at);
     return out;
   }
 
@@ -578,7 +634,7 @@ export function createGame(host) {
   function how() {
     const c = cam();
     const view = /** @type {[number, number]} */ ([project?.game.view.width ?? 1920, project?.game.view.height ?? 1080]);
-    return { focal: project?.game.view.focal ?? 1000, view, center: c?.center ?? /** @type {[number, number]} */ ([0, 0]), sizes: images, parts, hidden, solo, sprites: room ? sprites(draft ?? room) : [] };
+    return { focal: project?.game.view.focal ?? 1000, view, center: c?.center ?? /** @type {[number, number]} */ ([0, 0]), sizes: images, parts, anims, hidden, solo, sprites: room ? sprites(draft ?? room) : [] };
   }
 
   /** What the scene draws now. */
@@ -651,6 +707,8 @@ export function createGame(host) {
     gpu: () => gpu,
     sizes: images,
     parts,
+    anims,
+    boxes: () => showBoxes,
     want: (keys) => loadKeys(keys),
     stageSize,
     focal: () => project?.game.view.focal ?? 1000,
@@ -1116,6 +1174,20 @@ export function createGame(host) {
     if (selected?.kind === "asset") {
       return { title: selected.id.split("/").pop() ?? selected.id, target: "game", fields: [{ label: "File", path: [], value: selected.id, type: "read" }] };
     }
+    if (selected?.kind === "prefab") {
+      const p = project.prefabs.find((x) => x.id === selected?.id);
+      if (!p) return null;
+      const looks = project.assets.filter((a) => placeable(a) || animation(a)).map((a) => /** @type {[string, string]} */ ([a, a]));
+      /** @type {Field[]} */
+      const fields = [
+        { label: "Name", path: ["name"], value: p.name, type: "text" },
+        { label: "Looks", path: ["sprite"], value: p.sprite ?? "", type: "select", options: looks },
+        { label: "Feet", path: ["pivot"], value: p.pivot, type: "pair", hint: "from its picture's top left, where no slice says" },
+        { label: "Body", path: ["size"], value: p.size, type: "pair", hint: "width × height, centred on its feet" },
+        { label: "Does", path: ["behaviour", "kind"], value: p.behaviour.kind, type: "select", options: [["still", "Stands still"], ["player", "The player"], ["crawler", "Crawls"], ["flyer", "Flies"], ["charger", "Charges"], ["turret", "Shoots"]] },
+      ];
+      return { title: p.name || p.id, target: `prefab:${p.id}`, fields };
+    }
     return {
       title: room.id,
       target,
@@ -1172,7 +1244,133 @@ export function createGame(host) {
       `<div class="game-fields" data-game-target="${esc(shape.target)}">${shape.fields
         .map((f, i) => `<label class="game-field"><span>${esc(f.label)}</span>${input(f, i)}${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`)
         .join("")}</div>` +
-      (selected?.kind === "asset" && importable(selected.id) ? importForm(selected.id) : "");
+      (selected?.kind === "asset" && importable(selected.id) ? importForm(selected.id) : "") +
+      (selected?.kind === "asset" && animation(selected.id) ? animPanel(selected.id) : "") +
+      (selected?.kind === "prefab" ? clipsPanel(selected.id) : "");
+    startPreview();
+  }
+
+  /** A prefab's clips, state by state, when what it looks like is an animation. @param {string} id */
+  function clipsPanel(id) {
+    const p = project?.prefabs.find((x) => x.id === id);
+    if (!p?.sprite || !animation(p.sprite)) return "";
+    const anim = anims.get(p.sprite);
+    if (!anim) {
+      loadKeys([p.sprite]);
+      return `<p class="game-faint">Loading ${esc(p.sprite)}…</p>`;
+    }
+    const chosen = p.clips ?? {};
+    return `<section class="game-tool" data-game-clips="${esc(p.id)}"><h4>What it plays</h4>` +
+      `<p class="game-faint">Each state plays the clip of its name, unless one is chosen here.</p><div class="game-fields">` +
+      STATES.map(([state, label]) => {
+        const own = anim.clips.some((c) => c.name.toLowerCase() === state);
+        return `<label class="game-field"><span>${label}</span><select data-game-clip="${state}"><option value="">${own ? `${state} — its own` : "— the nearest"}</option>${anim.clips
+          .map((c) => `<option value="${esc(c.name)}"${chosen[state] === c.name ? " selected" : ""}>${esc(c.name)}</option>`)
+          .join("")}</select></label>`;
+      }).join("") +
+      `</div></section>`;
+  }
+  q("[data-game-inspector]").addEventListener("change", (e) => {
+    const pick = /** @type {HTMLSelectElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-clip]"));
+    const id = pick?.closest("[data-game-clips]")?.getAttribute("data-game-clips");
+    const p = project?.prefabs.find((x) => x.id === id);
+    if (!pick || !p) return;
+    e.stopImmediatePropagation();
+    /** @type {Record<string, string | undefined>} */
+    const clips = { ...(p.clips ?? {}) };
+    const state = pick.dataset.gameClip ?? "";
+    if (pick.value) clips[state] = pick.value;
+    else delete clips[state];
+    send({ type: "gameEdit", target: `prefab:${p.id}`, ops: [{ op: "set", path: ["clips"], value: clips }], label: "clips" });
+  }, true);
+
+  /** An animation: its clips — one played small — its boxes and its cues,
+   *  and which prefabs play it. @param {string} key */
+  function animPanel(key) {
+    const anim = anims.get(key);
+    if (!anim) {
+      loadKeys([key]);
+      return `<p class="game-faint">Loading…</p>`;
+    }
+    if (!anim.clips.some((c) => c.name === preview.clip)) preview = { ...preview, clip: anim.clips[0]?.name ?? "", frame: 0 };
+    const users = project?.prefabs.filter((p) => p.sprite === key) ?? [];
+    const player = project?.prefabs.find((p) => project && project.game.player.endsWith(`${p.id}.prefab.json`));
+    const ms = (/** @type {import('./bindings/GameClip').GameClip} */ c) => anim.frames.slice(c.from, c.to + 1).reduce((t, f) => t + f.ms, 0);
+    const way = { forward: "on", reverse: "back", pingPong: "to the end and back", pingPongReverse: "back and on again" };
+    return `<section class="game-tool game-anim" data-game-anim="${esc(key)}"><h4>Animation</h4>` +
+      `<p class="game-faint">${anim.frames.length} frame${anim.frames.length === 1 ? "" : "s"} of ${anim.size[0]} × ${anim.size[1]}, from ${esc(anim.source || "—")}.</p>` +
+      `<canvas class="game-anim-preview" data-game-anim-preview width="1" height="1"></canvas>` +
+      `<ul class="game-clips">${anim.clips
+        .map((c) => `<li><button class="game-clip${c.name === preview.clip ? " on" : ""}" data-game-preview-clip="${esc(c.name)}"><b>${esc(c.name)}</b>` +
+          `<span class="game-faint">frames ${c.from + 1}–${c.to + 1}, ${way[c.direction] ?? c.direction}${c.repeat ? `, ${c.repeat}×` : ""} · ${(ms(c) / 1000).toFixed(2)} s</span></button></li>`)
+        .join("")}</ul>` +
+      (anim.boxes.length ? `<h5 class="game-head">Boxes</h5><p class="game-faint">${anim.boxes.map((b) => `${esc(b.name)} (${b.kind})`).join(", ")} — drawn over a run when Boxes is on in the Run tab.</p>` : "") +
+      (anim.cues.length ? `<h5 class="game-head">Cues</h5><p class="game-faint">${anim.cues.map((c) => `${esc(c.name)} at frame ${c.frame + 1}`).join(", ")}</p>` : "") +
+      `<p class="game-faint">${users.length ? `Played by ${users.map((p) => esc(p.name || p.id)).join(", ")}.` : "No prefab plays it yet."}</p>` +
+      (player && player.sprite !== key ? `<p><button class="cc-quiet" data-game-anim-player="${esc(player.id)}">Make it the player's</button></p>` : "") +
+      `</section>`;
+  }
+  q("[data-game-inspector]").addEventListener("click", (e) => {
+    const target = /** @type {HTMLElement} */ (e.target);
+    const clip = /** @type {HTMLElement | null} */ (target.closest("[data-game-preview-clip]"));
+    if (clip) {
+      preview = { ...preview, clip: clip.dataset.gamePreviewClip ?? "", frame: -1 };
+      for (const b of q("[data-game-inspector]").querySelectorAll("[data-game-preview-clip]")) b.classList.toggle("on", b === clip);
+      startPreview();
+    }
+    const give = /** @type {HTMLElement | null} */ (target.closest("[data-game-anim-player]"));
+    const key = give?.closest("[data-game-anim]")?.getAttribute("data-game-anim");
+    if (give && key) send({ type: "gameEdit", target: `prefab:${give.dataset.gameAnimPlayer}`, ops: [{ op: "set", path: ["sprite"], value: key }], label: "the player's animation" });
+  });
+
+  /** The inspector's animation played: its clip's frames, each for its
+   *  time, round and round while it is on screen. */
+  function startPreview() {
+    clearTimeout(preview.timer);
+    const box = /** @type {HTMLElement | null} */ (q("[data-game-inspector]").querySelector("[data-game-anim]"));
+    const c = /** @type {HTMLCanvasElement | null} */ (box?.querySelector("[data-game-anim-preview]") ?? null);
+    const anim = box ? anims.get(box.dataset.gameAnim ?? "") : null;
+    const clip = anim?.clips.find((x) => x.name === preview.clip);
+    if (!c || !anim || !clip) return;
+    const back = clip.direction === "reverse" || clip.direction === "pingPongReverse";
+    if (preview.frame < clip.from || preview.frame > clip.to) preview = { ...preview, frame: back ? clip.to : clip.from, forward: !back };
+    const f = anim.frames[preview.frame];
+    const sheet = f ? anim.sheets[f.sheet] : null;
+    const bitmap = sheet ? bitmaps.get(sheet) : null;
+    if (sheet && !bitmap) {
+      readGame(sheet)
+        .then((bytes) => createImageBitmap(new Blob([bytes])))
+        .then((b) => {
+          bitmaps.set(sheet, b);
+          startPreview();
+        })
+        .catch(() => {});
+      return;
+    }
+    const scale = Math.max(1, Math.floor(160 / Math.max(anim.size[0], anim.size[1])));
+    c.width = anim.size[0] * scale;
+    c.height = anim.size[1] * scale;
+    const g = c.getContext("2d");
+    if (g && f && bitmap && f.rect[2] && f.rect[3]) {
+      g.imageSmoothingEnabled = project?.game.view.filter !== "nearest";
+      g.clearRect(0, 0, c.width, c.height);
+      g.drawImage(bitmap, f.rect[0], f.rect[1], f.rect[2], f.rect[3], f.offset[0] * scale, f.offset[1] * scale, f.rect[2] * scale, f.rect[3] * scale);
+    }
+    c.dataset.frame = String(preview.frame);
+    // The next, as the clip goes.
+    const pingpong = clip.direction === "pingPong" || clip.direction === "pingPongReverse";
+    let next = preview.frame + (preview.forward ? 1 : -1);
+    let forward = preview.forward;
+    if (next > clip.to || next < clip.from) {
+      if (pingpong && clip.from < clip.to) {
+        forward = !forward;
+        next = preview.frame + (forward ? 1 : -1);
+      } else next = forward ? clip.from : clip.to;
+    }
+    preview.timer = window.setTimeout(() => {
+      preview = { ...preview, frame: next, forward };
+      startPreview();
+    }, Math.max(16, f?.ms ?? 100));
   }
 
   /** Bringing a .psd or .png in as a room's planes: where, how large, and
@@ -1181,6 +1379,12 @@ export function createGame(host) {
   function importForm(source) {
     if (!project) return "";
     const done = project.imports?.find((i) => i.source === source);
+    if (animatable(source)) {
+      return `<section class="game-tool game-import" data-game-import-form><h4>Import as an animation</h4>` +
+        `<p class="game-faint">Its frames go onto sheets beside it, with <code>${esc(source.replace(/(-sheet)?\.[^./]+$/i, ""))}.anim.json</code> to say where each is: its tags become clips, slices called <code>hit…</code> and <code>hurt…</code> boxes, one called <code>feet</code> where it stands, and a cel's text a cue. A prefab plays it once it looks like it.</p>` +
+        (done?.anim ? `<p class="game-faint">Made ${esc(done.anim)} the last time. Importing again makes it again.</p>${done.changed ? `<p class="game-changed-note">The file has been saved since.</p>` : ""}` : "") +
+        `<p><button class="cc-primary" data-game-import="${esc(source)}">${done?.anim ? "Import again" : "Import"}</button></p></section>`;
+    }
     const into = done?.room ?? project.focus ?? project.game.start.room;
     const rooms = project.rooms.map((r) => `<option value="${esc(r.id)}"${r.id === into ? " selected" : ""}>${esc(r.id)}</option>`).join("");
     const before = done
@@ -1282,6 +1486,7 @@ export function createGame(host) {
       }</section>` +
       `<section class="game-tool"><h4>Play</h4>` +
       `<p class="game-faint">▶ over the stage plays the room on screen. The game has the keys while it runs; Esc stops it, and the run is kept here.</p>` +
+      `<label class="game-field game-check"><input type="checkbox" data-game-boxes${showBoxes ? " checked" : ""}> <span>Boxes — an animation's hitboxes and hurtboxes, over the run</span></label>` +
       (playError ? `<p class="game-error" role="alert">${esc(playError)}</p>` : "") +
       `<p class="game-faint" data-game-tick></p></section>` +
       `<section class="game-tool"><h4>Runs</h4>${
@@ -1307,6 +1512,12 @@ export function createGame(host) {
     }
   });
   q("[data-game-run]").addEventListener("change", (e) => {
+    const boxes = /** @type {HTMLInputElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-boxes]"));
+    if (boxes) {
+      showBoxes = boxes.checked;
+      keep("boxes", showBoxes ? "1" : "");
+      return;
+    }
     const grant = /** @type {HTMLInputElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-grant]"));
     if (grant) {
       if (grant.checked) granted.add(grant.dataset.gameGrant ?? "");
@@ -1368,6 +1579,13 @@ export function createGame(host) {
 
   showSide(side);
   render();
+
+  // For the window's tests: what is drawn, and what a run shows and says.
+  /** @type {any} */ (ws).gameProbe = {
+    drawn: () => drawn().map((d) => d.key),
+    frame: () => player?.frame() ?? null,
+    cue: () => player?.cue() ?? null,
+  };
 
   return {
     /** @param {{games: Found[], templates: Template[]}} event */

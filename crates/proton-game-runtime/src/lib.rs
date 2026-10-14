@@ -15,6 +15,8 @@
 //! pg_load(ptr, len) → 0 | -1        a cooked world, as JSON; -1: pg_error()
 //! pg_start(room, x, y, abilities)   a run from there, positions in 1/256 px
 //! pg_step(input) → happened         one tick; bits of what happened
+//! pg_cues() → ptr                   the cues the last tick said: count, then
+//!                                   each cue's index in the world's, as u32s
 //! pg_frame() → ptr                  header and drawn records, as i32s
 //! pg_hash_lo(), pg_hash_hi()        the run's state, as one number
 //! pg_error() → ptr                  why the last call failed: length, then bytes
@@ -25,12 +27,12 @@ use std::cell::RefCell;
 use proton_game::sim::{Happened, Sim, World};
 
 /// The version of this ABI: what the window checks before using it.
-pub const ABI: u32 = 1;
+pub const ABI: u32 = 2;
 
 /// Words in a frame's header, before its records.
 pub const HEADER: usize = 12;
 /// Words in a record.
-pub const RECORD: usize = 6;
+pub const RECORD: usize = 8;
 
 /// What `pg_step` says happened, a bit each.
 pub mod happened {
@@ -40,6 +42,8 @@ pub mod happened {
     pub const HURT: u32 = 8;
     pub const ENTERED: u32 = 16;
     pub const GAINED: u32 = 32;
+    /// A frame with a cue was shown: `pg_cues` says which.
+    pub const CUE: u32 = 64;
 }
 
 #[derive(Default)]
@@ -47,6 +51,8 @@ struct Held {
     world: Option<World>,
     sim: Option<Sim>,
     frame: Vec<i32>,
+    /// The cues the last tick said: count, then each.
+    cues: Vec<u32>,
     error: Vec<u8>,
 }
 
@@ -134,9 +140,18 @@ pub extern "C" fn pg_start(room: u32, x: i32, y: i32, abilities: u32) -> i32 {
 pub extern "C" fn pg_step(input: u32) -> u32 {
     HELD.with(|h| {
         let mut h = h.borrow_mut();
-        let Some(sim) = h.sim.as_mut() else { return 0 };
+        let held = &mut *h;
+        let Some(sim) = held.sim.as_mut() else { return 0 };
         sim.step(input);
-        sim.happened().iter().fold(0, |bits, what| {
+        let happened = sim.happened();
+        held.cues = vec![0];
+        for what in &happened {
+            if let Happened::Cue(c) = what {
+                held.cues.push(*c as u32);
+                held.cues[0] += 1;
+            }
+        }
+        happened.iter().fold(0, |bits, what| {
             bits | match what {
                 Happened::Jumped => happened::JUMPED,
                 Happened::Landed => happened::LANDED,
@@ -144,8 +159,33 @@ pub extern "C" fn pg_step(input: u32) -> u32 {
                 Happened::Hurt => happened::HURT,
                 Happened::Entered(_) => happened::ENTERED,
                 Happened::Gained(_) => happened::GAINED,
+                Happened::Cue(_) => happened::CUE,
             }
         })
+    })
+}
+
+/// The cues the last tick said: count, then each cue's place in the
+/// world's `cues`.
+pub fn cues() -> Vec<u32> {
+    HELD.with(|h| {
+        let h = h.borrow();
+        if h.cues.is_empty() {
+            vec![0]
+        } else {
+            h.cues.clone()
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn pg_cues() -> *const u32 {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        if h.cues.is_empty() {
+            h.cues = vec![0];
+        }
+        h.cues.as_ptr()
     })
 }
 
@@ -154,7 +194,7 @@ pub extern "C" fn pg_step(input: u32) -> u32 {
 /// Header: abi, tick, room, camera x, camera y (1/256 px), how far through
 /// a door (0 none, else 1–24), deaths, abilities, count, player x, player y
 /// (1/256 px), grounded. Record: sprite, x, y (pixels), pivot x, pivot y,
-/// flipped.
+/// flipped, the animation's frame and its clip (-1 for a still image).
 pub fn frame() -> Vec<i32> {
     HELD.with(|h| {
         let h = h.borrow();
@@ -176,7 +216,7 @@ pub fn frame() -> Vec<i32> {
             s.grounded as i32,
         ];
         for d in drawn {
-            out.extend([d.sprite as i32, d.at[0], d.at[1], d.pivot[0], d.pivot[1], d.flip as i32]);
+            out.extend([d.sprite as i32, d.at[0], d.at[1], d.pivot[0], d.pivot[1], d.flip as i32, d.frame.map_or(-1, |f| f as i32), d.clip.map_or(-1, |c| c as i32)]);
         }
         out
     })

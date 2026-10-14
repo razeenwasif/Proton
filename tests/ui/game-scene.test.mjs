@@ -2,7 +2,7 @@
 // room, what is drawn and in what order, and what a point is over.
 import {test} from 'node:test';
 import {equal, deepEqual, ok} from 'node:assert/strict';
-import {corner, factor, fitCam, layout, pickItem, shift, toPlane, viewOf} from '../../ui/game-scene.js';
+import {boxInRoom, corner, factor, fitCam, frameSprite, layout, pickItem, restingFrame, shift, toPlane, viewOf} from '../../ui/game-scene.js';
 
 const plane = (id, depth, items, more = {}) => ({id, name: id, depth, parallax: null, tint: null, fog: 0, lit: false, blend: 'normal', gameplay: false, items, ...more});
 const item = (id, image, at, more = {}) => ({id, image, at, scale: 1, rot: 0, flip: false, opacity: 1, blend: 'normal', ...more});
@@ -114,4 +114,28 @@ test('an image cut into pieces is drawn as its pieces, each where its part of th
   partly.delete('wide/1_0.png');
   const one = {...room, planes: [plane('main', 0, [item('cut', 'wide.img.json', [0, 0])], {gameplay: true})]};
   deepEqual(layout(one, {...how, sizes: partly, parts}).map((x) => x.key), ['wide/0_0.png']);
+});
+
+test('an animation\'s frame is the part of its sheet it is, on its feet, flipped about them', () => {
+  const anim = {format: 1, source: 'walk.aseprite', size: [16, 24], sheets: ['walk.sheet.png'],
+    frames: [{sheet: 0, rect: [0, 0, 4, 16], offset: [4, 8], ms: 100, pivot: [6, 24]}, {sheet: 0, rect: [6, 0, 4, 16], offset: [8, 8], ms: 80, pivot: null}, {sheet: 0, rect: [0, 0, 0, 0], offset: [0, 0], ms: 80, pivot: null}],
+    clips: [{name: 'run', from: 1, to: 1, direction: 'forward', repeat: 0}, {name: 'Idle', from: 0, to: 0, direction: 'forward', repeat: 0}], boxes: [], cues: []};
+  const sizes = new Map([['walk.sheet.png', [12, 16]]]);
+  const s = frameSprite(anim, {key: 'walk.anim.json', at: [100, 200], pivot: [6, 24], frame: 1}, sizes, 'main');
+  deepEqual([s.key, s.x, s.y, s.w, s.h, s.uv], ['walk.sheet.png', 102, 184, 4, 16, [0.5, 0, 10 / 12, 1]]);
+  // Flipped about its feet: what was 2 right of them is 2 left.
+  const f = frameSprite(anim, {key: 'walk.anim.json', at: [100, 200], pivot: [6, 24], frame: 1, flip: true}, sizes, 'main');
+  deepEqual([f.x, f.flip], [94, true]);
+  equal(frameSprite(anim, {key: 'k', at: [0, 0], pivot: [0, 0], frame: 2}, sizes, 'main'), null, 'an empty frame is not drawn');
+  equal(frameSprite(anim, {key: 'k', at: [0, 0], pivot: [0, 0], frame: 0}, new Map(), 'main'), null, 'nor one whose sheet has not loaded');
+  // Standing on the play plane, in the room's draw list.
+  const r = {...room, planes: [plane('main', 0, [], {gameplay: true})]};
+  const drawn = layout(r, {...how, sizes, anims: new Map([['walk.anim.json', anim]]), sprites: [{key: 'walk.anim.json', at: [100, 200], pivot: [6, 24], frame: 0}]});
+  deepEqual(drawn.map((d) => [d.key, d.x, d.y]), [['walk.sheet.png', 98, 184]]);
+  // A box over it, flipped with it; the frame it rests on.
+  deepEqual(boxInRoom([2, 8, 8, 16], [100, 200], [6, 24], false), [96, 184, 8, 16]);
+  deepEqual(boxInRoom([2, 8, 8, 16], [100, 200], [6, 24], true), [96, 184, 8, 16]);
+  deepEqual(boxInRoom([0, 8, 4, 16], [100, 200], [6, 24], true), [102, 184, 4, 16]);
+  equal(restingFrame(anim, {}), 0, 'a clip called idle, whatever its case');
+  equal(restingFrame(anim, {idle: 'run'}), 1, 'the prefab\'s choice');
 });

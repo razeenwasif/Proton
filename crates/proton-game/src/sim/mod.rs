@@ -58,6 +58,28 @@ pub enum Happened {
     Entered(u16),
     /// Picked up these abilities.
     Gained(u32),
+    /// A frame with a cue was shown: the cue, by its place in the world's.
+    Cue(u16),
+}
+
+/// Where an animated body's animation is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Animating {
+    /// The state it plays the clip of, by [`crate::format::STATES`]' order.
+    pub state: u8,
+    pub clip: u32,
+    /// The frame shown, of the animation's.
+    pub frame: u32,
+    /// Ticks left before the next.
+    pub left: u32,
+    /// Going on through the clip, not back.
+    pub forward: bool,
+    /// Times played through — a turn, for one to the end and back.
+    pub plays: u32,
+    /// Played as many times as it is to be: its frame held.
+    pub held: bool,
+    /// Begun at all.
+    pub begun: bool,
 }
 
 /// A run, as it stands.
@@ -96,6 +118,8 @@ pub struct State {
     pub door: Option<(u16, [Fx; 2], u16)>,
     pub cam: [Fx; 2],
     pub last_input: u32,
+    /// The player's animation, when it has one.
+    pub anim: Animating,
 }
 
 /// A run of the game.
@@ -106,7 +130,8 @@ pub struct Sim {
     happened: Vec<Happened>,
 }
 
-/// A drawn thing in a frame: an image of the world's, where, which way.
+/// A drawn thing in a frame: an image of the world's, where, which way —
+/// and for an animation, which of its frames, in which clip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Drawn {
     pub sprite: u16,
@@ -114,6 +139,8 @@ pub struct Drawn {
     pub at: [i32; 2],
     pub pivot: [i32; 2],
     pub flip: bool,
+    pub frame: Option<u32>,
+    pub clip: Option<u32>,
 }
 
 impl Sim {
@@ -150,6 +177,7 @@ impl Sim {
             door: None,
             cam: [0, 0],
             last_input: 0,
+            anim: Animating::default(),
         };
         state.cam = camera_target(&world, &state);
         let mut sim = Sim { world, state, happened: Vec::new() };
@@ -158,6 +186,7 @@ impl Sim {
         if !sim.state.grounded {
             sim.state.air = sim.world.moves.coyote + 1;
         }
+        sim.animate();
         sim
     }
 
@@ -326,6 +355,7 @@ impl Sim {
         }
         if self.state.hurt > 0 {
             self.state.hurt -= 1;
+            self.animate();
             return;
         }
 
@@ -475,6 +505,83 @@ impl Sim {
         }
         self.things();
         self.follow();
+        self.animate();
+    }
+
+    /// What the player is doing, as a state an animation has a clip for:
+    /// hurt, dashing, sliding down a wall, rising, falling, running, still.
+    fn player_state(&self) -> u8 {
+        let s = &self.state;
+        if s.hurt > 0 {
+            6
+        } else if s.dash > 0 {
+            4
+        } else if !s.grounded && s.wall != 0 && s.vel[1] > 0 {
+            5
+        } else if !s.grounded {
+            if s.vel[1] < 0 {
+                2
+            } else {
+                3
+            }
+        } else if s.vel[0] != 0 {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// The player's animation a tick on: its state's clip begun when the
+    /// state changes, else its frame shown a tick more and the next when its
+    /// time is up — on, back, or to the end and back, as the clip goes, and
+    /// held on its last when played as many times as it is to be. A frame's
+    /// cues are said as it is shown.
+    fn animate(&mut self) {
+        let Some(a) = self.world.player.anim else { return };
+        let state = self.player_state();
+        let Some(clip) = self.world.player.states.get(state as usize).copied().flatten() else { return };
+        let anim = &self.world.anims[a as usize];
+        let Some(run) = anim.clips.get(clip as usize).copied() else { return };
+        let s = &mut self.state.anim;
+        let back = run.direction == 1 || run.direction == 3;
+        let shown = if !s.begun || s.state != state || s.clip != clip {
+            *s = Animating { state, clip, frame: if back { run.to } else { run.from }, left: 0, forward: !back, plays: 0, held: false, begun: true };
+            true
+        } else if s.held {
+            false
+        } else {
+            s.left = s.left.saturating_sub(1);
+            if s.left > 0 {
+                false
+            } else {
+                let at_end = if s.forward { s.frame >= run.to } else { s.frame <= run.from };
+                if !at_end {
+                    s.frame = if s.forward { s.frame + 1 } else { s.frame - 1 };
+                    true
+                } else {
+                    s.plays += 1;
+                    if run.repeat > 0 && s.plays >= run.repeat {
+                        s.held = true;
+                        false
+                    } else if run.direction >= 2 && run.from < run.to {
+                        // Turned at an end: the end is shown once.
+                        s.forward = !s.forward;
+                        s.frame = if s.forward { s.frame + 1 } else { s.frame - 1 };
+                        true
+                    } else {
+                        s.frame = if s.forward { run.from } else { run.to };
+                        true
+                    }
+                }
+            }
+        };
+        if shown {
+            let frame = s.frame;
+            s.left = anim.frames.get(frame as usize).map_or(1, |f| f.0);
+            for &(_, cue) in anim.cues.iter().filter(|(f, _)| *f == frame) {
+                self.happened.push(Happened::Cue(cue));
+            }
+        }
     }
 
     fn jump(&mut self, speed: Fx) {
@@ -535,12 +642,15 @@ impl Sim {
     /// What to draw now: the player.
     pub fn frame(&self) -> Vec<Drawn> {
         let p = &self.world.player;
+        let animated = p.anim.and_then(|a| self.world.anims.get(a as usize)).filter(|_| self.state.anim.begun);
         match p.sprite {
             Some(sprite) => vec![Drawn {
                 sprite,
                 at: [self.state.pos[0] >> world::SHIFT, self.state.pos[1] >> world::SHIFT],
-                pivot: p.pivot,
+                pivot: animated.and_then(|a| a.frames.get(self.state.anim.frame as usize)).map_or(p.pivot, |f| f.1),
                 flip: self.state.facing < 0,
+                frame: animated.map(|_| self.state.anim.frame),
+                clip: animated.map(|_| self.state.anim.clip),
             }],
             None => Vec::new(),
         }
@@ -572,6 +682,13 @@ impl Sim {
             h.add(at[0] as i64);
             h.add(at[1] as i64);
             h.add(t as i64);
+        }
+        // A still player's run hashes as it did before there were animations.
+        if self.world.player.anim.is_some() {
+            let a = &s.anim;
+            for v in [a.state as i64, a.clip as i64, a.frame as i64, a.left as i64, a.forward as i64, a.plays as i64, a.held as i64, a.begun as i64] {
+                h.add(v);
+            }
         }
         h.0
     }

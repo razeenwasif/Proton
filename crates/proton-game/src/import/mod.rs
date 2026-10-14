@@ -15,6 +15,8 @@
 //! What comes out is files to write and planes to put in a room. Writing them
 //! and changing the room are the editor's; nothing here touches the disk.
 
+pub mod anim;
+
 // Photoshop's files and PNGs are read and written by Canvas's engine; the
 // game's importer lays them out as rooms.
 pub use proton_raster::file::{decode_png, encode_png};

@@ -1279,7 +1279,9 @@ pub enum Command {
     /// added to its room as closed solid shapes — one edit, undone whole.
     /// Bring a `.psd` or `.png` in the game's folder into a room: its groups
     /// become planes at the depths their names give, its layers images. The
-    /// images are written at once; the room's change is held until saved.
+    /// images are written at once; the room's change is held until saved. An
+    /// `.aseprite` file or a sprite sheet's `.json` becomes an animation —
+    /// an `.anim.json` beside it, and its sheets — and no room changes.
     #[serde(rename_all = "camelCase")]
     GameImport {
         source: String,
@@ -1397,7 +1399,8 @@ pub enum Command {
     /// The canvas into a game (`game`, its folder in the project): the frame
     /// shown written to its `art/` — layered, a `.psd` whose layers become
     /// planes, or flat, a `.png` — and imported into its room when it is the
-    /// game open; an animation's sprite sheet and its JSON written beside it.
+    /// game open; an animation's sprite sheet and its JSON written beside it,
+    /// and, the game open, made into the game's animation instead.
     RasterSend {
         game: String,
         #[serde(default)]

@@ -146,9 +146,9 @@ impl Raster {
         }
     }
 
-    /// Write the open canvas into a game's `art/` folder: its folder, and
-    /// the file as the game names it.
-    pub fn send(&self, root: &Path, game: &str, layers: bool) -> Result<(PathBuf, String), String> {
+    /// Write the open canvas into a game's `art/` folder: its folder, the
+    /// file as the game names it, and an animation's sheet's JSON.
+    pub fn send(&self, root: &Path, game: &str, layers: bool) -> Result<(PathBuf, String, Option<String>), String> {
         let open = self.open.as_ref().ok_or("no canvas is open")?;
         let dir = if game.is_empty() || game == "." { std::fs::canonicalize(root).map_err(|e| e.to_string())? } else { in_project(root, game)? };
         if !proton_game::project::Project::is_game(&dir) {
@@ -160,13 +160,15 @@ impl Raster {
         let (name, bytes) = if layers { (format!("{stem}.psd"), port::psd(&open.canvas, open.frame)) } else { (format!("{stem}.png"), port::png(&open.canvas, open.frame, 1)?) };
         std::fs::write(art.join(&name), bytes).map_err(|e| format!("{name}: {e}"))?;
         // An animation's every frame, beside it, for the game to animate by.
+        let mut sheet = None;
         if open.canvas.frames.len() > 1 {
             let image = format!("{stem}-sheet.png");
             let (png, json) = port::sheet(&open.canvas, &image, 0, 1)?;
             std::fs::write(art.join(&image), png).map_err(|e| format!("{image}: {e}"))?;
             std::fs::write(art.join(format!("{stem}-sheet.json")), json).map_err(|e| format!("{stem}-sheet.json: {e}"))?;
+            sheet = Some(format!("art/{stem}-sheet.json"));
         }
-        Ok((dir, format!("art/{name}")))
+        Ok((dir, format!("art/{name}"), sheet))
     }
 
     /// Bring a picture in: as layers on the canvas open, or as a canvas.

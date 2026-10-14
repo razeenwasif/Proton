@@ -112,6 +112,8 @@ struct Played {
     gained: Vec<(u32, String)>,
     jumps: u32,
     dashes: u32,
+    /// The cues the animation said, and how many times each.
+    cues: Vec<(String, u32)>,
     samples: Vec<(u32, String, [i32; 2], bool)>,
     parts: Vec<GamePathPart>,
 }
@@ -119,6 +121,7 @@ struct Played {
 fn play_out(world: World, start: (u16, [i32; 2], u32), inputs: &[(u32, u32)]) -> Played {
     let names: Vec<String> = world.rooms.iter().map(|r| r.id.clone()).collect();
     let abilities = world.abilities.clone();
+    let cue_names = world.cues.clone();
     let mut sim = Sim::at(world, start.0, start.1, start.2);
     let total: u32 = inputs.iter().map(|(_, n)| n).sum();
     let every = (total / SAMPLES as u32).max(1);
@@ -135,6 +138,7 @@ fn play_out(world: World, start: (u16, [i32; 2], u32), inputs: &[(u32, u32)]) ->
         gained: Vec::new(),
         jumps: 0,
         dashes: 0,
+        cues: Vec::new(),
         samples: vec![(0, room_of(&sim), feet(&sim), sim.state.grounded)],
         parts: vec![GamePathPart { room: room_of(&sim), points: vec![feet(&sim)], hurt: Vec::new() }],
     };
@@ -161,6 +165,13 @@ fn play_out(world: World, start: (u16, [i32; 2], u32), inputs: &[(u32, u32)]) ->
                             if bits & (1 << i) != 0 {
                                 out.gained.push((tick, id.clone()));
                             }
+                        }
+                    }
+                    Happened::Cue(c) => {
+                        let name = cue_names.get(c as usize).cloned().unwrap_or_default();
+                        match out.cues.iter_mut().find(|(n, _)| *n == name) {
+                            Some((_, count)) => *count += 1,
+                            None => out.cues.push((name, 1)),
                         }
                     }
                 }
@@ -221,6 +232,10 @@ fn summary(p: &Played, tick: u32) -> String {
         let got: Vec<String> = p.gained.iter().map(|(t, id)| format!("{id} at tick {t}")).collect();
         let _ = write!(out, " Gained {}.", got.join(", "));
     }
+    if !p.cues.is_empty() {
+        let said: Vec<String> = p.cues.iter().map(|(name, n)| format!("{name} ×{n}")).collect();
+        let _ = write!(out, " Cues said: {}.", said.join(", "));
+    }
     out
 }
 
@@ -266,7 +281,7 @@ impl Game {
             "game_check" => Ok(self.tool_check()),
             "game_play" => self.tool_play(input),
             "game_import" => {
-                let source = input.get("source").and_then(Value::as_str).ok_or("game_import: `source` is required: a .psd or .png in the game's folder")?;
+                let source = input.get("source").and_then(Value::as_str).ok_or("game_import: `source` is required: a .psd, .png, .aseprite or sprite sheet .json in the game's folder")?;
                 let room = input.get("room").and_then(Value::as_str);
                 let scale = input.get("scale").and_then(Value::as_f64);
                 let normals = input.get("normals").and_then(Value::as_bool).unwrap_or(false);
@@ -375,11 +390,38 @@ impl Game {
         }
         let prefabs: Vec<String> = project.prefabs.iter().map(|p| p.get().id.clone()).collect();
         let _ = writeln!(out, "Prefabs: {}.", list(&prefabs));
-        let art: Vec<String> = super::assets(project.root()).into_iter().filter(|a| a.ends_with(".psd") || a.ends_with(".PSD")).collect();
+        let assets = super::assets(project.root());
+        let art: Vec<String> = assets.iter().filter(|a| a.to_ascii_lowercase().ends_with(".psd")).cloned().collect();
         if !art.is_empty() {
             let _ = writeln!(out, "Layered art in its folder, for game_import: {}.", art.join(", "));
         }
-        for imported in &self.imports.sources {
+        let to_animate: Vec<String> = assets
+            .iter()
+            .filter(|a| {
+                let l = a.to_ascii_lowercase();
+                l.ends_with(".aseprite") || l.ends_with(".ase") || (l.ends_with(".json") && !l.ends_with(".anim.json") && !l.ends_with(".img.json"))
+            })
+            .cloned()
+            .collect();
+        if !to_animate.is_empty() {
+            let _ = writeln!(out, "Animations to bring in, for game_import: {}.", to_animate.join(", "));
+        }
+        for rel in assets.iter().filter(|a| a.ends_with(".anim.json")) {
+            let Ok(anim) = std::fs::read_to_string(project.root().join(rel)).map_err(|e| e.to_string()).and_then(|t| proton_game::doc::parse::<proton_game::format::Anim>(rel, &t)) else { continue };
+            let users: Vec<&str> = project.prefabs.iter().map(|p| p.get()).filter(|p| p.sprite.as_deref() == Some(rel.as_str())).map(|p| p.id.as_str()).collect();
+            let _ = writeln!(
+                out,
+                "Animation {rel}: {} frames of {}×{}, clips {}{}{}; {}.",
+                anim.frames.len(),
+                anim.size[0],
+                anim.size[1],
+                anim.clips.iter().map(|c| format!("{} ({}–{}, {:?})", c.name, c.from, c.to, c.direction).to_lowercase()).collect::<Vec<_>>().join(", "),
+                if anim.boxes.is_empty() { String::new() } else { format!("; boxes {}", anim.boxes.iter().map(|b| format!("{} ({:?})", b.name, b.kind).to_lowercase()).collect::<Vec<_>>().join(", ")) },
+                if anim.cues.is_empty() { String::new() } else { format!("; cues {}", anim.cues.iter().map(|c| format!("{} at frame {}", c.name, c.frame)).collect::<Vec<_>>().join(", ")) },
+                if users.is_empty() { "no prefab plays it: set a prefab's sprite to it with game_edit".to_string() } else { format!("played by {}", users.join(", ")) },
+            );
+        }
+        for imported in self.imports.sources.iter().filter(|s| s.anim.is_empty()) {
             let _ = writeln!(
                 out,
                 "Imported {} into {}: {} plane{} and {} image{} on the play plane.",

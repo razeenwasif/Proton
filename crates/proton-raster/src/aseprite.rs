@@ -11,6 +11,10 @@
 //! frame. Pixels are RGBA, grayscale and alpha, or palette indices; the
 //! palette comes in its own chunk (an older one in files from before 1.2).
 //!
+//! Slices — named rectangles a frame on, with a pivot if given — are kept:
+//! Game reads hitboxes and feet from them. Text a cel or a slice carries as
+//! user data is kept too: Game reads a cel's as a cue at its frame.
+//!
 //! What Canvas cannot hold is said in `notes`: tilemap layers, reference
 //! layers, a group's opacity laid onto its layers. A cel's own opacity is
 //! laid into its pixels' alpha, which draws the same.
@@ -37,8 +41,41 @@ pub struct Sprite {
     pub tags: Vec<Tag>,
     /// Its palette, as straight RGBA — what an indexed sprite's pixels name.
     pub palette: Vec<[u8; 4]>,
+    /// Named rectangles over the frames.
+    pub slices: Vec<Slice>,
+    /// Text cels carry, by layer (its place in `layers`) and frame.
+    pub texts: Vec<CelText>,
     /// What was left out or changed.
     pub notes: Vec<String>,
+}
+
+/// A named rectangle of the sprite — a hitbox, the feet — as it is from
+/// each key's frame on, until the next key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Slice {
+    pub name: String,
+    pub keys: Vec<SliceKey>,
+    /// Its user data's text, if it has any.
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SliceKey {
+    /// The frame it holds from.
+    pub frame: u32,
+    /// Left, top, width and height on the sprite; no size hides it from
+    /// this frame on.
+    pub rect: [i32; 4],
+    /// A point within it, from its top left.
+    pub pivot: Option<[i32; 2]>,
+}
+
+/// Text a cel carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CelText {
+    pub layer: usize,
+    pub frame: u32,
+    pub text: String,
 }
 
 /// A layer of a sprite, and its pixels in each frame.
@@ -124,6 +161,10 @@ impl<'a> Cursor<'a> {
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
+    fn i32(&mut self) -> Result<i32, String> {
+        Ok(self.u32()? as i32)
+    }
+
     fn string(&mut self) -> Result<String, String> {
         let n = self.u16()? as usize;
         Ok(String::from_utf8_lossy(self.take(n)?).into_owned())
@@ -139,6 +180,16 @@ struct Indexed {
     at: [i32; 2],
     size: [u32; 2],
     opacity: u8,
+}
+
+/// What a user data chunk read now would belong to.
+enum Last {
+    None,
+    Cel(usize, usize),
+    /// A tags chunk, and how many of its tags have had theirs.
+    Tags(usize),
+    Slice(usize),
+    Other,
 }
 
 /// A layer as the file lists it.
@@ -185,7 +236,9 @@ pub fn read(bytes: &[u8]) -> Result<Sprite, String> {
     let opacity_valid = flags & 1 != 0;
     let uuids = flags & 4 != 0;
 
-    let mut sprite = Sprite { width, height, durations: Vec::new(), layers: Vec::new(), tags: Vec::new(), palette: Vec::new(), notes: Vec::new() };
+    let mut sprite = Sprite { width, height, durations: Vec::new(), layers: Vec::new(), tags: Vec::new(), palette: Vec::new(), slices: Vec::new(), texts: Vec::new(), notes: Vec::new() };
+    // What a user data chunk belongs to: the last thing read.
+    let mut last = Last::None;
     let mut listed: Vec<Listed> = Vec::new();
     // An older palette, kept in case the file has no newer one.
     let mut old_palette: Vec<[u8; 4]> = Vec::new();
@@ -289,6 +342,7 @@ pub fn read(bytes: &[u8]) -> Result<Sprite, String> {
                         }
                     };
                     listed.push(Listed { name, kind: lkind, level, flags: lflags, blend, opacity, slot });
+                    last = Last::Other;
                 }
                 0x2005 => {
                     let index = b.u16()? as usize;
@@ -298,7 +352,12 @@ pub fn read(bytes: &[u8]) -> Result<Sprite, String> {
                     let ckind = b.u16()?;
                     let z = b.i16()?;
                     b.take(5)?;
-                    let Some(slot) = listed.get(index).and_then(|l| l.slot) else { continue };
+                    let Some(slot) = listed.get(index).and_then(|l| l.slot) else {
+                        last = Last::Other;
+                        c.at = chunk_start + size;
+                        continue;
+                    };
+                    last = Last::Cel(slot, frame);
                     if z != 0 {
                         noted(&mut sprite.notes, "a cel's z-index, which orders it among the layers in its frame, is not kept".into());
                     }
@@ -361,8 +420,43 @@ pub fn read(bytes: &[u8]) -> Result<Sprite, String> {
                         let name = b.string()?;
                         sprite.tags.push(Tag { name, from, to, direction, repeat });
                     }
+                    last = Last::Tags(0);
+                }
+                0x2022 => {
+                    let count = b.u32()?;
+                    let flags = b.u32()?;
+                    b.u32()?;
+                    let name = b.string()?;
+                    let mut keys = Vec::new();
+                    for _ in 0..count.min(65536) {
+                        let frame = b.u32()?;
+                        let rect = [b.i32()?, b.i32()?, b.u32()? as i32, b.u32()? as i32];
+                        if flags & 1 != 0 {
+                            b.take(16)?;
+                        }
+                        let pivot = if flags & 2 != 0 { Some([b.i32()?, b.i32()?]) } else { None };
+                        keys.push(SliceKey { frame, rect, pivot });
+                    }
+                    sprite.slices.push(Slice { name, keys, text: None });
+                    last = Last::Slice(sprite.slices.len() - 1);
+                }
+                0x2020 => {
+                    let flags = b.u32()?;
+                    let text = if flags & 1 != 0 { Some(b.string()?) } else { None };
+                    match (&mut last, text) {
+                        (Last::Cel(slot, frame), Some(text)) if !text.trim().is_empty() => sprite.texts.push(CelText { layer: *slot, frame: *frame as u32, text }),
+                        (Last::Slice(i), text) => sprite.slices[*i].text = text,
+                        _ => {}
+                    }
+                    // A tags chunk's user data comes a chunk a tag.
+                    if let Last::Tags(i) = &mut last {
+                        *i += 1;
+                    } else {
+                        last = Last::Other;
+                    }
                 }
                 0x2019 => {
+                    last = Last::Other;
                     let size = b.u32()? as usize;
                     let first = b.u32()? as usize;
                     let last = b.u32()? as usize;

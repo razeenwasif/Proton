@@ -142,6 +142,8 @@ pub struct GameImportRow {
     pub normals: bool,
     /// Saved again since it was imported.
     pub changed: bool,
+    /// The animation it made, when it was brought in as one.
+    pub anim: String,
 }
 
 /// The game open in a project, and the editor's place in it.
@@ -595,6 +597,7 @@ impl Game {
                         scale: s.scale,
                         normals: s.normals,
                         changed: proton_game::path::inside(project.root(), &s.source).ok().and_then(|p| import::stamp(&p)).is_some_and(|now| now != s.stamp),
+                        anim: s.anim.clone(),
                     })
                     .collect(),
             }),
@@ -648,6 +651,16 @@ fn slug(name: &str) -> String {
     }
 }
 
+/// Whether a JSON file is a sprite sheet's — frames, and the image they are
+/// on — and not one of the game's own.
+fn sheet_json(path: &Path, name: &str) -> bool {
+    if !name.ends_with(".json") || name.ends_with(".img.json") || name.ends_with(".anim.json") || matches!(name, "game.json" | "world.json" | "import.json") || name.ends_with(".room.json") || name.ends_with(".prefab.json") {
+        return false;
+    }
+    std::fs::metadata(path).is_ok_and(|m| m.len() < 4 << 20)
+        && std::fs::read(path).is_ok_and(|bytes| proton_game::import::anim::is_anim_source(name, &bytes))
+}
+
 /// The games in a project, for another mode to name them — Canvas sends art
 /// to one.
 pub fn found(root: &Path) -> Vec<GameFound> {
@@ -686,7 +699,8 @@ fn find(root: &Path) -> Vec<GameFound> {
 }
 
 /// The images and sounds in a game's folder, relative to it, for the Assets
-/// tab — hidden folders and the game's own JSON left out.
+/// tab — hidden folders and the game's own JSON left out; animations, and a
+/// sprite sheet's JSON to make one from, in.
 fn assets(root: &Path) -> Vec<String> {
     const SHOWN: &[&str] = &["png", "jpg", "jpeg", "webp", "psd", "aseprite", "ase", "glb", "gltf", "wav", "mp3", "m4a"];
     let mut out = Vec::new();
@@ -701,7 +715,11 @@ fn assets(root: &Path) -> Vec<String> {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if name.ends_with(".img.json") || path.extension().and_then(|e| e.to_str()).is_some_and(|e| SHOWN.contains(&e.to_ascii_lowercase().as_str())) {
+            } else if name.ends_with(".img.json")
+                || name.ends_with(".anim.json")
+                || path.extension().and_then(|e| e.to_str()).is_some_and(|e| SHOWN.contains(&e.to_ascii_lowercase().as_str()))
+                || sheet_json(&path, &name)
+            {
                 if let Ok(rel) = path.strip_prefix(root) {
                     out.push(rel.to_string_lossy().replace('\\', "/"));
                 }
@@ -711,10 +729,11 @@ fn assets(root: &Path) -> Vec<String> {
             }
         }
     }
-    // A cut image's pieces and its normal maps are its sidecar's, not
-    // images to place on their own.
+    // A cut image's pieces and its normal maps are its sidecar's, and an
+    // animation's sheets its own: not images to place on their own.
     let cut: Vec<String> = out.iter().filter_map(|a| a.strip_suffix(".img.json").map(|base| format!("{base}/"))).collect();
-    out.retain(|a| !a.ends_with(".normal.png") && !cut.iter().any(|base| a.starts_with(base.as_str())));
+    let sheets: Vec<String> = out.iter().filter_map(|a| a.strip_suffix(".anim.json").map(|base| format!("{base}.sheet"))).collect();
+    out.retain(|a| !a.ends_with(".normal.png") && !cut.iter().any(|base| a.starts_with(base.as_str())) && !(a.ends_with(".png") && sheets.iter().any(|s| a.starts_with(s.as_str()))));
     out.sort();
     out
 }
