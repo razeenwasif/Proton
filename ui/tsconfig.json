@@ -45,6 +45,7 @@
     "game-overlay.js",
     "game-scene.js",
     "game-render.js",
+    "game-skel.js",
     "game-play.js",
     "raster.js",
     "raster-view.js",

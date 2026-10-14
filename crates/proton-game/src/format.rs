@@ -832,6 +832,207 @@ pub struct Cue {
     pub name: String,
 }
 
+/* ── art/…/<name>.skel.json ───────────────────────────────────────── */
+
+/// A skeleton: bones, the parts drawn on them, and clips that move them —
+/// what a skeletal tool's file (DragonBones') is made into. Every part is a
+/// mesh of points each carried by up to four bones, so one way of drawing
+/// draws a rigid image and a skinned one alike. Lengths are the skeleton's
+/// pixels, `y` down; angles degrees, clockwise.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameSkel")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Skel {
+    pub format: u32,
+    pub source: String,
+    /// The image the parts are cut from, and its size.
+    pub atlas: String,
+    pub atlas_size: [u32; 2],
+    /// Keyframes a second: what a clip's frames are counted in.
+    pub fps: f64,
+    /// Parents before their children.
+    pub bones: Vec<SkelBone>,
+    /// Back to front.
+    pub slots: Vec<SkelSlot>,
+    pub clips: Vec<SkelClip>,
+    /// Shapes on bones — hitboxes, hurtboxes — from bounding boxes.
+    pub boxes: Vec<SkelBox>,
+}
+
+impl Default for Skel {
+    fn default() -> Skel {
+        Skel { format: FORMAT, source: String::new(), atlas: String::new(), atlas_size: [0, 0], fps: 24.0, bones: Vec::new(), slots: Vec::new(), clips: Vec::new(), boxes: Vec::new() }
+    }
+}
+
+/// A bone as it stands at rest, on its parent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameSkelBone")]
+#[serde(default, rename_all = "camelCase")]
+pub struct SkelBone {
+    pub name: String,
+    pub parent: Option<u32>,
+    pub at: [f64; 2],
+    /// The x axis's turn, and how much further the y axis turns: a skew.
+    pub rot: f64,
+    pub skew: f64,
+    pub scale: [f64; 2],
+    pub length: f64,
+}
+
+impl Default for SkelBone {
+    fn default() -> SkelBone {
+        SkelBone { name: String::new(), parent: None, at: [0.0, 0.0], rot: 0.0, skew: 0.0, scale: [1.0, 1.0], length: 0.0 }
+    }
+}
+
+/// A place parts are drawn, on a bone: which of its parts shows, and its
+/// colour.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameSkelSlot")]
+#[serde(default, rename_all = "camelCase")]
+pub struct SkelSlot {
+    pub name: String,
+    pub bone: u32,
+    /// The part shown at rest, by its place in `parts`; -1 for none.
+    pub shown: i32,
+    /// Multiplied into its colour: red, green, blue, alpha, 0 to 1.
+    pub color: [f64; 4],
+    pub parts: Vec<SkelMesh>,
+}
+
+impl Default for SkelSlot {
+    fn default() -> SkelSlot {
+        SkelSlot { name: String::new(), bone: 0, shown: 0, color: [1.0, 1.0, 1.0, 1.0], parts: Vec::new() }
+    }
+}
+
+/// A part: triangles of points, each where its bones carry it and where on
+/// the atlas it takes its colour from.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameSkelMesh")]
+#[serde(default, rename_all = "camelCase")]
+pub struct SkelMesh {
+    pub name: String,
+    pub points: Vec<SkelPoint>,
+    pub triangles: Vec<[u32; 3]>,
+}
+
+/// A point of a part: its place on the atlas, in pixels, and the bones that
+/// carry it — each with how much, and where the point is on that bone.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameSkelPoint")]
+#[serde(default, rename_all = "camelCase")]
+pub struct SkelPoint {
+    pub uv: [f64; 2],
+    /// At most four: (bone, weight, x, y on the bone).
+    pub bones: Vec<(u32, f64, [f64; 2])>,
+}
+
+/// A shape on a bone, from a bounding box.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameSkelBox")]
+#[serde(default, rename_all = "camelCase")]
+pub struct SkelBox {
+    pub name: String,
+    pub kind: BoxKind,
+    /// The slot it is a part of: shown while that part is.
+    pub slot: u32,
+    pub part: u32,
+    pub bone: u32,
+    /// Its corners on the bone.
+    pub points: Vec<[f64; 2]>,
+}
+
+/// A clip: keys for bones and slots over `frames` frames, and cues.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameSkelClip")]
+#[serde(default, rename_all = "camelCase")]
+pub struct SkelClip {
+    pub name: String,
+    pub frames: u32,
+    /// Times it plays before it holds its last pose; 0 for as long as it is played.
+    pub repeat: u32,
+    pub bones: Vec<BoneTrack>,
+    pub slots: Vec<SlotTrack>,
+    pub cues: Vec<Cue>,
+}
+
+/// A bone's keys: moved, turned and scaled from where it stands at rest.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameBoneTrack")]
+#[serde(default, rename_all = "camelCase")]
+pub struct BoneTrack {
+    pub bone: u32,
+    pub moved: Vec<Key>,
+    /// Turns in degrees, unwound so that each goes the way it is to.
+    pub turned: Vec<Key>,
+    pub scaled: Vec<Key>,
+}
+
+/// A value at a frame — one number or two — and how it eases to the next.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameKey")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Key {
+    pub frame: u32,
+    pub value: [f64; 2],
+    pub ease: Ease,
+}
+
+/// How a value goes from one key to the next.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameEase")]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Ease {
+    /// Holds until the next key.
+    Step,
+    #[default]
+    Linear,
+    /// Slow then fast, by how much (0 to 1).
+    In { amount: f64 },
+    /// Fast then slow.
+    Out { amount: f64 },
+    /// Slow, fast, slow.
+    InOut { amount: f64 },
+    /// A cubic Bézier from (0, 0) to (1, 1) through these two points.
+    Bezier { points: [f64; 4] },
+}
+
+/// A slot's keys: which part shows, and its colour.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameSlotTrack")]
+#[serde(default, rename_all = "camelCase")]
+pub struct SlotTrack {
+    pub slot: u32,
+    /// (frame, part shown from it on; -1 none).
+    pub shown: Vec<(u32, i32)>,
+    pub color: Vec<ColorKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameColorKey")]
+#[serde(default, rename_all = "camelCase")]
+pub struct ColorKey {
+    pub frame: u32,
+    pub color: [f64; 4],
+    pub ease: Ease,
+}
+
+impl Skel {
+    /// The clip each state plays, by `STATES`' order — as an animation's.
+    pub fn state_clips(&self, chosen: &BTreeMap<String, String>) -> Vec<Option<u32>> {
+        let as_anim = Anim { clips: self.clips.iter().map(|c| Clip { name: c.name.clone(), ..Clip::default() }).collect(), ..Anim::default() };
+        as_anim.state_clips(chosen)
+    }
+
+    /// Each clip's ticks at `tick` a second: what a run counts it in. The
+    /// window counts the same.
+    pub fn clip_ticks(&self, tick: u32) -> Vec<u32> {
+        self.clips.iter().map(|c| ((c.frames.max(1) as f64 / self.fps.max(1.0) * tick as f64).round() as u32).max(1)).collect()
+    }
+}
+
 /* ── import.json ──────────────────────────────────────────────────── */
 
 /// What art was brought in from where: importing a file again replaces what

@@ -293,6 +293,38 @@ impl World {
             body.anim = Some(0);
             body.states = anim.state_clips(&p.clips);
         }
+        // A skeleton: its clips as runs of one-tick frames, so a run plays
+        // it as it plays an animation — the window poses it from the tick.
+        if let Some(p) = player.filter(|p| p.sprite.as_deref().is_some_and(|s| s.ends_with(".skel.json"))) {
+            let rel = p.sprite.as_deref().unwrap_or_default();
+            let text = std::fs::read_to_string(project.root().join(rel)).map_err(|e| format!("the player's skeleton {rel} cannot be read: {e}"))?;
+            let skel: crate::format::Skel = crate::doc::parse(rel, &text)?;
+            if skel.clips.is_empty() {
+                return Err(format!("the player's skeleton {rel} has no clips"));
+            }
+            let mut frames = Vec::new();
+            let mut clips = Vec::new();
+            let mut said = Vec::new();
+            for (clip, ticks) in skel.clips.iter().zip(skel.clip_ticks(tick)) {
+                let from = frames.len() as u32;
+                frames.extend((0..ticks).map(|_| (1u32, p.pivot)));
+                clips.push(Run { from, to: from + ticks - 1, direction: 0, repeat: clip.repeat });
+                for c in &clip.cues {
+                    let at = ((c.frame as f64 / skel.fps.max(1.0) * t).round() as u32).min(ticks - 1);
+                    let index = match cues.iter().position(|n| *n == c.name) {
+                        Some(i) => i as u16,
+                        None => {
+                            cues.push(c.name.clone());
+                            (cues.len() - 1) as u16
+                        }
+                    };
+                    said.push((from + at, index));
+                }
+            }
+            anims.push(Animation { frames, clips, cues: said });
+            body.anim = Some((anims.len() - 1) as u16);
+            body.states = skel.state_clips(&p.clips);
+        }
         let ids: Vec<String> = project.rooms.iter().map(|r| r.get().id.clone()).collect();
         let index = |id: &str| ids.iter().position(|r| r == id).map(|i| i as u16);
         let rect = |r: [i32; 4]| [fx(r[0] as f64), fx(r[1] as f64), fx(r[2] as f64), fx(r[3] as f64)];

@@ -399,7 +399,7 @@ impl Game {
             .iter()
             .filter(|a| {
                 let l = a.to_ascii_lowercase();
-                l.ends_with(".aseprite") || l.ends_with(".ase") || (l.ends_with(".json") && !l.ends_with(".anim.json") && !l.ends_with(".img.json"))
+                l.ends_with(".aseprite") || l.ends_with(".ase") || (l.ends_with(".json") && !l.ends_with(".anim.json") && !l.ends_with(".skel.json") && !l.ends_with(".img.json"))
             })
             .cloned()
             .collect();
@@ -418,6 +418,18 @@ impl Game {
                 anim.clips.iter().map(|c| format!("{} ({}–{}, {:?})", c.name, c.from, c.to, c.direction).to_lowercase()).collect::<Vec<_>>().join(", "),
                 if anim.boxes.is_empty() { String::new() } else { format!("; boxes {}", anim.boxes.iter().map(|b| format!("{} ({:?})", b.name, b.kind).to_lowercase()).collect::<Vec<_>>().join(", ")) },
                 if anim.cues.is_empty() { String::new() } else { format!("; cues {}", anim.cues.iter().map(|c| format!("{} at frame {}", c.name, c.frame)).collect::<Vec<_>>().join(", ")) },
+                if users.is_empty() { "no prefab plays it: set a prefab's sprite to it with game_edit".to_string() } else { format!("played by {}", users.join(", ")) },
+            );
+        }
+        for rel in assets.iter().filter(|a| a.ends_with(".skel.json")) {
+            let Ok(skel) = std::fs::read_to_string(project.root().join(rel)).map_err(|e| e.to_string()).and_then(|t| proton_game::doc::parse::<proton_game::format::Skel>(rel, &t)) else { continue };
+            let users: Vec<&str> = project.prefabs.iter().map(|p| p.get()).filter(|p| p.sprite.as_deref() == Some(rel.as_str())).map(|p| p.id.as_str()).collect();
+            let _ = writeln!(
+                out,
+                "Skeleton {rel}: {} bones, clips {}{}; {}.",
+                skel.bones.len(),
+                skel.clips.iter().map(|c| format!("{} ({} frames at {} a second{})", c.name, c.frames, skel.fps, if c.repeat == 0 { ", looping".to_string() } else { format!(", {}×", c.repeat) })).collect::<Vec<_>>().join(", "),
+                if skel.boxes.is_empty() { String::new() } else { format!("; boxes {}", skel.boxes.iter().map(|b| format!("{} ({:?})", b.name, b.kind).to_lowercase()).collect::<Vec<_>>().join(", ")) },
                 if users.is_empty() { "no prefab plays it: set a prefab's sprite to it with game_edit".to_string() } else { format!("played by {}", users.join(", ")) },
             );
         }

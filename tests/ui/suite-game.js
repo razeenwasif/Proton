@@ -440,4 +440,55 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     await win.pushEvents([project(), room('crossroads_01')]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
+
+  await test('A DragonBones armature is imported as a skeleton, posed small in its inspector, drawn on the player, and played by the tick', async () => {
+    await win.dispatch({type: 'setMode', mode: 'game'}); await settle();
+    const frame = () => new Promise((done) => win.requestAnimationFrame(() => done(undefined)));
+    const fixtureSkel = JSON.parse(await (await fetch('/tests/ui/fixtures/game-skel.json')).text());
+    const atlas = await (await fetch('/tests/ui/fixtures/game/art/player.png')).arrayBuffer();
+    win.gameFiles = {'art/hero.skel.json': fixtureSkel.skel, 'art/hero_tex.png': atlas};
+    const assets = ['art/hero_ske.json', 'art/hero.skel.json', 'art/sky.png'];
+    await win.pushEvents([project({assets}), room('crossroads_01')]); await settle();
+    // The armature: offered as a skeleton.
+    $('[data-game-side="assets"]').click(); await settle();
+    ws().querySelector('[data-game-pick-id="art/hero_ske.json"]').click(); await settle();
+    const form = $('[data-game-import-form]');
+    assert(form?.textContent.includes('Import as a skeleton'), `an armature is offered as ${form?.querySelector('h4')?.textContent}`);
+    let before = win.commands.length;
+    form.querySelector('[data-game-import]').click(); await settle();
+    assert(sent(before, 'gameImport')[0]?.source === 'art/hero_ske.json', 'the armature was not imported');
+    // The skeleton: its clips, the wave posed small and moving.
+    ws().querySelector('[data-game-pick-id="art/hero.skel.json"]').click();
+    const panel = () => $('[data-game-anim]');
+    for (let i = 0; i < 30 && !panel()?.querySelector('[data-game-preview-clip]'); i++) await settle();
+    assert(panel()?.textContent.includes('3 bones') && panel().querySelectorAll('[data-game-preview-clip]').length === 2 && panel().textContent.includes('swish in idle'), `the skeleton says ${panel()?.textContent}`);
+    const posed = new Set();
+    for (let i = 0; i < 40 && posed.size < 3; i++) {
+      posed.add($('[data-game-anim-preview]')?.dataset.frame);
+      await new Promise((done) => setTimeout(done, 20));
+    }
+    assert(posed.size >= 3 && $('[data-game-anim-preview]').width === 160, `the preview posed frames ${[...posed]}`);
+    // The player as a skeleton: drawn from its atlas where the run starts.
+    const prefabs = fixture.prefabs.map((/** @type {any} */ p) => (p.id === 'player' ? {...p, sprite: 'art/hero.skel.json', pivot: [0, 0]} : p));
+    await win.pushEvents([project({assets, prefabs}), room('crossroads_01')]); await settle();
+    for (let i = 0; i < 30 && !ws().gameProbe.drawn().includes('art/hero_tex.png'); i++) await settle();
+    assert(ws().gameProbe.drawn().includes('art/hero_tex.png'), `the player is not drawn from its atlas: ${ws().gameProbe.drawn()}`);
+    $('[data-game-side="world"]').click(); await settle();
+    ws().querySelector('[data-game-pick="prefab"][data-game-pick-id="player"]').click(); await settle();
+    assert([...(/** @type {HTMLSelectElement} */ ($('[data-game-clip="jump"]'))?.options ?? [])].map((o) => o.value).join() === ',idle,jump', 'a skeleton\'s clips are not offered for its states');
+    // Played: its ticks, its cue.
+    before = win.commands.length;
+    await win.pushEvents([{type: 'gamePlay', world: fixtureSkel.world, start: fixtureSkel.start, rooms: fixture.rooms, keys: [['ArrowRight', 2]], replay: [[0, 80]]}]);
+    const seen = new Set();
+    for (let i = 0; i < 200 && !(seen.size > 5 && ws().gameProbe.cue() === 'swish'); i++) {
+      const words = ws().gameProbe.frame();
+      if (words && words[8] > 0) seen.add(words[12 + 6]);
+      await frame();
+    }
+    assert(seen.size > 5 && [...seen].every((f) => f >= 0 && f < 30) && ws().gameProbe.cue() === 'swish', `the run posed ticks ${[...seen]}, said ${ws().gameProbe.cue()}`);
+    $('[data-game-stop]').click(); await settle();
+    win.gameFiles = undefined;
+    await win.pushEvents([project(), room('crossroads_01')]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
 }

@@ -18,9 +18,10 @@
 
 import { escapeHtml as esc } from "./html.js";
 import { draw, handle, pick, toRoom, toStage } from "./game-overlay.js";
-import { corner, fitCam, layout, maskOf, pickItem, restingFrame, rgb, toPlane, viewOf } from "./game-scene.js";
+import { animOf, corner, fitCam, layout, maskOf, pickItem, restingFrame, rgb, toPlane, viewOf } from "./game-scene.js";
 import { createGameRender } from "./game-render.js";
 import { createPlayer } from "./game-play.js";
+import { pose, restingClip, skelOf, skin } from "./game-skel.js";
 import { readGame } from "./bridge.js";
 
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
@@ -49,10 +50,12 @@ const SIDES = ["world", "layers", "entities", "assets"];
 const placeable = (a) => /\.(png|jpe?g|webp)$/i.test(a) || a.endsWith(".img.json");
 /** Whether an asset is art to bring in as planes. @param {string} a */
 const importable = (a) => /\.(psd|png)$/i.test(a) || animatable(a);
-/** Whether an asset is made into an animation: an Aseprite file, or a sprite sheet's JSON. @param {string} a */
-const animatable = (a) => /\.(aseprite|ase)$/i.test(a) || (/\.json$/i.test(a) && !a.endsWith(".anim.json") && !a.endsWith(".img.json"));
-/** Whether an asset is an animation a prefab can play. @param {string} a */
-const animation = (a) => a.endsWith(".anim.json");
+/** Whether an asset is made into an animation or a skeleton: an Aseprite file, a sprite sheet's JSON, a DragonBones armature's. @param {string} a */
+const animatable = (a) => /\.(aseprite|ase)$/i.test(a) || (/\.json$/i.test(a) && !a.endsWith(".anim.json") && !a.endsWith(".skel.json") && !a.endsWith(".img.json"));
+/** Whether an asset is an animation a prefab can play: frames, or a skeleton. @param {string} a */
+const animation = (a) => a.endsWith(".anim.json") || a.endsWith(".skel.json");
+/** Whether an asset is a DragonBones armature's. @param {string} a */
+const armature = (a) => /_ske\.json$/i.test(a);
 
 /** The states an animated thing plays a clip in (proton-game's `STATES`), and what each is. */
 const STATES = /** @type {[string, string][]} */ ([
@@ -424,6 +427,8 @@ export function createGame(host) {
   const masks = new Map();
   /** Animations loaded, by their `.anim.json`. @type {Map<string, Anim>} */
   const anims = new Map();
+  /** Skeletons loaded, by their `.skel.json`. @type {Map<string, import('./bindings/GameSkel').GameSkel>} */
+  const skels = new Map();
   /** A sheet's pixels, for the inspector's preview to draw from. @type {Map<string, ImageBitmap>} */
   const bitmaps = new Map();
   /** Whether an image is drawn at u, v. @param {string} key @param {number} u @param {number} v */
@@ -452,11 +457,29 @@ export function createGame(host) {
     const filter = project?.game.view.filter === "nearest" ? "nearest" : "smooth";
     for (const key of wanted) {
       if (!key || images.has(key) || loading.has(key) || failed.has(key)) continue;
+      // A skeleton: its bones and parts first, then its atlas.
+      if (key.endsWith(".skel.json")) {
+        loading.add(key);
+        readGame(key)
+          .then((bytes) => skelOf(JSON.parse(new TextDecoder().decode(bytes))))
+          .then((skel) => {
+            skels.set(key, skel);
+            images.set(key, [0, 0]);
+            loadKeys([skel.atlas]);
+            if (selected?.kind === "asset" && selected.id === key) renderInspector();
+          })
+          .catch(() => failed.add(key))
+          .finally(() => {
+            loading.delete(key);
+            if (!playing()) paint();
+          });
+        continue;
+      }
       // An animation: what its frames are first, then its sheets.
       if (key.endsWith(".anim.json")) {
         loading.add(key);
         readGame(key)
-          .then((bytes) => JSON.parse(new TextDecoder().decode(bytes)))
+          .then((bytes) => animOf(JSON.parse(new TextDecoder().decode(bytes))))
           .then((anim) => {
             anims.set(key, anim);
             images.set(key, anim.size ?? [0, 0]);
@@ -517,6 +540,11 @@ export function createGame(host) {
     const out = [];
     const standing = (/** @type {Prefab} */ prefab, /** @type {number[]} */ at) => {
       if (!prefab.sprite) return;
+      if (prefab.sprite.endsWith(".skel.json")) {
+        if (!skels.has(prefab.sprite)) return void loadKeys([prefab.sprite]);
+        out.push({ key: prefab.sprite, at, pivot: prefab.pivot, frame: null, clips: prefab.clips });
+        return;
+      }
       const anim = anims.get(prefab.sprite);
       if (!anim && animation(prefab.sprite)) return void loadKeys([prefab.sprite]);
       const frame = anim ? restingFrame(anim, prefab.clips) : null;
@@ -634,7 +662,7 @@ export function createGame(host) {
   function how() {
     const c = cam();
     const view = /** @type {[number, number]} */ ([project?.game.view.width ?? 1920, project?.game.view.height ?? 1080]);
-    return { focal: project?.game.view.focal ?? 1000, view, center: c?.center ?? /** @type {[number, number]} */ ([0, 0]), sizes: images, parts, anims, hidden, solo, sprites: room ? sprites(draft ?? room) : [] };
+    return { focal: project?.game.view.focal ?? 1000, view, center: c?.center ?? /** @type {[number, number]} */ ([0, 0]), sizes: images, parts, anims, skels, tick: project?.game.physics.tick ?? 60, hidden, solo, sprites: room ? sprites(draft ?? room) : [] };
   }
 
   /** What the scene draws now. */
@@ -708,6 +736,7 @@ export function createGame(host) {
     sizes: images,
     parts,
     anims,
+    skels,
     boxes: () => showBoxes,
     want: (keys) => loadKeys(keys),
     stageSize,
@@ -1254,7 +1283,7 @@ export function createGame(host) {
   function clipsPanel(id) {
     const p = project?.prefabs.find((x) => x.id === id);
     if (!p?.sprite || !animation(p.sprite)) return "";
-    const anim = anims.get(p.sprite);
+    const anim = anims.get(p.sprite) ?? skels.get(p.sprite);
     if (!anim) {
       loadKeys([p.sprite]);
       return `<p class="game-faint">Loading ${esc(p.sprite)}…</p>`;
@@ -1284,9 +1313,84 @@ export function createGame(host) {
     send({ type: "gameEdit", target: `prefab:${p.id}`, ops: [{ op: "set", path: ["clips"], value: clips }], label: "clips" });
   }, true);
 
+  /** A skeleton: its bones, its clips — one played small — its boxes and
+   *  cues, and which prefabs play it. @param {string} key */
+  function skelPanel(key) {
+    const skel = skels.get(key);
+    if (!skel) {
+      loadKeys([key]);
+      return `<p class="game-faint">Loading…</p>`;
+    }
+    if (!skel.clips.some((c) => c.name === preview.clip)) preview = { ...preview, clip: skel.clips[restingClip(skel) ?? 0]?.name ?? "", frame: 0 };
+    const users = project?.prefabs.filter((p) => p.sprite === key) ?? [];
+    const player = project?.prefabs.find((p) => project && project.game.player.endsWith(`${p.id}.prefab.json`));
+    const cues = skel.clips.flatMap((c) => c.cues.map((q) => `${esc(q.name)} in ${esc(c.name)} at frame ${q.frame + 1}`));
+    return `<section class="game-tool game-anim" data-game-anim="${esc(key)}"><h4>Skeleton</h4>` +
+      `<p class="game-faint">${skel.bones.length} bone${skel.bones.length === 1 ? "" : "s"}, ${skel.slots.length} slot${skel.slots.length === 1 ? "" : "s"}, ${skel.fps} frames a second, from ${esc(skel.source || "—")}.</p>` +
+      `<canvas class="game-anim-preview" data-game-anim-preview width="1" height="1"></canvas>` +
+      `<ul class="game-clips">${skel.clips
+        .map((c) => `<li><button class="game-clip${c.name === preview.clip ? " on" : ""}" data-game-preview-clip="${esc(c.name)}"><b>${esc(c.name)}</b>` +
+          `<span class="game-faint">${c.frames} frames · ${(c.frames / skel.fps).toFixed(2)} s${c.repeat ? `, ${c.repeat}×` : ", looping"}</span></button></li>`)
+        .join("")}</ul>` +
+      (skel.boxes.length ? `<h5 class="game-head">Boxes</h5><p class="game-faint">${skel.boxes.map((b) => `${esc(b.name)} (${b.kind})`).join(", ")} — drawn over a run when Boxes is on in the Run tab.</p>` : "") +
+      (cues.length ? `<h5 class="game-head">Cues</h5><p class="game-faint">${cues.join(", ")}</p>` : "") +
+      `<p class="game-faint">${users.length ? `Played by ${users.map((p) => esc(p.name || p.id)).join(", ")}.` : "No prefab plays it yet."}</p>` +
+      (player && player.sprite !== key ? `<p><button class="cc-quiet" data-game-anim-player="${esc(player.id)}">Make it the player's</button></p>` : "") +
+      `</section>`;
+  }
+
+  /** A skeleton posed, small, on a 2D canvas: each triangle of each part
+   *  shown, drawn from the atlas by the map that takes its atlas triangle to
+   *  where its points land. @param {HTMLCanvasElement} c @param {import('./bindings/GameSkel').GameSkel} skel
+   *  @param {import('./game-skel.js').Pose} posed @param {ImageBitmap} atlas */
+  function drawPosed(c, skel, posed, atlas) {
+    const g = c.getContext("2d");
+    if (!g) return;
+    /** @type {{uv: number[][], at: number[][], color: number}[]} */
+    const tris = [];
+    skel.slots.forEach((slot, i) => {
+      const part = slot.parts[posed.shown[i]];
+      if (!part) return;
+      const at = part.points.map((p) => skin(posed, /** @type {[number, number, number[]][]} */ (p.bones)));
+      for (const [a, b, d] of part.triangles) tris.push({ uv: [part.points[a].uv, part.points[b].uv, part.points[d].uv], at: [at[a], at[b], at[d]], color: posed.colors[i * 4 + 3] });
+    });
+    const xs = tris.flatMap((t) => t.at.map((p) => p[0]));
+    const ys = tris.flatMap((t) => t.at.map((p) => p[1]));
+    if (!xs.length) return;
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const scale = Math.min(150 / Math.max(1, x1 - x0), 150 / Math.max(1, y1 - y0));
+    c.width = 160;
+    c.height = 160;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, 160, 160);
+    const place = (/** @type {number[]} */ p) => [80 + (p[0] - (x0 + x1) / 2) * scale, 80 + (p[1] - (y0 + y1) / 2) * scale];
+    for (const t of tris) {
+      const [[u0, v0], [u1, v1], [u2, v2]] = t.uv;
+      const [[px0, py0], [px1, py1], [px2, py2]] = t.at.map(place);
+      const det = (u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0);
+      if (Math.abs(det) < 1e-9) continue;
+      const a = ((px1 - px0) * (v2 - v0) - (px2 - px0) * (v1 - v0)) / det;
+      const cc = ((px2 - px0) * (u1 - u0) - (px1 - px0) * (u2 - u0)) / det;
+      const b = ((py1 - py0) * (v2 - v0) - (py2 - py0) * (v1 - v0)) / det;
+      const d = ((py2 - py0) * (u1 - u0) - (py1 - py0) * (u2 - u0)) / det;
+      g.save();
+      g.beginPath();
+      g.moveTo(px0, py0);
+      g.lineTo(px1, py1);
+      g.lineTo(px2, py2);
+      g.closePath();
+      g.clip();
+      g.globalAlpha = Math.max(0, Math.min(1, t.color));
+      g.setTransform(a, b, cc, d, px0 - a * u0 - cc * v0, py0 - b * u0 - d * v0);
+      g.drawImage(atlas, 0, 0);
+      g.restore();
+    }
+  }
+
   /** An animation: its clips — one played small — its boxes and its cues,
    *  and which prefabs play it. @param {string} key */
   function animPanel(key) {
+    if (key.endsWith(".skel.json")) return skelPanel(key);
     const anim = anims.get(key);
     if (!anim) {
       loadKeys([key]);
@@ -1329,6 +1433,34 @@ export function createGame(host) {
     clearTimeout(preview.timer);
     const box = /** @type {HTMLElement | null} */ (q("[data-game-inspector]").querySelector("[data-game-anim]"));
     const c = /** @type {HTMLCanvasElement | null} */ (box?.querySelector("[data-game-anim-preview]") ?? null);
+    const skel = box ? skels.get(box.dataset.gameAnim ?? "") : null;
+    if (c && skel) {
+      const at = skel.clips.findIndex((x) => x.name === preview.clip);
+      const clip = skel.clips[at];
+      const atlas = bitmaps.get(skel.atlas);
+      if (!atlas) {
+        readGame(skel.atlas)
+          .then((bytes) => createImageBitmap(new Blob([bytes])))
+          .then((b) => {
+            bitmaps.set(skel.atlas, b);
+            startPreview();
+          })
+          .catch(() => {});
+        return;
+      }
+      // Its frames by the clock: round and round, or held at the end.
+      const frames = Math.max(1, clip?.frames ?? 1);
+      const f = preview.frame < 0 ? 0 : preview.frame;
+      drawPosed(c, skel, pose(skel, clip ? at : null, f), atlas);
+      c.dataset.frame = String(Math.floor(f));
+      const step = skel.fps / 30;
+      const next = clip && clip.repeat > 0 && f + step >= frames ? frames : (f + step) % frames;
+      preview.timer = window.setTimeout(() => {
+        preview = { ...preview, frame: next };
+        startPreview();
+      }, 33);
+      return;
+    }
     const anim = box ? anims.get(box.dataset.gameAnim ?? "") : null;
     const clip = anim?.clips.find((x) => x.name === preview.clip);
     if (!c || !anim || !clip) return;
@@ -1379,6 +1511,12 @@ export function createGame(host) {
   function importForm(source) {
     if (!project) return "";
     const done = project.imports?.find((i) => i.source === source);
+    if (armature(source)) {
+      return `<section class="game-tool game-import" data-game-import-form><h4>Import as a skeleton</h4>` +
+        `<p class="game-faint">A DragonBones armature, with its atlas beside it (<code>…_tex.json</code> and its image): its bones, its parts skinned on them, its animations as clips, bounding boxes called <code>hit…</code> and <code>hurt…</code> as boxes, events as cues — made into <code>${esc(source.replace(/_ske\.json$/i, ""))}.skel.json</code>. Inverse kinematics and deforming keys are left out, and said.</p>` +
+        (done?.anim ? `<p class="game-faint">Made ${esc(done.anim)} the last time. Importing again makes it again.</p>${done.changed ? `<p class="game-changed-note">The file has been saved since.</p>` : ""}` : "") +
+        `<p><button class="cc-primary" data-game-import="${esc(source)}">${done?.anim ? "Import again" : "Import"}</button></p></section>`;
+    }
     if (animatable(source)) {
       return `<section class="game-tool game-import" data-game-import-form><h4>Import as an animation</h4>` +
         `<p class="game-faint">Its frames go onto sheets beside it, with <code>${esc(source.replace(/(-sheet)?\.[^./]+$/i, ""))}.anim.json</code> to say where each is: its tags become clips, slices called <code>hit…</code> and <code>hurt…</code> boxes, one called <code>feet</code> where it stands, and a cel's text a cue. A prefab plays it once it looks like it.</p>` +

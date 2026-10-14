@@ -16,6 +16,7 @@
 //! and changing the room are the editor's; nothing here touches the disk.
 
 pub mod anim;
+pub mod skel;
 
 // Photoshop's files and PNGs are read and written by Canvas's engine; the
 // game's importer lays them out as rooms.

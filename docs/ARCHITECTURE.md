@@ -1663,10 +1663,42 @@ on; an animation's inspector plays any clip small and says its boxes, cues
 and who plays it; a prefab's says which clip each state plays; and the Run
 tab can draw hitboxes and hurtboxes over a run.
 
-**What comes next** (the plan's G8–G14): skeletal animation (DragonBones,
-then Spine after its licence is decided), lighting and atmosphere, combat on
-the boxes animations now carry, the world map with ability gates, hot reload
-and a web export.
+**Skeletons** (G9b). A DragonBones armature — `<name>_ske.json`, its atlas
+`<name>_tex.json` and image beside it — is made into a `.skel.json`: bones,
+parents first, standing at rest as a place, a turn, a skew and a scale; slots
+back to front, each with the parts it can show and a colour; and every part
+a mesh whose points are each carried by up to four bones, so a rigid image
+and a skinned mesh are drawn the same way. An image is four points on its
+slot's bone where its pivot, its trimmed region and its own transform put
+them; a weighted mesh's points are found on each bone that weighs them —
+placed as bound (`slotPose`) and taken back through the bone's bound pose
+(`bonePose`), as DragonBones' own parser does; a region turned on the atlas
+is read across as its Pixi runtime reads it; a bounding box is a shape on its
+bone, a hitbox or hurtbox by its name. A clip keeps DragonBones' keys as
+offsets from rest — moved, turned (unwound by `clockwise` exactly as its
+parser unwinds), scaled — each eased by `tweenEasing` (quadratic in, out or
+both, by an amount) or a Bézier `curve`; slots' parts and colours; events as
+cues. Inverse kinematics, deforming keys, draw-order keys and nested
+armatures are left out and said. A skeleton has at most 64 bones: what the
+shader holds.
+
+The sim needs no skeleton: a skeleton's clips are cooked into runs of
+one-tick frames, so it plays them as it plays an animation's — by state, on
+a loop or held, cues said at their ticks — and a run's frame says the clip
+and the tick of it. The window (`ui/game-skel.js`, tested in node against
+transforms worked out by hand and against the core's own count of ticks)
+poses the clip at that moment — each bone's world matrix, each slot's part
+and colour — and the renderer's second program carries each point by its
+bones' matrices in the vertex shader, the parts' buffers made once a
+skeleton, flipped about the feet like any sprite (the same pixels in
+Chromium and WebKit). The inspector poses a clip small on a 2D canvas, each
+triangle drawn from the atlas by the map that takes it where its points
+land; the Run tab's boxes follow the bones.
+
+**What comes next** (the plan's G8–G14): Spine skeletons once its licence is
+decided, lighting and atmosphere, combat on the boxes animations and
+skeletons now carry, the world map with ability gates, hot reload and a web
+export.
 
 ### Canvas
 

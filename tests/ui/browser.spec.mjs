@@ -46,6 +46,10 @@ test('Game mode\'s renderer draws its art, hazed by its plane, over the ground',
   expect(near(result.left, [255, 0, 0])).toBe(true);
   expect(near(result.right, [128, 0, 128])).toBe(true);
   expect(near(result.ground, [0, 255, 0])).toBe(true);
+  // A skeleton's part where its bone carries it, between two sprites drawn
+  // by the other program, and flipped about its feet.
+  expect(result.skel.map((p, i) => near(p, [[0, 0, 255], [0, 255, 0], [255, 0, 0], [255, 0, 0]][i]))).toEqual([true, true, true, true]);
+  expect(result.flipped.map((p, i) => near(p, [[0, 0, 255], [0, 255, 0]][i]))).toEqual([true, true]);
 });
 
 test('Game mode\'s runtime compiles and runs under the app\'s own CSP, which still refuses eval', async ({page}) => {

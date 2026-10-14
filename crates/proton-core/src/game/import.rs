@@ -75,6 +75,9 @@ impl Game {
         if proton_game::import::anim::is_anim_source(source, &bytes) {
             return self.import_anim(source, &bytes, &path);
         }
+        if proton_game::import::skel::is_skel_source(source, &bytes) {
+            return self.import_skel(source, &bytes, &path);
+        }
         let previous = self.imports.sources.iter().find(|s| s.source == source).cloned();
         let id = room
             .map(str::to_string)
@@ -228,6 +231,62 @@ impl Game {
             a.clips.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", "),
             if a.boxes.is_empty() { String::new() } else { format!(", box{} {}", if a.boxes.len() == 1 { "" } else { "es" }, a.boxes.iter().map(|b| b.name.as_str()).collect::<Vec<_>>().join(", ")) },
             if a.cues.is_empty() { String::new() } else { format!(", {} cue{}", a.cues.len(), if a.cues.len() == 1 { "" } else { "s" }) },
+        );
+        said.push_str(&match users.as_slice() {
+            [] => " — a prefab plays it once its sprite is this file".to_string(),
+            ids => format!(" — played by {}", ids.join(", ")),
+        });
+        if !notes.is_empty() {
+            said.push_str(&format!(" — {} note{}", notes.len(), if notes.len() == 1 { "" } else { "s" }));
+        }
+        Ok(Done { said, notes, events: vec![self.project_event()] })
+    }
+}
+
+impl Game {
+    /// A DragonBones armature made into a `.skel.json` beside it — its
+    /// atlas read from beside it too, and left where it is.
+    fn import_skel(&mut self, source: &str, bytes: &[u8], path: &Path) -> Result<Done, String> {
+        let project = self.project.as_ref().ok_or("no game is open")?;
+        let root = project.root().to_path_buf();
+        let read = |rel: &str| proton_game::path::inside(&root, rel).ok().and_then(|p| std::fs::read(p).ok());
+        let made = proton_game::import::skel::import_skel(source, bytes, &read)?;
+        let mut notes = made.notes.clone();
+        if read(&made.skel.atlas).is_none() {
+            notes.push(format!("its atlas's image {} is not in the game's folder", made.skel.atlas));
+        }
+        for (rel, data) in &made.files {
+            let at = proton_game::path::inside(&root, rel)?;
+            if std::fs::read(&at).ok().as_deref() != Some(data.as_slice()) {
+                proton_game::doc::write_atomically(&at, data).map_err(|e| format!("{rel}: {e}"))?;
+            }
+        }
+        let files: Vec<String> = made.files.iter().map(|(f, _)| f.clone()).collect();
+        let record = Imported { source: source.to_string(), hash: hash(bytes), files, stamp: stamp(path).unwrap_or_default(), anim: made.path.clone(), ..Imported::default() };
+        match self.imports.sources.iter_mut().find(|s| s.source == source) {
+            Some(old) => *old = record,
+            None => self.imports.sources.push(record),
+        }
+        let text = proton_game::doc::to_text(&self.imports);
+        proton_game::doc::write_atomically(&root.join(IMPORTS), text.as_bytes()).map_err(|e| format!("{IMPORTS}: {e}"))?;
+        let s = &made.skel;
+        let parts = s.slots.iter().map(|sl| sl.parts.iter().filter(|m| !m.points.is_empty()).count()).sum::<usize>();
+        let users: Vec<String> = self
+            .project
+            .as_ref()
+            .map(|p| p.prefabs.iter().map(|d| d.get()).filter(|f| f.sprite.as_deref() == Some(made.path.as_str())).map(|f| f.id.clone()).collect())
+            .unwrap_or_default();
+        let mut said = format!(
+            "made {} of {}: {} bone{}, {} part{}, clip{} {}{}",
+            made.path,
+            source.rsplit('/').next().unwrap_or(source),
+            s.bones.len(),
+            if s.bones.len() == 1 { "" } else { "s" },
+            parts,
+            if parts == 1 { "" } else { "s" },
+            if s.clips.len() == 1 { "" } else { "s" },
+            s.clips.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", "),
+            if s.boxes.is_empty() { String::new() } else { format!(", box{} {}", if s.boxes.len() == 1 { "" } else { "es" }, s.boxes.iter().map(|b| b.name.as_str()).collect::<Vec<_>>().join(", ")) },
         );
         said.push_str(&match users.as_slice() {
             [] => " — a prefab plays it once its sprite is this file".to_string(),

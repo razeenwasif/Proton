@@ -138,3 +138,69 @@ fn an_animated_run_shows_the_same_frames_and_says_the_same_cues_in_both() {
     let held: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(held, fixture, "the animated run changed — write the fixtures again with PROTON_BLESS=1");
 }
+
+/// A DragonBones armature to animate the player with: a body and an arm on
+/// it, a wave that loops and says a cue, a jump that plays once.
+fn armature() -> (serde_json::Value, serde_json::Value) {
+    let atlas = serde_json::json!({ "imagePath": "hero_tex.png", "width": 32, "height": 32, "SubTexture": [
+        { "name": "body", "x": 0, "y": 0, "width": 16, "height": 24 }, { "name": "arm", "x": 16, "y": 0, "width": 8, "height": 16 } ] });
+    let ske = serde_json::json!({ "frameRate": 24, "armature": [{ "name": "hero", "frameRate": 24,
+        "bone": [{ "name": "root" }, { "name": "body", "parent": "root", "transform": { "y": -24 } }, { "name": "arm", "parent": "body", "transform": { "x": 6, "y": 4 } }],
+        "slot": [{ "name": "body", "parent": "body" }, { "name": "arm", "parent": "arm" }],
+        "skin": [{ "slot": [{ "name": "body", "display": [{ "name": "body" }] }, { "name": "arm", "display": [{ "name": "arm", "pivot": { "x": 0.5, "y": 0 } }] }] }],
+        "animation": [
+            { "name": "idle", "duration": 12, "playTimes": 0,
+              "bone": [{ "name": "arm", "rotateFrame": [{ "duration": 6, "tweenEasing": 0, "rotate": -30 }, { "duration": 6, "tweenEasing": 0, "rotate": 30 }, { "duration": 0, "rotate": -30 }] }],
+              "frame": [{ "duration": 6 }, { "duration": 6, "events": [{ "name": "swish" }] }] },
+            { "name": "jump", "duration": 8, "playTimes": 1,
+              "bone": [{ "name": "body", "translateFrame": [{ "duration": 8, "tweenEasing": 1, "y": 0 }, { "duration": 0, "y": -6 }] }] }
+        ] }] });
+    (ske, atlas)
+}
+
+#[test]
+fn a_run_of_a_skeleton_counts_its_ticks_and_says_its_cues_the_same_in_both() {
+    let (ske, atlas) = armature();
+    let dir = std::env::temp_dir().join(format!("proton-runtime-skel-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    proton_game::template::write(&dir, &proton_game::template::files("metroidvania", "Skeleton").unwrap()).unwrap();
+    let read = |rel: &str| (rel == "art/hero_tex.json").then(|| atlas.to_string().into_bytes());
+    let made = proton_game::import::skel::import_skel("art/hero_ske.json", ske.to_string().as_bytes(), &read).unwrap();
+    for (rel, bytes) in &made.files {
+        std::fs::write(dir.join(rel), bytes).unwrap();
+    }
+    let prefab = dir.join("prefabs/player.prefab.json");
+    let mut text: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&prefab).unwrap()).unwrap();
+    text["sprite"] = serde_json::json!("art/hero.skel.json");
+    text["pivot"] = serde_json::json!([0, 0]);
+    std::fs::write(&prefab, text.to_string()).unwrap();
+    let world = World::cook(&Project::open(&dir).unwrap()).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    // Twelve frames at 24 a second, 30 ticks at 60; eight, 20.
+    assert_eq!(world.anims[0].frames.len(), 50);
+    let json = serde_json::to_string(&world).unwrap();
+    assert_eq!(proton_game_runtime::load(json.as_bytes()), 0);
+    let (room, at) = world.start;
+    assert_eq!(proton_game_runtime::pg_start(room as u32, at[0], at[1], 0), 0);
+    let mut frames = Vec::new();
+    let mut cues = 0;
+    for (held, n) in replay() {
+        for _ in 0..n {
+            if proton_game_runtime::pg_step(held) & proton_game_runtime::happened::CUE != 0 {
+                cues += proton_game_runtime::cues()[0];
+            }
+            frames.push(proton_game_runtime::frame()[proton_game_runtime::HEADER + 6]);
+        }
+    }
+    let hash = format!("{:016x}", proton_game_runtime::hash());
+    assert!(cues > 3 && frames.iter().any(|&f| f >= 30), "{cues} cues, frames {:?}", &frames[..40]);
+    let skel = std::str::from_utf8(&made.files[0].1).unwrap().to_string();
+    let fixture = serde_json::json!({ "world": json, "skel": skel, "start": [room, at[0], at[1], 0], "replay": replay(), "hash": hash, "cues": cues,
+        "frames": frames.iter().step_by(10).collect::<Vec<_>>() });
+    let file = fixtures().join("game-skel.json");
+    if std::env::var_os("PROTON_BLESS").is_some() {
+        std::fs::write(&file, serde_json::to_string_pretty(&fixture).unwrap() + "\n").unwrap();
+    }
+    let held: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(held, fixture, "the skeleton's run changed — write the fixtures again with PROTON_BLESS=1");
+}

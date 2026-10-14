@@ -18,6 +18,7 @@
  * boxes — hitboxes red, hurtboxes green — drawn over it when asked. */
 
 import { boxInRoom, layout } from "./game-scene.js";
+import { boxesOf, momentOf, pose } from "./game-skel.js";
 
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
 
@@ -52,6 +53,7 @@ function compile() {
  *   sizes: Map<string, [number, number]>,
  *   parts: Map<string, import('./game-scene.js').Parts>,
  *   anims?: Map<string, import('./game-scene.js').Anim>,
+ *   skels?: Map<string, import('./bindings/GameSkel').GameSkel>,
  *   boxes?: () => boolean,
  *   want: (keys: string[]) => void,
  *   stageSize: () => number[],
@@ -179,7 +181,7 @@ export function createPlayer(host) {
       drawn.push({ key: world.sprites[now[o]], at, pivot: [now[o + 3], now[o + 4]], flip: Boolean(now[o + 5]), frame: now[o + 6] >= 0 ? now[o + 6] : null });
     }
     host.want([...room.planes.flatMap((p) => p.items.map((i) => i.image)), ...drawn.map((d) => d.key)]);
-    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, anims: host.anims, sprites: drawn });
+    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, anims: host.anims, skels: host.skels, tick: world.tick, sprites: drawn });
     const ratio = window.devicePixelRatio || 1;
     host.gpu()?.draw(sprites, view, width, height, ratio, host.ground());
     // Over it: what is outside the game's view, a door's fade, and a readout.
@@ -206,13 +208,34 @@ export function createPlayer(host) {
     }
     // Boxes over what is drawn, when asked: where each is in this frame.
     if (host.boxes?.()) {
+      const stroke = (/** @type {string} */ kind) => (kind === "hit" ? "#ff4d5e" : kind === "hurt" ? "#4dd88a" : "#f4c95d");
       for (const d of drawn) {
+        // A skeleton's boxes: where its bones put them, about its feet.
+        const skel = host.skels?.get(d.key);
+        if (skel) {
+          const m = momentOf(skel, world.tick, d.frame);
+          for (const b of boxesOf(skel, pose(skel, m.clip, m.frame))) {
+            g.strokeStyle = stroke(b.kind);
+            g.lineWidth = 1.5;
+            g.beginPath();
+            b.points.forEach((p, i) => {
+              const rx = d.at[0] + (p[0] - d.pivot[0]) * (d.flip ? -1 : 1);
+              const ry = d.at[1] + (p[1] - d.pivot[1]);
+              const [sx, sy] = [view.x + rx * view.scale, view.y + ry * view.scale];
+              if (i) g.lineTo(sx, sy);
+              else g.moveTo(sx, sy);
+            });
+            g.closePath();
+            g.stroke();
+          }
+          continue;
+        }
         const anim = d.frame === null || d.frame === undefined ? null : host.anims?.get(d.key);
         for (const b of anim?.boxes ?? []) {
           const rect = d.frame === null || d.frame === undefined ? null : b.frames[d.frame];
           if (!rect) continue;
           const [x, y, w, h] = boxInRoom(rect, d.at, d.pivot, d.flip);
-          g.strokeStyle = b.kind === "hit" ? "#ff4d5e" : b.kind === "hurt" ? "#4dd88a" : "#f4c95d";
+          g.strokeStyle = stroke(b.kind);
           g.lineWidth = 1.5;
           g.strokeRect(view.x + x * view.scale, view.y + y * view.scale, w * view.scale, h * view.scale);
         }

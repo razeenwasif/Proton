@@ -17,6 +17,8 @@
  * picture. Zoomed out, a backdrop covers only what the camera can see from
  * there, which is what it is: art outside it is never on screen. */
 
+import { momentOf, pose, restingClip } from "./game-skel.js";
+
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
 /** @typedef {import('./bindings/GamePlane').GamePlane} Plane */
 /** @typedef {import('./bindings/GameItem').GameItem} Item */
@@ -25,11 +27,16 @@
  *  @typedef {{center: [number, number], zoom: number}} Cam */
 /** One thing to draw, in room pixels. Rotation is about its middle. A piece
  *  of an image cut up carries the whole image's rectangle as `whole`; a
- *  frame of an animation, the part of its sheet it is, as `uv` (0–1).
- *  @typedef {{key: string, plane: string, item: string | null, x: number, y: number, w: number, h: number, rot: number, flip: boolean, opacity: number, tint: [number, number, number, number], blend: string, whole?: {x: number, y: number, w: number, h: number}, uv?: [number, number, number, number]}} Sprite */
+ *  frame of an animation, the part of its sheet it is, as `uv` (0–1); a
+ *  skeleton, its model and pose and where it stands, as `skel` — its key
+ *  then its atlas.
+ *  @typedef {{key: string, plane: string, item: string | null, x: number, y: number, w: number, h: number, rot: number, flip: boolean, opacity: number, tint: [number, number, number, number], blend: string, whole?: {x: number, y: number, w: number, h: number}, uv?: [number, number, number, number],
+ *             skel?: {model: import('./bindings/GameSkel').GameSkel, posed: import('./game-skel.js').Pose, at: number[], pivot: number[]}}} Sprite */
 /** An animation, as its `.anim.json` says it. @typedef {import('./bindings/GameAnim').GameAnim} Anim */
-/** Something standing on the play plane: an image or an animation's frame, its feet at `at`.
- *  @typedef {{key: string, at: number[], pivot: number[], flip?: boolean, frame?: number | null}} Standing */
+/** Something standing on the play plane: an image, an animation's frame or a
+ *  skeleton at a run's frame (at rest without one), its feet at `at`.
+ *  @typedef {{key: string, at: number[], pivot: number[], flip?: boolean, frame?: number | null, clips?: Record<string, string | undefined>}} Standing */
+
 /** How an image is cut up: its size, and where each piece goes in it (an `.img.json`).
  *  @typedef {{size: [number, number], chunks: {file: string, at: [number, number], size: [number, number]}[]}} Parts */
 
@@ -86,7 +93,7 @@ export function rgb(hex) {
  *  @param {Room} room
  *  @param {{focal: number, view: [number, number], center: [number, number], sizes: Map<string, [number, number]>,
  *           hidden?: Set<string>, solo?: string | null, sprites?: Standing[],
- *           parts?: Map<string, Parts>, anims?: Map<string, Anim>}} how
+ *           parts?: Map<string, Parts>, anims?: Map<string, Anim>, skels?: Map<string, import('./bindings/GameSkel').GameSkel>, tick?: number}} how
  *  @returns {Sprite[]} */
 export function layout(room, how) {
   const at = corner(room, how.view, how.center);
@@ -114,6 +121,14 @@ export function layout(room, how) {
     // What stands in the room stands on the play plane, in front of its art.
     if (plane.gameplay) {
       for (const s of how.sprites ?? []) {
+        const skel = how.skels?.get(s.key);
+        if (skel) {
+          if (!how.sizes.get(skel.atlas)) continue;
+          const m = s.frame === null || s.frame === undefined ? { clip: restingClip(skel, s.clips), frame: 0 } : momentOf(skel, how.tick ?? 60, s.frame);
+          out.push({ key: skel.atlas, plane: plane.id, item: null, x: s.at[0], y: s.at[1], w: 0, h: 0, rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal",
+            skel: { model: skel, posed: pose(skel, m.clip, m.frame), at: s.at, pivot: s.pivot } });
+          continue;
+        }
         const anim = how.anims?.get(s.key);
         if (anim) {
           const drawn = frameSprite(anim, s, how.sizes, plane.id);
@@ -130,6 +145,22 @@ export function layout(room, how) {
     }
   }
   return out;
+}
+
+/** An animation as its file says it, every list it may leave out when
+ *  empty — proton-game's writer leaves out `[]` — put back.
+ *  @param {any} raw @returns {Anim} */
+export function animOf(raw) {
+  const list = (/** @type {any} */ v) => (Array.isArray(v) ? v : []);
+  return {
+    ...raw,
+    size: raw.size ?? [0, 0],
+    sheets: list(raw.sheets),
+    frames: list(raw.frames).map((f) => ({ sheet: 0, rect: [0, 0, 0, 0], offset: [0, 0], ms: 100, pivot: null, ...f })),
+    clips: list(raw.clips).map((c) => ({ from: 0, to: 0, direction: "forward", repeat: 0, ...c })),
+    boxes: list(raw.boxes).map((b) => ({ kind: "other", ...b, frames: list(b.frames) })),
+    cues: list(raw.cues),
+  };
 }
 
 /** A frame of an animation, standing at `s.at` on its feet: the part of its

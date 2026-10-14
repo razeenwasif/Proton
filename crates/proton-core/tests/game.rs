@@ -532,3 +532,29 @@ fn an_aseprite_file_becomes_an_animation_the_player_plays_and_the_agent_sees() {
     let run = space.run_tool("game_play", &json!({"inputs": [{"hold": ["right"], "ticks": 60}]})).unwrap();
     assert!(run.contains("Cues said: step ×"), "{run}");
 }
+
+#[test]
+fn a_dragonbones_armature_becomes_a_skeleton_the_player_plays() {
+    let (mut space, root) = with_game("skel");
+    let game = root.join("crossroads");
+    let atlas = json!({ "imagePath": "hero_tex.png", "width": 32, "height": 32, "SubTexture": [{ "name": "body", "x": 0, "y": 0, "width": 16, "height": 24 }] });
+    let ske = json!({ "frameRate": 24, "armature": [{ "name": "hero",
+        "bone": [{ "name": "root" }, { "name": "body", "parent": "root", "transform": { "y": -12 } }],
+        "slot": [{ "name": "body", "parent": "body" }],
+        "skin": [{ "slot": [{ "name": "body", "display": [{ "name": "body" }, { "name": "Hurtbox", "type": "boundingBox", "width": 16, "height": 24 }] }] }],
+        "animation": [{ "name": "idle", "duration": 12, "playTimes": 0, "frame": [{ "duration": 6 }, { "duration": 6, "events": [{ "name": "breathe" }] }],
+                        "bone": [{ "name": "body", "translateFrame": [{ "duration": 12, "tweenEasing": 0 }, { "duration": 0, "y": -2 }] }] }] }] });
+    std::fs::write(game.join("art/hero_ske.json"), ske.to_string()).unwrap();
+    std::fs::write(game.join("art/hero_tex.json"), atlas.to_string()).unwrap();
+    std::fs::write(game.join("art/hero_tex.png"), std::fs::read(game.join("art/player.png")).unwrap()).unwrap();
+    let shown = view(&space.apply(Command::Sync)).unwrap().unwrap();
+    assert!(shown.assets.contains(&"art/hero_ske.json".to_string()) && !shown.assets.iter().any(|a| a.contains("hero_tex")), "{:?}", shown.assets);
+    let events = space.apply(Command::GameImport { source: "art/hero_ske.json".into(), room: None, scale: None, normals: false });
+    let said: Vec<String> = events.iter().filter_map(|e| if let Event::Notice { text, .. } = e { Some(text.clone()) } else { None }).collect();
+    assert!(said.iter().any(|s| s.contains("made art/hero.skel.json of hero_ske.json: 2 bones, 1 part, clip idle, box Hurtbox")), "{said:?}");
+    space.apply(edit("prefab:player", vec![set(&["sprite"], json!("art/hero.skel.json"))]));
+    let summary = space.run_tool("game_info", &json!({})).unwrap();
+    assert!(summary.contains("Skeleton art/hero.skel.json: 2 bones, clips idle (12 frames at 24 a second, looping); boxes hurtbox (hurt); played by player"), "{summary}");
+    let run = space.run_tool("game_play", &json!({"inputs": [{"ticks": 90}]})).unwrap();
+    assert!(run.contains("Cues said: breathe ×"), "{run}");
+}

@@ -658,7 +658,7 @@ fn sheet_json(path: &Path, name: &str) -> bool {
         return false;
     }
     std::fs::metadata(path).is_ok_and(|m| m.len() < 4 << 20)
-        && std::fs::read(path).is_ok_and(|bytes| proton_game::import::anim::is_anim_source(name, &bytes))
+        && std::fs::read(path).is_ok_and(|bytes| proton_game::import::anim::is_anim_source(name, &bytes) || proton_game::import::skel::is_skel_source(name, &bytes))
 }
 
 /// The games in a project, for another mode to name them — Canvas sends art
@@ -717,6 +717,7 @@ fn assets(root: &Path) -> Vec<String> {
                 stack.push(path);
             } else if name.ends_with(".img.json")
                 || name.ends_with(".anim.json")
+                || name.ends_with(".skel.json")
                 || path.extension().and_then(|e| e.to_str()).is_some_and(|e| SHOWN.contains(&e.to_ascii_lowercase().as_str()))
                 || sheet_json(&path, &name)
             {
@@ -734,6 +735,9 @@ fn assets(root: &Path) -> Vec<String> {
     let cut: Vec<String> = out.iter().filter_map(|a| a.strip_suffix(".img.json").map(|base| format!("{base}/"))).collect();
     let sheets: Vec<String> = out.iter().filter_map(|a| a.strip_suffix(".anim.json").map(|base| format!("{base}.sheet"))).collect();
     out.retain(|a| !a.ends_with(".normal.png") && !cut.iter().any(|base| a.starts_with(base.as_str())) && !(a.ends_with(".png") && sheets.iter().any(|s| a.starts_with(s.as_str()))));
+    // A skeleton's atlas is its own too.
+    let atlases: Vec<String> = out.iter().filter_map(|a| a.strip_suffix("_ske.json").map(|base| format!("{base}_tex."))).collect();
+    out.retain(|a| !atlases.iter().any(|t| a.starts_with(t.as_str())));
     out.sort();
     out
 }

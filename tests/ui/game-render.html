@@ -18,6 +18,23 @@
     result.right = render.probe(48, 32);
     render.draw([], {scale: 1, x: 0, y: 0}, 64, 64, 1, [0, 1, 0]);
     result.ground = render.probe(16, 32);
+    // A skeleton: a square on a bone turned a quarter, 16 along — so it
+    // covers x 0 to 16, y 0 to 16 of the skeleton — standing at 32, 40:
+    // drawn between two sprites, then flipped about its feet.
+    const blue = new ImageData(new Uint8ClampedArray([0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255]), 2, 2);
+    render.upload('blue', await createImageBitmap(blue), 'nearest');
+    const {pose} = await import('/game-skel.js');
+    const corner = (x, y, u, v) => ({uv: [u, v], bones: [[1, 1, [x, y]]]});
+    const model = {format: 1, source: '', atlas: 'blue', atlasSize: [2, 2], fps: 24, boxes: [], clips: [],
+      bones: [{name: 'root', parent: null, at: [0, 0], rot: 0, skew: 0, scale: [1, 1], length: 0}, {name: 'arm', parent: 0, at: [16, 0], rot: 90, skew: 0, scale: [1, 1], length: 0}],
+      slots: [{name: 's', bone: 1, shown: 0, color: [1, 1, 1, 1], parts: [{name: 'p', points: [corner(0, 0, 0, 0), corner(16, 0, 2, 0), corner(16, 16, 2, 2), corner(0, 16, 0, 2)], triangles: [[0, 1, 2], [0, 2, 3]]}]}]};
+    const skeleton = (flip) => ({key: 'blue', plane: 'p', item: null, x: 32, y: 40, w: 0, h: 0, rot: 0, flip, opacity: 1, tint: [0, 0, 0, 0], blend: 'normal',
+      skel: {model, posed: pose(model, null, 0), at: [32, 40], pivot: [0, 0]}});
+    const small = (x) => ({...sprite(x, [0, 0, 0, 0]), y: 0, w: 8, h: 8});
+    render.draw([small(0), skeleton(false), small(56)], {scale: 1, x: 0, y: 0}, 64, 64, 1, [0, 1, 0]);
+    result.skel = [render.probe(40, 48), render.probe(24, 48), render.probe(4, 4), render.probe(60, 4)];
+    render.draw([skeleton(true)], {scale: 1, x: 0, y: 0}, 64, 64, 1, [0, 1, 0]);
+    result.flipped = [render.probe(24, 48), render.probe(40, 48)];
   }
   window.result = result;
 </script>

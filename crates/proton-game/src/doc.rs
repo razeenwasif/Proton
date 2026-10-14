@@ -429,6 +429,20 @@ impl Document for crate::format::Anim {
     }
 }
 
+impl Document for crate::format::Skel {
+    fn problems(&self) -> Vec<String> {
+        let bones = self.bones.len() as u32;
+        let mut out = Vec::new();
+        if self.bones.iter().enumerate().any(|(i, b)| b.parent.is_some_and(|p| p >= i as u32)) {
+            out.push("a bone comes before its parent".into());
+        }
+        if self.slots.iter().any(|s| s.bone >= bones) || self.slots.iter().flat_map(|s| &s.parts).flat_map(|m| &m.points).flat_map(|p| &p.bones).any(|b| b.0 >= bones) {
+            out.push("a part is on a bone the skeleton does not have".into());
+        }
+        out
+    }
+}
+
 impl Document for Image {
     fn problems(&self) -> Vec<String> {
         Vec::new()

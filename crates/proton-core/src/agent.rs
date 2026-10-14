@@ -568,7 +568,10 @@ impl Agent {
                               their undo. An .aseprite file, or a sprite sheet's .json (Aseprite's, Canvas's), \
                               becomes an animation, <name>.anim.json beside it: frames on sheets, its tags \
                               clips, slices named hit…/hurt… boxes and one named feet or pivot where it \
-                              stands, a cel's text a cue; a prefab plays it once its sprite names it, each \
+                              stands, a cel's text a cue. A DragonBones armature (<name>_ske.json, its \
+                              <name>_tex.json atlas beside it) becomes a skeleton, <name>.skel.json: bones, \
+                              parts skinned on them, its animations clips, bounding boxes hit…/hurt… boxes, \
+                              events cues. A prefab plays either once its sprite names it, each \
                               state (idle, run, jump, fall, dash, wall, hurt) the clip of its name unless the \
                               prefab's clips map says another. Files are written at once. Importing the same \
                               file again replaces what it made before. Says what was left out and why."
