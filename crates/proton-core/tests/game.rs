@@ -558,3 +558,19 @@ fn a_dragonbones_armature_becomes_a_skeleton_the_player_plays() {
     let run = space.run_tool("game_play", &json!({"inputs": [{"ticks": 90}]})).unwrap();
     assert!(run.contains("Cues said: breathe ×"), "{run}");
 }
+
+#[test]
+fn the_agent_plays_a_fight_and_is_told_what_was_beaten_and_the_health_left() {
+    let (mut space, _root) = with_game("fight");
+    let info = space.run_tool("game_info", &json!({})).unwrap();
+    assert!(info.contains("crawler (crawler, health 2)") && info.contains("Combat: a swing does 1 for 8 frames"), "{info}");
+    // In from the west, up to where the crawler patrols, swinging as it comes.
+    let mut inputs = vec![json!({"hold": ["right"], "ticks": 105})];
+    for _ in 0..40 {
+        inputs.push(json!({"hold": ["attack"], "ticks": 1}));
+        inputs.push(json!({"hold": [], "ticks": 20}));
+    }
+    let run = space.run_tool("game_play", &json!({"room": "crossroads_02", "at": [120, 1400], "inputs": inputs})).unwrap();
+    // A press while a swing recovers is no swing: fewer than were pressed.
+    assert!(run.contains(", landing 2.") && run.contains("Beat crawler at tick") && run.contains("Health 5 of 5.") && !run.contains("Swung 40"), "{run}");
+}

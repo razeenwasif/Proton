@@ -114,6 +114,17 @@ struct Played {
     dashes: u32,
     /// The cues the animation said, and how many times each.
     cues: Vec<(String, u32)>,
+    swings: u32,
+    hits: u32,
+    /// Tick and the actor's id, each thing beaten.
+    beaten: Vec<(u32, String)>,
+    /// Tick and room, each death.
+    died: Vec<(u32, String)>,
+    rested: u32,
+    flags: Vec<(u32, String)>,
+    shots: u32,
+    /// Health at the end, and the most: none when nothing kills the player.
+    health: Option<(i32, i32)>,
     samples: Vec<(u32, String, [i32; 2], bool)>,
     parts: Vec<GamePathPart>,
 }
@@ -122,6 +133,8 @@ fn play_out(world: World, start: (u16, [i32; 2], u32), inputs: &[(u32, u32)]) ->
     let names: Vec<String> = world.rooms.iter().map(|r| r.id.clone()).collect();
     let abilities = world.abilities.clone();
     let cue_names = world.cues.clone();
+    let actor_names: Vec<String> = world.actors.iter().map(|a| a.id.clone()).collect();
+    let flag_names = world.flags.clone();
     let mut sim = Sim::at(world, start.0, start.1, start.2);
     let total: u32 = inputs.iter().map(|(_, n)| n).sum();
     let every = (total / SAMPLES as u32).max(1);
@@ -139,6 +152,14 @@ fn play_out(world: World, start: (u16, [i32; 2], u32), inputs: &[(u32, u32)]) ->
         jumps: 0,
         dashes: 0,
         cues: Vec::new(),
+        swings: 0,
+        hits: 0,
+        beaten: Vec::new(),
+        died: Vec::new(),
+        rested: 0,
+        flags: Vec::new(),
+        shots: 0,
+        health: None,
         samples: vec![(0, room_of(&sim), feet(&sim), sim.state.grounded)],
         parts: vec![GamePathPart { room: room_of(&sim), points: vec![feet(&sim)], hurt: Vec::new() }],
     };
@@ -174,6 +195,13 @@ fn play_out(world: World, start: (u16, [i32; 2], u32), inputs: &[(u32, u32)]) ->
                             None => out.cues.push((name, 1)),
                         }
                     }
+                    Happened::Swung => out.swings += 1,
+                    Happened::Hit => out.hits += 1,
+                    Happened::Killed(a) => out.beaten.push((tick, actor_names.get(a as usize).cloned().unwrap_or_default())),
+                    Happened::Died => out.died.push((tick, room.clone())),
+                    Happened::Rested => out.rested += 1,
+                    Happened::Flag(f) => out.flags.push((tick, flag_names.get(f as usize).cloned().unwrap_or_default())),
+                    Happened::Shot => out.shots += 1,
                 }
             }
             if out.parts.last().map(|p| p.room != room).unwrap_or(true) {
@@ -194,6 +222,7 @@ fn play_out(world: World, start: (u16, [i32; 2], u32), inputs: &[(u32, u32)]) ->
     out.end_room = room_of(&sim);
     out.end = feet(&sim);
     out.grounded = sim.state.grounded;
+    out.health = (sim.world.fight.health > 0).then_some((sim.state.health, sim.world.fight.health));
     if let Some(part) = out.parts.last_mut() {
         part.points.push(out.end);
     }
@@ -235,6 +264,30 @@ fn summary(p: &Played, tick: u32) -> String {
     if !p.cues.is_empty() {
         let said: Vec<String> = p.cues.iter().map(|(name, n)| format!("{name} ×{n}")).collect();
         let _ = write!(out, " Cues said: {}.", said.join(", "));
+    }
+    if p.swings > 0 {
+        let _ = write!(out, " Swung {} time{}, landing {}.", p.swings, if p.swings == 1 { "" } else { "s" }, p.hits);
+    }
+    if !p.beaten.is_empty() {
+        let beaten: Vec<String> = p.beaten.iter().map(|(t, id)| format!("{id} at tick {t}")).collect();
+        let _ = write!(out, " Beat {}.", beaten.join(", "));
+    }
+    if p.shots > 0 {
+        let _ = write!(out, " {} shot{} fired at the player.", p.shots, if p.shots == 1 { " was" } else { "s were" });
+    }
+    if !p.died.is_empty() {
+        let died: Vec<String> = p.died.iter().map(|(t, room)| format!("tick {t} in {room}")).collect();
+        let _ = write!(out, " Died {}.", died.join(", "));
+    }
+    if p.rested > 0 {
+        let _ = write!(out, " Rested at a bench {} time{}.", p.rested, if p.rested == 1 { "" } else { "s" });
+    }
+    if !p.flags.is_empty() {
+        let set: Vec<String> = p.flags.iter().map(|(t, f)| format!("{f} at tick {t}")).collect();
+        let _ = write!(out, " Flags set: {}.", set.join(", "));
+    }
+    if let Some((left, most)) = p.health {
+        let _ = write!(out, " Health {left} of {most}.");
     }
     out
 }
@@ -388,8 +441,22 @@ impl Game {
                 if flags.is_empty() { String::new() } else { format!(" [{}]", flags.join(", ")) },
             );
         }
-        let prefabs: Vec<String> = project.prefabs.iter().map(|p| p.get().id.clone()).collect();
+        let prefabs: Vec<String> = project
+            .prefabs
+            .iter()
+            .map(|p| {
+                let p = p.get();
+                let health = p.health.map(|h| format!(", health {h}")).unwrap_or_default();
+                format!("{} ({}{health})", p.id, format!("{:?}", p.behaviour.kind).to_lowercase())
+            })
+            .collect();
         let _ = writeln!(out, "Prefabs: {}.", list(&prefabs));
+        let k = &game.combat;
+        let _ = writeln!(
+            out,
+            "Combat: a swing does {} for {} frames then rests {}, reaching {}×{} px; hitstop {} frames; hurt, the player is spared {} frames and stunned {}. Entities of a prefab may carry props patrol [from, to], facing (true: left) and flag (beating it sets the flag for good); a trigger (rect, props.flag) sets a flag; an ability_gate's props.flag keeps it shut until set; a save_point is a bench rested at with up.",
+            k.damage, k.frames, k.recovery, k.reach[0], k.reach[1], k.hitstop, k.invincible, k.stun
+        );
         let assets = super::assets(project.root());
         let art: Vec<String> = assets.iter().filter(|a| a.to_ascii_lowercase().ends_with(".psd")).cloned().collect();
         if !art.is_empty() {

@@ -88,6 +88,7 @@ function tone(prefab, c) {
     case "save_point": return c.ok;
     case "ability_gate": return c.warn;
     case "ability_pickup": return c.accent;
+    case "trigger": return c.warn;
     default: return c.text;
   }
 }
@@ -198,6 +199,22 @@ export function draw(g, room, view, c, selected, also = {}) {
       g.closePath();
       g.fill();
       label = [x + 8, y - 4];
+      // A patrol, when it is selected: the ends it turns at.
+      const patrol = e.props?.patrol;
+      if (is("entity", e.id) && Array.isArray(patrol) && patrol.length === 2) {
+        const [a] = toStage(view, [patrol[0], e.at[1]]);
+        const [b] = toStage(view, [patrol[1], e.at[1]]);
+        g.setLineDash([4, 4]);
+        g.beginPath();
+        g.moveTo(a, y + 10);
+        g.lineTo(b, y + 10);
+        for (const end of [a, b]) {
+          g.moveTo(end, y + 4);
+          g.lineTo(end, y + 16);
+        }
+        g.stroke();
+        g.setLineDash([]);
+      }
     }
     if (label) {
       g.fillStyle = is("entity", e.id) ? c.accent : c.muted;

@@ -431,7 +431,7 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     const seen = new Set();
     for (let i = 0; i < 200 && !(seen.has(2) && ws().gameProbe.cue() === 'step'); i++) {
       const words = ws().gameProbe.frame();
-      if (words && words[8] > 0) seen.add(words[12 + 6]);
+      if (words && words[8] > 0) seen.add(words[16 + 6]);
       await frame();
     }
     assert(seen.has(1) && seen.has(2) && ws().gameProbe.cue() === 'step', `the run showed frames ${[...seen]}, said ${ws().gameProbe.cue()}`);
@@ -482,7 +482,7 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     const seen = new Set();
     for (let i = 0; i < 200 && !(seen.size > 5 && ws().gameProbe.cue() === 'swish'); i++) {
       const words = ws().gameProbe.frame();
-      if (words && words[8] > 0) seen.add(words[12 + 6]);
+      if (words && words[8] > 0) seen.add(words[16 + 6]);
       await frame();
     }
     assert(seen.size > 5 && [...seen].every((f) => f >= 0 && f < 30) && ws().gameProbe.cue() === 'swish', `the run posed ticks ${[...seen]}, said ${ws().gameProbe.cue()}`);
@@ -568,6 +568,82 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     times.dispatchEvent(new win.Event('change', {bubbles: true}));
     quality.value = 'medium';
     quality.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    await win.pushEvents([project(), room('crossroads_01')]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+
+  await test('Combat is set in the inspector — a prefab\'s health and behaviour, the game\'s swing, an entity\'s patrol and flag — a prefab dragged in is placed, and a fight is played with its health and boxes', async () => {
+    await win.dispatch({type: 'setMode', mode: 'game'}); await settle();
+    await win.pushEvents([project(), room('crossroads_02')]); await settle();
+    const field = (/** @type {string[]} */ path) => /** @type {HTMLInputElement | null} */ (ws().querySelector(`[data-game-field='${JSON.stringify(path)}']`));
+    const change = async (/** @type {HTMLInputElement} */ input, /** @type {string} */ value) => {
+      const before = win.commands.length;
+      input.value = value;
+      input.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+      return sent(before, 'gameEdit')[0];
+    };
+    // The crawler: its health, and its behaviour's numbers with their defaults.
+    $('[data-game-side="world"]').click(); await settle();
+    ws().querySelector('[data-game-pick="prefab"][data-game-pick-id="crawler"]').click(); await settle();
+    assert(field(['health'])?.value === '2' && field(['behaviour', 'params', 'speed'])?.value === '90' && field(['behaviour', 'params', 'damage'])?.value === '1',
+      'the crawler\'s health and numbers are not in the inspector');
+    const faster = await change(/** @type {HTMLInputElement} */ (field(['behaviour', 'params', 'speed'])), '140');
+    assert(faster?.target === 'prefab:crawler' && JSON.stringify(faster.ops) === '[{"op":"set","path":["behaviour","params","speed"],"value":140}]', `speed sent ${JSON.stringify(faster)}`);
+    const row = ws().querySelector('[data-game-pick="prefab"][data-game-pick-id="crawler"]');
+    assert(row.getAttribute('draggable') === 'true' && ws().querySelector('[data-game-pick="prefab"][data-game-pick-id="player"]').getAttribute('draggable') !== 'true', 'only things a room places can be dragged');
+    // The game's swing.
+    ws().querySelector('[data-game-pick="game"]').click(); await settle();
+    assert(field(['combat', 'damage'])?.value === '1' && field(['combat', 'hitstop'])?.value === '4' && field(['combat', 'pogo'])?.value === '0.8', 'the swing is not in the game\'s settings');
+    const stop = await change(/** @type {HTMLInputElement} */ (field(['combat', 'hitstop'])), '6');
+    assert(stop?.target === 'game' && stop.ops[0].path.join() === 'combat,hitstop' && stop.ops[0].value === 6, `hitstop sent ${JSON.stringify(stop)}`);
+    // The crawler in the room: its patrol, which way it faces, the flag it sets.
+    $('[data-game-side="entities"]').click(); await settle();
+    ws().querySelector('[data-game-pick="entity"][data-game-pick-id="crawler_1"]').click(); await settle();
+    const patrol = [...ws().querySelectorAll(`[data-game-field='${JSON.stringify(['entities', '#crawler_1', 'props', 'patrol'])}']`)].map((i) => i.value);
+    assert(patrol.join() === '1100,1700', `the patrol shows ${patrol}`);
+    const flag = await change(/** @type {HTMLInputElement} */ (field(['entities', '#crawler_1', 'props', 'flag'])), 'first_blood');
+    assert(JSON.stringify(flag?.ops) === '[{"op":"set","path":["entities","#crawler_1","props","flag"],"value":"first_blood"}]', `the flag sent ${JSON.stringify(flag)}`);
+    assert(field(['entities', '#crawler_1', 'props', 'facing']), 'which way it faces is not a field');
+    // Dragged from the list onto the stage: placed where it was dropped.
+    $('[data-game-side="world"]').click(); await settle();
+    const dt = new win.DataTransfer();
+    ws().querySelector('[data-game-pick="prefab"][data-game-pick-id="crawler"]').dispatchEvent(new win.DragEvent('dragstart', {dataTransfer: dt, bubbles: true}));
+    const stage = $('[data-game-stage]');
+    const box = stage.getBoundingClientRect();
+    let before = win.commands.length;
+    stage.dispatchEvent(new win.DragEvent('drop', {dataTransfer: dt, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2, bubbles: true, cancelable: true}));
+    await settle();
+    const placed = sent(before, 'gameEdit')[0];
+    assert(placed?.target === 'room:crossroads_02' && placed.ops[0].op === 'insert' && placed.ops[0].path.join() === 'entities' && placed.ops[0].value.id === 'crawler_2' && placed.ops[0].value.prefab === 'crawler',
+      `dropping the crawler sent ${JSON.stringify(placed)}`);
+    // A fight played: things drawn with who they are, the player's health as
+    // pips, the boxes the run tests.
+    $('[data-game-panel="run"]').click(); await settle();
+    const boxes = /** @type {HTMLInputElement} */ ($('[data-game-boxes]'));
+    boxes.checked = true;
+    boxes.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const fight = JSON.parse(await (await fetch('/tests/ui/fixtures/game-fight.json')).text());
+    await win.pushEvents([{type: 'gamePlay', world: fight.world, start: fight.start, rooms: fixture.rooms, keys: [], replay: fight.replay}]);
+    const frame = () => new Promise((done) => win.requestAnimationFrame(() => done(undefined)));
+    /** @type {Set<number>} */
+    const who = new Set();
+    let flashed = false;
+    for (let i = 0; i < 400 && !(who.size >= 4 && flashed); i++) {
+      const words = ws().gameProbe.frame();
+      for (let r = 0; words && r < words[8]; r++) {
+        who.add(words[16 + r * 9 + 8]);
+        flashed ||= Boolean(words[16 + r * 9 + 5] & 2);
+      }
+      await frame();
+    }
+    assert(who.has(0) && who.size >= 4 && flashed, `the fight drew ${[...who]}, flashed ${flashed}`);
+    const words = ws().gameProbe.frame();
+    assert(words[13] === 5 && words[12] <= 5, `the header's health is ${words[12]} of ${words[13]}`);
+    const tested = ws().gameProbe.boxes();
+    assert(tested.length >= 2 && tested.some((/** @type {number[]} */ b) => b[0] === 0), `the boxes tested are ${JSON.stringify(tested)}`);
+    $('[data-game-stop]').click(); await settle();
+    boxes.checked = false;
+    boxes.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
     await win.pushEvents([project(), room('crossroads_01')]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });

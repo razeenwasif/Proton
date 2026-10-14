@@ -36,8 +36,11 @@ import { momentOf, pose, restingClip } from "./game-skel.js";
  *             skel?: {model: import('./bindings/GameSkel').GameSkel, posed: import('./game-skel.js').Pose, at: number[], pivot: number[]}}} Sprite */
 /** An animation, as its `.anim.json` says it. @typedef {import('./bindings/GameAnim').GameAnim} Anim */
 /** Something standing on the play plane: an image, an animation's frame or a
- *  skeleton at a run's frame (at rest without one), its feet at `at`.
- *  @typedef {{key: string, at: number[], pivot: number[], flip?: boolean, frame?: number | null, clips?: Record<string, string | undefined>}} Standing */
+ *  skeleton at a run's frame (at rest without one), its feet at `at` — just
+ *  hurt (`flash`, drawn white) or spared for now (`blink`, drawn faint). A
+ *  shot with no image of its own is a glow `glow` across, its middle at `at`.
+ *  @typedef {{key: string, at: number[], pivot: number[], flip?: boolean, frame?: number | null, clips?: Record<string, string | undefined>,
+ *             flash?: boolean, blink?: boolean, glow?: number}} Standing */
 
 /** How an image is cut up: its size, and where each piece goes in it (an `.img.json`).
  *  Its normal map, when it has one, is cut the same way.
@@ -132,26 +135,13 @@ export function layout(room, how) {
     // What stands in the room stands on the play plane, in front of its art.
     if (plane.gameplay) {
       for (const s of how.sprites ?? []) {
-        const skel = how.skels?.get(s.key);
-        if (skel) {
-          if (!how.sizes.get(skel.atlas)) continue;
-          const m = s.frame === null || s.frame === undefined ? { clip: restingClip(skel, s.clips), frame: 0 } : momentOf(skel, how.tick ?? 60, s.frame);
-          out.push({ key: skel.atlas, plane: plane.id, item: null, x: s.at[0], y: s.at[1], w: 0, h: 0, rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal",
-            skel: { model: skel, posed: pose(skel, m.clip, m.frame), at: s.at, pivot: s.pivot } });
-          continue;
+        const from = out.length;
+        standing(s, plane.id, how, out);
+        // Just hurt: white. Spared for now: faint.
+        for (let k = from; k < out.length; k++) {
+          if (s.flash) out[k].tint = [1, 1, 1, 0.85];
+          if (s.blink) out[k].opacity = 0.35;
         }
-        const anim = how.anims?.get(s.key);
-        if (anim) {
-          const drawn = frameSprite(anim, s, how.sizes, plane.id);
-          if (drawn) out.push(drawn);
-          continue;
-        }
-        const size = how.sizes.get(s.key);
-        if (!size) continue;
-        // Flipped about its pivot, so it turns where it stands.
-        const x = s.flip ? s.at[0] - (size[0] - s.pivot[0]) : s.at[0] - s.pivot[0];
-        out.push({ key: s.key, plane: plane.id, item: null, x, y: s.at[1] - s.pivot[1], w: size[0], h: size[1],
-          rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal" });
       }
     }
     // A lit plane's art is shaded by the lights.
@@ -225,6 +215,37 @@ export function animOf(raw) {
     boxes: list(raw.boxes).map((b) => ({ kind: "other", ...b, frames: list(b.frames) })),
     cues: list(raw.cues),
   };
+}
+
+/** What stands at `s.at`, as sprites on `plane`: a skeleton posed, an
+ *  animation's frame, an image on its feet, or a shot's glow — none while
+ *  what it is drawn from has not loaded.
+ *  @param {Standing} s @param {string} plane @param {Parameters<typeof layout>[1]} how @param {Sprite[]} out */
+function standing(s, plane, how, out) {
+  if (s.key === GLOW) {
+    const r = (s.glow ?? 24) / 2;
+    out.push({ key: GLOW, plane, item: null, x: s.at[0] - r, y: s.at[1] - r, w: r * 2, h: r * 2, rot: 0, flip: false, opacity: 1, tint: [1, 0.55, 0.3, 1], blend: "add" });
+    return;
+  }
+  const skel = how.skels?.get(s.key);
+  if (skel) {
+    if (!how.sizes.get(skel.atlas)) return;
+    const m = s.frame === null || s.frame === undefined ? { clip: restingClip(skel, s.clips), frame: 0 } : momentOf(skel, how.tick ?? 60, s.frame);
+    out.push({ key: skel.atlas, plane, item: null, x: s.at[0], y: s.at[1], w: 0, h: 0, rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal",
+      skel: { model: skel, posed: pose(skel, m.clip, m.frame), at: s.at, pivot: s.pivot } });
+    return;
+  }
+  const anim = how.anims?.get(s.key);
+  if (anim) {
+    const drawn = frameSprite(anim, s, how.sizes, plane);
+    if (drawn) out.push(drawn);
+    return;
+  }
+  const size = how.sizes.get(s.key);
+  if (!size) return;
+  // Flipped about its pivot, so it turns where it stands.
+  const x = s.flip ? s.at[0] - (size[0] - s.pivot[0]) : s.at[0] - s.pivot[0];
+  out.push({ key: s.key, plane, item: null, x, y: s.at[1] - s.pivot[1], w: size[0], h: size[1], rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal" });
 }
 
 /** A frame of an animation, standing at `s.at` on its feet: the part of its

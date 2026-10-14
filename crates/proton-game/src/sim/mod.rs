@@ -25,13 +25,15 @@
 //! Gravity is applied the exact way — position by velocity plus half the
 //! acceleration — so a jump goes as high as `game.json` says, to the pixel.
 
+mod fight;
 pub mod world;
 
 use std::collections::BTreeSet;
 
+pub use fight::{Foe, Shot, SHOT};
 pub use world::{input, Fx, Kind, World, PX};
 
-use world::Seg;
+use world::{Animation, Seg};
 
 /// How far up a horizontal step may lift to climb a slope, in steps.
 const CLIMB: Fx = 2;
@@ -45,6 +47,10 @@ const WALL_LOCK: u8 = 10;
 const DROP: u8 = 14;
 /// How far from a hazard a place must be to be sent back to.
 const SAFE: Fx = 32 * PX;
+/// Ticks a death is watched before it is gone back from.
+const DIE: u32 = 60;
+/// The state the player plays an attack's clip in, by `STATES`' order.
+const ATTACK: u8 = 7;
 
 /// What a tick did that the window or the agent may care about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,7 +58,7 @@ pub enum Happened {
     Jumped,
     Landed,
     Dashed,
-    /// Touched a hazard and was sent back.
+    /// Touched a hazard and was sent back, or was hurt by something.
     Hurt,
     /// Arrived in a room, by its index.
     Entered(u16),
@@ -60,6 +66,20 @@ pub enum Happened {
     Gained(u32),
     /// A frame with a cue was shown: the cue, by its place in the world's.
     Cue(u16),
+    /// Began a swing.
+    Swung,
+    /// A swing landed.
+    Hit,
+    /// Beat a thing, by its actor.
+    Killed(u16),
+    /// Ran out of health.
+    Died,
+    /// Rested at a bench.
+    Rested,
+    /// A flag was set, by its place in the world's.
+    Flag(u16),
+    /// A turret shot.
+    Shot,
 }
 
 /// Where an animated body's animation is.
@@ -120,6 +140,33 @@ pub struct State {
     pub last_input: u32,
     /// The player's animation, when it has one.
     pub anim: Animating,
+    /// Health left: what the player's prefab says to start, 0 when nothing
+    /// can kill them.
+    pub health: i32,
+    /// Swings begun: a thing is hit at most once a swing.
+    pub swing: u32,
+    /// Ticks left of the swing under way, and which way it goes: 0 before,
+    /// -1 up, 1 down.
+    pub attack: u32,
+    pub attack_dir: i8,
+    /// Ticks in which nothing hurts the player, and in which they are not
+    /// theirs to steer.
+    pub invincible: u32,
+    pub stun: u32,
+    /// Ticks the game holds still for a blow that landed, and what was
+    /// pressed meanwhile.
+    pub stop: u32,
+    pub queued: u32,
+    /// Ticks left of a death, before it is gone back from.
+    pub dead: u32,
+    pub kills: u32,
+    /// Where a death goes back to: a bench, or the start.
+    pub rest: (u16, [Fx; 2]),
+    pub flags: BTreeSet<u16>,
+    /// What stands in the room, and what flies through it.
+    pub foes: Vec<Foe>,
+    pub shots: Vec<Shot>,
+    pub shots_made: u32,
 }
 
 /// A run of the game.
@@ -128,19 +175,54 @@ pub struct Sim {
     pub world: World,
     pub state: State,
     happened: Vec<Happened>,
+    /// Whether the player's animation has hitboxes of its own: then a swing
+    /// hurts where they are, not where the game's reach puts it.
+    boxed: bool,
 }
 
 /// A drawn thing in a frame: an image of the world's, where, which way —
-/// and for an animation, which of its frames, in which clip.
+/// and for an animation, which of its frames, in which clip — and who it
+/// is: 0 the player, a thing in the room one more than its place there, a
+/// shot [`SHOT`] and more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Drawn {
-    pub sprite: u16,
-    /// The feet, in pixels of the room.
+    /// None for a shot with no image of its own.
+    pub sprite: Option<u16>,
+    /// The feet, in pixels of the room — a shot's middle.
     pub at: [i32; 2],
     pub pivot: [i32; 2],
     pub flip: bool,
     pub frame: Option<u32>,
     pub clip: Option<u32>,
+    pub who: u32,
+    /// Just hurt: drawn white.
+    pub flash: bool,
+    /// Not to be hurt for now: drawn faint, on and off.
+    pub blink: bool,
+}
+
+/// A box a run tests: a hitbox or a hurtbox, and where — left, top, right,
+/// bottom in the room, fixed point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Boxed {
+    pub hit: bool,
+    pub rect: [Fx; 4],
+}
+
+/// A box that moves through lines: `half` wide each side of its feet,
+/// `height` tall, and whether it is dropping through one-way lines.
+#[derive(Debug, Clone, Copy)]
+struct Shape {
+    half: Fx,
+    height: Fx,
+    drop: bool,
+}
+
+impl Shape {
+    /// Its box at `pos`: left, top, right, bottom.
+    fn bbox(&self, pos: [Fx; 2]) -> [Fx; 4] {
+        [pos[0] - self.half, pos[1] - self.height, pos[0] + self.half, pos[1]]
+    }
 }
 
 impl Sim {
@@ -178,9 +260,26 @@ impl Sim {
             cam: [0, 0],
             last_input: 0,
             anim: Animating::default(),
+            health: world.fight.health,
+            swing: 0,
+            attack: 0,
+            attack_dir: 0,
+            invincible: 0,
+            stun: 0,
+            stop: 0,
+            queued: 0,
+            dead: 0,
+            kills: 0,
+            rest: (room, at),
+            flags: BTreeSet::new(),
+            foes: Vec::new(),
+            shots: Vec::new(),
+            shots_made: 0,
         };
         state.cam = camera_target(&world, &state);
-        let mut sim = Sim { world, state, happened: Vec::new() };
+        let boxed = world.player.anim.and_then(|a| world.anims.get(a as usize)).is_some_and(|a| a.boxes.iter().any(|b| b.1 == 0));
+        let mut sim = Sim { world, state, happened: Vec::new(), boxed };
+        sim.enter();
         sim.state.grounded = sim.on_ground();
         // Starting in the air is not having just left the ground.
         if !sim.state.grounded {
@@ -197,8 +296,12 @@ impl Sim {
 
     /// The player's box: left, top, right, bottom.
     fn bbox(&self, pos: [Fx; 2]) -> [Fx; 4] {
-        let b = &self.world.player;
-        [pos[0] - b.half, pos[1] - b.height, pos[0] + b.half, pos[1]]
+        self.player_shape().bbox(pos)
+    }
+
+    /// The player as something that moves through lines.
+    fn player_shape(&self) -> Shape {
+        Shape { half: self.world.player.half, height: self.world.player.height, drop: self.state.drop > 0 }
     }
 
     fn room(&self) -> &world::Room {
@@ -209,18 +312,23 @@ impl Sim {
         needs == 0 || self.state.abilities & needs == needs
     }
 
-    /// Whether the box at `pos` overlaps anything solid — gates that are
+    /// Whether a gate stands shut.
+    fn shut(&self, g: &world::Gate) -> bool {
+        !self.has(g.needs) || g.flag.is_some_and(|f| !self.state.flags.contains(&f))
+    }
+
+    /// Whether `shape` at `pos` overlaps anything solid — gates that are
     /// shut included — and, if so, whether that thing can be clung to.
     /// One-way lines count only when `from` is given and the box was clear
     /// of them there: only coming down onto them.
-    fn blocked(&self, pos: [Fx; 2], from: Option<[Fx; 2]>) -> Option<bool> {
-        let b = self.bbox(pos);
+    fn blocked_as(&self, shape: Shape, pos: [Fx; 2], from: Option<[Fx; 2]>) -> Option<bool> {
+        let b = shape.bbox(pos);
         let mut wall = None;
         for s in &self.room().segs {
             let solid = match s.kind {
                 Kind::Hazard => false,
                 Kind::Oneway => match from {
-                    Some(was) if self.state.drop == 0 => !overlaps(&self.bbox(was), s),
+                    Some(was) if !shape.drop => !overlaps(&shape.bbox(was), s),
                     _ => false,
                 },
                 _ => true,
@@ -231,11 +339,15 @@ impl Sim {
             }
         }
         for g in &self.room().gates {
-            if !self.has(g.needs) && boxes(&b, &g.rect) {
+            if self.shut(g) && boxes(&b, &g.rect) {
                 wall = Some(true);
             }
         }
         wall
+    }
+
+    fn blocked(&self, pos: [Fx; 2], from: Option<[Fx; 2]>) -> Option<bool> {
+        self.blocked_as(self.player_shape(), pos, from)
     }
 
     fn on_ground(&self) -> bool {
@@ -246,21 +358,29 @@ impl Sim {
     /// Move across by `dx`, a pixel at a time, climbing what can be climbed.
     /// Whether a wall stopped it, and whether that wall can be clung to.
     fn move_x(&mut self, dx: Fx) -> Option<bool> {
+        let (pos, hit) = self.slide_x(self.player_shape(), self.state.pos, dx);
+        self.state.pos = pos;
+        hit
+    }
+
+    /// `shape` at `pos` moved across by `dx`, a pixel at a time, climbing
+    /// what can be climbed: where it ends, and whether a wall stopped it and
+    /// can be clung to.
+    fn slide_x(&self, shape: Shape, mut pos: [Fx; 2], dx: Fx) -> ([Fx; 2], Option<bool>) {
         let mut left = dx;
         while left != 0 {
             let step = left.signum() * left.abs().min(PX);
-            let pos = self.state.pos;
             let next = [pos[0] + step, pos[1]];
-            match self.blocked(next, Some(pos)) {
-                None => self.state.pos = next,
+            match self.blocked_as(shape, next, Some(pos)) {
+                None => pos = next,
                 Some(clingable) => {
                     // A slope: try the step lifted, a quarter pixel at a time.
                     let mut climbed = false;
                     let mut lift = PX / 4;
                     while lift <= step.abs() * CLIMB {
                         let up = [pos[0] + step, pos[1] - lift];
-                        if self.blocked(up, Some([pos[0], pos[1] - lift])).is_none() {
-                            self.state.pos = up;
+                        if self.blocked_as(shape, up, Some([pos[0], pos[1] - lift])).is_none() {
+                            pos = up;
                             climbed = true;
                             break;
                         }
@@ -268,52 +388,57 @@ impl Sim {
                     }
                     if !climbed {
                         // Up against it, not a fraction of a pixel short.
-                        self.close(step, 0);
-                        return Some(clingable);
+                        return (self.close(shape, pos, step, 0), Some(clingable));
                     }
                 }
             }
             left -= step;
         }
-        None
+        (pos, None)
     }
 
     /// Move down (or up) by `dy`, a pixel at a time. Whether something
     /// stopped it.
     fn move_y(&mut self, dy: Fx) -> bool {
+        let (pos, hit) = self.slide_y(self.player_shape(), self.state.pos, dy);
+        self.state.pos = pos;
+        hit
+    }
+
+    /// `shape` at `pos` moved down (or up) by `dy`, a pixel at a time: where
+    /// it ends, and whether something stopped it.
+    fn slide_y(&self, shape: Shape, mut pos: [Fx; 2], dy: Fx) -> ([Fx; 2], bool) {
         let mut left = dy;
         while left != 0 {
             let step = left.signum() * left.abs().min(PX);
-            let pos = self.state.pos;
             let next = [pos[0], pos[1] + step];
             let from = if step > 0 { Some(pos) } else { None };
-            if self.blocked(next, from).is_some() {
+            if self.blocked_as(shape, next, from).is_some() {
                 // Landed on it, not hovering a fraction of a pixel above.
-                self.close(0, step);
-                return true;
+                return (self.close(shape, pos, 0, step), true);
             }
-            self.state.pos = next;
+            pos = next;
             left -= step;
         }
-        false
+        (pos, false)
     }
 
-    /// Move as far as is free toward a step that was blocked, halving the
-    /// try each time it is: what was run into is then touched exactly, and
-    /// standing on it is standing on it.
-    fn close(&mut self, dx: Fx, dy: Fx) {
+    /// As far as is free from `pos` toward a step that was blocked, halving
+    /// the try each time it is: what was run into is then touched exactly,
+    /// and standing on it is standing on it.
+    fn close(&self, shape: Shape, mut pos: [Fx; 2], dx: Fx, dy: Fx) -> [Fx; 2] {
         let (mut sx, mut sy) = (dx / 2, dy / 2);
         while sx != 0 || sy != 0 {
-            let pos = self.state.pos;
             let next = [pos[0] + sx, pos[1] + sy];
-            let from = if sy > 0 { Some(pos) } else if sy == 0 { Some(pos) } else { None };
-            if self.blocked(next, from).is_none() {
-                self.state.pos = next;
+            let from = if sy >= 0 { Some(pos) } else { None };
+            if self.blocked_as(shape, next, from).is_none() {
+                pos = next;
             } else {
                 sx /= 2;
                 sy /= 2;
             }
         }
+        pos
     }
 
     /// Whether the box touches a hazard where it is.
@@ -332,9 +457,17 @@ impl Sim {
     /// One tick, with `held` the input held during it.
     pub fn step(&mut self, held: u32) {
         let m = self.world.moves.clone();
-        let pressed = held & !self.state.last_input;
-        self.state.last_input = held;
         self.state.tick += 1;
+        // A blow landed: everything holds still a moment. What is pressed
+        // meanwhile is seen as pressed after.
+        if self.state.stop > 0 {
+            self.state.stop -= 1;
+            self.state.queued |= held & !self.state.last_input;
+            self.state.last_input = held;
+            return;
+        }
+        let pressed = (held & !self.state.last_input) | std::mem::take(&mut self.state.queued);
+        self.state.last_input = held;
 
         // Going through a door: still, while the screen goes and comes back.
         if let Some((room, at, t)) = self.state.door {
@@ -345,6 +478,7 @@ impl Sim {
                 self.state.safe = at;
                 self.state.vel = [0, 0];
                 self.state.cam = camera_target(&self.world, &self.state);
+                self.enter();
                 self.happened.push(Happened::Entered(room));
             }
             self.state.door = if t >= DOOR { None } else { Some((room, at, t)) };
@@ -358,9 +492,26 @@ impl Sim {
             self.animate();
             return;
         }
+        // Dead: watched a moment, then back to the last bench, whole again.
+        if self.state.dead > 0 {
+            self.state.dead -= 1;
+            if self.state.dead == 0 {
+                let (room, at) = self.state.rest;
+                self.state.health = self.world.fight.health;
+                self.state.door = Some((room, at, 0));
+            }
+            self.animate();
+            return;
+        }
+        self.state.invincible = self.state.invincible.saturating_sub(1);
+        self.state.stun = self.state.stun.saturating_sub(1);
+        self.state.attack = self.state.attack.saturating_sub(1);
+        // Thrown back by a hurt: the stick and the buttons do nothing.
+        let stunned = self.state.stun > 0;
+        let (held, pressed) = if stunned { (0, 0) } else { (held, pressed) };
 
         let x = ((held & input::RIGHT != 0) as i32) - ((held & input::LEFT != 0) as i32);
-        if x != 0 && self.state.wall_lock == 0 {
+        if x != 0 && self.state.wall_lock == 0 && self.state.attack == 0 {
             self.state.facing = x as i8;
         }
         self.state.wall_lock = self.state.wall_lock.saturating_sub(1);
@@ -384,6 +535,11 @@ impl Sim {
         if dashing {
             self.state.dash -= 1;
             self.state.vel = [m.dash * self.state.facing as i32, 0];
+        } else if stunned {
+            // Thrown: the throw carries, slowing only on the ground.
+            if self.state.grounded {
+                self.state.vel[0] = approach(self.state.vel[0], 0, m.decel / 4);
+            }
         } else {
             // Running: toward the stick's speed, at the rates given.
             let want = x * m.run;
@@ -420,8 +576,11 @@ impl Sim {
         // any of the `buffer` ticks after it, landing being seen the tick
         // after it happens.
         self.state.buffer = self.state.buffer.saturating_sub(1);
+        if pressed & input::ATTACK != 0 && self.state.attack == 0 && !dashing {
+            self.swing(held);
+        }
         // Let go early, and the rise is cut.
-        if self.state.rising && held & input::JUMP == 0 {
+        if self.state.rising && held & input::JUMP == 0 && !stunned {
             if self.state.vel[1] < 0 {
                 self.state.vel[1] = self.state.vel[1] * m.cut / 256;
             }
@@ -496,24 +655,87 @@ impl Sim {
         }
 
         if self.hazardous() {
+            if self.world.fight.health > 0 {
+                // With health, a hazard costs some, and sends back only
+                // while there is some left.
+                self.state.health -= 1;
+                self.happened.push(Happened::Hurt);
+                if self.state.health <= 0 {
+                    self.die();
+                    self.follow();
+                    return;
+                }
+            } else {
+                self.state.deaths += 1;
+                self.happened.push(Happened::Hurt);
+            }
             self.state.pos = self.state.safe;
             self.state.vel = [0, 0];
             self.state.hurt = HURT;
-            self.state.deaths += 1;
             self.state.dash = 0;
-            self.happened.push(Happened::Hurt);
+            self.state.attack = 0;
         }
-        self.things();
+        self.things(pressed);
+        self.foes();
+        self.shots();
+        self.fight();
         self.follow();
         self.animate();
     }
 
+    /// A swing begun: up with up held, down with down held in the air, else
+    /// before the player — as long as the attack's clip, when there is
+    /// one, else the game's swing and its recovery.
+    fn swing(&mut self, held: u32) {
+        let s = &mut self.state;
+        s.swing += 1;
+        s.attack_dir = if held & input::UP != 0 {
+            -1
+        } else if held & input::DOWN != 0 && !s.grounded {
+            1
+        } else {
+            0
+        };
+        let fight = &self.world.fight;
+        let clip = self.world.player.anim.and_then(|a| {
+            let anim = self.world.anims.get(a as usize)?;
+            let clip = self.world.player.states.get(ATTACK as usize).copied().flatten()?;
+            let run = anim.clips.get(clip as usize)?;
+            Some(anim.frames[run.from as usize..=run.to as usize].iter().map(|f| f.0).sum::<u32>())
+        });
+        s.attack = match clip {
+            Some(ticks) => {
+                // Begun again, however the last one ended.
+                s.anim.begun = false;
+                ticks.max(1)
+            }
+            None => (fight.frames + fight.recovery).max(1),
+        };
+        self.happened.push(Happened::Swung);
+    }
+
+    /// Out of health: watched a moment, still, then back to the last bench.
+    fn die(&mut self) {
+        let s = &mut self.state;
+        s.dead = DIE;
+        s.deaths += 1;
+        s.vel = [0, 0];
+        s.dash = 0;
+        s.attack = 0;
+        s.stun = 0;
+        s.invincible = 0;
+        self.happened.push(Happened::Died);
+    }
+
     /// What the player is doing, as a state an animation has a clip for:
-    /// hurt, dashing, sliding down a wall, rising, falling, running, still.
+    /// hurt, swinging, dashing, sliding down a wall, rising, falling,
+    /// running, still.
     fn player_state(&self) -> u8 {
         let s = &self.state;
-        if s.hurt > 0 {
+        if s.hurt > 0 || s.stun > 0 || s.dead > 0 {
             6
+        } else if s.attack > 0 && self.world.player.states.get(ATTACK as usize).copied().flatten().is_some() {
+            ATTACK
         } else if s.dash > 0 {
             4
         } else if !s.grounded && s.wall != 0 && s.vel[1] > 0 {
@@ -531,57 +753,13 @@ impl Sim {
         }
     }
 
-    /// The player's animation a tick on: its state's clip begun when the
-    /// state changes, else its frame shown a tick more and the next when its
-    /// time is up — on, back, or to the end and back, as the clip goes, and
-    /// held on its last when played as many times as it is to be. A frame's
-    /// cues are said as it is shown.
+    /// The player's animation a tick on, its cues said.
     fn animate(&mut self) {
         let Some(a) = self.world.player.anim else { return };
         let state = self.player_state();
-        let Some(clip) = self.world.player.states.get(state as usize).copied().flatten() else { return };
-        let anim = &self.world.anims[a as usize];
-        let Some(run) = anim.clips.get(clip as usize).copied() else { return };
-        let s = &mut self.state.anim;
-        let back = run.direction == 1 || run.direction == 3;
-        let shown = if !s.begun || s.state != state || s.clip != clip {
-            *s = Animating { state, clip, frame: if back { run.to } else { run.from }, left: 0, forward: !back, plays: 0, held: false, begun: true };
-            true
-        } else if s.held {
-            false
-        } else {
-            s.left = s.left.saturating_sub(1);
-            if s.left > 0 {
-                false
-            } else {
-                let at_end = if s.forward { s.frame >= run.to } else { s.frame <= run.from };
-                if !at_end {
-                    s.frame = if s.forward { s.frame + 1 } else { s.frame - 1 };
-                    true
-                } else {
-                    s.plays += 1;
-                    if run.repeat > 0 && s.plays >= run.repeat {
-                        s.held = true;
-                        false
-                    } else if run.direction >= 2 && run.from < run.to {
-                        // Turned at an end: the end is shown once.
-                        s.forward = !s.forward;
-                        s.frame = if s.forward { s.frame + 1 } else { s.frame - 1 };
-                        true
-                    } else {
-                        s.frame = if s.forward { run.from } else { run.to };
-                        true
-                    }
-                }
-            }
-        };
-        if shown {
-            let frame = s.frame;
-            s.left = anim.frames.get(frame as usize).map_or(1, |f| f.0);
-            for &(_, cue) in anim.cues.iter().filter(|(f, _)| *f == frame) {
-                self.happened.push(Happened::Cue(cue));
-            }
-        }
+        let mut cues = Vec::new();
+        advance(&self.world.anims[a as usize], &self.world.player.states, state, &mut self.state.anim, &mut cues);
+        self.happened.extend(cues.into_iter().map(Happened::Cue));
     }
 
     fn jump(&mut self, speed: Fx) {
@@ -600,8 +778,8 @@ impl Sim {
             && !self.room().segs.iter().any(|s| matches!(s.kind, Kind::Solid | Kind::Nowall) && overlaps(&below, s))
     }
 
-    /// Pickups taken, and doors walked into.
-    fn things(&mut self) {
+    /// Pickups taken, flags set, benches rested at, and doors walked into.
+    fn things(&mut self, pressed: u32) {
         let b = self.bbox(self.state.pos);
         let room = self.state.room;
         let mut gained = 0;
@@ -626,8 +804,27 @@ impl Sim {
             self.state.abilities |= gained;
             self.happened.push(Happened::Gained(gained));
         }
+        let set: Vec<u16> = self.room().triggers.iter().filter(|t| boxes(&b, &t.rect)).map(|t| t.flag).collect();
+        for f in set {
+            self.set_flag(f);
+        }
+        if pressed & input::UP != 0 && self.state.grounded {
+            let bench = self.room().rests.iter().copied().find(|at| (at[0] - self.state.pos[0]).abs() <= 32 * PX && (b[1] - 32 * PX..=b[3] + 32 * PX).contains(&at[1]));
+            if let Some(at) = bench {
+                self.state.rest = (room, at);
+                self.state.health = self.world.fight.health;
+                self.happened.push(Happened::Rested);
+            }
+        }
         if let Some(door) = self.room().doors.iter().find(|d| boxes(&b, &d.rect)) {
             self.state.door = Some((door.room, door.at, 0));
+        }
+    }
+
+    /// A flag set, said once.
+    fn set_flag(&mut self, flag: u16) {
+        if self.state.flags.insert(flag) {
+            self.happened.push(Happened::Flag(flag));
         }
     }
 
@@ -639,21 +836,28 @@ impl Sim {
         }
     }
 
-    /// What to draw now: the player.
+    /// What to draw now: what stands in the room, the player before it,
+    /// and shots before them all.
     pub fn frame(&self) -> Vec<Drawn> {
+        let mut out = self.foes_drawn();
         let p = &self.world.player;
-        let animated = p.anim.and_then(|a| self.world.anims.get(a as usize)).filter(|_| self.state.anim.begun);
-        match p.sprite {
-            Some(sprite) => vec![Drawn {
-                sprite,
-                at: [self.state.pos[0] >> world::SHIFT, self.state.pos[1] >> world::SHIFT],
-                pivot: animated.and_then(|a| a.frames.get(self.state.anim.frame as usize)).map_or(p.pivot, |f| f.1),
-                flip: self.state.facing < 0,
-                frame: animated.map(|_| self.state.anim.frame),
-                clip: animated.map(|_| self.state.anim.clip),
-            }],
-            None => Vec::new(),
+        let s = &self.state;
+        let animated = p.anim.and_then(|a| self.world.anims.get(a as usize)).filter(|_| s.anim.begun);
+        if let Some(sprite) = p.sprite {
+            out.push(Drawn {
+                sprite: Some(sprite),
+                at: [s.pos[0] >> world::SHIFT, s.pos[1] >> world::SHIFT],
+                pivot: animated.and_then(|a| a.frames.get(s.anim.frame as usize)).map_or(p.pivot, |f| f.1),
+                flip: s.facing < 0,
+                frame: animated.map(|_| s.anim.frame),
+                clip: animated.map(|_| s.anim.clip),
+                who: 0,
+                flash: s.dead > 0 || s.stun + 4 > self.world.fight.stun && s.stun > 0,
+                blink: s.dead == 0 && s.invincible > 0 && (s.invincible / 4) % 2 == 1,
+            });
         }
+        out.extend(self.shots_drawn());
+        out
     }
 
     /// The run's state as one number: two runs with the same hash are, to the
@@ -685,8 +889,25 @@ impl Sim {
         }
         // A still player's run hashes as it did before there were animations.
         if self.world.player.anim.is_some() {
-            let a = &s.anim;
-            for v in [a.state as i64, a.clip as i64, a.frame as i64, a.left as i64, a.forward as i64, a.plays as i64, a.held as i64, a.begun as i64] {
+            hash_anim(&mut h, &s.anim);
+        }
+        for v in [s.health as i64, s.swing as i64, s.attack as i64, s.attack_dir as i64, s.invincible as i64, s.stun as i64, s.stop as i64] {
+            h.add(v);
+        }
+        for v in [s.queued as i64, s.dead as i64, s.kills as i64, s.rest.0 as i64, s.rest.1[0] as i64, s.rest.1[1] as i64, s.shots_made as i64] {
+            h.add(v);
+        }
+        h.add(s.flags.len() as i64);
+        for &f in &s.flags {
+            h.add(f as i64);
+        }
+        h.add(s.foes.len() as i64);
+        for f in &s.foes {
+            f.hash(&mut h);
+        }
+        h.add(s.shots.len() as i64);
+        for shot in &s.shots {
+            for v in [shot.id as i64, shot.pos[0] as i64, shot.pos[1] as i64, shot.vel[0] as i64, shot.vel[1] as i64, shot.life as i64, shot.damage as i64] {
                 h.add(v);
             }
         }
@@ -743,6 +964,59 @@ fn overlaps(b: &[Fx; 4], s: &Seg) -> bool {
     let side = |x: Fx, y: Fx| (dx * (y - s.a[1]) as i64 - dy * (x - s.a[0]) as i64).signum();
     let corners = [side(b[0], b[1]), side(b[2], b[1]), side(b[2], b[3]), side(b[0], b[3])];
     !(corners.iter().all(|&c| c >= 0) || corners.iter().all(|&c| c <= 0))
+}
+
+fn hash_anim(h: &mut Fnv, a: &Animating) {
+    for v in [a.state as i64, a.clip as i64, a.frame as i64, a.left as i64, a.forward as i64, a.plays as i64, a.held as i64, a.begun as i64] {
+        h.add(v);
+    }
+}
+
+/// An animation a tick on, for something in `state`: its state's clip
+/// begun when the state changes, else its frame shown a tick more and the
+/// next when its time is up — on, back, or to the end and back, as the clip
+/// goes, and held on its last when played as many times as it is to be. A
+/// frame's cues are said as it is shown.
+fn advance(anim: &Animation, states: &[Option<u32>], state: u8, s: &mut Animating, cues: &mut Vec<u16>) {
+    let Some(clip) = states.get(state as usize).copied().flatten() else { return };
+    let Some(run) = anim.clips.get(clip as usize).copied() else { return };
+    let back = run.direction == 1 || run.direction == 3;
+    let shown = if !s.begun || s.state != state || s.clip != clip {
+        *s = Animating { state, clip, frame: if back { run.to } else { run.from }, left: 0, forward: !back, plays: 0, held: false, begun: true };
+        true
+    } else if s.held {
+        false
+    } else {
+        s.left = s.left.saturating_sub(1);
+        if s.left > 0 {
+            false
+        } else {
+            let at_end = if s.forward { s.frame >= run.to } else { s.frame <= run.from };
+            if !at_end {
+                s.frame = if s.forward { s.frame + 1 } else { s.frame - 1 };
+                true
+            } else {
+                s.plays += 1;
+                if run.repeat > 0 && s.plays >= run.repeat {
+                    s.held = true;
+                    false
+                } else if run.direction >= 2 && run.from < run.to {
+                    // Turned at an end: the end is shown once.
+                    s.forward = !s.forward;
+                    s.frame = if s.forward { s.frame + 1 } else { s.frame - 1 };
+                    true
+                } else {
+                    s.frame = if s.forward { run.from } else { run.to };
+                    true
+                }
+            }
+        }
+    };
+    if shown {
+        let frame = s.frame;
+        s.left = anim.frames.get(frame as usize).map_or(1, |f| f.0);
+        cues.extend(anim.cues.iter().filter(|(f, _)| *f == frame).map(|&(_, cue)| cue));
+    }
 }
 
 #[derive(Default)]

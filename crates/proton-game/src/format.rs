@@ -56,6 +56,7 @@ pub struct GameFile {
     pub player: String,
     pub start: Start,
     pub post: Post,
+    pub combat: Combat,
 }
 
 impl Default for GameFile {
@@ -72,6 +73,7 @@ impl Default for GameFile {
             player: "prefabs/player.prefab.json".into(),
             start: Start::default(),
             post: Post::default(),
+            combat: Combat::default(),
         }
     }
 }
@@ -280,6 +282,55 @@ pub struct Post {
 impl Default for Post {
     fn default() -> Post {
         Post { bloom: 0.25, grade: None, vignette: 0.3 }
+    }
+}
+
+/// How a fight goes: the player's swing, what a blow does to whoever takes
+/// it, and how long the game holds still on one. Frames are ticks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameCombat")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Combat {
+    /// A swing's damage.
+    pub damage: i32,
+    /// Where the player's animation has no hitbox, the swing's: how far it
+    /// reaches from the body and how wide it is, in pixels — before the
+    /// player, or above, or below in the air.
+    pub reach: [i32; 2],
+    /// Frames a swing hurts, then frames before the next.
+    pub frames: u32,
+    pub recovery: u32,
+    /// How hard a swing throws what it hits, across and up, pixels a second.
+    pub knockback: [i32; 2],
+    /// How hard landing a swing pushes the player back, pixels a second.
+    pub recoil: i32,
+    /// How hard the player is thrown when hurt, away and up.
+    pub knocked: [i32; 2],
+    /// Frames the game holds still when a blow lands.
+    pub hitstop: u32,
+    /// Frames after a hurt in which the player cannot be hurt again, and in
+    /// which they are not theirs to steer.
+    pub invincible: u32,
+    pub stun: u32,
+    /// What a swing down onto something gives back of a jump, 0 to 1.
+    pub pogo: f64,
+}
+
+impl Default for Combat {
+    fn default() -> Combat {
+        Combat {
+            damage: 1,
+            reach: [72, 56],
+            frames: 8,
+            recovery: 12,
+            knockback: [420, 240],
+            recoil: 180,
+            knocked: [360, 300],
+            hitstop: 4,
+            invincible: 60,
+            stun: 14,
+            pogo: 0.8,
+        }
     }
 }
 
@@ -645,9 +696,11 @@ pub struct Prefab {
     pub health: Option<i32>,
     pub behaviour: Behaviour,
     /// For an animated sprite, the clip each state plays — `idle`, `run`,
-    /// `jump`, `fall`, `dash`, `wall`, `hurt` — where it is not the clip of
-    /// the state's own name.
+    /// `jump`, `fall`, `dash`, `wall`, `hurt`, `attack` — where it is not the
+    /// clip of the state's own name.
     pub clips: BTreeMap<String, String>,
+    /// What a turret shoots: an image; a glowing ball when none.
+    pub shot: Option<String>,
 }
 
 impl Default for Prefab {
@@ -662,13 +715,33 @@ impl Default for Prefab {
             health: None,
             behaviour: Behaviour::default(),
             clips: BTreeMap::new(),
+            shot: None,
         }
     }
 }
 
 /// The states an animated thing plays a clip in, in the order the sim
 /// numbers them.
-pub const STATES: [&str; 7] = ["idle", "run", "jump", "fall", "dash", "wall", "hurt"];
+pub const STATES: [&str; 8] = ["idle", "run", "jump", "fall", "dash", "wall", "hurt", "attack"];
+
+/// Each behaviour's numbers, what they are and what they are when not
+/// said: speeds in pixels a second, times in seconds, lengths in pixels.
+pub const PARAMS: [(BehaviourKind, &[(&str, f64)]); 5] = [
+    (BehaviourKind::Still, &[("damage", 0.0)]),
+    (BehaviourKind::Crawler, &[("speed", 90.0), ("damage", 1.0)]),
+    (BehaviourKind::Flyer, &[("speed", 160.0), ("accel", 500.0), ("sight", 420.0), ("damage", 1.0)]),
+    (BehaviourKind::Charger, &[("speed", 0.0), ("sight", 520.0), ("windup", 0.4), ("rush", 640.0), ("rushTime", 0.9), ("rest", 0.6), ("damage", 1.0)]),
+    (BehaviourKind::Turret, &[("rate", 1.6), ("sight", 640.0), ("shotSpeed", 380.0), ("damage", 1.0)]),
+];
+
+impl Behaviour {
+    /// A number of its, or what it is when not said.
+    pub fn param(&self, name: &str) -> f64 {
+        self.params.get(name).copied().unwrap_or_else(|| {
+            PARAMS.iter().find(|(k, _)| *k == self.kind).and_then(|(_, list)| list.iter().find(|(n, _)| *n == name)).map_or(0.0, |(_, v)| *v)
+        })
+    }
+}
 
 /// What it does, from the behaviours built in. A game's own logic is a later
 /// question; these are what a first game needs.
@@ -767,18 +840,30 @@ impl Anim {
     /// The clip each state plays, by `STATES`' order: the prefab's choice,
     /// the clip of the state's own name, a near one — a run walks when there
     /// is no run, a fall is a jump coming down — and the first clip at last.
+    /// An attack has a clip only when one is named so: without one, a swing
+    /// plays whatever the body is doing.
     pub fn state_clips(&self, chosen: &BTreeMap<String, String>) -> Vec<Option<u32>> {
         let by_name = |name: &str| self.clips.iter().position(|c| c.name.eq_ignore_ascii_case(name)).map(|i| i as u32);
-        let near: [&[&str]; 7] = [&["idle", "stand"], &["run", "walk", "move"], &["jump", "rise"], &["fall", "jump"], &["dash", "run", "walk"], &["wall", "slide", "fall"], &["hurt", "hit", "idle"]];
+        let near: [&[&str]; 8] = [
+            &["idle", "stand"],
+            &["run", "walk", "move", "fly"],
+            &["jump", "rise"],
+            &["fall", "jump"],
+            &["dash", "rush", "run", "walk"],
+            &["wall", "slide", "fall"],
+            &["hurt", "hit", "idle"],
+            &["attack", "slash", "swing", "shoot"],
+        ];
         STATES
             .iter()
             .zip(near)
             .map(|(state, names)| {
-                chosen
-                    .get(*state)
-                    .and_then(|c| by_name(c))
-                    .or_else(|| names.iter().find_map(|n| by_name(n)))
-                    .or_else(|| (!self.clips.is_empty()).then_some(0))
+                let found = chosen.get(*state).and_then(|c| by_name(c)).or_else(|| names.iter().find_map(|n| by_name(n)));
+                if *state == "attack" {
+                    found
+                } else {
+                    found.or_else(|| (!self.clips.is_empty()).then_some(0))
+                }
             })
             .collect()
     }
@@ -1060,6 +1145,117 @@ impl Skel {
     /// window counts the same.
     pub fn clip_ticks(&self, tick: u32) -> Vec<u32> {
         self.clips.iter().map(|c| ((c.frames.max(1) as f64 / self.fps.max(1.0) * tick as f64).round() as u32).max(1)).collect()
+    }
+
+    /// Each bone's world matrix — a, b, c, d, tx, ty — at `frame` (fractions
+    /// and all) of clip `clip`, at rest for none; and the part each slot
+    /// shows. `ui/game-skel.js`'s `pose`, for what the core works out once.
+    pub fn pose(&self, clip: Option<usize>, frame: f64) -> (Vec<[f64; 6]>, Vec<i32>) {
+        let c = clip.and_then(|i| self.clips.get(i));
+        let mut world: Vec<[f64; 6]> = Vec::with_capacity(self.bones.len());
+        for (i, b) in self.bones.iter().enumerate() {
+            let t = c.and_then(|c| c.bones.iter().find(|t| t.bone as usize == i));
+            let moved = t.map_or([0.0, 0.0], |t| sample(&t.moved, frame, [0.0, 0.0]));
+            let turned = t.map_or([0.0, 0.0], |t| sample(&t.turned, frame, [0.0, 0.0]));
+            let scaled = t.map_or([1.0, 1.0], |t| sample(&t.scaled, frame, [1.0, 1.0]));
+            let r = (b.rot + turned[0]).to_radians();
+            let k = (b.rot + turned[0] + b.skew + turned[1]).to_radians();
+            let (sx, sy) = (b.scale[0] * scaled[0], b.scale[1] * scaled[1]);
+            let local = [r.cos() * sx, r.sin() * sx, -k.sin() * sy, k.cos() * sy, b.at[0] + moved[0], b.at[1] + moved[1]];
+            let m = match b.parent.and_then(|p| world.get(p as usize)) {
+                Some(p) => times(p, &local),
+                None => local,
+            };
+            world.push(m);
+        }
+        let shown = self
+            .slots
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let mut part = s.shown;
+                if let Some(t) = c.and_then(|c| c.slots.iter().find(|t| t.slot as usize == i)) {
+                    for &(at, value) in &t.shown {
+                        if at as f64 <= frame {
+                            part = value;
+                        }
+                    }
+                }
+                part
+            })
+            .collect();
+        (world, shown)
+    }
+
+    /// The boxes shown at `frame` of clip `clip`, each as the box round its
+    /// corners — left, top, right, bottom in the skeleton's pixels.
+    pub fn boxes_at(&self, clip: Option<usize>, frame: f64) -> Vec<(BoxKind, [f64; 4])> {
+        let (bones, shown) = self.pose(clip, frame);
+        self.boxes
+            .iter()
+            .filter(|b| shown.get(b.slot as usize) == Some(&(b.part as i32)) && !b.points.is_empty())
+            .filter_map(|b| {
+                let m = bones.get(b.bone as usize)?;
+                let mut r = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+                for p in &b.points {
+                    let (x, y) = (m[0] * p[0] + m[2] * p[1] + m[4], m[1] * p[0] + m[3] * p[1] + m[5]);
+                    r = [r[0].min(x), r[1].min(y), r[2].max(x), r[3].max(y)];
+                }
+                Some((b.kind, r))
+            })
+            .collect()
+    }
+}
+
+/// `p` then `q`: what `q` places, placed by `p`.
+fn times(p: &[f64; 6], q: &[f64; 6]) -> [f64; 6] {
+    [p[0] * q[0] + p[2] * q[1], p[1] * q[0] + p[3] * q[1], p[0] * q[2] + p[2] * q[3], p[1] * q[2] + p[3] * q[3], p[0] * q[4] + p[2] * q[5] + p[4], p[1] * q[4] + p[3] * q[5] + p[5]]
+}
+
+/// A track's value at frame `f`: its first key's before it, its last's
+/// after, and between two keys, eased from one to the next.
+fn sample(keys: &[Key], f: f64, rest: [f64; 2]) -> [f64; 2] {
+    let Some(first) = keys.first() else { return rest };
+    if f <= first.frame as f64 {
+        return first.value;
+    }
+    let mut i = 0;
+    while i + 1 < keys.len() && keys[i + 1].frame as f64 <= f {
+        i += 1;
+    }
+    if i == keys.len() - 1 {
+        return keys[i].value;
+    }
+    let (a, b) = (&keys[i], &keys[i + 1]);
+    let span = (b.frame - a.frame) as f64;
+    let e = if span > 0.0 { a.ease.at((f - a.frame as f64) / span) } else { 1.0 };
+    [a.value[0] + (b.value[0] - a.value[0]) * e, a.value[1] + (b.value[1] - a.value[1]) * e]
+}
+
+impl Ease {
+    /// How far along a key's way to the next a value is at `p` (0–1) of it.
+    pub fn at(&self, p: f64) -> f64 {
+        match *self {
+            Ease::Step => 0.0,
+            Ease::Linear => p,
+            Ease::In { amount } => (p * p - p) * amount + p,
+            Ease::Out { amount } => (1.0 - (1.0 - p) * (1.0 - p) - p) * amount + p,
+            Ease::InOut { amount } => (0.5 * (1.0 - (p * std::f64::consts::PI).cos()) - p) * amount + p,
+            Ease::Bezier { points: [x1, y1, x2, y2] } => {
+                // The curve's t where its x is p, by halving; its y there.
+                let at = |t: f64, a: f64, b: f64| 3.0 * (1.0 - t) * (1.0 - t) * t * a + 3.0 * (1.0 - t) * t * t * b + t * t * t;
+                let (mut lo, mut hi) = (0.0, 1.0);
+                for _ in 0..30 {
+                    let mid = (lo + hi) / 2.0;
+                    if at(mid, x1, x2) < p {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                at((lo + hi) / 2.0, y1, y2)
+            }
+        }
     }
 }
 

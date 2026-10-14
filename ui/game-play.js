@@ -14,19 +14,28 @@
  * and Esc still are Proton's: Esc stops.
  *
  * An animated thing's record names the frame it shows, which is drawn from
- * its sheet; the cues its frames say are shown as they are said, and its
- * boxes — hitboxes red, hurtboxes green — drawn over it when asked. */
+ * its sheet; the cues its frames say are shown as they are said. Each record
+ * says who it is — the player, a thing in the room, a shot — so what moves
+ * is eased from where that one was; a thing just hurt is drawn white, the
+ * player spared after a hurt faint. The player's health is pips over the
+ * picture, and the boxes the run tests this tick — hitboxes red, hurtboxes
+ * green — are drawn over it when asked: the run's own, not worked out again. */
 
-import { boxInRoom, layout, lightingOf } from "./game-scene.js";
-import { boxesOf, momentOf, pose } from "./game-skel.js";
+import { GLOW, layout, lightingOf } from "./game-scene.js";
 
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
 
 /** The runtime's ABI, and the words in a frame's header and in each record
  *  (proton-game-runtime). */
-const ABI = 2;
-const HEADER = 12;
-const RECORD = 8;
+const ABI = 3;
+const HEADER = 16;
+const RECORD = 9;
+/** A record's look bits. */
+const FLIP = 1;
+const FLASH = 2;
+const BLINK = 4;
+/** A shot's `who` is this and its number. */
+const SHOT = 1 << 20;
 /** What `pg_step` says when a frame with a cue was shown. */
 const CUE = 64;
 /** Ticks a cue stays in the readout. */
@@ -177,14 +186,24 @@ export function createPlayer(host) {
     const [vw, vh] = world.view;
     const zoom = Math.min(width / vw, height / vh);
     const view = { scale: zoom, x: width / 2 - center[0] * zoom, y: height / 2 - center[1] * zoom };
+    // Where each was the tick before, by who it is.
+    /** @type {Map<number, number>} */
+    const was = new Map();
+    if (before && before[2] === now[2]) for (let i = 0; i < before[8]; i++) was.set(before[HEADER + i * RECORD + 8], HEADER + i * RECORD);
+    /** @type {import('./game-scene.js').Standing[]} */
     const drawn = [];
     for (let i = 0; i < now[8]; i++) {
       const o = HEADER + i * RECORD;
-      const p = before && before[2] === now[2] && before[8] > i ? HEADER + i * RECORD : -1;
-      const at = p >= 0 && before ? [before[o + 1] + (now[o + 1] - before[o + 1]) * alpha, before[o + 2] + (now[o + 2] - before[o + 2]) * alpha] : [now[o + 1], now[o + 2]];
-      drawn.push({ key: world.sprites[now[o]], at, pivot: [now[o + 3], now[o + 4]], flip: Boolean(now[o + 5]), frame: now[o + 6] >= 0 ? now[o + 6] : null });
+      const p = was.get(now[o + 8]);
+      const at = p !== undefined && before ? [before[p + 1] + (now[o + 1] - before[p + 1]) * alpha, before[p + 2] + (now[o + 2] - before[p + 2]) * alpha] : [now[o + 1], now[o + 2]];
+      const bits = now[o + 5];
+      const key = now[o] >= 0 ? world.sprites[now[o]] : GLOW;
+      // A shot is drawn about its middle.
+      const size = now[o + 8] >= SHOT && key !== GLOW ? host.sizes.get(key) : undefined;
+      const pivot = size ? [size[0] / 2, size[1] / 2] : [now[o + 3], now[o + 4]];
+      drawn.push({ key, at, pivot, flip: Boolean(bits & FLIP), frame: now[o + 6] >= 0 ? now[o + 6] : null, flash: Boolean(bits & FLASH), blink: Boolean(bits & BLINK) });
     }
-    host.want([...room.planes.flatMap((p) => p.items.map((i) => i.image)), ...drawn.map((d) => d.key)]);
+    host.want([...room.planes.flatMap((p) => p.items.map((i) => i.image)), ...drawn.map((d) => d.key).filter((k) => k !== GLOW)]);
     // Lights waver by the run's own clock, so a run played back wavers alike.
     const time = (now[1] + alpha) / Math.max(1, world.tick);
     const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, anims: host.anims, skels: host.skels, tick: world.tick, time, sprites: drawn });
@@ -217,48 +236,35 @@ export function createPlayer(host) {
       g.fillRect(box[0], box[1], box[2], box[3]);
       g.globalAlpha = 1;
     }
-    // Boxes over what is drawn, when asked: where each is in this frame.
+    // The boxes the run tests now, when asked: count, then hit or hurt and
+    // left, top, right, bottom in 1/256 px.
     if (host.boxes?.()) {
-      const stroke = (/** @type {string} */ kind) => (kind === "hit" ? "#ff4d5e" : kind === "hurt" ? "#4dd88a" : "#f4c95d");
-      for (const d of drawn) {
-        // A skeleton's boxes: where its bones put them, about its feet.
-        const skel = host.skels?.get(d.key);
-        if (skel) {
-          const m = momentOf(skel, world.tick, d.frame);
-          for (const b of boxesOf(skel, pose(skel, m.clip, m.frame))) {
-            g.strokeStyle = stroke(b.kind);
-            g.lineWidth = 1.5;
-            g.beginPath();
-            b.points.forEach((p, i) => {
-              const rx = d.at[0] + (p[0] - d.pivot[0]) * (d.flip ? -1 : 1);
-              const ry = d.at[1] + (p[1] - d.pivot[1]);
-              const [sx, sy] = [view.x + rx * view.scale, view.y + ry * view.scale];
-              if (i) g.lineTo(sx, sy);
-              else g.moveTo(sx, sy);
-            });
-            g.closePath();
-            g.stroke();
-          }
-          continue;
-        }
-        const anim = d.frame === null || d.frame === undefined ? null : host.anims?.get(d.key);
-        for (const b of anim?.boxes ?? []) {
-          const rect = d.frame === null || d.frame === undefined ? null : b.frames[d.frame];
-          if (!rect) continue;
-          const [x, y, w, h] = boxInRoom(rect, d.at, d.pivot, d.flip);
-          g.strokeStyle = stroke(b.kind);
-          g.lineWidth = 1.5;
-          g.strokeRect(view.x + x * view.scale, view.y + y * view.scale, w * view.scale, h * view.scale);
-        }
+      const at = pg.pg_boxes();
+      const n = new Int32Array(pg.memory.buffer, at, 1)[0];
+      const words = new Int32Array(pg.memory.buffer, at, 1 + n * 5);
+      g.lineWidth = 1.5;
+      for (let i = 0; i < n; i++) {
+        const [hit, l, t, r, b] = words.subarray(1 + i * 5, 6 + i * 5);
+        g.strokeStyle = hit ? "#ff4d5e" : "#4dd88a";
+        g.strokeRect(view.x + (l / 256) * view.scale, view.y + (t / 256) * view.scale, ((r - l) / 256) * view.scale, ((b - t) / 256) * view.scale);
       }
+    }
+    // Health, as pips: whole, and lost.
+    const most = now[13];
+    for (let i = 0; i < most; i++) {
+      g.beginPath();
+      g.arc(box[0] + 14 + i * 16, box[1] + 30, 5.5, 0, Math.PI * 2);
+      g.fillStyle = i < now[12] ? "rgba(255, 255, 255, 0.92)" : "rgba(255, 255, 255, 0.15)";
+      g.fill();
     }
     g.font = "11px ui-monospace, monospace";
     g.fillStyle = "rgba(255, 255, 255, 0.7)";
     const said = cue && now[1] - cue.tick < CUE_SHOWN ? ` · ${cue.name}` : "";
-    g.fillText(`${room.id} · ${now[1]}${playback ? " · playing back" : ""}${now[6] ? ` · ${now[6]} hurt` : ""}${said}`, box[0] + 8, box[1] + 16);
+    g.fillStyle = "rgba(255, 255, 255, 0.7)";
+    g.fillText(`${room.id} · ${now[1]}${playback ? " · playing back" : ""}${now[6] ? ` · ${now[6]} ${most ? (now[6] === 1 ? "death" : "deaths") : "hurt"}` : ""}${now[14] ? ` · ${now[14]} beaten` : ""}${said}`, box[0] + 8, box[1] + 16);
     if (host.times?.()) {
       // The draw's own cost is the GPU's work handed over, not waited for.
-      g.fillText(`${times.frame.toFixed(1)} ms a frame · ${times.draw.toFixed(1)} ms to draw · ${sprites.length} sprites`, box[0] + 8, box[1] + 30);
+      g.fillText(`${times.frame.toFixed(1)} ms a frame · ${times.draw.toFixed(1)} ms to draw · ${sprites.length} sprites`, box[0] + 8, box[1] + (most ? 50 : 30));
     }
   }
 
@@ -365,6 +371,14 @@ export function createPlayer(host) {
     paused: () => paused,
     /** The frame's header and records, for tests. */
     frame: () => (now ? [...now] : null),
+    /** The boxes the run tests now, for tests: [hit, left, top, right, bottom] in 1/256 px. */
+    boxes: () => {
+      if (!pg || !now) return [];
+      const at = pg.pg_boxes();
+      const n = new Int32Array(pg.memory.buffer, at, 1)[0];
+      const words = [...new Int32Array(pg.memory.buffer, at, 1 + n * 5)];
+      return Array.from({ length: n }, (_, i) => words.slice(1 + i * 5, 6 + i * 5));
+    },
     /** The last cue said, for tests. */
     cue: () => cue?.name ?? null,
     /** How long frames take, for tests and the readout. */

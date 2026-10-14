@@ -36,6 +36,7 @@ fn world_of(tag: &str, segs: Vec<Seg>) -> World {
         pickups: vec![],
         zones: vec![],
         spawns: vec![],
+        ..Room::default()
     }];
     world
 }
@@ -192,15 +193,28 @@ fn a_hazard_sends_the_player_back_to_where_they_last_stood_safely() {
         }
     }
     assert!(hurt, "the thorns did nothing");
-    assert_eq!(sim.state.deaths, 1);
+    // The template's player has health: thorns cost some, and are not a death.
+    assert_eq!((sim.state.deaths, sim.state.health), (0, sim.world.fight.health - 1));
     assert!(sim.state.pos[0] < fx(900.0), "sent back to {:?}", sim.state.pos);
+    // Without health, every touch counts as one.
+    let lines = vec![line([0, 1000], [4000, 1000], Kind::Solid), line([900, 995], [1100, 995], Kind::Hazard)];
+    let mut world = world_of("hazard_no_health", lines);
+    world.fight.health = 0;
+    let mut sim = Sim::at(world, 0, at(600, 1000), ALL);
+    for _ in 0..120 {
+        sim.step(input::RIGHT);
+        if sim.happened().contains(&Happened::Hurt) {
+            break;
+        }
+    }
+    assert_eq!((sim.state.deaths, sim.state.health), (1, 0));
 }
 
 #[test]
 fn a_gate_stays_shut_until_its_ability_is_picked_up() {
     let mut world = world_of("gate", floor());
     let dash = world.ability("dash");
-    world.rooms[0].gates.push(proton_game::sim::world::Gate { rect: [fx(1000.0), fx(700.0), fx(40.0), fx(300.0)], needs: dash });
+    world.rooms[0].gates.push(proton_game::sim::world::Gate { rect: [fx(1000.0), fx(700.0), fx(40.0), fx(300.0)], needs: dash, flag: None });
     world.rooms[0].pickups.push(proton_game::sim::world::Pickup { at: at(400, 1000), grants: dash });
     // Without it, the gate is a wall.
     let mut shut = Sim::at(world.clone(), 0, at(600, 1000), 0);
@@ -293,6 +307,7 @@ fn the_same_input_makes_the_same_run_and_different_input_a_different_one() {
 fn the_run_itself_holds_no_floats() {
     // The one thing that keeps the core's run and the window's the same run:
     // floats are only for cooking, which happens once, in the core.
-    let run = include_str!("../src/sim/mod.rs");
-    assert!(!run.contains("f32") && !run.contains("f64"), "a float crept into the simulation");
+    for run in [include_str!("../src/sim/mod.rs"), include_str!("../src/sim/fight.rs")] {
+        assert!(!run.contains("f32") && !run.contains("f64"), "a float crept into the simulation");
+    }
 }

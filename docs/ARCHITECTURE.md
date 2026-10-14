@@ -1719,9 +1719,47 @@ probes — lit and unlit, a normal map lit from the side it faces, bloom only
 when finished, a grade turning red to cyan, the vignette — give the same
 pixels in Chromium and WebKit.
 
-**What comes next** (the plan's G10–G14): combat on the boxes animations and
-skeletons now carry, game feel and audio, the world map with ability gates,
-hot reload and a web export. (Spine was dropped by the user's choice.)
+**Combat and things in rooms** (G10). Every entity of a game's own prefab
+is now simulated, not only drawn by the editor: the cook makes each prefab a
+room places an `Actor` (its body and look, its health, what it does and the
+numbers it does it by — per tick, fixed point; `format::PARAMS` says each
+behaviour's numbers and their defaults) and each placement a `Placed` (where,
+which way, a patrol's ends, the flag beating it sets). The sim
+(`sim/fight.rs`, integers only, held to that by the no-floats test) runs the
+four behaviours built in — a crawler walks the ground and turns at walls,
+ledges and its patrol's ends; a flyer drifts toward the player it sees and
+home when it does not; a charger watches, winds up, rushes and rests; a
+turret shoots at the player it sees, its shots moving through the room's
+lines a few pixels at a time — and a still thing stands. The player swings
+on attack (up with up held, down with down held in the air): where the
+player's animation has hitboxes the swing hurts there, frame by frame, else
+in the game's reach before them for its first frames (`game.json`'s
+`combat`). A blow is a hitbox overlapping a hurtbox — an animation's own
+boxes where it has them, else the body. A swing hits each thing once; a hit
+holds the whole game still for a few ticks (hitstop, presses meanwhile kept
+for after), throws the thing, pushes the player back, and a swing down
+bounces off what it meets. Hurt, the player loses health, is thrown, stunned
+and spared for a while; out of health they die, and wake at the last bench
+rested at (a `save_point`, rested at with up) with the room as it was. Flags
+are named by entities' props: beating a thing with a `flag` sets it and
+keeps it beaten; a `trigger` sets one when walked into; an `ability_gate`
+with one stays shut until it is set. A skeleton's boxes are posed once, when
+the world is cooked (`Skel::pose`, the port of `game-skel.js`), into
+per-tick boxes like an animation's. Runtime ABI 3: a frame's header carries
+health, the most health, things beaten and hitstop; each record who it is
+(0 the player, a thing one more than its place, a shot `SHOT` and more) and
+bits for flipped, just hurt (drawn white) and spared (drawn faint); a shot
+with no image is drawn as a glow; `pg_boxes` gives the boxes the run tests,
+which the Run tab draws when asked rather than working them out again. The
+inspector sets a prefab's health and behaviour, the game's swing, an
+entity's patrol, facing and flag; a prefab is placed by dragging its row
+onto the stage. A fight replayed (`game-fight.json`) ends in the same hash,
+frames, boxes and events natively and in the WebAssembly; the agent's
+`game_play` says what was swung at, beaten, and the health left.
+
+**What comes next** (the plan's G11–G14): game feel and audio, the world map
+with ability gates, hot reload and a web export. (Spine was dropped by the
+user's choice.)
 
 ### Canvas
 

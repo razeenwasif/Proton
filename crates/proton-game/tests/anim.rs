@@ -154,7 +154,7 @@ fn the_player_plays_its_states_clips_and_says_their_cues() {
     let a = &world.anims[0];
     // Times in ticks at 60 a second; the feet from the slice.
     assert_eq!(a.frames.iter().map(|f| f.0).collect::<Vec<_>>(), [6, 5, 5, 7]);
-    assert_eq!(world.player.states, [Some(0), Some(1), Some(1), Some(0), Some(1), Some(0), Some(0)]);
+    assert_eq!(world.player.states, [Some(0), Some(1), Some(1), Some(0), Some(1), Some(0), Some(0), None], "no clip is called attack");
     let mut sim = Sim::new(world.clone(), u32::MAX);
     for _ in 0..30 {
         sim.step(0);

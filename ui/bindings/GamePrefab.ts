@@ -20,7 +20,11 @@ pivot: [number, number],
 size: [number, number], health: number | null, behaviour: GameBehaviour, 
 /**
  * For an animated sprite, the clip each state plays — `idle`, `run`,
- * `jump`, `fall`, `dash`, `wall`, `hurt` — where it is not the clip of
- * the state's own name.
+ * `jump`, `fall`, `dash`, `wall`, `hurt`, `attack` — where it is not the
+ * clip of the state's own name.
  */
-clips: { [key in string]?: string }, };
+clips: { [key in string]?: string }, 
+/**
+ * What a turret shoots: an image; a glowing ball when none.
+ */
+shot: string | null, };

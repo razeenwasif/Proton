@@ -43,7 +43,20 @@ const KEYS = /** @type {[string, string][]} */ ([
 ]);
 
 /** What rooms place without a prefab of the game's own. */
-const BUILT_IN = ["transition", "save_point", "ability_gate", "ability_pickup"];
+const BUILT_IN = ["transition", "save_point", "ability_gate", "ability_pickup", "trigger"];
+
+/** Each behaviour's numbers, what they are when not said, and what each is
+ *  (proton-game's `format::PARAMS`). @type {Record<string, [string, number, string, string][]>} */
+const PARAMS = {
+  still: [["damage", 0, "Touch hurts", "health a touch takes; 0 for none"]],
+  crawler: [["speed", 90, "Speed", "pixels a second"], ["damage", 1, "Touch hurts", "health a touch takes"]],
+  flyer: [["speed", 160, "Speed", "pixels a second"], ["accel", 500, "Turns", "pixels a second, a second"], ["sight", 420, "Sees", "pixels away"], ["damage", 1, "Touch hurts", "health a touch takes"]],
+  charger: [
+    ["speed", 0, "Walks", "pixels a second while watching; 0 stands"], ["sight", 520, "Sees", "pixels away, level with it"], ["windup", 0.4, "Winds up", "seconds"],
+    ["rush", 640, "Rush", "pixels a second"], ["rushTime", 0.9, "Rushes for", "seconds"], ["rest", 0.6, "Rests", "seconds after"], ["damage", 1, "Touch hurts", "health a touch takes"],
+  ],
+  turret: [["rate", 1.6, "Every", "seconds between shots"], ["sight", 640, "Sees", "pixels away"], ["shotSpeed", 380, "Shot speed", "pixels a second"], ["damage", 1, "Hurts", "health a shot or a touch takes"]],
+};
 
 const SIDES = ["world", "layers", "entities", "assets"];
 
@@ -60,8 +73,14 @@ const armature = (a) => /_ske\.json$/i.test(a);
 
 /** The states an animated thing plays a clip in (proton-game's `STATES`), and what each is. */
 const STATES = /** @type {[string, string][]} */ ([
-  ["idle", "Standing"], ["run", "Running"], ["jump", "Rising"], ["fall", "Falling"], ["dash", "Dashing"], ["wall", "On a wall"], ["hurt", "Hurt"],
+  ["idle", "Standing"], ["run", "Running"], ["jump", "Rising"], ["fall", "Falling"], ["dash", "Dashing"], ["wall", "On a wall"], ["hurt", "Hurt"], ["attack", "Attacking"],
 ]);
+
+/** An entity's text prop, or "". @param {{props: Record<string, any>}} e @param {string} key */
+function textProp(e, key) {
+  const v = e.props[key];
+  return typeof v === "string" ? v : "";
+}
 
 /** How far a point is from a segment. @param {number} px @param {number} py @param {number[]} a @param {number[]} b */
 function segmentDistance(px, py, a, b) {
@@ -299,7 +318,7 @@ export function createGame(host) {
         ? `<h5 class="game-head warn">To fix</h5>${project.problems.map((p) => `<p class="game-problem">${esc(p)}</p>`).join("")}`
         : "";
       const prefabRows = project.prefabs
-        .map((p) => row("prefab", p.id, p.name || p.id, esc(p.sprite && animation(p.sprite) ? "animated" : p.behaviour.kind)))
+        .map((p) => row("prefab", p.id, p.name || p.id, esc(p.sprite && animation(p.sprite) ? "animated" : p.behaviour.kind), p.behaviour.kind === "player" ? "" : ` draggable="true" title="Drag it onto the stage to place it in the room"`))
         .join("");
       box.innerHTML =
         row("game", "game", "Game settings", project.gameDirty ? `<span class="dot"></span>` : "") +
@@ -1055,7 +1074,23 @@ export function createGame(host) {
   // An image dragged in from Assets is placed where it is dropped, on the
   // plane selected — or the one the game is played on.
   stage.addEventListener("dragover", (e) => {
-    if (e.dataTransfer?.types.includes("text/x-proton-asset")) e.preventDefault();
+    if (e.dataTransfer?.types.includes("text/x-proton-asset") || e.dataTransfer?.types.includes("text/x-proton-prefab")) e.preventDefault();
+  });
+  // A prefab dragged in is placed in the room, standing where it is dropped.
+  stage.addEventListener("drop", (e) => {
+    const prefab = e.dataTransfer?.getData("text/x-proton-prefab");
+    const c = cam();
+    if (!prefab || !room || !c || playing()) return;
+    e.preventDefault();
+    const [w, h] = stageSize();
+    const [sx, sy] = stagePoint(e);
+    const point = toRoom(viewOf(c, w, h), sx, sy);
+    const taken = new Set(room.entities.map((x) => x.id));
+    let n = 1;
+    while (taken.has(`${prefab}_${n}`)) n++;
+    const id = `${prefab}_${n}`;
+    send({ type: "gameEdit", target: `room:${room.id}`, ops: [{ op: "insert", path: ["entities"], value: { id, prefab, at: [Math.round(point[0]), Math.round(point[1])] } }], label: "place" });
+    selected = { kind: "entity", id };
   });
   stage.addEventListener("drop", (e) => {
     const key = e.dataTransfer?.getData("text/x-proton-asset");
@@ -1078,6 +1113,12 @@ export function createGame(host) {
     selected = { kind: "item", id, plane: plane.id };
   });
   q("[data-game-side-body]").addEventListener("dragstart", (e) => {
+    const prefab = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-pick='prefab']"));
+    if (prefab && e.dataTransfer) {
+      e.dataTransfer.setData("text/x-proton-prefab", prefab.dataset.gamePickId ?? "");
+      e.dataTransfer.effectAllowed = "copy";
+      return;
+    }
     const row = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-pick='asset']"));
     if (row && e.dataTransfer) {
       e.dataTransfer.setData("text/x-proton-asset", row.dataset.gamePickId ?? "");
@@ -1134,6 +1175,17 @@ export function createGame(host) {
           { label: "Jump buffer frames", path: ["controller", "jump", "buffer"], value: game.controller.jump.buffer, type: "number" },
           { label: "Dash distance", path: ["controller", "dash", "distance"], value: game.controller.dash.distance, type: "number" },
           { label: "Air jumps", path: ["controller", "airJumps"], value: game.controller.airJumps, type: "number" },
+          { label: "Swing damage", path: ["combat", "damage"], value: game.combat.damage, type: "number" },
+          { label: "Swing reach", path: ["combat", "reach"], value: game.combat.reach, type: "pair", hint: "how far × how wide, where the player's animation has no hitbox" },
+          { label: "Swing frames", path: ["combat", "frames"], value: game.combat.frames, type: "number", hint: "it hurts for these, then" },
+          { label: "Recovery frames", path: ["combat", "recovery"], value: game.combat.recovery, type: "number", hint: "before the next" },
+          { label: "Knockback", path: ["combat", "knockback"], value: game.combat.knockback, type: "pair", hint: "what a swing throws, across × up, pixels a second" },
+          { label: "Recoil", path: ["combat", "recoil"], value: game.combat.recoil, type: "number", hint: "the player pushed back by landing one" },
+          { label: "Thrown when hurt", path: ["combat", "knocked"], value: game.combat.knocked, type: "pair", hint: "away × up, pixels a second" },
+          { label: "Hitstop frames", path: ["combat", "hitstop"], value: game.combat.hitstop, type: "number", hint: "the game holds still as a blow lands" },
+          { label: "Spared frames", path: ["combat", "invincible"], value: game.combat.invincible, type: "number", hint: "after a hurt, nothing hurts again" },
+          { label: "Stunned frames", path: ["combat", "stun"], value: game.combat.stun, type: "number", hint: "after a hurt, the stick does nothing" },
+          { label: "Pogo", path: ["combat", "pogo"], value: game.combat.pogo, type: "number", hint: "0 to 1: a swing down bounces this much of a jump" },
           { label: "Bloom", path: ["post", "bloom"], value: game.post.bloom, type: "number", hint: "0 to 1: how far bright light spills" },
           { label: "Vignette", path: ["post", "vignette"], value: game.post.vignette, type: "number", hint: "0 to 1: how dark the corners go" },
           { label: "Grade", path: ["post", "grade"], value: game.post.grade ?? "", type: "select", options: [["", "None"], ...project.assets.filter((a) => /\.png$/i.test(a)).map((a) => /** @type {[string, string]} */ ([a, a]))], hint: "a colour table: an n²×n strip, as editors export" },
@@ -1198,7 +1250,20 @@ export function createGame(host) {
         fields.push({ label: "Leads to", path: [...at, "to", "room"], value: e.to?.room ?? "", type: "select", options: project.rooms.map((r) => [r.id, r.id]) });
         fields.push({ label: "Arriving at", path: [...at, "to", "entry"], value: e.to?.entry ?? "", type: "text", hint: "a spawn in that room" });
       }
-      if (e.prefab === "ability_gate") fields.push({ label: "Opens for", path: [...at, "requires"], value: e.requires, type: "abilities" });
+      if (e.prefab === "ability_gate") {
+        fields.push({ label: "Opens for", path: [...at, "requires"], value: e.requires, type: "abilities" });
+        fields.push({ label: "And a flag", path: [...at, "props", "flag"], value: textProp(e, "flag"), type: "text", hint: "shut until it is set; blank for none" });
+      }
+      if (e.prefab === "trigger") fields.push({ label: "Sets", path: [...at, "props", "flag"], value: textProp(e, "flag"), type: "text", hint: "a flag, set as the player walks in" });
+      const prefab = project.prefabs.find((p) => p.id === e.prefab);
+      if (prefab && prefab.behaviour.kind !== "player" && e.at) {
+        const patrol = e.props.patrol;
+        if (prefab.behaviour.kind === "crawler" || prefab.behaviour.kind === "charger") {
+          fields.push({ label: "Patrol", path: [...at, "props", "patrol"], value: Array.isArray(patrol) && patrol.length === 2 ? patrol : [e.at[0] - 300, e.at[0] + 300], type: "pair", hint: "from × to: it turns at each end" });
+        }
+        fields.push({ label: "Faces left", path: [...at, "props", "facing"], value: e.props.facing === true || (typeof e.props.facing === "number" && e.props.facing < 0), type: "check" });
+        fields.push({ label: "Beaten sets", path: [...at, "props", "flag"], value: textProp(e, "flag"), type: "text", hint: "a flag; once set, it stays beaten" });
+      }
       if (e.prefab === "ability_pickup") {
         fields.push({ label: "Gives", path: [...at, "grants"], value: e.grants ?? "", type: "select", options: game.abilities.map((a) => [a.id, a.name || a.id]) });
       }
@@ -1259,7 +1324,16 @@ export function createGame(host) {
         { label: "Feet", path: ["pivot"], value: p.pivot, type: "pair", hint: "from its picture's top left, where no slice says" },
         { label: "Body", path: ["size"], value: p.size, type: "pair", hint: "width × height, centred on its feet" },
         { label: "Does", path: ["behaviour", "kind"], value: p.behaviour.kind, type: "select", options: [["still", "Stands still"], ["player", "The player"], ["crawler", "Crawls"], ["flyer", "Flies"], ["charger", "Charges"], ["turret", "Shoots"]] },
+        { label: "Health", path: ["health"], value: p.health ?? null, type: "optional", hint: p.behaviour.kind === "player" ? "blank: nothing kills the player" : "blank: nothing hurts it" },
       ];
+      for (const [name, fallback, label, hint] of PARAMS[p.behaviour.kind] ?? []) {
+        fields.push({ label, path: ["behaviour", "params", name], value: p.behaviour.params[name] ?? fallback, type: "number", hint });
+      }
+      if (p.behaviour.kind === "turret") {
+        const images = project.assets.filter((a) => placeable(a)).map((a) => /** @type {[string, string]} */ ([a, a]));
+        fields.push({ label: "Shoots", path: ["shot"], value: p.shot ?? "", type: "select", options: [["", "A glowing ball"], ...images] });
+      }
+      if (p.behaviour.kind !== "player") fields.push({ label: "Place", path: [], value: "drag it from the list onto the stage", type: "read" });
       return { title: p.name || p.id, target: `prefab:${p.id}`, fields };
     }
     return {
@@ -1650,7 +1724,7 @@ export function createGame(host) {
       if (value === null) return [{ op: "set", path: ["ambience", "fog"], value: null }];
       if (!room?.ambience.fog) return [{ op: "set", path: ["ambience", "fog"], value: { color: value, near: 400, far: 3000, amount: 0.5 } }];
     }
-    if (path.join("/") === "post/grade" && value === "") return [{ op: "set", path, value: null }];
+    if ((path.join("/") === "post/grade" || path.join("/") === "shot") && value === "") return [{ op: "set", path, value: null }];
     return [{ op: "set", path, value }];
   }
   q("[data-game-inspector]").addEventListener("click", (e) => {
@@ -1689,7 +1763,7 @@ export function createGame(host) {
       }</section>` +
       `<section class="game-tool"><h4>Play</h4>` +
       `<p class="game-faint">▶ over the stage plays the room on screen. The game has the keys while it runs; Esc stops it, and the run is kept here.</p>` +
-      `<label class="game-field game-check"><input type="checkbox" data-game-boxes${showBoxes ? " checked" : ""}> <span>Boxes — an animation's hitboxes and hurtboxes, over the run</span></label>` +
+      `<label class="game-field game-check"><input type="checkbox" data-game-boxes${showBoxes ? " checked" : ""}> <span>Boxes — what hits and what is hurt, over the run</span></label>` +
       `<label class="game-field"><span>Finish</span><select data-game-quality>${[["low", "Low — no bloom, grade or vignette"], ["medium", "Medium — bloom at a quarter size"], ["high", "High — bloom at half size"]]
         .map(([v, label]) => `<option value="${v}"${v === quality ? " selected" : ""}>${label}</option>`)
         .join("")}</select></label>` +
@@ -1806,6 +1880,7 @@ export function createGame(host) {
   /** @type {any} */ (ws).gameProbe = {
     drawn: () => drawn().map((d) => d.key),
     frame: () => player?.frame() ?? null,
+    boxes: () => player?.boxes() ?? [],
     cue: () => player?.cue() ?? null,
     times: () => player?.times() ?? null,
   };

@@ -65,5 +65,18 @@
   "post": {
     "bloom": 0.25,
     "vignette": 0.3
+  },
+  "combat": {
+    "damage": 1,
+    "reach": [72, 56],
+    "frames": 8,
+    "recovery": 12,
+    "knockback": [420, 240],
+    "recoil": 180,
+    "knocked": [360, 300],
+    "hitstop": 4,
+    "invincible": 60,
+    "stun": 14,
+    "pogo": 0.8
   }
 }

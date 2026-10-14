@@ -20,6 +20,13 @@ fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/ui/fixtures")
 }
 
+/// The frame the player's record shows: the record whose `who` is 0.
+fn player_frame(frame: &[i32]) -> i32 {
+    use proton_game_runtime::{HEADER, RECORD};
+    let count = frame[8] as usize;
+    (0..count).map(|i| &frame[HEADER + i * RECORD..HEADER + (i + 1) * RECORD]).find(|r| r[8] == 0).map_or(-1, |r| r[6])
+}
+
 /// The replay: across the first room, over the thorns, through the door, and
 /// about in the second.
 fn replay() -> Vec<(u32, u32)> {
@@ -28,7 +35,7 @@ fn replay() -> Vec<(u32, u32)> {
 }
 
 fn world() -> World {
-    let dir = std::env::temp_dir().join(format!("proton-runtime-det-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("proton-runtime-det-{}-{:?}", std::process::id(), std::thread::current().id()));
     let _ = std::fs::remove_dir_all(&dir);
     proton_game::template::write(&dir, &proton_game::template::files("metroidvania", "Determinism").unwrap()).unwrap();
     let world = World::cook(&Project::open(&dir).unwrap()).unwrap();
@@ -122,8 +129,7 @@ fn an_animated_run_shows_the_same_frames_and_says_the_same_cues_in_both() {
             if proton_game_runtime::pg_step(held) & proton_game_runtime::happened::CUE != 0 {
                 cues += proton_game_runtime::cues()[0];
             }
-            let frame = proton_game_runtime::frame();
-            frames.push(frame[proton_game_runtime::HEADER + 6]);
+            frames.push(player_frame(&proton_game_runtime::frame()));
         }
     }
     let hash = format!("{:016x}", proton_game_runtime::hash());
@@ -189,7 +195,7 @@ fn a_run_of_a_skeleton_counts_its_ticks_and_says_its_cues_the_same_in_both() {
             if proton_game_runtime::pg_step(held) & proton_game_runtime::happened::CUE != 0 {
                 cues += proton_game_runtime::cues()[0];
             }
-            frames.push(proton_game_runtime::frame()[proton_game_runtime::HEADER + 6]);
+            frames.push(player_frame(&proton_game_runtime::frame()));
         }
     }
     let hash = format!("{:016x}", proton_game_runtime::hash());
@@ -203,4 +209,76 @@ fn a_run_of_a_skeleton_counts_its_ticks_and_says_its_cues_the_same_in_both() {
     }
     let held: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(held, fixture, "the skeleton's run changed — write the fixtures again with PROTON_BLESS=1");
+}
+
+/// The template's first room with a fight put in it: the template's
+/// crawler, and a charger, a flyer and a turret made from it.
+fn fighting_world() -> World {
+    use proton_game::sim::world::{Does, Placed};
+    let mut world = world();
+    let crawler = world.actors[0].clone();
+    let fx = proton_game::sim::world::fx;
+    let mut add = |does: Does, health: i32| {
+        let mut a = crawler.clone();
+        a.id = format!("{does:?}").to_lowercase();
+        a.does = does;
+        a.health = health;
+        a.speed = if does == Does::Flyer { fx(200.0 / 60.0) } else { a.speed };
+        a.accel = fx(500.0 / 3600.0);
+        a.sight = fx(520.0);
+        (a.windup, a.rush, a.rush_ticks, a.rest) = (24, fx(640.0 / 60.0), 54, 36);
+        (a.rate, a.shot_speed) = (80, fx(380.0 / 60.0));
+        world.actors.push(a);
+        (world.actors.len() - 1) as u16
+    };
+    let charger = add(Does::Charger, 3);
+    let flyer = add(Does::Flyer, 1);
+    let turret = add(Does::Turret, 2);
+    let place = |actor: u16, x: f64, y: f64, facing: i8| Placed { actor, at: [fx(x), fx(y)], facing, patrol: None, flag: None };
+    world.rooms[0].foes = vec![place(0, 760.0, 1800.0, -1), place(charger, 1300.0, 1800.0, -1), place(flyer, 1000.0, 1500.0, -1), place(turret, 1750.0, 1800.0, -1)];
+    world
+}
+
+/// The fight: in at the crawler swinging, under the flyer, a swing down from
+/// a jump, on toward the charger and the turret.
+fn fight() -> Vec<(u32, u32)> {
+    let (r, l, j, a, d, u) = (input::RIGHT, input::LEFT, input::JUMP, input::ATTACK, input::DOWN, input::UP);
+    vec![(0, 20), (r, 40), (a, 1), (0, 12), (r, 15), (a, 1), (0, 24), (r | a, 1), (r, 30), (r | j, 18), (d, 4), (d | a, 1), (d, 25), (u | a, 1), (0, 30), (r, 60), (a, 1), (r, 20), (l, 30), (a, 1), (0, 90)]
+}
+
+#[test]
+fn a_fight_goes_the_same_way_in_both() {
+    use proton_game_runtime::happened;
+    let world = fighting_world();
+    let json = serde_json::to_string(&world).unwrap();
+    assert_eq!(proton_game_runtime::load(json.as_bytes()), 0);
+    let (room, at) = world.start;
+    assert_eq!(proton_game_runtime::pg_start(room as u32, at[0], at[1], 0), 0);
+    let mut said = std::collections::BTreeMap::<&str, u32>::new();
+    let mut drawn = Vec::new();
+    let mut tick = 0;
+    for (held, n) in fight() {
+        for _ in 0..n {
+            let bits = proton_game_runtime::pg_step(held);
+            for (name, bit) in [("swung", happened::SWUNG), ("hit", happened::HIT), ("killed", happened::KILLED), ("hurt", happened::HURT), ("shot", happened::SHOT)] {
+                *said.entry(name).or_default() += (bits & bit != 0) as u32;
+            }
+            if tick % 10 == 0 {
+                let f = proton_game_runtime::frame();
+                drawn.push([f[8], f[12], f[14], f[15]]);
+            }
+            tick += 1;
+        }
+    }
+    let hash = format!("{:016x}", proton_game_runtime::hash());
+    // Something of everything happened.
+    assert!(["swung", "hit", "killed", "hurt", "shot"].iter().all(|k| said.get(k).copied().unwrap_or(0) > 0), "{said:?}");
+    let fixture = serde_json::json!({ "world": json, "start": [room, at[0], at[1], 0], "replay": fight(), "hash": hash, "said": said,
+        "drawn": drawn, "frame": proton_game_runtime::frame(), "boxes": proton_game_runtime::boxes() });
+    let file = fixtures().join("game-fight.json");
+    if std::env::var_os("PROTON_BLESS").is_some() {
+        std::fs::write(&file, serde_json::to_string_pretty(&fixture).unwrap() + "\n").unwrap();
+    }
+    let held: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(held, fixture, "the fight changed — write the fixtures again with PROTON_BLESS=1");
 }
