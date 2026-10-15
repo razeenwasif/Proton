@@ -300,7 +300,7 @@ fn read_game(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<ta
         Ok(it) => it.session.game_file(&key),
         Err(poisoned) => poisoned.into_inner().session.game_file(&key),
     };
-    let path = path.ok_or_else(|| format!("{key}: not an image of the open game"))?;
+    let path = path.ok_or_else(|| format!("{key}: not a file of the open game the window may read"))?;
     std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
 }
 

@@ -78,5 +78,27 @@
     "invincible": 60,
     "stun": 14,
     "pogo": 0.8
+  },
+  "feel": {
+    "lookahead": 96,
+    "shake": 0.5,
+    "squash": 0.5
+  },
+  "audio": {
+    "effects": 0.8,
+    "music": 0.6,
+    "sounds": {
+      "dash": "audio/dash.wav",
+      "die": "audio/hurt.wav",
+      "gain": "audio/gain.wav",
+      "hit": "audio/hit.wav",
+      "hurt": "audio/hurt.wav",
+      "jump": "audio/jump.wav",
+      "kill": "audio/kill.wav",
+      "land": "audio/land.wav",
+      "rest": "audio/rest.wav",
+      "shot": "audio/shot.wav",
+      "swing": "audio/swing.wav"
+    }
   }
 }

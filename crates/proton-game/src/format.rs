@@ -57,6 +57,8 @@ pub struct GameFile {
     pub start: Start,
     pub post: Post,
     pub combat: Combat,
+    pub feel: Feel,
+    pub audio: Audio,
 }
 
 impl Default for GameFile {
@@ -74,6 +76,8 @@ impl Default for GameFile {
             start: Start::default(),
             post: Post::default(),
             combat: Combat::default(),
+            feel: Feel::default(),
+            audio: Audio::default(),
         }
     }
 }
@@ -333,6 +337,65 @@ impl Default for Combat {
         }
     }
 }
+
+/// How the game feels to hold: the camera leading the player, the screen
+/// shaking at a blow, a body squashing as it lands and stretching as it
+/// jumps.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameFeel")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Feel {
+    /// How far ahead of the player the camera looks, the way they face, in
+    /// pixels.
+    pub lookahead: i32,
+    /// How hard the screen shakes at a blow, 0 to 1.
+    pub shake: f64,
+    /// How much a body squashes and stretches, 0 to 1.
+    pub squash: f64,
+}
+
+impl Default for Feel {
+    fn default() -> Feel {
+        Feel { lookahead: 96, shake: 0.5, squash: 0.5 }
+    }
+}
+
+/// What the game sounds like: how loud, and the sound each event plays —
+/// one of [`SOUND_EVENTS`] or a cue an animation says — by its file in the
+/// game's folder (`.wav`, `.mp3` or `.m4a`). An area's music is its own
+/// (`world.json`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "GameAudio")]
+#[serde(default, rename_all = "camelCase")]
+pub struct Audio {
+    /// Sounds and music, 0 to 1.
+    pub effects: f64,
+    pub music: f64,
+    pub sounds: BTreeMap<String, String>,
+}
+
+impl Default for Audio {
+    fn default() -> Audio {
+        Audio { effects: 0.8, music: 0.6, sounds: BTreeMap::new() }
+    }
+}
+
+/// The events a run says that a sound can be put to, and what each is.
+pub const SOUND_EVENTS: [(&str, &str); 13] = [
+    ("jump", "the player jumps"),
+    ("land", "the player lands"),
+    ("dash", "the player dashes"),
+    ("swing", "the player swings"),
+    ("hit", "a swing lands"),
+    ("kill", "something is beaten"),
+    ("hurt", "the player is hurt"),
+    ("die", "the player dies"),
+    ("shot", "a turret shoots"),
+    ("rest", "the player rests at a bench"),
+    ("gain", "an ability is picked up"),
+    ("flag", "a flag is set"),
+    ("enter", "a room is entered"),
+];
 
 /* ── world.json ───────────────────────────────────────────────────── */
 

@@ -19,8 +19,16 @@
  * is eased from where that one was; a thing just hurt is drawn white, the
  * player spared after a hurt faint. The player's health is pips over the
  * picture, and the boxes the run tests this tick — hitboxes red, hurtboxes
- * green — are drawn over it when asked: the run's own, not worked out again. */
+ * green — are drawn over it when asked: the run's own, not worked out again.
+ *
+ * What happens is felt as well as seen: dust as the player jumps and lands,
+ * sparks as a blow lands and a burst as a thing is beaten, the body
+ * stretching into a jump and squashing as it lands, the screen shaking at a
+ * blow — all from the tick each happened at, so a run played back looks the
+ * same — and each event's sound, and the area's music as rooms change. */
 
+import { soundsFor } from "./game-audio.js";
+import { living, noise } from "./game-fx.js";
 import { GLOW, layout, lightingOf } from "./game-scene.js";
 
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
@@ -36,6 +44,18 @@ const FLASH = 2;
 const BLINK = 4;
 /** A shot's `who` is this and its number. */
 const SHOT = 1 << 20;
+/** `pg_step`'s bits that make something to see. */
+const JUMPED = 1;
+const LANDED = 2;
+const DASHED = 4;
+const HURT = 8;
+const HIT = 256;
+const KILLED = 512;
+const DIED = 1024;
+const RESTED = 2048;
+/** Ticks a squash or stretch, and a shake, take to settle. */
+const SQUASH = 10;
+const SHAKE = 14;
 /** What `pg_step` says when a frame with a cue was shown. */
 const CUE = 64;
 /** Ticks a cue stays in the readout. */
@@ -66,6 +86,10 @@ function compile() {
  *   boxes?: () => boolean,
  *   post?: () => {bloom: number, vignette: number, grade: string | null, quality: "low" | "medium" | "high"},
  *   times?: () => boolean,
+ *   feel?: () => {shake: number, squash: number} | undefined,
+ *   audio?: ReturnType<typeof import('./game-audio.js').createAudio>,
+ *   sounds?: () => Record<string, string | undefined>,
+ *   music?: (room: string) => string | null,
  *   want: (keys: string[]) => void,
  *   stageSize: () => number[],
  *   focal: () => number,
@@ -105,6 +129,13 @@ export function createPlayer(host) {
   let cue = null;
   /** How long frames take, eased: between frames, and drawing one (ms). */
   const times = { frame: 0, draw: 0, last: 0 };
+  /** Bursts begun by what happened. @type {import('./game-fx.js').Spark[]} */
+  let sparks = [];
+  /** The player's last squash or stretch, and the screen's last shake: the tick each began at.
+   *  @type {{tick: number, stretch: boolean} | null} */
+  let squash = null;
+  /** @type {{tick: number, amount: number} | null} */
+  let shake = null;
 
   /** Why the runtime's last call failed. */
   function why() {
@@ -149,12 +180,76 @@ export function createPlayer(host) {
     const happened = pg.pg_step(bits);
     before = now;
     now = frameWords();
+    /** @type {string[]} */
+    let said = [];
     if (happened & CUE) {
       const at = pg.pg_cues();
       const words = new Uint32Array(pg.memory.buffer, at, 1 + new Uint32Array(pg.memory.buffer, at, 1)[0]);
-      const said = [...words.slice(1)].map((i) => world?.cues?.[i] ?? "").filter(Boolean);
+      said = [...words.slice(1)].map((i) => world?.cues?.[i] ?? "").filter(Boolean);
       if (said.length) cue = { name: said.join(", "), tick: now[1] };
     }
+    felt(happened);
+    for (const file of soundsFor(happened, said, host.sounds?.() ?? {})) void host.audio?.play(file);
+    if (!before || before[2] !== now[2]) void host.audio?.music(host.music?.(rooms[now[2]]?.id ?? "") ?? null);
+  }
+
+  /** Each record of a frame, by who it is. @param {Int32Array | null} words */
+  function records(words) {
+    /** @type {Map<number, {x: number, y: number, bits: number}>} */
+    const out = new Map();
+    for (let i = 0; words && i < words[8]; i++) {
+      const o = HEADER + i * RECORD;
+      out.set(words[o + 8], { x: words[o + 1], y: words[o + 2], bits: words[o + 5] });
+    }
+    return out;
+  }
+
+  /** What the tick did, as something to see: bursts where it happened, a
+   *  squash or stretch, a shake. @param {number} happened */
+  function felt(happened) {
+    if (!now || !world) return;
+    const tick = now[1];
+    const time = tick / Math.max(1, world.tick);
+    const seed = (/** @type {number} */ who) => Math.imul(tick, 131) + who;
+    const mine = records(now);
+    const was = before && before[2] === now[2] ? records(before) : new Map();
+    const me = mine.get(0);
+    const feet = /** @type {[number, number]} */ ([now[9] / 256, now[10] / 256]);
+    const flip = Boolean((me?.bits ?? 0) & FLIP);
+    const spark = (/** @type {string} */ kind, /** @type {[number, number]} */ at, /** @type {number} */ who, turned = false) =>
+      sparks.push({ kind, at, start: time, seed: seed(who), flip: turned, tall: world.view[1] });
+    if (happened & JUMPED) {
+      spark("jump", feet, 0);
+      squash = { tick, stretch: true };
+    }
+    if (happened & LANDED) {
+      spark("land", feet, 0);
+      spark("land", feet, 1, true);
+      squash = { tick, stretch: false };
+    }
+    if (happened & DASHED) spark("dash", [feet[0], feet[1] - 30], 0, !flip);
+    if (happened & HURT) {
+      spark("hurt", [feet[0], feet[1] - 36], 0);
+      shake = { tick, amount: 1 };
+    }
+    if (happened & DIED) {
+      spark("kill", [feet[0], feet[1] - 36], 0);
+      shake = { tick, amount: 1 };
+    }
+    if (happened & RESTED) spark("rest", [feet[0], feet[1] - 20], 0);
+    if (happened & HIT) {
+      // Sparks on what was struck: whatever has just begun to flash.
+      for (const [who, r] of mine) {
+        if (who > 0 && who < SHOT && r.bits & FLASH && !((was.get(who)?.bits ?? 0) & FLASH)) spark("hit", [r.x, r.y - 20], who);
+      }
+      shake = { tick, amount: Math.max(shake && tick - shake.tick < SHAKE ? shake.amount : 0, 0.35) };
+    }
+    if (happened & KILLED) {
+      // A burst where what was beaten stood last.
+      for (const [who, r] of was) if (who > 0 && who < SHOT && !mine.has(who)) spark("kill", [r.x, r.y - 20], who);
+      shake = { tick, amount: Math.max(shake && tick - shake.tick < SHAKE ? shake.amount : 0, 0.6) };
+    }
+    sparks = living(sparks, time);
   }
 
   /** @param {number} t */
@@ -183,6 +278,15 @@ export function createPlayer(host) {
     if (!room) return;
     const ease = (/** @type {number} */ i) => (before && before[2] === now?.[2] ? before[i] + (now[i] - before[i]) * alpha : now?.[i] ?? 0);
     const center = /** @type {[number, number]} */ ([ease(3) / 256, ease(4) / 256]);
+    const feel = host.feel?.() ?? { shake: 0.5, squash: 0.5 };
+    // A shake: a jolt a tick, fading.
+    const age = (/** @type {{tick: number}} */ from) => (now?.[1] ?? 0) + alpha - from.tick;
+    if (shake && age(shake) < SHAKE && feel.shake > 0) {
+      const amp = shake.amount * feel.shake * 12 * (1 - age(shake) / SHAKE);
+      const t = now[1];
+      center[0] += (noise(t, 1, 0) - 0.5) * 2 * amp;
+      center[1] += (noise(t, 2, 0) - 0.5) * 2 * amp;
+    }
     const [vw, vh] = world.view;
     const zoom = Math.min(width / vw, height / vh);
     const view = { scale: zoom, x: width / 2 - center[0] * zoom, y: height / 2 - center[1] * zoom };
@@ -201,12 +305,19 @@ export function createPlayer(host) {
       // A shot is drawn about its middle.
       const size = now[o + 8] >= SHOT && key !== GLOW ? host.sizes.get(key) : undefined;
       const pivot = size ? [size[0] / 2, size[1] / 2] : [now[o + 3], now[o + 4]];
-      drawn.push({ key, at, pivot, flip: Boolean(bits & FLIP), frame: now[o + 6] >= 0 ? now[o + 6] : null, flash: Boolean(bits & FLASH), blink: Boolean(bits & BLINK) });
+      /** @type {[number, number] | undefined} */
+      let scale;
+      if (now[o + 8] === 0 && squash && age(squash) < SQUASH && feel.squash > 0) {
+        // Stretched into a jump, squashed by a landing, easing back.
+        const k = (1 - age(squash) / SQUASH) * feel.squash;
+        scale = squash.stretch ? [1 - 0.25 * k, 1 + 0.3 * k] : [1 + 0.3 * k, 1 - 0.25 * k];
+      }
+      drawn.push({ key, at, pivot, flip: Boolean(bits & FLIP), frame: now[o + 6] >= 0 ? now[o + 6] : null, flash: Boolean(bits & FLASH), blink: Boolean(bits & BLINK), scale });
     }
     host.want([...room.planes.flatMap((p) => p.items.map((i) => i.image)), ...drawn.map((d) => d.key).filter((k) => k !== GLOW)]);
     // Lights waver by the run's own clock, so a run played back wavers alike.
     const time = (now[1] + alpha) / Math.max(1, world.tick);
-    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, anims: host.anims, skels: host.skels, tick: world.tick, time, sprites: drawn });
+    const sprites = layout(room, { focal: host.focal(), view: world.view, center, sizes: host.sizes, parts: host.parts, anims: host.anims, skels: host.skels, tick: world.tick, time, sprites: drawn, sparks });
     const ratio = window.devicePixelRatio || 1;
     const began = performance.now();
     host.gpu()?.draw(sprites, view, width, height, ratio, host.ground(), { ...lightingOf(room, { focal: host.focal(), view: world.view, center, time }), post: host.post?.() ?? null });
@@ -320,6 +431,7 @@ export function createPlayer(host) {
       host.dispatch({ type: "gameRecorded", room: start.room, at: start.at, abilities: start.abilities, replay: recording, hash });
     }
     playback = null;
+    host.audio?.stop();
     host.changed({ playing, paused: false, tick: 0 });
     host.ended();
   }
@@ -348,7 +460,12 @@ export function createPlayer(host) {
       playback = event.replay ? { runs: event.replay, at: 0, left: event.replay[0]?.[1] ?? 0 } : null;
       before = null;
       cue = null;
+      sparks = [];
+      squash = null;
+      shake = null;
       now = frameWords();
+      host.audio?.preload(Object.values(host.sounds?.() ?? {}).filter((f) => typeof f === "string"));
+      void host.audio?.music(host.music?.(rooms[now[2]]?.id ?? "") ?? null);
       playing = true;
       paused = false;
       last = 0;
@@ -383,5 +500,7 @@ export function createPlayer(host) {
     cue: () => cue?.name ?? null,
     /** How long frames take, for tests and the readout. */
     times: () => ({ ...times }),
+    /** The bursts flying now, by kind, for tests. */
+    sparks: () => sparks.map((s) => s.kind),
   };
 }

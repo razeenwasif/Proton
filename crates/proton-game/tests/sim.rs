@@ -311,3 +311,22 @@ fn the_run_itself_holds_no_floats() {
         assert!(!run.contains("f32") && !run.contains("f64"), "a float crept into the simulation");
     }
 }
+
+#[test]
+fn the_camera_looks_ahead_the_way_the_player_faces() {
+    let lines = vec![line([0, 1000], [4000, 1000], Kind::Solid)];
+    let world = world_of("look", lines);
+    let look = world.look;
+    assert_eq!(look, fx(96.0), "the template looks 96 px ahead");
+    let mut sim = Sim::at(world, 0, at(2000, 1000), ALL);
+    for _ in 0..120 {
+        sim.step(0);
+    }
+    assert!((sim.state.cam[0] - (sim.state.pos[0] + look)).abs() <= 8 * PX, "facing right, the camera is at {} for a player at {}", sim.state.cam[0], sim.state.pos[0]);
+    // Turned about: it eases round to the other side.
+    sim.step(input::LEFT);
+    for _ in 0..120 {
+        sim.step(0);
+    }
+    assert!((sim.state.cam[0] - (sim.state.pos[0] - look)).abs() <= 8 * PX, "facing left, the camera is at {} for a player at {}", sim.state.cam[0], sim.state.pos[0]);
+}

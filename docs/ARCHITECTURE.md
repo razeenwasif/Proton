@@ -1757,8 +1757,39 @@ onto the stage. A fight replayed (`game-fight.json`) ends in the same hash,
 frames, boxes and events natively and in the WebAssembly; the agent's
 `game_play` says what was swung at, beaten, and the health left.
 
-**What comes next** (the plan's G11–G14): game feel and audio, the world map
-with ability gates, hot reload and a web export. (Spine was dropped by the
+**Feel and sound** (G11). `game.json` gains `feel` (how far the camera
+looks ahead, how hard a blow shakes the screen, how much a body squashes)
+and `audio` (how loud sounds and music are, and the file each event plays —
+`format::SOUND_EVENTS` or any cue an animation says). The look-ahead is the
+sim's — the camera's target leads the player the way they face, eased as
+the camera always is — so it is in every run's hash; everything else is
+the window's and never touches a run. `ui/game-fx.js` draws particles as
+closed functions of time and a seed: a room's emitters (motes, rain, snow,
+leaves, embers, dust) laid over the part of their plane the camera sees,
+tiled from the room's origin so they stay put as the camera moves; bursts
+(dust on a jump and a landing, a dash's trail, sparks on a blow, a burst
+where a thing was beaten, a hurt, a rest) begun at the tick something
+happened and worked out from it — so a run played back shows the same
+particles at any frame rate. Sizes and speeds are a 1080-high view's,
+scaled to the game's. `game-play.js` reads what each tick said — the bits,
+and who began flashing or went missing between frames — for where bursts
+start, stretches the player into a jump and squashes it on landing, and
+shakes the camera from a noise of the tick. `ui/game-audio.js` plays each
+tick's sounds once each (a death's over the hurt under it) through Web
+Audio, at most four of one sound at a time, and an area's music
+(`world.json`'s `areas[].music`) looping, crossfaded as rooms change areas;
+the context is made or woken by the click or key that starts a run, as a
+window must. The template's sounds are made in code, like its art — waves
+and seeded noise shaped by adds and multiplies, so they are the same bytes
+everywhere. The core now serves the window `.anim.json`, `.skel.json`,
+`.wav`, `.mp3` and `.m4a` as well as images (animations and skeletons had
+been refused in the app, though not by the tests' stand-in). The editor:
+feel and loudness in the game's settings with a sound for each event and
+cue, an area's name, colour and music when its heading in the World tab is
+picked, ▶ Listen on a sound, Silent in the Run tab.
+
+**What comes next** (the plan's G12–G14): the world map and progression,
+hot reload with a gamepad, and a web export. (Spine was dropped by the
 user's choice.)
 
 ### Canvas

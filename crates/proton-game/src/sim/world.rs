@@ -285,6 +285,13 @@ pub struct World {
     /// Flags' names, by index.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flags: Vec<String>,
+    /// How far ahead of the player the camera looks, the way they face.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub look: Fx,
+}
+
+fn is_zero(v: &Fx) -> bool {
+    *v == 0
 }
 
 impl World {
@@ -539,6 +546,7 @@ impl World {
             fight,
             actors,
             flags,
+            look: fx(game.feel.lookahead.max(0) as f64),
         })
     }
 }

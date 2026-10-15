@@ -6,7 +6,8 @@
 //! nothing in a new game belongs to anyone but its maker. The drawing uses
 //! only adds, multiplies and square roots, which every machine does alike, so
 //! the same template is the same bytes everywhere — the UI tests' fixture is
-//! this template, written out and checked against it.
+//! this template, written out and checked against it. Its sounds are made
+//! the same way: waves and noise, shaped by adds and multiplies.
 
 use std::path::Path;
 
@@ -59,6 +60,7 @@ fn metroidvania(name: &str) -> Vec<File> {
         ],
         input: default_input(),
         start: Start { room: "crossroads_01".into(), spawn: "start".into() },
+        audio: Audio { sounds: SOUNDS.iter().map(|(event, file, _)| (event.to_string(), format!("audio/{file}.wav"))).collect(), ..Audio::default() },
         ..GameFile::default()
     };
     let world = World {
@@ -104,6 +106,9 @@ fn metroidvania(name: &str) -> Vec<File> {
         File { rel: "art/player.png".into(), bytes: figure().png() },
         File { rel: "art/crawler.png".into(), bytes: crawler_art().png() },
     ]
+    .into_iter()
+    .chain(sounds())
+    .collect()
 }
 
 /// The planes every template room shares, sized to a room `width` wide whose
@@ -238,6 +243,181 @@ fn second_room() -> Room {
         ambience: Ambience { ambient: Some("#6a7590".into()), particles: Vec::new(), fog: None },
         ..Room::default()
     }
+}
+
+/* ── sounds ───────────────────────────────────────────────────────── */
+
+/// Samples a second, for every sound.
+const RATE: u32 = 22_050;
+
+/// What makes a sound's samples.
+type Make = fn() -> Vec<f64>;
+
+/// Each event's sound: the event, its file's name, how it is made.
+const SOUNDS: &[(&str, &str, Make)] = &[
+    ("jump", "jump", jump_sound),
+    ("land", "land", land_sound),
+    ("dash", "dash", dash_sound),
+    ("swing", "swing", swing_sound),
+    ("hit", "hit", hit_sound),
+    ("kill", "kill", kill_sound),
+    ("hurt", "hurt", hurt_sound),
+    ("die", "hurt", hurt_sound),
+    ("shot", "shot", shot_sound),
+    ("gain", "gain", gain_sound),
+    ("rest", "rest", rest_sound),
+];
+
+/// Each sound's file, once though two events share one.
+fn sounds() -> Vec<File> {
+    let mut out: Vec<File> = Vec::new();
+    for (_, name, make) in SOUNDS {
+        let rel = format!("audio/{name}.wav");
+        if !out.iter().any(|f| f.rel == rel) {
+            out.push(File { rel, bytes: wav(&make()) });
+        }
+    }
+    out
+}
+
+/// Samples in -1 to 1 as a 16-bit mono WAV.
+fn wav(samples: &[f64]) -> Vec<u8> {
+    let data = (samples.len() * 2) as u32;
+    let mut out = Vec::with_capacity(44 + data as usize);
+    out.extend(b"RIFF");
+    out.extend((36 + data).to_le_bytes());
+    out.extend(b"WAVEfmt ");
+    out.extend(16u32.to_le_bytes());
+    out.extend(1u16.to_le_bytes());
+    out.extend(1u16.to_le_bytes());
+    out.extend(RATE.to_le_bytes());
+    out.extend((RATE * 2).to_le_bytes());
+    out.extend(2u16.to_le_bytes());
+    out.extend(16u16.to_le_bytes());
+    out.extend(b"data");
+    out.extend(data.to_le_bytes());
+    for s in samples {
+        out.extend(((s.clamp(-1.0, 1.0) * 32767.0).round() as i16).to_le_bytes());
+    }
+    out
+}
+
+/// A voice: a wave whose pitch slides from one frequency to another, and
+/// noise, each as loud as asked, through a low-pass whose openness slides
+/// too, under an envelope that rises in `attack` seconds and falls away to
+/// nothing by the end.
+struct Voice {
+    seconds: f64,
+    attack: f64,
+    /// 0 none, 1 triangle, 2 square.
+    wave: u8,
+    from: f64,
+    to: f64,
+    tone: f64,
+    noise: f64,
+    /// The low-pass's openness, 0 to 1, from and to.
+    open: [f64; 2],
+}
+
+impl Voice {
+    fn render(&self) -> Vec<f64> {
+        let n = (self.seconds * RATE as f64) as usize;
+        let mut out = Vec::with_capacity(n);
+        let (mut phase, mut seed, mut low) = (0.0f64, 0x2545_f491u32, 0.0f64);
+        for i in 0..n {
+            let t = i as f64 / n as f64;
+            let freq = self.from + (self.to - self.from) * t;
+            phase += freq / RATE as f64;
+            phase -= phase.floor();
+            let wave = match self.wave {
+                1 => 4.0 * (phase - 0.5).abs() - 1.0,
+                2 => {
+                    if phase < 0.5 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }
+                _ => 0.0,
+            };
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let noise = (seed >> 8) as f64 / (1u32 << 24) as f64 * 2.0 - 1.0;
+            let raw = wave * self.tone + noise * self.noise;
+            let open = self.open[0] + (self.open[1] - self.open[0]) * t;
+            low += (raw - low) * open;
+            let at = i as f64 / RATE as f64;
+            let rise = if self.attack > 0.0 { (at / self.attack).min(1.0) } else { 1.0 };
+            let fall = (1.0 - t) * (1.0 - t);
+            out.push(low * rise * fall);
+        }
+        out
+    }
+}
+
+/// Voices laid over each other, each begun at its own time in seconds.
+fn layered(voices: &[(f64, Voice)]) -> Vec<f64> {
+    let mut out: Vec<f64> = Vec::new();
+    for (start, v) in voices {
+        let at = (start * RATE as f64) as usize;
+        for (i, s) in v.render().into_iter().enumerate() {
+            if out.len() <= at + i {
+                out.resize(at + i + 1, 0.0);
+            }
+            out[at + i] += s;
+        }
+    }
+    out
+}
+
+fn jump_sound() -> Vec<f64> {
+    Voice { seconds: 0.14, attack: 0.005, wave: 1, from: 260.0, to: 620.0, tone: 0.5, noise: 0.0, open: [0.6, 0.6] }.render()
+}
+
+fn land_sound() -> Vec<f64> {
+    layered(&[
+        (0.0, Voice { seconds: 0.09, attack: 0.002, wave: 0, from: 0.0, to: 0.0, tone: 0.0, noise: 0.9, open: [0.1, 0.05] }),
+        (0.0, Voice { seconds: 0.1, attack: 0.002, wave: 1, from: 110.0, to: 70.0, tone: 0.4, noise: 0.0, open: [0.8, 0.8] }),
+    ])
+}
+
+fn dash_sound() -> Vec<f64> {
+    Voice { seconds: 0.2, attack: 0.02, wave: 0, from: 0.0, to: 0.0, tone: 0.0, noise: 0.7, open: [0.4, 0.06] }.render()
+}
+
+fn swing_sound() -> Vec<f64> {
+    Voice { seconds: 0.16, attack: 0.05, wave: 0, from: 0.0, to: 0.0, tone: 0.0, noise: 1.8, open: [0.05, 0.35] }.render()
+}
+
+fn hit_sound() -> Vec<f64> {
+    layered(&[
+        (0.0, Voice { seconds: 0.06, attack: 0.001, wave: 0, from: 0.0, to: 0.0, tone: 0.0, noise: 0.8, open: [0.3, 0.2] }),
+        (0.0, Voice { seconds: 0.1, attack: 0.001, wave: 2, from: 140.0, to: 90.0, tone: 0.35, noise: 0.0, open: [0.3, 0.2] }),
+    ])
+}
+
+fn kill_sound() -> Vec<f64> {
+    layered(&[
+        (0.0, Voice { seconds: 0.32, attack: 0.002, wave: 0, from: 0.0, to: 0.0, tone: 0.0, noise: 0.8, open: [0.2, 0.05] }),
+        (0.0, Voice { seconds: 0.3, attack: 0.002, wave: 1, from: 300.0, to: 80.0, tone: 0.45, noise: 0.0, open: [0.7, 0.4] }),
+    ])
+}
+
+fn hurt_sound() -> Vec<f64> {
+    Voice { seconds: 0.22, attack: 0.003, wave: 2, from: 520.0, to: 180.0, tone: 0.4, noise: 0.05, open: [0.25, 0.15] }.render()
+}
+
+fn shot_sound() -> Vec<f64> {
+    Voice { seconds: 0.08, attack: 0.002, wave: 2, from: 880.0, to: 440.0, tone: 0.3, noise: 0.0, open: [0.3, 0.2] }.render()
+}
+
+fn gain_sound() -> Vec<f64> {
+    let note = |f: f64, seconds: f64| Voice { seconds, attack: 0.004, wave: 1, from: f, to: f, tone: 0.4, noise: 0.0, open: [0.7, 0.7] };
+    layered(&[(0.0, note(523.25, 0.12)), (0.09, note(659.25, 0.12)), (0.18, note(783.99, 0.3))])
+}
+
+fn rest_sound() -> Vec<f64> {
+    let note = |f: f64| Voice { seconds: 0.6, attack: 0.02, wave: 1, from: f, to: f, tone: 0.25, noise: 0.0, open: [0.5, 0.3] };
+    layered(&[(0.0, note(392.0)), (0.05, note(587.33))])
 }
 
 /* ── drawing ──────────────────────────────────────────────────────── */

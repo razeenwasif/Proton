@@ -20,6 +20,7 @@ import { escapeHtml as esc } from "./html.js";
 import { draw, handle, pick, toRoom, toStage } from "./game-overlay.js";
 import { animOf, corner, fitCam, layout, lightingOf, maskOf, pickItem, restingFrame, rgb, toPlane, viewOf } from "./game-scene.js";
 import { createGameRender } from "./game-render.js";
+import { createAudio, musicFor } from "./game-audio.js";
 import { createPlayer } from "./game-play.js";
 import { pose, restingClip, skelOf, skin } from "./game-skel.js";
 import { readGame } from "./bridge.js";
@@ -70,6 +71,14 @@ const animatable = (a) => /\.(aseprite|ase)$/i.test(a) || (/\.json$/i.test(a) &&
 const animation = (a) => a.endsWith(".anim.json") || a.endsWith(".skel.json");
 /** Whether an asset is a DragonBones armature's. @param {string} a */
 const armature = (a) => /_ske\.json$/i.test(a);
+
+/** The events a sound can be put to (proton-game's `SOUND_EVENTS`), and what each is. */
+const SOUND_EVENTS = /** @type {[string, string][]} */ ([
+  ["jump", "Jumps"], ["land", "Lands"], ["dash", "Dashes"], ["swing", "Swings"], ["hit", "A swing lands"], ["kill", "Beats something"],
+  ["hurt", "Is hurt"], ["die", "Dies"], ["shot", "A turret shoots"], ["rest", "Rests at a bench"], ["gain", "Picks up an ability"], ["flag", "A flag is set"], ["enter", "Enters a room"],
+]);
+/** Whether an asset is a sound. @param {string} a */
+const audible = (a) => /\.(wav|mp3|m4a)$/i.test(a);
 
 /** The states an animated thing plays a clip in (proton-game's `STATES`), and what each is. */
 const STATES = /** @type {[string, string][]} */ ([
@@ -146,6 +155,8 @@ export function createGame(host) {
   let quality = /** @type {"low" | "medium" | "high"} */ (["low", "medium", "high"].includes(pref("quality", "medium")) ? pref("quality", "medium") : "medium");
   /** Whether a run shows how long its frames take. */
   let showTimes = pref("times", "") === "1";
+  /** Whether runs are heard. */
+  let muted = pref("muted", "") === "1";
   /** Whether Play draws animations' boxes. */
   let showBoxes = pref("boxes", "") === "1";
   /** The inspector's preview of an animation: which clip, and its timer. */
@@ -324,7 +335,7 @@ export function createGame(host) {
         row("game", "game", "Game settings", project.gameDirty ? `<span class="dot"></span>` : "") +
         (prefabRows ? `<h5 class="game-head">Prefabs</h5>${prefabRows}` : "") +
         areas
-          .map((a) => `<h5 class="game-head"><i class="game-swatch" style="background:${esc(a.color || "transparent")}"></i>${esc(a.name || a.id)}</h5>${rooms(a.id)}`)
+          .map((a) => `<h5 class="game-head${a.id ? " game-pickable" : ""}${selected?.kind === "area" && selected.id === a.id ? " on" : ""}"${a.id ? ` data-game-pick="area" data-game-pick-id="${esc(a.id)}" title="Its name, colour and music"` : ""}><i class="game-swatch" style="background:${esc(a.color || "transparent")}"></i>${esc(a.name || a.id)}${a.music ? ` <span class="game-row-meta">♪</span>` : ""}</h5>${rooms(a.id)}`)
           .join("") +
         problems;
       return;
@@ -409,7 +420,7 @@ export function createGame(host) {
     renderSide();
     renderInspector();
     paint();
-    if (what && (what.kind !== "asset" || importable(what.id) || animation(what.id))) showPanel("inspector");
+    if (what && (what.kind !== "asset" || importable(what.id) || animation(what.id) || audible(what.id))) showPanel("inspector");
   }
 
   /* ── the stage ───────────────────────────────────────────────── */
@@ -773,8 +784,19 @@ export function createGame(host) {
   }
   new ResizeObserver(() => paint()).observe(stage);
 
+  // Sound, made the first time a run or a preview is started by a person.
+  const audio = createAudio({
+    read: readGame,
+    volumes: () => ({ effects: project?.game.audio?.effects ?? 0.8, music: project?.game.audio?.music ?? 0.6 }),
+    muted: () => muted,
+  });
+
   player = createPlayer({
     canvas,
+    audio,
+    feel: () => project?.game.feel,
+    sounds: () => project?.game.audio?.sounds ?? {},
+    music: (id) => (project ? musicFor(project.world, id) : null),
     gpu: () => gpu,
     sizes: images,
     parts,
@@ -810,6 +832,8 @@ export function createGame(host) {
   /** A run from this room, with the abilities the Run tab grants. */
   function play() {
     if (!project?.focus) return;
+    // Woken now, while the click or key that started the run still counts.
+    void audio.resume();
     playError = "";
     agentPath = [];
     send({ type: "gamePlay", room: project.focus, abilities: [...granted] });
@@ -1186,6 +1210,11 @@ export function createGame(host) {
           { label: "Spared frames", path: ["combat", "invincible"], value: game.combat.invincible, type: "number", hint: "after a hurt, nothing hurts again" },
           { label: "Stunned frames", path: ["combat", "stun"], value: game.combat.stun, type: "number", hint: "after a hurt, the stick does nothing" },
           { label: "Pogo", path: ["combat", "pogo"], value: game.combat.pogo, type: "number", hint: "0 to 1: a swing down bounces this much of a jump" },
+          { label: "Look ahead", path: ["feel", "lookahead"], value: game.feel?.lookahead ?? 96, type: "number", hint: "pixels the camera leads the player by, the way they face" },
+          { label: "Shake", path: ["feel", "shake"], value: game.feel?.shake ?? 0.5, type: "number", hint: "0 to 1: how hard a blow shakes the screen" },
+          { label: "Squash", path: ["feel", "squash"], value: game.feel?.squash ?? 0.5, type: "number", hint: "0 to 1: a body stretching into a jump and squashing as it lands" },
+          { label: "Sounds", path: ["audio", "effects"], value: game.audio?.effects ?? 0.8, type: "number", hint: "0 to 1: how loud" },
+          { label: "Music", path: ["audio", "music"], value: game.audio?.music ?? 0.6, type: "number", hint: "0 to 1: how loud; each area has its own" },
           { label: "Bloom", path: ["post", "bloom"], value: game.post.bloom, type: "number", hint: "0 to 1: how far bright light spills" },
           { label: "Vignette", path: ["post", "vignette"], value: game.post.vignette, type: "number", hint: "0 to 1: how dark the corners go" },
           { label: "Grade", path: ["post", "grade"], value: game.post.grade ?? "", type: "select", options: [["", "None"], ...project.assets.filter((a) => /\.png$/i.test(a)).map((a) => /** @type {[string, string]} */ ([a, a]))], hint: "a colour table: an n²×n strip, as editors export" },
@@ -1310,6 +1339,21 @@ export function createGame(host) {
         ],
       };
     }
+    if (selected?.kind === "area") {
+      const a = project.world.areas.find((x) => x.id === selected?.id);
+      if (!a) return null;
+      const at = ["areas", `#${a.id}`];
+      const sounds = project.assets.filter(audible).map((x) => /** @type {[string, string]} */ ([x, x]));
+      return {
+        title: a.name || a.id,
+        target: "world",
+        fields: [
+          { label: "Name", path: [...at, "name"], value: a.name, type: "text" },
+          { label: "Colour", path: [...at, "color"], value: a.color, type: "color", hint: "on the map" },
+          { label: "Music", path: [...at, "music"], value: a.music ?? "", type: "select", options: [["", "None"], ...sounds], hint: "loops while the player is in its rooms, crossfaded between areas" },
+        ],
+      };
+    }
     if (selected?.kind === "asset") {
       return { title: selected.id.split("/").pop() ?? selected.id, target: "game", fields: [{ label: "File", path: [], value: selected.id, type: "read" }] };
     }
@@ -1402,8 +1446,28 @@ export function createGame(host) {
         .join("")}</div>` +
       (selected?.kind === "asset" && importable(selected.id) ? importForm(selected.id) : "") +
       (selected?.kind === "asset" && animation(selected.id) ? animPanel(selected.id) : "") +
+      (selected?.kind === "asset" && audible(selected.id) ? `<p class="game-trace"><button class="cc-quiet" data-game-listen="${esc(selected.id)}" title="Hear it">▶ Listen</button></p>` : "") +
+      (selected?.kind === "game" ? soundsPanel() : "") +
       (selected?.kind === "prefab" ? clipsPanel(selected.id) : "");
     startPreview();
+  }
+
+  /** The game's sounds, event by event, and by each cue its animations
+   *  say: the file each plays, or none. Sent as the whole map, as a prefab's
+   *  clips are, so none is a key taken out. */
+  function soundsPanel() {
+    if (!project) return "";
+    const files = project.assets.filter(audible);
+    const chosen = project.game.audio?.sounds ?? {};
+    const cues = [...new Set([...anims.values()].flatMap((a) => a.cues.map((c) => c.name)))].filter((c) => !SOUND_EVENTS.some(([e]) => e === c));
+    const rows = [...SOUND_EVENTS, ...cues.map((c) => /** @type {[string, string]} */ ([c, `Cue “${c}”`]))];
+    return `<section class="game-sounds"><h5 class="game-head">Sounds</h5>${
+      files.length ? "" : `<p class="game-faint">No .wav, .mp3 or .m4a in the game's folder yet.</p>`
+    }${rows
+      .map(([event, label]) => `<label class="game-field"><span>${esc(label)}</span><select data-game-sound="${esc(event)}"><option value="">None</option>${files
+        .map((f) => `<option value="${esc(f)}"${chosen[event] === f ? " selected" : ""}>${esc(f)}</option>`)
+        .join("")}${chosen[event] && !files.includes(/** @type {string} */ (chosen[event])) ? `<option value="${esc(chosen[event] ?? "")}" selected>${esc(chosen[event] ?? "")} — missing</option>` : ""}</select></label>`)
+      .join("")}</section>`;
   }
 
   /** A prefab's clips, state by state, when what it looks like is an animation. @param {string} id */
@@ -1705,6 +1769,17 @@ export function createGame(host) {
   }
 
   q("[data-game-inspector]").addEventListener("change", (e) => {
+    const sound = /** @type {HTMLSelectElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-sound]"));
+    if (sound && project) {
+      /** @type {Record<string, string>} */
+      const next = {};
+      for (const [k, v] of Object.entries(project.game.audio?.sounds ?? {})) if (v) next[k] = v;
+      const event = sound.dataset.gameSound ?? "";
+      if (sound.value) next[event] = sound.value;
+      else delete next[event];
+      send({ type: "gameEdit", target: "game", ops: [{ op: "set", path: ["audio", "sounds"], value: next }], label: "sound" });
+      return;
+    }
     const field = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-field]"));
     const target = /** @type {HTMLElement | null} */ (field?.closest("[data-game-target]"))?.dataset.gameTarget;
     if (!field || !target) return;
@@ -1724,12 +1799,14 @@ export function createGame(host) {
       if (value === null) return [{ op: "set", path: ["ambience", "fog"], value: null }];
       if (!room?.ambience.fog) return [{ op: "set", path: ["ambience", "fog"], value: { color: value, near: 400, far: 3000, amount: 0.5 } }];
     }
-    if ((path.join("/") === "post/grade" || path.join("/") === "shot") && value === "") return [{ op: "set", path, value: null }];
+    if ((path.join("/") === "post/grade" || path.join("/") === "shot" || (path[0] === "areas" && path[2] === "music")) && value === "") return [{ op: "set", path, value: null }];
     return [{ op: "set", path, value }];
   }
   q("[data-game-inspector]").addEventListener("click", (e) => {
     const target = /** @type {HTMLElement} */ (e.target);
     if (target.closest("[data-game-remove]")) removeSelected();
+    const listen = /** @type {HTMLElement | null} */ (target.closest("[data-game-listen]"));
+    if (listen) void audio.resume().then(() => audio.play(listen.dataset.gameListen ?? ""));
     const trace = /** @type {HTMLElement | null} */ (target.closest("[data-game-trace]"));
     if (trace && room) send({ type: "gameTrace", room: room.id, item: trace.dataset.gameTrace });
   });
@@ -1768,6 +1845,7 @@ export function createGame(host) {
         .map(([v, label]) => `<option value="${v}"${v === quality ? " selected" : ""}>${label}</option>`)
         .join("")}</select></label>` +
       `<label class="game-field game-check"><input type="checkbox" data-game-times${showTimes ? " checked" : ""}> <span>Frame times, over the run</span></label>` +
+      `<label class="game-field game-check"><input type="checkbox" data-game-mute${muted ? " checked" : ""}> <span>Silent — no sounds or music</span></label>` +
       (playError ? `<p class="game-error" role="alert">${esc(playError)}</p>` : "") +
       `<p class="game-faint" data-game-tick></p></section>` +
       `<section class="game-tool"><h4>Runs</h4>${
@@ -1788,6 +1866,7 @@ export function createGame(host) {
   q("[data-game-run]").addEventListener("click", (e) => {
     const replay = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-replay]"));
     if (replay) {
+      void audio.resume();
       playError = "";
       send({ type: "gamePlay", recording: Number(replay.dataset.gameReplay), abilities: [] });
     }
@@ -1798,6 +1877,13 @@ export function createGame(host) {
       quality = /** @type {"low" | "medium" | "high"} */ (finish.value);
       keep("quality", quality);
       paint();
+      return;
+    }
+    const mute = /** @type {HTMLInputElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-mute]"));
+    if (mute) {
+      muted = mute.checked;
+      keep("muted", muted ? "1" : "");
+      audio.level();
       return;
     }
     const times = /** @type {HTMLInputElement | null} */ (/** @type {HTMLElement} */ (e.target).closest("[data-game-times]"));
@@ -1881,6 +1967,9 @@ export function createGame(host) {
     drawn: () => drawn().map((d) => d.key),
     frame: () => player?.frame() ?? null,
     boxes: () => player?.boxes() ?? [],
+    sparks: () => player?.sparks() ?? [],
+    audio: () => audio.state(),
+    music: () => audio.playing(),
     cue: () => player?.cue() ?? null,
     times: () => player?.times() ?? null,
   };

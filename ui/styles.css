@@ -5569,6 +5569,10 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .game-sub { margin-left: 14px; padding-left: 6px; border-left: 1px solid color-mix(in srgb, var(--text) 10%, var(--bg-deep)); }
 .game-head { display: flex; align-items: center; gap: 6px; margin: 12px 8px 4px; font: 600 var(--z-2xs) var(--zed); color: var(--faint); text-transform: none; }
 .game-head.warn { color: var(--warn); }
+.game-head.game-pickable { cursor: pointer; border-radius: 4px; padding: 2px 4px; margin-left: 4px; margin-right: 4px; }
+.game-head.game-pickable:hover { color: var(--text); background: var(--row-hover); }
+.game-head.game-pickable.on { color: var(--text); background: var(--row-on); box-shadow: inset 0 0 0 1px var(--row-on-edge); }
+.game-sounds { margin-top: 8px; }
 .game-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .game-problem { margin: 2px 8px; color: var(--muted); font: var(--z-2xs)/1.45 var(--zed); }
 .game-pane-head { display: flex; align-items: center; gap: 2px; padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, var(--bg-deep)); }

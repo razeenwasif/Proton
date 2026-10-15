@@ -17,7 +17,10 @@
  * picture. Zoomed out, a backdrop covers only what the camera can see from
  * there, which is what it is: art outside it is never on screen. */
 
+import { GLOW, air, burst, seedOf } from "./game-fx.js";
 import { momentOf, pose, restingClip } from "./game-skel.js";
+
+export { GLOW };
 
 /** @typedef {import('./bindings/GameRoom').GameRoom} Room */
 /** @typedef {import('./bindings/GamePlane').GamePlane} Plane */
@@ -37,10 +40,11 @@ import { momentOf, pose, restingClip } from "./game-skel.js";
 /** An animation, as its `.anim.json` says it. @typedef {import('./bindings/GameAnim').GameAnim} Anim */
 /** Something standing on the play plane: an image, an animation's frame or a
  *  skeleton at a run's frame (at rest without one), its feet at `at` — just
- *  hurt (`flash`, drawn white) or spared for now (`blink`, drawn faint). A
- *  shot with no image of its own is a glow `glow` across, its middle at `at`.
+ *  hurt (`flash`, drawn white) or spared for now (`blink`, drawn faint), and
+ *  squashed or stretched about its feet by `scale`. A shot with no image of
+ *  its own is a glow `glow` across, its middle at `at`.
  *  @typedef {{key: string, at: number[], pivot: number[], flip?: boolean, frame?: number | null, clips?: Record<string, string | undefined>,
- *             flash?: boolean, blink?: boolean, glow?: number}} Standing */
+ *             flash?: boolean, blink?: boolean, glow?: number, scale?: [number, number]}} Standing */
 
 /** How an image is cut up: its size, and where each piece goes in it (an `.img.json`).
  *  Its normal map, when it has one, is cut the same way.
@@ -48,8 +52,6 @@ import { momentOf, pose, restingClip } from "./game-skel.js";
 /** A light as the renderer takes it: where in room pixels, its reach, how high, its colour times its intensity.
  *  @typedef {{x: number, y: number, radius: number, height: number, color: number[]}} Lamp */
 
-/** The key a light's glow is drawn by: the renderer's own texture. */
-export const GLOW = "__glow";
 /** The most lights a frame is lit by (the renderer's). */
 const LIGHTS = 16;
 
@@ -102,11 +104,14 @@ export function rgb(hex) {
 /** Everything a room draws, back to front, in room pixels, for the game
  *  camera centred at `center`. `sizes` says how large each loaded image is;
  *  what has not loaded is left out until it has. An animation, by its key in
- *  `anims`, is drawn as the frame its standing thing names.
+ *  `anims`, is drawn as the frame its standing thing names. At a `time`, a
+ *  room's air — its emitters — hangs on its planes, and `sparks`, bursts
+ *  begun by what happened, fly on the play plane before what stands there.
  *  @param {Room} room
  *  @param {{focal: number, view: [number, number], center: [number, number], sizes: Map<string, [number, number]>,
  *           hidden?: Set<string>, solo?: string | null, sprites?: Standing[],
- *           parts?: Map<string, Parts>, anims?: Map<string, Anim>, skels?: Map<string, import('./bindings/GameSkel').GameSkel>, tick?: number, time?: number}} how
+ *           parts?: Map<string, Parts>, anims?: Map<string, Anim>, skels?: Map<string, import('./bindings/GameSkel').GameSkel>, tick?: number, time?: number,
+ *           sparks?: import('./game-fx.js').Spark[]}} how
  *  @returns {Sprite[]} */
 export function layout(room, how) {
   const at = corner(room, how.view, how.center);
@@ -143,6 +148,20 @@ export function layout(room, how) {
           if (s.blink) out[k].opacity = 0.35;
         }
       }
+      for (const spark of how.sparks ?? []) {
+        for (const m of burst(spark, how.time ?? 0)) out.push({ key: GLOW, plane: plane.id, item: null, flip: false, ...m });
+      }
+    }
+    // The room's air on this plane, over what the camera sees of it.
+    if (how.time !== undefined) {
+      const f = factor(plane, how.focal);
+      const seen = [at[0] * f, at[1] * f, how.view[0], how.view[1]];
+      (room.ambience?.particles ?? []).forEach((e, i) => {
+        if (e.plane !== plane.id) return;
+        for (const m of air(e.preset, seen, how.time ?? 0, seedOf(`${room.id}:${i}`))) {
+          out.push({ key: GLOW, plane: plane.id, item: null, flip: false, ...m, x: m.x + dx, y: m.y + dy });
+        }
+      });
     }
     // A lit plane's art is shaded by the lights.
     if (plane.lit) for (let k = first; k < out.length; k++) out[k].lit = true;
@@ -238,14 +257,22 @@ function standing(s, plane, how, out) {
   const anim = how.anims?.get(s.key);
   if (anim) {
     const drawn = frameSprite(anim, s, how.sizes, plane);
-    if (drawn) out.push(drawn);
+    if (drawn) out.push(squashed(drawn, s));
     return;
   }
   const size = how.sizes.get(s.key);
   if (!size) return;
   // Flipped about its pivot, so it turns where it stands.
   const x = s.flip ? s.at[0] - (size[0] - s.pivot[0]) : s.at[0] - s.pivot[0];
-  out.push({ key: s.key, plane, item: null, x, y: s.at[1] - s.pivot[1], w: size[0], h: size[1], rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal" });
+  out.push(squashed({ key: s.key, plane, item: null, x, y: s.at[1] - s.pivot[1], w: size[0], h: size[1], rot: 0, flip: Boolean(s.flip), opacity: 1, tint: [0, 0, 0, 0], blend: "normal" }, s));
+}
+
+/** A sprite squashed or stretched about the feet of what stands, as its
+ *  `scale` says. @param {Sprite} sprite @param {Standing} s @returns {Sprite} */
+export function squashed(sprite, s) {
+  if (!s.scale || (s.scale[0] === 1 && s.scale[1] === 1)) return sprite;
+  const [sx, sy] = s.scale;
+  return { ...sprite, x: s.at[0] + (sprite.x - s.at[0]) * sx, y: s.at[1] + (sprite.y - s.at[1]) * sy, w: sprite.w * sx, h: sprite.h * sy };
 }
 
 /** A frame of an animation, standing at `s.at` on its feet: the part of its

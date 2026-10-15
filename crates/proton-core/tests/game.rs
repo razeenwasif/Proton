@@ -180,10 +180,17 @@ fn a_project_that_is_a_game_opens_it_on_entering_the_mode() {
 }
 
 #[test]
-fn the_window_is_given_only_the_open_games_images() {
+fn the_window_is_given_only_the_open_games_images_animations_and_sounds() {
     let (space, root) = with_game("files");
     let sky = space.game_file("art/sky.png").expect("the sky is the game's");
     assert!(sky.starts_with(std::fs::canonicalize(root.join("crossroads")).unwrap()), "{}", sky.display());
+    // What the window draws an animated thing and a skeleton from, and plays.
+    let game = root.join("crossroads");
+    for rel in ["art/hero.anim.json", "art/hero.skel.json", "audio/jump.wav", "audio/theme.mp3", "audio/step.m4a"] {
+        std::fs::create_dir_all(game.join(rel).parent().unwrap()).unwrap();
+        std::fs::write(game.join(rel), b"x").unwrap();
+        assert!(space.game_file(rel).is_some(), "{rel} was not given to the window");
+    }
     for refused in ["game.json", "../crossroads/art/sky.png", "/etc/hosts.png", "art/nowhere.png", "rooms/crossroads_01.room.json"] {
         assert!(space.game_file(refused).is_none(), "{refused} was given to the window");
     }
@@ -564,6 +571,7 @@ fn the_agent_plays_a_fight_and_is_told_what_was_beaten_and_the_health_left() {
     let (mut space, _root) = with_game("fight");
     let info = space.run_tool("game_info", &json!({})).unwrap();
     assert!(info.contains("crawler (crawler, health 2)") && info.contains("Combat: a swing does 1 for 8 frames"), "{info}");
+    assert!(info.contains("Feel: the camera looks 96 px ahead") && info.contains("jump → audio/jump.wav"), "{info}");
     // In from the west, up to where the crawler patrols, swinging as it comes.
     let mut inputs = vec![json!({"hold": ["right"], "ticks": 105})];
     for _ in 0..40 {

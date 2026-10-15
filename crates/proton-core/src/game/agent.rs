@@ -457,6 +457,18 @@ impl Game {
             "Combat: a swing does {} for {} frames then rests {}, reaching {}×{} px; hitstop {} frames; hurt, the player is spared {} frames and stunned {}. Entities of a prefab may carry props patrol [from, to], facing (true: left) and flag (beating it sets the flag for good); a trigger (rect, props.flag) sets a flag; an ability_gate's props.flag keeps it shut until set; a save_point is a bench rested at with up.",
             k.damage, k.frames, k.recovery, k.reach[0], k.reach[1], k.hitstop, k.invincible, k.stun
         );
+        let f = &game.feel;
+        let sounds: Vec<String> = game.audio.sounds.iter().map(|(event, file)| format!("{event} → {file}")).collect();
+        let events: Vec<&str> = proton_game::format::SOUND_EVENTS.iter().map(|(e, _)| *e).collect();
+        let _ = writeln!(
+            out,
+            "Feel: the camera looks {} px ahead; shake {}, squash {}. Sounds (game.json audio.sounds, keyed by {} or an animation's cue): {}. An area's music is world.json's areas[].music.",
+            f.lookahead,
+            f.shake,
+            f.squash,
+            events.join(", "),
+            list(&sounds)
+        );
         let assets = super::assets(project.root());
         let art: Vec<String> = assets.iter().filter(|a| a.to_ascii_lowercase().ends_with(".psd")).cloned().collect();
         if !art.is_empty() {

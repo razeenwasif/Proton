@@ -915,12 +915,13 @@ impl Sim {
     }
 }
 
-/// Where the camera wants to be: the player's middle, held inside the room's
-/// bounds — and still along an axis where a zone says so.
+/// Where the camera wants to be: the player's middle, looking ahead the way
+/// they face, held inside the room's bounds — and still along an axis where
+/// a zone says so.
 fn camera_target(world: &World, s: &State) -> [Fx; 2] {
     let room = &world.rooms[s.room as usize];
     let p = &world.player;
-    let mut at = [s.pos[0], s.pos[1] - p.height / 2];
+    let mut at = [s.pos[0] + s.facing as Fx * world.look, s.pos[1] - p.height / 2];
     for z in &room.zones {
         let inside = (z.rect[0]..z.rect[0] + z.rect[2]).contains(&s.pos[0]) && (z.rect[1]..z.rect[1] + z.rect[3]).contains(&s.pos[1]);
         if inside && z.lock == 1 {

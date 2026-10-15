@@ -647,4 +647,61 @@ export async function gameChecks({test, assert, win, doc, $, settle, shown}) {
     await win.pushEvents([project(), room('crossroads_01')]); await settle();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
+
+  await test('Feel and sound are set in the game\'s settings — look-ahead, shake, squash, loudness, a sound for each event — an area has its music, a sound can be heard, and a run wakes the sound, kicks up dust and can be silenced', async () => {
+    await win.dispatch({type: 'setMode', mode: 'game'}); await settle();
+    await win.pushEvents([project({assets: ['art/player.png', 'audio/jump.wav', 'audio/land.wav', 'audio/theme.mp3']}), room('crossroads_01')]); await settle();
+    const field = (/** @type {string[]} */ path) => /** @type {HTMLInputElement | null} */ (ws().querySelector(`[data-game-field='${JSON.stringify(path)}']`));
+    $('[data-game-side="world"]').click(); await settle();
+    ws().querySelector('[data-game-pick="game"]').click(); await settle();
+    assert(field(['feel', 'lookahead'])?.value === '96' && field(['feel', 'shake'])?.value === '0.5' && field(['audio', 'effects'])?.value === '0.8', 'feel and loudness are not in the game\'s settings');
+    // The template's sounds, event by event; a choice sends the whole map.
+    const jump = /** @type {HTMLSelectElement} */ (ws().querySelector('[data-game-sound="jump"]'));
+    assert(jump?.value === 'audio/jump.wav' && ws().querySelector('[data-game-sound="enter"]')?.value === '', `the jump's sound shows ${jump?.value}`);
+    let before = win.commands.length;
+    jump.value = '';
+    jump.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const map = sent(before, 'gameEdit')[0];
+    assert(map?.target === 'game' && map.ops[0].path.join() === 'audio,sounds' && !('jump' in map.ops[0].value) && map.ops[0].value.land === 'audio/land.wav',
+      `clearing the jump's sound sent ${JSON.stringify(map)}`);
+    // An area: its music.
+    ws().querySelector('[data-game-pick="area"][data-game-pick-id="crossroads"]').click(); await settle();
+    const music = /** @type {HTMLSelectElement} */ (field(['areas', '#crossroads', 'music']));
+    assert(music && [...music.options].map((o) => o.value).includes('audio/theme.mp3') && !ws().querySelector('[data-game-sound]'), 'the area has no music to choose');
+    before = win.commands.length;
+    music.value = 'audio/theme.mp3';
+    music.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const chose = sent(before, 'gameEdit')[0];
+    assert(chose?.target === 'world' && JSON.stringify(chose.ops) === '[{"op":"set","path":["areas","#crossroads","music"],"value":"audio/theme.mp3"}]', `music sent ${JSON.stringify(chose)}`);
+    before = win.commands.length;
+    music.value = '';
+    music.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(sent(before, 'gameEdit')[0]?.ops[0].value === null, 'no music was sent as something');
+    // A sound in the assets can be heard.
+    $('[data-game-side="assets"]').click(); await settle();
+    ws().querySelector('[data-game-pick="asset"][data-game-pick-id="audio/jump.wav"]').click(); await settle();
+    assert(ws().querySelector('[data-game-listen="audio/jump.wav"]'), 'a sound cannot be listened to');
+    // Play wakes the sound; a jump kicks up dust, a landing more.
+    $('[data-game-panel="run"]').click(); await settle();
+    $('[data-game-play]').click(); await settle();
+    assert(ws().gameProbe.audio() === 'running', `the sound is ${ws().gameProbe.audio()} after Play`);
+    const world = await (await fetch('/tests/ui/fixtures/game-world.json')).text();
+    await win.pushEvents([{type: 'gamePlay', world, start: [0, ...JSON.parse(world).rooms[0].spawns[0][1], 0], rooms: fixture.rooms, keys: [], replay: [[0, 20], [16, 3], [0, 120]]}]);
+    const frame = () => new Promise((done) => win.requestAnimationFrame(() => done(undefined)));
+    const seen = new Set();
+    for (let i = 0; i < 300 && !(seen.has('jump') && seen.has('land')); i++) {
+      for (const kind of ws().gameProbe.sparks()) seen.add(kind);
+      await frame();
+    }
+    assert(seen.has('jump') && seen.has('land'), `the run kicked up ${[...seen]}`);
+    $('[data-game-stop]').click(); await settle();
+    const mute = /** @type {HTMLInputElement} */ ($('[data-game-mute]'));
+    mute.checked = true;
+    mute.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(win.localStorage.getItem('proton.game.muted') === '1', 'silence was not kept');
+    mute.checked = false;
+    mute.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    await win.pushEvents([project(), room('crossroads_01')]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
 }

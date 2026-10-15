@@ -46,6 +46,8 @@
     "game-scene.js",
     "game-render.js",
     "game-skel.js",
+    "game-fx.js",
+    "game-audio.js",
     "game-play.js",
     "raster.js",
     "raster-view.js",
