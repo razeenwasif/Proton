@@ -55,9 +55,20 @@ use serde_json::Value;
 
 use crate::{Block, Delta, Message, Reply, Request, Role, StopReason, Turn, Usage};
 
+/// Where the Gemini desktop app keeps the `agy` it ships with: inside its
+/// bundle, in either Applications folder. Nothing outside macOS has it.
+pub fn bundled(home: Option<&Path>) -> Vec<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return Vec::new();
+    }
+    let inside = |apps: PathBuf| apps.join("Gemini.app").join("Contents").join("Helpers").join("agy");
+    std::iter::once(inside(PathBuf::from("/Applications"))).chain(home.map(|h| inside(h.join("Applications")))).collect()
+}
+
 /// Where `agy` is. An explicit override wins; then where Antigravity's
 /// installer puts it, because an app opened from the Dock does not see the
-/// shell's PATH; then the PATH it does see.
+/// shell's PATH; then the PATH it does see; then the copy inside the Gemini
+/// desktop app — a standalone install, chosen on purpose, coming first.
 pub fn executable() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("PROTON_AGY_BIN") {
         let path = PathBuf::from(path);
@@ -67,18 +78,19 @@ pub fn executable() -> Result<PathBuf, String> {
             .ok_or_else(|| "PROTON_AGY_BIN does not name a file".into());
     }
     let name = if cfg!(windows) { "agy.exe" } else { "agy" };
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    let installed = home.map(|home| PathBuf::from(home).join(".local").join("bin").join(name));
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    let installed = home.as_ref().map(|home| home.join(".local").join("bin").join(name));
     let on_path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
         .map(|dir| dir.join(name))
         .collect::<Vec<_>>();
     installed
         .into_iter()
         .chain(on_path)
+        .chain(bundled(home.as_deref()))
         .find(|path| path.is_file())
         .ok_or_else(|| {
-            "Install Antigravity and its agy command, run agy once to sign in, then retry. \
-             PROTON_AGY_BIN can select its executable."
+            "Install Antigravity or the Gemini desktop app (which carries agy), run agy once to sign in, \
+             then retry. PROTON_AGY_BIN can select its executable."
                 .into()
         })
 }
@@ -474,6 +486,16 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_gemini_apps_own_agy_is_looked_for_in_both_applications_folders() {
+        let found = bundled(Some(Path::new("/Users/someone")));
+        assert_eq!(
+            found,
+            [PathBuf::from("/Applications/Gemini.app/Contents/Helpers/agy"), PathBuf::from("/Users/someone/Applications/Gemini.app/Contents/Helpers/agy")]
+        );
     }
 
     #[test]

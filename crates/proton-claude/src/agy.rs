@@ -33,19 +33,36 @@ use crate::pipe::{Line, Pipe};
 use crate::saved::Record;
 
 /// Where `agy` is: `PROTON_AGY_BIN`, where Antigravity's installer puts it,
-/// then the login shell's PATH and our own.
+/// then the login shell's PATH and our own, then the copy the Gemini desktop
+/// app carries inside its bundle — a standalone install coming first.
 pub fn executable() -> Result<PathBuf, String> {
     let names: &[&str] = if cfg!(windows) { &["agy.exe"] } else { &["agy"] };
-    let places = crate::pipe::home().map(|home| vec![home.join(".local").join("bin").join(names[0])]).unwrap_or_default();
-    crate::pipe::find("PROTON_AGY_BIN", names, places).map_err(|why| {
+    let home = crate::pipe::home();
+    let places = home.as_ref().map(|home| vec![home.join(".local").join("bin").join(names[0])]).unwrap_or_default();
+    let found = crate::pipe::find("PROTON_AGY_BIN", names, places);
+    let found = match found {
+        Err(why) if why.is_empty() => bundled(home.as_deref()).into_iter().find(|p| p.is_file()).ok_or(why),
+        other => other,
+    };
+    found.map_err(|why| {
         if why.is_empty() {
-            "Antigravity's agy command is not installed. Install Antigravity, run `agy` once in a terminal \
-             to sign in, then try again."
+            "Antigravity's agy command is not installed. Install Antigravity or the Gemini desktop app \
+             (which carries agy), run `agy` once in a terminal to sign in, then try again."
                 .into()
         } else {
             why
         }
     })
+}
+
+/// Where the Gemini desktop app keeps the `agy` it ships with: inside its
+/// bundle, in either Applications folder. Nothing outside macOS has it.
+pub fn bundled(home: Option<&Path>) -> Vec<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return Vec::new();
+    }
+    let inside = |apps: PathBuf| apps.join("Gemini.app").join("Contents").join("Helpers").join("agy");
+    std::iter::once(inside(PathBuf::from("/Applications"))).chain(home.map(|h| inside(h.join("Applications")))).collect()
 }
 
 /// The command line for a mode, model and effort, carrying a conversation
@@ -547,6 +564,15 @@ fn capabilities_with(models: Vec<ModelChoice>) -> Capabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_gemini_apps_own_agy_is_looked_for_in_both_applications_folders() {
+        assert_eq!(
+            bundled(Some(Path::new("/Users/someone"))),
+            [PathBuf::from("/Applications/Gemini.app/Contents/Helpers/agy"), PathBuf::from("/Users/someone/Applications/Gemini.app/Contents/Helpers/agy")]
+        );
+    }
 
     #[test]
     fn an_unattended_antigravity_plans_in_a_sandbox_and_hears_its_instructions_once() {

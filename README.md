@@ -392,7 +392,9 @@ A Google AI subscription has no API key, so the **Gemini** provider cannot use
 it. **Antigravity** can: in **Settings → AI & models**, select it, and Proton
 runs Antigravity's `agy` command on your own Google sign-in. Run `agy` once in a
 terminal to sign in. Proton finds it in `~/.local/bin`, where the Antigravity
-installer puts it, or on PATH, or at `PROTON_AGY_BIN`. Gemini 3.8 Flash (High)
+installer puts it, or on PATH, or inside the Gemini desktop app
+(`Gemini.app/Contents/Helpers/agy`), or at
+`PROTON_AGY_BIN`. Gemini 3.8 Flash (High)
 is the default, and `agy models` lists the rest.
 
 Unlike Codex, `agy` cannot be handed Proton's tools for a single run, so it
