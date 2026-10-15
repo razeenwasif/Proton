@@ -101,3 +101,10 @@ opt-level = 2
 # from a poisoned lock catch panics, which `panic = "abort"` would end.
 strip = true
 lto = "thin"
+
+# What runs at build time — proc-macros, build scripts — is not stripped:
+# Xcode's strip takes a proc-macro dylib's Rust metadata with its symbols,
+# and a fresh release build then fails with "can't find crate for
+# `thiserror_impl`". The shipped binary is stripped all the same.
+[profile.release.build-override]
+strip = false

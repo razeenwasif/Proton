@@ -97,6 +97,39 @@ Research's milestones after Lean (P0–P7, `6c103a9`).
 - **The Lab on Linux and Windows.** bubblewrap has never been run for real,
   and the Lab is Unix-only (no `Scripts\python.exe`).
 
+## Canvas
+
+Pixel art and painting in one mode, Pixel and Paint (P0–P8). What waits on
+the person, and what the plan put off until a measurement or a request
+calls for it.
+
+### Waiting on the person
+
+- **A pen on real hardware.** WebKit hands a tablet's events to the page as
+  a mouse with no pressure, so the shell reads them with an AppKit monitor
+  (`pen.rs`). Pressure from the drawing tablet and from the iPad's Pencil
+  through Sidecar has never been tried on either.
+- **The paths only the app has.** Pasting and copying through the real
+  pasteboard, and pictures dropped and uploaded as raw bytes over Tauri's
+  IPC, are tested against stand-ins.
+- **The agent drawing.** `canvas_*` are tested through `run_tool`; a real
+  model using them is a live round, run with the person's go-ahead.
+
+### Later builds
+
+- **More brushes.** Smudge, blur and liquify; brushes with a texture or a
+  grain; a pen's tilt.
+- **More to a layer.** Masks, clipping and adjustment layers; blend modes
+  that are not per channel (hue, saturation, colour, luminosity); 16 bits a
+  channel.
+- **Text** on a layer.
+- **Larger canvases** than 4096 pixels a side, and turning the view.
+- **More generators.** Tiles by wave-function collapse; RotSprite for
+  turning pixel art without its pixels going ragged.
+- **More formats.** OpenRaster and Krita's files; colour profiles (sRGB is
+  assumed now).
+- **SIMD** in the WebAssembly, if a measurement shows a brush wants it.
+
 ## Game
 
 Proton's own 2D-first engine, Metroidvania first. G0–G11 are built (G0–G6 on
