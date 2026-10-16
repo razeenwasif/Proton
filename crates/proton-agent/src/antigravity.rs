@@ -506,7 +506,7 @@ mod tests {
         assert!(args[1].ends_with("what does main do?"), "{}", args[1]);
         assert!(args[1].contains("may not run commands"), "{}", args[1]);
         assert!(args.windows(2).any(|w| w == ["--output-format", "stream-json"]));
-        assert!(args.windows(2).any(|w| w == ["--model", "gemini-3.8-flash-high"]));
+        assert!(args.windows(2).any(|w| w == ["--model", "gemini-4-argon-high"]));
         assert!(!args.iter().any(|a| a == "--mode"), "read-only unless allowed");
         assert!(!args.iter().any(|a| a.contains("dangerously")));
         assert_eq!(command.get_current_dir(), Some(std::env::temp_dir().as_path()));

@@ -106,8 +106,8 @@ impl Provider {
             (Provider::Gemini, false) => "gemini-pro-latest",
             (Provider::Gemini, true) => "gemini-flash-latest",
             // `agy models` names, which carry the thinking level in the id.
-            (Provider::Antigravity, false) => "gemini-3.8-flash-high",
-            (Provider::Antigravity, true) => "gemini-3.8-flash-low",
+            (Provider::Antigravity, false) => "gemini-4-argon-high",
+            (Provider::Antigravity, true) => "gemini-4-argon-low",
         }
     }
 

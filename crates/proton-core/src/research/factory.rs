@@ -50,9 +50,18 @@ pub struct Engines {
     chosen: BTreeMap<Seat, Option<String>>,
 }
 
-/// The first Gemini model Antigravity offers: it lists its newest first.
+/// The newest Gemini Antigravity offers — it lists its newest first — at
+/// the most thinking it offers that model at: `agy` names each level as its
+/// own model, `gemini-4-argon-low`, `-medium`, `-high`, in no fixed order.
 fn gemini(capabilities: &proton_claude::Capabilities) -> Option<String> {
-    capabilities.models.iter().map(|m| m.value.clone()).find(|v| v.starts_with("gemini"))
+    let ids: Vec<&str> = capabilities.models.iter().map(|m| m.value.as_str()).filter(|v| v.starts_with("gemini")).collect();
+    let first = *ids.first()?;
+    let base = ["-high", "-medium", "-low"].iter().find_map(|level| first.strip_suffix(level)).unwrap_or(first);
+    ["-high", "-medium", "-low"]
+        .iter()
+        .map(|level| format!("{base}{level}"))
+        .find(|id| ids.contains(&id.as_str()))
+        .or_else(|| Some(first.to_string()))
 }
 
 impl AgentFactory for Engines {
@@ -89,5 +98,31 @@ impl AgentFactory for Engines {
     fn create(&mut self, task: &Dispatch, how: &Unattended, settings: Settings, cwd: &Path) -> Result<Box<dyn Conversation>, String> {
         let engine = engine_of(task.seat).ok_or_else(|| format!("{} is not an engine.", task.seat.name()))?;
         engine::unattended(engine, cwd.to_path_buf(), settings, how)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn offered(ids: &[&str]) -> proton_claude::Capabilities {
+        let models = ids
+            .iter()
+            .map(|id| proton_claude::ModelChoice { value: id.to_string(), resolved: id.to_string(), name: id.to_string(), description: String::new(), efforts: Vec::new() })
+            .collect();
+        proton_claude::Capabilities { models, ..proton_claude::Capabilities::default() }
+    }
+
+    #[test]
+    fn the_seat_gets_the_newest_gemini_at_its_most_thinking() {
+        // As `agy models` listed them on 2026-10-17: the newest Gemini first,
+        // its levels in no order, others after.
+        let today = offered(&["default", "gemini-4-argon-medium", "gemini-4-argon-high", "gemini-4-argon-low", "gemini-3.8-flash-high", "claude-opus-5-5-high"]);
+        assert_eq!(gemini(&today).as_deref(), Some("gemini-4-argon-high"));
+        // Only lower levels: the most there is.
+        assert_eq!(gemini(&offered(&["gemini-4-argon-low", "gemini-4-argon-medium"])).as_deref(), Some("gemini-4-argon-medium"));
+        // A model with no levels in its name, as it is.
+        assert_eq!(gemini(&offered(&["default", "gemini-5-pro", "gemini-4-argon-high"])).as_deref(), Some("gemini-5-pro"));
+        assert_eq!(gemini(&offered(&["default", "claude-opus-5-5-high"])), None);
     }
 }

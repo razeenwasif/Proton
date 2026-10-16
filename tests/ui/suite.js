@@ -1393,14 +1393,14 @@ await test('Antigravity is a provider, with its own models and its own tools nam
   assert($('[data-set-bool="agent.antigravityEdits"]') && !$('[data-set-bool="agent.antigravityEdits"]').checked, 'edits are not off by default');
   key('Escape'); await settle();
   await showAgentDock();
-  await win.pushEvents([{type: 'agent', provider: 'antigravity', model: 'gemini-3.8-flash-high',
+  await win.pushEvents([{type: 'agent', provider: 'antigravity', model: 'gemini-4-argon-high',
     credential: 'Uses your Antigravity sign-in', activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0,
     transcript: [{speaker: 'you', text: 'what does main do?', thinking: '', streaming: false, calls: []},
       {speaker: 'proton', text: 'It parses arguments.', thinking: '', streaming: false,
         calls: [{id: 'agy-2', name: 'view_file', detail: 'AbsolutePath=/fixture/main.c', result: '', state: 'done'}]}]}]);
   assert($('[data-agent-provider]').textContent === 'Antigravity', 'provider is mislabeled');
   const models = [...$('[data-model-pick]').options].map(o => o.value);
-  assert(models.includes('gemini-3.1-pro-high') && $('[data-model-pick]').value === 'gemini-3.8-flash-high', `wrong models: ${models}`);
+  assert(models[0] === 'gemini-4-argon-high' && models.includes('gemini-3.8-flash-high') && $('[data-model-pick]').value === 'gemini-4-argon-high', `wrong models: ${models}`);
   assert([...doc.querySelectorAll('#codex-dock .tool b')].some(b => b.textContent === 'Read file'), 'its tool row is unnamed');
 });
 await test('An answer in the agent panel colours its code, draws its TeX, keeps its citations, and never becomes HTML', async () => {

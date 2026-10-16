@@ -6481,13 +6481,15 @@ const MODELS = {
     "gemini-3.1-pro-preview",
     "gemini-3.8-flash",
   ],
-  // `agy models` ids: the thinking level is part of the name.
+  // `agy models` ids, as it listed them on 2026-10-17: the thinking level
+  // is part of the name.
   antigravity: [
+    "gemini-4-argon-high",
+    "gemini-4-argon-medium",
+    "gemini-4-argon-low",
     "gemini-3.8-flash-high",
     "gemini-3.8-flash-medium",
     "gemini-3.8-flash-low",
-    "gemini-3.1-pro-high",
-    "gemini-3.1-pro-low",
   ],
 };
 

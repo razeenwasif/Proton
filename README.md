@@ -394,8 +394,10 @@ runs Antigravity's `agy` command on your own Google sign-in. Run `agy` once in a
 terminal to sign in. Proton finds it in `~/.local/bin`, where the Antigravity
 installer puts it, or on PATH, or inside the Gemini desktop app
 (`Gemini.app/Contents/Helpers/agy`), or at
-`PROTON_AGY_BIN`. Gemini 3.8 Flash (High)
-is the default, and `agy models` lists the rest.
+`PROTON_AGY_BIN`. Gemini 4 Argon (High)
+is the default, and `agy models` lists the rest. Research gives its
+Antigravity seat the newest Gemini Antigravity offers, at its highest
+thinking level.
 
 Unlike Codex, `agy` cannot be handed Proton's tools for a single run, so it
 works in the project with its own. Its steps appear in the agent pane as they
