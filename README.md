@@ -85,9 +85,13 @@ sessions and Artifact tool — drawn as Claude Code's app draws it, with what it
 publishes in a pane beside the conversation. Codex, Gemini and Antigravity
 answer in the same tab.
 **Codex** · the editor — buffers, LSP, splits, the agent dock, and the mobile
-target's device / layout-inspector / Logcat panel. C and C++ are formatted by
-clangd, or by `clang-format` — Xcode's, Homebrew's or LLVM's — where there is
-no clangd, with the project's `.clang-format`. Brackets and quotes close as
+target's device / layout-inspector / Logcat panel. C and C++ are left as
+written on save unless **Format C and C++ too** is on in Settings; then, and
+with `␣lf` whenever asked, they are formatted by clangd, or by `clang-format`
+— Xcode's, Homebrew's or LLVM's — where there is no clangd, with the
+project's `.clang-format`. ⌘V pastes the clipboard as vim's `"+` would: as
+copied in insert mode, before the cursor in normal mode, over the selection
+in visual mode. Brackets and quotes close as
 they are typed; Enter, `o` and `O` indent as the code calls for, and Tab is
 as wide as the file's own indent — from its `.editorconfig`, else from its
 lines. Saves are whole or not at all, and quitting with unsaved changes asks

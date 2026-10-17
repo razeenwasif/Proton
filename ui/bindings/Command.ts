@@ -31,7 +31,7 @@ import type { StudyRole } from "./StudyRole";
 import type { StudyTutorSettings } from "./StudyTutorSettings";
 import type { TexBundle } from "./TexBundle";
 
-export type Command = { "type": "key", key: Key, } | { "type": "perform", action: Action, } | { "type": "setMode", mode: ModeId, } | { "type": "openBuffer", path: string, } | { "type": "focusBuffer", index: number, } | { "type": "closeBuffer", index: number, force: boolean, } | { "type": "save" } | { "type": "viewport", 
+export type Command = { "type": "key", key: Key, } | { "type": "editorPaste", text: string, } | { "type": "perform", action: Action, } | { "type": "setMode", mode: ModeId, } | { "type": "openBuffer", path: string, } | { "type": "focusBuffer", index: number, } | { "type": "closeBuffer", index: number, force: boolean, } | { "type": "save" } | { "type": "viewport", 
 /**
  * Which split is reporting. Each has its own height and scroll, so
  * each has to speak for itself.

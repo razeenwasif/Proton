@@ -2084,6 +2084,7 @@ impl Workspace {
             // While a picker is open it owns the keyboard, so the modal engine
             // is suspended rather than consulted: `d` types a `d` instead of
             // starting an operator.
+            Command::EditorPaste { text } => self.paste(text),
             Command::Key { key } if self.pickers.is_open() => self.picker_key(&key),
 
             Command::Key { key } => {
@@ -2914,7 +2915,11 @@ impl Workspace {
                 // Not a LaTeX file: texlab formats with latexindent, which
                 // TinyTeX does not have, and a save is typeset instead.
                 let tex = self.editor.buffer().path().is_some_and(crate::tex::is_source);
-                if self.settings.bool("editor.formatOnSave", true) && !tex {
+                // C and C++ are left as written unless asked for: clangd's
+                // and clang-format's house style rewrites code that has its
+                // own. `␣lf` still formats one when asked.
+                let c = self.editor.buffer().path().is_some_and(crate::formatters::is_c_family);
+                if self.settings.bool("editor.formatOnSave", true) && !tex && (!c || self.settings.bool("editor.formatC", false)) {
                     events.extend(self.request_format(true));
                 }
                 if tex && (self.mode == ModeId::Tex || self.tex.used()) && self.settings.bool("tex.compileOnSave", true) {
@@ -6677,6 +6682,55 @@ impl Workspace {
         events
     }
 
+    /// ⌘V: the system clipboard's text into the buffer, as vim's `"+`
+    /// register would put it — typed in at the cursor as it was copied in
+    /// insert mode (no indent added, no bracket closed: it is already what it
+    /// should be), before the cursor in normal mode (`P`; on the line above
+    /// when it is whole lines), and in place of the selection in visual mode.
+    /// One undo step, whatever it was.
+    fn paste(&mut self, text: String) -> Vec<Event> {
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        if text.is_empty() || !self.mode.edits_text() || self.pickers.is_open() {
+            return Vec::new();
+        }
+        let before = self.vim.mode();
+        let visual = matches!(before, VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock);
+        if !visual && !matches!(before, VimMode::Insert | VimMode::Replace | VimMode::Normal) {
+            return Vec::new();
+        }
+        self.popup.close();
+        let mut events = Vec::new();
+        let buf = self.editor.buffer_mut();
+        buf.end_group();
+        buf.begin_group(false);
+        if visual {
+            // The selection goes, as `d` would take it, and the paste lands
+            // where it began.
+            let held = (self.editor.active(), self.editor.buffer().cursor);
+            let (evts, _) = self.act(&Action::new(Verb::Delete, Object::Selection, 1), before, false);
+            events.extend(evts);
+            self.vim.keys(&Key { key: "Escape".into(), ctrl: false, alt: false, shift: false, meta: false });
+            self.last_visual = Some((held.0, held.1.anchor, held.1.offset, before));
+        }
+        let buf = self.editor.buffer_mut();
+        let n = text.chars().count();
+        let (at, cursor) = match before {
+            VimMode::Insert | VimMode::Replace => (buf.cursor.offset, buf.cursor.offset + n),
+            // Whole lines go above the line, the cursor at their start.
+            _ if text.ends_with('\n') && !visual => (buf.line_start(), buf.line_start()),
+            // Else before the cursor, which ends on the last character put.
+            _ => (buf.cursor.offset, buf.cursor.offset + n.saturating_sub(1)),
+        };
+        buf.apply(vec![proton_text::Edit::insert(at, text)], proton_text::Cursor::at(cursor));
+        buf.end_group();
+        if self.vim.mode() != before {
+            events.push(self.vim_event());
+        }
+        events.extend(self.after_action(true));
+        self.resync();
+        events
+    }
+
     /// Run an action against the active mode, reporting whether text changed.
     ///
     /// Only Codex edits text today; the other modes accept the action and
@@ -7997,7 +8051,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn c_with_no_server_to_format_it_is_formatted_by_clang_format_on_fmt_and_on_save() {
+    fn c_with_no_server_to_format_it_is_formatted_by_clang_format_on_fmt_and_on_save_when_asked() {
         use std::os::unix::fs::PermissionsExt;
         let project = Project::new("clang-format");
         let root = project.real();
@@ -8025,7 +8079,14 @@ mod tests {
         typed(&mut ws, "u");
         assert_eq!(ws.editor().buffer().contents(), "int x;\nint main(){\nreturn 0;\n}\n", "one `u` does not take the formatting back");
 
-        // A save formats, and writes what it formatted.
+        // A save writes C as it is written: formatting it on save is asked for.
+        typed(&mut ws, "u");
+        ws.apply(Command::Save);
+        settle_format(&mut ws);
+        assert_eq!(std::fs::read_to_string(root.join("main.c")).unwrap(), "int main(){\nreturn 0;\n}\n", "a save formatted C unasked");
+        // Asked, a save formats, and writes what it formatted.
+        ws.apply(Command::SetSetting { key: "editor.formatC".into(), value: serde_json::json!(true) });
+        typed(&mut ws, "ggOint x;");
         ws.apply(Command::Save);
         settle_format(&mut ws);
         assert_eq!(std::fs::read_to_string(root.join("main.c")).unwrap(), "int x;\nint main() {\n  return 0;\n}\n");

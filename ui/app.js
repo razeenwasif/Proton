@@ -3585,6 +3585,16 @@ document.addEventListener("paste", (e) => {
   if (text) dispatch({ type: "terminalPaste", text });
 });
 
+// A paste into the editor's hidden field is the editor's: see ⌘V below.
+document.addEventListener("paste", (e) => {
+  const field = /** @type {HTMLElement | null} */ (e.target instanceof Element ? e.target.closest("[data-editor-paste]") : null);
+  if (!field) return;
+  e.preventDefault();
+  field.blur();
+  const text = e.clipboardData?.getData("text/plain") ?? "";
+  if (text) dispatch({ type: "editorPaste", text });
+});
+
 // What an input method composes — an accent, a character from another
 // script — arrives as text in the field rather than as a key, and is the
 // shell's too. The field is emptied every time, so nothing builds up in it.
@@ -5724,6 +5734,24 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey && e.key === "Enter" && activeMode === "tex") {
     e.preventDefault();
     dispatch({ type: "texSyncForward" });
+    return;
+  }
+
+  // ⌘V in the editor pastes the system clipboard (⌃⇧V elsewhere: ⌃V is
+  // vim's block selection). A paste lands only in something that takes text,
+  // so a hidden field holds the focus for the moment it arrives; the paste
+  // handler hands its text to the core, which puts it where vim's `"+`
+  // would. The field lets go straight after, pasted into or not, so no later
+  // key is typed into it.
+  if (editsText() && !terminalFocused && !overlays.active && !documentIsOpen() && e.key.toLowerCase() === "v"
+      && !e.target?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable=false])")
+      && (/Mac/.test(navigator.platform) ? e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey : e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey)) {
+    const field = /** @type {HTMLTextAreaElement | null} */ ($("[data-editor-paste]"));
+    if (field) {
+      field.value = "";
+      field.focus({ preventScroll: true });
+      setTimeout(() => field.blur(), 0);
+    }
     return;
   }
 

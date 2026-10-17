@@ -1665,6 +1665,7 @@
           <h4>Format on save</h4>
           <p>`:w` writes the file and then asks the language server to format it, writing again if anything changed. Turn this off for a project whose formatter disagrees with its own history.</p>
           <label class="st-toggle"><input type="checkbox" data-set-bool="editor.formatOnSave" checked> Format the buffer when it is written</label>
+          <label class="st-toggle"><input type="checkbox" data-set-bool="editor.formatC"> Format C and C++ too (clangd, or clang-format with the project's <code>.clang-format</code>)</label>
         </div>
       </div>
 
@@ -1779,5 +1780,11 @@
 </div>
 
 <script type="module" src="app.js"></script>
+  <!-- The editor's text is drawn, not edited in place, and a paste only
+       lands in something that takes text: ⌘V hands the focus here for the
+       moment the paste arrives, and its text goes to the core. Outside the
+       layout, which places its panes by their order. -->
+  <textarea class="term-input editor-paste" data-editor-paste tabindex="-1" aria-hidden="true"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
 </body>
 </html>

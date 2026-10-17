@@ -322,6 +322,34 @@ await test('A paste while the shell has the keyboard goes to the shell, as a pas
   if (!wasOpen) { toggle.click(); await settle(); }
   $('.workspace.on [data-editor]').focus();
 });
+await test('⌘V in the editor pastes the clipboard: the paste lands in a hidden field, goes to the core, and the field lets go of the keyboard', async () => {
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  $('.workspace.on [data-editor]').focus();
+  const field = $('[data-editor-paste]');
+  const mac = /Mac/.test(win.navigator.platform);
+  key('v', mac ? {metaKey: true} : {ctrlKey: true, shiftKey: true});
+  assert(doc.activeElement === field, '⌘V did not move the focus to where a paste can land');
+  const before = win.commands.length;
+  const data = new win.DataTransfer();
+  data.setData('text/plain', 'int x = 1;\n');
+  const paste = new win.ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true});
+  field.dispatchEvent(paste);
+  await settle();
+  const sent = win.commands.slice(before);
+  assert(sent.some((c) => c.type === 'editorPaste' && c.text === 'int x = 1;\n'), `no paste reached the editor: ${JSON.stringify(sent)}`);
+  assert(paste.defaultPrevented && field.value === '' && doc.activeElement !== field, 'the hidden field kept the paste or the keyboard');
+  // With nothing to paste, the field still lets go: no later key is typed into it.
+  key('v', mac ? {metaKey: true} : {ctrlKey: true, shiftKey: true});
+  await new Promise((done) => setTimeout(done, 20));
+  assert(doc.activeElement !== field, 'the hidden field held on to the keyboard');
+  // ⌃V without ⇧ is vim's block selection, not a paste.
+  $('.workspace.on [data-editor]').focus();
+  const keys = win.commands.length;
+  key('v', {ctrlKey: true});
+  await settle();
+  assert(doc.activeElement !== field && win.commands.slice(keys).some((c) => c.type === 'key' && c.key.key === 'v' && c.key.ctrl), '⌃V did not go to the editor as a key');
+  key('Escape'); await settle();
+});
 /** One line of coloured text per row: a red number, then a word on blue. */
 const colourScreen = (first, rows = 1) => ({type: 'terminal', running: true, scrollback: 0, cursor: [0, 0], cursorVisible: true,
   rows: Array.from({length: rows}, (_, i) => [{text: `${first + i} `, fg: 1}, {text: 'drawn', bg: 4}])});

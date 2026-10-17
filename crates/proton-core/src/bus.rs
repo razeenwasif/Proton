@@ -41,6 +41,12 @@ pub enum Command {
     Key {
         key: Key,
     },
+    /// ⌘V in the editor: the system clipboard's text into the buffer —
+    /// typed in as copied in insert mode, put before the cursor (`P`) in
+    /// normal mode, over the selection in visual mode. One undo step.
+    EditorPaste {
+        text: String,
+    },
     /// An already-resolved action, from a menu, a click, or a replayed macro.
     Perform {
         action: Action,
