@@ -322,32 +322,40 @@ await test('A paste while the shell has the keyboard goes to the shell, as a pas
   if (!wasOpen) { toggle.click(); await settle(); }
   $('.workspace.on [data-editor]').focus();
 });
-await test('⌘V in the editor pastes the clipboard: the paste lands in a hidden field, goes to the core, and the field lets go of the keyboard', async () => {
+await test('⌘V in the editor pastes the clipboard: read by the shell on the Mac, else through a hidden field, to the core; ⌃V stays vim\'s', async () => {
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   $('.workspace.on [data-editor]').focus();
   const field = $('[data-editor-paste]');
   const mac = /Mac/.test(win.navigator.platform);
-  key('v', mac ? {metaKey: true} : {ctrlKey: true, shiftKey: true});
-  assert(doc.activeElement === field, '⌘V did not move the focus to where a paste can land');
-  const before = win.commands.length;
-  const data = new win.DataTransfer();
-  data.setData('text/plain', 'int x = 1;\n');
-  const paste = new win.ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true});
-  field.dispatchEvent(paste);
-  await settle();
-  const sent = win.commands.slice(before);
-  assert(sent.some((c) => c.type === 'editorPaste' && c.text === 'int x = 1;\n'), `no paste reached the editor: ${JSON.stringify(sent)}`);
-  assert(paste.defaultPrevented && field.value === '' && doc.activeElement !== field, 'the hidden field kept the paste or the keyboard');
-  // With nothing to paste, the field still lets go: no later key is typed into it.
-  key('v', mac ? {metaKey: true} : {ctrlKey: true, shiftKey: true});
-  await new Promise((done) => setTimeout(done, 20));
-  assert(doc.activeElement !== field, 'the hidden field held on to the keyboard');
+  const chord = mac ? {metaKey: true} : {ctrlKey: true, shiftKey: true};
+  let before = win.commands.length;
+  if (mac) {
+    // The shell reads the clipboard: nothing waits on a page's paste.
+    win.clipboardText = '● a point\n';
+    key('v', chord);
+    await settle();
+    assert(doc.activeElement !== field, 'the shell\'s paste moved the focus');
+    win.clipboardText = null;
+    key('v', chord);
+    await settle();
+  } else {
+    key('v', chord);
+    assert(doc.activeElement === field, '⌘V did not move the focus to where a paste can land');
+    const data = new win.DataTransfer();
+    data.setData('text/plain', '● a point\n');
+    const paste = new win.ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true});
+    field.dispatchEvent(paste);
+    await settle();
+    assert(paste.defaultPrevented && field.value === '' && doc.activeElement !== field, 'the hidden field kept the paste or the keyboard');
+  }
+  const sent = win.commands.slice(before).filter((c) => c.type === 'editorPaste');
+  assert(sent.length === 1 && sent[0].text === '● a point\n', `the pastes that reached the editor: ${JSON.stringify(sent)}`);
   // ⌃V without ⇧ is vim's block selection, not a paste.
   $('.workspace.on [data-editor]').focus();
-  const keys = win.commands.length;
+  before = win.commands.length;
   key('v', {ctrlKey: true});
   await settle();
-  assert(doc.activeElement !== field && win.commands.slice(keys).some((c) => c.type === 'key' && c.key.key === 'v' && c.key.ctrl), '⌃V did not go to the editor as a key');
+  assert(doc.activeElement !== field && win.commands.slice(before).some((c) => c.type === 'key' && c.key.key === 'v' && c.key.ctrl), '⌃V did not go to the editor as a key');
   key('Escape'); await settle();
 });
 /** One line of coloured text per row: a red number, then a word on blue. */

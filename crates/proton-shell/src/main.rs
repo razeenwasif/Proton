@@ -362,6 +362,13 @@ fn paste_raster_image(session: State<'_, Mutex<BridgeSession>>) -> Result<Option
     held.session.raster_put_blob(png).map(Some)
 }
 
+/// ⌘V in the editor: the clipboard's text, read here because a page is given
+/// it only when something editable has the focus, and the editor is drawn.
+#[tauri::command]
+fn paste_text() -> Option<String> {
+    pasteboard::text()
+}
+
 /// ⌘C or ⌘X in Canvas, once the core has made the copy: its pixels put on
 /// the system's clipboard as a PNG, for other apps. Whether there were any.
 #[tauri::command]
@@ -641,6 +648,7 @@ fn main() {
             read_raster,
             put_raster_blob,
             paste_raster_image,
+            paste_text,
             copy_raster_image,
             quit
         ])

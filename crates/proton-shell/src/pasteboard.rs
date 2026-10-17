@@ -1,4 +1,6 @@
-//! Pictures on the system's clipboard, for Canvas mode.
+//! Pictures on the system's clipboard, for Canvas mode — and its text, for
+//! the editor's ⌘V, on the same terms: the editor's text is drawn, not an
+//! editable element, so a page paste there arrives late or not at all.
 //!
 //! WebKit does not give a page what is on the clipboard unless something
 //! editable has the focus, and a canvas is not that; so ⌘V asks here
@@ -26,6 +28,17 @@ pub fn take() -> Option<Vec<u8>> {
             }
             mac::read_png(board)
         }
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// The text on the clipboard, for the editor's ⌘V: none if it holds none.
+pub fn text() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: the general pasteboard, which AppKit keeps alive.
+        unsafe { mac::read_text(mac::general()) }
     }
     #[cfg(not(target_os = "macos"))]
     None
@@ -106,6 +119,22 @@ mod mac {
         bytes(made)
     }
 
+    /// The plain text on `board`, as UTF-8.
+    ///
+    /// # Safety
+    /// `board` is a live NSPasteboard.
+    pub unsafe fn read_text(board: *mut AnyObject) -> Option<String> {
+        let text: *mut AnyObject = msg_send![board, stringForType: string("public.utf8-plain-text")];
+        if text.is_null() {
+            return None;
+        }
+        let utf8: *const std::ffi::c_char = msg_send![text, UTF8String];
+        if utf8.is_null() {
+            return None;
+        }
+        Some(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned())
+    }
+
     /// Put `png` on `board`, alone; the change count after.
     ///
     /// # Safety
@@ -126,6 +155,20 @@ mod mac {
         fn own() -> *mut AnyObject {
             // SAFETY: a class method making a fresh pasteboard.
             unsafe { msg_send![class!(NSPasteboard), pasteboardWithUniqueName] }
+        }
+
+        #[test]
+        fn text_put_on_a_pasteboard_is_read_back_as_it_was() {
+            let board = own();
+            // SAFETY: the test's own pasteboard, alive until released below.
+            unsafe {
+                assert_eq!(super::read_text(board), None, "a new pasteboard holds text");
+                let _: isize = msg_send![board, clearContents];
+                let text = super::string("● a point — and 中文\nint x;");
+                let _: bool = msg_send![board, setString: text, forType: super::string("public.utf8-plain-text")];
+                assert_eq!(super::read_text(board).as_deref(), Some("● a point — and 中文\nint x;"));
+                let _: () = msg_send![board, releaseGlobally];
+            }
         }
 
         #[test]

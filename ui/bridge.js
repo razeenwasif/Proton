@@ -116,6 +116,13 @@ export async function pasteRasterImage() {
   return tauri.core.invoke("paste_raster_image");
 }
 
+/** ⌘V in the editor: the clipboard's text, read by the shell — none if it
+ *  holds none, or there is no shell. @returns {Promise<string | null>} */
+export async function pasteText() {
+  if (!tauri) return null;
+  return tauri.core.invoke("paste_text");
+}
+
 /** Canvas's copy put on the system's clipboard as a PNG. @returns {Promise<boolean>} */
 export async function copyRasterImage() {
   if (!tauri) return false;

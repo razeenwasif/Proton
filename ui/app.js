@@ -14,7 +14,7 @@
 
 import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
-import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, readGeometry, readLab, sendKey, setBackdrop, setOpaque,
+import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, pasteText, readGeometry, readLab, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, wireWindowChrome, quitApp } from "./bridge.js";
 import { closeDocument, documentIsOpen, documentKey, documentOpened, documentShown, fitDocument, openDocument, zoomDocument } from "./document.js";
 import { decodeMesh } from "./meshbytes.js";
@@ -5738,14 +5738,24 @@ document.addEventListener("keydown", (e) => {
   }
 
   // ⌘V in the editor pastes the system clipboard (⌃⇧V elsewhere: ⌃V is
-  // vim's block selection). A paste lands only in something that takes text,
-  // so a hidden field holds the focus for the moment it arrives; the paste
-  // handler hands its text to the core, which puts it where vim's `"+`
-  // would. The field lets go straight after, pasted into or not, so no later
-  // key is typed into it.
+  // vim's block selection), and the core puts it where vim's `"+` would. In
+  // the app the shell reads the clipboard: WebKit gives a page a paste only
+  // when something editable has the focus, and the editor is drawn — a paste
+  // routed through a hidden field arrived after the field had let go, and
+  // never landed. Elsewhere — no shell (the browser preview), or a shell
+  // that reads no clipboard off the Mac — the hidden field holds
+  // the focus for the moment the paste arrives, and lets go straight after,
+  // so no later key is typed into it.
   if (editsText() && !terminalFocused && !overlays.active && !documentIsOpen() && e.key.toLowerCase() === "v"
       && !e.target?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable=false])")
       && (/Mac/.test(navigator.platform) ? e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey : e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey)) {
+    if (HAS_SHELL && /Mac/.test(navigator.platform)) {
+      e.preventDefault();
+      void pasteText().then((text) => {
+        if (text) dispatch({ type: "editorPaste", text });
+      });
+      return;
+    }
     const field = /** @type {HTMLTextAreaElement | null} */ ($("[data-editor-paste]"));
     if (field) {
       field.value = "";
