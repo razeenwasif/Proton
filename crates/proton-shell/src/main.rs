@@ -369,6 +369,12 @@ fn paste_text() -> Option<String> {
     pasteboard::text()
 }
 
+/// What the editor yanked or deleted, put on the system clipboard as well.
+#[tauri::command]
+fn copy_text(text: String) {
+    pasteboard::put_text(&text);
+}
+
 /// ⌘C or ⌘X in Canvas, once the core has made the copy: its pixels put on
 /// the system's clipboard as a PNG, for other apps. Whether there were any.
 #[tauri::command]
@@ -649,6 +655,7 @@ fn main() {
             put_raster_blob,
             paste_raster_image,
             paste_text,
+            copy_text,
             copy_raster_image,
             quit
         ])

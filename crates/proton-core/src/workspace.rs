@@ -637,6 +637,9 @@ impl Workspace {
     pub fn apply(&mut self, command: Command) -> Vec<Event> {
         let mut events = self.dispatch(command);
         events.extend(self.highlights.take_notices().into_iter().map(|text| notice(text, NoticeLevel::Warn)));
+        if let Some(text) = self.editor.take_clipboard() {
+            events.push(Event::Clipboard { text });
+        }
         events
     }
 

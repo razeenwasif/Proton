@@ -14,7 +14,7 @@
 
 import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
-import { HAS_SHELL, applyBackdrop, dispatch, dispatchMany, onEvents, onCommand, pasteText, readGeometry, readLab, sendKey, setBackdrop, setOpaque,
+import { HAS_SHELL, applyBackdrop, copyText, dispatch, dispatchMany, onEvents, onCommand, pasteText, readGeometry, readLab, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, wireWindowChrome, quitApp } from "./bridge.js";
 import { closeDocument, documentIsOpen, documentKey, documentOpened, documentShown, fitDocument, openDocument, zoomDocument } from "./document.js";
 import { decodeMesh } from "./meshbytes.js";
@@ -4916,6 +4916,11 @@ function renderEvent(event) {
 
     case "modeChanged":
       renderMode(event.mode);
+      break;
+
+    // A yank or a delete: on the system clipboard too.
+    case "clipboard":
+      void copyText(event.text);
       break;
 
     case "vimMode":

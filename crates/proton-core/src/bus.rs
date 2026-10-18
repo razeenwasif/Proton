@@ -1672,6 +1672,12 @@ pub enum Event {
     ModeChanged {
         mode: ModeId,
     },
+    /// Text yanked or deleted into the unnamed register, or `"+` / `"*`: for
+    /// the system clipboard as well, as vim's `clipboard=unnamedplus` puts
+    /// it — so ⌘V, here or in another app, pastes what was just yanked.
+    Clipboard {
+        text: String,
+    },
 
     /* ── buffers ──────────────────────────────────────────────────── */
     /// The visible window of the active buffer. Sent whenever the text, the

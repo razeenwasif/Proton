@@ -80,6 +80,7 @@ window.__TAURI__ = {
     }
     if (name === 'paste_raster_image') return window.rasterPaste?.() ?? null;
     if (name === 'paste_text') return window.clipboardText ?? null;
+    if (name === 'copy_text') { window.clipboardText = args?.text ?? null; return null; }
     if (name === 'copy_raster_image') return true;
     // The open game's images: the fixture game's, from the server.
     if (name === 'read_game') {

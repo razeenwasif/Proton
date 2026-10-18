@@ -123,6 +123,13 @@ export async function pasteText() {
   return tauri.core.invoke("paste_text");
 }
 
+/** What the editor yanked or deleted, on the system clipboard too: through
+ *  the shell, or the page's own clipboard with none. @param {string} text */
+export async function copyText(text) {
+  if (tauri) return tauri.core.invoke("copy_text", { text });
+  await navigator.clipboard?.writeText(text).catch(() => undefined);
+}
+
 /** Canvas's copy put on the system's clipboard as a PNG. @returns {Promise<boolean>} */
 export async function copyRasterImage() {
   if (!tauri) return false;

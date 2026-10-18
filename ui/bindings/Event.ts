@@ -145,7 +145,7 @@ export type Event = { "type": "vimMode", mode: VimMode, label: string, } | { "ty
  * They share the prompt, and the character is the only thing telling
  * a reader which one they are typing into.
  */
-prompt: string, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "viewport", 
+prompt: string, } | { "type": "cmdlineRun", text: string, } | { "type": "action", action: Action, description: string, } | { "type": "unsupported", description: string, mode: ModeId, } | { "type": "input", text: string, } | { "type": "modeChanged", mode: ModeId, } | { "type": "clipboard", text: string, } | { "type": "viewport", 
 /**
  * Which split this is the content of.
  */

@@ -12,6 +12,7 @@ export interface NativeApi {
     invoke(name: 'put_raster_blob', body: Uint8Array): Promise<number>;
     invoke(name: 'paste_raster_image'): Promise<number | null>;
     invoke(name: 'paste_text'): Promise<string | null>;
+    invoke(name: 'copy_text', args: {text: string}): Promise<void>;
     invoke(name: 'copy_raster_image'): Promise<boolean>;
     invoke(name: 'backdrop'): Promise<string>;
     invoke(name: 'set_backdrop', args: {material: string}): Promise<string>;

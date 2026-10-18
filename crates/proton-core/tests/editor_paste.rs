@@ -81,3 +81,30 @@ fn one_undo_takes_a_paste_back_whole() {
     paste(&mut ws, "a\r\nb\r\n");
     assert_eq!(ws.editor().buffer().contents(), "a\nb\n\n");
 }
+
+/// What a key sends for the system clipboard, if anything.
+fn copied(ws: &mut Workspace, s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in s.chars() {
+        let mut k = Key::char(c);
+        k.shift = c.is_uppercase();
+        for e in ws.apply(Command::Key { key: k }) {
+            if let proton_core::bus::Event::Clipboard { text } = e {
+                out.push(text);
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_yank_or_a_delete_goes_on_the_system_clipboard_and_a_named_register_does_not() {
+    let mut ws = holding("one two\nthree\n");
+    assert_eq!(copied(&mut ws, "yy"), ["one two\n"], "yy did not reach the clipboard");
+    assert_eq!(copied(&mut ws, "jdd"), ["three\n"], "dd did not reach the clipboard");
+    assert_eq!(copied(&mut ws, "k\"ayy"), Vec::<String>::new(), "a named register reached the clipboard");
+    assert_eq!(copied(&mut ws, "0yw"), ["one "]);
+    // And `p` still puts what was yanked.
+    keys(&mut ws, "P");
+    assert_eq!(ws.editor().buffer().contents(), "one one two\n");
+}

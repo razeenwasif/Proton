@@ -357,6 +357,11 @@ await test('⌘V in the editor pastes the clipboard: read by the shell on the Ma
   await settle();
   assert(doc.activeElement !== field && win.commands.slice(before).some((c) => c.type === 'key' && c.key.key === 'v' && c.key.ctrl), '⌃V did not go to the editor as a key');
   key('Escape'); await settle();
+  // A yank or a delete the core reports goes on the system clipboard.
+  win.clipboardText = null;
+  await win.pushEvents([{type: 'clipboard', text: 'yanked line\n'}]); await settle();
+  assert(win.clipboardText === 'yanked line\n', `a yank did not reach the clipboard: ${win.clipboardText}`);
+  win.clipboardText = null;
 });
 /** One line of coloured text per row: a red number, then a word on blue. */
 const colourScreen = (first, rows = 1) => ({type: 'terminal', running: true, scrollback: 0, cursor: [0, 0], cursorVisible: true,

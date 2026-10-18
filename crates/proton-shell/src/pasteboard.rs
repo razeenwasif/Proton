@@ -44,6 +44,17 @@ pub fn text() -> Option<String> {
     None
 }
 
+/// Put text on the clipboard: what the editor yanked or deleted.
+pub fn put_text(text: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: the general pasteboard, which AppKit keeps alive.
+        unsafe { mac::write_text(mac::general(), text) };
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = text;
+}
+
 /// Put a PNG on the clipboard, as Canvas's copy.
 pub fn put(png: &[u8]) {
     #[cfg(target_os = "macos")]
@@ -135,6 +146,20 @@ mod mac {
         Some(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned())
     }
 
+    /// Put `text` on `board`, alone.
+    ///
+    /// # Safety
+    /// `board` is a live NSPasteboard.
+    pub unsafe fn write_text(board: *mut AnyObject, text: &str) {
+        let Ok(c) = CString::new(text.replace('\0', "")) else { return };
+        let ns: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()];
+        if ns.is_null() {
+            return;
+        }
+        let _: isize = msg_send![board, clearContents];
+        let _: bool = msg_send![board, setString: ns, forType: string("public.utf8-plain-text")];
+    }
+
     /// Put `png` on `board`, alone; the change count after.
     ///
     /// # Safety
@@ -163,10 +188,10 @@ mod mac {
             // SAFETY: the test's own pasteboard, alive until released below.
             unsafe {
                 assert_eq!(super::read_text(board), None, "a new pasteboard holds text");
-                let _: isize = msg_send![board, clearContents];
-                let text = super::string("● a point — and 中文\nint x;");
-                let _: bool = msg_send![board, setString: text, forType: super::string("public.utf8-plain-text")];
+                super::write_text(board, "● a point — and 中文\nint x;");
                 assert_eq!(super::read_text(board).as_deref(), Some("● a point — and 中文\nint x;"));
+                super::write_text(board, "yanked\n");
+                assert_eq!(super::read_text(board).as_deref(), Some("yanked\n"), "a second write did not replace the first");
                 let _: () = msg_send![board, releaseGlobally];
             }
         }

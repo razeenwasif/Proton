@@ -32,6 +32,9 @@ pub struct Editor {
     buffers: Vec<Buffer>,
     active: usize,
     registers: HashMap<String, Register>,
+    /// What the last yank or delete put in the unnamed register (or `"+`,
+    /// `"*`), not yet handed on for the system clipboard.
+    clipboard: Option<String>,
     /// A block insert waiting for insert mode to end. See `block.rs`.
     block_insert: Option<PendingInsert>,
     /// One level of indentation, for `>` and `<`: a tab, or a run of spaces —
@@ -67,6 +70,7 @@ impl Editor {
             buffers: vec![Buffer::default()],
             active: 0,
             registers: HashMap::new(),
+            clipboard: None,
             block_insert: None,
             indent: "    ".into(),
             root: Root::default(),
@@ -759,12 +763,22 @@ impl Editor {
     }
 
     fn write_register(&mut self, name: Option<&str>, text: String, shape: Shape) {
+        // The system clipboard gets what the unnamed register does, unless a
+        // register of Proton's own (`"a`…) was named — `unnamedplus`.
+        if matches!(name, None | Some("+") | Some("*")) && !text.is_empty() {
+            self.clipboard = Some(text.clone());
+        }
         let reg = Register { text, shape };
         // The unnamed register always gets a copy, exactly as in vim.
         self.registers.insert("\"".into(), reg.clone());
         if let Some(name) = name {
             self.registers.insert(name.to_string(), reg);
         }
+    }
+
+    /// What the last yank or delete left for the system clipboard, once.
+    pub fn take_clipboard(&mut self) -> Option<String> {
+        self.clipboard.take()
     }
 
     fn read_register(&self, name: Option<&str>) -> Register {
