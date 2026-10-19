@@ -387,6 +387,23 @@ fn a_drag_leaves_a_visual_selection() {
 }
 
 #[test]
+fn a_drag_that_goes_nowhere_is_a_click_and_keeps_insert_mode() {
+    let mut ws = Workspace::rooted("../..");
+    ws.apply(Command::OpenBuffer {
+        path: "crates/proton-core/tests/fixtures/indented.txt".into(),
+    });
+    type_keys(&mut ws, "i");
+    ws.apply(Command::PlaceCursor { line: 1, column: 2 });
+    // The pointer twitched, and stayed on the character pressed on.
+    ws.apply(Command::SelectTo { line: 1, column: 2 });
+    assert_eq!(ws.vim_mode(), proton_core::VimMode::Insert, "a click left insert mode");
+    assert!(!ws.editor().buffer().cursor.has_selection());
+    // A real drag still selects.
+    ws.apply(Command::SelectTo { line: 1, column: 6 });
+    assert_eq!(ws.vim_mode(), proton_core::VimMode::Visual);
+}
+
+#[test]
 fn dragging_further_moves_the_head_and_not_the_anchor() {
     let mut ws = Workspace::rooted("../..");
     ws.apply(Command::OpenBuffer {

@@ -766,6 +766,21 @@ await test('Rapid pane clicks reserve focus and cursor placement before typing',
     assert($('.workspace.on .split.on').dataset.view === '1', 'wrong focused pane');
   } finally { win.replyDelay = 0; }
 });
+await test('A click whose pointer twitches inside the character pressed on is not a drag; one that reaches another is', async () => {
+  const target = $('.workspace.on [data-editor] .tx');
+  const rect = target.getBoundingClientRect();
+  const at = {clientX: rect.left + 3, clientY: rect.top + rect.height / 2};
+  const before = win.commands.length;
+  target.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, cancelable: true, button: 0, ...at}));
+  doc.dispatchEvent(new win.MouseEvent('mousemove', {bubbles: true, clientX: at.clientX + 1, clientY: at.clientY}));
+  await new Promise((done) => win.requestAnimationFrame(() => win.requestAnimationFrame(done)));
+  assert(!win.commands.slice(before).some((c) => c.type === 'selectTo'), 'a twitch inside the character became a drag');
+  doc.dispatchEvent(new win.MouseEvent('mousemove', {bubbles: true, clientX: at.clientX + 60, clientY: at.clientY}));
+  await new Promise((done) => win.requestAnimationFrame(() => win.requestAnimationFrame(done)));
+  doc.dispatchEvent(new win.MouseEvent('mouseup', {bubbles: true}));
+  assert(win.commands.slice(before).some((c) => c.type === 'selectTo'), 'a drag to another character did not select');
+  await win.dispatch({type: 'key', key: {key: 'Escape', ctrl: false, alt: false, shift: false, meta: false}}); await settle();
+});
 await test('Rapid resizing reports both visible panes with useful heights', async () => {
   const before = win.commands.length;
   frame.style.height = '560px'; await settle();

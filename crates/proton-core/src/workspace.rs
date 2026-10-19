@@ -775,10 +775,17 @@ impl Workspace {
 
             Command::SelectTo { line, column } => {
                 let was = self.vim.mode();
-                self.vim.enter_visual();
                 let buffer = self.editor.buffer_mut();
                 let line = line.min(buffer.len_lines().saturating_sub(1));
                 let at = buffer.offset_of(proton_text::Position { line, column });
+                // A drag that has gone nowhere is a click: no selection, and
+                // insert mode kept for somebody who clicked to type there.
+                let visual = matches!(was, VimMode::Visual | VimMode::VisualLine | VimMode::VisualBlock);
+                if !visual && buffer.clamp(buffer.cursor.moved_to(at)).offset == buffer.cursor.offset {
+                    return self.after_action(false);
+                }
+                self.vim.enter_visual();
+                let buffer = self.editor.buffer_mut();
                 // The head moves and the anchor stays, which is the whole of
                 // what a visual selection is.
                 buffer.cursor = buffer.clamp(buffer.cursor.extended_to(at));

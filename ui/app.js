@@ -1238,6 +1238,11 @@ function pointAt(x, y) {
    is selected is worse than either. */
 let dragging = false;
 let dragTo = null;
+/* Where the press began. A drag starts only once the pointer reaches
+   another character: a click is rarely perfectly still, and a twitch inside
+   the character pressed on became a selection — which took insert mode away
+   from somebody who had only clicked to move the cursor. */
+let dragFrom = null;
 
 document.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
@@ -1255,6 +1260,7 @@ document.addEventListener("mousedown", (e) => {
   e.target.closest?.("[data-editor]")?.focus({ preventScroll: true });
   focusTerminal(false);
   dragging = true;
+  dragFrom = at;
 
   // The core clamps: a click past the end of a short line is the ordinary
   // case, and the front end does not hold the document to check against.
@@ -1273,6 +1279,10 @@ document.addEventListener("mousemove", (e) => {
   if (!dragging) return;
   const at = pointAt(e.clientX, e.clientY);
   if (!at) return;
+  if (dragFrom) {
+    if (at.line === dragFrom.line && at.column === dragFrom.column) return;
+    dragFrom = null;
+  }
   // Coalesced to one per frame: a drag fires far more moves than the screen
   // can show, and each one would otherwise be a round trip.
   const queued = dragTo !== null;
@@ -1287,6 +1297,7 @@ document.addEventListener("mousemove", (e) => {
 
 document.addEventListener("mouseup", () => {
   dragging = false;
+  dragFrom = null;
 });
 
 /* The open buffers, and which one each pane is showing.
