@@ -5,9 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Diffuse mode: image generation by node graph — the flow format, its edits and undo, and the graph checked against the server's node catalogue."
+description = "Diffuse mode: image generation by node graph — the flow format, its edits and undo, the graph checked against the server's node catalogue, and the client for Nexus's image server."
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 ts-rs = { workspace = true }
+# The same build of ureq as the agent's and the literature's, so nothing new
+# is compiled; plain http too, as the gateway on the LAN is.
+ureq = { version = "3", default-features = false, features = ["rustls", "json", "platform-verifier"] }

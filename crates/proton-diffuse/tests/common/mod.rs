@@ -2,6 +2,8 @@
 //! design itself, and the SDXL flow built by ops.
 #![allow(dead_code)]
 
+pub mod server;
+
 use std::collections::BTreeMap;
 
 use proton_diffuse::{Catalogue, Flow, Models, Op};

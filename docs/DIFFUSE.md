@@ -3,7 +3,7 @@
 A small ComfyUI in Proton. You build a graph of nodes (load a checkpoint,
 encode a prompt, sample, decode, save), run it, and watch it work; the
 models run on forge, the RTX 4090 desktop, behind Nexus. Proton is the
-editor and the client. Status: design and screens agreed 2026-10-26; D0
+editor and the client. Status: design and screens agreed 2026-10-26; D0 and D1
 built (`crates/proton-diffuse`). Shared as the doc
 [Diffuse Design](https://claude.ai/artifact/DuvNm2Xh1dG8bMsRDD7dBa); the
 screens are the mockups in
@@ -313,14 +313,27 @@ middle, tabs on the right.
   the graph a run sends (bypassed nodes passed through, defaults filled,
   only what the outputs need). Its tests hold the v1 catalogue and the run
   above, read from this document.
-- **Core** (`proton-core/src/diffuse/`): the open flows, and the client. The client uses the
+- **`proton-diffuse`'s client** (D1, built): every request of the contract
+  on `ureq`, sent to the address that answered last and to the next only
+  when one cannot be reached; the three ways of not being served told
+  apart (unreachable, `401`, `503 offline`); the event stream read a line
+  at a time as it arrives, ending after `done`, `error` or `cancelled`;
+  ids checked before they go into a path; and what forge served last kept
+  in the project's `.proton/diffuse/`. Proved against a fake gateway on a
+  loopback port playing back a recorded run.
+- **Core** (`proton-core/src/diffuse/`): the gateway's addresses from the
+  person's own settings (`diffuse.gateway`, default
+  `http://atlas:7420/img/v1`, and `diffuse.gatewayAway`), the key from
+  `NEXUS_KEY` (Proton's environment, then the login shell's, kept in memory
+  only); then, from D2, the open flows and the worker that runs them. The client uses the
   HTTP library Proton already has (`ureq`) and reads the event stream line
   by line on a worker thread. It downloads outputs into the project and
   sends progress, previews and results to the window.
 - **Window** (`ui/diffuse*.js`): the canvas, fields, queue and gallery.
   Previews arrive as data URLs, which the window's security policy allows.
-- **Settings:** the gateway URL at home and away (Tailscale); the second
-  is tried when the first doesn't answer. The key comes only from
+- **Settings:** the gateway URL at home and away (Tailscale), the person's
+  own (`diffuse.gateway`, `diffuse.gatewayAway`); the second is tried when
+  the first doesn't answer. The key comes only from
   `NEXUS_KEY`, read at launch, never stored or shown.
 - **Elsewhere:** an output can be sent to Canvas as a new layer or to an
   open game as art. The agent gets `flow_info`, `flow_edit` and `flow_run`

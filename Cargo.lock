@@ -4358,6 +4358,7 @@ dependencies = [
  "proton-dap",
  "proton-data",
  "proton-design",
+ "proton-diffuse",
  "proton-game",
  "proton-index",
  "proton-lab",
@@ -4429,6 +4430,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ts-rs",
+ "ureq",
 ]
 
 [[package]]

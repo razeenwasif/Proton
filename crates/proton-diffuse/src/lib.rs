@@ -25,16 +25,23 @@
 //! - [`check`]: what stops a flow running, node by node.
 //! - [`doc`]: a flow open for editing — undo, redo, held until saved.
 //! - [`text`]: the file's text, written so diffs show only what changed.
+//! - [`client`]: the gateway's `/img/v1` — requests, the run's event
+//!   stream, and how the gateway and forge are.
+//! - [`cache`]: what forge served last, kept so graphs edit while it is off.
 
+pub mod cache;
 pub mod catalogue;
 pub mod check;
+pub mod client;
 pub mod doc;
 pub mod flow;
 pub mod op;
 pub mod text;
 
+pub use cache::Known;
 pub use catalogue::{Catalogue, Input, Kind, Model, Models, NodeType, Output};
 pub use check::{check, Problem};
+pub use client::{Client, Error, Event, Health, HealthState, Key};
 pub use doc::FlowDoc;
 pub use flow::{Flag, Flow, Graph, GraphNode, Link, Node, Port, SeedMode, FORMAT};
 pub use op::{Applied, Op};
