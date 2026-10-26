@@ -318,9 +318,78 @@ export async function diffuseChecks({test, assert, win, doc, $, settle, shown}) 
     await new Promise((done) => setTimeout(done, 100)); await settle();
     const opened = sent(before, 'diffuseOpenGraph')[0];
     assert(opened?.name === 'harbour.png' && JSON.stringify(opened.graph) === JSON.stringify(graph), `a dropped PNG sent ${JSON.stringify(opened)}`);
+    // One with no graph is a picture: a Load Image of it.
+    win.diffusePuts = [];
+    before = win.commands.length;
     drop(new win.File([png(null)], 'photo.png', {type: 'image/png'}));
-    await new Promise((done) => setTimeout(done, 100)); await settle();
-    assert(shown($('[data-df-ask]')) && $('[data-df-ask]').textContent.includes('photo.png holds no graph'), 'a PNG with no graph was not said so');
-    $('[data-df-ask] [data-df-answer="stay"]').click(); await settle();
+    await new Promise((done) => setTimeout(done, 150)); await settle();
+    const made = sent(before, 'diffuseEdit').flatMap((c) => c.ops);
+    assert(win.diffusePuts[0]?.path === 'inputs/photo.png' && made.some((op) => op.op === 'add' && op.type === 'LoadImage' && op.values.image === 'inputs/photo.png') || made.some((op) => op.op === 'set' && op.value === 'inputs/photo.png'),
+      `a PNG with no graph made ${JSON.stringify(made)}`);
+  });
+
+  await test('A Load Image takes a picture chosen, dropped or from the gallery; its mask is painted in a sheet and kept beside the flow; an output goes to Canvas or Game', async () => {
+    // A flow with a Load Image (node 8) chosen.
+    await answer({type: 'diffuseOpen', path: 'lighthouse.flow.json'});
+    ws().querySelector('[data-df-view="graph"]').click(); await settle();
+    await answer({type: 'diffuseEdit', path: 'lighthouse.flow.json', ops: [{op: 'add', type: 'LoadImage', at: [16, 600], values: {}}]});
+    const id = [...ws().querySelectorAll('.df-node.on')].map((n) => n.dataset.dfNode)[0];
+    ws().querySelector('[data-df-panel="inspector"]').click(); await settle();
+    const inspector = $('[data-df-inspector]');
+    assert(inspector.textContent.includes('No picture yet') && inspector.querySelector('[data-df-upload-file]') && inspector.querySelector('[data-df-pick-input]'), 'a Load Image offers no way to choose its picture');
+    // Chosen from a file: kept under inputs/, then set.
+    win.diffusePuts = [];
+    const input = /** @type {HTMLInputElement} */ (inspector.querySelector('[data-df-upload-file]'));
+    const transfer = new win.DataTransfer();
+    transfer.items.add(new win.File([onePixel()], 'Harbour photo.png', {type: 'image/png'}));
+    input.files = transfer.files;
+    let before = win.commands.length;
+    input.dispatchEvent(new win.Event('change', {bubbles: true}));
+    await new Promise((done) => setTimeout(done, 150)); await settle();
+    assert(win.diffusePuts[0]?.path === 'inputs/Harbour-photo.png', `the picture was kept at ${win.diffusePuts[0]?.path}`);
+    const set = sent(before, 'diffuseEdit')[0];
+    assert(JSON.stringify(set?.ops) === JSON.stringify([{op: 'set', id, name: 'image', value: 'inputs/Harbour-photo.png'}]), `choosing sent ${JSON.stringify(set)}`);
+    await answer(set);
+    // Its mask: painted in the sheet, kept beside the flow.
+    await new Promise((done) => setTimeout(done, 100));
+    const maskButton = $('[data-df-inspector] [data-df-mask]');
+    assert(maskButton, `no Paint the mask once it has a picture: ${$('[data-df-inspector]').textContent.slice(0, 200)}`);
+    maskButton.click();
+    await new Promise((done) => setTimeout(done, 300)); await settle();
+    const sheet = $('.df-mask');
+    assert(shown(sheet) && sheet.textContent.includes('Harbour-photo.png'), 'Paint the mask opened no sheet');
+    // ⌫ in the sheet is the sheet's: the Load Image stays.
+    const beforeKey = win.commands.length;
+    sheet.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Backspace', bubbles: true, cancelable: true}));
+    await settle();
+    assert(!sent(beforeKey, 'diffuseEdit').some((c) => c.ops.some((op) => op.op === 'remove')), '⌫ in the mask sheet took the node away');
+    const canvas = sheet.querySelector('[data-mask-view]');
+    const r = canvas.getBoundingClientRect();
+    const paint = (/** @type {string} */ type, /** @type {number} */ fx) => canvas.dispatchEvent(new win.PointerEvent(type, {bubbles: true, button: 0, clientX: r.left + r.width * fx, clientY: r.top + r.height / 2, pointerId: 51}));
+    paint('pointerdown', 0.5); paint('pointerup', 0.5);
+    assert(!sheet.querySelector('[data-mask-share]').textContent.startsWith('0%'), `a stroke masked nothing: ${sheet.querySelector('[data-mask-share]').textContent}`);
+    win.diffusePuts = [];
+    sheet.querySelector('[data-mask-done]').click();
+    await new Promise((done) => setTimeout(done, 200)); await settle();
+    assert(win.diffusePuts[0]?.path === `lighthouse.${id}.mask.png` && !shown($('.df-mask')), `the mask was kept at ${win.diffusePuts[0]?.path}`);
+    // From the gallery: the chosen Load Image's picture.
+    before = win.commands.length;
+    assert($('[data-df-inspector] [data-df-pick-input]'), 'no From the gallery after the mask');
+    $('[data-df-inspector] [data-df-pick-input]').click(); await settle();
+    await win.pushEvents([{type: 'diffuseGallery', images: [{path: 'outputs/lighthouse/image_0003.png', folder: 'outputs/lighthouse', madeAt: 1792980000, width: 64, height: 64, graph: true, made: {seed: 7}}]}]); await settle();
+    ws().querySelector('[data-df-pick-image]').click(); await settle();
+    const use = $('[data-df-inspector] [data-df-use-input]');
+    assert(use?.textContent.includes("Load Image's picture"), 'the gallery does not offer the picture to the Load Image');
+    use.click(); await settle();
+    const used = sent(before, 'diffuseEdit')[0];
+    assert(JSON.stringify(used?.ops) === JSON.stringify([{op: 'set', id, name: 'image', value: 'outputs/lighthouse/image_0003.png'}]) && !shown($('[data-df-gallery]')), `Use sent ${JSON.stringify(used)}`);
+    // To Canvas and to Game.
+    ws().querySelector('[data-df-view="gallery"]').click(); await settle();
+    ws().querySelector('[data-df-pick-image]').click(); await settle();
+    before = win.commands.length;
+    $('[data-df-inspector] [data-df-send="canvas"]').click(); await settle();
+    $('[data-df-inspector] [data-df-send="game"]').click(); await settle();
+    const sends = sent(before, 'diffuseSend').map((c) => `${c.to} ${c.path}`);
+    assert(JSON.stringify(sends) === JSON.stringify(['canvas outputs/lighthouse/image_0003.png', 'game outputs/lighthouse/image_0003.png']), `sent ${sends}`);
   });
 }

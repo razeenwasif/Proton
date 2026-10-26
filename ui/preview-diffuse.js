@@ -44,6 +44,8 @@ export function createDiffusePreview(deliver) {
   const drawn = new Map();
   /** The graph each output was made by, by path. @type {Map<string, any>} */
   const ranWith = new Map();
+  /** Pictures handed over — chosen, dropped, masks — by path. @type {Map<string, ArrayBuffer>} */
+  const kept = new Map();
   let runCount = 0;
   /** Diffuse's folder, as the person would type it. */
   let folder = "~/Diffuse";
@@ -197,8 +199,15 @@ export function createDiffusePreview(deliver) {
 
   return {
     sync: () => [view(), known(), runsEvent(), galleryEvent()],
+    /** A picture handed over: kept here, as the core would write it. @param {string} path @param {Uint8Array} bytes */
+    async put(path, bytes) {
+      kept.set(path, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+      return path;
+    },
     /** An output's picture, as the shell would read it. @param {string} path */
     async file(path) {
+      const own = kept.get(path);
+      if (own) return own;
       if (!drawn.has(path)) throw new Error(`${path}: not an image Diffuse may read`);
       const url = picture(drawn.get(path) ?? 0, 512, "image/png");
       return (await fetch(url)).arrayBuffer();
@@ -282,6 +291,8 @@ export function createDiffusePreview(deliver) {
           shown = path;
           return [{ type: "notice", text: `Opened its graph as ${path} — ⌘S keeps it.`, level: "info" }, view()];
         }
+        case "diffuseSend":
+          return [{ type: "notice", text: `The preview has no ${command.to === "game" ? "Game" : "Canvas"} to send ${command.path} to: in the app it goes to that mode's own project.`, level: "info" }];
         case "diffuseFolder":
           folder = command.folder || "~/Diffuse";
           return [view()];

@@ -1484,6 +1484,10 @@ pub enum Command {
     /// Open a graph as a new flow: one the window read out of a PNG dropped
     /// on it. `name` is what the flow is called — the PNG's, say.
     DiffuseOpenGraph { name: String, graph: proton_diffuse::Graph },
+    /// An output to Canvas — made a canvas in the project Canvas shows — or
+    /// to Game — written into the open game's `art/` and brought into its
+    /// room. `to` is `canvas` or `game`.
+    DiffuseSend { path: String, to: String },
     /// Move a flow to the Trash, closing it if it is open; its images stay.
     DiffuseDelete { path: String },
     /// Move images to the Trash: outputs the gallery lists, or ones a run made.

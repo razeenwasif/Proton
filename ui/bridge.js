@@ -101,6 +101,18 @@ export async function readDiffuse(path) {
   return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
 }
 
+/** A picture for Diffuse — chosen, dropped, a mask painted — written into
+ *  Diffuse's folder at `path` (raw bytes, as Canvas's are): where it was
+ *  written. @param {string} path @param {Uint8Array} bytes @returns {Promise<string>} */
+export async function putDiffuseFile(path, bytes) {
+  if (!tauri) {
+    const adapter = await preview;
+    if (!adapter) throw new Error('Browser preview is unavailable');
+    return adapter.putDiffuseFile(path, bytes);
+  }
+  return tauri.core.invoke("put_diffuse_file", bytes, { headers: { "x-proton-path": path } });
+}
+
 /** Tiles of one layer of the open canvas, as bytes (see the shell's
  *  `read_raster` for the layout). @param {number} generation @param {number} layer @param {number[]} tiles */
 export async function readRaster(generation, layer, tiles) {

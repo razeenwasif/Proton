@@ -703,6 +703,66 @@ impl Session {
         }
     }
 
+    /// A picture the window hands over, written into Diffuse's folder: see
+    /// `diffuse::Diffuse::put`. Where it was written.
+    pub fn diffuse_put(&mut self, rel: &str, bytes: &[u8]) -> Result<String, String> {
+        let home = self.diffuse_home();
+        self.diffuse.put(&home, rel, bytes)
+    }
+
+    /// An output to Canvas or Game, in the project that mode shows — whose
+    /// own it is, now each mode has its own: Canvas makes a canvas of it, as
+    /// of a picture dropped on it; Game writes it into the open game's `art/`
+    /// and brings it into the room on screen.
+    fn diffuse_send(&mut self, path: &str, to: &str) -> Vec<Event> {
+        let home = self.diffuse_home();
+        let Some(file) = self.diffuse.file(&home, path) else {
+            return vec![notice(format!("{path} is not an image Diffuse may send"), NoticeLevel::Warn)];
+        };
+        let bytes = match std::fs::read(&file) {
+            Ok(bytes) => bytes,
+            Err(e) => return vec![notice(format!("{path}: {e}"), NoticeLevel::Error)],
+        };
+        let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "image.png".into());
+        match to {
+            "canvas" => {
+                let mut events = self.set_mode(ModeId::Raster);
+                match self.active_mut().raster_put_blob(bytes) {
+                    Ok(blob) => events.extend(self.delegate(Command::RasterImport {
+                        path: None,
+                        blob: Some(blob),
+                        layer: false,
+                        above: None,
+                        name: Some(name),
+                    })),
+                    Err(why) => events.push(notice(why, NoticeLevel::Error)),
+                }
+                events
+            }
+            "game" => {
+                let mut events = self.set_mode(ModeId::Game);
+                let Some(game) = self.active().game_dir() else {
+                    events.push(notice("open a game in Game, then send the picture to it again".into(), NoticeLevel::Warn));
+                    return events;
+                };
+                let stem = name.trim_end_matches(".png");
+                let mut rel = format!("art/{stem}.png");
+                let mut n = 2;
+                while game.join(&rel).exists() {
+                    rel = format!("art/{stem}-{n}.png");
+                    n += 1;
+                }
+                if let Err(e) = proton_diffuse::doc::write_atomically(&game.join(&rel), &bytes) {
+                    events.push(notice(format!("{rel}: {e}"), NoticeLevel::Error));
+                    return events;
+                }
+                events.extend(self.delegate(Command::GameImport { source: rel, room: None, scale: None, normals: false }));
+                events
+            }
+            other => vec![notice(format!("Diffuse sends to Canvas or Game, not {other}"), NoticeLevel::Warn)],
+        }
+    }
+
     /// Keep Diffuse's flows and images in another folder — none, the default
     /// — written to the person's own settings. Refused while a flow has
     /// changes, which would be left behind.
@@ -853,6 +913,7 @@ impl Session {
             command if crate::pdf::handles(&command) => self.pdf.apply(command),
             // And Diffuse's: its flows and images are in a folder of its own.
             Command::DiffuseFolder { folder } => self.set_diffuse_folder(folder),
+            Command::DiffuseSend { path, to } => self.diffuse_send(&path, &to),
             command if crate::diffuse::handles(&command) => {
                 let home = self.diffuse_home();
                 self.diffuse.apply(&home, command)

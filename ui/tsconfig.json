@@ -59,6 +59,7 @@
     "raster-frames.js",
     "diffuse.js",
     "diffuse-graph.js",
+    "diffuse-mask.js",
     "highlight.js",
     "claude.js",
     "research.js",

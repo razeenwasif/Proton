@@ -8,4 +8,5 @@ export function createPreview(deliver: (event: WireEvent) => void, latency: Map<
   readGame(key: string): Promise<ArrayBuffer>;
   readRaster(generation: number, layer: number, tiles: number[]): Promise<ArrayBuffer>;
   readDiffuse(path: string): Promise<ArrayBuffer>;
+  putDiffuseFile(path: string, bytes: Uint8Array): Promise<string>;
 };

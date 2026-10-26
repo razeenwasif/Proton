@@ -133,7 +133,41 @@ pub(super) struct Job {
     pub outputs: String,
     /// The output nodes: whether each keeps its images, and their prefix.
     pub saves: BTreeMap<String, (bool, String)>,
+    /// The pictures a run sends first: each one's node and field, its file,
+    /// and the mask painted over it, if one was.
+    pub inputs: Vec<Picture>,
     pub control: Control,
+}
+
+/// A picture to upload before the graph is sent.
+#[derive(Debug, Clone)]
+pub(super) struct Picture {
+    pub node: String,
+    pub field: String,
+    pub file: PathBuf,
+    pub mask: Option<PathBuf>,
+}
+
+/// A picture as forge takes it: the picture, and the mask — white where it
+/// is painted — in its alpha, transparent where masked, as ComfyUI's Load
+/// Image reads one. Without a mask, the file as it is.
+pub(super) fn upload_bytes(picture: &Picture) -> Result<Vec<u8>, String> {
+    let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let bytes = std::fs::read(&picture.file).map_err(|e| format!("{}: {e}", name(&picture.file)))?;
+    let Some(mask) = &picture.mask else { return Ok(bytes) };
+    let (w, h, mut rgba) =
+        proton_raster::file::decode_png(&bytes).map_err(|e| format!("{}: {e}", name(&picture.file)))?;
+    let read = std::fs::read(mask).map_err(|e| format!("{}: {e}", name(mask)))?;
+    let (mw, mh, shade) = proton_raster::file::decode_png(&read).map_err(|e| format!("{}: {e}", name(mask)))?;
+    if (mw, mh) != (w, h) {
+        return Err(format!("the mask is {mw} × {mh} and the picture {w} × {h}: paint the mask again"));
+    }
+    for (pixel, painted) in rgba.chunks_exact_mut(4).zip(shade.chunks_exact(4)) {
+        // How much is masked: the mask's brightness, as far as it is opaque.
+        let masked = (painted[0] as u32 * painted[3] as u32 / 255) as u8;
+        pixel[3] = pixel[3].min(255 - masked);
+    }
+    proton_raster::file::encode_png(w, h, &rgba)
 }
 
 /// Start a run's worker.
@@ -151,7 +185,17 @@ fn follow(job: &Job, tell: &Sender<News>) -> Result<(), String> {
     let mut gateway = job.gateway.clone();
     let client =
         gateway.client(&job.person).ok_or("no NEXUS_KEY in your shell: export it in your profile, then look again")?;
-    let queued = client.run(&job.graph).map_err(|e| e.describe())?;
+    // Each picture first: forge keeps an upload a day, so a flow names a
+    // file of its own and the run sends it, its mask in its alpha.
+    let mut graph = job.graph.clone();
+    for picture in &job.inputs {
+        let bytes = upload_bytes(picture)?;
+        let upload = client.upload(&bytes).map_err(|e| e.describe())?;
+        if let Some(node) = graph.nodes.iter_mut().find(|n| n.id == picture.node) {
+            node.values.insert(picture.field.clone(), serde_json::Value::String(upload.id));
+        }
+    }
+    let queued = client.run(&graph).map_err(|e| e.describe())?;
     *job.control.run.lock().unwrap_or_else(|e| e.into_inner()) = Some(queued.run.clone());
     let _ = tell.send(News::Queued { id, run: queued.run.clone(), position: queued.position });
     // Stopped while it was on its way: stop it there too.

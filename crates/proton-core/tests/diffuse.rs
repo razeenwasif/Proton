@@ -271,11 +271,24 @@ fn forge_png(graph: &str) -> Vec<u8> {
 /// event and makes one image, and that image with the graph in it. A run
 /// whose sampler asks for 2048 px runs out of memory.
 fn serving_gateway() -> String {
+    recording_gateway().0
+}
+
+/// What a recording gateway was sent: the last graph, and each upload's bytes.
+type Recorded = (std::sync::Arc<std::sync::Mutex<String>>, std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>);
+
+fn recording_gateway() -> (String, Recorded) {
     use server::{Fake, Reply};
     let sent = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let uploads = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = (sent.clone(), uploads.clone());
     let fake = Fake::start(move |seen| {
         let path = seen.path.as_str();
         match (seen.method.as_str(), path) {
+            ("POST", "/img/v1/uploads") => {
+                uploads.lock().unwrap().push(seen.body.clone());
+                Reply::json(200, r#"{"id": "up_31", "width": 4, "height": 4}"#)
+            }
             ("GET", "/img/v1/status") => Reply::json(200, r#"{"gpu": {"name": "NVIDIA GeForce RTX 4090", "total": 25757220864, "used": 7600000000}}"#),
             ("GET", "/img/v1/nodes") => Reply::json(200, CATALOGUE),
             ("GET", "/img/v1/models") => Reply::json(200, include_str!("../../proton-diffuse/tests/fixtures/models.json")),
@@ -319,7 +332,7 @@ fn serving_gateway() -> String {
             _ => Reply::json(404, r#"{"error": "not_found", "message": "no"}"#),
         }
     });
-    fake.base.clone()
+    (fake.base.clone(), recorded)
 }
 
 fn runs(events: &[Event]) -> Option<Vec<proton_core::diffuse::DiffuseRun>> {
@@ -533,4 +546,88 @@ fn the_first_flow_makes_diffuses_folder() {
     let events = space.apply(Command::DiffuseNew { name: "first".into(), template: None });
     assert!(warned(&events).is_none(), "{events:?}");
     assert!(root.join("first.flow.json").is_file());
+}
+
+/// A 4 × 4 picture, every pixel `rgb`, as a PNG.
+fn picture(rgb: [u8; 3]) -> Vec<u8> {
+    let rgba: Vec<u8> = (0..16).flat_map(|_| [rgb[0], rgb[1], rgb[2], 255]).collect();
+    proton_raster::file::encode_png(4, 4, &rgba).unwrap()
+}
+
+#[test]
+fn a_picture_and_its_painted_mask_go_to_forge_as_one_upload_named_in_the_graph() {
+    std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
+    let root = kept_project("picture");
+    let mut space = session_in(&root);
+    space.apply(Command::SetMode { mode: ModeId::Diffuse });
+    space.apply(Command::DiffuseNew { name: "boat".into(), template: Some("inpaint".into()) });
+    // The picture, kept in the folder; the same bytes again are the same file,
+    // other bytes of the name another.
+    assert_eq!(space.diffuse_put("inputs/harbour.png", &picture([10, 20, 30])).unwrap(), "inputs/harbour.png");
+    assert_eq!(space.diffuse_put("inputs/harbour.png", &picture([10, 20, 30])).unwrap(), "inputs/harbour.png");
+    assert_eq!(space.diffuse_put("inputs/harbour.png", &picture([99, 99, 99])).unwrap(), "inputs/harbour-2.png");
+    assert!(space.diffuse_put("../outside.png", &picture([0, 0, 0])).is_err());
+    assert!(space.diffuse_put("inputs/notes.png", b"not a picture").is_err());
+    // A Load Image naming a picture not there says so.
+    let edit = |space: &mut Session, value: &str| {
+        space.apply(Command::DiffuseEdit {
+            path: "boat.flow.json".into(),
+            ops: vec![Op::Set { id: "4".into(), name: "image".into(), value: json!(value) }],
+        })
+    };
+    let missing = view(&edit(&mut space, "inputs/gone.png")).shown.unwrap().problems;
+    assert!(missing.iter().any(|p| p.message == "inputs/gone.png is not in Diffuse's folder"), "{missing:?}");
+    edit(&mut space, "inputs/harbour.png");
+    // A mask: the left half painted.
+    let mask: Vec<u8> = (0..16).flat_map(|i| if i % 4 < 2 { [255, 255, 255, 255] } else { [0, 0, 0, 255] }).collect();
+    let mask = proton_raster::file::encode_png(4, 4, &mask).unwrap();
+    assert_eq!(space.diffuse_put("boat.4.mask.png", &mask).unwrap(), "boat.4.mask.png");
+
+    let (base, (sent, uploads)) = recording_gateway();
+    set_gateway(&root, Some(&base));
+    space.apply(Command::DiffuseLook { again: false });
+    poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
+    let started = space.apply(Command::DiffuseRun { path: "boat.flow.json".into() });
+    assert!(warned(&started).is_none(), "{started:?}");
+    poll_until(&mut space, |e| runs(e).is_some_and(|r| r[0].state.ended()));
+    // One upload: the picture, transparent where the mask is painted.
+    let uploaded = uploads.lock().unwrap().clone();
+    assert_eq!(uploaded.len(), 1);
+    let (w, h, rgba) = proton_raster::file::decode_png(&uploaded[0]).unwrap();
+    assert_eq!((w, h), (4, 4));
+    for (i, pixel) in rgba.chunks(4).enumerate() {
+        assert_eq!(&pixel[..3], &[10, 20, 30], "the picture's colour is kept under the mask");
+        assert_eq!(pixel[3], if i % 4 < 2 { 0 } else { 255 }, "pixel {i}");
+    }
+    // The graph names forge's upload, not the file.
+    let graph: serde_json::Value = serde_json::from_str(&sent.lock().unwrap()).unwrap();
+    let load = graph["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "4").unwrap().clone();
+    assert_eq!(load["values"]["image"], json!("up_31"));
+}
+
+#[test]
+fn an_output_is_sent_to_canvas_as_a_canvas_and_to_game_only_with_a_game_open() {
+    std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
+    let (mut space, root) = with_flow("send");
+    set_gateway(&root, Some(&serving_gateway()));
+    space.apply(Command::DiffuseLook { again: false });
+    poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
+    space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
+    poll_until(&mut space, |e| runs(e).is_some_and(|r| r[0].state.ended()));
+    // forge's PNG here is head only; Canvas needs a whole one.
+    std::fs::write(root.join("outputs/lighthouse/image_0001.png"), picture([200, 100, 50])).unwrap();
+    let sent =
+        space.apply(Command::DiffuseSend { path: "outputs/lighthouse/image_0001.png".into(), to: "canvas".into() });
+    assert_eq!(space.active().mode(), ModeId::Raster);
+    assert!(warned(&sent).is_none(), "{sent:?}");
+    assert!(
+        sent.iter()
+            .any(|e| matches!(e, Event::RasterCanvas { canvas: Some(c) } if c.width == 4 && c.name == "image-0001")),
+        "no canvas was made of it"
+    );
+    space.apply(Command::SetMode { mode: ModeId::Diffuse });
+    let to_game =
+        space.apply(Command::DiffuseSend { path: "outputs/lighthouse/image_0001.png".into(), to: "game".into() });
+    assert_eq!(space.active().mode(), ModeId::Game);
+    assert!(warned(&to_game).unwrap().contains("open a game in Game"));
 }

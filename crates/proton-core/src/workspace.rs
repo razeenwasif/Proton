@@ -1599,6 +1599,7 @@ impl Workspace {
             | Command::DiffuseDeleteImages { .. }
             | Command::DiffuseOpenImage { .. }
             | Command::DiffuseOpenGraph { .. }
+            | Command::DiffuseSend { .. }
             | Command::DiffuseGateways { .. }
             | Command::DiffuseFolder { .. } => Vec::new(),
             // PDF is the window's too: the session answers it.
@@ -4120,6 +4121,11 @@ impl Workspace {
         }
         events.push(self.tree_event());
         Ok((said, events))
+    }
+
+    /// The folder of the game open in Game mode, if one is.
+    pub fn game_dir(&self) -> Option<PathBuf> {
+        self.game.root().map(|root| root.to_path_buf())
     }
 
     /// A picture the window hands over, kept to bring in: its number.

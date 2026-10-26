@@ -435,7 +435,7 @@ impl Diffuse {
                 // Only what the window was shown: listed by the gallery or made by a run.
                 let mut files = Vec::new();
                 for rel in &paths {
-                    match self.file(root, rel) {
+                    match self.listed(root, rel) {
                         Some(file) => files.push(file),
                         None => {
                             return vec![notice(format!("{rel} is not an image Diffuse may delete"), NoticeLevel::Warn)]
@@ -548,6 +548,10 @@ impl Diffuse {
                 (n.id.clone(), (n.kind == "SaveImage", prefix))
             })
             .collect();
+        let inputs = match Self::pictures(root, path, &graph, &catalogue) {
+            Ok(inputs) => inputs,
+            Err(why) => return vec![notice(format!("{path} can't run yet: {why}"), NoticeLevel::Warn)],
+        };
         self.next_run += 1;
         let id = self.next_run;
         let control = Control::default();
@@ -581,6 +585,7 @@ impl Diffuse {
                 root: root.to_path_buf(),
                 outputs,
                 saves,
+                inputs,
                 control,
             },
             tell,
@@ -841,14 +846,90 @@ impl Diffuse {
 
     /// An image the window may read: one in the gallery, or one a run made.
     pub fn file(&self, root: &Path, rel: &str) -> Option<PathBuf> {
-        let listed =
-            self.gallery.contains_key(rel) || self.runs.iter().any(|r| r.outputs.iter().any(|o| o.path == rel));
-        if !listed {
+        // Any picture in Diffuse's folder: outputs, inputs and masks are all
+        // its own.
+        if !rel.to_ascii_lowercase().ends_with(".png") {
             return None;
         }
         let path = root.join(rel);
         let base = std::fs::canonicalize(root).ok()?;
         std::fs::canonicalize(&path).ok().filter(|real| real.starts_with(&base))
+    }
+
+    /// An image Diffuse may move to the Trash: one the gallery or a run listed.
+    fn listed(&self, root: &Path, rel: &str) -> Option<PathBuf> {
+        let listed =
+            self.gallery.contains_key(rel) || self.runs.iter().any(|r| r.outputs.iter().any(|o| o.path == rel));
+        listed.then(|| self.file(root, rel)).flatten()
+    }
+
+    /// A picture the window hands over — chosen, dropped, a mask painted —
+    /// written into Diffuse's folder: `inputs/<name>.png` (another name if
+    /// that one holds another picture), or a flow's `<flow>.<node>.mask.png`
+    /// beside it. Only a PNG. Where it was written.
+    pub fn put(&self, root: &Path, rel: &str, bytes: &[u8]) -> Result<String, String> {
+        proton_diffuse::png::head(bytes).ok_or("only a PNG is kept")?;
+        let plain = |part: &str| !part.is_empty() && !part.starts_with('.') && !part.contains(['\\', '\0', ':']);
+        let parts: Vec<&str> = rel.split('/').collect();
+        let input = parts.len() == 2 && parts[0] == "inputs" && rel.ends_with(".png") && plain(parts[1]);
+        let mask = rel.ends_with(".mask.png") && parts.iter().all(|p| plain(p) && *p != "..");
+        if !input && !mask {
+            return Err(format!("{rel} is not where Diffuse keeps a picture"));
+        }
+        std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+        let mut rel = rel.to_string();
+        if input {
+            let stem = rel.trim_end_matches(".png").to_string();
+            let mut n = 2;
+            while let Ok(there) = std::fs::read(root.join(&rel)) {
+                if there == bytes {
+                    return Ok(rel);
+                }
+                rel = format!("{stem}-{n}.png");
+                n += 1;
+            }
+        }
+        let path = root.join(&rel);
+        let base = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+        if !std::fs::canonicalize(path.parent().unwrap_or(root)).unwrap_or(base.clone()).starts_with(&base) {
+            return Err(format!("{rel} leads outside Diffuse's folder"));
+        }
+        proton_diffuse::doc::write_atomically(&path, bytes).map_err(|e| format!("{rel}: {e}"))?;
+        Ok(rel)
+    }
+
+    /// The mask painted over a flow's Load Image, where it is kept.
+    pub fn mask_of(flow: &str, node: &str) -> String {
+        format!("{}.{node}.mask.png", flow.trim_end_matches(EXTENSION))
+    }
+
+    /// The pictures a flow's graph sends: each upload field's file, and its
+    /// node's mask when one was painted.
+    fn pictures(
+        root: &Path,
+        path: &str,
+        graph: &proton_diffuse::Graph,
+        catalogue: &Catalogue,
+    ) -> Result<Vec<run::Picture>, String> {
+        let mut out = Vec::new();
+        for node in &graph.nodes {
+            let Some(kind) = catalogue.node(&node.kind) else { continue };
+            for field in kind.fields().filter(|f| f.kind() == proton_diffuse::Kind::Upload) {
+                let Some(rel) = node.values.get(&field.name).and_then(serde_json::Value::as_str) else { continue };
+                let file = root.join(rel);
+                if !file.is_file() {
+                    return Err(format!("{rel} is not in Diffuse's folder: choose the picture again"));
+                }
+                let mask = root.join(Self::mask_of(path, &node.id));
+                out.push(run::Picture {
+                    node: node.id.clone(),
+                    field: field.name.clone(),
+                    file,
+                    mask: mask.is_file().then_some(mask),
+                });
+            }
+        }
+        Ok(out)
     }
 
     fn person_settings(&self) -> Settings {
@@ -895,7 +976,25 @@ impl Diffuse {
         let shown = self.shown.as_ref().and_then(|path| {
             let (_, doc) = self.open.iter().find(|(rel, _)| rel == path)?;
             let problems = match known.and_then(|k| k.catalogue.as_ref()) {
-                Some(catalogue) => proton_diffuse::check(doc.get(), catalogue, known.and_then(|k| k.models.as_ref())),
+                Some(catalogue) => {
+                    let mut found = proton_diffuse::check(doc.get(), catalogue, known.and_then(|k| k.models.as_ref()));
+                    // A picture a Load Image names, gone from the folder.
+                    for node in &doc.get().nodes {
+                        let Some(kind) = catalogue.node(&node.kind) else { continue };
+                        for field in kind.fields().filter(|f| f.kind() == proton_diffuse::Kind::Upload) {
+                            if let Some(rel) = node.values.get(&field.name).and_then(serde_json::Value::as_str) {
+                                if !root.join(rel).is_file() {
+                                    found.push(Problem {
+                                        node: Some(node.id.clone()),
+                                        input: Some(field.name.clone()),
+                                        message: format!("{rel} is not in Diffuse's folder"),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    found
+                }
                 None => vec![Problem {
                     node: None,
                     input: None,

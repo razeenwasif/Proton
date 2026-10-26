@@ -6023,3 +6023,26 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .df-danger:hover { color: var(--err); }
 .df-new .df-radio { flex-wrap: wrap; }
 .df-new .df-radio span { flex-basis: 100%; margin: 0 0 0 22px; }
+
+/* Diffuse's pictures: a Load Image's, and the sheet its mask is painted in. */
+.df-upload { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 8px; background: var(--df-well); border: 1px solid var(--df-line); }
+.df-upload-shot { flex: none; width: 48px; height: 48px; object-fit: cover; border-radius: 5px; background: var(--df-card); }
+.df-upload-name { min-width: 0; overflow-wrap: anywhere; font: var(--z-2xs) var(--zed); color: var(--text); }
+.df-upload-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.df-file { position: relative; overflow: hidden; cursor: pointer; }
+.df-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.df-mask { position: absolute; inset: 12px; z-index: 6; display: flex; flex-direction: column; border-radius: 12px; background: color-mix(in srgb, var(--text) 5%, var(--head)); border: 1px solid var(--row-on-edge); box-shadow: 0 20px 50px rgba(0, 0, 0, .55); outline: none; }
+.df-mask-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--df-line); font: var(--z-xs) var(--sans); color: var(--text); }
+.df-mask-head .grow { flex: 1; }
+.df-mask-head button { padding: 4px 12px; }
+.df-mask-body { flex: 1; min-height: 0; display: flex; }
+.df-mask-tools { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 8px; border-right: 1px solid var(--df-line); }
+.df-mask-tools button { width: 36px; height: 36px; border: 0; border-radius: 8px; background: none; color: var(--df-soft); font: 15px var(--sans); cursor: pointer; }
+.df-mask-tools button:hover { background: var(--row-hover); color: var(--text); }
+.df-mask-tools button[aria-pressed="true"] { background: var(--row-on); color: var(--text); }
+.df-mask-sep { width: 24px; height: 1px; background: var(--df-line); margin: 2px 0; }
+.df-mask-stage { flex: 1; min-width: 0; display: grid; place-items: center; background: var(--bg-deep); overflow: hidden; }
+.df-mask-stage canvas { cursor: crosshair; border-radius: 4px; touch-action: none; }
+.df-mask-side { flex: none; width: 200px; display: flex; flex-direction: column; gap: 10px; padding: 12px; border-left: 1px solid var(--df-line); font: var(--z-xs) var(--sans); color: var(--df-soft); }
+.df-mask-side input[type="range"] { width: 100%; accent-color: var(--accent); }
+.df-mask-share { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--df-well); color: var(--text); line-height: 1.45; }

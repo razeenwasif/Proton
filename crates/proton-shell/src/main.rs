@@ -316,6 +316,22 @@ fn read_diffuse(path: String, session: State<'_, Mutex<BridgeSession>>) -> Resul
     std::fs::read(&file).map(tauri::ipc::Response::new).map_err(|e| format!("{path}: {e}"))
 }
 
+/// A picture the page hands over for Diffuse — chosen, dropped, a mask
+/// painted — written into Diffuse's folder at the path its `x-proton-path`
+/// header names: where it was written. Raw bytes, as Canvas's are.
+#[tauri::command]
+fn put_diffuse_file(request: tauri::ipc::Request<'_>, session: State<'_, Mutex<BridgeSession>>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("a picture comes as raw bytes".into());
+    };
+    let path = request.headers().get("x-proton-path").and_then(|v| v.to_str().ok()).ok_or("no path for the picture")?.to_string();
+    let mut held = match session.lock() {
+        Ok(it) => it,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    held.session.diffuse_put(&path, bytes)
+}
+
 /// Tiles of the open canvas, as bytes — what the window fetches when the core
 /// changed them (undo, redo, the agent) or when its copy was found to differ.
 ///
@@ -664,6 +680,7 @@ fn main() {
             read_lab,
             read_game,
             read_diffuse,
+            put_diffuse_file,
             read_raster,
             put_raster_blob,
             paste_raster_image,

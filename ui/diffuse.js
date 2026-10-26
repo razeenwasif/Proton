@@ -18,7 +18,8 @@
  * the mode comes on screen and every half minute while it stays, and on
  * Try again. */
 
-import { copyText, readDiffuse } from "./bridge.js";
+import { copyText, putDiffuseFile, readDiffuse } from "./bridge.js";
+import { openMask } from "./diffuse-mask.js";
 import { escapeHtml as esc } from "./html.js";
 import { colourOf, fieldsOf, freshId, grouped, HEAD, NODE_W, pngText, portAt, portOf, rowsOf, search, shortValue, socketFor, wire } from "./diffuse-graph.js";
 
@@ -45,6 +46,7 @@ const KEYS = /** @type {[string, string][]} */ ([
   ["⌘↩", "run the flow on forge — again to queue another"], ["⌘.", "stop its run"],
   ["⌫ in the Gallery", "move the images chosen to the Trash — ⌘-click chooses more"],
   ["drop a PNG", "open the graph that made it, as a new flow"],
+  ["drop a picture", "on a Load Image: its picture; elsewhere: a Load Image of it"],
   ["⌘Z ⇧⌘Z", "undo, redo"], ["⌘S", "save the flow"], ["f", "the whole graph"], ["⎋", "close the search, choose nothing"], ["?", "these keys"],
 ]);
 
@@ -98,6 +100,14 @@ export function createDiffuse(host) {
   let pickedAll = new Set(/** @type {string[]} */ ([]));
   /** Each image read, as a `data:` URL, by path. @type {Map<string, Promise<string>>} */
   const urls = new Map();
+
+  /** A Load Image waiting for a picture from the gallery. @type {{node: string, field: string} | null} */
+  let pickingInput = null;
+  /** Where a Load Image's mask is kept: beside its flow. @param {string} node */
+  const maskPath = (node) => {
+    const p = path();
+    return p ? `${p.replace(/\.flow\.json$/, "")}.${node}.mask.png` : null;
+  };
 
   const ended = (/** @type {string} */ state) => state === "done" || state === "failed" || state === "cancelled";
   /** The newest run of the flow shown. */
@@ -368,7 +378,7 @@ export function createDiffuse(host) {
    *  image the node last made. @param {Node} node */
   function atWork(node) {
     const r = lastRun();
-    if (!r) return "";
+    if (!r) return pictureOf(node);
     const p = r.progress;
     if (p && p.node === node.id && !ended(r.state)) {
       const pct = Math.round((p.step / Math.max(1, p.steps)) * 100);
@@ -380,9 +390,107 @@ export function createDiffuse(host) {
       );
     }
     const made = r.outputs.filter((o) => o.node === node.id);
+    if (!made.length) return pictureOf(node);
     const last = made[made.length - 1];
     if (!last) return "";
     return `<div class="df-work"><img class="df-shot" data-df-img="${esc(last.path)}" alt="${esc(last.path)}" draggable="false"><div class="df-work-said"><span>${esc(last.path.split("/").pop() ?? "")}</span><span>${last.width} × ${last.height}</span></div></div>`;
+  }
+
+  /** The picture a Load Image has, small on its card. @param {Node} node */
+  function pictureOf(node) {
+    const kind = kindOf(node.type);
+    const field = kind?.inputs.find((i) => i.kind === "upload");
+    const value = field ? node.values[field.name] : null;
+    if (typeof value !== "string" || !value) return "";
+    return `<div class="df-work"><img class="df-shot" data-df-img="${esc(value)}" alt="${esc(value)}" draggable="false"><div class="df-work-said"><span>${esc(value.split("/").pop() ?? "")}</span></div></div>`;
+  }
+
+  /** How much of a picture a kept mask covers, or `null` with none.
+   *  @param {string} p @returns {Promise<number | null>} */
+  async function maskShare(p) {
+    try {
+      const url = await urlOf(p);
+      const img = new Image();
+      await new Promise((done, failed) => {
+        img.onload = done;
+        img.onerror = failed;
+        img.src = url;
+      });
+      const c = document.createElement("canvas");
+      c.width = Math.min(256, img.naturalWidth);
+      c.height = Math.max(1, Math.round((c.width / img.naturalWidth) * img.naturalHeight));
+      const g = /** @type {CanvasRenderingContext2D} */ (c.getContext("2d"));
+      g.drawImage(img, 0, 0, c.width, c.height);
+      const data = g.getImageData(0, 0, c.width, c.height).data;
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 4) sum += data[i];
+      return sum / ((data.length / 4) * 255);
+    } catch {
+      return null;
+    }
+  }
+
+  /** A picture file as a PNG — the folder keeps PNGs only — and kept under
+   *  `inputs/`: where it was written. @param {File} file */
+  async function keepPicture(file) {
+    let bytes = new Uint8Array(await file.arrayBuffer());
+    if (!(bytes[0] === 0x89 && bytes[1] === 0x50)) {
+      const bitmap = await createImageBitmap(file);
+      const c = document.createElement("canvas");
+      c.width = bitmap.width;
+      c.height = bitmap.height;
+      /** @type {CanvasRenderingContext2D} */ (c.getContext("2d")).drawImage(bitmap, 0, 0);
+      const blob = await new Promise((done) => c.toBlob(done, "image/png"));
+      bytes = new Uint8Array(await /** @type {Blob} */ (blob).arrayBuffer());
+    }
+    const stem = file.name.replace(/\.[A-Za-z0-9]+$/, "").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "picture";
+    const rel = await putDiffuseFile(`inputs/${stem}.png`, bytes);
+    urls.delete(rel);
+    return rel;
+  }
+
+  /** Give a Load Image a picture — the one chosen, or the first in the flow —
+   *  or, the flow having none, add one with it at `at`.
+   *  @param {string} rel @param {{node: string, field: string} | null} [target] @param {[number, number]} [at] */
+  function usePicture(rel, target = null, at) {
+    const f = flow();
+    if (!f) return;
+    const loads = f.nodes.filter((n) => kindOf(n.type)?.inputs.some((i) => i.kind === "upload"));
+    const node = target ? f.nodes.find((n) => n.id === target.node) : (loads.find((n) => chosen.has(n.id)) ?? loads[0]);
+    if (node) {
+      const field = target?.field ?? kindOf(node.type)?.inputs.find((i) => i.kind === "upload")?.name ?? "image";
+      edit([{ op: "set", id: node.id, name: field, value: rel }]);
+      chosen = new Set([node.id]);
+      return;
+    }
+    const kind = kindOf("LoadImage");
+    if (!kind) return;
+    const place = at ?? [16, Math.max(16, ...f.nodes.map((n) => n.at[1] + 300))];
+    edit([{ op: "add", type: "LoadImage", at: [Math.round(place[0]), Math.round(place[1])], values: { image: rel } }]);
+  }
+
+  /** The mask sheet, for a Load Image's picture. @param {string} field */
+  async function paintMask(field) {
+    const one = [...chosen][0];
+    const node = flow()?.nodes.find((n) => n.id === one);
+    const value = node?.values[field];
+    const mask = node ? maskPath(node.id) : null;
+    if (!node || typeof value !== "string" || !mask) return;
+    const image = await urlOf(value).catch(() => null);
+    if (!image) return;
+    const kept = await urlOf(mask).catch(() => null);
+    await openMask({
+      host: stage,
+      title: value.split("/").pop() ?? value,
+      image,
+      mask: kept,
+      done: async (png) => {
+        const rel = await putDiffuseFile(mask, png);
+        urls.delete(rel);
+        renderInspector();
+      },
+      cancel: () => {},
+    });
   }
 
   /** An image of the project, as a `data:` URL — the window's security
@@ -541,6 +649,13 @@ export function createDiffuse(host) {
       `<div class="df-fieldset">${fieldsOf(kind).map((field) => fieldHtml(node, field)).join("")}</div>` +
       inputsHtml(node, kind) +
       actions(node);
+    fillImages(box);
+    for (const said of box.querySelectorAll("[data-df-mask-said]")) {
+      const p = /** @type {HTMLElement} */ (said).dataset.dfMaskSaid ?? "";
+      maskShare(p).then((share) => {
+        if (share !== null) said.textContent = `${Math.round(share * 100)}% masked: only that is redrawn`;
+      });
+    }
   }
 
   /** A field's control. @param {Node} node @param {Input} field */
@@ -577,8 +692,21 @@ export function createDiffuse(host) {
           `<div class="df-seg" role="group" aria-label="After each run">${seg("fixed", "fixed")}${seg("random", "random")}${seg("increment", "+1")}</div></div>`
         );
       }
-      case "upload":
-        return `<div class="df-field">${label}<span class="df-faint">${value ? esc(String(value)) : "no image yet"} — picking an image comes with masks</span></div>`;
+      case "upload": {
+        const mask = maskPath(node.id);
+        return (
+          `<div class="df-field"><span class="df-field-name">${esc(field.name)}</span>` +
+          (value
+            ? `<div class="df-upload"><img class="df-upload-shot" data-df-img="${esc(String(value))}" alt="${esc(String(value))}" draggable="false"><span class="df-upload-name">${esc(String(value))}</span></div>`
+            : `<p class="df-faint">No picture yet: choose one, take one from the gallery, or drop one on the graph.</p>`) +
+          `<div class="df-upload-buttons"><label class="hbtn df-file">Choose a file<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-df-upload-file="${esc(field.name)}"></label>` +
+          `<button class="hbtn" data-df-pick-input="${esc(field.name)}">From the gallery</button>` +
+          (value && mask ? `<button class="hbtn" data-df-mask="${esc(field.name)}">Paint the mask</button>` : "") +
+          `</div>` +
+          (value && mask ? `<span class="df-faint" data-df-mask-said="${esc(mask)}">no mask: all of it is redrawn</span>` : "") +
+          `</div>`
+        );
+      }
       default:
         return `<div class="df-field">${label}<code class="df-faint">${esc(JSON.stringify(shownValue))}</code></div>`;
     }
@@ -655,6 +783,8 @@ export function createDiffuse(host) {
       `<div class="df-actions">` +
       (image.graph ? `<button class="cc-primary" data-df-open-image="${esc(image.path)}" title="The graph forge wrote into it, as a new flow">Open its graph</button>` : "") +
       (flowHere ? `<button class="hbtn" data-df-open-flow="${esc(flowHere)}">Open ${esc(flowHere)}</button>` : "") +
+      `<button class="hbtn" data-df-use-input="${esc(image.path)}">${pickingInput ? "Use as Load Image's picture" : "Use as input"}</button>` +
+      `<button class="hbtn" data-df-send="canvas">Send to Canvas</button><button class="hbtn" data-df-send="game">Send to Game</button>` +
       `<button class="hbtn" data-df-copy-path="${esc(image.path)}">Copy its path</button>` +
       `<button class="hbtn df-danger" data-df-delete-images>${BIN} Move to Trash</button></div>`;
     fillImages(box);
@@ -874,7 +1004,8 @@ export function createDiffuse(host) {
   stage.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || !flow()) return;
     const target = /** @type {HTMLElement} */ (e.target);
-    if (target.closest("[data-df-search]")) return;
+    // The search and the mask sheet sit over the graph and are their own.
+    if (target.closest("[data-df-search], .df-mask")) return;
     closeSearch();
     stage.focus({ preventScroll: true });
     const out = /** @type {HTMLElement | null} */ (target.closest("[data-df-out]"));
@@ -1008,14 +1139,14 @@ export function createDiffuse(host) {
 
   stage.addEventListener("dblclick", (e) => {
     const target = /** @type {HTMLElement} */ (e.target);
-    if (!flow() || target.closest("[data-df-node], [data-df-search]")) return;
+    if (!flow() || target.closest("[data-df-node], [data-df-search], .df-mask")) return;
     openSearch(toGraph(e));
   });
 
   stage.addEventListener(
     "wheel",
     (e) => {
-      if (!flow()) return;
+      if (!flow() || /** @type {HTMLElement} */ (e.target).closest?.(".df-mask")) return;
       e.preventDefault();
       const cam = camera();
       if (e.ctrlKey || e.metaKey) {
@@ -1061,12 +1192,17 @@ export function createDiffuse(host) {
    *  forge wrote into it — opened as a new flow; a PNG with none, said so.
    *  @param {DragEvent} e */
   async function droppedPngs(e) {
-    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => /\.png$/i.test(f.name) || f.type === "image/png");
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(f.name));
     if (!files.length) return;
     e.preventDefault();
     const none = [];
+    // Dropped on a Load Image: its picture. Elsewhere on the graph: a Load
+    // Image of it there.
+    const card = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest?.("[data-df-node]"));
+    const onto = card ? flow()?.nodes.find((n) => n.id === card.dataset.dfNode && kindOf(n.type)?.inputs.some((i) => i.kind === "upload")) : null;
+    const point = stageView === "graph" && flow() ? toGraph(e) : undefined;
     for (const file of files) {
-      const text = pngText(new Uint8Array(await file.arrayBuffer()));
+      const text = /\.png$/i.test(file.name) || file.type === "image/png" ? pngText(new Uint8Array(await file.arrayBuffer())) : null;
       let graph = null;
       try {
         const read = text ? JSON.parse(text) : null;
@@ -1074,13 +1210,21 @@ export function createDiffuse(host) {
       } catch {
         graph = null;
       }
-      if (graph && Array.isArray(graph.nodes) && Array.isArray(graph.links)) {
+      if (graph && Array.isArray(graph.nodes) && Array.isArray(graph.links) && !onto) {
         send({ type: "diffuseOpenGraph", name: file.name, graph });
         setView("graph");
+      } else if (flow() && stageView === "graph") {
+        try {
+          const rel = await keepPicture(file);
+          const target = onto ? { node: onto.id, field: kindOf(onto.type)?.inputs.find((i) => i.kind === "upload")?.name ?? "image" } : null;
+          usePicture(rel, target, point ? [point[0] - NODE_W / 2, point[1] - HEAD / 2] : undefined);
+        } catch (error) {
+          none.push(`${file.name} (${/** @type {Error} */ (error)?.message ?? error})`);
+        }
       } else none.push(file.name);
     }
     if (none.length) {
-      asking = { kind: "note", text: `${none.join(", ")} ${none.length === 1 ? "holds" : "hold"} no graph: only a PNG a flow made on forge has one.` };
+      asking = { kind: "note", text: `${none.join(", ")}: no graph in ${none.length === 1 ? "it" : "them"}. Open a flow and drop a picture on the graph to use it as an input.` };
       renderAsk();
     }
   }
@@ -1195,6 +1339,24 @@ export function createDiffuse(host) {
       setView("gallery");
       return setPanel("inspector");
     }
+    const pickInput = at("[data-df-pick-input]");
+    const one = [...chosen][0];
+    if (pickInput && one) {
+      pickingInput = { node: one, field: pickInput.dataset.dfPickInput ?? "image" };
+      return setView("gallery");
+    }
+    const maskButton = at("[data-df-mask]");
+    if (maskButton) return void paintMask(maskButton.dataset.dfMask ?? "image");
+    const useInput = at("[data-df-use-input]");
+    if (useInput) {
+      const target = pickingInput;
+      pickingInput = null;
+      setView("graph");
+      usePicture(useInput.dataset.dfUseInput ?? "", target);
+      return;
+    }
+    const sendTo = at("[data-df-send]");
+    if (sendTo && picked) return send({ type: "diffuseSend", path: picked, to: sendTo.dataset.dfSend });
     const openImage = at("[data-df-open-image]");
     if (openImage) {
       send({ type: "diffuseOpenImage", path: openImage.dataset.dfOpenImage });
@@ -1229,7 +1391,6 @@ export function createDiffuse(host) {
       return;
     }
     const seed = at("[data-df-seed]");
-    const one = [...chosen][0];
     if (seed && one) return edit([{ op: "seed", id: one, mode: /** @type {any} */ (seed.dataset.dfSeed) }]);
     const reseed = at("[data-df-reseed]");
     if (reseed && one) return edit([{ op: "set", id: one, name: reseed.dataset.dfReseed ?? "seed", value: newSeed() }]);
@@ -1281,6 +1442,18 @@ export function createDiffuse(host) {
   ws.addEventListener("change", (e) => {
     const el = /** @type {HTMLInputElement} */ (e.target);
     const one = [...chosen][0];
+    if (el.dataset.dfUploadFile && one && el.files?.[0]) {
+      const field = el.dataset.dfUploadFile;
+      const file = el.files[0];
+      void keepPicture(file).then(
+        (rel) => usePicture(rel, { node: one, field }),
+        (error) => {
+          asking = { kind: "note", text: `${file.name} could not be kept: ${error?.message ?? error}` };
+          renderAsk();
+        },
+      );
+      return;
+    }
     if (el.dataset.dfSet && one) {
       const kind = el.dataset.kind;
       const raw = el.value;
@@ -1377,6 +1550,8 @@ export function createDiffuse(host) {
   /** A key, when Diffuse is on screen: whether it was taken. @param {KeyboardEvent} e */
   function key(e) {
     const target = /** @type {HTMLElement} */ (e.target);
+    // The mask sheet's keys are its own: ⌫ there must not take a node away.
+    if (target.closest?.(".df-mask")) return false;
     const typing = target.closest?.("input, textarea, select, [contenteditable]");
     const mod = e.metaKey || e.ctrlKey;
     if (mod && !e.altKey && e.key.toLowerCase() === "s") {

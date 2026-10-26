@@ -57,7 +57,7 @@ const pick = () => ({type: 'picker', kind: 'files', title: 'Find files', query,
 window.__TAURI__ = {
   event: {listen: async (_, callback) => { window.pushBatch = payload => callback({payload}); window.pushEvents = events => callback({payload: window.makeBatch(events)}); return () => {}; }},
   window: {getCurrentWindow: () => ({close() {}, minimize() {}, toggleMaximize() {}, startDragging() {}})},
-  core: {invoke: async (name, args = {}) => {
+  core: {invoke: async (name, args = {}, options = {}) => {
     const {command} = args;
     if (name !== 'dispatch') (window.invokes ??= []).push({name, args});
     if (name === 'backdrop') return 'vibrancy';
@@ -83,6 +83,13 @@ window.__TAURI__ = {
     if (name === 'copy_text') { window.clipboardText = args?.text ?? null; return null; }
     if (name === 'copy_raster_image') return true;
     // The open game's images: the fixture game's, from the server.
+    // A picture written into Diffuse's folder: kept for the test to read.
+    if (name === 'put_diffuse_file') {
+      const path = options.headers?.['x-proton-path'];
+      (window.diffusePuts ??= []).push({path, bytes: args});
+      (window.diffuseFiles ??= {})[path] = args.buffer.slice(args.byteOffset, args.byteOffset + args.byteLength);
+      return path;
+    }
     // An image Diffuse shows, as a test's stand-in core holds it.
     if (name === 'read_diffuse') {
       const bytes = window.diffuseFiles?.[args.path];

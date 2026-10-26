@@ -11,6 +11,7 @@ export interface NativeApi {
     invoke(name: 'read_diffuse', args: {path: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'read_raster', args: {generation: number, layer: number, tiles: number[]}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'put_raster_blob', body: Uint8Array): Promise<number>;
+    invoke(name: 'put_diffuse_file', body: Uint8Array, options: {headers: Record<string, string>}): Promise<string>;
     invoke(name: 'paste_raster_image'): Promise<number | null>;
     invoke(name: 'paste_text'): Promise<string | null>;
     invoke(name: 'copy_text', args: {text: string}): Promise<void>;
