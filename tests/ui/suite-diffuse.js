@@ -496,4 +496,53 @@ export async function diffuseChecks({test, assert, win, doc, $, settle, shown}) 
     input.textContent = '';
     ws().querySelector('[data-df-panel="inspector"]').click(); await settle();
   });
+
+  await test('A sealed Diffuse is locked until Touch ID or the password, asked for on arrival; its Gallery asks each time and shuts when left', async () => {
+    const sync = core.sync();
+    const unlocked = sync.find((/** @type {any} */ e) => e.type === 'diffuseView');
+    const lockedView = {type: 'diffuseView', view: {...unlocked.view, flows: [], open: [], shown: null, locked: true}};
+    const image = {path: 'outputs/lighthouse/image_0007.png', folder: 'outputs/lighthouse', madeAt: 7, width: 1024, height: 1024, graph: true, made: {seed: 7}};
+    /** @type {any} */
+    let answerWith = new Error('not unlocked: cancelled');
+    win.diffuseUnlock = () => answerWith;
+    win.diffuseUnlocks = [];
+    ws().querySelector('[data-df-view="graph"]').click(); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+    await win.pushEvents([lockedView, {type: 'diffuseGallery', images: [], locked: true}]); await settle();
+    // Coming here asks once; a cancel leaves the lock, saying nothing wrong.
+    await win.dispatch({type: 'setMode', mode: 'diffuse'}); await settle(); await settle();
+    const lock = ws().querySelector('[data-df-lock]');
+    assert(JSON.stringify(win.diffuseUnlocks) === '[false]', `coming to Diffuse asked ${JSON.stringify(win.diffuseUnlocks)}`);
+    assert(shown(lock) && lock.textContent.includes('Diffuse is locked') && !lock.querySelector('.df-lock-said'), 'the lock is not shown, or a cancel was reported');
+    assert(!ws().querySelector('[data-df-side-body]').textContent.includes('lighthouse.flow.json'), 'a locked Diffuse lists its flows');
+    // A refusal is said in the shell's words.
+    answerWith = new Error('the key in your keychain does not open lighthouse.flow.json.sealed');
+    lock.querySelector('[data-df-unlock]').click(); await settle(); await settle();
+    assert(lock.querySelector('.df-lock-said')?.textContent.includes('does not open'), 'why it did not unlock is not said');
+    // Unlocked: the lock goes and the flows are there.
+    answerWith = [...sync.filter((/** @type {any} */ e) => e.type !== 'diffuseGallery'), {type: 'diffuseGallery', images: [], locked: true}];
+    lock.querySelector('[data-df-unlock]').click(); await settle(); await settle();
+    assert(!shown(lock) && JSON.stringify(win.diffuseUnlocks) === '[false,false,false]', `still locked after unlocking (${JSON.stringify(win.diffuseUnlocks)})`);
+    // The Gallery: asked for each time it is shown, its images only then.
+    answerWith = [{type: 'diffuseGallery', images: [image], locked: false}];
+    let before = win.commands.length;
+    ws().querySelector('[data-df-view="gallery"]').click(); await settle(); await settle();
+    assert(win.diffuseUnlocks.at(-1) === true, 'opening the Gallery did not ask');
+    assert(ws().querySelectorAll('[data-df-pick-image]').length === 1, 'the unlocked Gallery shows no image');
+    // Left: shut, its images let go, and asked for again on coming back.
+    ws().querySelector('[data-df-view="graph"]').click(); await settle();
+    assert(sent(before, 'diffuseGalleryLock').length === 1 && !ws().querySelector('[data-df-pick-image]'), 'leaving the Gallery did not shut it');
+    await win.pushEvents([{type: 'diffuseGallery', images: [], locked: true}]); await settle();
+    answerWith = new Error('not unlocked: cancelled');
+    ws().querySelector('[data-df-view="gallery"]').click(); await settle(); await settle();
+    assert(win.diffuseUnlocks.length === 5 && ws().querySelector('[data-df-unlock-gallery]') && !ws().querySelector('[data-df-pick-image]'), 'the Gallery opened without asking again');
+    // Leaving Diffuse from the Gallery shuts it too.
+    before = win.commands.length;
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+    assert(sent(before, 'diffuseGalleryLock').length === 1, 'leaving Diffuse did not shut the Gallery');
+    await win.dispatch({type: 'setMode', mode: 'diffuse'}); await settle(); await settle();
+    ws().querySelector('[data-df-view="graph"]').click(); await settle();
+    await win.pushEvents([{type: 'diffuseGallery', images: [], locked: false}]); await settle();
+    win.diffuseUnlock = undefined;
+  });
 }

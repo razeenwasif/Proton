@@ -5985,6 +5985,17 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .df-tile-said span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .df-empty-note { display: grid; place-content: center; gap: 6px; min-height: 60%; text-align: center; color: var(--df-soft); font: var(--z-xs) var(--sans); }
 .df-empty-note p { margin: 0; }
+/* Sealed: the whole mode under a card until Touch ID or the password; the
+   Gallery behind one of its own each time it is shown. */
+.workspace[data-ws="diffuse"] { position: relative; }
+.df-lock { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: var(--bg-deep); }
+.df-lock[hidden] { display: none; }
+.df-lock-card { display: grid; justify-items: center; gap: 10px; max-width: 340px; padding: 28px; text-align: center; color: var(--df-soft); font: var(--z-xs) var(--sans); }
+.df-lock-card h2 { margin: 0; font: 600 15px var(--sans); color: var(--text); }
+.df-lock-card p { margin: 0; line-height: 1.5; }
+.df-lock-icon { width: 34px; height: 34px; fill: none; stroke: var(--df-soft); stroke-width: 1.4; }
+.df-lock-said { color: var(--red, #ff6767); }
+.df-gallery-locked { max-width: 360px; margin: 0 auto; }
 .df-big { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: var(--df-well); }
 .df-mono { font-family: var(--zed); font-size: 13px; }
 .df-made { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 4px 10px; padding: 10px 14px; font-size: 12px; color: var(--text); }

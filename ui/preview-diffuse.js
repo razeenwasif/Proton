@@ -204,6 +204,11 @@ export function createDiffusePreview(deliver) {
       kept.set(path, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
       return path;
     },
+    /** Diffuse unlocked: the preview seals nothing, so there is nothing to
+     *  tell. @param {boolean} _gallery @returns {any[]} */
+    unlock(_gallery) {
+      return [];
+    },
     /** An output's picture, as the shell would read it. @param {string} path */
     async file(path) {
       const own = kept.get(path);

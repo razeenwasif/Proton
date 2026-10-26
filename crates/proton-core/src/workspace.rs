@@ -1598,6 +1598,8 @@ impl Workspace {
             | Command::DiffuseRun { .. }
             | Command::DiffuseCancel { .. }
             | Command::DiffuseGallery
+            | Command::DiffuseGalleryLock
+            | Command::DiffuseLock
             | Command::DiffuseDelete { .. }
             | Command::DiffuseDeleteImages { .. }
             | Command::DiffuseOpenImage { .. }

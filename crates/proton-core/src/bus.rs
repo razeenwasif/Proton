@@ -1471,6 +1471,12 @@ pub enum Command {
     DiffuseCancel { id: u32 },
     /// The project's outputs, listed again.
     DiffuseGallery,
+    /// The Gallery was left: its images are locked again, and unlocked only
+    /// by the person's Touch ID or password (the shell's `unlock_diffuse`).
+    DiffuseGalleryLock,
+    /// Lock Diffuse: its key let go, its flows closed — refused while one
+    /// has changes not saved.
+    DiffuseLock,
     /// Keep Diffuse's flows and images in another folder — `~` allowed; none
     /// puts them back in `~/Diffuse`.
     DiffuseFolder {
@@ -2776,8 +2782,9 @@ pub enum Event {
     /// The runs this session, newest first: each node's state, the step at
     /// work and its preview, the images saved.
     DiffuseRuns { runs: Vec<crate::diffuse::DiffuseRun> },
-    /// The project's outputs, newest first, with what made each.
-    DiffuseGallery { images: Vec<crate::diffuse::DiffuseImage> },
+    /// The project's outputs, newest first, with what made each — none while
+    /// the Gallery is `locked`.
+    DiffuseGallery { images: Vec<crate::diffuse::DiffuseImage>, locked: bool },
     /// The cut Video mode is showing, and the captions beside it.
     ///
     /// `Cut` rather than `Timeline`, because the timeline is the widget and

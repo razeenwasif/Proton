@@ -25,3 +25,6 @@ window-vibrancy = "0.8.0"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 block2 = "0.6"
+# The keychain, where Diffuse's key is kept (`vault.rs`): already in the tree
+# through the platform verifier.
+security-framework = "3"

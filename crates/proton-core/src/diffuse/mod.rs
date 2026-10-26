@@ -21,6 +21,8 @@ use std::time::Instant;
 
 use proton_diffuse::client::NodeState;
 use proton_diffuse::png::Made;
+use proton_diffuse::seal;
+pub use proton_diffuse::seal::{read as read_sealed, Seal};
 use proton_diffuse::{Catalogue, Client, Event as RunEvent, Flow, FlowDoc, Health, Key, Known, Op, Problem, SeedMode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -122,6 +124,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::DiffuseRun { .. }
             | Command::DiffuseCancel { .. }
             | Command::DiffuseGallery
+            | Command::DiffuseGalleryLock
+            | Command::DiffuseLock
             | Command::DiffuseDelete { .. }
             | Command::DiffuseDeleteImages { .. }
             | Command::DiffuseOpenImage { .. }
@@ -176,6 +180,9 @@ pub struct DiffuseView {
     pub added: Vec<String>,
     /// The starters a new flow can begin from.
     pub starters: Vec<DiffuseStarter>,
+    /// Whether Diffuse is locked: its files sealed and its key not given yet,
+    /// so nothing of them is shown.
+    pub locked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -223,6 +230,14 @@ pub struct Diffuse {
     /// The gallery's images, by path, with when each was written: its head
     /// is read again only when the file changes.
     gallery: BTreeMap<String, (std::time::SystemTime, DiffuseImage)>,
+    /// Whether Diffuse's files are sealed on disk: the app's are; a test's
+    /// need not be.
+    sealing: bool,
+    /// The key they are sealed with, once the person has unlocked Diffuse.
+    seal: Option<Seal>,
+    /// Whether the Gallery is open: unlocked each time it is shown, locked
+    /// again when it is left.
+    gallery_open: bool,
 }
 
 impl Diffuse {
@@ -239,6 +254,87 @@ impl Diffuse {
     /// Where the person's own settings are, for the gateway's addresses.
     pub fn set_person(&mut self, file: Option<PathBuf>) {
         self.person = file;
+    }
+
+    /// Seal Diffuse's files on disk: locked until the person gives the key.
+    pub fn seal_files(&mut self) {
+        self.sealing = true;
+    }
+
+    /// Whether anything in the folder is sealed already: a key made now
+    /// would not open it.
+    pub fn has_sealed(&self, root: &Path) -> bool {
+        first_sealed(root).is_some()
+    }
+
+    /// Whether Diffuse waits for its key.
+    pub fn locked(&self) -> bool {
+        self.sealing && self.seal.is_none()
+    }
+
+    /// Whether the Gallery's images are kept from the window.
+    fn gallery_locked(&self) -> bool {
+        self.sealing && (self.seal.is_none() || !self.gallery_open)
+    }
+
+    /// The person unlocked Diffuse — and the Gallery, with `gallery` — with
+    /// their Touch ID or password, and the shell gave the key their keychain
+    /// keeps. A key that does not open what is sealed here is refused. What
+    /// is still plain in the folder is sealed then, its plain file moved to
+    /// the Trash once its sealed one has been read back.
+    pub fn unlock(&mut self, root: &Path, key: Seal, gallery: bool) -> Result<Vec<Event>, String> {
+        if let Some(had) = &self.seal {
+            if !had.same(&key) {
+                return Err("that is not the key Diffuse's files are sealed with".into());
+            }
+        }
+        if let Some(sample) = first_sealed(root) {
+            let bytes = std::fs::read(&sample).map_err(|e| format!("{}: {e}", sample.display()))?;
+            key.open(&bytes).map_err(|_| {
+                format!(
+                    "the key in your keychain does not open {}: it was sealed with another one",
+                    sample.strip_prefix(root).unwrap_or(&sample).display()
+                )
+            })?;
+        }
+        self.sealing = true;
+        self.seal = Some(key.clone());
+        if gallery {
+            self.gallery_open = true;
+        }
+        let mut events = Vec::new();
+        let (sealed, failed) = seal_all(root, &key);
+        if sealed > 0 {
+            events.push(notice(
+                format!(
+                    "Sealed {sealed} file{} in Diffuse's folder; the plain ones are in the Trash — empty it to be rid of them.",
+                    if sealed == 1 { "" } else { "s" }
+                ),
+                NoticeLevel::Info,
+            ));
+        }
+        if let Some(first) = failed.first() {
+            events.push(notice(format!("{} could not be sealed: {first}", failed.len()), NoticeLevel::Warn));
+        }
+        events.extend(self.events(root));
+        Ok(events)
+    }
+
+    /// Lock Diffuse: its key let go, its flows closed, the Gallery shut —
+    /// not while a flow has changes, which would be lost.
+    fn lock(&mut self, root: &Path) -> Vec<Event> {
+        if let Some(first) = self.unsaved().first() {
+            return vec![notice(
+                format!("save or discard {first}'s changes before locking Diffuse"),
+                NoticeLevel::Warn,
+            )];
+        }
+        self.seal = None;
+        self.gallery_open = false;
+        self.open.clear();
+        self.shown = None;
+        self.gallery.clear();
+        self.events(root)
     }
 
     /// The mode came on screen: what the project kept of forge, if nothing
@@ -262,10 +358,30 @@ impl Diffuse {
     }
 
     pub fn apply(&mut self, root: &Path, command: Command) -> Vec<Event> {
+        let anyway = matches!(
+            command,
+            Command::DiffuseLook { .. }
+                | Command::DiffuseGateways { .. }
+                | Command::DiffuseGallery
+                | Command::DiffuseGalleryLock
+                | Command::DiffuseLock
+        );
+        if self.locked() && !anyway {
+            return vec![
+                notice("Diffuse is locked: unlock it with Touch ID or your password".into(), NoticeLevel::Warn),
+                self.view_event(root, Vec::new()),
+            ];
+        }
         match command {
+            Command::DiffuseGalleryLock => {
+                self.gallery_open = false;
+                vec![self.gallery_event(root)]
+            }
+            Command::DiffuseLock => self.lock(root),
             Command::DiffuseOpen { path } => {
                 if self.open.iter().all(|(rel, _)| rel != &path) {
-                    let doc = match inside(root, &path).and_then(|file| FlowDoc::read(&file)) {
+                    let doc = match inside(root, &path).and_then(|file| FlowDoc::read_sealed(&file, self.seal.as_ref()))
+                    {
                         Ok(doc) => doc,
                         Err(why) => return vec![notice(why, NoticeLevel::Error)],
                     };
@@ -291,7 +407,7 @@ impl Diffuse {
                     Ok(file) => file,
                     Err(why) => return vec![notice(why, NoticeLevel::Error)],
                 };
-                if file.exists() {
+                if seal::exists(&file) {
                     return vec![notice(format!("{rel} is already here"), NoticeLevel::Warn)];
                 }
                 let mut flow = Flow::default();
@@ -303,7 +419,7 @@ impl Diffuse {
                         return vec![notice(format!("the starter needs forge's nodes: {why}"), NoticeLevel::Warn)];
                     }
                 }
-                let mut doc = FlowDoc::fresh(&file, flow);
+                let mut doc = FlowDoc::fresh(&file, flow).sealed_with(self.seal.clone());
                 if let Err(why) = doc.save() {
                     return vec![notice(why, NoticeLevel::Error)];
                 }
@@ -345,9 +461,17 @@ impl Diffuse {
                 vec![self.view_event(root, Vec::new())]
             }
             Command::DiffuseSave => {
+                let sealed = self.seal.is_some();
                 let Some(doc) = self.shown_mut() else { return Vec::new() };
                 match doc.save() {
-                    Ok(()) => vec![self.view_event(root, Vec::new())],
+                    Ok(()) => {
+                        // A plain copy left beside the sealed one goes.
+                        let plain = doc.path().to_path_buf();
+                        if sealed && plain.is_file() {
+                            let _ = to_trash(&[plain]);
+                        }
+                        vec![self.view_event(root, Vec::new())]
+                    }
                     Err(why) => vec![notice(why, NoticeLevel::Error)],
                 }
             }
@@ -397,11 +521,12 @@ impl Diffuse {
             }
             Command::DiffuseGallery => vec![self.gallery_event(root)],
             Command::DiffuseOpenImage { path } => {
-                let Some(file) = self.file(root, &path) else {
-                    return vec![notice(format!("{path} is not an image Diffuse may open"), NoticeLevel::Warn)];
+                let bytes = match self.image(root, &path) {
+                    Some(Ok(bytes)) => bytes,
+                    Some(Err(why)) => return vec![notice(why, NoticeLevel::Warn)],
+                    None => return vec![notice(format!("{path} is not an image Diffuse may open"), NoticeLevel::Warn)],
                 };
-                let read =
-                    std::fs::File::open(&file).ok().and_then(|f| proton_diffuse::png::head(std::io::BufReader::new(f)));
+                let read = proton_diffuse::png::head(&bytes[..]);
                 let Some(graph) = read.and_then(|head| head.flow).as_deref().and_then(proton_diffuse::png::graph_of)
                 else {
                     return vec![notice(
@@ -421,7 +546,9 @@ impl Diffuse {
                     Ok(file) => file,
                     Err(why) => return vec![notice(why, NoticeLevel::Error)],
                 };
-                if let Err(why) = to_trash(&[file]) {
+                let files: Vec<PathBuf> =
+                    [seal::sealed_path(&file), file].into_iter().filter(|f| f.is_file()).collect();
+                if let Err(why) = to_trash(&files) {
                     return vec![notice(why, NoticeLevel::Error)];
                 }
                 self.open.retain(|(rel, _)| rel != &path);
@@ -438,7 +565,9 @@ impl Diffuse {
                 let mut files = Vec::new();
                 for rel in &paths {
                     match self.listed(root, rel) {
-                        Some(file) => files.push(file),
+                        Some(file) => {
+                            files.extend([seal::sealed_path(&file), file].into_iter().filter(|f| f.is_file()))
+                        }
                         None => {
                             return vec![notice(format!("{rel} is not an image Diffuse may delete"), NoticeLevel::Warn)]
                         }
@@ -590,6 +719,7 @@ impl Diffuse {
                 saves,
                 inputs,
                 control,
+                seal: self.seal.clone(),
             },
             tell,
         );
@@ -632,7 +762,7 @@ impl Diffuse {
             .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
             .collect();
         let stem = if stem.trim_matches('-').is_empty() { "flow".to_string() } else { stem };
-        let taken = |rel: &str| root.join(rel).exists() || self.open.iter().any(|(r, _)| r == rel);
+        let taken = |rel: &str| seal::exists(&root.join(rel)) || self.open.iter().any(|(r, _)| r == rel);
         let mut rel = format!("{stem}{EXTENSION}");
         let mut n = 2;
         while taken(&rel) {
@@ -647,7 +777,7 @@ impl Diffuse {
             Err(why) => return vec![notice(why, NoticeLevel::Error)],
         };
         let flow = proton_diffuse::layout::flow_from_graph(graph, &self.catalogue());
-        self.open.push((rel.clone(), FlowDoc::fresh(&file, flow)));
+        self.open.push((rel.clone(), FlowDoc::fresh(&file, flow).sealed_with(self.seal.clone())));
         self.shown = Some(rel.clone());
         vec![
             notice(format!("Opened its graph as {rel} — ⌘S keeps it."), NoticeLevel::Info),
@@ -801,6 +931,9 @@ impl Diffuse {
     /// The project's outputs, newest first: `outputs/` and each open flow's
     /// own folder, three deep, each PNG's head read once until it changes.
     pub fn gallery_event(&mut self, root: &Path) -> Event {
+        if self.gallery_locked() {
+            return Event::DiffuseGallery { images: Vec::new(), locked: true };
+        }
         let mut folders = vec!["outputs".to_string()];
         for (_, doc) in &self.open {
             if let Some(own) = &doc.get().outputs {
@@ -826,19 +959,22 @@ impl Diffuse {
                         }
                         continue;
                     }
-                    if !name.to_ascii_lowercase().ends_with(".png") {
+                    // A sealed image stands for the plain one it holds.
+                    let plain = seal::plain_name(&name).unwrap_or(&name);
+                    if !plain.to_ascii_lowercase().ends_with(".png") {
                         continue;
                     }
                     let Ok(meta) = entry.metadata() else { continue };
                     let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                    let logical = path.with_file_name(plain);
                     let rel =
-                        path.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
-                    let image = match self.gallery.get(&rel) {
+                        logical.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+                    let image = match self.gallery.get(&rel).or_else(|| seen.get(&rel)) {
                         Some((when, image)) if *when == modified => image.clone(),
                         _ => {
-                            let Some(head) = std::fs::File::open(&path)
+                            let Some(head) = seal::read(&logical, self.seal.as_ref())
                                 .ok()
-                                .and_then(|f| proton_diffuse::png::head(std::io::BufReader::new(f)))
+                                .and_then(|bytes| proton_diffuse::png::head(&bytes[..]))
                             else {
                                 continue;
                             };
@@ -865,19 +1001,42 @@ impl Diffuse {
         let mut images: Vec<DiffuseImage> = self.gallery.values().map(|(_, image)| image.clone()).collect();
         images.sort_by(|a, b| b.made_at.cmp(&a.made_at).then(b.path.cmp(&a.path)));
         images.truncate(GALLERY);
-        Event::DiffuseGallery { images }
+        Event::DiffuseGallery { images, locked: false }
     }
 
-    /// An image the window may read: one in the gallery, or one a run made.
+    /// A picture in Diffuse's folder, by the plain name it is known by —
+    /// outputs, inputs and masks are all its own — sealed or not.
     pub fn file(&self, root: &Path, rel: &str) -> Option<PathBuf> {
-        // Any picture in Diffuse's folder: outputs, inputs and masks are all
-        // its own.
-        if !rel.to_ascii_lowercase().ends_with(".png") {
+        if !rel.to_ascii_lowercase().ends_with(".png") || rel.contains("..") {
             return None;
         }
         let path = root.join(rel);
+        let on_disk = if seal::sealed_path(&path).is_file() { seal::sealed_path(&path) } else { path.clone() };
         let base = std::fs::canonicalize(root).ok()?;
-        std::fs::canonicalize(&path).ok().filter(|real| real.starts_with(&base))
+        std::fs::canonicalize(&on_disk).ok().filter(|real| real.starts_with(&base)).map(|_| path)
+    }
+
+    /// Where a picture the window asks for is, and the key to read it with —
+    /// once Diffuse is unlocked; an older output only while the Gallery is
+    /// open, while this session's runs' images, pictures and masks show
+    /// beside their flows.
+    pub fn reader(&self, root: &Path, rel: &str) -> Option<(PathBuf, Option<Seal>)> {
+        if self.locked() {
+            return None;
+        }
+        let shown_anyway = rel.starts_with("inputs/")
+            || rel.ends_with(".mask.png")
+            || self.runs.iter().any(|r| r.outputs.iter().any(|o| o.path == rel));
+        if self.gallery_locked() && !shown_anyway {
+            return None;
+        }
+        Some((self.file(root, rel)?, self.seal.clone()))
+    }
+
+    /// A picture's bytes, as `reader` allows them.
+    pub fn image(&self, root: &Path, rel: &str) -> Option<Result<Vec<u8>, String>> {
+        let (path, key) = self.reader(root, rel)?;
+        Some(seal::read(&path, key.as_ref()))
     }
 
     /// An image Diffuse may move to the Trash: one the gallery or a run listed.
@@ -905,7 +1064,7 @@ impl Diffuse {
         if input {
             let stem = rel.trim_end_matches(".png").to_string();
             let mut n = 2;
-            while let Ok(there) = std::fs::read(root.join(&rel)) {
+            while let Ok(there) = seal::read(&root.join(&rel), self.seal.as_ref()) {
                 if there == bytes {
                     return Ok(rel);
                 }
@@ -918,7 +1077,7 @@ impl Diffuse {
         if !std::fs::canonicalize(path.parent().unwrap_or(root)).unwrap_or(base.clone()).starts_with(&base) {
             return Err(format!("{rel} leads outside Diffuse's folder"));
         }
-        proton_diffuse::doc::write_atomically(&path, bytes).map_err(|e| format!("{rel}: {e}"))?;
+        seal::write(&path, bytes, self.seal.as_ref()).map_err(|e| format!("{rel}: {e}"))?;
         Ok(rel)
     }
 
@@ -941,7 +1100,7 @@ impl Diffuse {
             for field in kind.fields().filter(|f| f.kind() == proton_diffuse::Kind::Upload) {
                 let Some(rel) = node.values.get(&field.name).and_then(serde_json::Value::as_str) else { continue };
                 let file = root.join(rel);
-                if !file.is_file() {
+                if !seal::exists(&file) {
                     return Err(format!("{rel} is not in Diffuse's folder: choose the picture again"));
                 }
                 let mask = root.join(Self::mask_of(path, &node.id));
@@ -949,7 +1108,7 @@ impl Diffuse {
                     node: node.id.clone(),
                     field: field.name.clone(),
                     file,
-                    mask: mask.is_file().then_some(mask),
+                    mask: seal::exists(&mask).then_some(mask),
                 });
             }
         }
@@ -1007,7 +1166,7 @@ impl Diffuse {
                         let Some(kind) = catalogue.node(&node.kind) else { continue };
                         for field in kind.fields().filter(|f| f.kind() == proton_diffuse::Kind::Upload) {
                             if let Some(rel) = node.values.get(&field.name).and_then(serde_json::Value::as_str) {
-                                if !root.join(rel).is_file() {
+                                if !seal::exists(&root.join(rel)) {
                                     found.push(Problem {
                                         node: Some(node.id.clone()),
                                         input: Some(field.name.clone()),
@@ -1044,8 +1203,29 @@ impl Diffuse {
                 about: about.to_string(),
             })
             .collect();
+        if self.locked() {
+            return Event::DiffuseView {
+                view: DiffuseView {
+                    folder: crate::folder::tilde(root),
+                    flows: Vec::new(),
+                    open: Vec::new(),
+                    shown: None,
+                    added: Vec::new(),
+                    starters,
+                    locked: true,
+                },
+            };
+        }
         Event::DiffuseView {
-            view: DiffuseView { folder: crate::folder::tilde(root), flows: find(root), open, shown, added, starters },
+            view: DiffuseView {
+                folder: crate::folder::tilde(root),
+                flows: find(root),
+                open,
+                shown,
+                added,
+                starters,
+                locked: false,
+            },
         }
     }
 }
@@ -1130,13 +1310,105 @@ fn find(root: &Path) -> Vec<String> {
                 if depth < 3 {
                     stack.push((path, depth + 1));
                 }
-            } else if name.ends_with(EXTENSION) {
-                out.push(path.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default());
+            } else if seal::plain_name(&name).unwrap_or(&name).ends_with(EXTENSION) {
+                // A sealed flow is listed by its plain name.
+                let plain = path.with_file_name(seal::plain_name(&name).unwrap_or(&name));
+                out.push(plain.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default());
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// What Diffuse seals: its flows, and its pictures — outputs, inputs, masks
+/// and previews — wherever they are in its folder, but not what forge
+/// served last, which is forge's and holds nothing of the person's.
+fn sealable(rel: &Path) -> bool {
+    let name = rel.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if seal::plain_name(&name).is_some() {
+        return false;
+    }
+    let previews = rel.starts_with(Path::new(".proton/diffuse/previews"));
+    let hidden = rel.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'));
+    (name.ends_with(EXTENSION) || name.ends_with(".png")) && (previews || !hidden)
+}
+
+/// The files in Diffuse's folder, five folders down, as `keep` chooses them.
+fn files_in(root: &Path, keep: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
+    const SKIP: &[&str] = &["node_modules", "target"];
+    let mut out = Vec::new();
+    let mut stack = vec![(root.to_path_buf(), 0u32)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            // Links are not followed: a sealed file is never written outside.
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() {
+                if depth < 5 {
+                    stack.push((path, depth + 1));
+                }
+            } else if kind.is_file() && path.strip_prefix(root).is_ok_and(&keep) {
+                out.push(path);
             }
         }
     }
     out.sort();
     out
+}
+
+/// A sealed file in the folder, to try a key on.
+fn first_sealed(root: &Path) -> Option<PathBuf> {
+    files_in(root, |rel| rel.file_name().is_some_and(|n| seal::plain_name(&n.to_string_lossy()).is_some()))
+        .into_iter()
+        .next()
+}
+
+/// Seal every plain flow and picture in the folder: each written sealed,
+/// read back and checked, then its plain file moved to the Trash. How many
+/// were sealed, and what could not be.
+fn seal_all(root: &Path, key: &Seal) -> (usize, Vec<String>) {
+    let mut sealed = Vec::new();
+    let mut failed = Vec::new();
+    for plain in files_in(root, sealable) {
+        let rel = plain.strip_prefix(root).unwrap_or(&plain).display().to_string();
+        let done = (|| -> Result<(), String> {
+            let bytes = std::fs::read(&plain).map_err(|e| e.to_string())?;
+            let twin = seal::sealed_path(&plain);
+            if twin.is_file() {
+                // Sealed before, and plain again since: the newer one is kept.
+                let older = std::fs::metadata(&twin).and_then(|m| m.modified()).ok();
+                let newer = std::fs::metadata(&plain).and_then(|m| m.modified()).ok();
+                if older >= newer {
+                    return Ok(());
+                }
+            }
+            seal::write(&plain, &bytes, Some(key))?;
+            let back = seal::read(&plain, Some(key))?;
+            if back != bytes {
+                let _ = std::fs::remove_file(&twin);
+                return Err("it did not read back the same".into());
+            }
+            Ok(())
+        })();
+        match done {
+            Ok(()) => sealed.push(plain),
+            Err(why) => failed.push(format!("{rel}: {why}")),
+        }
+    }
+    let count = sealed.len();
+    if count > 0 {
+        if let Err(why) = to_trash(&sealed) {
+            failed.push(why);
+        }
+    }
+    (count, failed)
 }
 
 #[cfg(test)]

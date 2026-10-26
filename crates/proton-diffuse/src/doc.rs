@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use crate::catalogue::Catalogue;
 use crate::flow::{Flow, FORMAT};
 use crate::op::{apply, Applied, Op};
+use crate::seal::Seal;
 use crate::text::to_text;
 
 /// How many steps back undo goes.
@@ -26,19 +27,39 @@ pub struct FlowDoc {
     saved: Option<Flow>,
     undo: Vec<Flow>,
     redo: Vec<Flow>,
+    /// What it is sealed with on disk; plain without.
+    seal: Option<Seal>,
 }
 
 impl FlowDoc {
     /// Read the flow at `path`.
     pub fn read(path: &Path) -> Result<FlowDoc, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let value = parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-        Ok(FlowDoc { path: path.to_path_buf(), saved: Some(value.clone()), value, undo: Vec::new(), redo: Vec::new() })
+        FlowDoc::read_sealed(path, None)
+    }
+
+    /// Read the flow `path` names — its sealed file with `seal`, or the plain
+    /// one — and keep it sealed with `seal` when saved.
+    pub fn read_sealed(path: &Path, seal: Option<&Seal>) -> Result<FlowDoc, String> {
+        let value = read_flow(path, seal)?;
+        Ok(FlowDoc {
+            path: path.to_path_buf(),
+            saved: Some(value.clone()),
+            value,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            seal: seal.cloned(),
+        })
     }
 
     /// A flow that exists only in memory until it is saved.
     pub fn fresh(path: &Path, value: Flow) -> FlowDoc {
-        FlowDoc { path: path.to_path_buf(), value, saved: None, undo: Vec::new(), redo: Vec::new() }
+        FlowDoc { path: path.to_path_buf(), value, saved: None, undo: Vec::new(), redo: Vec::new(), seal: None }
+    }
+
+    /// The same flow, saved sealed with `seal` from now on.
+    pub fn sealed_with(mut self, seal: Option<Seal>) -> FlowDoc {
+        self.seal = seal;
+        self
     }
 
     pub fn path(&self) -> &Path {
@@ -107,7 +128,7 @@ impl FlowDoc {
     /// Write it, whole or not at all. Undo survives a save: undoing past it
     /// makes the tab dirty again.
     pub fn save(&mut self) -> Result<(), String> {
-        write_atomically(&self.path, self.text().as_bytes()).map_err(|e| format!("{}: {e}", self.path.display()))?;
+        crate::seal::write(&self.path, self.text().as_bytes(), self.seal.as_ref())?;
         self.saved = Some(self.value.clone());
         Ok(())
     }
@@ -116,8 +137,7 @@ impl FlowDoc {
     /// file says, as a step that can be undone. `Ok(false)` when it says
     /// what the flow already is.
     pub fn reread(&mut self) -> Result<bool, String> {
-        let text = std::fs::read_to_string(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))?;
-        let value = parse(&text).map_err(|e| format!("{}: {e}", self.path.display()))?;
+        let value = read_flow(&self.path, self.seal.as_ref())?;
         if value == self.value {
             self.saved = Some(value);
             return Ok(false);
@@ -126,6 +146,13 @@ impl FlowDoc {
         self.saved = Some(value);
         Ok(true)
     }
+}
+
+/// The flow `path` names, sealed or plain.
+fn read_flow(path: &Path, seal: Option<&Seal>) -> Result<Flow, String> {
+    let bytes = crate::seal::read(path, seal)?;
+    let text = String::from_utf8(bytes).map_err(|_| format!("{}: not text", path.display()))?;
+    parse(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// A flow as its file's text. A flow always serialises, so the error is

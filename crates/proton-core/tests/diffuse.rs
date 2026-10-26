@@ -392,7 +392,7 @@ fn a_flow_runs_on_forge_its_image_saved_and_listed_and_its_seed_moved_on() {
         .iter()
         .rev()
         .find_map(|e| match e {
-            Event::DiffuseGallery { images } => Some(images.clone()),
+            Event::DiffuseGallery { images, .. } => Some(images.clone()),
             _ => None,
         })
         .expect("the gallery, again");
@@ -460,7 +460,7 @@ fn a_flow_and_its_images_go_to_the_trash_and_only_what_the_window_was_shown() {
     assert!(bin.join("image_0001.png").is_file());
     assert!(runs(&gone).unwrap()[0].outputs.is_empty(), "the run still offers the image");
     let gallery = gone.iter().find_map(|e| match e {
-        Event::DiffuseGallery { images } => Some(images.clone()),
+        Event::DiffuseGallery { images, .. } => Some(images.clone()),
         _ => None,
     });
     assert_eq!(gallery.map(|g| g.len()), Some(0));
@@ -921,4 +921,154 @@ fn a_workspaces_agent_hands_its_flow_calls_to_the_session_and_flow_names_whats_o
     space.active_mut().set_flow_about(about);
     let asked = space.active().with_context("make @flow sharper");
     assert!(asked.contains("# @flow") && asked.contains("Flow lighthouse.flow.json (on the person's screen, with changes not saved).") && asked.contains("steps=12"), "{asked}");
+}
+
+/* ── sealed on disk ──────────────────────────────────────────────── */
+
+fn gallery(events: &[Event]) -> Option<(Vec<proton_core::diffuse::DiffuseImage>, bool)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::DiffuseGallery { images, locked } => Some((images.clone(), *locked)),
+        _ => None,
+    })
+}
+
+/// Every file under `root`, by its path in it.
+fn every_file(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                out.push(path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn a_sealed_diffuse_shows_nothing_until_unlocked_then_seals_what_was_plain_and_keeps_its_gallery_shut() {
+    let bin = test_trash();
+    std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
+    let root = kept_project("sealed");
+    // What was there before sealing: a flow, an image with its graph, a
+    // picture, a mask and a preview.
+    let starter = {
+        let mut flow = proton_diffuse::Flow::default();
+        let catalogue = proton_diffuse::Catalogue::parse(CATALOGUE).unwrap();
+        proton_diffuse::op::apply(&mut flow, &proton_diffuse::templates::ops("textToImage").unwrap(), &catalogue).unwrap();
+        proton_diffuse::doc::text(&flow)
+    };
+    std::fs::write(root.join("lighthouse.flow.json"), &starter).unwrap();
+    std::fs::create_dir_all(root.join("outputs/lighthouse")).unwrap();
+    let graph = r#"{"nodes":[{"id":"2","type":"TextEncode","values":{"text":"a secret harbour"}}],"links":[]}"#;
+    let made = forge_png(graph);
+    std::fs::write(root.join("outputs/lighthouse/image_0001.png"), &made).unwrap();
+    std::fs::create_dir_all(root.join("inputs")).unwrap();
+    std::fs::write(root.join("inputs/shore.png"), picture([10, 20, 30])).unwrap();
+    std::fs::write(root.join("lighthouse.4.mask.png"), picture([255, 255, 255])).unwrap();
+    std::fs::create_dir_all(root.join(".proton/diffuse/previews")).unwrap();
+    std::fs::write(root.join(".proton/diffuse/previews/p1.png"), picture([1, 2, 3])).unwrap();
+
+    let mut space = session_in(&root).sealing_diffuse();
+    let events = space.apply(Command::SetMode { mode: ModeId::Diffuse });
+    let seen = view(&events);
+    assert!(seen.locked && seen.flows.is_empty() && seen.shown.is_none(), "{seen:?}");
+    assert!(gallery(&events).unwrap().1, "the gallery is not locked");
+    let refused = space.apply(Command::DiffuseOpen { path: "lighthouse.flow.json".into() });
+    assert!(warned(&refused).unwrap().contains("Diffuse is locked"));
+    assert!(space.diffuse_file("outputs/lighthouse/image_0001.png").is_none());
+    assert!(space.diffuse_file("inputs/shore.png").is_none());
+    let (said, _) = space.flow_tool("flow_info", &json!({}));
+    assert!(matches!(said, proton_core::diffuse::Said::Now(Err(why)) if why.contains("Diffuse is locked")));
+    assert!(space.flow_about().contains("locked"));
+
+    // Unlocked: what was plain is sealed, read back, and its plain file trashed.
+    let key = proton_diffuse::Seal::new([42; 32]);
+    let events = space.unlock_diffuse(key.clone(), false).unwrap();
+    let said = events
+        .iter()
+        .find_map(|e| match e {
+            Event::Notice { text, .. } if text.starts_with("Sealed") => Some(text.clone()),
+            _ => None,
+        })
+        .expect("said what it sealed");
+    assert!(said.starts_with("Sealed 5 files in Diffuse's folder; the plain ones are in the Trash"), "{said}");
+    let files: Vec<String> = every_file(&root).into_iter().filter(|f| !f.starts_with(".proton/diffuse/catalogue")).collect();
+    assert_eq!(
+        files,
+        [
+            ".proton/diffuse/previews/p1.png.sealed",
+            "inputs/shore.png.sealed",
+            "lighthouse.4.mask.png.sealed",
+            "lighthouse.flow.json.sealed",
+            "outputs/lighthouse/image_0001.png.sealed",
+        ]
+    );
+    assert!(bin.join("image_0001.png").is_file() && bin.join("lighthouse.flow.json").is_file());
+    let raw = std::fs::read(root.join("outputs/lighthouse/image_0001.png.sealed")).unwrap();
+    assert!(!raw.windows(14).any(|w| w == b"secret harbour") && !raw.starts_with(b"\x89PNG"), "the image shows through");
+    assert!(!String::from_utf8_lossy(&std::fs::read(root.join("lighthouse.flow.json.sealed")).unwrap()).contains("KSampler"));
+    let seen = view(&events);
+    assert!(!seen.locked && seen.flows == ["lighthouse.flow.json"], "{seen:?}");
+
+    // Diffuse is open, the Gallery not: older outputs are kept from the
+    // window, pictures and masks are not.
+    assert_eq!(gallery(&events).unwrap(), (vec![], true));
+    assert!(space.diffuse_file("outputs/lighthouse/image_0001.png").is_none());
+    let (path, opened) = space.diffuse_reader("inputs/shore.png").unwrap();
+    assert_eq!(proton_diffuse::seal::read(&path, opened.as_ref()).unwrap(), picture([10, 20, 30]));
+    // The Gallery unlocked: listed with what made it, read from its sealed file.
+    let events = space.unlock_diffuse(key.clone(), true).unwrap();
+    let (images, locked) = gallery(&events).unwrap();
+    assert!(!locked && images.len() == 1 && images[0].path == "outputs/lighthouse/image_0001.png");
+    assert!(images[0].graph && images[0].width == 1024, "its head was not read through the seal: {:?}", images[0]);
+    let (path, opened) = space.diffuse_reader("outputs/lighthouse/image_0001.png").unwrap();
+    assert_eq!(proton_diffuse::seal::read(&path, opened.as_ref()).unwrap(), made);
+    // Left, and shut again.
+    assert_eq!(gallery(&space.apply(Command::DiffuseGalleryLock)).unwrap(), (vec![], true));
+    assert!(space.diffuse_file("outputs/lighthouse/image_0001.png").is_none());
+    // Another key is refused.
+    assert!(space.unlock_diffuse(proton_diffuse::Seal::new([7; 32]), true).unwrap_err().contains("not the key"));
+
+    // A flow opened, changed and saved stays sealed; nothing plain is written.
+    let opened = space.apply(Command::DiffuseOpen { path: "lighthouse.flow.json".into() });
+    assert_eq!(view(&opened).shown.unwrap().flow.nodes.len(), 7);
+    space.apply(Command::DiffuseEdit {
+        path: "lighthouse.flow.json".into(),
+        ops: vec![Op::Set { id: "2".into(), name: "text".into(), value: json!("a harbour at dawn") }],
+    });
+    // Not locked while it has changes.
+    assert!(warned(&space.apply(Command::DiffuseLock)).unwrap().contains("before locking"));
+    space.apply(Command::DiffuseSave);
+    assert!(!root.join("lighthouse.flow.json").exists());
+    let reread = proton_diffuse::FlowDoc::read_sealed(&root.join("lighthouse.flow.json"), Some(&key)).unwrap();
+    assert_eq!(reread.get().node("2").unwrap().values["text"], json!("a harbour at dawn"));
+    // A picture handed over is kept sealed.
+    assert_eq!(space.diffuse_put("inputs/dune.png", &picture([200, 180, 90])).unwrap(), "inputs/dune.png");
+    assert!(root.join("inputs/dune.png.sealed").is_file() && !root.join("inputs/dune.png").exists());
+
+    // A run on forge: its image written sealed, and shown — this session's.
+    set_gateway(&root, Some(&serving_gateway()));
+    space.apply(Command::DiffuseLook { again: false });
+    poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
+    space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
+    let heard = poll_until(&mut space, |e| runs(e).is_some_and(|r| r[0].state.ended()));
+    let run = runs(&heard).unwrap().remove(0);
+    assert_eq!(run.state, proton_core::diffuse::RunState::Done, "{run:?}");
+    assert_eq!(run.outputs[0].path, "outputs/lighthouse/image_0002.png");
+    assert!(root.join("outputs/lighthouse/image_0002.png.sealed").is_file() && !root.join("outputs/lighthouse/image_0002.png").exists());
+    let (path, opened) = space.diffuse_reader("outputs/lighthouse/image_0002.png").expect("this session's run is shown");
+    assert!(proton_diffuse::seal::read(&path, opened.as_ref()).unwrap().starts_with(b"\x89PNG"));
+    assert!(space.diffuse_file("outputs/lighthouse/image_0001.png").is_none(), "an older one is the Gallery's");
+
+    // Locked again: nothing shown, and the key let go.
+    let locked = space.apply(Command::DiffuseLock);
+    assert!(view(&locked).locked);
+    assert!(space.diffuse_file("outputs/lighthouse/image_0002.png").is_none());
+    assert!(space.diffuse_locked());
 }

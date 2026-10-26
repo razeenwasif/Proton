@@ -19,7 +19,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use proton_diffuse::client::NodeState;
-use proton_diffuse::{Error as ClientError, Event, Graph};
+use proton_diffuse::{Error as ClientError, Event, Graph, Seal};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -174,6 +174,9 @@ pub(super) struct Job {
     /// and the mask painted over it, if one was.
     pub inputs: Vec<Picture>,
     pub control: Control,
+    /// What the run's images are sealed with on disk, and its pictures read
+    /// with; plain without.
+    pub seal: Option<Seal>,
 }
 
 /// A picture to upload before the graph is sent.
@@ -188,13 +191,13 @@ pub(super) struct Picture {
 /// A picture as forge takes it: the picture, and the mask — white where it
 /// is painted — in its alpha, transparent where masked, as ComfyUI's Load
 /// Image reads one. Without a mask, the file as it is.
-pub(super) fn upload_bytes(picture: &Picture) -> Result<Vec<u8>, String> {
+pub(super) fn upload_bytes(picture: &Picture, seal: Option<&Seal>) -> Result<Vec<u8>, String> {
     let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let bytes = std::fs::read(&picture.file).map_err(|e| format!("{}: {e}", name(&picture.file)))?;
+    let bytes = proton_diffuse::seal::read(&picture.file, seal).map_err(|e| format!("{}: {e}", name(&picture.file)))?;
     let Some(mask) = &picture.mask else { return Ok(bytes) };
     let (w, h, mut rgba) =
         proton_raster::file::decode_png(&bytes).map_err(|e| format!("{}: {e}", name(&picture.file)))?;
-    let read = std::fs::read(mask).map_err(|e| format!("{}: {e}", name(mask)))?;
+    let read = proton_diffuse::seal::read(mask, seal).map_err(|e| format!("{}: {e}", name(mask)))?;
     let (mw, mh, shade) = proton_raster::file::decode_png(&read).map_err(|e| format!("{}: {e}", name(mask)))?;
     if (mw, mh) != (w, h) {
         return Err(format!("the mask is {mw} × {mh} and the picture {w} × {h}: paint the mask again"));
@@ -232,7 +235,7 @@ fn follow(job: &Job, tell: &Sender<News>) -> Result<(), String> {
     // file of its own and the run sends it, its mask in its alpha.
     let mut graph = job.graph.clone();
     for picture in &job.inputs {
-        let bytes = upload_bytes(picture)?;
+        let bytes = upload_bytes(picture, job.seal.as_ref())?;
         let upload = client.upload(&bytes).map_err(|e| e.describe())?;
         if let Some(node) = graph.nodes.iter_mut().find(|n| n.id == picture.node) {
             node.values.insert(picture.field.clone(), serde_json::Value::String(upload.id));
@@ -295,7 +298,7 @@ fn follow(job: &Job, tell: &Sender<News>) -> Result<(), String> {
             if let Event::Image { id: node, image, .. } = &event {
                 let bytes = client.image(image).map_err(|e| e.describe())?;
                 let (kept, prefix) = job.saves.get(node).cloned().unwrap_or((false, "image".into()));
-                let output = save(&job.root, &job.outputs, node, image, kept, &prefix, &bytes)?;
+                let output = save(&job.root, &job.outputs, node, image, kept, &prefix, &bytes, job.seal.as_ref())?;
                 let _ = tell.send(News::Saved { id, output });
             }
             let ended = event.ends();
@@ -346,6 +349,7 @@ fn save(
     kept: bool,
     prefix: &str,
     bytes: &[u8],
+    seal: Option<&Seal>,
 ) -> Result<RunOutput, String> {
     let head = proton_diffuse::png::head(bytes).ok_or_else(|| format!("forge's image {image} is not a PNG"))?;
     let (folder, name) = match kept {
@@ -357,7 +361,7 @@ fn save(
         false => (root.join(".proton").join("diffuse").join("previews"), format!("{}.png", plain(image))),
     };
     let path = folder.join(&name);
-    proton_diffuse::doc::write_atomically(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    proton_diffuse::seal::write(&path, bytes, seal)?;
     let rel = path.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or(name);
     Ok(RunOutput { node: node.to_string(), path: rel, width: head.width, height: head.height, kept })
 }
@@ -381,6 +385,7 @@ fn next_number(folder: &Path, prefix: &str) -> u32 {
                 .flatten()
                 .filter_map(|e| {
                     let name = e.file_name().to_string_lossy().into_owned();
+                    let name = proton_diffuse::seal::plain_name(&name).unwrap_or(&name);
                     name.strip_prefix(&lead)?.strip_suffix(".png")?.parse::<u32>().ok()
                 })
                 .max()

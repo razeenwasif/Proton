@@ -14,3 +14,7 @@ ts-rs = { workspace = true }
 # The same build of ureq as the agent's and the literature's, so nothing new
 # is compiled; plain http too, as the gateway on the LAN is.
 ureq = { version = "3", default-features = false, features = ["rustls", "json", "platform-verifier"] }
+# Diffuse's files sealed on disk: RustCrypto's AES-256-GCM, over the aes
+# crate PDFs already build; its nonces from the OS through getrandom 0.2,
+# also already built.
+aes-gcm = "0.10"

@@ -418,6 +418,27 @@ Trash; a flow's images stay when it goes.
   images saved or why it failed and at which node; `wait: false` answers at
   once, `cancel` stops a run. `@flow` sends what `flow_info` says of the flow
   on screen; a chip beside Diffuse's agent writes it.
+- **Sealed on disk** (2026-10-26): in the app, Diffuse's flows and pictures
+  — outputs, inputs, masks and previews — are sealed with AES-256-GCM
+  (`proton-diffuse::seal`): each file is its plain name with `.sealed`
+  after it, a header, a nonce made afresh for each write, and the bytes, so
+  Finder, Quick Look, Spotlight and a backup see noise. What forge served
+  last (the catalogue and models) stays plain: it is forge's. The key is
+  32 bytes in the person's login keychain (service "Proton Diffuse"), made
+  there the first time; the shell (`proton-shell/src/vault.rs`) asks for
+  Touch ID or the Mac's password through LocalAuthentication before it reads
+  it — the app is ad-hoc signed, so the data-protection keychain, which can
+  ask by itself, is closed to it, and a new build must be allowed once at
+  the keychain's prompt. Diffuse is locked until then: nothing of it is
+  shown, its commands and the agent's flow tools refused. The Gallery has a
+  lock of its own, asked for each time it is shown and shut when it is
+  left; older outputs reach the window only while it is open, this
+  session's runs' images, pictures and masks once Diffuse is. On the first
+  unlock everything still plain is sealed, read back, and its plain file
+  moved to the Trash. Lock (beside Change) locks Diffuse again; quitting
+  does too. Sent to Canvas or Game, a picture is written plain, as those
+  keep theirs. forge's own copies — kept 24 hours by Nexus — are not
+  Proton's to seal.
 - **The inspector** (2026-10-26): a field being typed in keeps what was
   typed, and its caret, when a look at forge draws the inspector again,
   and is set when it is left; a prompt's box starts fourteen lines tall and

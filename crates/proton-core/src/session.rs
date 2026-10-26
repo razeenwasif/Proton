@@ -711,7 +711,37 @@ impl Session {
 
     /// An image Diffuse may show, in its folder.
     pub fn diffuse_file(&self, rel: &str) -> Option<PathBuf> {
-        self.diffuse.file(&self.diffuse_home(), rel)
+        self.diffuse_reader(rel).map(|(path, _)| path)
+    }
+
+    /// Where a picture the window may read is, and the key to open it with:
+    /// read off the session's lock, as the shell does.
+    pub fn diffuse_reader(&self, rel: &str) -> Option<(PathBuf, Option<proton_diffuse::Seal>)> {
+        self.diffuse.reader(&self.diffuse_home(), rel)
+    }
+
+    /// Seal Diffuse's files on disk, as the app does: locked until the person
+    /// unlocks it.
+    pub fn sealing_diffuse(mut self) -> Session {
+        self.diffuse.seal_files();
+        self
+    }
+
+    /// The person unlocked Diffuse — and its Gallery, with `gallery` — and
+    /// the shell has the key their keychain keeps.
+    pub fn unlock_diffuse(&mut self, key: proton_diffuse::Seal, gallery: bool) -> Result<Vec<Event>, String> {
+        let home = self.diffuse_home();
+        self.diffuse.unlock(&home, key, gallery)
+    }
+
+    /// Whether Diffuse waits for its key.
+    pub fn diffuse_locked(&self) -> bool {
+        self.diffuse.locked()
+    }
+
+    /// Whether anything in Diffuse's folder is sealed already.
+    pub fn diffuse_has_sealed(&self) -> bool {
+        self.diffuse.has_sealed(&self.diffuse_home())
     }
 
     /// Diffuse's folder: the person's `diffuse.folder`, or `~/Diffuse`. Made
@@ -741,14 +771,13 @@ impl Session {
     /// and brings it into the room on screen.
     fn diffuse_send(&mut self, path: &str, to: &str) -> Vec<Event> {
         let home = self.diffuse_home();
-        let Some(file) = self.diffuse.file(&home, path) else {
-            return vec![notice(format!("{path} is not an image Diffuse may send"), NoticeLevel::Warn)];
+        // Sent as a plain picture: Canvas and Game keep theirs so.
+        let bytes = match self.diffuse.image(&home, path) {
+            Some(Ok(bytes)) => bytes,
+            Some(Err(why)) => return vec![notice(why, NoticeLevel::Error)],
+            None => return vec![notice(format!("{path} is not an image Diffuse may send"), NoticeLevel::Warn)],
         };
-        let bytes = match std::fs::read(&file) {
-            Ok(bytes) => bytes,
-            Err(e) => return vec![notice(format!("{path}: {e}"), NoticeLevel::Error)],
-        };
-        let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "image.png".into());
+        let name = path.rsplit('/').next().filter(|n| !n.is_empty()).unwrap_or("image.png").to_string();
         match to {
             "canvas" => {
                 let mut events = self.set_mode(ModeId::Raster);

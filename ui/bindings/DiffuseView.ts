@@ -30,4 +30,9 @@ added: Array<string>,
 /**
  * The starters a new flow can begin from.
  */
-starters: Array<DiffuseStarter>, };
+starters: Array<DiffuseStarter>, 
+/**
+ * Whether Diffuse is locked: its files sealed and its key not given yet,
+ * so nothing of them is shown.
+ */
+locked: boolean, };

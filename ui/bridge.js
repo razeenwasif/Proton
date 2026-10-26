@@ -101,6 +101,21 @@ export async function readDiffuse(path) {
   return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
 }
 
+/** Unlock Diffuse — and its Gallery, with `gallery` — once the person has
+ *  shown they are at the Mac: Touch ID or the Mac's password, asked by the
+ *  shell, which takes the key from their keychain. The events it makes come
+ *  in order with the rest; a refusal or a cancel throws, in words.
+ *  @param {boolean} gallery */
+export async function unlockDiffuse(gallery) {
+  if (!tauri) {
+    const adapter = await preview;
+    if (!adapter) throw new Error('Browser preview is unavailable');
+    transport.deliver(await adapter.unlockDiffuse(gallery));
+    return;
+  }
+  await transport.receive(await tauri.core.invoke("unlock_diffuse", { gallery }));
+}
+
 /** A picture for Diffuse — chosen, dropped, a mask painted — written into
  *  Diffuse's folder at `path` (raw bytes, as Canvas's are): where it was
  *  written. @param {string} path @param {Uint8Array} bytes @returns {Promise<string>} */

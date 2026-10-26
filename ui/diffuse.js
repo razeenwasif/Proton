@@ -18,7 +18,7 @@
  * the mode comes on screen and every half minute while it stays, and on
  * Try again. */
 
-import { copyText, putDiffuseFile, readDiffuse } from "./bridge.js";
+import { copyText, putDiffuseFile, readDiffuse, unlockDiffuse } from "./bridge.js";
 import { openMask } from "./diffuse-mask.js";
 import { escapeHtml as esc } from "./html.js";
 import { colourOf, fieldsOf, freshId, grouped, HEAD, NODE_W, pngText, portAt, portOf, rowsOf, search, shortValue, socketFor, wire } from "./diffuse-graph.js";
@@ -118,6 +118,14 @@ export function createDiffuse(host) {
   let pickedAll = new Set(/** @type {string[]} */ ([]));
   /** Each image read, as a `data:` URL, by path. @type {Map<string, Promise<string>>} */
   const urls = new Map();
+  /** Whether the Gallery is shut: its images unlocked each time it is shown. */
+  let galleryLocked = false;
+  /** An unlock under way — Touch ID or the password being asked for. */
+  let unlocking = false;
+  /** Why the last unlock did not, in the shell's words. */
+  let unlockSaid = "";
+  /** Ask to unlock once Diffuse is drawn: on coming here, before its view. */
+  let unlockOnView = false;
 
   /** A Load Image waiting for a picture from the gallery. @type {{node: string, field: string} | null} */
   let pickingInput = null;
@@ -168,12 +176,57 @@ export function createDiffuse(host) {
   /* ── drawing ─────────────────────────────────────────────────────── */
 
   function render() {
+    renderLock();
     renderSide();
     renderBar();
     renderAsk();
     renderBanner();
     renderGraph();
     renderPanel();
+  }
+
+  /** Diffuse sealed and not unlocked: nothing of it shown, and a way in. */
+  function renderLock() {
+    const box = q("[data-df-lock]");
+    const locked = Boolean(view?.locked);
+    box.hidden = !locked;
+    if (!locked) return;
+    box.innerHTML =
+      `<div class="df-lock-card"><svg class="i df-lock-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3"/></svg>` +
+      `<h2>Diffuse is locked</h2><p>Its flows and pictures are sealed on this Mac. Unlock them with Touch ID or your password.</p>` +
+      `<button class="cc-primary" data-df-unlock${unlocking ? " disabled" : ""}>${unlocking ? "Waiting for you…" : "Unlock"}</button>` +
+      (unlockSaid ? `<p class="df-lock-said">${esc(unlockSaid)}</p>` : "") +
+      `</div>`;
+  }
+
+  /** Ask the shell to unlock Diffuse, or its Gallery: Touch ID or the
+   *  Mac's password, then the key from the keychain. @param {boolean} gallery */
+  async function unlock(gallery) {
+    if (unlocking) return;
+    unlocking = true;
+    unlockSaid = "";
+    renderLock();
+    if (stageView === "gallery") renderGallery();
+    try {
+      await unlockDiffuse(gallery);
+    } catch (error) {
+      const said = String(/** @type {any} */ (error)?.message ?? error);
+      // A cancel is the person's choice, not a fault to report.
+      unlockSaid = /cancel/i.test(said) ? "" : said;
+    } finally {
+      unlocking = false;
+      renderLock();
+      if (stageView === "gallery") renderGallery();
+    }
+  }
+
+  /** The Gallery left: shut again, and its pictures let go. What it lists
+   *  goes when the core says it is shut — a Diffuse that seals nothing keeps
+   *  its Gallery open. */
+  function shutGallery() {
+    send({ type: "diffuseGalleryLock" });
+    urls.clear();
+    q("[data-df-gallery]").innerHTML = "";
   }
 
   function renderSide() {
@@ -191,7 +244,7 @@ export function createDiffuse(host) {
         (movingFolder
           ? `<form class="df-folder-form" data-df-folder-form><label class="df-field">Keep flows and images in<input name="folder" value="${esc(where)}" spellcheck="false" autocomplete="off"></label>` +
             `<div class="df-folder-buttons"><button class="cc-primary" type="submit">Keep it here</button><button class="cc-quiet" type="button" data-df-folder-default>~/Diffuse</button><button class="cc-quiet" type="button" data-df-folder-cancel>Cancel</button></div></form>`
-          : `<div class="df-folder"><span class="df-faint">In</span><code title="Diffuse's own folder, whichever project is open">${esc(where)}</code><button class="df-folder-change" data-df-folder-edit>Change</button></div>`) +
+          : `<div class="df-folder"><span class="df-faint">In</span><code title="Diffuse's own folder, whichever project is open">${esc(where)}</code><button class="df-folder-change" data-df-folder-edit>Change</button><button class="df-folder-change" data-df-lock-now title="Lock Diffuse: its flows and pictures need Touch ID or your password again">Lock</button></div>`) +
         `<div class="df-head">Flows</div>` +
         (flows.length
           ? flows
@@ -560,6 +613,14 @@ export function createDiffuse(host) {
   /** The outputs, as a grid. */
   function renderGallery() {
     const box = q("[data-df-gallery]");
+    if (galleryLocked) {
+      box.innerHTML =
+        `<div class="df-empty-note df-gallery-locked"><p><b>The Gallery is locked.</b></p><p class="df-faint">Unlock it with Touch ID or your password to see every image Diffuse has made. It locks again when you leave it.</p>` +
+        `<p><button class="cc-primary" data-df-unlock-gallery${unlocking ? " disabled" : ""}>${unlocking ? "Waiting for you…" : "Unlock the Gallery"}</button></p>` +
+        (unlockSaid ? `<p class="df-lock-said">${esc(unlockSaid)}</p>` : "") +
+        `</div>`;
+      return;
+    }
     const folders = [...new Set(images.map((i) => i.folder))].sort();
     const shownImages = images.filter((i) => !folder || i.folder === folder);
     box.innerHTML =
@@ -1404,6 +1465,9 @@ export function createDiffuse(host) {
       return;
     }
     if (at("[data-df-look]")) return send({ type: "diffuseLook", again: true });
+    if (at("[data-df-unlock]")) return void unlock(stageView === "gallery");
+    if (at("[data-df-unlock-gallery]")) return void unlock(true);
+    if (at("[data-df-lock-now]")) return send({ type: "diffuseLock" });
     const viewButton = at("[data-df-view]");
     if (viewButton) return setView(viewButton.dataset.dfView ?? "graph");
     if (at("[data-df-run]")) return runIt();
@@ -1639,8 +1703,11 @@ export function createDiffuse(host) {
 
   /** The graph or the outputs. @param {string} to */
   function setView(to) {
+    const was = stageView;
     stageView = to === "gallery" ? "gallery" : "graph";
+    if (was === "gallery" && stageView !== "gallery") shutGallery();
     if (stageView === "gallery") send({ type: "diffuseGallery" });
+    if (stageView === "gallery" && was !== "gallery" && galleryLocked) void unlock(true);
     closeSearch();
     renderBar();
     renderGraph();
@@ -1749,6 +1816,11 @@ export function createDiffuse(host) {
     view(next) {
       const before = path();
       view = next;
+      if (!next.locked) unlockSaid = "";
+      if (next.locked && unlockOnView && shown) {
+        unlockOnView = false;
+        void unlock(stageView === "gallery");
+      }
       const f = flow();
       if (next.added.length) chosen = new Set(next.added);
       else if (path() !== before) chosen.clear();
@@ -1763,8 +1835,11 @@ export function createDiffuse(host) {
       if (stageView === "graph") renderGraph();
       if (panel === "queue") renderQueue();
     },
-    /** The project's outputs. @param {{images: Image[]}} event */
+    /** The project's outputs — none while the Gallery is shut. @param {{images: Image[], locked?: boolean}} event */
     gallery(event) {
+      const wasLocked = galleryLocked;
+      galleryLocked = Boolean(event.locked);
+      if (galleryLocked && !wasLocked) urls.clear();
       images = event.images ?? [];
       pickedAll = new Set([...pickedAll].filter((p) => images.some((i) => i.path === p)));
       if (picked && !images.some((i) => i.path === picked)) picked = null;
@@ -1791,8 +1866,15 @@ export function createDiffuse(host) {
         lookNow();
         looking = setInterval(lookNow, LOOK_EVERY);
         render();
+        // Coming here asks for the person's say-so once: Diffuse's, or the
+        // Gallery's when that is what is on screen.
+        if (view?.locked) void unlock(stageView === "gallery");
+        else if (!view) unlockOnView = true;
+        else if (stageView === "gallery" && galleryLocked) void unlock(true);
       } else {
         closeSearch();
+        unlockOnView = false;
+        if (stageView === "gallery") shutGallery();
       }
     },
     key,

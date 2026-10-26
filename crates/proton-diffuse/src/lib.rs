@@ -41,6 +41,7 @@ pub mod flow;
 pub mod layout;
 pub mod op;
 pub mod png;
+pub mod seal;
 pub mod templates;
 pub mod text;
 
@@ -51,3 +52,4 @@ pub use client::{Client, Error, Event, Health, HealthState, Key};
 pub use doc::FlowDoc;
 pub use flow::{Flag, Flow, Graph, GraphNode, Link, Node, Port, SeedMode, FORMAT};
 pub use op::{Applied, Op};
+pub use seal::Seal;

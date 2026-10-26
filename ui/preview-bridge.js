@@ -1500,7 +1500,7 @@ FCM: NON-DROP FRAME
     if (state.vim === "Command") return [{ type: "cmdline", text: "", prompt: state.prompt }, vimEvent()];
     return state.vim === before ? [] : [vimEvent()];
   };
-  return {send, readLab: (key) => research.file(key), readGame: (key) => games.file(key), readRaster: (generation, layer, tiles) => rasters.tiles(generation, layer, tiles), readDiffuse: (path) => diffuses.file(path), putDiffuseFile: (path, bytes) => diffuses.put(path, bytes), async readGeometry(key) {
+  return {send, readLab: (key) => research.file(key), readGame: (key) => games.file(key), readRaster: (generation, layer, tiles) => rasters.tiles(generation, layer, tiles), readDiffuse: (path) => diffuses.file(path), putDiffuseFile: (path, bytes) => diffuses.put(path, bytes), unlockDiffuse: async (gallery) => diffuses.unlock(gallery), async readGeometry(key) {
     const mesh = mockMesh(key);
     const wait = mockLatency.get(key) ?? 0;
     if (wait) await new Promise(done => setTimeout(done, wait));

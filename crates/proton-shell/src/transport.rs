@@ -22,6 +22,12 @@ impl BridgeSession {
 
     pub fn apply(&mut self, command: Command) -> EventBatch {
         let events = self.session.apply(command);
+        self.batch(events)
+    }
+
+    /// Events the session made other than by a command, numbered as a
+    /// command's are.
+    pub fn batch(&mut self, events: Vec<Event>) -> EventBatch {
         if !events.is_empty() {
             self.sequence += 1;
         }

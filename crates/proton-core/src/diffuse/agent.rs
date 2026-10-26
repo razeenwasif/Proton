@@ -240,7 +240,7 @@ impl Diffuse {
         let models = self.known.as_ref().and_then(|k| k.models.as_ref());
         let (flow, dirty, held) = match self.open.iter().find(|(rel, _)| rel == path) {
             Some((_, doc)) => (doc.get().clone(), doc.is_dirty(), true),
-            None => (FlowDoc::read(&inside(root, path)?)?.get().clone(), false, false),
+            None => (FlowDoc::read_sealed(&inside(root, path)?, self.seal.as_ref())?.get().clone(), false, false),
         };
         let problems = catalogue.map(|c| proton_diffuse::check(&flow, c, models)).unwrap_or_default();
         let how = match (held, self.shown.as_deref() == Some(path), dirty) {
@@ -255,6 +255,9 @@ impl Diffuse {
 
     /// What `@flow` sends: Diffuse, and the flow on screen.
     pub fn about(&self, root: &Path) -> String {
+        if self.locked() {
+            return "Diffuse is locked: the person has not unlocked it, so nothing of its flows can be said.".into();
+        }
         let mut out = self.state_words(root);
         match &self.shown {
             Some(path) => {
@@ -269,6 +272,10 @@ impl Diffuse {
 
     /// One of the agent's Diffuse tools, and what the window draws again.
     pub fn tool(&mut self, root: &Path, name: &str, input: &Value) -> (Said, Vec<Event>) {
+        if self.locked() {
+            let why = "Diffuse is locked: its files are sealed until the person unlocks it with Touch ID or their password, in Diffuse.";
+            return (Said::Now(Err(why.into())), Vec::new());
+        }
         match name {
             "flow_info" => (Said::Now(self.tool_info(root, input)), Vec::new()),
             "flow_edit" => {

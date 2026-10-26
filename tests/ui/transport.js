@@ -90,6 +90,15 @@ window.__TAURI__ = {
       (window.diffuseFiles ??= {})[path] = args.buffer.slice(args.byteOffset, args.byteOffset + args.byteLength);
       return path;
     }
+    // Diffuse unlocked after the person's say-so: what a test's stand-in
+    // answers, or why it was not — numbered as a command's reply.
+    if (name === 'unlock_diffuse') {
+      (window.diffuseUnlocks ??= []).push(args.gallery);
+      const answer = await window.diffuseUnlock?.(args.gallery);
+      // An Error from the suite's own frame is not this frame's Error.
+      if (answer && !Array.isArray(answer) && typeof answer.message === 'string') throw answer.message;
+      return window.makeBatch(answer ?? []);
+    }
     // An image Diffuse shows, as a test's stand-in core holds it.
     if (name === 'read_diffuse') {
       const bytes = window.diffuseFiles?.[args.path];

@@ -7,6 +7,7 @@ mod backdrop;
 mod pasteboard;
 mod pen;
 mod transport;
+mod vault;
 mod window;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -308,12 +309,42 @@ fn read_game(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<ta
 /// as bytes: where it is asked under the lock, read after.
 #[tauri::command(async)]
 fn read_diffuse(path: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
-    let file = match session.lock() {
-        Ok(it) => it.session.diffuse_file(&path),
-        Err(poisoned) => poisoned.into_inner().session.diffuse_file(&path),
+    let reader = match session.lock() {
+        Ok(it) => it.session.diffuse_reader(&path),
+        Err(poisoned) => poisoned.into_inner().session.diffuse_reader(&path),
     };
-    let file = file.ok_or_else(|| format!("{path}: not an image Diffuse may read"))?;
-    std::fs::read(&file).map(tauri::ipc::Response::new).map_err(|e| format!("{path}: {e}"))
+    // Opened off the lock: a picture is megabytes.
+    let (file, key) = reader.ok_or_else(|| format!("{path}: not an image Diffuse may show now"))?;
+    proton_core::diffuse::read_sealed(&file, key.as_ref()).map(tauri::ipc::Response::new)
+}
+
+/// Unlock Diffuse — and its Gallery, with `gallery` — once the person has
+/// shown they are at the Mac: Touch ID, or the Mac's password. The key comes
+/// from their keychain, made there the first time; it never reaches the
+/// page. The events the unlock makes, numbered as a command's.
+#[tauri::command(async)]
+fn unlock_diffuse(gallery: bool, session: State<'_, Mutex<BridgeSession>>) -> Result<EventBatch, String> {
+    vault::ask(if gallery { "open Diffuse's Gallery" } else { "unlock Diffuse" })?;
+    let sealed = match session.lock() {
+        Ok(it) => it.session.diffuse_has_sealed(),
+        Err(poisoned) => poisoned.into_inner().session.diffuse_has_sealed(),
+    };
+    let key = match vault::key()? {
+        Some(key) => key,
+        // A key made now would not open what is sealed: never one in its place.
+        None if sealed => return Err("Diffuse's files are sealed, and the key to them is not in your keychain".into()),
+        None => {
+            let key = proton_core::diffuse::Seal::generate().bytes();
+            vault::keep(&key)?;
+            key
+        }
+    };
+    let mut held = match session.lock() {
+        Ok(it) => it,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let events = held.session.unlock_diffuse(proton_core::diffuse::Seal::new(key), gallery)?;
+    Ok(held.batch(events))
 }
 
 /// A picture the page hands over for Diffuse — chosen, dropped, a mask
@@ -666,10 +697,9 @@ fn main() {
     tauri::Builder::default()
         .register_uri_scheme_protocol("artifact", |_, request| artifact_page(&request))
         .register_uri_scheme_protocol("study", |_, request| study_media(&request))
-        .manage(Mutex::new(BridgeSession::new(Session::restore(
-            requested_folder(),
-            working_folder(),
-        ))))
+        .manage(Mutex::new(BridgeSession::new(
+            Session::restore(requested_folder(), working_folder()).sealing_diffuse(),
+        )))
         .invoke_handler(tauri::generate_handler![
             dispatch,
             backdrop,
@@ -681,6 +711,7 @@ fn main() {
             read_game,
             read_diffuse,
             put_diffuse_file,
+            unlock_diffuse,
             read_raster,
             put_raster_blob,
             paste_raster_image,
