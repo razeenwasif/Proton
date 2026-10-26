@@ -36,6 +36,9 @@ pub enum Mention {
     Game,
     /// The canvas open in Canvas mode — and small pixel art's pixels.
     Canvas,
+    /// The flow on screen in Diffuse: its nodes, values and links, and what
+    /// stops it running.
+    Flow,
 }
 
 impl Mention {
@@ -48,11 +51,13 @@ impl Mention {
             Mention::Pdf => "@pdf",
             Mention::Game => "@game",
             Mention::Canvas => "@canvas",
+            Mention::Flow => "@flow",
         }
     }
 
     /// Every mention this build understands, for the composer's chips.
-    pub const ALL: [Mention; 6] = [Mention::Selection, Mention::Dataframe, Mention::Log, Mention::Pdf, Mention::Game, Mention::Canvas];
+    pub const ALL: [Mention; 7] =
+        [Mention::Selection, Mention::Dataframe, Mention::Log, Mention::Pdf, Mention::Game, Mention::Canvas, Mention::Flow];
 }
 
 /// The mentions in a question, in the order they were written, without repeats.
@@ -125,6 +130,8 @@ mod tests {
         assert!(found("@games are fun").is_empty());
         assert_eq!(found("shade the sword in @canvas"), [Mention::Canvas]);
         assert!(found("@canvases").is_empty());
+        assert_eq!(found("run @flow at 1216×832"), [Mention::Flow]);
+        assert!(found("@flows").is_empty());
         assert!(found("mail@pdf.org and @pdfs").is_empty());
     }
 

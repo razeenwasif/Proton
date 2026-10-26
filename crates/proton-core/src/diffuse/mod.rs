@@ -29,8 +29,10 @@ use crate::bus::{Command, Event, NoticeLevel};
 use crate::settings::Settings;
 use crate::workspace::notice;
 
+mod agent;
 mod run;
 
+pub use agent::{Said, TOOLS};
 use run::{Control, Job, News};
 pub use run::{DiffuseRun, NodeRun, RunOutput, RunProblem, RunProgress, RunState};
 

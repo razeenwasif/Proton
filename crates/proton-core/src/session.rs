@@ -225,7 +225,13 @@ pub struct Session {
     /// Diffuse: the flows open, the runs, and what forge is — the person's,
     /// kept in Diffuse's own folder whichever project is open.
     diffuse: crate::diffuse::Diffuse,
+    /// Runs the agent is waiting on: the project whose agent asked, its call,
+    /// the run, and when to stop waiting.
+    flow_waits: Vec<(PathBuf, String, u32, std::time::Instant)>,
 }
+
+/// How long the agent waits on a run before it is told to look again later.
+const FLOW_WAIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 impl Session {
     /// One workspace, no persistence, no language servers. What tests want.
@@ -254,6 +260,7 @@ impl Session {
             tex: None,
             pdf: crate::pdf::Pdfs::new(),
             diffuse: crate::diffuse::Diffuse::default(),
+            flow_waits: Vec::new(),
         }
     }
 
@@ -328,6 +335,24 @@ impl Session {
     /// the window draws again.
     pub fn pdf_tool(&mut self, name: &str, input: &serde_json::Value) -> (Result<String, String>, Vec<Event>) {
         self.pdf.tool(name, input)
+    }
+
+    /// One of the agent's Diffuse tools, as the session answers them: now,
+    /// or once a run has ended (`flow_waited`); and what the window draws
+    /// again.
+    pub fn flow_tool(&mut self, name: &str, input: &serde_json::Value) -> (crate::diffuse::Said, Vec<Event>) {
+        let home = self.diffuse_home();
+        self.diffuse.tool(&home, name, input)
+    }
+
+    /// What `@flow` sends: Diffuse, and the flow on screen.
+    pub fn flow_about(&self) -> String {
+        self.diffuse.about(&self.diffuse_home())
+    }
+
+    /// What run `id` came to, once it has ended.
+    pub fn flow_waited(&self, id: u32) -> Option<Result<String, String>> {
+        self.diffuse.waited(id)
     }
 
     /// Notebook's, made otherwise: for a test, one that says which of its
@@ -962,11 +987,17 @@ impl Session {
                 events
             }
 
-            // What `@pdf` stands for is the session's to say: the PDFs are its.
+            // What `@pdf` and `@flow` stand for is the session's to say: the
+            // PDFs and the flows are its.
             Command::Ask { text } => {
-                if crate::mention::found(&text).contains(&crate::mention::Mention::Pdf) {
+                let mentioned = crate::mention::found(&text);
+                if mentioned.contains(&crate::mention::Mention::Pdf) {
                     let about = self.pdf.about();
                     self.active_mut().set_pdf_about(about);
+                }
+                if mentioned.contains(&crate::mention::Mention::Flow) {
+                    let about = self.flow_about();
+                    self.active_mut().set_flow_about(about);
                 }
                 self.delegate(Command::Ask { text })
             }
@@ -1124,13 +1155,29 @@ impl Session {
         let side = self.mode();
         let mut events = Vec::new();
         let mut drawn = Vec::new();
+        let home = self.diffuse_home();
         for (index, workspace) in self.workspaces.iter_mut().enumerate() {
             workspace.set_quiet(index != active);
             let produced = workspace.apply(Command::Poll);
             workspace.set_quiet(false);
-            // The agent's PDF tools, answered from the session's PDFs —
-            // whichever project's agent asked, since the PDFs are none's.
-            for (id, name, input) in workspace.take_pdf_calls() {
+            // The agent's PDF and Diffuse tools, answered from the session's
+            // PDFs and flows — whichever project's agent asked, since they
+            // are none's. A run it waits on is answered once it has ended.
+            for (id, name, input) in workspace.take_session_calls() {
+                if crate::diffuse::TOOLS.contains(&name.as_str()) {
+                    let (said, events) = self.diffuse.tool(&home, &name, &input);
+                    match said {
+                        crate::diffuse::Said::Now(answer) => workspace.answer_tool(&id, answer),
+                        crate::diffuse::Said::Wait(run) => self.flow_waits.push((
+                            workspace.root().to_path_buf(),
+                            id,
+                            run,
+                            std::time::Instant::now() + FLOW_WAIT,
+                        )),
+                    }
+                    drawn.extend(events);
+                    continue;
+                }
                 let (answer, events) = self.pdf.tool(&name, &input);
                 workspace.answer_tool(&id, answer);
                 drawn.extend(events);
@@ -1149,8 +1196,26 @@ impl Session {
         }
         events.extend(self.study.poll());
         events.extend(self.pdf.poll());
-        let home = self.diffuse_home();
         events.extend(self.diffuse.poll(&home));
+        // Runs the agent waited on that have ended — or that it has waited
+        // on long enough.
+        let mut waits = std::mem::take(&mut self.flow_waits);
+        waits.retain(|(root, call, run, until)| {
+            let answer = match self.diffuse.waited(*run) {
+                Some(answer) => answer,
+                None if std::time::Instant::now() >= *until => Ok(format!(
+                    "Run {run} is still going after {} minutes; flow_info says how it goes.",
+                    FLOW_WAIT.as_secs() / 60
+                )),
+                None => return true,
+            };
+            // A project closed meanwhile has no turn to answer.
+            if let Some(workspace) = self.workspaces.iter_mut().find(|w| w.root() == root.as_path()) {
+                workspace.answer_tool(call, answer);
+            }
+            false
+        });
+        self.flow_waits = waits;
         events.extend(drawn);
         events.extend(self.crossed(side));
         self.claim(events)

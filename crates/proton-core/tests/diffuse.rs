@@ -757,3 +757,168 @@ fn a_stream_that_keeps_dropping_leaves_the_run_lost_and_a_run_gone_says_so() {
         (proton_core::diffuse::RunState::Lost, Some("forge no longer has this run"))
     );
 }
+
+/* ── the agent ───────────────────────────────────────────────────── */
+
+fn now(said: proton_core::diffuse::Said) -> Result<String, String> {
+    match said {
+        proton_core::diffuse::Said::Now(answer) => answer,
+        other => panic!("answered later: {other:?}"),
+    }
+}
+
+/// A serving forge, looked at, in Diffuse with nothing open.
+fn agent_on_forge(tag: &str) -> (Session, PathBuf) {
+    std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
+    let root = project(tag);
+    let mut space = session_in(&root);
+    set_gateway(&root, Some(&serving_gateway()));
+    space.apply(Command::SetMode { mode: ModeId::Diffuse });
+    space.apply(Command::DiffuseLook { again: false });
+    poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
+    (space, root)
+}
+
+/// Wait for run `id` the agent asked for, as the session's poll does.
+fn waited(space: &mut Session, id: u32) -> Result<String, String> {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        space.apply(Command::Poll);
+        if let Some(answer) = space.flow_waited(id) {
+            return answer;
+        }
+        assert!(Instant::now() < deadline, "run {id} never ended");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn the_agent_builds_a_flow_from_nothing_runs_it_and_is_told_what_it_made() {
+    let (mut space, root) = agent_on_forge("agent");
+    let info = now(space.flow_tool("flow_info", &json!({})).0).unwrap();
+    assert!(info.contains("forge is serving images on NVIDIA GeForce RTX 4090"), "{info}");
+    assert!(info.contains("No flows yet") && info.contains("No flow is on the person's screen"), "{info}");
+    assert!(info.contains("- KSampler \"KSampler\" (Sample): model MODEL, positive CONDITIONING"), "{info}");
+    assert!(info.contains("Starters a new flow can begin from: textToImage"), "{info}");
+    let fields = now(space.flow_tool("flow_info", &json!({"nodes": ["EmptyLatent", "Nope"]})).0).unwrap();
+    assert!(fields.contains("- field width: int, 64 to 4096, a multiple of 8, 1024 if not set"), "{fields}");
+    assert!(fields.contains("forge has no node Nope."), "{fields}");
+
+    // A flow made, then built in one call: nodes named by refs, placed for it.
+    let (said, events) = space.flow_tool(
+        "flow_edit",
+        &json!({"new": {"name": "harbour"}, "ops": [
+            {"op": "add", "type": "LoadCheckpoint", "ref": "ckpt", "values": {"checkpoint": "sd_xl_base_1.0.safetensors"}},
+            {"op": "add", "type": "TextEncode", "ref": "pos", "values": {"text": "a harbour at dawn"}},
+            {"op": "add", "type": "TextEncode", "ref": "neg", "values": {"text": "blurry"}},
+            {"op": "add", "type": "EmptyLatent", "ref": "size"},
+            {"op": "add", "type": "KSampler", "ref": "sampler", "values": {"sampler": "dpmpp_2m", "scheduler": "karras"}},
+            {"op": "add", "type": "VAEDecode", "ref": "decode"},
+            {"op": "add", "type": "SaveImage", "ref": "save", "values": {"prefix": "harbour"}},
+            {"op": "connect", "from": "ckpt:clip", "to": "pos:clip"},
+            {"op": "connect", "from": "ckpt:clip", "to": "neg:clip"},
+            {"op": "connect", "from": "ckpt:model", "to": "sampler:model"},
+            {"op": "connect", "from": "pos:conditioning", "to": "sampler:positive"},
+            {"op": "connect", "from": "neg:conditioning", "to": "sampler:negative"},
+            {"op": "connect", "from": "size:latent", "to": "sampler:latent"},
+            {"op": "connect", "from": "sampler:latent", "to": "decode:latent"},
+            {"op": "connect", "from": "ckpt:vae", "to": "decode:vae"},
+            {"op": "connect", "from": "decode:image", "to": "save:images"}
+        ]}),
+    );
+    let made = now(said).unwrap();
+    assert!(made.starts_with("Made harbour.flow.json, empty, and put it on the person's screen; applied 16 ops"), "{made}");
+    assert!(made.contains("added nodes 1, 2, 3, 4, 5, 6, 7 (ckpt is 1, decode is 6, neg is 3, pos is 2, sampler is 5, save is 7, size is 4)"), "{made}");
+    assert!(made.contains("held until the person saves") && made.contains("Ready to run."), "{made}");
+    assert!(made.contains("- 5 KSampler (KSampler) at [") && made.contains("positive ← 2:conditioning"), "{made}");
+    let shown = view(&events).shown.expect("on screen");
+    assert_eq!((shown.path.as_str(), shown.flow.nodes.len(), shown.dirty), ("harbour.flow.json", 7, true));
+    // Placed as the starters are: every wire runs left to right, no card on another.
+    let at = |id: &str| shown.flow.node(id).unwrap().at;
+    for link in &shown.flow.links {
+        let (from, to) = (link.from.split(':').next().unwrap(), link.to.split(':').next().unwrap());
+        assert!(at(from)[0] < at(to)[0], "{} runs right to left", link.to);
+    }
+    let places: std::collections::BTreeSet<String> = shown.flow.nodes.iter().map(|n| format!("{:?}", n.at)).collect();
+    assert_eq!(places.len(), 7);
+    // One step of the person's undo, all of it.
+    assert!(view(&space.apply(Command::DiffuseUndo)).shown.unwrap().flow.nodes.is_empty());
+    assert_eq!(view(&space.apply(Command::DiffuseRedo)).shown.unwrap().flow.nodes.len(), 7);
+
+    // A node added to a flow that has some goes in its column, below what is there.
+    let more = now(space.flow_tool(
+        "flow_edit",
+        &json!({"ops": [{"op": "add", "type": "PreviewImage", "ref": "look"}, {"op": "connect", "from": "6:image", "to": "look:images"}]}),
+    )
+    .0)
+    .unwrap();
+    assert!(more.contains("added node 8 (look is 8)"), "{more}");
+    let flow = view(&space.apply(Command::Sync)).shown.unwrap().flow;
+    let (preview, save) = (flow.node("8").unwrap().at, flow.node("7").unwrap().at);
+    assert!(preview[0] == save[0] && preview[1] > save[1], "{preview:?} beside {save:?}");
+
+    // A wrong op changes nothing, and says which.
+    let wrong = now(space.flow_tool("flow_edit", &json!({"ops": [{"op": "set", "id": "5", "name": "steps", "value": 31}, {"op": "connect", "from": "1:clip", "to": "5:model"}]})).0).unwrap_err();
+    assert!(wrong.starts_with("flow_edit changed nothing: op 2:"), "{wrong}");
+    assert_eq!(view(&space.apply(Command::Sync)).shown.unwrap().flow.node("5").unwrap().values.get("steps"), Some(&json!(30)));
+
+    // Run, waited for: the answer is the image it saved.
+    let (said, events) = space.flow_tool("flow_run", &json!({}));
+    assert_eq!(said, proton_core::diffuse::Said::Wait(1));
+    assert!(runs(&events).is_some_and(|r| r[0].flow == "harbour.flow.json"));
+    let done = waited(&mut space, 1).unwrap();
+    assert!(done.starts_with("Run 1 of harbour.flow.json done in 9.5 s. Saved in Diffuse's folder: outputs/harbour/harbour_0001.png (1024 × 1024)."), "{done}");
+    assert!(root.join("outputs/harbour/harbour_0001.png").is_file());
+    let info = now(space.flow_tool("flow_info", &json!({})).0).unwrap();
+    assert!(info.contains("Runs, newest first: run 1 of harbour.flow.json: done, made outputs/harbour/harbour_0001.png."), "{info}");
+    // Saved only when asked; and what @flow sends.
+    assert!(now(space.flow_tool("flow_edit", &json!({"save": true})).0).unwrap().starts_with("Saved harbour.flow.json."));
+    assert!(std::fs::read_to_string(root.join("harbour.flow.json")).unwrap().contains("\"PreviewImage\""));
+    let about = space.flow_about();
+    assert!(about.contains("Flow harbour.flow.json (on the person's screen).") && about.contains("flow_info lists the nodes"), "{about}");
+}
+
+#[test]
+fn a_run_the_agent_waits_on_that_fails_says_where_and_not_without_forge() {
+    let (mut space, _) = agent_on_forge("agent-fail");
+    now(space.flow_tool("flow_edit", &json!({"new": {"name": "big", "starter": "textToImage"}})).0).unwrap();
+    now(space.flow_tool("flow_edit", &json!({"ops": [{"op": "set", "id": "4", "name": "width", "value": 2048}]})).0).unwrap();
+    let proton_core::diffuse::Said::Wait(id) = space.flow_tool("flow_run", &json!({"flow": "big.flow.json"})).0 else {
+        panic!("not waited on")
+    };
+    let failed = waited(&mut space, id).unwrap_err();
+    assert!(failed.starts_with("Run 1 of big.flow.json failed: forge ran out of GPU memory: CUDA out of memory (node 6:"), "{failed}");
+    // Not waited on: answered at once.
+    let sent = now(space.flow_tool("flow_run", &json!({"wait": false})).0).unwrap();
+    assert!(sent.starts_with("Sent big.flow.json to forge as run 2;"), "{sent}");
+    waited(&mut space, 2).unwrap_err();
+    assert!(now(space.flow_tool("flow_run", &json!({"cancel": 2})).0).unwrap_err().contains("ended already"));
+    assert!(now(space.flow_tool("flow_run", &json!({"flow": "gone.flow.json"})).0).is_err());
+
+    // Without forge's nodes known, nothing can be checked, so nothing is applied.
+    let root = project("agent-blind");
+    let mut blind = session_in(&root);
+    blind.apply(Command::SetMode { mode: ModeId::Diffuse });
+    let refused = now(blind.flow_tool("flow_edit", &json!({"new": {"name": "x"}, "ops": [{"op": "add", "type": "KSampler"}]})).0).unwrap_err();
+    assert!(refused.contains("forge's nodes are not known yet"), "{refused}");
+    assert!(now(blind.flow_tool("flow_info", &json!({})).0).unwrap().contains("forge's nodes are not known yet"));
+}
+
+#[test]
+fn a_workspaces_agent_hands_its_flow_calls_to_the_session_and_flow_names_whats_on_screen() {
+    let (mut space, _) = with_flow("agent-seam");
+    let outcome = space.active_mut().call_tool("t1", "flow_info", &json!({}));
+    assert!(matches!(outcome, proton_core::workspace::ToolOutcome::Deferred), "a flow tool was answered by the workspace");
+    let calls = space.active_mut().take_session_calls();
+    assert_eq!((calls[0].0.as_str(), calls[0].1.as_str()), ("t1", "flow_info"));
+    // Answered by the session's poll: nothing is left for it.
+    space.active_mut().call_tool("t2", "flow_edit", &json!({"ops": [{"op": "set", "id": "5", "name": "steps", "value": 12}]}));
+    let events = space.apply(Command::Poll);
+    assert!(space.active_mut().take_session_calls().is_empty());
+    assert_eq!(view(&events).shown.unwrap().flow.node("5").unwrap().values["steps"], json!(12), "the edit is drawn");
+    // @flow: what the session says of the flow on screen.
+    let about = space.flow_about();
+    space.active_mut().set_flow_about(about);
+    let asked = space.active().with_context("make @flow sharper");
+    assert!(asked.contains("# @flow") && asked.contains("Flow lighthouse.flow.json (on the person's screen, with changes not saved).") && asked.contains("steps=12"), "{asked}");
+}

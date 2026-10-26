@@ -251,7 +251,8 @@ every edit again on the canvas it saves, checking the two by a hash.
 graph of nodes — load a checkpoint, encode a prompt, sample, decode, save —
 built here and run whole by Nexus's image server on forge, the desktop's
 RTX 4090. A flow is a `Name.flow.json` that diffs; the nodes there are come
-from the server, so one Nexus adds needs no Proton release.
+from the server, so one Nexus adds needs no Proton release. The agent
+builds and runs flows too (`flow_info`, `flow_edit`, `flow_run`, `@flow`).
 `docs/DIFFUSE.md` is the design and the contract with Nexus.
 **Video** · a multitrack timeline over a CMX3600 edit decision list, with the
 captions from the `.srt` beside it. Both files are spliced, never re-printed.

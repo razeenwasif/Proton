@@ -50,6 +50,24 @@ const KEYS = /** @type {[string, string][]} */ ([
   ["⌘Z ⇧⌘Z", "undo, redo"], ["⌘S", "save the flow"], ["f", "the whole graph"], ["⎋", "close the search, choose nothing"], ["?", "these keys"],
 ]);
 
+/** A prompt written as JSON — Ideogram's are — rather than as words. @param {string} text */
+const looksJson = (text) => /^\s*[[{]/.test(text);
+
+/** A prompt's box as tall as what is in it, from fourteen lines to most of
+ *  the window, and set out as code once it is JSON: unwrapped, no spelling
+ *  marks. @param {HTMLTextAreaElement} box */
+function fitPrompt(box) {
+  const json = looksJson(box.value);
+  if (box.classList.contains("json") !== json) {
+    box.classList.toggle("json", json);
+    box.spellcheck = !json;
+    box.wrap = json ? "off" : "soft";
+  }
+  box.style.height = "";
+  const most = Math.round((box.ownerDocument.defaultView?.innerHeight ?? 800) * 0.7);
+  box.style.height = `${Math.min(most, Math.max(box.scrollHeight + 2, box.clientHeight))}px`;
+}
+
 /** A seed nobody chose: a whole number the window holds exactly. */
 const newSeed = () => Math.floor(Math.random() * 2 ** 32);
 
@@ -629,6 +647,33 @@ export function createDiffuse(host) {
 
   function renderInspector() {
     const box = q("[data-df-inspector]");
+    // A field being typed in keeps what was typed, and its caret: a look at
+    // forge — on coming here, then every half minute — draws the inspector
+    // again, from a flow that has the field's value only once it is set.
+    const active = /** @type {HTMLInputElement | HTMLTextAreaElement | null} */ (ws.ownerDocument.activeElement);
+    const typing = active && box.contains(active) && active.matches("input, textarea") ? active : null;
+    const where = typing && (typing.id ? `#${CSS.escape(typing.id)}` : typing.dataset.dfFlow ? `[data-df-flow="${typing.dataset.dfFlow}"]` : null);
+    const kept = typing && where ? { where, value: typing.value, from: typing.selectionStart, to: typing.selectionEnd, scroll: box.scrollTop } : null;
+    drawInspector(box);
+    for (const prompt of box.querySelectorAll("textarea.df-prompt")) fitPrompt(/** @type {HTMLTextAreaElement} */ (prompt));
+    if (!kept) return;
+    const again = /** @type {HTMLInputElement | HTMLTextAreaElement | null} */ (box.querySelector(kept.where));
+    if (!again) return;
+    again.focus({ preventScroll: true });
+    again.value = kept.value;
+    // Put back, not typed: no change is said of it on leaving, so it is
+    // set then by hand — unless more is typed, and the change says so.
+    if (again.value !== again.defaultValue) again.dataset.dfPending = "";
+    try {
+      again.setSelectionRange(kept.from, kept.to);
+    } catch {
+      // A number field has no caret to put back.
+    }
+    box.scrollTop = kept.scroll;
+  }
+
+  /** The inspector: the flow, the node chosen, or several. @param {HTMLElement} box */
+  function drawInspector(box) {
     const f = flow();
     if (!f) {
       box.innerHTML = `<p class="df-faint df-pad">Open a flow to see its nodes here.</p>`;
@@ -689,7 +734,7 @@ export function createDiffuse(host) {
         return `<div class="df-field">${label}<input id="${id}" type="number" data-df-set="${esc(field.name)}" data-kind="${field.kind}" value="${esc(String(shownValue))}"${range}></div>`;
       case "text":
         return field.multiline
-          ? `<div class="df-field">${label}<textarea id="${id}" data-df-set="${esc(field.name)}" data-kind="text" rows="4">${esc(String(shownValue))}</textarea></div>`
+          ? `<div class="df-field">${label}<textarea id="${id}" class="df-prompt${looksJson(String(shownValue)) ? " json" : ""}" data-df-set="${esc(field.name)}" data-kind="text" rows="14"${looksJson(String(shownValue)) ? ' spellcheck="false" wrap="off"' : ""}>${esc(String(shownValue))}</textarea></div>`
           : `<div class="df-field">${label}<input id="${id}" data-df-set="${esc(field.name)}" data-kind="text" value="${esc(String(shownValue))}" spellcheck="false"></div>`;
       case "choice": {
         const list = choices(field);
@@ -1049,8 +1094,10 @@ export function createDiffuse(host) {
   stage.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || !flow()) return;
     const target = /** @type {HTMLElement} */ (e.target);
-    // The search and the mask sheet sit over the graph and are their own.
-    if (target.closest("[data-df-search], .df-mask")) return;
+    // The search and the mask sheet sit over the graph and are their own;
+    // the gallery takes the graph's place, and a press on a picture there is
+    // a click — caught for a pan, it would land on the stage, not the picture.
+    if (target.closest("[data-df-search], .df-mask, [data-df-gallery]")) return;
     closeSearch();
     stage.focus({ preventScroll: true });
     const out = /** @type {HTMLElement | null} */ (target.closest("[data-df-out]"));
@@ -1500,17 +1547,7 @@ export function createDiffuse(host) {
       return;
     }
     if (el.dataset.dfSet && one) {
-      const kind = el.dataset.kind;
-      const raw = el.value;
-      /** @type {unknown} */
-      let value = raw;
-      if (kind === "int" || kind === "float" || kind === "seed") value = raw.trim() === "" ? null : Number(raw);
-      if (typeof value === "number" && !Number.isFinite(value)) return;
-      if (kind === "int" && typeof value === "number") {
-        value = onStep(el, value);
-        el.value = String(value);
-      }
-      edit([{ op: "set", id: one, name: el.dataset.dfSet, value }]);
+      setField(el, one);
       return;
     }
     if (el.matches("[data-df-size]") && one && el.value) {
@@ -1523,12 +1560,48 @@ export function createDiffuse(host) {
       renderGallery();
       return;
     }
-    if (el.dataset.dfFlow === "note") edit([{ op: "note", text: el.value }]);
+    if (el.dataset.dfFlow === "note") {
+      delete el.dataset.dfPending;
+      edit([{ op: "note", text: el.value }]);
+    }
     if (el.dataset.dfFlow === "outputs") edit([{ op: "outputs", path: el.value }]);
+  });
+
+  /** A field's value set on node `id`, as the person left it. @param {HTMLInputElement} el @param {string} id */
+  function setField(el, id) {
+    delete el.dataset.dfPending;
+    const kind = el.dataset.kind;
+    const raw = el.value;
+    /** @type {unknown} */
+    let value = raw;
+    if (kind === "int" || kind === "float" || kind === "seed") value = raw.trim() === "" ? null : Number(raw);
+    if (typeof value === "number" && !Number.isFinite(value)) return;
+    if (kind === "int" && typeof value === "number") {
+      value = onStep(el, value);
+      el.value = String(value);
+    }
+    edit([{ op: "set", id, name: el.dataset.dfSet ?? "", value }]);
+  }
+
+  // A field put back after the inspector was drawn again, left with no more
+  // typed: set now, since no change will be said of it.
+  ws.addEventListener("focusout", (e) => {
+    const el = /** @type {HTMLInputElement} */ (e.target);
+    const one = [...chosen][0];
+    if (el.dataset?.dfPending === undefined) return;
+    if (el.dataset.dfSet && one) setField(el, one);
+    else if (el.dataset.dfFlow === "note") {
+      delete el.dataset.dfPending;
+      edit([{ op: "note", text: el.value }]);
+    }
   });
 
   ws.addEventListener("input", (e) => {
     const el = /** @type {HTMLInputElement} */ (e.target);
+    if (el.matches("textarea.df-prompt")) {
+      fitPrompt(/** @type {HTMLTextAreaElement} */ (/** @type {unknown} */ (el)));
+      return;
+    }
     if (el.matches("[data-df-query]") && searching) {
       searching.query = el.value;
       searching.pick = 0;

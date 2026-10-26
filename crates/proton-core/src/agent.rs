@@ -754,6 +754,78 @@ impl Agent {
                     }
                 }),
             },
+            // Diffuse's flows: the session's, answered there (`diffuse::agent`).
+            Tool {
+                name: "flow_info".into(),
+                description: "Diffuse, the image-graph mode: whether forge (the RTX 4090 image server) is serving, \
+                              the flows in Diffuse's folder and those open, and the flow on the person's screen — \
+                              or the one named — with each node's id, type, place and values, the links into its \
+                              inputs, and what stops it running; then every node forge offers with its sockets, \
+                              the models it has, the starters, and the latest runs. With `nodes`, those node \
+                              types' fields in full: kinds, ranges, defaults and the choices allowed. Read-only; \
+                              call it first, and with `nodes` before setting fields you have not seen."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "flow": { "type": "string", "description": "A flow's path in Diffuse's folder, such as lighthouse.flow.json. Defaults to the one on screen." },
+                        "nodes": { "type": "array", "items": { "type": "string" }, "description": "Node types to describe in full, such as [\"KSampler\", \"EmptyLatent\"]." }
+                    }
+                }),
+            },
+            Tool {
+                name: "flow_edit".into(),
+                description: "Make, open and change a flow, as the person edits one: `new` makes one (from a starter: \
+                              textToImage, imageToImage, inpaint, hiresFix or flux) and puts it on their screen; \
+                              `flow` opens and shows another; `ops` are applied in order as one step of their \
+                              undo, all or none. Ops: {\"op\": \"add\", \"type\": \"KSampler\", \"values\": \
+                              {...}, \"ref\": \"sampler\"} (\"at\": [x, y] optional: without it the node is \
+                              placed for you); {\"op\": \"set\", \"id\": \"5\", \"name\": \"steps\", \
+                              \"value\": 30} (null for the default); {\"op\": \"connect\", \"from\": \
+                              \"1:model\", \"to\": \"sampler:model\"} from an output to an input of the same \
+                              socket type; {\"op\": \"disconnect\", \"to\": \"5:latent\"}; {\"op\": \
+                              \"remove\", \"ids\": [...]}; {\"op\": \"seed\", \"id\": ..., \"mode\": \
+                              \"fixed\"|\"increment\"|\"random\"}; {\"op\": \"bypass\", \"id\": ..., \
+                              \"on\": true}; {\"op\": \"place\", \"id\": ..., \"at\": [x, y]}; {\"op\": \
+                              \"note\", \"text\": ...}. A node's id is a number; a `ref` names a node added in \
+                              this call so later ops can use it in place of its id, in `id`, `ids` and ports. \
+                              Changes are on the person's screen at once and held until the person saves; `save`: \
+                              true saves, only when they asked for it. Answers with the flow as it now is."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "new": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "A plain file name, such as harbour." },
+                                "starter": { "type": "string", "enum": ["textToImage", "imageToImage", "inpaint", "hiresFix", "flux"] }
+                            },
+                            "required": ["name"]
+                        },
+                        "flow": { "type": "string", "description": "The flow to change, opened if it is not. Defaults to the one on screen." },
+                        "ops": { "type": "array", "items": { "type": "object" } },
+                        "save": { "type": "boolean" }
+                    }
+                }),
+            },
+            Tool {
+                name: "flow_run".into(),
+                description: "Run a flow on forge, as ⌘↩ does: the flow on screen, or the one named, as it is now, \
+                              saved or not. Waits until the run ends and answers with the images it saved in \
+                              Diffuse's folder, or why it failed and at which node; `wait`: false answers at once. \
+                              `cancel` with a run's number stops it. A run uses forge's GPU, so run when the person \
+                              asked for images, not to check a graph: flow_info says what stops one running."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "flow": { "type": "string" },
+                        "wait": { "type": "boolean", "description": "Wait for the run to end (the default)." },
+                        "cancel": { "type": "integer", "description": "A run's number, to stop it." }
+                    }
+                }),
+            },
             Tool {
                 name: "diagnostics".into(),
                 description: "Errors and warnings the language server has reported for a \
@@ -1327,7 +1399,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 28);
+        assert_eq!(tools.len(), 31);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the
@@ -1354,7 +1426,7 @@ mod tests {
         // The PDF tools that change it have to say the change waits for the
         // person: told only "rotate the pages", a model reports a file
         // rewritten, and the person believes it.
-        for name in ["pdf_annotate", "pdf_pages", "game_edit", "game_import", "canvas_draw", "canvas_generate"] {
+        for name in ["pdf_annotate", "pdf_pages", "game_edit", "game_import", "canvas_draw", "canvas_generate", "flow_edit"] {
             let changing = tools.iter().find(|t| t.name == name).unwrap();
             assert!(changing.description.contains("held until the person saves"), "{name}: {}", changing.description);
         }
@@ -1365,6 +1437,8 @@ mod tests {
         assert_eq!(declared, crate::game::TOOLS);
         let declared: Vec<&str> = tools.iter().map(|t| t.name.as_str()).filter(|n| n.starts_with("canvas_")).collect();
         assert_eq!(declared, crate::raster::TOOLS);
+        let declared: Vec<&str> = tools.iter().map(|t| t.name.as_str()).filter(|n| n.starts_with("flow_")).collect();
+        assert_eq!(declared, crate::diffuse::TOOLS);
         for tool in &tools {
             // A description written with line continuations and mangled into
             // one long line reads to the model as a run of whitespace in the

@@ -428,4 +428,72 @@ export async function diffuseChecks({test, assert, win, doc, $, settle, shown}) 
     size.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
     assert(JSON.stringify(sent(before, 'diffuseEdit')[0]?.ops) === JSON.stringify([{op: 'set', id: '4', name: 'width', value: 1216}, {op: 'set', id: '4', name: 'height', value: 832}]), 'a preset did not set both sides');
   });
+
+  await test('A prompt being typed survives a look at forge drawing the inspector again, in a box with room for Ideogram\'s JSON', async () => {
+    await answer({type: 'diffuseOpen', path: 'lighthouse.flow.json'});
+    ws().querySelector('[data-df-view="graph"]').click(); await settle();
+    ws().querySelector('[data-df-panel="inspector"]').click(); await settle();
+    ws().querySelector('[data-df-grab="2"]').dispatchEvent(new win.PointerEvent('pointerdown', {bubbles: true, button: 0, clientX: 0, clientY: 0, pointerId: 71}));
+    $('[data-df-stage]').dispatchEvent(new win.PointerEvent('pointerup', {bubbles: true, button: 0, clientX: 0, clientY: 0, pointerId: 71}));
+    await settle();
+    let prompt = /** @type {HTMLTextAreaElement} */ (ws().querySelector('[data-df-inspector] [data-df-set="text"]'));
+    prompt.focus();
+    prompt.value = 'a harbour at dawn, fog';
+    prompt.setSelectionRange(9, 9);
+    prompt.dispatchEvent(new win.Event('input', {bubbles: true}));
+    // What forge is, said again — as a look on coming to Diffuse says it.
+    await win.pushEvents(core.sync()); await settle();
+    prompt = /** @type {HTMLTextAreaElement} */ (ws().querySelector('[data-df-inspector] [data-df-set="text"]'));
+    assert(prompt.value === 'a harbour at dawn, fog', `what was typed became ${JSON.stringify(prompt.value)}`);
+    assert(win.document.activeElement === prompt && prompt.selectionStart === 9, 'the prompt lost the keyboard or its caret');
+    const before = win.commands.length;
+    prompt.blur(); await settle();
+    const set = sent(before, 'diffuseEdit')[0];
+    assert(JSON.stringify(set?.ops) === JSON.stringify([{op: 'set', id: '2', name: 'text', value: 'a harbour at dawn, fog'}]), `leaving the prompt sent ${JSON.stringify(set)}`);
+    await answer(set);
+    // Room to write in, and JSON set out as code, the box growing with it.
+    prompt = /** @type {HTMLTextAreaElement} */ (ws().querySelector('[data-df-inspector] [data-df-set="text"]'));
+    assert(prompt.clientHeight >= 250, `the prompt box is ${prompt.clientHeight}px tall`);
+    const short = prompt.clientHeight;
+    prompt.focus();
+    prompt.value = JSON.stringify({prompt: 'a harbour at dawn', style: 'oil painting', palette: ['#203050', '#e0a070'], details: Array.from({length: 30}, (_, i) => `detail ${i}`)}, null, 2);
+    prompt.dispatchEvent(new win.Event('input', {bubbles: true}));
+    assert(prompt.classList.contains('json') && !prompt.spellcheck && prompt.clientHeight > short, `JSON is not set out as code in a box that grows (${prompt.clientHeight}px, ${prompt.className})`);
+    prompt.value = 'a lighthouse at dusk, oil painting';
+    prompt.dispatchEvent(new win.Event('input', {bubbles: true}));
+    assert(!prompt.classList.contains('json'), 'words stay set out as JSON');
+    prompt.blur(); await settle();
+    await answer({type: 'diffuseEdit', path: 'lighthouse.flow.json', ops: [{op: 'set', id: '2', name: 'text', value: 'a lighthouse at dusk, oil painting'}]});
+  });
+
+  await test('A press on a picture in the gallery chooses it rather than panning the graph behind', async () => {
+    // The gallery is in the graph's place: a press there is not a pan, which
+    // would take the pointer and leave the click on the stage.
+    const image = (/** @type {string} */ path, /** @type {number} */ at) => ({path, folder: 'outputs/lighthouse', madeAt: at, width: 1024, height: 1024, graph: true, made: {seed: at}});
+    ws().querySelector('[data-df-view="gallery"]').click(); await settle();
+    await win.pushEvents([{type: 'diffuseGallery', images: [image('outputs/lighthouse/image_0009.png', 9), image('outputs/lighthouse/image_0008.png', 8)]}]); await settle();
+    const world = /** @type {HTMLElement} */ (ws().querySelector('[data-df-world]'));
+    const was = world.style.transform;
+    const tile = ws().querySelectorAll('[data-df-pick-image]')[1];
+    const [x, y] = centre(tile);
+    fire(tile.querySelector('img'), 'pointerdown', x, y, {pointerId: 72});
+    fire($('[data-df-stage]'), 'pointermove', x + 60, y + 40, {pointerId: 72});
+    fire($('[data-df-stage]'), 'pointerup', x + 60, y + 40, {pointerId: 72});
+    assert(world.style.transform === was, 'a press on a picture panned the graph behind the gallery');
+    /** @type {HTMLElement} */ (tile.querySelector('img')).click(); await settle();
+    const on = [...ws().querySelectorAll('.df-tile.on')].map((t) => /** @type {HTMLElement} */ (t).dataset.dfPickImage);
+    assert(JSON.stringify(on) === JSON.stringify(['outputs/lighthouse/image_0008.png']), `chosen: ${on}`);
+    ws().querySelector('[data-df-view="graph"]').click(); await settle();
+  });
+
+  await test('@flow beside Diffuse\'s agent puts the flow on screen in the question', async () => {
+    ws().querySelector('[data-df-panel="agent"]').click(); await settle();
+    const chip = ws().querySelector('[data-df-body="agent"] [data-mention="@flow"]');
+    assert(chip && shown(chip), 'there is no @flow chip beside the agent');
+    chip.click(); await settle();
+    const input = ws().querySelector('[data-df-body="agent"] [data-agent-input]');
+    assert(input.textContent.includes('@flow'), 'the chip did not put @flow in the question');
+    input.textContent = '';
+    ws().querySelector('[data-df-panel="inspector"]').click(); await settle();
+  });
 }

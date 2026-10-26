@@ -166,11 +166,14 @@ pub struct Workspace {
     /// hash: so a streaming answer sends the entries from the first that
     /// changed rather than the whole conversation on every token.
     agent_sent: std::cell::RefCell<Vec<u64>>,
-    /// The agent's PDF tool calls, which the session answers: the PDFs are
-    /// its, not a project's. Deferred as a cell run is, and for as long.
-    pdf_calls: Vec<(String, String, serde_json::Value)>,
+    /// The agent's PDF and Diffuse tool calls, which the session answers: the
+    /// PDFs and the flows are its, not a project's. Deferred as a cell run
+    /// is, and for as long.
+    session_calls: Vec<(String, String, serde_json::Value)>,
     /// What `@pdf` says in the next question, as the session last told it.
     pdf_about: Option<String>,
+    /// What `@flow` says, likewise.
+    flow_about: Option<String>,
     /// The file the open conversation lives in. `None` until it has a
     /// question in it — a conversation with nothing said is not worth a file.
     chat_path: Option<PathBuf>,
@@ -1485,7 +1488,7 @@ impl Workspace {
                 // of it. Nothing is written for an empty conversation.
                 self.agent.clear();
                 self.waiting.clear();
-                self.pdf_calls.clear();
+                self.session_calls.clear();
                 self.chat_path = None;
                 vec![self.agent_event(), self.chats_event()]
             }
@@ -1800,7 +1803,7 @@ impl Workspace {
                 // code — but nothing is waiting on it any more. Leaving these
                 // would answer into a turn that no longer exists.
                 self.waiting.clear();
-                self.pdf_calls.clear();
+                self.session_calls.clear();
                 vec![self.agent_event()]
             }
 
@@ -4882,6 +4885,7 @@ impl Workspace {
                 crate::mention::Mention::Pdf => self.pdf_about.clone().unwrap_or_else(|| "No PDF is open in the PDF mode.".into()),
                 crate::mention::Mention::Game => self.game.about(),
                 crate::mention::Mention::Canvas => self.raster.about(self.root()),
+                crate::mention::Mention::Flow => self.flow_about.clone().unwrap_or_else(|| "Diffuse has not been opened.".into()),
             });
         }
         out
@@ -4967,9 +4971,10 @@ impl Workspace {
     /// question — "is there an answer yet?" — rather than knowing which tools
     /// are slow.
     pub fn call_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) -> ToolOutcome {
-        // The PDFs are the session's, which answers these after this poll.
-        if crate::pdf::TOOLS.contains(&name) {
-            self.pdf_calls.push((id.to_string(), name.to_string(), input.clone()));
+        // The PDFs and the flows are the session's, which answers these after
+        // this poll.
+        if crate::pdf::TOOLS.contains(&name) || crate::diffuse::TOOLS.contains(&name) {
+            self.session_calls.push((id.to_string(), name.to_string(), input.clone()));
             return ToolOutcome::Deferred;
         }
         if name == "search_library" {
@@ -4996,10 +5001,10 @@ impl Workspace {
         }
     }
 
-    /// The agent's PDF tool calls since the last time, for the session to
-    /// answer from its PDFs.
-    pub fn take_pdf_calls(&mut self) -> Vec<(String, String, serde_json::Value)> {
-        std::mem::take(&mut self.pdf_calls)
+    /// The agent's PDF and Diffuse tool calls since the last time, for the
+    /// session to answer from its PDFs and flows.
+    pub fn take_session_calls(&mut self) -> Vec<(String, String, serde_json::Value)> {
+        std::mem::take(&mut self.session_calls)
     }
 
     /// Answer a call the session ran. The turn goes on at the next poll,
@@ -5009,6 +5014,10 @@ impl Workspace {
     }
 
     /// What `@pdf` says in the next question: the session's PDF on top.
+    pub fn set_flow_about(&mut self, about: String) {
+        self.flow_about = Some(about);
+    }
+
     pub fn set_pdf_about(&mut self, about: String) {
         self.pdf_about = Some(about);
     }

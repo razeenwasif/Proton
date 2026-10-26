@@ -398,6 +398,32 @@ Trash; a flow's images stay when it goes.
   open game as art. The agent gets `flow_info`, `flow_edit` and `flow_run`
   and an `@flow` mention, so it can build a graph from a description and
   run it.
+- **The agent** (D6, built; `proton-core/src/diffuse/agent.rs`): the agent
+  lives in a workspace and Diffuse in the session, so a workspace defers
+  `flow_*` calls and the session answers them after its poll, as it does
+  the PDF tools. `flow_info` says whether forge is serving, the flows and
+  those open, the flow on screen (or one named) node by node — id, type,
+  place, values, the links into its inputs — and what stops it running;
+  then forge's nodes with their sockets, its models, the starters and the
+  latest runs, and with `nodes` those types' fields in full (kinds, ranges,
+  steps, defaults, choices). `flow_edit` makes a flow (`new`, from a
+  starter or empty), opens one (`flow`), and applies `ops` — the window's
+  own — as one step of the person's undo, all or none, held until they
+  save; an `add` may carry a `ref` that later ops in the call use in place
+  of the id it cannot know yet, and one with no `at` is placed: a flow made
+  whole in the call is laid out as a PNG's graph is, and a node added to one
+  goes in the column its links give it, below what is there. `save` saves,
+  only when the person asked. `flow_run` runs the flow as ⌘↩ does and holds
+  the turn until the run ends — up to fifteen minutes — answering with the
+  images saved or why it failed and at which node; `wait: false` answers at
+  once, `cancel` stops a run. `@flow` sends what `flow_info` says of the flow
+  on screen; a chip beside Diffuse's agent writes it.
+- **The inspector** (2026-10-26): a field being typed in keeps what was
+  typed, and its caret, when a look at forge draws the inspector again,
+  and is set when it is left; a prompt's box starts fourteen lines tall and
+  grows with it to most of the window, set out as code once it is JSON
+  (Ideogram's prompts are). A press on a picture in the Gallery chooses it:
+  the stage behind no longer takes it for a pan.
 
 ### Milestones
 

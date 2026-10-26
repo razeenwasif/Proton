@@ -435,10 +435,10 @@ fn the_agent_reads_searches_marks_and_rearranges_the_pdf_on_top_each_change_held
     // A workspace's agent asks; the session answers after the poll.
     let outcome = session.active_mut().call_tool("t1", "pdf_info", &json!({}));
     assert!(matches!(outcome, proton_core::workspace::ToolOutcome::Deferred), "a PDF tool was answered by the workspace");
-    let calls = session.active_mut().take_pdf_calls();
+    let calls = session.active_mut().take_session_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!((calls[0].0.as_str(), calls[0].1.as_str()), ("t1", "pdf_info"));
-    assert!(session.active_mut().take_pdf_calls().is_empty());
+    assert!(session.active_mut().take_session_calls().is_empty());
 
     session.apply(Command::SetMode { mode: ModeId::Pdf });
     let events = session.apply(Command::PdfOpen { path: "paper.pdf".into(), page: None, password: None });
