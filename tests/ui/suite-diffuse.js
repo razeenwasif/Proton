@@ -275,4 +275,52 @@ export async function diffuseChecks({test, assert, win, doc, $, settle, shown}) 
     ws().querySelector('[data-df-folder-form] button[type="submit"]').click(); await settle();
     assert(sent(before, 'diffuseFolder')[0]?.folder === '~/Pictures/Diffuse', 'the folder was not moved');
   });
+
+  await test('A new flow starts from any of the starters, an output\'s graph opens as a new flow, and so does a PNG dropped on the graph', async () => {
+    await win.pushEvents(core.sync()); await settle();
+    ws().querySelector('[data-df-side="flows"]').click(); await settle();
+    const starters = [...ws().querySelectorAll('[data-df-new] [name="template"]')].map((r) => r.value);
+    assert(JSON.stringify(starters) === JSON.stringify(['textToImage', 'imageToImage', 'inpaint', 'hiresFix', 'flux', '']), `the starters offered are ${starters}`);
+    /** @type {HTMLInputElement} */ ($('[data-df-new-name]')).value = 'sharp';
+    /** @type {HTMLInputElement} */ (ws().querySelector('[data-df-new] [value="hiresFix"]')).checked = true;
+    let before = win.commands.length;
+    $('[data-df-new] button[type="submit"]').click(); await settle();
+    assert(sent(before, 'diffuseNew')[0]?.template === 'hiresFix', `New sent ${JSON.stringify(sent(before, 'diffuseNew')[0])}`);
+    // From the gallery.
+    ws().querySelector('[data-df-view="gallery"]').click(); await settle();
+    await win.pushEvents([{type: 'diffuseGallery', images: [{path: 'outputs/lighthouse/image_0003.png', folder: 'outputs/lighthouse', madeAt: 1792980000, width: 64, height: 64, graph: true, made: {seed: 7}}]}]);
+    await settle();
+    ws().querySelector('[data-df-pick-image]').click(); await settle();
+    before = win.commands.length;
+    $('[data-df-inspector] [data-df-open-image]').click(); await settle();
+    assert(sent(before, 'diffuseOpenImage')[0]?.path === 'outputs/lighthouse/image_0003.png' && !shown($('[data-df-gallery]')), 'Open its graph did not ask for it on the graph');
+    // Dropped: the window reads the graph out of the PNG itself.
+    const enc = (/** @type {string} */ t) => new TextEncoder().encode(t);
+    const chunk = (/** @type {string} */ kind, /** @type {Uint8Array} */ data) => {
+      const out = new Uint8Array(12 + data.length);
+      new DataView(out.buffer).setUint32(0, data.length);
+      out.set([...kind].map((c) => c.charCodeAt(0)), 4);
+      out.set(data, 8);
+      return out;
+    };
+    const png = (/** @type {string | null} */ text) => {
+      const parts = [Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a), chunk('IHDR', new Uint8Array(13)), ...(text ? [chunk('tEXt', enc(`proton-flow\0${text}`))] : []), chunk('IDAT', enc('x'))];
+      return new Blob(parts, {type: 'image/png'});
+    };
+    const graph = {nodes: [{id: '1', type: 'SaveImage', values: {prefix: 'x'}}], links: []};
+    const drop = (/** @type {File} */ file) => {
+      const transfer = new win.DataTransfer();
+      transfer.items.add(file);
+      $('[data-df-stage]').dispatchEvent(new win.DragEvent('drop', {bubbles: true, cancelable: true, dataTransfer: transfer}));
+    };
+    before = win.commands.length;
+    drop(new win.File([png(JSON.stringify(graph))], 'harbour.png', {type: 'image/png'}));
+    await new Promise((done) => setTimeout(done, 100)); await settle();
+    const opened = sent(before, 'diffuseOpenGraph')[0];
+    assert(opened?.name === 'harbour.png' && JSON.stringify(opened.graph) === JSON.stringify(graph), `a dropped PNG sent ${JSON.stringify(opened)}`);
+    drop(new win.File([png(null)], 'photo.png', {type: 'image/png'}));
+    await new Promise((done) => setTimeout(done, 100)); await settle();
+    assert(shown($('[data-df-ask]')) && $('[data-df-ask]').textContent.includes('photo.png holds no graph'), 'a PNG with no graph was not said so');
+    $('[data-df-ask] [data-df-answer="stay"]').click(); await settle();
+  });
 }

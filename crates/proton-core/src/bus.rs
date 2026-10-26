@@ -1478,6 +1478,12 @@ pub enum Command {
         #[ts(optional)]
         folder: Option<String>,
     },
+    /// Open the graph an output was made by — the one forge wrote into its
+    /// PNG — as a new flow, laid out, held until saved.
+    DiffuseOpenImage { path: String },
+    /// Open a graph as a new flow: one the window read out of a PNG dropped
+    /// on it. `name` is what the flow is called — the PNG's, say.
+    DiffuseOpenGraph { name: String, graph: proton_diffuse::Graph },
     /// Move a flow to the Trash, closing it if it is open; its images stay.
     DiffuseDelete { path: String },
     /// Move images to the Trash: outputs the gallery lists, or ones a run made.

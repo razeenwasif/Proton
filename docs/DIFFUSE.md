@@ -3,8 +3,8 @@
 A small ComfyUI in Proton. You build a graph of nodes (load a checkpoint,
 encode a prompt, sample, decode, save), run it, and watch it work; the
 models run on forge, the RTX 4090 desktop, behind Nexus. Proton is the
-editor and the client. Status: design and screens agreed 2026-10-26; D0 to D3
-built: the format, the client, the mode, and runs. Shared as the doc
+editor and the client. Status: design and screens agreed 2026-10-26; D0 to D4
+built: the format, the client, the mode, runs, and graphs in PNGs. Shared as the doc
 [Diffuse Design](https://claude.ai/artifact/DuvNm2Xh1dG8bMsRDD7dBa); the
 screens are the mockups in
 [Diffuse UI](https://claude.ai/artifact/QcvnmxeJPeNrnFNJ8gs9hG).
@@ -335,6 +335,14 @@ Trash; a flow's images stay when it goes.
   node added for a wire let go on space names it by the id the core will
   give it — and asks the core to look at forge on coming on screen and
   every 30 s. Load Image's picture waits for D5.
+- **Graphs in PNGs and starters** (D4, built): an output's graph — the one
+  forge writes into each PNG as `proton-flow` — opens as a new flow from the
+  Gallery's Open its graph, or from a PNG dropped on the graph (the window
+  reads the chunk itself), laid out in columns by depth since a run's graph
+  carries no places (`proton-diffuse`'s `layout`), named after the image
+  and held until ⌘S. New flows start from Text to image, Image to image,
+  Inpaint, Hires fix or FLUX; the image inputs wait for D5's picture.
+  ComfyUI's own PNGs (their `workflow` chunk) are not read.
 - **Runs** (D3, built): Run (`⌘↩`) sends the flow shown, as often as it
   is pressed; each run has a worker in the core that sends the graph,
   follows its event stream, fetches each image and writes it — a Save

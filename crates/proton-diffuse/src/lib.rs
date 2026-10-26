@@ -30,6 +30,7 @@
 //! - [`cache`]: what forge served last, kept so graphs edit while it is off.
 //! - [`templates`]: starter graphs, as batches of ops.
 //! - [`png`]: an output's size and the graph that made it, from its PNG's head.
+//! - [`layout`]: a graph that came without places — out of a PNG — laid out.
 
 pub mod cache;
 pub mod catalogue;
@@ -37,6 +38,7 @@ pub mod check;
 pub mod client;
 pub mod doc;
 pub mod flow;
+pub mod layout;
 pub mod op;
 pub mod png;
 pub mod templates;

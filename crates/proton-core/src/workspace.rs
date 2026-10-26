@@ -1597,6 +1597,8 @@ impl Workspace {
             | Command::DiffuseGallery
             | Command::DiffuseDelete { .. }
             | Command::DiffuseDeleteImages { .. }
+            | Command::DiffuseOpenImage { .. }
+            | Command::DiffuseOpenGraph { .. }
             | Command::DiffuseGateways { .. }
             | Command::DiffuseFolder { .. } => Vec::new(),
             // PDF is the window's too: the session answers it.

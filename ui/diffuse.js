@@ -20,7 +20,7 @@
 
 import { copyText, readDiffuse } from "./bridge.js";
 import { escapeHtml as esc } from "./html.js";
-import { colourOf, fieldsOf, freshId, grouped, HEAD, NODE_W, portAt, portOf, rowsOf, search, shortValue, socketFor, wire } from "./diffuse-graph.js";
+import { colourOf, fieldsOf, freshId, grouped, HEAD, NODE_W, pngText, portAt, portOf, rowsOf, search, shortValue, socketFor, wire } from "./diffuse-graph.js";
 
 /** @typedef {import('./bindings/DiffuseView').DiffuseView} View */
 /** @typedef {import('./bindings/DiffuseKnown').DiffuseKnown} Known */
@@ -44,6 +44,7 @@ const KEYS = /** @type {[string, string][]} */ ([
   ["⌘ wheel  pinch", "zoom"], ["⌫", "remove what is chosen"], ["⌘D", "a copy of what is chosen"], ["⌘A", "choose every node"],
   ["⌘↩", "run the flow on forge — again to queue another"], ["⌘.", "stop its run"],
   ["⌫ in the Gallery", "move the images chosen to the Trash — ⌘-click chooses more"],
+  ["drop a PNG", "open the graph that made it, as a new flow"],
   ["⌘Z ⇧⌘Z", "undo, redo"], ["⌘S", "save the flow"], ["f", "the whole graph"], ["⎋", "close the search, choose nothing"], ["?", "these keys"],
 ]);
 
@@ -77,7 +78,7 @@ export function createDiffuse(host) {
   let looking = null;
   /** What the bar above the stage is asking about: closing a flow with
    *  changes, or moving a flow or images to the Trash.
-   *  @type {{kind: "close", path: string} | {kind: "deleteFlow", path: string} | {kind: "deleteImages", paths: string[]} | null} */
+   *  @type {{kind: "close", path: string} | {kind: "deleteFlow", path: string} | {kind: "deleteImages", paths: string[]} | {kind: "note", text: string} | null} */
   let asking = null;
   /** Whether the Flows list is showing a field to move Diffuse's folder. */
   let movingFolder = false;
@@ -170,7 +171,9 @@ export function createDiffuse(host) {
           : `<p class="df-faint">No flow here yet.</p>`) +
         `<form class="df-new" data-df-new><div class="df-head">New flow</div>` +
         `<label>Name <input name="name" data-df-new-name placeholder="lighthouse" autocomplete="off" spellcheck="false" required></label>` +
-        `<label class="df-radio"><input type="radio" name="template" value="textToImage" checked> Text to image <span>7 nodes</span></label>` +
+        (view?.starters ?? [{ name: "textToImage", title: "Text to image", about: "" }])
+          .map((t, i) => `<label class="df-radio" title="${esc(t.about)}"><input type="radio" name="template" value="${esc(t.name)}"${i === 0 ? " checked" : ""}> ${esc(t.title)}<span>${esc(t.about)}</span></label>`)
+          .join("") +
         `<label class="df-radio"><input type="radio" name="template" value=""> Empty</label>` +
         `<button class="cc-primary" type="submit">Make it</button></form>`;
     } else if (side === "nodes") {
@@ -263,6 +266,8 @@ export function createDiffuse(host) {
         `<span class="df-banner-text">Move <b>${esc(asking.path)}</b> to the Trash?${dirty ? " Its changes not saved go with it." : ""} The images it made stay where they are.</span>` +
         `<button class="cc-quiet" data-df-answer="stay">Keep it</button>` +
         `<button class="cc-primary" data-df-answer="trash">Move to Trash</button>`;
+    } else if (asking.kind === "note") {
+      box.innerHTML = `<span class="df-banner-text">${esc(asking.text)}</span><button class="cc-quiet" data-df-answer="stay">OK</button>`;
     } else {
       const n = asking.paths.length;
       box.innerHTML =
@@ -648,7 +653,8 @@ export function createDiffuse(host) {
       `<div class="df-made">${row("Seed", m.seed)}${row("Steps", m.steps)}${row("CFG", m.cfg)}${row("Sampler", [m.sampler, m.scheduler].filter(Boolean).join(" · "))}${row("Denoise", m.denoise)}${row("Model", m.checkpoint?.replace(/\.safetensors$/, ""))}${row("Prompt", m.prompt)}${row("Negative", m.negative)}</div>` +
       (image.graph ? "" : `<p class="df-faint df-pad">This PNG holds no graph: it was not made by a flow, or not by forge.</p>`) +
       `<div class="df-actions">` +
-      (flowHere ? `<button class="cc-primary" data-df-open-flow="${esc(flowHere)}">Open its flow</button>` : "") +
+      (image.graph ? `<button class="cc-primary" data-df-open-image="${esc(image.path)}" title="The graph forge wrote into it, as a new flow">Open its graph</button>` : "") +
+      (flowHere ? `<button class="hbtn" data-df-open-flow="${esc(flowHere)}">Open ${esc(flowHere)}</button>` : "") +
       `<button class="hbtn" data-df-copy-path="${esc(image.path)}">Copy its path</button>` +
       `<button class="hbtn df-danger" data-df-delete-images>${BIN} Move to Trash</button></div>`;
     fillImages(box);
@@ -1030,10 +1036,20 @@ export function createDiffuse(host) {
   );
 
   // A node dragged from the catalogue.
+  /** A drag that carries files. @param {DragEvent} e */
+  const carriesFiles = (e) => [...(e.dataTransfer?.items ?? [])].some((i) => i.kind === "file");
   stage.addEventListener("dragover", (e) => {
-    if (e.dataTransfer?.types.includes("application/x-diffuse-node")) e.preventDefault();
+    if (e.dataTransfer?.types.includes("application/x-diffuse-node") || carriesFiles(e)) e.preventDefault();
   });
+  q("[data-df-gallery]").addEventListener("dragover", (e) => {
+    if (carriesFiles(e)) e.preventDefault();
+  });
+  q("[data-df-gallery]").addEventListener("drop", (e) => void droppedPngs(e));
   stage.addEventListener("drop", (e) => {
+    if (carriesFiles(e)) {
+      void droppedPngs(e);
+      return;
+    }
     const type = e.dataTransfer?.getData("application/x-diffuse-node");
     const kind = type ? kindOf(type) : null;
     if (!type || !kind || !flow()) return;
@@ -1041,6 +1057,34 @@ export function createDiffuse(host) {
     const [x, y] = toGraph(e);
     edit([{ op: "add", type, at: [Math.round(x - NODE_W / 2), Math.round(y - HEAD / 2)], values: seeded(kind) }]);
   });
+  /** PNGs dropped on the graph or the gallery: each one's graph — the one
+   *  forge wrote into it — opened as a new flow; a PNG with none, said so.
+   *  @param {DragEvent} e */
+  async function droppedPngs(e) {
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => /\.png$/i.test(f.name) || f.type === "image/png");
+    if (!files.length) return;
+    e.preventDefault();
+    const none = [];
+    for (const file of files) {
+      const text = pngText(new Uint8Array(await file.arrayBuffer()));
+      let graph = null;
+      try {
+        const read = text ? JSON.parse(text) : null;
+        graph = read?.graph ?? read;
+      } catch {
+        graph = null;
+      }
+      if (graph && Array.isArray(graph.nodes) && Array.isArray(graph.links)) {
+        send({ type: "diffuseOpenGraph", name: file.name, graph });
+        setView("graph");
+      } else none.push(file.name);
+    }
+    if (none.length) {
+      asking = { kind: "note", text: `${none.join(", ")} ${none.length === 1 ? "holds" : "hold"} no graph: only a PNG a flow made on forge has one.` };
+      renderAsk();
+    }
+  }
+
   ws.addEventListener("dragstart", (e) => {
     const item = /** @type {HTMLElement} */ (e.target).closest?.("[data-df-add]");
     if (item && e.dataTransfer) e.dataTransfer.setData("application/x-diffuse-node", /** @type {HTMLElement} */ (item).dataset.dfAdd ?? "");
@@ -1113,7 +1157,7 @@ export function createDiffuse(host) {
         }
       } else if (said === "trash") {
         if (was.kind === "deleteFlow") send({ type: "diffuseDelete", path: was.path });
-        else {
+        else if (was.kind === "deleteImages") {
           send({ type: "diffuseDeleteImages", paths: was.paths });
           for (const p of was.paths) {
             pickedAll.delete(p);
@@ -1150,6 +1194,11 @@ export function createDiffuse(host) {
       picked = shownImage.dataset.dfShowImage ?? null;
       setView("gallery");
       return setPanel("inspector");
+    }
+    const openImage = at("[data-df-open-image]");
+    if (openImage) {
+      send({ type: "diffuseOpenImage", path: openImage.dataset.dfOpenImage });
+      return setView("graph");
     }
     const openFlow = at("[data-df-open-flow]");
     if (openFlow) {

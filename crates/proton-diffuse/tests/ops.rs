@@ -207,6 +207,33 @@ fn ops_read_as_the_window_sends_them() {
 }
 
 #[test]
+fn every_starter_is_sound_and_ready_to_run_but_for_the_picture_it_asks_for() {
+    use proton_diffuse::templates::{ops, TEMPLATES};
+    for (name, _, _) in TEMPLATES {
+        let mut flow = Flow::default();
+        run(&mut flow, &ops(name).unwrap()).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let problems = proton_diffuse::check(&flow, &catalogue(), None);
+        let left: Vec<String> = problems.iter().map(|p| p.message.clone()).collect();
+        match name {
+            // Image to image and inpainting wait for the person's picture.
+            "imageToImage" | "inpaint" => assert_eq!(left, ["no image chosen"], "{name}"),
+            _ => assert!(left.is_empty(), "{name}: {left:?}"),
+        }
+        // Every node on the graph is in a place of its own.
+        for (i, a) in flow.nodes.iter().enumerate() {
+            for b in &flow.nodes[i + 1..] {
+                assert!(a.at != b.at, "{name}: {} and {} sit on each other", a.id, b.id);
+            }
+        }
+    }
+    let mut flow = Flow::default();
+    run(&mut flow, &ops("hiresFix").unwrap()).unwrap();
+    let graph = flow.graph(&catalogue(), None).unwrap();
+    assert_eq!(graph.nodes.iter().filter(|n| n.kind == "KSampler").count(), 2);
+    assert_eq!(graph.nodes.iter().find(|n| n.id == "7").unwrap().values["denoise"], json!(0.5));
+}
+
+#[test]
 fn the_text_to_image_starter_is_ready_to_run() {
     let mut flow = Flow::default();
     run(&mut flow, &proton_diffuse::templates::ops("textToImage").unwrap()).unwrap();

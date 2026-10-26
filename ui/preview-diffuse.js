@@ -42,6 +42,8 @@ export function createDiffusePreview(deliver) {
   const images = [];
   /** Each output's picture, by path: the seed it was drawn from. @type {Map<string, number>} */
   const drawn = new Map();
+  /** The graph each output was made by, by path. @type {Map<string, any>} */
+  const ranWith = new Map();
   let runCount = 0;
   /** Diffuse's folder, as the person would type it. */
   let folder = "~/Diffuse";
@@ -163,6 +165,13 @@ export function createDiffusePreview(deliver) {
         open: open.map(tab),
         shown: doc && shown ? { path: shown, flow: copy(doc.flow), problems: problems(doc.flow), dirty: tab(shown).dirty, canUndo: doc.undo.length > 0, canRedo: doc.redo.length > 0 } : null,
         added,
+        starters: [
+          { name: "textToImage", title: "Text to image", about: "a prompt, SDXL, one picture" },
+          { name: "imageToImage", title: "Image to image", about: "a picture of yours, redrawn from a prompt" },
+          { name: "inpaint", title: "Inpaint", about: "a picture with part of it redrawn: its mask" },
+          { name: "hiresFix", title: "Hires fix", about: "drawn, enlarged in the latent, drawn again sharper" },
+          { name: "flux", title: "FLUX", about: "FLUX.1 dev: one prompt, no negative" },
+        ],
       },
     };
   }
@@ -259,6 +268,20 @@ export function createDiffusePreview(deliver) {
           return [];
         case "diffuseGallery":
           return [galleryEvent()];
+        case "diffuseOpenImage":
+        case "diffuseOpenGraph": {
+          // The stand-in keeps each output's flow as it ran, for its graph.
+          const graph = command.graph ?? ranWith.get(command.path);
+          if (!graph) return [{ type: "notice", text: `${command.path} holds no graph`, level: "warn" }];
+          const stem = String(command.name ?? command.path).split("/").pop().replace(/\.png$/, "").replace(/[^A-Za-z0-9_-]+/g, "-");
+          let path = `${stem}.flow.json`;
+          for (let n = 2; flows.has(path); n++) path = `${stem}-${n}.flow.json`;
+          const flow = { format: 1, note: null, outputs: null, nodes: graph.nodes.map((/** @type {any} */ n, /** @type {number} */ i) => ({ ...copy(n), at: [16 + (i % 4) * 250, 16 + Math.floor(i / 4) * 260], seed: null, bypass: null })), links: copy(graph.links) };
+          flows.set(path, { flow, undo: [], redo: [], saved: "" });
+          open.push(path);
+          shown = path;
+          return [{ type: "notice", text: `Opened its graph as ${path} — ⌘S keeps it.`, level: "info" }, view()];
+        }
         case "diffuseFolder":
           folder = command.folder || "~/Diffuse";
           return [view()];
@@ -325,6 +348,7 @@ export function createDiffusePreview(deliver) {
               const number = images.filter((i) => i.path.startsWith(`outputs/${stem}/${prefix}_`)).length + 1;
               const out = kept ? `outputs/${stem}/${prefix}_${String(number).padStart(4, "0")}.png` : `.proton/diffuse/previews/preview-${r.id}.png`;
               drawn.set(out, seed);
+              ranWith.set(out, { nodes: flow.nodes.map((/** @type {any} */ x) => ({ id: x.id, type: x.type, values: copy(x.values) })), links: copy(flow.links) });
               r.nodes.push({ id: n.id, state: "done", seconds: 0.1 });
               r.outputs.push({ node: n.id, path: out, width: 1024, height: 1024, kept });
               if (kept) {

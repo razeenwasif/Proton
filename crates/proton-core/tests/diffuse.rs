@@ -486,3 +486,51 @@ fn diffuses_folder_is_moved_into_the_persons_settings_and_not_with_changes_left_
     assert!(kept["diffuse"].get("folder").is_none());
     assert!(space.diffuse_home().ends_with("Diffuse"));
 }
+
+#[test]
+fn an_outputs_graph_opens_as_a_new_flow_and_so_does_one_dropped_on_the_window() {
+    std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
+    let (mut space, root) = with_flow("from-png");
+    set_gateway(&root, Some(&serving_gateway()));
+    space.apply(Command::DiffuseLook { again: false });
+    poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
+    space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
+    poll_until(&mut space, |e| runs(e).is_some_and(|r| r[0].state.ended()));
+    let sent = view(&space.apply(Command::Sync)).shown.unwrap().flow;
+
+    // The output's graph, out of its PNG: a new flow named after it, unsaved.
+    let opened = space.apply(Command::DiffuseOpenImage { path: "outputs/lighthouse/image_0001.png".into() });
+    let seen = view(&opened);
+    let shown = seen.shown.unwrap();
+    assert_eq!(shown.path, "image_0001.flow.json");
+    assert!(shown.dirty && !root.join("image_0001.flow.json").exists(), "it is written only on ⌘S");
+    let catalogue = proton_diffuse::Catalogue::parse(CATALOGUE).unwrap();
+    assert_eq!(
+        shown.flow.graph(&catalogue, None).unwrap(),
+        sent.graph(&catalogue, None).unwrap(),
+        "not the graph that ran"
+    );
+    assert_eq!(shown.problems, vec![]);
+    assert_eq!(seen.starters.len(), 5);
+    // Again: a name of its own.
+    let again = view(&space.apply(Command::DiffuseOpenImage { path: "outputs/lighthouse/image_0001.png".into() }));
+    assert_eq!(again.shown.unwrap().path, "image_0001-2.flow.json");
+    // One the window read out of a dropped PNG.
+    let graph = sent.graph(&catalogue, None).unwrap();
+    let dropped = view(&space.apply(Command::DiffuseOpenGraph { name: "harbour at dusk.png".into(), graph }));
+    assert_eq!(dropped.shown.unwrap().path, "harbour-at-dusk.flow.json");
+    // Not an image the gallery listed: refused.
+    let refused = space.apply(Command::DiffuseOpenImage { path: "lighthouse.flow.json".into() });
+    assert!(warned(&refused).is_some());
+}
+
+#[test]
+fn the_first_flow_makes_diffuses_folder() {
+    let root = project("fresh-folder").join("not-yet");
+    let mut space = session_in(&root);
+    space.apply(Command::SetMode { mode: ModeId::Diffuse });
+    assert!(!root.exists(), "entering Diffuse made its folder");
+    let events = space.apply(Command::DiffuseNew { name: "first".into(), template: None });
+    assert!(warned(&events).is_none(), "{events:?}");
+    assert!(root.join("first.flow.json").is_file());
+}

@@ -136,3 +136,38 @@ export function shortValue(value) {
   const plain = text.replace(/\.safetensors$|\.ckpt$|\.pth$/, "");
   return plain.length > 26 ? `${plain.slice(0, 25)}…` : plain;
 }
+
+/** The text a PNG keeps under `key` — the graph forge writes as
+ *  `proton-flow` — read from its head, before the pixels; `null` when it
+ *  holds none, or is not a PNG. `tEXt`, and `iTXt` uncompressed.
+ *  @param {Uint8Array} bytes @param {string} [key] */
+export function pngText(bytes, key = "proton-flow") {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (bytes.length < 8 || signature.some((b, i) => bytes[i] !== b)) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const latin = (/** @type {Uint8Array} */ part) => String.fromCharCode(...part);
+  let at = 8;
+  while (at + 8 <= bytes.length) {
+    const length = view.getUint32(at);
+    const kind = latin(bytes.subarray(at + 4, at + 8));
+    const data = bytes.subarray(at + 8, Math.min(bytes.length, at + 8 + length));
+    if (kind === "IDAT" || kind === "IEND") break;
+    const nul = data.indexOf(0);
+    if (nul > 0 && latin(data.subarray(0, nul)) === key) {
+      if (kind === "tEXt") {
+        let text = "";
+        for (let i = nul + 1; i < data.length; i += 0x8000) text += latin(data.subarray(i, Math.min(data.length, i + 0x8000)));
+        return text;
+      }
+      if (kind === "iTXt" && data[nul + 1] === 0) {
+        // Keyword, NUL, compressed flag, method, language NUL, translated keyword NUL, text.
+        let i = nul + 3;
+        i = data.indexOf(0, i) + 1;
+        i = data.indexOf(0, i) + 1;
+        if (i > 0) return new TextDecoder().decode(data.subarray(i));
+      }
+    }
+    at += 12 + length;
+  }
+  return null;
+}

@@ -122,8 +122,19 @@ pub fn handles(command: &Command) -> bool {
             | Command::DiffuseGallery
             | Command::DiffuseDelete { .. }
             | Command::DiffuseDeleteImages { .. }
+            | Command::DiffuseOpenImage { .. }
+            | Command::DiffuseOpenGraph { .. }
             | Command::DiffuseGateways { .. }
     )
+}
+
+/// A starter graph a new flow can begin from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+pub struct DiffuseStarter {
+    pub name: String,
+    pub title: String,
+    pub about: String,
 }
 
 /// An image in the gallery: one of the project's outputs.
@@ -161,6 +172,8 @@ pub struct DiffuseView {
     pub shown: Option<DiffuseShown>,
     /// The nodes the edit just answered added, so the window can select them.
     pub added: Vec<String>,
+    /// The starters a new flow can begin from.
+    pub starters: Vec<DiffuseStarter>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -268,6 +281,10 @@ impl Diffuse {
                     )];
                 }
                 let rel = format!("{name}{EXTENSION}");
+                // Diffuse's folder is made when its first flow is.
+                if let Err(e) = std::fs::create_dir_all(root) {
+                    return vec![notice(format!("{}: {e}", root.display()), NoticeLevel::Error)];
+                }
                 let file = match inside(root, &rel) {
                     Ok(file) => file,
                     Err(why) => return vec![notice(why, NoticeLevel::Error)],
@@ -377,6 +394,23 @@ impl Diffuse {
                 }
             }
             Command::DiffuseGallery => vec![self.gallery_event(root)],
+            Command::DiffuseOpenImage { path } => {
+                let Some(file) = self.file(root, &path) else {
+                    return vec![notice(format!("{path} is not an image Diffuse may open"), NoticeLevel::Warn)];
+                };
+                let read =
+                    std::fs::File::open(&file).ok().and_then(|f| proton_diffuse::png::head(std::io::BufReader::new(f)));
+                let Some(graph) = read.and_then(|head| head.flow).as_deref().and_then(proton_diffuse::png::graph_of)
+                else {
+                    return vec![notice(
+                        format!("{path} holds no graph: it was not made by a flow on forge"),
+                        NoticeLevel::Warn,
+                    )];
+                };
+                let name = path.rsplit('/').next().unwrap_or(&path).trim_end_matches(".png").to_string();
+                self.open_graph(root, &name, &graph)
+            }
+            Command::DiffuseOpenGraph { name, graph } => self.open_graph(root, &name, &graph),
             Command::DiffuseDelete { path } => {
                 if !find(root).contains(&path) {
                     return vec![notice(format!("{path} is not a flow in the project"), NoticeLevel::Warn)];
@@ -573,6 +607,44 @@ impl Diffuse {
             }
         }
         vec![self.runs_event(), self.view_event(root, Vec::new())]
+    }
+
+    /// A graph opened as a new flow, laid out, named after `name` and held
+    /// until saved: `<name>.flow.json`, or `<name>-2.flow.json` and on when
+    /// that is taken.
+    fn open_graph(&mut self, root: &Path, name: &str, graph: &proton_diffuse::Graph) -> Vec<Event> {
+        if graph.nodes.is_empty() {
+            return vec![notice("that graph has no nodes".into(), NoticeLevel::Warn)];
+        }
+        let stem: String = name
+            .trim()
+            .trim_end_matches(".png")
+            .trim_end_matches(EXTENSION)
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+            .collect();
+        let stem = if stem.trim_matches('-').is_empty() { "flow".to_string() } else { stem };
+        let taken = |rel: &str| root.join(rel).exists() || self.open.iter().any(|(r, _)| r == rel);
+        let mut rel = format!("{stem}{EXTENSION}");
+        let mut n = 2;
+        while taken(&rel) {
+            rel = format!("{stem}-{n}{EXTENSION}");
+            n += 1;
+        }
+        if let Err(e) = std::fs::create_dir_all(root) {
+            return vec![notice(format!("{}: {e}", root.display()), NoticeLevel::Error)];
+        }
+        let file = match inside(root, &rel) {
+            Ok(file) => file,
+            Err(why) => return vec![notice(why, NoticeLevel::Error)],
+        };
+        let flow = proton_diffuse::layout::flow_from_graph(graph, &self.catalogue());
+        self.open.push((rel.clone(), FlowDoc::fresh(&file, flow)));
+        self.shown = Some(rel.clone());
+        vec![
+            notice(format!("Opened its graph as {rel} — ⌘S keeps it."), NoticeLevel::Info),
+            self.view_event(root, Vec::new()),
+        ]
     }
 
     /// What the runs' workers have said since last asked.
@@ -841,8 +913,16 @@ impl Diffuse {
         });
         let open =
             self.open.iter().map(|(path, doc)| DiffuseTab { path: path.clone(), dirty: doc.is_dirty() }).collect();
+        let starters = proton_diffuse::templates::TEMPLATES
+            .iter()
+            .map(|(name, title, about)| DiffuseStarter {
+                name: name.to_string(),
+                title: title.to_string(),
+                about: about.to_string(),
+            })
+            .collect();
         Event::DiffuseView {
-            view: DiffuseView { folder: crate::folder::tilde(root), flows: find(root), open, shown, added },
+            view: DiffuseView { folder: crate::folder::tilde(root), flows: find(root), open, shown, added, starters },
         }
     }
 }

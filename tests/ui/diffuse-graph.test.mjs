@@ -56,3 +56,30 @@ test('colours are the mockups\', and a newer server\'s type gets one of its own'
   equal(shortValue('sd_xl_base_1.0.safetensors'), 'sd_xl_base_1.0');
   equal(shortValue(undefined), '—');
 });
+
+test('a PNG\'s graph is read from its head, tEXt or iTXt, and nothing from one without', async () => {
+  const {pngText} = await import('../../ui/diffuse-graph.js');
+  const chunk = (kind, data) => {
+    const out = new Uint8Array(12 + data.length);
+    new DataView(out.buffer).setUint32(0, data.length);
+    out.set([...kind].map((c) => c.charCodeAt(0)), 4);
+    out.set(data, 8);
+    return out;
+  };
+  const bytes = (...parts) => {
+    const all = [Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a), ...parts];
+    const out = new Uint8Array(all.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of all) { out.set(p, at); at += p.length; }
+    return out;
+  };
+  const enc = (s) => new TextEncoder().encode(s);
+  const ihdr = chunk('IHDR', new Uint8Array(13));
+  const graph = '{"nodes":[{"id":"1","type":"SaveImage","values":{}}],"links":[]}';
+  equal(pngText(bytes(ihdr, chunk('tEXt', enc(`Software\0PIL`)), chunk('tEXt', enc(`proton-flow\0${graph}`)), chunk('IDAT', enc('xx')))), graph);
+  equal(pngText(bytes(ihdr, chunk('iTXt', enc(`proton-flow\0\0\0en\0\0${graph}`)), chunk('IDAT', enc('xx')))), graph);
+  // After the pixels is not read; nor is a PNG with none, nor not a PNG.
+  equal(pngText(bytes(ihdr, chunk('IDAT', enc('xx')), chunk('tEXt', enc(`proton-flow\0${graph}`)))), null);
+  equal(pngText(bytes(ihdr, chunk('IDAT', enc('xx')))), null);
+  equal(pngText(enc('GIF89a.....')), null);
+});

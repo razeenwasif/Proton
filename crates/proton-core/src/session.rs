@@ -178,6 +178,8 @@ pub struct Session {
     /// the app. `None` — a session made for a test — puts them under the
     /// system's temporary folder, never the person's home.
     homes: Option<PathBuf>,
+    /// Whether `homes` is a test's: Diffuse's folder goes there too.
+    test_homes: bool,
     /// Projects opened before, most recent first. Includes the open ones.
     recents: Vec<PathBuf>,
     /// The workspace picker, when it is open. The session's rather than a
@@ -237,6 +239,7 @@ impl Session {
             listed: vec![Listed::all()],
             shown: vec![None; ModeId::ALL.len()],
             homes: None,
+            test_homes: false,
             recents: Vec::new(),
             picker: None,
             matcher: Matcher::new(),
@@ -677,6 +680,7 @@ impl Session {
     /// `~/Proton`: for a test, which must never make folders in the home.
     pub fn with_mode_homes(mut self, dir: impl Into<PathBuf>) -> Session {
         self.homes = Some(dir.into());
+        self.test_homes = true;
         self
     }
 
@@ -686,10 +690,14 @@ impl Session {
     }
 
     /// Diffuse's folder: the person's `diffuse.folder`, or `~/Diffuse`. Made
-    /// only when something is written there.
+    /// only when something is written there. A test's session — one given
+    /// homes of its own, or keeping no session file — never names the
+    /// person's.
     pub fn diffuse_home(&self) -> PathBuf {
         let chosen = self.person.clone().map(crate::settings::Settings::at).map(|s| s.string("diffuse.folder", "")).unwrap_or_default();
         match chosen.trim() {
+            "" if self.test_homes => self.homes.clone().unwrap_or_else(std::env::temp_dir).join("Diffuse"),
+            "" if self.store.is_none() => std::env::temp_dir().join(format!("proton-modes-{}", std::process::id())).join("Diffuse"),
             "" => folder::home().unwrap_or_else(std::env::temp_dir).join("Diffuse"),
             typed => folder::expand(typed),
         }

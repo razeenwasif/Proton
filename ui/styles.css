@@ -6021,3 +6021,5 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .df-danger { display: inline-flex; align-items: center; gap: 5px; }
 .df-danger .i { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; }
 .df-danger:hover { color: var(--err); }
+.df-new .df-radio { flex-wrap: wrap; }
+.df-new .df-radio span { flex-basis: 100%; margin: 0 0 0 22px; }

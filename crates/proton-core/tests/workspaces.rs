@@ -496,6 +496,19 @@ fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes
     assert!(session.active().root().ends_with("LaTeX"), "LaTeX was given Codex's project: {:?}", session.active().root());
 }
 
+#[test]
+fn a_tests_diffuse_never_takes_the_persons_folder() {
+    // Diffuse's own folder is ~/Diffuse in the app; a test's is its own.
+    let scratch = Scratch::new("diffuse-home");
+    let homes = scratch.root.join("homes");
+    let store = scratch.root.join("session.json");
+    let mut session = Session::restore_from(Some(store), Some(PathBuf::from(scratch.at("alpha"))), None).with_mode_homes(&homes);
+    mode(&mut session, ModeId::Diffuse);
+    assert_eq!(session.active().root(), folder_of(&homes.join("Diffuse")));
+    let bare = Session::new(scratch.at("alpha"));
+    assert!(bare.diffuse_home().starts_with(std::env::temp_dir()), "a test's Diffuse is at {:?}", bare.diffuse_home());
+}
+
 /// A folder as the session roots it: its links followed.
 fn folder_of(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap()
