@@ -1,0 +1,13 @@
+{
+  "checkpoints": [
+    {"name": "sd_xl_base_1.0.safetensors", "family": "sdxl", "bytes": 6938078334},
+    {"name": "flux1-dev-fp8.safetensors", "family": "flux", "bytes": 17246524772}
+  ],
+  "loras": [
+    {"name": "impasto.safetensors", "family": "sdxl", "bytes": 228452040}
+  ],
+  "vaes": [],
+  "upscalers": [
+    {"name": "4x-UltraSharp.pth", "bytes": 66961958}
+  ]
+}

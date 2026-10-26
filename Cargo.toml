@@ -10,6 +10,7 @@ members = [
     "crates/proton-dap",
     "crates/proton-data",
     "crates/proton-design",
+    "crates/proton-diffuse",
     "crates/proton-index",
     "crates/proton-lab",
     "crates/proton-library",
@@ -53,6 +54,7 @@ proton-core = { path = "crates/proton-core" }
 proton-dap = { path = "crates/proton-dap" }
 proton-data = { path = "crates/proton-data" }
 proton-design = { path = "crates/proton-design" }
+proton-diffuse = { path = "crates/proton-diffuse" }
 proton-game = { path = "crates/proton-game" }
 proton-raster = { path = "crates/proton-raster" }
 proton-scene = { path = "crates/proton-scene" }

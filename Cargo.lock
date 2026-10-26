@@ -4423,6 +4423,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-diffuse"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
+]
+
+[[package]]
 name = "proton-game"
 version = "0.0.1"
 dependencies = [

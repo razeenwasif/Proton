@@ -1,0 +1,13 @@
+[package]
+name = "proton-diffuse"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Diffuse mode: image generation by node graph — the flow format, its edits and undo, and the graph checked against the server's node catalogue."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+ts-rs = { workspace = true }
