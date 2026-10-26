@@ -120,8 +120,6 @@ pub struct Workspace {
     game: crate::game::Game,
     /// The canvas open in Canvas mode, with its history and its saves.
     raster: crate::raster::Raster,
-    /// The flows open in Diffuse, and what forge is and has.
-    diffuse: crate::diffuse::Diffuse,
     /// The cut Video mode is showing, and the captions beside it.
     video: crate::video::Video,
     /// The local model that turns a question into a vector, when the settings
@@ -593,7 +591,7 @@ impl Workspace {
     /// asks before closing it, because a closed workspace takes its buffers
     /// with it and there is no undo for that.
     pub fn is_modified(&self) -> bool {
-        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.game.unsaved().is_empty() || !self.raster.unsaved().is_empty() || !self.diffuse.unsaved().is_empty()
+        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.game.unsaved().is_empty() || !self.raster.unsaved().is_empty()
     }
 
     /// The files with unsaved changes, as the project names them.
@@ -611,8 +609,6 @@ impl Workspace {
         files.extend(self.game.unsaved());
         // So is a canvas.
         files.extend(self.raster.unsaved());
-        // And a flow.
-        files.extend(self.diffuse.unsaved());
         files
     }
 
@@ -626,7 +622,6 @@ impl Workspace {
         let mut failed: Vec<String> = failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect();
         failed.extend(self.game.save_unsaved());
         failed.extend(self.raster.save_unsaved());
-        failed.extend(self.diffuse.save_unsaved());
         failed
     }
 
@@ -670,17 +665,6 @@ impl Workspace {
                 }
                 Err(why) => vec![notice(why, NoticeLevel::Warn)],
             },
-            command if crate::diffuse::handles(&command) => {
-                let root = self.root().to_path_buf();
-                let made = matches!(command, Command::DiffuseNew { .. });
-                let mut events = self.diffuse.apply(&root, command);
-                if made && events.iter().any(|e| matches!(e, Event::DiffuseView { .. })) {
-                    // A flow made is a file the tree and git see.
-                    events.push(self.tree_event());
-                    events.push(self.repo_event());
-                }
-                events
-            }
             command if crate::raster::handles(&command) => {
                 let root = self.root().to_path_buf();
                 let wrote = matches!(command, Command::RasterExport { .. });
@@ -772,8 +756,6 @@ impl Workspace {
                 events.extend(self.game.events(&root));
                 // The canvases here, and the one open.
                 events.extend(self.raster.events(&root));
-                // The flows here, those open, and what forge is.
-                events.extend(self.diffuse.events(&root));
                 events
             }
 
@@ -1600,7 +1582,8 @@ impl Workspace {
             | Command::RasterExport { .. }
             | Command::RasterImport { .. }
             | Command::RasterShow { .. } => Vec::new(),
-            // And these by Diffuse's.
+            // And these by Diffuse's — the session's, as a flow is the
+            // person's, kept in Diffuse's own folder, not a project's.
             Command::DiffuseOpen { .. }
             | Command::DiffuseNew { .. }
             | Command::DiffuseClose { .. }
@@ -1612,7 +1595,10 @@ impl Workspace {
             | Command::DiffuseRun { .. }
             | Command::DiffuseCancel { .. }
             | Command::DiffuseGallery
-            | Command::DiffuseGateways { .. } => Vec::new(),
+            | Command::DiffuseDelete { .. }
+            | Command::DiffuseDeleteImages { .. }
+            | Command::DiffuseGateways { .. }
+            | Command::DiffuseFolder { .. } => Vec::new(),
             // PDF is the window's too: the session answers it.
             Command::PdfOpen { .. }
             | Command::PdfClose { .. }
@@ -1819,9 +1805,6 @@ impl Workspace {
                 let mut events = self.poll_servers();
                 // A canvas's save, written on a worker, has finished.
                 events.extend(self.raster.poll());
-                // A look at forge, made on a worker, has come back.
-                let root = self.root().to_path_buf();
-                events.extend(self.diffuse.poll(&root));
                 let (built, readable) = self.tex.poll();
                 // TeX installed: the editor's LaTeX server is its texlab.
                 if built.iter().any(|e| matches!(e, Event::TexEnv { env: proton_lab::tex::TexState::Ready { .. } })) {
@@ -4145,16 +4128,6 @@ impl Workspace {
     /// What Canvas last copied, as a PNG, for the system's clipboard.
     pub fn raster_clip_png(&self) -> Option<Vec<u8>> {
         self.raster.clip_png()
-    }
-
-    /// An image Diffuse's window may read: in the gallery, or made by a run.
-    pub fn diffuse_file(&self, rel: &str) -> Option<PathBuf> {
-        self.diffuse.file(self.root(), rel)
-    }
-
-    /// Where the person's own settings are: Diffuse's gateway is theirs.
-    pub fn set_person_settings(&mut self, file: Option<PathBuf>) {
-        self.diffuse.set_person(file);
     }
 
     /// Tiles of the open canvas, shared: see `raster::Raster::tiles`.
@@ -6684,12 +6657,7 @@ impl Workspace {
             let root = self.root().to_path_buf();
             events.extend(self.raster.enter(&root));
         }
-        // Diffuse shows the project's flows and what forge was last known to
-        // have; the window asks it to look again.
-        if mode == ModeId::Diffuse {
-            let root = self.root().to_path_buf();
-            events.extend(self.diffuse.enter(&root));
-        }
+
         // Video goes looking on the same terms, once — and re-reads on the way
         // back in. Its second document is the difference: a transcription is
         // usually written by something else, minutes after the cut was opened,

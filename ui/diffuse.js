@@ -43,6 +43,7 @@ const KEYS = /** @type {[string, string][]} */ ([
   ["drag a node's head", "move it — ⇧ adds it to those chosen"], ["drag the ground", "move over the graph"],
   ["⌘ wheel  pinch", "zoom"], ["⌫", "remove what is chosen"], ["⌘D", "a copy of what is chosen"], ["⌘A", "choose every node"],
   ["⌘↩", "run the flow on forge — again to queue another"], ["⌘.", "stop its run"],
+  ["⌫ in the Gallery", "move the images chosen to the Trash — ⌘-click chooses more"],
   ["⌘Z ⇧⌘Z", "undo, redo"], ["⌘S", "save the flow"], ["f", "the whole graph"], ["⎋", "close the search, choose nothing"], ["?", "these keys"],
 ]);
 
@@ -74,8 +75,14 @@ export function createDiffuse(host) {
   let shown = false;
   /** @type {ReturnType<typeof setInterval> | null} */
   let looking = null;
-  /** The flow whose unsaved changes a close is asking about. @type {string | null} */
-  let closing = null;
+  /** What the bar above the stage is asking about: closing a flow with
+   *  changes, or moving a flow or images to the Trash.
+   *  @type {{kind: "close", path: string} | {kind: "deleteFlow", path: string} | {kind: "deleteImages", paths: string[]} | null} */
+  let asking = null;
+  /** Whether the Flows list is showing a field to move Diffuse's folder. */
+  let movingFolder = false;
+  /** Bin, as an icon: lines in the theme's colour. */
+  const BIN = `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6"/></svg>`;
   /** The runs this session, newest first. @type {Run[]} */
   let runs = [];
   /** The project's outputs, newest first. @type {Image[]} */
@@ -84,8 +91,10 @@ export function createDiffuse(host) {
   let stageView = "graph";
   /** The folder the gallery shows; none, all of them. */
   let folder = "";
-  /** The output chosen in the gallery. @type {string | null} */
+  /** The output chosen in the gallery, whose detail the inspector shows. @type {string | null} */
   let picked = null;
+  /** Every output chosen — ⌘ or ⇧ click adds one — to move to the Trash together. */
+  let pickedAll = new Set(/** @type {string[]} */ ([]));
   /** Each image read, as a `data:` URL, by path. @type {Map<string, Promise<string>>} */
   const urls = new Map();
 
@@ -143,13 +152,22 @@ export function createDiffuse(host) {
     if (side === "flows") {
       const open = new Set(view?.open.map((t) => t.path) ?? []);
       const flows = view?.flows ?? [];
+      const where = view?.folder ?? "~/Diffuse";
       body.innerHTML =
-        `<div class="df-head">Flows here</div>` +
+        (movingFolder
+          ? `<form class="df-folder-form" data-df-folder-form><label class="df-field">Keep flows and images in<input name="folder" value="${esc(where)}" spellcheck="false" autocomplete="off"></label>` +
+            `<div class="df-folder-buttons"><button class="cc-primary" type="submit">Keep it here</button><button class="cc-quiet" type="button" data-df-folder-default>~/Diffuse</button><button class="cc-quiet" type="button" data-df-folder-cancel>Cancel</button></div></form>`
+          : `<div class="df-folder"><span class="df-faint">In</span><code title="Diffuse's own folder, whichever project is open">${esc(where)}</code><button class="df-folder-change" data-df-folder-edit>Change</button></div>`) +
+        `<div class="df-head">Flows</div>` +
         (flows.length
           ? flows
-              .map((f) => `<button class="df-flow${f === path() ? " on" : ""}" data-df-open="${esc(f)}"><span class="df-flow-name">${esc(f)}</span>${open.has(f) ? `<span class="df-flow-open" title="Open">●</span>` : ""}</button>`)
+              .map(
+                (f) =>
+                  `<div class="df-flow-row"><button class="df-flow${f === path() ? " on" : ""}" data-df-open="${esc(f)}"><span class="df-flow-name">${esc(f)}</span>${open.has(f) ? `<span class="df-flow-open" title="Open">●</span>` : ""}</button>` +
+                  `<button class="df-row-trash" data-df-delete-flow="${esc(f)}" aria-label="Move ${esc(f)} to the Trash" title="Move to the Trash">${BIN}</button></div>`,
+              )
               .join("")
-          : `<p class="df-faint">No flow in this project yet.</p>`) +
+          : `<p class="df-faint">No flow here yet.</p>`) +
         `<form class="df-new" data-df-new><div class="df-head">New flow</div>` +
         `<label>Name <input name="name" data-df-new-name placeholder="lighthouse" autocomplete="off" spellcheck="false" required></label>` +
         `<label class="df-radio"><input type="radio" name="template" value="textToImage" checked> Text to image <span>7 nodes</span></label>` +
@@ -231,13 +249,27 @@ export function createDiffuse(host) {
 
   function renderAsk() {
     const box = q("[data-df-ask]");
-    box.hidden = !closing;
-    if (!closing) return;
-    box.innerHTML =
-      `<span class="df-banner-text"><b>${esc(closing)}</b> has changes not saved.</span>` +
-      `<button class="cc-quiet" data-df-answer="stay">Keep it open</button>` +
-      `<button class="cc-quiet" data-df-answer="discard">Close without saving</button>` +
-      `<button class="cc-primary" data-df-answer="save">Save and close</button>`;
+    box.hidden = !asking;
+    if (!asking) return;
+    if (asking.kind === "close") {
+      box.innerHTML =
+        `<span class="df-banner-text"><b>${esc(asking.path)}</b> has changes not saved.</span>` +
+        `<button class="cc-quiet" data-df-answer="stay">Keep it open</button>` +
+        `<button class="cc-quiet" data-df-answer="discard">Close without saving</button>` +
+        `<button class="cc-primary" data-df-answer="save">Save and close</button>`;
+    } else if (asking.kind === "deleteFlow") {
+      const dirty = view?.open.find((t) => t.path === /** @type {any} */ (asking).path)?.dirty;
+      box.innerHTML =
+        `<span class="df-banner-text">Move <b>${esc(asking.path)}</b> to the Trash?${dirty ? " Its changes not saved go with it." : ""} The images it made stay where they are.</span>` +
+        `<button class="cc-quiet" data-df-answer="stay">Keep it</button>` +
+        `<button class="cc-primary" data-df-answer="trash">Move to Trash</button>`;
+    } else {
+      const n = asking.paths.length;
+      box.innerHTML =
+        `<span class="df-banner-text">Move ${n === 1 ? `<b>${esc(asking.paths[0])}</b>` : `<b>${n} images</b>`} to the Trash? You can put ${n === 1 ? "it" : "them"} back from there.</span>` +
+        `<button class="cc-quiet" data-df-answer="stay">Keep ${n === 1 ? "it" : "them"}</button>` +
+        `<button class="cc-primary" data-df-answer="trash">Move to Trash</button>`;
+    }
   }
 
   function renderBanner() {
@@ -391,7 +423,7 @@ export function createDiffuse(host) {
         ? `<div class="df-gallery-grid">${shownImages
             .map(
               (i) =>
-                `<button class="df-tile${i.path === picked ? " on" : ""}" data-df-pick-image="${esc(i.path)}" aria-pressed="${i.path === picked}">` +
+                `<button class="df-tile${pickedAll.has(i.path) ? " on" : ""}" data-df-pick-image="${esc(i.path)}" aria-pressed="${pickedAll.has(i.path)}">` +
                 `<img data-df-img="${esc(i.path)}" alt="${esc(i.path)}" draggable="false"><span class="df-tile-said"><span>${esc(i.path.split("/").pop() ?? "")}</span><span class="df-faint">${i.made.seed ?? ""}</span></span></button>`,
             )
             .join("")}</div>`
@@ -593,6 +625,12 @@ export function createDiffuse(host) {
   /** The output chosen in the gallery, large, with what made it. */
   function renderPicked() {
     const box = q("[data-df-inspector]");
+    if (pickedAll.size > 1) {
+      box.innerHTML =
+        `<div class="df-pad"><div class="df-title">${pickedAll.size} images</div><div class="df-sub">⌘-click adds an image or takes it away</div></div>` +
+        `<div class="df-actions"><button class="hbtn df-danger" data-df-delete-images>${BIN} Move ${pickedAll.size} to the Trash</button></div>`;
+      return;
+    }
     const image = images.find((i) => i.path === picked);
     if (!image) {
       box.innerHTML = `<p class="df-faint df-pad">Choose an image to see what made it.</p>`;
@@ -611,7 +649,8 @@ export function createDiffuse(host) {
       (image.graph ? "" : `<p class="df-faint df-pad">This PNG holds no graph: it was not made by a flow, or not by forge.</p>`) +
       `<div class="df-actions">` +
       (flowHere ? `<button class="cc-primary" data-df-open-flow="${esc(flowHere)}">Open its flow</button>` : "") +
-      `<button class="hbtn" data-df-copy-path="${esc(image.path)}">Copy its path</button></div>`;
+      `<button class="hbtn" data-df-copy-path="${esc(image.path)}">Copy its path</button>` +
+      `<button class="hbtn df-danger" data-df-delete-images>${BIN} Move to Trash</button></div>`;
     fillImages(box);
   }
 
@@ -1033,21 +1072,54 @@ export function createDiffuse(host) {
     if (close) {
       const p = close.dataset.dfClose ?? "";
       if (view?.open.find((t) => t.path === p)?.dirty) {
-        closing = p;
+        asking = { kind: "close", path: p };
         renderAsk();
       } else send({ type: "diffuseClose", path: p });
       return;
     }
+    const deleteFlow = at("[data-df-delete-flow]");
+    if (deleteFlow) {
+      asking = { kind: "deleteFlow", path: deleteFlow.dataset.dfDeleteFlow ?? "" };
+      return renderAsk();
+    }
+    if (at("[data-df-delete-images]")) return askToDeleteImages();
+    if (at("[data-df-folder-edit]")) {
+      movingFolder = true;
+      renderSide();
+      /** @type {HTMLInputElement | null} */ (q("[data-df-folder-form] input"))?.focus();
+      return;
+    }
+    if (at("[data-df-folder-cancel]")) {
+      movingFolder = false;
+      return renderSide();
+    }
+    if (at("[data-df-folder-default]")) {
+      movingFolder = false;
+      send({ type: "diffuseFolder" });
+      return renderSide();
+    }
     const answer = at("[data-df-answer]");
-    if (answer && closing) {
-      const p = closing;
-      closing = null;
+    if (answer && asking) {
+      const was = asking;
+      const said = answer.dataset.dfAnswer;
+      asking = null;
       renderAsk();
-      if (answer.dataset.dfAnswer === "discard") send({ type: "diffuseClose", path: p, discard: true });
-      if (answer.dataset.dfAnswer === "save") {
-        send({ type: "diffuseOpen", path: p });
-        send({ type: "diffuseSave" });
-        send({ type: "diffuseClose", path: p });
+      if (was.kind === "close") {
+        if (said === "discard") send({ type: "diffuseClose", path: was.path, discard: true });
+        if (said === "save") {
+          send({ type: "diffuseOpen", path: was.path });
+          send({ type: "diffuseSave" });
+          send({ type: "diffuseClose", path: was.path });
+        }
+      } else if (said === "trash") {
+        if (was.kind === "deleteFlow") send({ type: "diffuseDelete", path: was.path });
+        else {
+          send({ type: "diffuseDeleteImages", paths: was.paths });
+          for (const p of was.paths) {
+            pickedAll.delete(p);
+            urls.delete(p);
+          }
+        }
       }
       return;
     }
@@ -1060,7 +1132,16 @@ export function createDiffuse(host) {
     if (cancel) return send({ type: "diffuseCancel", id: Number(cancel.dataset.dfCancel) });
     const tile = at("[data-df-pick-image]");
     if (tile) {
-      picked = tile.dataset.dfPickImage ?? null;
+      const p = tile.dataset.dfPickImage ?? "";
+      const mouse = /** @type {MouseEvent} */ (e);
+      if (mouse.metaKey || mouse.shiftKey || mouse.ctrlKey) {
+        if (pickedAll.has(p)) pickedAll.delete(p);
+        else pickedAll.add(p);
+        picked = pickedAll.has(p) ? p : ([...pickedAll][0] ?? null);
+      } else {
+        picked = p;
+        pickedAll = new Set([p]);
+      }
       renderGallery();
       return setPanel("inspector");
     }
@@ -1125,6 +1206,14 @@ export function createDiffuse(host) {
 
   ws.addEventListener("submit", (e) => {
     const form = /** @type {HTMLFormElement} */ (e.target);
+    if (form.matches("[data-df-folder-form]")) {
+      e.preventDefault();
+      const typed = String(new FormData(form).get("folder") ?? "").trim();
+      movingFolder = false;
+      send(typed ? { type: "diffuseFolder", folder: typed } : { type: "diffuseFolder" });
+      renderSide();
+      return;
+    }
     if (form.matches("[data-df-gateways]")) {
       e.preventDefault();
       const data = new FormData(form);
@@ -1190,6 +1279,14 @@ export function createDiffuse(host) {
     }
     e.stopPropagation();
   });
+
+  /** Ask before moving the images chosen in the gallery to the Trash. */
+  function askToDeleteImages() {
+    const paths = [...pickedAll].filter((p) => images.some((i) => i.path === p));
+    if (!paths.length) return;
+    asking = { kind: "deleteImages", paths };
+    renderAsk();
+  }
 
   /** The graph or the outputs. @param {string} to */
   function setView(to) {
@@ -1262,6 +1359,10 @@ export function createDiffuse(host) {
       return true;
     }
     if (mod) return false;
+    if ((e.key === "Backspace" || e.key === "Delete") && stageView === "gallery") {
+      askToDeleteImages();
+      return true;
+    }
     if ((e.key === "Backspace" || e.key === "Delete") && chosen.size) {
       act_("remove");
       return true;
@@ -1314,8 +1415,10 @@ export function createDiffuse(host) {
     /** The project's outputs. @param {{images: Image[]}} event */
     gallery(event) {
       images = event.images ?? [];
+      pickedAll = new Set([...pickedAll].filter((p) => images.some((i) => i.path === p)));
       if (picked && !images.some((i) => i.path === picked)) picked = null;
-      if (!picked) picked = images[0]?.path ?? null;
+      if (!picked) picked = [...pickedAll][0] ?? images[0]?.path ?? null;
+      if (picked && !pickedAll.size) pickedAll.add(picked);
       if (stageView === "gallery") {
         renderGallery();
         if (panel === "inspector") renderPicked();

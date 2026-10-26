@@ -240,4 +240,39 @@ export async function diffuseChecks({test, assert, win, doc, $, settle, shown}) 
     const set = sent(before, 'diffuseGateways')[0];
     assert(set?.home === 'http://192.168.68.62:7420/img/v1' && set.away === undefined, `the addresses sent were ${JSON.stringify(set)}`);
   });
+
+  await test('A flow and chosen images go to the Trash after asking; Diffuse says which folder it keeps them in, and moves it', async () => {
+    ws().querySelector('[data-df-side="flows"]').click(); await settle();
+    assert(ws().querySelector('.df-folder code')?.textContent === '~/Diffuse', `the folder shown is ${ws().querySelector('.df-folder code')?.textContent}`);
+    ws().querySelector('[data-df-delete-flow="lighthouse.flow.json"]').click(); await settle();
+    const ask = $('[data-df-ask]');
+    assert(shown(ask) && ask.textContent.includes('Move lighthouse.flow.json to the Trash') && ask.textContent.includes('stay where they are'), 'deleting a flow did not ask');
+    let before = win.commands.length;
+    ask.querySelector('[data-df-answer="trash"]').click(); await settle();
+    assert(sent(before, 'diffuseDelete')[0]?.path === 'lighthouse.flow.json', 'the flow was not sent to the Trash');
+    // Two images chosen with ⌘-click, then ⌫.
+    const image = (/** @type {string} */ p) => ({path: p, folder: 'outputs/lighthouse', madeAt: 1792980000, width: 64, height: 64, graph: true, made: {seed: 1}});
+    win.diffuseFiles = {'outputs/lighthouse/image_0001.png': onePixel(), 'outputs/lighthouse/image_0002.png': onePixel()};
+    ws().querySelector('[data-df-view="gallery"]').click(); await settle();
+    await win.pushEvents([{type: 'diffuseGallery', images: [image('outputs/lighthouse/image_0002.png'), image('outputs/lighthouse/image_0001.png')]}]); await settle();
+    const tile = (/** @type {number} */ n) => [...ws().querySelectorAll('[data-df-pick-image]')][n];
+    tile(0).click(); await settle();
+    // The gallery is drawn again after each choice: the tile is found afresh.
+    tile(1).dispatchEvent(new win.MouseEvent('click', {bubbles: true, metaKey: true})); await settle();
+    assert(ws().querySelectorAll('.df-tile.on').length === 2 && $('[data-df-inspector]').textContent.includes('2 images'), 'two images were not chosen');
+    press('Backspace'); await settle();
+    assert(shown(ask) && ask.textContent.includes('2 images'), '⌫ did not ask about the two images');
+    before = win.commands.length;
+    ask.querySelector('[data-df-answer="trash"]').click(); await settle();
+    const gone = sent(before, 'diffuseDeleteImages')[0];
+    assert(JSON.stringify(gone?.paths?.sort()) === JSON.stringify(['outputs/lighthouse/image_0001.png', 'outputs/lighthouse/image_0002.png']), `the images sent were ${JSON.stringify(gone)}`);
+    // The folder, moved.
+    ws().querySelector('[data-df-view="graph"]').click(); await settle();
+    ws().querySelector('[data-df-folder-edit]').click(); await settle();
+    const field = /** @type {HTMLInputElement} */ (ws().querySelector('[data-df-folder-form] input'));
+    field.value = '~/Pictures/Diffuse';
+    before = win.commands.length;
+    ws().querySelector('[data-df-folder-form] button[type="submit"]').click(); await settle();
+    assert(sent(before, 'diffuseFolder')[0]?.folder === '~/Pictures/Diffuse', 'the folder was not moved');
+  });
 }

@@ -120,6 +120,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::DiffuseRun { .. }
             | Command::DiffuseCancel { .. }
             | Command::DiffuseGallery
+            | Command::DiffuseDelete { .. }
+            | Command::DiffuseDeleteImages { .. }
             | Command::DiffuseGateways { .. }
     )
 }
@@ -149,7 +151,9 @@ pub struct DiffuseImage {
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct DiffuseView {
-    /// The project's flows, as it names them.
+    /// Diffuse's folder, as the person would type it.
+    pub folder: String,
+    /// The flows in it, by their path in it.
     pub flows: Vec<String>,
     /// The flows open, as tabs, in the order they were opened.
     pub open: Vec<DiffuseTab>,
@@ -207,6 +211,16 @@ pub struct Diffuse {
 }
 
 impl Diffuse {
+    /// Diffuse's folder moved: nothing of the old one is kept — its flows
+    /// (none with changes, the session saw to that), its gallery, and what
+    /// it kept of forge.
+    pub fn moved(&mut self) {
+        self.open.clear();
+        self.shown = None;
+        self.gallery.clear();
+        self.known = None;
+    }
+
     /// Where the person's own settings are, for the gateway's addresses.
     pub fn set_person(&mut self, file: Option<PathBuf>) {
         self.person = file;
@@ -363,6 +377,52 @@ impl Diffuse {
                 }
             }
             Command::DiffuseGallery => vec![self.gallery_event(root)],
+            Command::DiffuseDelete { path } => {
+                if !find(root).contains(&path) {
+                    return vec![notice(format!("{path} is not a flow in the project"), NoticeLevel::Warn)];
+                }
+                let file = match inside(root, &path) {
+                    Ok(file) => file,
+                    Err(why) => return vec![notice(why, NoticeLevel::Error)],
+                };
+                if let Err(why) = to_trash(&[file]) {
+                    return vec![notice(why, NoticeLevel::Error)];
+                }
+                self.open.retain(|(rel, _)| rel != &path);
+                if self.shown.as_deref() == Some(path.as_str()) {
+                    self.shown = self.open.last().map(|(rel, _)| rel.clone());
+                }
+                vec![
+                    notice(format!("Moved {path} to the Trash."), NoticeLevel::Info),
+                    self.view_event(root, Vec::new()),
+                ]
+            }
+            Command::DiffuseDeleteImages { paths } => {
+                // Only what the window was shown: listed by the gallery or made by a run.
+                let mut files = Vec::new();
+                for rel in &paths {
+                    match self.file(root, rel) {
+                        Some(file) => files.push(file),
+                        None => {
+                            return vec![notice(format!("{rel} is not an image Diffuse may delete"), NoticeLevel::Warn)]
+                        }
+                    }
+                }
+                if files.is_empty() {
+                    return Vec::new();
+                }
+                if let Err(why) = to_trash(&files) {
+                    return vec![notice(why, NoticeLevel::Error)];
+                }
+                for run in &mut self.runs {
+                    run.outputs.retain(|o| !paths.contains(&o.path));
+                }
+                let said = match paths.len() {
+                    1 => format!("Moved {} to the Trash.", paths[0]),
+                    n => format!("Moved {n} images to the Trash."),
+                };
+                vec![notice(said, NoticeLevel::Info), self.runs_event(), self.gallery_event(root)]
+            }
             Command::DiffuseGateways { home, away } => {
                 let Some(file) = self.person.clone() else {
                     return vec![notice(
@@ -781,7 +841,27 @@ impl Diffuse {
         });
         let open =
             self.open.iter().map(|(path, doc)| DiffuseTab { path: path.clone(), dirty: doc.is_dirty() }).collect();
-        Event::DiffuseView { view: DiffuseView { flows: find(root), open, shown, added } }
+        Event::DiffuseView {
+            view: DiffuseView { folder: crate::folder::tilde(root), flows: find(root), open, shown, added },
+        }
+    }
+}
+
+/// Move files to the Trash, whence they can be put back. `PROTON_TRASH`
+/// names a folder to move them to instead, for tests: a test's files never
+/// reach the person's Trash.
+fn to_trash(files: &[PathBuf]) -> Result<(), String> {
+    match std::env::var_os("PROTON_TRASH") {
+        Some(bin) => {
+            let bin = PathBuf::from(bin);
+            std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
+            for file in files {
+                let name = file.file_name().ok_or("a file with no name")?;
+                std::fs::rename(file, bin.join(name)).map_err(|e| format!("{}: {e}", file.display()))?;
+            }
+            Ok(())
+        }
+        None => trash::delete_all(files).map_err(|e| format!("Could not move it to the Trash: {e}")),
     }
 }
 

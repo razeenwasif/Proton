@@ -292,6 +292,13 @@ middle, tabs on the right.
 
 ### Files
 
+Diffuse keeps its flows and images in **a folder of its own** —
+`~/Diffuse`, or the person's `diffuse.folder` — whichever project is open
+in Codex, as Reader keeps PDFs; the paths below are in it. The Flows list
+says which folder and moves it. Deleting a flow or an image moves it to the
+Trash; a flow's images stay when it goes.
+
+
 - **`Name.flow.json`** in the project: flat `nodes` and `links`, in the
   same shape as the run's `graph`, plus each node's position and the
   seed setting. Written in a fixed key order so diffs show only what
@@ -302,7 +309,7 @@ middle, tabs on the right.
 - **Masks** are kept beside the flow as `<flow name>.<node id>.mask.png`,
   one per Load Image node that has one.
 - **The catalogue and model lists** forge served last are kept in the
-  project's `.proton/diffuse/`, so graphs open and edit while it is away.
+  folder's `.proton/diffuse/`, so graphs open and edit while it is away.
 - **Edits** are held until `⌘S`, with undo, as Game and Canvas do.
 
 ### Inside Proton

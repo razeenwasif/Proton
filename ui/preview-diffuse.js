@@ -43,6 +43,8 @@ export function createDiffusePreview(deliver) {
   /** Each output's picture, by path: the seed it was drawn from. @type {Map<string, number>} */
   const drawn = new Map();
   let runCount = 0;
+  /** Diffuse's folder, as the person would type it. */
+  let folder = "~/Diffuse";
   const runsEvent = () => ({ type: "diffuseRuns", runs: copy(runs) });
   const galleryEvent = () => ({ type: "diffuseGallery", images: copy(images) });
 
@@ -156,6 +158,7 @@ export function createDiffusePreview(deliver) {
     return {
       type: "diffuseView",
       view: {
+        folder,
         flows: [...flows.keys()].sort(),
         open: open.map(tab),
         shown: doc && shown ? { path: shown, flow: copy(doc.flow), problems: problems(doc.flow), dirty: tab(shown).dirty, canUndo: doc.undo.length > 0, canRedo: doc.redo.length > 0 } : null,
@@ -256,6 +259,25 @@ export function createDiffusePreview(deliver) {
           return [];
         case "diffuseGallery":
           return [galleryEvent()];
+        case "diffuseFolder":
+          folder = command.folder || "~/Diffuse";
+          return [view()];
+        case "diffuseDelete": {
+          flows.delete(command.path);
+          const at = open.indexOf(command.path);
+          if (at >= 0) open.splice(at, 1);
+          if (shown === command.path) shown = open[open.length - 1] ?? null;
+          return [{ type: "notice", text: `Moved ${command.path} to the Trash.`, level: "info" }, view()];
+        }
+        case "diffuseDeleteImages": {
+          for (const p of command.paths) {
+            const at = images.findIndex((i) => i.path === p);
+            if (at >= 0) images.splice(at, 1);
+            drawn.delete(p);
+            for (const r of runs) r.outputs = r.outputs.filter((/** @type {any} */ o) => o.path !== p);
+          }
+          return [runsEvent(), galleryEvent()];
+        }
         case "diffuseCancel": {
           const r = runs.find((x) => x.id === command.id);
           if (r && !["done", "failed", "cancelled"].includes(r.state)) {

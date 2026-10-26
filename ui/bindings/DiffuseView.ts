@@ -7,7 +7,11 @@ import type { DiffuseTab } from "./DiffuseTab";
  */
 export type DiffuseView = { 
 /**
- * The project's flows, as it names them.
+ * Diffuse's folder, as the person would type it.
+ */
+folder: string, 
+/**
+ * The flows in it, by their path in it.
  */
 flows: Array<string>, 
 /**

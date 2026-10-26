@@ -1471,6 +1471,17 @@ pub enum Command {
     DiffuseCancel { id: u32 },
     /// The project's outputs, listed again.
     DiffuseGallery,
+    /// Keep Diffuse's flows and images in another folder — `~` allowed; none
+    /// puts them back in `~/Diffuse`.
+    DiffuseFolder {
+        #[serde(default)]
+        #[ts(optional)]
+        folder: Option<String>,
+    },
+    /// Move a flow to the Trash, closing it if it is open; its images stay.
+    DiffuseDelete { path: String },
+    /// Move images to the Trash: outputs the gallery lists, or ones a run made.
+    DiffuseDeleteImages { paths: Vec<String> },
     /// Where the gateway is, at home and away — the person's own settings;
     /// none takes one away.
     DiffuseGateways {

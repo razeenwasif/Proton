@@ -1,15 +1,16 @@
-//! Diffuse through the seam the window uses: the project's flows, a flow
-//! made from a starter and opened, edits held until saved and undone, the
-//! quit prompt, and a look at the gateway on a worker.
+//! Diffuse through the seam the window uses: the flows in Diffuse's own
+//! folder — never the project open in Codex — a flow made from a starter
+//! and opened, edits held until saved and undone, the quit prompt, a look at
+//! the gateway on a worker, runs, and the Trash.
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use proton_core::bus::{Event, NoticeLevel};
 use proton_core::diffuse::DiffuseView;
-use proton_core::{Command, ModeId, Workspace};
+use proton_core::{Command, ModeId, Session};
 use proton_diffuse::{HealthState, Known, Op};
 use serde_json::json;
 
@@ -22,7 +23,31 @@ fn project(tag: &str) -> PathBuf {
     dir
 }
 
-/// A project that has seen forge before: its catalogue kept.
+/// Where a test's person keeps their settings: beside Diffuse's folder.
+fn person_file(home: &Path) -> PathBuf {
+    home.with_file_name(format!("{}-person.json", home.file_name().unwrap().to_string_lossy()))
+}
+
+/// The person's settings: Diffuse's folder is `home`, and its gateway `gateway`.
+fn set_gateway(home: &Path, gateway: Option<&str>) {
+    let mut diffuse = json!({"folder": home});
+    if let Some(gateway) = gateway {
+        diffuse["gateway"] = json!(gateway);
+    }
+    std::fs::write(person_file(home), json!({ "diffuse": diffuse }).to_string()).unwrap();
+}
+
+/// A session whose Diffuse keeps its flows in `home`, a folder of its own,
+/// with the project open in Codex somewhere else.
+fn session_in(home: &Path) -> Session {
+    let project = home.with_file_name(format!("{}-project", home.file_name().unwrap().to_string_lossy()));
+    let _ = std::fs::remove_dir_all(&project);
+    std::fs::create_dir_all(&project).unwrap();
+    set_gateway(home, None);
+    Session::new(&project).with_person_settings(person_file(home))
+}
+
+/// A Diffuse folder that has seen forge before: its catalogue kept.
 fn kept_project(tag: &str) -> PathBuf {
     let root = project(tag);
     std::fs::create_dir_all(root.join(".proton/diffuse")).unwrap();
@@ -56,9 +81,9 @@ fn warned(events: &[Event]) -> Option<String> {
 }
 
 /// In Diffuse, with `lighthouse.flow.json` made from the text-to-image starter.
-fn with_flow(tag: &str) -> (Workspace, PathBuf) {
+fn with_flow(tag: &str) -> (Session, PathBuf) {
     let root = kept_project(tag);
-    let mut space = Workspace::rooted(&root);
+    let mut space = session_in(&root);
     space.apply(Command::SetMode { mode: ModeId::Diffuse });
     let events = space.apply(Command::DiffuseNew { name: "lighthouse".into(), template: Some("textToImage".into()) });
     assert!(warned(&events).is_none(), "{events:?}");
@@ -71,9 +96,14 @@ fn entering_shows_the_flows_here_and_what_forge_was_last_known_to_have() {
     std::fs::create_dir_all(root.join("art")).unwrap();
     std::fs::write(root.join("art/harbour.flow.json"), "{\"format\": 1}\n").unwrap();
     std::fs::write(root.join("notes.json"), "{}").unwrap();
-    let mut space = Workspace::rooted(&root);
+    let mut space = session_in(&root);
+    // A flow in the project open in Codex is that project's, not Diffuse's.
+    let project = root.with_file_name(format!("{}-project", root.file_name().unwrap().to_string_lossy()));
+    std::fs::write(project.join("codex.flow.json"), "{\"format\": 1}\n").unwrap();
     let events = space.apply(Command::SetMode { mode: ModeId::Diffuse });
-    assert_eq!(view(&events).flows, ["art/harbour.flow.json"]);
+    let seen = view(&events);
+    assert_eq!(seen.flows, ["art/harbour.flow.json"]);
+    assert!(seen.folder.ends_with(&root.file_name().unwrap().to_string_lossy().to_string()), "{}", seen.folder);
     let known = known(&events).expect("what was kept");
     assert_eq!(known.health.state, HealthState::Looking);
     assert_eq!(known.catalogue.unwrap().nodes.len(), 16);
@@ -110,7 +140,7 @@ fn edits_are_held_until_saved_and_undone_whole() {
     let shown = seen.shown.unwrap();
     assert!(shown.dirty && shown.can_undo);
     assert!(seen.open[0].dirty);
-    assert_eq!(space.unsaved(), ["lighthouse.flow.json"]);
+    assert_eq!(space.unsaved(), ["lighthouse.flow.json (Diffuse)"]);
     // A refused edit says why and leaves the flow as it was.
     let refused = space.apply(Command::DiffuseEdit {
         path: "lighthouse.flow.json".into(),
@@ -135,7 +165,7 @@ fn a_flow_with_changes_is_not_closed_and_quitting_saves_it() {
     space.apply(Command::DiffuseEdit { path: "lighthouse.flow.json".into(), ops: vec![set] });
     let closing = space.apply(Command::DiffuseClose { path: "lighthouse.flow.json".into(), discard: false });
     assert!(warned(&closing).unwrap().contains("save or discard"));
-    assert!(space.is_modified());
+    assert!(!space.unsaved().is_empty());
     assert!(space.save_unsaved().is_empty());
     assert!(std::fs::read_to_string(root.join("lighthouse.flow.json")).unwrap().contains("\"steps\": 12"));
     let closed = view(&space.apply(Command::DiffuseClose { path: "lighthouse.flow.json".into(), discard: false }));
@@ -155,7 +185,7 @@ fn without_forges_nodes_known_a_flow_still_opens_and_says_why_it_cannot_run() {
         "{\"format\": 1, \"nodes\": [{\"id\": \"1\", \"type\": \"KSampler\", \"at\": [0, 0]}]}\n",
     )
     .unwrap();
-    let mut space = Workspace::rooted(&root);
+    let mut space = session_in(&root);
     space.apply(Command::SetMode { mode: ModeId::Diffuse });
     let shown = view(&space.apply(Command::DiffuseOpen { path: "old.flow.json".into() })).shown.unwrap();
     assert_eq!(shown.problems.len(), 1);
@@ -198,10 +228,8 @@ fn a_look_at_the_gateway_is_made_on_a_worker_and_said_when_it_is_back() {
     // the login shell is never asked.
     std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
     let root = kept_project("look");
-    let person = root.join("person.json");
-    std::fs::write(&person, json!({"diffuse": {"gateway": idle_gateway()}}).to_string()).unwrap();
-    let mut space = Workspace::rooted(&root);
-    space.set_person_settings(Some(person));
+    let mut space = session_in(&root);
+    set_gateway(&root, Some(&idle_gateway()));
     space.apply(Command::SetMode { mode: ModeId::Diffuse });
     assert!(space.apply(Command::DiffuseLook { again: false }).is_empty());
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -302,7 +330,7 @@ fn runs(events: &[Event]) -> Option<Vec<proton_core::diffuse::DiffuseRun>> {
 }
 
 /// Poll until `done` says so of what came back.
-fn poll_until(space: &mut Workspace, mut done: impl FnMut(&[Event]) -> bool) -> Vec<Event> {
+fn poll_until(space: &mut Session, mut done: impl FnMut(&[Event]) -> bool) -> Vec<Event> {
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut all = Vec::new();
     loop {
@@ -320,9 +348,7 @@ fn poll_until(space: &mut Workspace, mut done: impl FnMut(&[Event]) -> bool) -> 
 fn a_flow_runs_on_forge_its_image_saved_and_listed_and_its_seed_moved_on() {
     std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
     let (mut space, root) = with_flow("run");
-    let person = root.join("person.json");
-    std::fs::write(&person, json!({"diffuse": {"gateway": serving_gateway()}}).to_string()).unwrap();
-    space.set_person_settings(Some(person));
+    set_gateway(&root, Some(&serving_gateway()));
     space.apply(Command::DiffuseLook { again: false });
     poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
     space.apply(Command::DiffuseEdit {
@@ -372,9 +398,7 @@ fn a_flow_runs_on_forge_its_image_saved_and_listed_and_its_seed_moved_on() {
 fn a_run_forge_cannot_finish_says_why() {
     std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
     let (mut space, root) = with_flow("oom");
-    let person = root.join("person.json");
-    std::fs::write(&person, json!({"diffuse": {"gateway": serving_gateway()}}).to_string()).unwrap();
-    space.set_person_settings(Some(person));
+    set_gateway(&root, Some(&serving_gateway()));
     space.apply(Command::DiffuseLook { again: false });
     poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
     space.apply(Command::DiffuseEdit {
@@ -393,4 +417,72 @@ fn a_run_forge_cannot_finish_says_why() {
     });
     let refused = space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
     assert!(warned(&refused).unwrap().contains("can't run yet: model has no link"));
+}
+
+/// Where a test's Trash is: never the person's.
+fn test_trash() -> PathBuf {
+    let bin = std::env::temp_dir().join(format!("proton-core-diffuse-bin-{}", std::process::id()));
+    std::env::set_var("PROTON_TRASH", &bin);
+    bin
+}
+
+#[test]
+fn a_flow_and_its_images_go_to_the_trash_and_only_what_the_window_was_shown() {
+    let bin = test_trash();
+    std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
+    let (mut space, root) = with_flow("trash");
+    set_gateway(&root, Some(&serving_gateway()));
+    space.apply(Command::DiffuseLook { again: false });
+    poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
+    space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
+    poll_until(&mut space, |e| runs(e).is_some_and(|r| r[0].state.ended()));
+    let image = "outputs/lighthouse/image_0001.png".to_string();
+    assert!(root.join(&image).is_file());
+    // Nothing the gallery did not list: not a flow, not a file outside.
+    let refused = space.apply(Command::DiffuseDeleteImages { paths: vec!["lighthouse.flow.json".into()] });
+    assert!(warned(&refused).unwrap().contains("not an image Diffuse may delete"));
+    assert!(root.join("lighthouse.flow.json").is_file());
+    let gone = space.apply(Command::DiffuseDeleteImages { paths: vec![image.clone()] });
+    assert!(!root.join(&image).exists());
+    assert!(bin.join("image_0001.png").is_file());
+    assert!(runs(&gone).unwrap()[0].outputs.is_empty(), "the run still offers the image");
+    let gallery = gone.iter().find_map(|e| match e {
+        Event::DiffuseGallery { images } => Some(images.clone()),
+        _ => None,
+    });
+    assert_eq!(gallery.map(|g| g.len()), Some(0));
+    // The flow: closed, and moved; its images stay where they are.
+    std::fs::write(root.join("outputs/lighthouse/kept.png"), b"\x89PNG").unwrap();
+    let deleted = space.apply(Command::DiffuseDelete { path: "lighthouse.flow.json".into() });
+    let after = view(&deleted);
+    assert!(after.shown.is_none() && after.open.is_empty() && after.flows.is_empty(), "{after:?}");
+    assert!(!root.join("lighthouse.flow.json").exists() && bin.join("lighthouse.flow.json").is_file());
+    assert!(root.join("outputs/lighthouse/kept.png").is_file());
+    assert!(warned(&space.apply(Command::DiffuseDelete { path: "../elsewhere.flow.json".into() })).is_some());
+}
+
+#[test]
+fn diffuses_folder_is_moved_into_the_persons_settings_and_not_with_changes_left_behind() {
+    let (mut space, root) = with_flow("folder");
+    let elsewhere = project("folder-elsewhere");
+    std::fs::write(elsewhere.join("harbour.flow.json"), "{\"format\": 1}\n").unwrap();
+    space.apply(Command::DiffuseEdit {
+        path: "lighthouse.flow.json".into(),
+        ops: vec![Op::Place { id: "1".into(), at: [0.0, 0.0] }],
+    });
+    let refused = space.apply(Command::DiffuseFolder { folder: Some(elsewhere.display().to_string()) });
+    assert!(warned(&refused).unwrap().contains("save or discard lighthouse.flow.json"));
+    space.apply(Command::DiffuseSave);
+    let moved = space.apply(Command::DiffuseFolder { folder: Some(elsewhere.display().to_string()) });
+    let seen = view(&moved);
+    assert_eq!(seen.flows, ["harbour.flow.json"]);
+    assert!(seen.open.is_empty() && seen.shown.is_none());
+    let kept: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(person_file(&root)).unwrap()).unwrap();
+    assert_eq!(kept["diffuse"]["folder"], json!(elsewhere.display().to_string()));
+    assert_eq!(space.diffuse_home(), elsewhere);
+    // None puts it back to ~/Diffuse: only the setting is checked, nothing made there.
+    space.apply(Command::DiffuseFolder { folder: None });
+    let kept: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(person_file(&root)).unwrap()).unwrap();
+    assert!(kept["diffuse"].get("folder").is_none());
+    assert!(space.diffuse_home().ends_with("Diffuse"));
 }

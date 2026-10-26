@@ -4382,6 +4382,7 @@ dependencies = [
  "proton-voice",
  "serde",
  "serde_json",
+ "trash",
  "ts-rs",
 ]
 

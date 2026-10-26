@@ -232,6 +232,9 @@ pub struct Session {
     tex: Option<std::sync::Arc<std::sync::Mutex<proton_lab::tex::TexEnv>>>,
     /// The PDF mode's open PDFs: the person's, one set for every project here.
     pdf: crate::pdf::Pdfs,
+    /// Diffuse: the flows open, the runs, and what forge is — the person's,
+    /// kept in Diffuse's own folder whichever project is open.
+    diffuse: crate::diffuse::Diffuse,
 }
 
 impl Session {
@@ -258,6 +261,7 @@ impl Session {
             study: crate::study::Study::new(),
             tex: None,
             pdf: crate::pdf::Pdfs::new(),
+            diffuse: crate::diffuse::Diffuse::default(),
         }
     }
 
@@ -381,9 +385,7 @@ impl Session {
         let folder = crate::settings::Settings::at(file.clone()).research_folder();
         self.study = std::mem::take(&mut self.study).with_person_settings(&file);
         self.pdf = std::mem::take(&mut self.pdf).with_person_settings(&file);
-        for workspace in &mut self.workspaces {
-            workspace.set_person_settings(Some(file.clone()));
-        }
+        self.diffuse.set_person(Some(file.clone()));
         self.person = Some(file);
         match folder {
             Some(folder) => self.with_research_in(&folder),
@@ -638,6 +640,8 @@ impl Session {
             .collect();
         // And the PDFs changed in the PDF mode, which are no project's.
         files.extend(self.pdf.unsaved().into_iter().map(|name| format!("{name} (PDF)")));
+        // And Diffuse's flows, which are in its own folder.
+        files.extend(self.diffuse.unsaved().into_iter().map(|name| format!("{name} (Diffuse)")));
         files
     }
 
@@ -646,6 +650,7 @@ impl Session {
     pub fn save_unsaved(&mut self) -> Vec<String> {
         let mut failed: Vec<String> = self.workspaces.iter_mut().flat_map(|workspace| workspace.save_unsaved()).collect();
         failed.extend(self.pdf.save_unsaved());
+        failed.extend(self.diffuse.save_unsaved());
         failed
     }
 
@@ -671,9 +676,48 @@ impl Session {
         self.active().lab_file(key)
     }
 
-    /// An image Diffuse may show, in the project on screen.
+    /// An image Diffuse may show, in its folder.
     pub fn diffuse_file(&self, rel: &str) -> Option<PathBuf> {
-        self.active().diffuse_file(rel)
+        self.diffuse.file(&self.diffuse_home(), rel)
+    }
+
+    /// Diffuse's folder: the person's `diffuse.folder`, or `~/Diffuse`. Made
+    /// only when something is written there.
+    pub fn diffuse_home(&self) -> PathBuf {
+        let chosen = self.person.clone().map(crate::settings::Settings::at).map(|s| s.string("diffuse.folder", "")).unwrap_or_default();
+        match chosen.trim() {
+            "" => folder::home().unwrap_or_else(std::env::temp_dir).join("Diffuse"),
+            typed => folder::expand(typed),
+        }
+    }
+
+    /// Keep Diffuse's flows and images in another folder — none, the default
+    /// — written to the person's own settings. Refused while a flow has
+    /// changes, which would be left behind.
+    fn set_diffuse_folder(&mut self, folder: Option<String>) -> Vec<Event> {
+        let unsaved = self.diffuse.unsaved();
+        if !unsaved.is_empty() {
+            return vec![notice(format!("save or discard {}'s changes before moving Diffuse's folder", unsaved.join(", ")), NoticeLevel::Warn)];
+        }
+        let Some(file) = self.person.clone() else {
+            return vec![notice("Proton has no settings of your own to keep Diffuse's folder in".into(), NoticeLevel::Warn)];
+        };
+        let typed = folder.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
+        if let Some(typed) = &typed {
+            let path = folder::expand(typed);
+            if path.exists() && !path.is_dir() {
+                return vec![notice(format!("{typed} is a file, not a folder"), NoticeLevel::Warn)];
+            }
+        }
+        let value = typed.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null);
+        if let Err(why) = crate::settings::Settings::at(file).set("diffuse.folder", value) {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        self.diffuse.moved();
+        let home = self.diffuse_home();
+        let mut events = self.diffuse.enter(&home);
+        events.extend(self.diffuse.apply(&home, Command::DiffuseLook { again: false }));
+        events
     }
 
     /// Where an image of the game open in the project on screen is.
@@ -778,6 +822,10 @@ impl Session {
                 if mode == ModeId::Study {
                     events.extend(self.study.enter());
                 }
+                if mode == ModeId::Diffuse {
+                    let home = self.diffuse_home();
+                    events.extend(self.diffuse.enter(&home));
+                }
                 if mode == ModeId::Pdf {
                     let root = self.active().root().to_path_buf();
                     let pdfs = self.active_mut().pdf_files();
@@ -791,6 +839,12 @@ impl Session {
             command if crate::study::handles(&command) => self.study.apply(command),
             // As are PDF's: a PDF is the person's wherever it lives.
             command if crate::pdf::handles(&command) => self.pdf.apply(command),
+            // And Diffuse's: its flows and images are in a folder of its own.
+            Command::DiffuseFolder { folder } => self.set_diffuse_folder(folder),
+            command if crate::diffuse::handles(&command) => {
+                let home = self.diffuse_home();
+                self.diffuse.apply(&home, command)
+            }
 
             // While the workspace picker is open it owns the keyboard, exactly
             // as Telescope does inside a workspace — and for the same reason.
@@ -830,6 +884,8 @@ impl Session {
             Command::Sync => {
                 let mut events = self.delegate(Command::Sync);
                 events.push(self.workspaces_event());
+                let home = self.diffuse_home();
+                events.extend(self.diffuse.events(&home));
                 events
             }
 
@@ -1018,6 +1074,8 @@ impl Session {
         }
         events.extend(self.study.poll());
         events.extend(self.pdf.poll());
+        let home = self.diffuse_home();
+        events.extend(self.diffuse.poll(&home));
         events.extend(drawn);
         events.extend(self.crossed(side));
         self.claim(events)
@@ -1027,7 +1085,6 @@ impl Session {
 
     fn build(&self, root: &Path) -> Workspace {
         let mut workspace = Workspace::rooted(root).sharing_plugins(&self.plugins).sharing_research(self.research.as_ref());
-        workspace.set_person_settings(self.person.clone());
         if let Some(tex) = &self.tex {
             workspace.share_tex(tex);
         }

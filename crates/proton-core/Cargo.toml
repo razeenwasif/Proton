@@ -17,6 +17,9 @@ proton-council = { workspace = true }
 proton-data = { workspace = true }
 proton-design = { workspace = true }
 proton-diffuse = { workspace = true }
+# Deleting a flow or an image moves it to the Trash, as the conversation
+# list does: the same build as proton-claude's.
+trash = "5"
 proton-game = { workspace = true }
 proton-raster = { workspace = true }
 proton-video = { workspace = true }
