@@ -156,7 +156,11 @@ pub fn holds(kind: Kind) -> bool {
     if kind == Kind::None {
         return false;
     }
-    let base = std::env::temp_dir().join(format!("proton-fence-{}-{:?}", std::process::id(), kind));
+    // A folder for each probe: two at once — tests do — would share one, and
+    // the first to finish would take the other's away.
+    static PROBE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = PROBE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let base = std::env::temp_dir().join(format!("proton-fence-{}-{:?}-{n}", std::process::id(), kind));
     let _ = std::fs::remove_dir_all(&base);
     let (inside, home) = (base.join("run"), base.join("home"));
     if std::fs::create_dir_all(&inside).is_err() || std::fs::create_dir_all(&home).is_err() || std::fs::write(home.join("secret"), "secret").is_err() {
@@ -220,5 +224,22 @@ mod tests {
         assert!(holds(Kind::Seatbelt), "Seatbelt let the probe out");
         assert!(!holds(Kind::None));
         assert_eq!(available(), Kind::Seatbelt);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn probes_at_once_each_keep_their_own_folder() {
+        if !Path::new(SANDBOX_EXEC).is_file() {
+            return;
+        }
+        // Tests probe at once; one probe's folder taken away by another's
+        // finishing made Seatbelt look as if it let the probe out.
+        let held: Vec<bool> = (0..8)
+            .map(|_| std::thread::spawn(|| holds(Kind::Seatbelt)))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|t| t.join().unwrap())
+            .collect();
+        assert!(held.iter().all(|h| *h), "{held:?}");
     }
 }
