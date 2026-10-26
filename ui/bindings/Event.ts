@@ -20,6 +20,8 @@ import type { DebugFrame } from "./DebugFrame";
 import type { DebugPhase } from "./DebugPhase";
 import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
+import type { DiffuseKnown } from "./DiffuseKnown";
+import type { DiffuseView } from "./DiffuseView";
 import type { Entry } from "./Entry";
 import type { ExperimentRow } from "./ExperimentRow";
 import type { GameFound } from "./GameFound";
@@ -534,7 +536,7 @@ meshes: Array<string>, } | { "type": "geometry" } & Geometry | { "type": "gameHo
 /**
  * Room, x, y (1/256 px), abilities.
  */
-start: [number, number, number, number], rooms: Array<GameRoom>, keys: Array<[string, number]>, replay: Array<[number, number]> | null, } | { "type": "gamePath", parts: Array<GamePathPart>, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "rasterHome", canvases: Array<RasterFound>, images: Array<string>, games: Array<string>, } | { "type": "rasterCanvas", canvas: RasterView | null, } | { "type": "rasterApplied", generation: number, seq: number, version: number, hash: string, refused: string | null, dirty: boolean, canUndo: boolean, canRedo: boolean, } | { "type": "rasterChanged", generation: number, version: number, tiles: Array<[number, Array<number>]>, meta: boolean, } | { "type": "cut", 
+start: [number, number, number, number], rooms: Array<GameRoom>, keys: Array<[string, number]>, replay: Array<[number, number]> | null, } | { "type": "gamePath", parts: Array<GamePathPart>, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "rasterHome", canvases: Array<RasterFound>, images: Array<string>, games: Array<string>, } | { "type": "rasterCanvas", canvas: RasterView | null, } | { "type": "rasterApplied", generation: number, seq: number, version: number, hash: string, refused: string | null, dirty: boolean, canUndo: boolean, canRedo: boolean, } | { "type": "rasterChanged", generation: number, version: number, tiles: Array<[number, Array<number>]>, meta: boolean, } | { "type": "diffuseView", view: DiffuseView, } | { "type": "diffuseKnown", known: DiffuseKnown, gateways: Array<string>, } | { "type": "cut", 
 /**
  * Empty when none is open.
  */

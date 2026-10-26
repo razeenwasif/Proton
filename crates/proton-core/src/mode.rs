@@ -42,17 +42,21 @@ pub enum ModeId {
     /// generators. "Canvas" on the rail; `raster` in the code, where "paint"
     /// and "canvas" already mean drawing a frame.
     Raster,
+    /// Image generation by node graph, a small ComfyUI: graphs built here
+    /// and run whole on Nexus's image server on forge. "Diffuse" on the rail.
+    Diffuse,
 }
 
 impl ModeId {
     /// Ordered as the keys bind them, `1`–`9`, `0` for the tenth, `-` for
-    /// the eleventh and `=` for the twelfth: Data and Research beside Codex,
-    /// the three a working day moves between, Notebook after Research, then
-    /// LaTeX and PDF, then Canvas. The rail and the title bar draw LaTeX and
-    /// PDF beside Notebook, the reading and writing modes together, and
-    /// Canvas beside Game, which it makes pictures for — without moving
+    /// the eleventh, `=` for the twelfth and `\` for the thirteenth: Data
+    /// and Research beside Codex, the three a working day moves between,
+    /// Notebook after Research, then LaTeX and PDF, then Canvas, then
+    /// Diffuse. The rail and the title bar draw LaTeX and PDF beside
+    /// Notebook, the reading and writing modes together, and Canvas and
+    /// Diffuse beside Game, which they make pictures for — without moving
     /// their keys.
-    pub const ALL: [ModeId; 12] = [
+    pub const ALL: [ModeId; 13] = [
         ModeId::Chat,
         ModeId::Codex,
         ModeId::Data,
@@ -65,6 +69,7 @@ impl ModeId {
         ModeId::Tex,
         ModeId::Pdf,
         ModeId::Raster,
+        ModeId::Diffuse,
     ];
 
     pub fn slug(self) -> &'static str {
@@ -81,6 +86,7 @@ impl ModeId {
             ModeId::Tex => "tex",
             ModeId::Pdf => "pdf",
             ModeId::Raster => "raster",
+            ModeId::Diffuse => "diffuse",
         }
     }
 
@@ -94,8 +100,8 @@ impl ModeId {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`12`, one-indexed as the user sees them — `10` is `0` on the keys,
-    /// `11` is `-` and `12` is `=`.
+    /// `1`–`13`, one-indexed as the user sees them — `10` is `0` on the keys,
+    /// `11` is `-`, `12` is `=` and `13` is `\`.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }

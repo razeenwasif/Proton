@@ -3,8 +3,8 @@
 A small ComfyUI in Proton. You build a graph of nodes (load a checkpoint,
 encode a prompt, sample, decode, save), run it, and watch it work; the
 models run on forge, the RTX 4090 desktop, behind Nexus. Proton is the
-editor and the client. Status: design and screens agreed 2026-10-26; D0 and D1
-built (`crates/proton-diffuse`). Shared as the doc
+editor and the client. Status: design and screens agreed 2026-10-26; D0 to D2
+built: the format, the client, and the mode in the window. Shared as the doc
 [Diffuse Design](https://claude.ai/artifact/DuvNm2Xh1dG8bMsRDD7dBa); the
 screens are the mockups in
 [Diffuse UI](https://claude.ai/artifact/QcvnmxeJPeNrnFNJ8gs9hG).
@@ -16,7 +16,7 @@ screens are the mockups in
 - **Nexus's side is built separately** (another session or the owner).
   This document is the contract it builds to.
 - **Proton gets its own mode**, the thirteenth: **Diffuse**, internal id
-  `diffuse`. Its key is open (see the end).
+  `diffuse`, on `⌃\`.
 
 ## The split
 
@@ -321,11 +321,21 @@ middle, tabs on the right.
   ids checked before they go into a path; and what forge served last kept
   in the project's `.proton/diffuse/`. Proved against a fake gateway on a
   loopback port playing back a recorded run.
-- **Core** (`proton-core/src/diffuse/`): the gateway's addresses from the
+- **The mode** (D2, built): `ui/diffuse.js` draws the graph from the core's
+  answer to each edit (cards of `ui/diffuse-graph.js`'s measures, so a wire
+  is drawn from the flow alone), sends a gesture as one batch of ops — a
+  node added for a wire let go on space names it by the id the core will
+  give it — and asks the core to look at forge on coming on screen and
+  every 30 s. The Gallery, Queue and Run wait for D3; Load Image's picture
+  for D5. `ui/preview-diffuse.js` stands in for the core in the browser
+  preview and the browser suite.
+- **Core** (`proton-core/src/diffuse/`): the open flows as tabs, held until
+  ⌘S and named in the quit prompt; the gateway's addresses from the
   person's own settings (`diffuse.gateway`, default
   `http://atlas:7420/img/v1`, and `diffuse.gatewayAway`), the key from
   `NEXUS_KEY` (Proton's environment, then the login shell's, kept in memory
-  only); then, from D2, the open flows and the worker that runs them. The client uses the
+  only); looks at forge on a worker; then, from D3, the worker that runs
+  flows. The client uses the
   HTTP library Proton already has (`ureq`) and reads the event stream line
   by line on a worker thread. It downloads outputs into the project and
   sends progress, previews and results to the window.
@@ -356,8 +366,6 @@ D0 to D2 need nothing from Nexus. D3's real run waits on N1.
 
 ## Open
 
-- **The mode's key.** Every ⌃ key on the number row is taken. `⌃\` is
-  free; or no key, reached from the rail and `⌘K`.
 - **Memory on forge:** FLUX dev at full precision is about 24 GB with its
   encoders, more than the 4090 holds alongside anything else; the server
   should load it in fp8 or offload the T5 encoder. Nexus's call.

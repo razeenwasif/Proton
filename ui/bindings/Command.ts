@@ -3,6 +3,7 @@ import type { Action } from "./Action";
 import type { ChatEngine } from "./ChatEngine";
 import type { ClaudeAnswer } from "./ClaudeAnswer";
 import type { ClaudeImage } from "./ClaudeImage";
+import type { DiffuseOp } from "./DiffuseOp";
 import type { Direction } from "./Direction";
 import type { GameOp } from "./GameOp";
 import type { HypothesisStatus } from "./HypothesisStatus";
@@ -85,7 +86,7 @@ tolerance?: number, } | { "type": "gamePlay", room?: string, at?: [number, numbe
 /**
  * What a picture handed over is called: a dropped file's name.
  */
-name?: string, } | { "type": "openTimeline", path: string, } | { "type": "selectClip", index: number, } | { "type": "setClipField", index: number, field: string, value: string, } | { "type": "setCaptionField", index: number, field: string, value: string, } | { "type": "setTimelineRate", fps: number, } | { "type": "setMaterialParam", material: string, node: string, param: string, value: ParamValue, } | { "type": "moveGraphNode", material: string, node: string, at: [number, number], } | { "type": "connectPorts", material: string, from: string, to: string, } | { "type": "rewirePort", material: string, fromInput: string, toInput: string, } | { "type": "disconnectPort", material: string, to: string, } | { "type": "revealLayer", index: number, } | { "type": "setSetting", key: string, value: unknown, } | { "type": "convene", question: string, } | { "type": "openDebate", name: string, } | { "type": "setLibraryScope", sources: Array<string>, } | { "type": "refreshLibrary" } | { "type": "openCitation", cite: string, } | { "type": "askToQuit" } | { "type": "saveNotebook" } | { "type": "answerProposal", id: number, accept: boolean, } | { "type": "jumpTo", mode: ModeId, path: string, 
+name?: string, } | { "type": "diffuseOpen", path: string, } | { "type": "diffuseNew", name: string, template?: string, } | { "type": "diffuseClose", path: string, discard: boolean, } | { "type": "diffuseEdit", path: string, ops: Array<DiffuseOp>, } | { "type": "diffuseUndo" } | { "type": "diffuseRedo" } | { "type": "diffuseSave" } | { "type": "diffuseLook", again: boolean, } | { "type": "openTimeline", path: string, } | { "type": "selectClip", index: number, } | { "type": "setClipField", index: number, field: string, value: string, } | { "type": "setCaptionField", index: number, field: string, value: string, } | { "type": "setTimelineRate", fps: number, } | { "type": "setMaterialParam", material: string, node: string, param: string, value: ParamValue, } | { "type": "moveGraphNode", material: string, node: string, at: [number, number], } | { "type": "connectPorts", material: string, from: string, to: string, } | { "type": "rewirePort", material: string, fromInput: string, toInput: string, } | { "type": "disconnectPort", material: string, to: string, } | { "type": "revealLayer", index: number, } | { "type": "setSetting", key: string, value: unknown, } | { "type": "convene", question: string, } | { "type": "openDebate", name: string, } | { "type": "setLibraryScope", sources: Array<string>, } | { "type": "refreshLibrary" } | { "type": "openCitation", cite: string, } | { "type": "askToQuit" } | { "type": "saveNotebook" } | { "type": "answerProposal", id: number, accept: boolean, } | { "type": "jumpTo", mode: ModeId, path: string, 
 /**
  * Zero-based, as every line number crossing this bus is.
  */

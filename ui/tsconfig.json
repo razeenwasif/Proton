@@ -57,6 +57,8 @@
     "raster-runtime.js",
     "raster-render.js",
     "raster-frames.js",
+    "diffuse.js",
+    "diffuse-graph.js",
     "highlight.js",
     "claude.js",
     "research.js",

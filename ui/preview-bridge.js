@@ -9,6 +9,7 @@ import {createTexPreview} from './preview-tex.js';
 import {createPdfPreview} from './preview-pdf.js';
 import {createGamePreview} from './preview-game.js';
 import {createRasterPreview} from './preview-raster.js';
+import {createDiffusePreview} from './preview-diffuse.js';
 
 export function createPreview(deliver, mockLatency) {
   let mockMesh = () => null;
@@ -20,6 +21,7 @@ export function createPreview(deliver, mockLatency) {
   const pdfs = createPdfPreview(deliver);
   const games = createGamePreview(deliver);
   const rasters = createRasterPreview(deliver);
+  const diffuses = createDiffusePreview(deliver);
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
@@ -857,6 +859,7 @@ FCM: NON-DROP FRAME
         sceneEvent(),
         ...games.sync(),
         ...rasters.sync(),
+        ...diffuses.sync(),
         cutEvent(),
         settingsEvent(),
         chatsEvent(),
@@ -874,6 +877,7 @@ FCM: NON-DROP FRAME
     if (command.type.startsWith("pdf")) return pdfs.command(command);
     if (command.type.startsWith("game")) return games.command(command);
     if (command.type.startsWith("raster")) return rasters.command(command);
+    if (command.type.startsWith("diffuse")) return diffuses.command(command);
     if (command.type === "runCell") {
       // The shape of a real run: the cell goes busy, and the answer arrives
       // later on its own — which is what the panel has to survive.
@@ -1395,7 +1399,7 @@ FCM: NON-DROP FRAME
     }
     if (command.type === "setMode") {
       state.mode = command.mode;
-      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "tex" ? tex.entered() : []), ...(state.mode === "pdf" ? pdfs.entered() : []), ...(state.mode === "game" ? games.sync() : []), ...(state.mode === "raster" ? rasters.sync() : [])];
+      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "tex" ? tex.entered() : []), ...(state.mode === "pdf" ? pdfs.entered() : []), ...(state.mode === "game" ? games.sync() : []), ...(state.mode === "raster" ? rasters.sync() : []), ...(state.mode === "diffuse" ? diffuses.sync() : [])];
     }
     // A real traced step, dumped from the core by
     // `crates/proton-core/tests/dump_step.rs`. Real rather than invented,

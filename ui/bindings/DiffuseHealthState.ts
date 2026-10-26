@@ -3,4 +3,4 @@
 /**
  * How the gateway and forge are.
  */
-export type DiffuseHealthState = "serving" | "offline" | "badKey" | "noKey" | "unreachable" | "failing";
+export type DiffuseHealthState = "looking" | "serving" | "offline" | "badKey" | "noKey" | "unreachable" | "failing";

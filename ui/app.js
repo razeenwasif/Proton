@@ -39,6 +39,7 @@ import { createTexVisual } from "./tex-visual.js";
 import { createPdf } from "./pdf.js";
 import { createGame } from "./game.js";
 import { createRaster } from "./raster.js";
+import { createDiffuse } from "./diffuse.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -471,7 +472,7 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["chat", "codex", "data", "research", "study", "design", "modeling", "game", "video", "tex", "pdf", "raster"];
+const MODES = ["chat", "codex", "data", "research", "study", "design", "modeling", "game", "video", "tex", "pdf", "raster", "diffuse"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -506,7 +507,7 @@ function renderWindowGround(again = false) {
   if (!HAS_SHELL) return;
   // Chat, Data, Research and Notebook are drawn as Codex is — every pixel
   // the theme's ground — so they get the same opaque window.
-  const want = ["codex", "chat", "data", "research", "study", "tex", "pdf", "game", "raster"].includes(activeMode) ? hexOf(token("--bg")) : null;
+  const want = ["codex", "chat", "data", "research", "study", "tex", "pdf", "game", "raster", "diffuse"].includes(activeMode) ? hexOf(token("--bg")) : null;
   if (!again && want === groundAsked) return;
   groundAsked = want;
   setOpaque(want);
@@ -552,6 +553,7 @@ function renderMode(mode) {
   if (mode === "data" && lastNotebook) renderNotebook(lastNotebook);
   game.show(mode === "game");
   rasterMode.show(mode === "raster");
+  diffuseMode.show(mode === "diffuse");
   requestAnimationFrame(reportEveryViewport);
 }
 
@@ -907,6 +909,8 @@ const pdf = createPdf({ root: document, dispatch, keys: showKeys });
 const game = createGame({ root: document, dispatch, keys: showKeys });
 // Canvas mode, "raster" in the code: "canvas" and "paint" already mean drawing here.
 const rasterMode = createRaster({ root: document, dispatch, keys: showKeys });
+// Diffuse: image generation by node graph, run on Nexus's image server.
+const diffuseMode = createDiffuse({ root: document, dispatch, keys: showKeys });
 /* Notebook: notebooks of your own sources, and the knowledge base they are
    chosen from. Drawn from what the core reads of them. */
 const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
@@ -5321,6 +5325,14 @@ function renderEvent(event) {
       rasterMode.home(event);
       break;
 
+    case "diffuseView":
+      diffuseMode.view(event.view);
+      break;
+
+    case "diffuseKnown":
+      diffuseMode.known(event);
+      break;
+
     case "rasterCanvas":
       rasterMode.canvas(event);
       break;
@@ -5672,6 +5684,12 @@ document.addEventListener("keydown", (e) => {
     coreSetMode("raster");
     return;
   }
+  // ⌃\ the thirteenth, Diffuse: the key after = and the brackets.
+  if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Backslash") {
+    e.preventDefault();
+    coreSetMode("diffuse");
+    return;
+  }
 
   // ⌃` is Zed's terminal toggle. It means nothing to a Vim keymap, and it has
   // to work from inside the shell too, or the pane could not be put away from
@@ -5721,6 +5739,10 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (activeMode === "raster" && !terminalFocused && rasterMode.key(e)) {
+    e.preventDefault();
+    return;
+  }
+  if (activeMode === "diffuse" && !terminalFocused && diffuseMode.key(e)) {
     e.preventDefault();
     return;
   }
@@ -6805,6 +6827,8 @@ function paintAgent(event) {
   if (gameDot && $("#game-pane")?.dataset.showing !== "agent") gameDot.hidden = event.activity === "idle";
   const rasterDot = $("[data-raster-agent-dot]");
   if (rasterDot && $("#raster-pane")?.dataset.showing !== "agent") rasterDot.hidden = event.activity === "idle";
+  const diffuseDot = $("[data-diffuse-agent-dot]");
+  if (diffuseDot && $("#diffuse-pane")?.dataset.showing !== "agent") diffuseDot.hidden = event.activity === "idle";
   // Which service answered. Worth a permanent chip rather than a setting you
   // have to go and look up: the two give different answers to the same
   // question, and a transcript you cannot attribute is one you cannot reason
@@ -6844,7 +6868,7 @@ function paintAgent(event) {
     send.classList.toggle("stop", event.activity !== "idle");
     send.setAttribute("aria-label", event.activity === "idle" ? "Send" : "Stop");
     // Codex's composer sends with Zed's paper plane; Chat keeps its arrow.
-    const idle = send.closest("#codex-dock, #tex-pane, #pdf-pane, #game-pane, #raster-pane") ? "send" : "arrow-up";
+    const idle = send.closest("#codex-dock, #tex-pane, #pdf-pane, #game-pane, #raster-pane, #diffuse-pane") ? "send" : "arrow-up";
     send.innerHTML = `<svg class="i"><use href="#i-${
       event.activity === "idle" ? idle : "stop"
     }"/></svg>`;

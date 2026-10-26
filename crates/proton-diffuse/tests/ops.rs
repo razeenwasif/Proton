@@ -205,3 +205,12 @@ fn ops_read_as_the_window_sends_them() {
     assert_eq!(ops.len(), 9);
     assert_eq!(ops[0], Op::Add { kind: "KSampler".into(), at: [10.0, 20.0], values: BTreeMap::new() });
 }
+
+#[test]
+fn the_text_to_image_starter_is_ready_to_run() {
+    let mut flow = Flow::default();
+    run(&mut flow, &proton_diffuse::templates::ops("textToImage").unwrap()).unwrap();
+    assert_eq!(flow.nodes.len(), 7);
+    assert_eq!(proton_diffuse::check(&flow, &catalogue(), None), vec![]);
+    assert!(proton_diffuse::templates::ops("nope").is_none());
+}

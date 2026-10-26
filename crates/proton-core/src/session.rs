@@ -381,6 +381,9 @@ impl Session {
         let folder = crate::settings::Settings::at(file.clone()).research_folder();
         self.study = std::mem::take(&mut self.study).with_person_settings(&file);
         self.pdf = std::mem::take(&mut self.pdf).with_person_settings(&file);
+        for workspace in &mut self.workspaces {
+            workspace.set_person_settings(Some(file.clone()));
+        }
         self.person = Some(file);
         match folder {
             Some(folder) => self.with_research_in(&folder),
@@ -1019,6 +1022,7 @@ impl Session {
 
     fn build(&self, root: &Path) -> Workspace {
         let mut workspace = Workspace::rooted(root).sharing_plugins(&self.plugins).sharing_research(self.research.as_ref());
+        workspace.set_person_settings(self.person.clone());
         if let Some(tex) = &self.tex {
             workspace.share_tex(tex);
         }

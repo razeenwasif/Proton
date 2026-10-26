@@ -1,7 +1,7 @@
 //! The mode contract: four slots, a verb table, and a document.
 //!
 //! A mode is the unit of "which application am I in", and the claim the whole
-//! project rests on is that twelve of them can share one editor because a mode
+//! project rests on is that thirteen of them can share one editor because a mode
 //! is a small, closed thing:
 //!
 //! ```text
@@ -88,6 +88,8 @@ pub enum Slot {
     PdfTools,
     /// A picture, to draw on.
     Canvas,
+    /// A graph of nodes and the wires between them, to build and run.
+    Graph,
 }
 
 /// How a mode's work persists.
@@ -135,6 +137,9 @@ pub enum DocumentKind {
     /// pictures, which no text can be; each saved the same bytes when the
     /// same pixels, so an untouched layer never shows in a diff.
     Canvas,
+    /// A `.flow.json`: a graph of nodes and links, written so moving a node
+    /// changes one line.
+    Flow,
 }
 
 /// The whole of a mode, as anything outside it needs to know.
@@ -247,6 +252,14 @@ impl Layout {
                 Slot::Inspector,
                 DocumentKind::Canvas,
             ),
+            // ComfyUI's: the flows and the nodes there are, the graph, and
+            // the node selected beside the queue and the agent.
+            ModeId::Diffuse => (
+                Slot::Explorer,
+                Slot::Graph,
+                Slot::Inspector,
+                DocumentKind::Flow,
+            ),
         };
         Layout {
             mode,
@@ -281,7 +294,7 @@ mod tests {
 
     #[test]
     fn every_mode_has_a_layout_and_a_document() {
-        // The contract is only a contract if it covers all twelve. A mode
+        // The contract is only a contract if it covers all thirteen. A mode
         // added later fails to compile rather than falling through to a
         // default that puts an editor where its stage should be.
         for mode in ModeId::ALL {

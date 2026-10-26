@@ -4,7 +4,7 @@
 
 A code editor that is also a chat client, a data notebook, a research
 workbench, a design tool, a 3D workspace, a game editor and a video editor —
-one window, eleven modes, a shared Vim-style modal engine underneath all of
+one window, thirteen modes, a shared Vim-style modal engine underneath all of
 them, and an agent that can act in any of them.
 
 **M0 through M7 are built**, and every mode in the window now reads and writes
@@ -33,7 +33,7 @@ wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
 on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
 already call it `cmake`.
 
-Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃0`, `⌃-` and `⌃=` switch mode · `␣` leader · `⌘K` Telescope ·
+Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃0`, `⌃-`, `⌃=` and `⌃\` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
 `␣w` splits · `` ⌃` `` terminal · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
@@ -66,17 +66,18 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-game/` | Game mode's engine: its project format, editable documents, template, collision tracing and the fixed-point simulation |
 | `crates/proton-game-runtime/` | The simulation as WebAssembly, for the window's Play — built to `ui/game-runtime.wasm` by `scripts/game-wasm.mjs` |
 | `crates/proton-raster/` | Canvas mode's engine: layered pictures in 64-px tiles, blend modes, ops with undo, the `.canvas` folder format — in whole numbers only, so the window's WebAssembly and the core make the same pixels |
+| `crates/proton-diffuse/` | Diffuse's flows: the `.flow.json` format, its edits and undo, the graph checked against the server's node catalogue, and the client for Nexus's image server |
 | `crates/proton-raster-runtime/` | The raster engine as WebAssembly, the window's copy of a canvas — built to `ui/raster-runtime.wasm` by `scripts/wasm.mjs` |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
-| `ui/` | The front end — the app's real chrome, and the interactive prototype — all eleven modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
+| `ui/` | The front end — the app's real chrome, and the interactive prototype — all thirteen modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
 | `design/DESIGN.md` | The design system, the mode-by-mode spec, and which reference each idea came from |
 | `docs/ARCHITECTURE.md` | The build document — crate layout, the core/UI seam, the mode contract, milestones |
 | `docs/STACK.md` | Language, renderer, parser, plugin runtime — what is settled and what is still a real decision |
 | `docs/CODE-VISUALIZER.md` | Integration plan for [Code-Visualizer](https://github.com/razeenwasif/Code-Visualizer) |
 | `assets/` | The reference designs the whole thing was drawn from |
 
-## The eleven modes
+## The thirteen modes
 
 See the [current capability matrix](docs/ARCHITECTURE.md) for implemented documents and runtime limitations.
 
@@ -241,6 +242,12 @@ canvas of pressure-led brushes over layers that blend. A canvas is a folder,
 `Name.canvas/`: a `canvas.json` that diffs and a PNG a layer. The window
 paints on its own copy, the engine built as WebAssembly, and the core makes
 every edit again on the canvas it saves, checking the two by a hash.
+**Diffuse** · image generation by node graph, a small ComfyUI, on ⌃\\: a
+graph of nodes — load a checkpoint, encode a prompt, sample, decode, save —
+built here and run whole by Nexus's image server on forge, the desktop's
+RTX 4090. A flow is a `Name.flow.json` that diffs; the nodes there are come
+from the server, so one Nexus adds needs no Proton release.
+`docs/DIFFUSE.md` is the design and the contract with Nexus.
 **Video** · a multitrack timeline over a CMX3600 edit decision list, with the
 captions from the `.srt` beside it. Both files are spliced, never re-printed.
 There is no program monitor: a frame of the programme is a decoded frame of

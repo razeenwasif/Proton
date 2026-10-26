@@ -480,6 +480,8 @@ fn plain(id: &str) -> Result<&str, Error> {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../ui/bindings/", rename = "DiffuseHealthState")]
 pub enum HealthState {
+    /// Not looked at yet.
+    Looking,
     /// forge serves images.
     Serving,
     /// The gateway answered that forge's image server is not running.
@@ -510,6 +512,11 @@ pub struct Health {
 }
 
 impl Health {
+    /// Before the first look.
+    pub fn looking() -> Health {
+        Health { state: HealthState::Looking, url: None, ms: None, status: None, message: "looking for forge".into() }
+    }
+
     /// No key: nothing was asked.
     pub fn no_key() -> Health {
         Health {

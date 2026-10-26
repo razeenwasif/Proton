@@ -104,6 +104,8 @@
     <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="6.5" cy="6.5" r="2.5"/><path d="M8.6 8.2L19 18M19 6L8.6 15.8"/></symbol>
     <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 000 17c1.4 0 2-1 2-1.8 0-1.6-1.3-1.7-1.3-3 0-.9.8-1.7 1.8-1.7H17a3.5 3.5 0 003.5-3.5C20.5 6.6 16.7 3.5 12 3.5z"/><circle cx="8" cy="9.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="7.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="16" cy="9.5" r="1.1" fill="currentColor" stroke="none"/></symbol>
 
+    <symbol id="i-nodes" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/><path d="M10 7h2.5a2 2 0 012 2v3a2 2 0 002 2"/><circle cx="17.5" cy="7" r="2.2"/><path d="M15.3 7H12.5"/></symbol>
+
     <!-- ── status and marks ───────────────────────────────────────── -->
     <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 2.5L5 13.5h6l-.5 8 8.5-11h-6z"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
@@ -212,6 +214,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="modeling"><svg class="i"><use href="#i-cube"/></svg><span>Model</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="game"><svg class="i"><use href="#i-game"/></svg><span>Game</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="raster"><svg class="i"><use href="#i-palette"/></svg><span>Canvas</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="diffuse"><svg class="i"><use href="#i-nodes"/></svg><span>Diffuse</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="video"><svg class="i"><use href="#i-video"/></svg><span>Video</span></button>
       </div>
 
@@ -1088,6 +1091,76 @@
       </aside>
     </section>
 
+    <!-- Diffuse: image generation by node graph, a small ComfyUI. The graphs
+         are built here and run whole on Nexus's image server on forge; the
+         screens are the "Diffuse UI" mockups. -->
+    <section class="workspace" data-ws="diffuse" style="--col-l:260px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side df-side">
+        <header class="df-side-tabs" role="tablist" aria-label="Flows, nodes and models">
+          <button class="dock-tab on" role="tab" aria-selected="true" data-df-side="flows">Flows</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-df-side="nodes">Nodes</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-df-side="models">Models</button>
+        </header>
+        <div class="scroll df-side-body" data-df-side-body></div>
+        <footer class="df-forge" data-df-forge></footer>
+      </aside>
+
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
+      <main class="pane df-main">
+        <div class="df-bar">
+          <div class="df-tabs" role="tablist" aria-label="Flows open" data-df-tabs></div>
+          <div class="df-seg" role="group" aria-label="View">
+            <button aria-pressed="true" data-df-view="graph">Graph</button>
+            <button aria-pressed="false" data-df-view="gallery" disabled title="Outputs show here once flows run">Gallery</button>
+          </div>
+          <span class="grow"></span>
+          <button class="df-chip" data-df-chip title="How forge is — the Server tab says more"></button>
+          <button class="hbtn" data-df-undo title="Undo  ⌘Z" aria-label="Undo" disabled><svg class="i"><use href="#i-undo"/></svg></button>
+          <button class="hbtn" data-df-redo title="Redo  ⇧⌘Z" aria-label="Redo" disabled><svg class="i"><use href="#i-redo"/></svg></button>
+          <button class="hbtn" data-df-save title="Save  ⌘S" disabled>Save</button>
+          <button class="cc-primary df-run" data-df-run disabled>▶ Run <kbd>⌘↩</kbd></button>
+        </div>
+        <div class="df-ask" data-df-ask hidden></div>
+        <div class="df-banner" data-df-banner role="status" hidden></div>
+        <div class="df-stage" data-df-stage tabindex="0" aria-label="The graph">
+          <div class="df-world" data-df-world>
+            <svg class="df-wires" data-df-wires aria-hidden="true"></svg>
+            <div class="df-nodes" data-df-nodes></div>
+          </div>
+          <div class="df-empty" data-df-empty hidden></div>
+          <div class="df-search" data-df-search role="dialog" aria-label="Add a node" hidden></div>
+        </div>
+        <div class="df-foot" data-df-foot></div>
+      </main>
+
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+      <aside class="pane df-pane" id="diffuse-pane" data-showing="inspector">
+        <header class="df-pane-head" role="tablist" aria-label="Inspector, server and the agent">
+          <button class="dock-tab on" role="tab" aria-selected="true" data-df-panel="inspector">Inspector</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-df-panel="server">Server</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-df-panel="agent">Agent <span class="dot" data-diffuse-agent-dot hidden></span></button>
+        </header>
+        <div class="scroll df-pane-body" data-df-body="inspector" data-df-inspector></div>
+        <div class="scroll df-pane-body" data-df-body="server" data-df-server hidden></div>
+        <div class="df-agent" data-df-body="agent" hidden>
+          <div class="scroll" data-agent-thread></div>
+          <div class="composer">
+            <div class="box">
+              <div class="txt" contenteditable="plaintext-only" role="textbox"
+                   aria-label="Ask about this flow" data-agent-input
+                   data-placeholder="Ask about this flow"></div>
+              <div class="foot">
+                <span class="grow"></span>
+                <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
+                <span class="send" data-agent-send role="button" tabindex="0"
+                      aria-label="Send"><svg class="i"><use href="#i-send"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
     <!-- ══ VIDEO ═════════════════════════════════════════════════ -->
     <section class="workspace" data-ws="video" style="--col-l:226px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side">
@@ -1472,6 +1545,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="modeling" title="Model  ⌃7"><span>Model</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="game" title="Game  ⌃8"><span>Game</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="raster" title="Canvas  ⌃="><span>Canvas</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="diffuse" title="Diffuse  ⌃\"><span>Diffuse</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="video" title="Video  ⌃9"><span>Video</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>

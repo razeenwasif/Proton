@@ -28,6 +28,7 @@
 //! - [`client`]: the gateway's `/img/v1` — requests, the run's event
 //!   stream, and how the gateway and forge are.
 //! - [`cache`]: what forge served last, kept so graphs edit while it is off.
+//! - [`templates`]: starter graphs, as batches of ops.
 
 pub mod cache;
 pub mod catalogue;
@@ -36,6 +37,7 @@ pub mod client;
 pub mod doc;
 pub mod flow;
 pub mod op;
+pub mod templates;
 pub mod text;
 
 pub use cache::Known;

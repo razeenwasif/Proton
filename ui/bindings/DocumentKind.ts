@@ -14,4 +14,4 @@
  * keeps what it can — a `canvas.json` that diffs, and layers that are
  * ordinary PNGs, written the same bytes for the same pixels.
  */
-export type DocumentKind = "conversation" | "source" | "notebook" | "component" | "scene" | "level" | "timeline" | "investigation" | "studyNotebook" | "manuscript" | "pdf" | "canvas";
+export type DocumentKind = "conversation" | "source" | "notebook" | "component" | "scene" | "level" | "timeline" | "investigation" | "studyNotebook" | "manuscript" | "pdf" | "canvas" | "flow";

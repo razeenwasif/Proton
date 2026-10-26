@@ -195,13 +195,14 @@ fn mode_ids_round_trip_through_their_slugs_and_indices() {
         assert_eq!(ModeId::from_index(i + 1), Some(*mode));
     }
     assert_eq!(ModeId::from_index(0), None);
-    assert_eq!(ModeId::from_index(13), None);
+    assert_eq!(ModeId::from_index(14), None);
     // Notebook is ⌃5, after Research; LaTeX the tenth, ⌃0; PDF the eleventh,
-    // ⌃-; Canvas the twelfth, ⌃=.
+    // ⌃-; Canvas the twelfth, ⌃=; Diffuse the thirteenth, ⌃\.
     assert_eq!(ModeId::from_index(5), Some(ModeId::Study));
     assert_eq!(ModeId::from_index(10), Some(ModeId::Tex));
     assert_eq!(ModeId::from_index(11), Some(ModeId::Pdf));
     assert_eq!(ModeId::from_index(12), Some(ModeId::Raster));
+    assert_eq!(ModeId::from_index(13), Some(ModeId::Diffuse));
 }
 
 #[test]

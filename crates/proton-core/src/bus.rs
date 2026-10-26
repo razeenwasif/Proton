@@ -1435,6 +1435,37 @@ pub enum Command {
         name: Option<String>,
     },
 
+    /* ── Diffuse ──────────────────────────────────────────────────── */
+    /// Open a flow — a `.flow.json` in the project — and show it.
+    DiffuseOpen { path: String },
+    /// Make `<name>.flow.json` at the project's top and open it: empty, or
+    /// from a starter graph (`template`: `textToImage`).
+    DiffuseNew {
+        name: String,
+        #[serde(default)]
+        #[ts(optional)]
+        template: Option<String>,
+    },
+    /// Close a flow; refused while it has changes, unless they are to go.
+    DiffuseClose {
+        path: String,
+        #[serde(default)]
+        discard: bool,
+    },
+    /// Edits to a flow, as one undo step: all of them, or none and why.
+    DiffuseEdit { path: String, ops: Vec<proton_diffuse::Op> },
+    /// Undo and redo in the flow shown.
+    DiffuseUndo,
+    DiffuseRedo,
+    /// Write the flow shown.
+    DiffuseSave,
+    /// Look at the gateway and forge, on a worker; `again` looks for
+    /// `NEXUS_KEY` again too, as after it has just been exported.
+    DiffuseLook {
+        #[serde(default)]
+        again: bool,
+    },
+
     /* ── cuts and captions ────────────────────── */
     /// Point Video mode at an `.edl`. Answered with `Event::Cut`.
     OpenTimeline {
@@ -2698,6 +2729,13 @@ pub enum Event {
         tiles: Vec<(u32, Vec<u32>)>,
         meta: bool,
     },
+    /// Diffuse: the project's flows, those open, and the one shown with what
+    /// stops it running.
+    DiffuseView { view: crate::diffuse::DiffuseView },
+    /// What forge is and has — its health, catalogue and models — as it
+    /// answered just now or as the project kept them; and the gateway's
+    /// addresses, in the order they are tried.
+    DiffuseKnown { known: proton_diffuse::Known, gateways: Vec<String> },
     /// The cut Video mode is showing, and the captions beside it.
     ///
     /// `Cut` rather than `Timeline`, because the timeline is the widget and
