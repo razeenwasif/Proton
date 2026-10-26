@@ -89,6 +89,18 @@ export async function readGame(key) {
   return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
 }
 
+/** An image Diffuse shows — an output, or one a run made — as bytes.
+ *  @param {string} path */
+export async function readDiffuse(path) {
+  if (!tauri) {
+    const adapter = await preview;
+    if (!adapter) throw new Error('Browser preview is unavailable');
+    return adapter.readDiffuse(path);
+  }
+  const body = await tauri.core.invoke("read_diffuse", { path });
+  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
+}
+
 /** Tiles of one layer of the open canvas, as bytes (see the shell's
  *  `read_raster` for the layout). @param {number} generation @param {number} layer @param {number[]} tiles */
 export async function readRaster(generation, layer, tiles) {

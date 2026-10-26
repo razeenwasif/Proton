@@ -4,7 +4,8 @@
  * memory, applies the window's ops much as proton-diffuse does (without its
  * checks beyond the plainest), and says forge serves the v1 catalogue —
  * the same JSON as proton-diffuse's test fixture, which a node test keeps
- * in step. Nothing is written to disk. */
+ * in step. A run plays out over a couple of seconds, step by step, and its
+ * image is a picture drawn here. Nothing is written to disk. */
 
 /** The v1 node catalogue: `crates/proton-diffuse/tests/fixtures/catalogue-v1.json`. */
 export const CATALOGUE = {"version":1,"types":["MODEL","CLIP","VAE","CONDITIONING","LATENT","IMAGE","MASK","UPSCALER"],"nodes":[{"type":"LoadCheckpoint","title":"Load Checkpoint","group":"Load","inputs":[{"name":"checkpoint","kind":"choice","from":"checkpoints"}],"outputs":[{"name":"model","type":"MODEL"},{"name":"clip","type":"CLIP"},{"name":"vae","type":"VAE"}]},{"type":"LoadLoRA","title":"Load LoRA","group":"Load","inputs":[{"name":"model","type":"MODEL"},{"name":"clip","type":"CLIP"},{"name":"lora","kind":"choice","from":"loras"},{"name":"strength","kind":"float","min":-2,"max":2,"step":0.05,"default":1}],"outputs":[{"name":"model","type":"MODEL"},{"name":"clip","type":"CLIP"}]},{"type":"LoadVAE","title":"Load VAE","group":"Load","inputs":[{"name":"vae","kind":"choice","from":"vaes"}],"outputs":[{"name":"vae","type":"VAE"}]},{"type":"LoadImage","title":"Load Image","group":"Load","inputs":[{"name":"image","kind":"upload"}],"outputs":[{"name":"image","type":"IMAGE"},{"name":"mask","type":"MASK"}]},{"type":"TextEncode","title":"Text Encode","group":"Prompt","inputs":[{"name":"clip","type":"CLIP"},{"name":"text","kind":"text","multiline":true,"default":""}],"outputs":[{"name":"conditioning","type":"CONDITIONING"}]},{"type":"EmptyLatent","title":"Empty Latent","group":"Latent","inputs":[{"name":"width","kind":"int","min":64,"max":4096,"step":8,"default":1024},{"name":"height","kind":"int","min":64,"max":4096,"step":8,"default":1024},{"name":"batch","kind":"int","min":1,"max":8,"step":1,"default":1}],"outputs":[{"name":"latent","type":"LATENT"}]},{"type":"KSampler","title":"KSampler","group":"Sample","inputs":[{"name":"model","type":"MODEL"},{"name":"positive","type":"CONDITIONING"},{"name":"negative","type":"CONDITIONING","optional":true},{"name":"latent","type":"LATENT"},{"name":"seed","kind":"seed"},{"name":"steps","kind":"int","min":1,"max":150,"step":1,"default":30},{"name":"cfg","kind":"float","min":0,"max":30,"step":0.1,"default":6.5},{"name":"sampler","kind":"choice","from":"samplers"},{"name":"scheduler","kind":"choice","from":"schedulers"},{"name":"denoise","kind":"float","min":0,"max":1,"step":0.01,"default":1}],"outputs":[{"name":"latent","type":"LATENT"}]},{"type":"VAEDecode","title":"VAE Decode","group":"Latent","inputs":[{"name":"vae","type":"VAE"},{"name":"latent","type":"LATENT"}],"outputs":[{"name":"image","type":"IMAGE"}]},{"type":"VAEEncode","title":"VAE Encode","group":"Latent","inputs":[{"name":"vae","type":"VAE"},{"name":"image","type":"IMAGE"}],"outputs":[{"name":"latent","type":"LATENT"}]},{"type":"SetLatentMask","title":"Set Latent Mask","group":"Latent","inputs":[{"name":"latent","type":"LATENT"},{"name":"mask","type":"MASK"}],"outputs":[{"name":"latent","type":"LATENT"}]},{"type":"UpscaleLatent","title":"Upscale Latent","group":"Latent","inputs":[{"name":"latent","type":"LATENT"},{"name":"scale","kind":"float","min":1,"max":4,"step":0.05,"default":1.5}],"outputs":[{"name":"latent","type":"LATENT"}]},{"type":"LoadUpscaler","title":"Load Upscaler","group":"Load","inputs":[{"name":"upscaler","kind":"choice","from":"upscalers"}],"outputs":[{"name":"upscaler","type":"UPSCALER"}]},{"type":"UpscaleImage","title":"Upscale Image","group":"Image","inputs":[{"name":"image","type":"IMAGE"},{"name":"upscaler","type":"UPSCALER","optional":true},{"name":"scale","kind":"float","min":1,"max":4,"step":0.05,"default":2}],"outputs":[{"name":"image","type":"IMAGE"}]},{"type":"InvertMask","title":"Invert Mask","group":"Image","inputs":[{"name":"mask","type":"MASK"}],"outputs":[{"name":"mask","type":"MASK"}]},{"type":"PreviewImage","title":"Preview Image","group":"Output","inputs":[{"name":"images","type":"IMAGE"}],"outputs":[]},{"type":"SaveImage","title":"Save Image","group":"Output","inputs":[{"name":"images","type":"IMAGE"},{"name":"prefix","kind":"text","default":"image"}],"outputs":[]}],"lists":{"samplers":["euler","euler_a","heun","dpmpp_2m","dpmpp_2m_sde","dpmpp_sde","ddim","unipc","lcm"],"schedulers":["normal","karras","exponential","sgm_uniform","simple"]}};
@@ -35,6 +36,35 @@ export function createDiffusePreview(deliver) {
   const copy = (/** @type {any} */ v) => JSON.parse(JSON.stringify(v));
   const fresh = (/** @type {any} */ flow) => String(Math.max(0, ...flow.nodes.map((/** @type {any} */ n) => Number(n.id)).filter(Number.isInteger)) + 1);
   const port = (/** @type {string} */ p) => p.split(":")[0];
+  /** Runs this session, newest first. @type {any[]} */
+  const runs = [];
+  /** The outputs, newest first. @type {any[]} */
+  const images = [];
+  /** Each output's picture, by path: the seed it was drawn from. @type {Map<string, number>} */
+  const drawn = new Map();
+  let runCount = 0;
+  const runsEvent = () => ({ type: "diffuseRuns", runs: copy(runs) });
+  const galleryEvent = () => ({ type: "diffuseGallery", images: copy(images) });
+
+  /** A picture from a seed: a dusk sky, a sea, a sun. @param {number} seed @param {number} size @param {string} type */
+  function picture(seed, size, type) {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const g = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+    const hue = (seed * 47) % 360;
+    const sky = g.createLinearGradient(0, 0, 0, size * 0.62);
+    sky.addColorStop(0, `hsl(${hue} 40% 18%)`);
+    sky.addColorStop(1, `hsl(${(hue + 40) % 360} 60% 62%)`);
+    g.fillStyle = sky;
+    g.fillRect(0, 0, size, size * 0.62);
+    g.fillStyle = `hsl(${(hue + 200) % 360} 35% 16%)`;
+    g.fillRect(0, size * 0.62, size, size);
+    g.fillStyle = "#f7c58a";
+    g.beginPath();
+    g.arc(size * (0.3 + ((seed % 7) / 14)), size * 0.5, size * 0.07, 0, Math.PI * 2);
+    g.fill();
+    return canvas.toDataURL(type, 0.6);
+  }
 
   function apply(/** @type {any} */ flow, /** @type {any} */ op, /** @type {string[]} */ added) {
     switch (op.op) {
@@ -154,7 +184,13 @@ export function createDiffusePreview(deliver) {
   })();
 
   return {
-    sync: () => [view(), known()],
+    sync: () => [view(), known(), runsEvent(), galleryEvent()],
+    /** An output's picture, as the shell would read it. @param {string} path */
+    async file(path) {
+      if (!drawn.has(path)) throw new Error(`${path}: not an image Diffuse may read`);
+      const url = picture(drawn.get(path) ?? 0, 512, "image/png");
+      return (await fetch(url)).arrayBuffer();
+    },
     /** @param {any} command */
     command(command) {
       switch (command.type) {
@@ -218,6 +254,85 @@ export function createDiffusePreview(deliver) {
         case "diffuseLook":
           setTimeout(() => deliver(known()), 30);
           return [];
+        case "diffuseGallery":
+          return [galleryEvent()];
+        case "diffuseCancel": {
+          const r = runs.find((x) => x.id === command.id);
+          if (r && !["done", "failed", "cancelled"].includes(r.state)) {
+            r.state = "cancelled";
+            r.progress = null;
+            r.preview = null;
+          }
+          return [runsEvent()];
+        }
+        case "diffuseRun": {
+          const doc = flows.get(command.path);
+          if (!doc) return [];
+          const flow = doc.flow;
+          const r = { id: ++runCount, run: `preview-${runCount}`, flow: command.path, state: "sending", position: null, nodes: [], progress: null, preview: null, outputs: [], message: null, seconds: null, started: Date.now() };
+          runs.unshift(r);
+          const sampler = flow.nodes.find((/** @type {any} */ n) => n.type === "KSampler");
+          const seed = Number(sampler?.values.seed ?? 0);
+          const steps = Number(sampler?.values.steps ?? 30);
+          const saves = flow.nodes.filter((/** @type {any} */ n) => n.type === "SaveImage" || n.type === "PreviewImage");
+          /** @type {(() => void)[]} */
+          const beats = [() => Object.assign(r, { state: "queued", position: 0 }), () => Object.assign(r, { state: "running", position: null })];
+          for (const n of flow.nodes.filter((/** @type {any} */ n) => n.type !== "KSampler" && !saves.includes(n))) {
+            beats.push(() => r.nodes.push({ id: n.id, state: "running", seconds: null }));
+            beats.push(() => Object.assign(r.nodes.find((/** @type {any} */ x) => x.id === n.id), { state: "done", seconds: 0.2 }));
+          }
+          if (sampler) {
+            beats.push(() => r.nodes.push({ id: sampler.id, state: "running", seconds: null }));
+            for (let step = 1; step <= steps; step += Math.max(1, Math.floor(steps / 10))) {
+              beats.push(() => {
+                r.progress = { node: sampler.id, step, steps };
+                r.preview = picture(seed, 96, "image/jpeg");
+              });
+            }
+            beats.push(() => {
+              Object.assign(r.nodes.find((/** @type {any} */ x) => x.id === sampler.id), { state: "done", seconds: 1.6 });
+              r.progress = null;
+              r.preview = null;
+            });
+          }
+          for (const n of saves) {
+            beats.push(() => {
+              const kept = n.type === "SaveImage";
+              const stem = command.path.replace(/\.flow\.json$/, "").split("/").pop();
+              const prefix = String(n.values.prefix ?? stem);
+              const number = images.filter((i) => i.path.startsWith(`outputs/${stem}/${prefix}_`)).length + 1;
+              const out = kept ? `outputs/${stem}/${prefix}_${String(number).padStart(4, "0")}.png` : `.proton/diffuse/previews/preview-${r.id}.png`;
+              drawn.set(out, seed);
+              r.nodes.push({ id: n.id, state: "done", seconds: 0.1 });
+              r.outputs.push({ node: n.id, path: out, width: 1024, height: 1024, kept });
+              if (kept) {
+                const text = (/** @type {string} */ input) => {
+                  const link = flow.links.find((/** @type {any} */ l) => l.to === `${sampler?.id}:${input}`);
+                  return flow.nodes.find((/** @type {any} */ x) => x.id === link?.from.split(":")[0])?.values.text ?? null;
+                };
+                images.unshift({ path: out, folder: `outputs/${stem}`, madeAt: Math.floor(Date.now() / 1000), width: 1024, height: 1024, graph: true,
+                  made: { seed, steps, cfg: sampler?.values.cfg ?? null, sampler: sampler?.values.sampler ?? null, scheduler: sampler?.values.scheduler ?? null, denoise: sampler?.values.denoise ?? null,
+                    checkpoint: flow.nodes.find((/** @type {any} */ x) => x.type === "LoadCheckpoint")?.values.checkpoint ?? null, prompt: text("positive"), negative: text("negative") } });
+              }
+            });
+          }
+          beats.push(() => Object.assign(r, { state: "done", seconds: 2.4 }));
+          let at = 0;
+          const beat = () => {
+            if (r.state === "cancelled") return;
+            beats[at++]();
+            deliver(runsEvent());
+            if (r.state === "done") deliver(galleryEvent());
+            if (at < beats.length) setTimeout(beat, 140);
+          };
+          setTimeout(beat, 140);
+          // The seeds that move after a run, moved.
+          for (const n of flow.nodes) {
+            if (n.seed === "increment") n.values.seed = Number(n.values.seed ?? 0) + 1;
+            if (n.seed === "random") n.values.seed = Math.floor(Math.random() * 2 ** 32);
+          }
+          return [runsEvent(), view()];
+        }
         default:
           return [];
       }

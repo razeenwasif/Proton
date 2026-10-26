@@ -3,8 +3,8 @@
 A small ComfyUI in Proton. You build a graph of nodes (load a checkpoint,
 encode a prompt, sample, decode, save), run it, and watch it work; the
 models run on forge, the RTX 4090 desktop, behind Nexus. Proton is the
-editor and the client. Status: design and screens agreed 2026-10-26; D0 to D2
-built: the format, the client, and the mode in the window. Shared as the doc
+editor and the client. Status: design and screens agreed 2026-10-26; D0 to D3
+built: the format, the client, the mode, and runs. Shared as the doc
 [Diffuse Design](https://claude.ai/artifact/DuvNm2Xh1dG8bMsRDD7dBa); the
 screens are the mockups in
 [Diffuse UI](https://claude.ai/artifact/QcvnmxeJPeNrnFNJ8gs9hG).
@@ -61,7 +61,8 @@ Proton (MacBook)                     atlas (coordinator)            forge (RTX 4
 Every request carries `Authorization: Bearer <gateway key>`. A missing or
 wrong key is `401 {"error": "key"}`. When the image server on forge is not
 running, the gateway itself answers every `/img/v1` request with
-`503 {"error": "offline"}`, so Proton can tell "atlas is unreachable",
+`503 {"error": "offline"}` (Nexus says `not_serving`, and `502` when the
+server does not answer; Proton takes all three), so Proton can tell "atlas is unreachable",
 "the key is wrong" and "forge is not serving" apart. Proton reads the key from the
 `NEXUS_KEY` environment variable of the login shell and never stores it.
 
@@ -326,8 +327,21 @@ middle, tabs on the right.
   is drawn from the flow alone), sends a gesture as one batch of ops — a
   node added for a wire let go on space names it by the id the core will
   give it — and asks the core to look at forge on coming on screen and
-  every 30 s. The Gallery, Queue and Run wait for D3; Load Image's picture
-  for D5. `ui/preview-diffuse.js` stands in for the core in the browser
+  every 30 s. Load Image's picture waits for D5.
+- **Runs** (D3, built): Run (`⌘↩`) sends the flow shown, as often as it
+  is pressed; each run has a worker in the core that sends the graph,
+  follows its event stream, fetches each image and writes it — a Save
+  Image's as `<prefix>_<nnnn>.png` in the flow's outputs folder, numbered
+  after those there; a Preview Image's under `.proton/diffuse/previews/` —
+  and the core polls their news in. The graph outlines the node at work
+  with its step and preview, says of the rest cached, done in so long, or
+  waiting, and shows each output on its node; the Queue tab follows every
+  run this session; Stop (`⌘.`) cancels one. A seed set to move after a
+  run moves when the run is sent, as an edit. The Gallery reads each
+  output PNG's head — its size and the graph in it, never its pixels — to
+  say what made it; the window gets an image's bytes through the shell's
+  `read_diffuse`, only for an image the gallery or a run listed. The
+  Server tab sets the gateway's addresses in the person's own settings. `ui/preview-diffuse.js` stands in for the core in the browser
   preview and the browser suite.
 - **Core** (`proton-core/src/diffuse/`): the open flows as tabs, held until
   ⌘S and named in the quit prompt; the gateway's addresses from the

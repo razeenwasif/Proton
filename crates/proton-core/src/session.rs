@@ -671,6 +671,11 @@ impl Session {
         self.active().lab_file(key)
     }
 
+    /// An image Diffuse may show, in the project on screen.
+    pub fn diffuse_file(&self, rel: &str) -> Option<PathBuf> {
+        self.active().diffuse_file(rel)
+    }
+
     /// Where an image of the game open in the project on screen is.
     pub fn game_file(&self, key: &str) -> Option<PathBuf> {
         self.active().game_file(key)

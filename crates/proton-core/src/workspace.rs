@@ -1608,7 +1608,11 @@ impl Workspace {
             | Command::DiffuseUndo
             | Command::DiffuseRedo
             | Command::DiffuseSave
-            | Command::DiffuseLook { .. } => Vec::new(),
+            | Command::DiffuseLook { .. }
+            | Command::DiffuseRun { .. }
+            | Command::DiffuseCancel { .. }
+            | Command::DiffuseGallery
+            | Command::DiffuseGateways { .. } => Vec::new(),
             // PDF is the window's too: the session answers it.
             Command::PdfOpen { .. }
             | Command::PdfClose { .. }
@@ -4141,6 +4145,11 @@ impl Workspace {
     /// What Canvas last copied, as a PNG, for the system's clipboard.
     pub fn raster_clip_png(&self) -> Option<Vec<u8>> {
         self.raster.clip_png()
+    }
+
+    /// An image Diffuse's window may read: in the gallery, or made by a run.
+    pub fn diffuse_file(&self, rel: &str) -> Option<PathBuf> {
+        self.diffuse.file(self.root(), rel)
     }
 
     /// Where the person's own settings are: Diffuse's gateway is theirs.

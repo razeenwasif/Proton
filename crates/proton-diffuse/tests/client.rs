@@ -67,6 +67,11 @@ fn a_refused_key_and_an_idle_forge_are_told_apart_and_the_key_is_never_said() {
     assert_eq!(client(vec![idle.base.clone()]).models().unwrap_err(), Error::Offline);
     let health = client(vec![idle.base.clone()]).health();
     assert_eq!(health.state, HealthState::Offline);
+    // Nexus's own words for it.
+    let nexus = Fake::start(|_| Reply::json(503, r#"{"error": "not_serving", "message": "no node is serving images"}"#));
+    assert_eq!(client(vec![nexus.base.clone()]).status().unwrap_err(), Error::Offline);
+    let silent = Fake::start(|_| Reply::json(502, r#"{"error": "not_serving", "message": "the image server didn't answer"}"#));
+    assert_eq!(client(vec![silent.base.clone()]).status().unwrap_err(), Error::Offline);
     assert_eq!(health.url.as_deref(), Some(idle.base.as_str()));
     assert!(health.message.contains("Nexus › Inference"));
 }

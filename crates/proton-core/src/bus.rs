@@ -1465,6 +1465,22 @@ pub enum Command {
         #[serde(default)]
         again: bool,
     },
+    /// Send a flow to forge to run.
+    DiffuseRun { path: String },
+    /// Stop a run, Proton's number for it: queued or running.
+    DiffuseCancel { id: u32 },
+    /// The project's outputs, listed again.
+    DiffuseGallery,
+    /// Where the gateway is, at home and away — the person's own settings;
+    /// none takes one away.
+    DiffuseGateways {
+        #[serde(default)]
+        #[ts(optional)]
+        home: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        away: Option<String>,
+    },
 
     /* ── cuts and captions ────────────────────── */
     /// Point Video mode at an `.edl`. Answered with `Event::Cut`.
@@ -2736,6 +2752,11 @@ pub enum Event {
     /// answered just now or as the project kept them; and the gateway's
     /// addresses, in the order they are tried.
     DiffuseKnown { known: proton_diffuse::Known, gateways: Vec<String> },
+    /// The runs this session, newest first: each node's state, the step at
+    /// work and its preview, the images saved.
+    DiffuseRuns { runs: Vec<crate::diffuse::DiffuseRun> },
+    /// The project's outputs, newest first, with what made each.
+    DiffuseGallery { images: Vec<crate::diffuse::DiffuseImage> },
     /// The cut Video mode is showing, and the captions beside it.
     ///
     /// `Cut` rather than `Timeline`, because the timeline is the widget and

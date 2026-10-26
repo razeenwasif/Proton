@@ -217,3 +217,180 @@ fn a_look_at_the_gateway_is_made_on_a_worker_and_said_when_it_is_back() {
     // What was kept is still what the editor works from.
     assert_eq!(found.catalogue.unwrap().nodes.len(), 16);
 }
+
+#[path = "../../proton-diffuse/tests/common/server.rs"]
+#[allow(dead_code)]
+mod server;
+
+/// A PNG as forge writes one: its head, the graph sent as `proton-flow`,
+/// then pixels nobody reads.
+fn forge_png(graph: &str) -> Vec<u8> {
+    let mut out = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    let mut chunk = |kind: &[u8; 4], data: &[u8]| {
+        out.extend((data.len() as u32).to_be_bytes());
+        out.extend(kind);
+        out.extend(data);
+        out.extend([0, 0, 0, 0]);
+    };
+    chunk(b"IHDR", &[0, 0, 4, 0, 0, 0, 4, 0, 8, 2, 0, 0, 0]);
+    chunk(b"tEXt", &[b"proton-flow\0".as_slice(), graph.as_bytes()].concat());
+    chunk(b"IDAT", &[0; 16]);
+    chunk(b"IEND", &[]);
+    out
+}
+
+/// A gateway serving forge: the catalogue, a run that goes through every
+/// event and makes one image, and that image with the graph in it. A run
+/// whose sampler asks for 2048 px runs out of memory.
+fn serving_gateway() -> String {
+    use server::{Fake, Reply};
+    let sent = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let fake = Fake::start(move |seen| {
+        let path = seen.path.as_str();
+        match (seen.method.as_str(), path) {
+            ("GET", "/img/v1/status") => Reply::json(200, r#"{"gpu": {"name": "NVIDIA GeForce RTX 4090", "total": 25757220864, "used": 7600000000}}"#),
+            ("GET", "/img/v1/nodes") => Reply::json(200, CATALOGUE),
+            ("GET", "/img/v1/models") => Reply::json(200, include_str!("../../proton-diffuse/tests/fixtures/models.json")),
+            ("POST", "/img/v1/runs") => {
+                let body: serde_json::Value = serde_json::from_slice(&seen.body).unwrap();
+                let big = body["graph"]["nodes"].as_array().unwrap().iter().any(|n| n["values"]["width"] == json!(2048));
+                *sent.lock().unwrap() = body["graph"].to_string();
+                Reply::json(200, if big { r#"{"run": "r-oom", "position": 0}"# } else { r#"{"run": "r1", "position": 0}"# })
+            }
+            ("GET", "/img/v1/runs/r1/events") => Reply::stream(vec![
+                (
+                    Duration::ZERO,
+                    concat!(
+                        "event: queued\ndata: {\"position\": 0}\n\n",
+                        "event: started\ndata: {}\n\n",
+                        "event: node\ndata: {\"id\": \"1\", \"state\": \"running\"}\n\n",
+                        "event: node\ndata: {\"id\": \"1\", \"state\": \"done\"}\n\n",
+                        "event: node\ndata: {\"id\": \"5\", \"state\": \"running\"}\n\n",
+                        "event: progress\ndata: {\"id\": \"5\", \"step\": 15, \"steps\": 30}\n\n",
+                        "event: preview\ndata: {\"id\": \"5\", \"step\": 15, \"jpeg\": \"/9j/AA==\"}\n\n",
+                    ),
+                ),
+                // The sampler at work for a while, as it is on forge.
+                (Duration::from_millis(400), ""),
+                (
+                    Duration::ZERO,
+                    concat!(
+                    "event: node\ndata: {\"id\": \"5\", \"state\": \"done\"}\n\n",
+                    "event: node\ndata: {\"id\": \"7\", \"state\": \"running\"}\n\n",
+                    "event: image\ndata: {\"id\": \"7\", \"image\": \"image-abc123\", \"index\": 0, \"width\": 1024, \"height\": 1024}\n\n",
+                    "event: node\ndata: {\"id\": \"7\", \"state\": \"done\"}\n\n",
+                    "event: done\ndata: {\"seconds\": 9.5}\n\n",
+                    ),
+                ),
+            ]),
+            ("GET", "/img/v1/runs/r-oom/events") => Reply::stream(vec![(
+                Duration::ZERO,
+                "event: started\ndata: {}\n\nevent: error\ndata: {\"id\": \"6\", \"error\": \"oom\", \"message\": \"CUDA out of memory\"}\n\n",
+            )]),
+            ("GET", "/img/v1/images/image-abc123") => Reply::bytes("image/png", forge_png(&sent.lock().unwrap())),
+            _ => Reply::json(404, r#"{"error": "not_found", "message": "no"}"#),
+        }
+    });
+    fake.base.clone()
+}
+
+fn runs(events: &[Event]) -> Option<Vec<proton_core::diffuse::DiffuseRun>> {
+    events.iter().rev().find_map(|e| match e {
+        Event::DiffuseRuns { runs } => Some(runs.clone()),
+        _ => None,
+    })
+}
+
+/// Poll until `done` says so of what came back.
+fn poll_until(space: &mut Workspace, mut done: impl FnMut(&[Event]) -> bool) -> Vec<Event> {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut all = Vec::new();
+    loop {
+        let events = space.apply(Command::Poll);
+        all.extend(events.clone());
+        if done(&events) {
+            return all;
+        }
+        assert!(Instant::now() < deadline, "it never came: {all:?}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_flow_runs_on_forge_its_image_saved_and_listed_and_its_seed_moved_on() {
+    std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
+    let (mut space, root) = with_flow("run");
+    let person = root.join("person.json");
+    std::fs::write(&person, json!({"diffuse": {"gateway": serving_gateway()}}).to_string()).unwrap();
+    space.set_person_settings(Some(person));
+    space.apply(Command::DiffuseLook { again: false });
+    poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
+    space.apply(Command::DiffuseEdit {
+        path: "lighthouse.flow.json".into(),
+        ops: vec![Op::Seed { id: "5".into(), mode: proton_diffuse::SeedMode::Increment }],
+    });
+    let started = space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
+    let first = runs(&started).unwrap();
+    assert_eq!(first[0].state, proton_core::diffuse::RunState::Sending);
+    // Run with 42; the seed is 43 for the next.
+    assert_eq!(view(&started).shown.unwrap().flow.node("5").unwrap().values["seed"], json!(43));
+    let heard = poll_until(&mut space, |e| runs(e).is_some_and(|r| r[0].state.ended()));
+    let run = runs(&heard).unwrap().remove(0);
+    assert_eq!(run.state, proton_core::diffuse::RunState::Done, "{run:?}");
+    assert_eq!(run.run.as_deref(), Some("r1"));
+    assert_eq!(run.seconds, Some(9.5));
+    let states: Vec<String> = run.nodes.iter().map(|n| format!("{} {:?}", n.id, n.state)).collect();
+    assert_eq!(states, ["1 Done", "5 Done", "7 Done"]);
+    assert!(run.nodes.iter().all(|n| n.seconds.is_some()));
+    assert_eq!(run.outputs.len(), 1);
+    assert_eq!(run.outputs[0].path, "outputs/lighthouse/image_0001.png");
+    assert!(run.outputs[0].kept && run.outputs[0].width == 1024);
+    assert!(root.join("outputs/lighthouse/image_0001.png").is_file());
+    // A progress and a preview were heard on the way.
+    assert!(heard.iter().any(|e| matches!(e, Event::DiffuseRuns { runs } if runs[0].progress.as_ref().is_some_and(|p| p.step == 15) && runs[0].preview.as_deref() == Some("data:image/jpeg;base64,/9j/AA=="))));
+    // The gallery lists it, with what made it.
+    let gallery = heard
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            Event::DiffuseGallery { images } => Some(images.clone()),
+            _ => None,
+        })
+        .expect("the gallery, again");
+    assert_eq!(gallery[0].path, "outputs/lighthouse/image_0001.png");
+    assert_eq!(gallery[0].made.seed, Some(42));
+    assert_eq!(gallery[0].made.prompt.as_deref(), Some("a lighthouse at dusk, oil painting"));
+    assert!(space.diffuse_file("outputs/lighthouse/image_0001.png").is_some());
+    assert!(space.diffuse_file("lighthouse.flow.json").is_none());
+    // The next is numbered after it.
+    space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
+    poll_until(&mut space, |e| runs(e).is_some_and(|r| r[0].state.ended()));
+    assert!(root.join("outputs/lighthouse/image_0002.png").is_file());
+}
+
+#[test]
+fn a_run_forge_cannot_finish_says_why() {
+    std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
+    let (mut space, root) = with_flow("oom");
+    let person = root.join("person.json");
+    std::fs::write(&person, json!({"diffuse": {"gateway": serving_gateway()}}).to_string()).unwrap();
+    space.set_person_settings(Some(person));
+    space.apply(Command::DiffuseLook { again: false });
+    poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
+    space.apply(Command::DiffuseEdit {
+        path: "lighthouse.flow.json".into(),
+        ops: vec![Op::Set { id: "4".into(), name: "width".into(), value: json!(2048) }],
+    });
+    space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
+    let heard = poll_until(&mut space, |e| runs(e).is_some_and(|r| r[0].state.ended()));
+    let run = runs(&heard).unwrap().remove(0);
+    assert_eq!(run.state, proton_core::diffuse::RunState::Failed);
+    assert_eq!(run.message.as_deref(), Some("forge ran out of GPU memory: CUDA out of memory"));
+    // A flow that cannot run is not sent.
+    space.apply(Command::DiffuseEdit {
+        path: "lighthouse.flow.json".into(),
+        ops: vec![Op::Disconnect { to: "5:model".into() }],
+    });
+    let refused = space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
+    assert!(warned(&refused).unwrap().contains("can't run yet: model has no link"));
+}

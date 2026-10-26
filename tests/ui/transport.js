@@ -83,6 +83,12 @@ window.__TAURI__ = {
     if (name === 'copy_text') { window.clipboardText = args?.text ?? null; return null; }
     if (name === 'copy_raster_image') return true;
     // The open game's images: the fixture game's, from the server.
+    // An image Diffuse shows, as a test's stand-in core holds it.
+    if (name === 'read_diffuse') {
+      const bytes = window.diffuseFiles?.[args.path];
+      if (!bytes) throw new Error(`${args.path}: not an image Diffuse may read`);
+      return bytes;
+    }
     if (name === 'read_game') {
       // A test's own files first: an image cut up, say.
       const own = window.gameFiles?.[args.key];

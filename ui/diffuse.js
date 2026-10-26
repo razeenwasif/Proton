@@ -18,6 +18,7 @@
  * the mode comes on screen and every half minute while it stays, and on
  * Try again. */
 
+import { copyText, readDiffuse } from "./bridge.js";
 import { escapeHtml as esc } from "./html.js";
 import { colourOf, fieldsOf, freshId, grouped, HEAD, NODE_W, portAt, portOf, rowsOf, search, shortValue, socketFor, wire } from "./diffuse-graph.js";
 
@@ -29,6 +30,8 @@ import { colourOf, fieldsOf, freshId, grouped, HEAD, NODE_W, portAt, portOf, row
 /** @typedef {import('./bindings/DiffuseInput').DiffuseInput} Input */
 /** @typedef {import('./bindings/DiffuseOp').DiffuseOp} Op */
 /** @typedef {import('./bindings/DiffuseProblem').DiffuseProblem} Problem */
+/** @typedef {import('./bindings/DiffuseRun').DiffuseRun} Run */
+/** @typedef {import('./bindings/DiffuseImage').DiffuseImage} Image */
 /** @typedef {{x: number, y: number, z: number}} Camera */
 /** @typedef {{port: string, side: "in" | "out", type: string, detach: string | null, at: [number, number]}} Pulling */
 
@@ -39,6 +42,7 @@ const KEYS = /** @type {[string, string][]} */ ([
   ["double-click", "add a node there"], ["drag from a socket", "a wire; let go on space to add a node for it"],
   ["drag a node's head", "move it — ⇧ adds it to those chosen"], ["drag the ground", "move over the graph"],
   ["⌘ wheel  pinch", "zoom"], ["⌫", "remove what is chosen"], ["⌘D", "a copy of what is chosen"], ["⌘A", "choose every node"],
+  ["⌘↩", "run the flow on forge — again to queue another"], ["⌘.", "stop its run"],
   ["⌘Z ⇧⌘Z", "undo, redo"], ["⌘S", "save the flow"], ["f", "the whole graph"], ["⎋", "close the search, choose nothing"], ["?", "these keys"],
 ]);
 
@@ -72,6 +76,24 @@ export function createDiffuse(host) {
   let looking = null;
   /** The flow whose unsaved changes a close is asking about. @type {string | null} */
   let closing = null;
+  /** The runs this session, newest first. @type {Run[]} */
+  let runs = [];
+  /** The project's outputs, newest first. @type {Image[]} */
+  let images = [];
+  /** What the stage shows: the graph, or the outputs. */
+  let stageView = "graph";
+  /** The folder the gallery shows; none, all of them. */
+  let folder = "";
+  /** The output chosen in the gallery. @type {string | null} */
+  let picked = null;
+  /** Each image read, as a `data:` URL, by path. @type {Map<string, Promise<string>>} */
+  const urls = new Map();
+
+  const ended = (/** @type {string} */ state) => state === "done" || state === "failed" || state === "cancelled";
+  /** The newest run of the flow shown. */
+  const lastRun = () => runs.find((r) => r.flow === path()) ?? null;
+  /** Its run still going, if one is. */
+  const activeRun = () => runs.find((r) => r.flow === path() && !ended(r.state)) ?? null;
   /** A wire being pulled from a socket. @type {Pulling | null} */
   let pulling = null;
   /** The search open, where on the graph it adds, and what it must fit.
@@ -187,14 +209,24 @@ export function createDiffuse(host) {
     const chip = q("[data-df-chip]");
     chip.innerHTML = `<span class="df-dot" style="--c:${stateColour(known?.health.state ?? "looking")}"></span>${esc(chipText())}`;
     const run = /** @type {HTMLButtonElement} */ (q("[data-df-run]"));
-    run.disabled = true;
-    run.title = !s
+    const active = activeRun();
+    const state = known?.health.state ?? "looking";
+    const why = !s
       ? "Open a flow to run it"
       : s.problems.length
         ? `Not ready: ${s.problems[0].message}`
-        : known?.health.state !== "serving"
-          ? known?.health.message || "forge is not serving"
-          : "Running a flow is not built yet";
+        : state === "serving" || state === "looking"
+          ? ""
+          : known?.health.message || "forge is not serving";
+    run.disabled = Boolean(why);
+    run.title = why || (active ? "Queue another run of it  ⌘↩" : "Run it on forge  ⌘↩");
+    q("[data-df-run-label]").textContent = active ? "Queue" : "Run";
+    const going = runs.filter((r) => !ended(r.state)).length;
+    const count = q("[data-df-count]");
+    count.hidden = !going;
+    count.textContent = String(going);
+    q("[data-df-stop]").hidden = !active;
+    for (const b of ws.querySelectorAll("[data-df-view]")) b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.dfView === stageView));
   }
 
   function renderAsk() {
@@ -222,6 +254,14 @@ export function createDiffuse(host) {
   function renderGraph() {
     const f = flow();
     const empty = q("[data-df-empty]");
+    const gallery = q("[data-df-gallery]");
+    gallery.hidden = stageView !== "gallery";
+    if (stageView === "gallery") {
+      empty.hidden = true;
+      world.hidden = true;
+      renderGallery();
+      return;
+    }
     empty.hidden = Boolean(f);
     world.hidden = !f;
     if (!f) {
@@ -234,6 +274,7 @@ export function createDiffuse(host) {
     q("[data-df-nodes]").innerHTML = f.nodes.map((n) => card(n, troubled.has(n.id))).join("");
     drawWires();
     placeWorld();
+    fillImages(world);
     q("[data-df-foot]").innerHTML =
       `<span>${Math.round(camera().z * 100)}%</span><span>${f.nodes.length} nodes · ${f.links.length} wires</span>` +
       (problems.length ? `<span class="df-foot-problem">${problems.length === 1 ? "1 thing" : `${problems.length} things`} to fix before it runs</span>` : `<span class="df-foot-ok">ready to run</span>`) +
@@ -243,10 +284,17 @@ export function createDiffuse(host) {
   /** One node's card. @param {Node} node @param {boolean} troubled */
   function card(node, troubled) {
     const kind = kindOf(node.type);
-    const classes = ["df-node", chosen.has(node.id) ? "on" : "", node.bypass ? "bypassed" : "", troubled ? "troubled" : "", kind ? "" : "unknown"].filter(Boolean).join(" ");
+    const working = lastRun()?.nodes.some((n) => n.id === node.id && n.state === "running") && !ended(lastRun()?.state ?? "done");
+    const classes = ["df-node", chosen.has(node.id) ? "on" : "", node.bypass ? "bypassed" : "", troubled ? "troubled" : "", kind ? "" : "unknown", working ? "working" : ""].filter(Boolean).join(" ");
+    const r = lastRun();
+    const going = r && !ended(r.state);
+    const at = r?.nodes.find((n) => n.id === node.id);
+    const state = at ? at.state : going && !node.bypass ? "waiting" : "";
+    const said = state === "done" && at?.seconds !== null && at?.seconds !== undefined ? `done ${at.seconds.toFixed(1)} s` : state;
     const head =
       `<div class="df-node-head" data-df-grab="${esc(node.id)}"><b>${esc(kind?.title ?? node.type)}</b><span class="df-node-id">${esc(node.id)}</span>` +
       (node.bypass ? `<span class="df-badge">bypassed</span>` : "") +
+      (state ? `<span class="df-badge run-${esc(state)}">${esc(said)}</span>` : "") +
       (troubled ? `<span class="df-badge warn" title="Something here stops the flow running">!</span>` : "") +
       `</div>`;
     if (!kind) {
@@ -276,7 +324,79 @@ export function createDiffuse(host) {
         return `<div class="df-pill"><span>${esc(field.name)}</span><span>${esc(shortValue(value))}${field.kind === "seed" && node.seed && node.seed !== "fixed" ? ` · ${esc(node.seed)}` : ""}</span></div>`;
       })
       .join("");
-    return `<div class="${classes}" data-df-node="${esc(node.id)}" style="left:${node.at[0]}px;top:${node.at[1]}px;width:${NODE_W}px">${head}<div class="df-rows">${rows}</div>${fields ? `<div class="df-fields">${fields}</div>` : ""}</div>`;
+    return `<div class="${classes}" data-df-node="${esc(node.id)}" style="left:${node.at[0]}px;top:${node.at[1]}px;width:${NODE_W}px">${head}<div class="df-rows">${rows}</div>${fields ? `<div class="df-fields">${fields}</div>` : ""}${atWork(node)}</div>`;
+  }
+
+  /** What a run shows on a card: the step at work and its preview, or the
+   *  image the node last made. @param {Node} node */
+  function atWork(node) {
+    const r = lastRun();
+    if (!r) return "";
+    const p = r.progress;
+    if (p && p.node === node.id && !ended(r.state)) {
+      const pct = Math.round((p.step / Math.max(1, p.steps)) * 100);
+      return (
+        `<div class="df-work"><div class="df-bar-track"><div class="df-bar-fill" style="width:${pct}%"></div></div>` +
+        `<div class="df-work-said"><span>step ${p.step} / ${p.steps}</span><span>${pct}%</span></div>` +
+        (r.preview ? `<img class="df-shot blurred" src="${esc(r.preview)}" alt="A preview at step ${p.step}">` : "") +
+        `</div>`
+      );
+    }
+    const made = r.outputs.filter((o) => o.node === node.id);
+    const last = made[made.length - 1];
+    if (!last) return "";
+    return `<div class="df-work"><img class="df-shot" data-df-img="${esc(last.path)}" alt="${esc(last.path)}" draggable="false"><div class="df-work-said"><span>${esc(last.path.split("/").pop() ?? "")}</span><span>${last.width} × ${last.height}</span></div></div>`;
+  }
+
+  /** An image of the project, as a `data:` URL — the window's security
+   *  policy lets in no other kind. @param {string} p */
+  function urlOf(p) {
+    let url = urls.get(p);
+    if (!url) {
+      url = readDiffuse(p).then((bytes) => {
+        const view = new Uint8Array(bytes);
+        let text = "";
+        for (let i = 0; i < view.length; i += 0x8000) text += String.fromCharCode(...view.subarray(i, i + 0x8000));
+        return `data:image/png;base64,${btoa(text)}`;
+      });
+      url.catch(() => urls.delete(p));
+      urls.set(p, url);
+    }
+    return url;
+  }
+
+  /** Each image waiting for its picture, given it. @param {Element} box */
+  function fillImages(box) {
+    for (const img of box.querySelectorAll("img[data-df-img]")) {
+      const p = /** @type {HTMLElement} */ (img).dataset.dfImg ?? "";
+      urlOf(p).then(
+        (url) => {
+          /** @type {HTMLImageElement} */ (img).src = url;
+        },
+        () => img.classList.add("missing"),
+      );
+    }
+  }
+
+  /** The outputs, as a grid. */
+  function renderGallery() {
+    const box = q("[data-df-gallery]");
+    const folders = [...new Set(images.map((i) => i.folder))].sort();
+    const shownImages = images.filter((i) => !folder || i.folder === folder);
+    box.innerHTML =
+      `<div class="df-gallery-head"><label class="df-field-inline">Show <select data-df-folder><option value="">every flow's</option>${folders
+        .map((f) => `<option value="${esc(f)}"${f === folder ? " selected" : ""}>${esc(f)}</option>`)
+        .join("")}</select></label><span class="df-faint">${shownImages.length} ${shownImages.length === 1 ? "image" : "images"}, newest first</span></div>` +
+      (shownImages.length
+        ? `<div class="df-gallery-grid">${shownImages
+            .map(
+              (i) =>
+                `<button class="df-tile${i.path === picked ? " on" : ""}" data-df-pick-image="${esc(i.path)}" aria-pressed="${i.path === picked}">` +
+                `<img data-df-img="${esc(i.path)}" alt="${esc(i.path)}" draggable="false"><span class="df-tile-said"><span>${esc(i.path.split("/").pop() ?? "")}</span><span class="df-faint">${i.made.seed ?? ""}</span></span></button>`,
+            )
+            .join("")}</div>`
+        : `<div class="df-empty-note"><p>No outputs yet.</p><p class="df-faint">A flow's Save Image writes its pictures into <code>outputs/&lt;flow&gt;/</code>; they show here.</p></div>`);
+    fillImages(box);
   }
 
   /** The wires, from the flow and where any dragged node is now.
@@ -338,8 +458,12 @@ export function createDiffuse(host) {
     for (const body of ws.querySelectorAll("[data-df-body]")) /** @type {HTMLElement} */ (body).hidden = /** @type {HTMLElement} */ (body).dataset.dfBody !== panel;
     const pane = /** @type {HTMLElement} */ (ws.querySelector("#diffuse-pane"));
     if (pane) pane.dataset.showing = panel;
-    if (panel === "inspector") renderInspector();
+    if (panel === "inspector") {
+      if (stageView === "gallery") renderPicked();
+      else renderInspector();
+    }
     if (panel === "server") renderServer();
+    if (panel === "queue") renderQueue();
   }
 
   function renderInspector() {
@@ -466,6 +590,75 @@ export function createDiffuse(host) {
           .join("")}</ul>`
       : `<p class="df-ok df-pad">Ready to run.</p>`;
 
+  /** The output chosen in the gallery, large, with what made it. */
+  function renderPicked() {
+    const box = q("[data-df-inspector]");
+    const image = images.find((i) => i.path === picked);
+    if (!image) {
+      box.innerHTML = `<p class="df-faint df-pad">Choose an image to see what made it.</p>`;
+      return;
+    }
+    const m = image.made;
+    const row = (/** @type {string} */ label, /** @type {unknown} */ value) =>
+      value === null || value === undefined || value === "" ? "" : `<span class="df-faint">${esc(label)}</span><span>${esc(String(value))}</span>`;
+    const stem = image.folder.split("/").pop() ?? "";
+    const flowHere = (view?.flows ?? []).find((f) => f.replace(/\.flow\.json$/, "").split("/").pop() === stem);
+    box.innerHTML =
+      `<div class="df-pad"><img class="df-big" data-df-img="${esc(image.path)}" alt="${esc(image.path)}" draggable="false"></div>` +
+      `<div class="df-pad-x"><div class="df-title df-mono">${esc(image.path.split("/").pop() ?? "")}</div>` +
+      `<div class="df-sub">${image.width} × ${image.height} · ${esc(new Date(image.madeAt * 1000).toLocaleString())}</div></div>` +
+      `<div class="df-made">${row("Seed", m.seed)}${row("Steps", m.steps)}${row("CFG", m.cfg)}${row("Sampler", [m.sampler, m.scheduler].filter(Boolean).join(" · "))}${row("Denoise", m.denoise)}${row("Model", m.checkpoint?.replace(/\.safetensors$/, ""))}${row("Prompt", m.prompt)}${row("Negative", m.negative)}</div>` +
+      (image.graph ? "" : `<p class="df-faint df-pad">This PNG holds no graph: it was not made by a flow, or not by forge.</p>`) +
+      `<div class="df-actions">` +
+      (flowHere ? `<button class="cc-primary" data-df-open-flow="${esc(flowHere)}">Open its flow</button>` : "") +
+      `<button class="hbtn" data-df-copy-path="${esc(image.path)}">Copy its path</button></div>`;
+    fillImages(box);
+  }
+
+  /** The runs: the one at work, those waiting, and those done this session. */
+  function renderQueue() {
+    const box = q("[data-df-queue]");
+    if (!runs.length) {
+      box.innerHTML = `<p class="df-faint df-pad">No runs yet. Run a flow with ▶ Run or ⌘↩: forge works through them one at a time, and they show here.</p>`;
+      return;
+    }
+    const going = runs.filter((r) => !ended(r.state));
+    const done = runs.filter((r) => ended(r.state));
+    const titleOf = (/** @type {Run} */ r, /** @type {string} */ id) => {
+      const node = r.flow === path() ? flow()?.nodes.find((n) => n.id === id) : null;
+      return node ? `${kindOf(node.type)?.title ?? node.type} ${id}` : `node ${id}`;
+    };
+    const cardOf = (/** @type {Run} */ r) => {
+      const p = r.progress;
+      const pct = p ? Math.round((p.step / Math.max(1, p.steps)) * 100) : 0;
+      const state =
+        r.state === "sending" ? "sending" : r.state === "queued" ? `queued${r.position ? ` · ${r.position} ahead` : ""}` : r.state === "running" ? "running" : r.state === "done" ? `done in ${r.seconds?.toFixed(1) ?? "?"} s` : r.state;
+      return (
+        `<div class="df-run-card ${esc(r.state)}"><div class="df-run-head"><b>${esc(r.flow)}</b><span class="df-faint">run ${r.id}</span></div>` +
+        `<div class="df-run-state">${esc(state)}</div>` +
+        (p && !ended(r.state) ? `<div class="df-bar-track"><div class="df-bar-fill" style="width:${pct}%"></div></div><div class="df-work-said"><span>${esc(titleOf(r, p.node))} · step ${p.step} / ${p.steps}</span><span>${pct}%</span></div>` : "") +
+        (r.nodes.length && !ended(r.state)
+          ? `<div class="df-run-nodes">${r.nodes
+              .map((n) => `<div><span>${esc(titleOf(r, n.id))}</span><span class="run-${esc(n.state)}">${n.state === "done" && n.seconds !== null ? `${n.seconds.toFixed(1)} s` : esc(n.state)}</span></div>`)
+              .join("")}</div>`
+          : "") +
+        (r.message ? `<div class="df-run-why">${esc(r.message)}</div>` : "") +
+        (r.outputs.filter((o) => o.kept).length
+          ? `<div class="df-run-outs">${r.outputs
+              .filter((o) => o.kept)
+              .map((o) => `<button class="df-run-out" data-df-show-image="${esc(o.path)}" title="${esc(o.path)}"><img data-df-img="${esc(o.path)}" alt="${esc(o.path)}" draggable="false"></button>`)
+              .join("")}</div>`
+          : "") +
+        (!ended(r.state) ? `<div class="df-actions"><button class="hbtn" data-df-cancel="${r.id}">${r.state === "running" ? "Stop it" : "Take it out"}</button></div>` : "") +
+        `</div>`
+      );
+    };
+    box.innerHTML =
+      (going.length ? `<div class="df-head df-pad-x">Now</div>${going.map(cardOf).join("")}` : "") +
+      (done.length ? `<div class="df-head df-pad-x">This session</div>${done.map(cardOf).join("")}` : "");
+    fillImages(box);
+  }
+
   function renderServer() {
     const box = q("[data-df-server]");
     const h = known?.health;
@@ -482,8 +675,11 @@ export function createDiffuse(host) {
       check(known?.catalogue ? "ok" : "none", "Its nodes and models", known?.catalogue ? (known.fresh ? "just now" : "as kept from before") : "none kept") +
       (h?.message && state !== "serving" ? `<p class="df-pad df-say">${esc(h.message)}</p>` : "") +
       `<div class="df-head df-pad-x">Where Proton looks</div>` +
-      (gateways.length ? gateways.map((g, i) => `<div class="df-address"><span class="df-faint">${i === 0 ? "at home" : "away"}</span><code>${esc(g)}</code></div>`).join("") : `<p class="df-pad df-faint">No address set.</p>`) +
-      `<p class="df-pad df-faint">Your own settings set these: <code>diffuse.gateway</code> and <code>diffuse.gatewayAway</code> in <code>~/.config/proton/settings.json</code>. The key is <code>NEXUS_KEY</code> from your shell, never stored.</p>` +
+      `<form class="df-fieldset" data-df-gateways>` +
+      `<label class="df-field">At home<input name="home" value="${esc(gateways[0] ?? "")}" placeholder="http://192.168.1.10:7420/img/v1" spellcheck="false" autocomplete="off"></label>` +
+      `<label class="df-field">Away (Tailscale)<input name="away" value="${esc(gateways[1] ?? "")}" placeholder="http://atlas.your-tailnet.ts.net:7420/img/v1" spellcheck="false" autocomplete="off"><span class="df-faint">tried when the first doesn't answer</span></label>` +
+      `<button class="hbtn" type="submit">Keep these</button></form>` +
+      `<p class="df-pad df-faint">Kept in your own settings, <code>~/.config/proton/settings.json</code>. The key is <code>NEXUS_KEY</code> from your shell — Nexus › Inference › One endpoint — and is never stored.</p>` +
       `<div class="df-actions"><button class="hbtn" data-df-look>Look again</button></div>`;
   }
 
@@ -856,6 +1052,31 @@ export function createDiffuse(host) {
       return;
     }
     if (at("[data-df-look]")) return send({ type: "diffuseLook", again: true });
+    const viewButton = at("[data-df-view]");
+    if (viewButton) return setView(viewButton.dataset.dfView ?? "graph");
+    if (at("[data-df-run]")) return runIt();
+    if (at("[data-df-stop]")) return stopIt();
+    const cancel = at("[data-df-cancel]");
+    if (cancel) return send({ type: "diffuseCancel", id: Number(cancel.dataset.dfCancel) });
+    const tile = at("[data-df-pick-image]");
+    if (tile) {
+      picked = tile.dataset.dfPickImage ?? null;
+      renderGallery();
+      return setPanel("inspector");
+    }
+    const shownImage = at("[data-df-show-image]");
+    if (shownImage) {
+      picked = shownImage.dataset.dfShowImage ?? null;
+      setView("gallery");
+      return setPanel("inspector");
+    }
+    const openFlow = at("[data-df-open-flow]");
+    if (openFlow) {
+      send({ type: "diffuseOpen", path: openFlow.dataset.dfOpenFlow });
+      return setView("graph");
+    }
+    const copy = at("[data-df-copy-path]");
+    if (copy) return void copyText(copy.dataset.dfCopyPath ?? "");
     if (at("[data-df-chip]")) return setPanel("server");
     if (at("[data-df-undo]")) return send({ type: "diffuseUndo" });
     if (at("[data-df-redo]")) return send({ type: "diffuseRedo" });
@@ -904,6 +1125,12 @@ export function createDiffuse(host) {
 
   ws.addEventListener("submit", (e) => {
     const form = /** @type {HTMLFormElement} */ (e.target);
+    if (form.matches("[data-df-gateways]")) {
+      e.preventDefault();
+      const data = new FormData(form);
+      send({ type: "diffuseGateways", home: String(data.get("home") ?? "").trim() || undefined, away: String(data.get("away") ?? "").trim() || undefined });
+      return;
+    }
     if (!form.matches("[data-df-new]")) return;
     e.preventDefault();
     const data = new FormData(form);
@@ -924,6 +1151,11 @@ export function createDiffuse(host) {
       if (kind === "int" || kind === "float" || kind === "seed") value = raw.trim() === "" ? null : Number(raw);
       if (typeof value === "number" && !Number.isFinite(value)) return;
       edit([{ op: "set", id: one, name: el.dataset.dfSet, value }]);
+      return;
+    }
+    if (el.matches("[data-df-folder]")) {
+      folder = el.value;
+      renderGallery();
       return;
     }
     if (el.dataset.dfFlow === "note") edit([{ op: "note", text: el.value }]);
@@ -959,6 +1191,31 @@ export function createDiffuse(host) {
     e.stopPropagation();
   });
 
+  /** The graph or the outputs. @param {string} to */
+  function setView(to) {
+    stageView = to === "gallery" ? "gallery" : "graph";
+    if (stageView === "gallery") send({ type: "diffuseGallery" });
+    closeSearch();
+    renderBar();
+    renderGraph();
+    renderPanel();
+  }
+
+  /** Run the flow shown, or queue another run of it. */
+  function runIt() {
+    const p = path();
+    const button = /** @type {HTMLButtonElement} */ (q("[data-df-run]"));
+    if (!p || button.disabled) return;
+    send({ type: "diffuseRun", path: p });
+    if (panel === "server") setPanel("queue");
+  }
+
+  /** Stop the flow's run. */
+  function stopIt() {
+    const r = activeRun();
+    if (r) send({ type: "diffuseCancel", id: r.id });
+  }
+
   /** @param {string} to */
   function setSide(to) {
     side = to;
@@ -978,6 +1235,16 @@ export function createDiffuse(host) {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && !e.altKey && e.key.toLowerCase() === "s") {
       if (view?.shown?.dirty) send({ type: "diffuseSave" });
+      return true;
+    }
+    if (mod && e.key === "Enter") {
+      // A field being typed in is set first, so the run has what was typed.
+      if (typing) /** @type {HTMLElement} */ (target).blur();
+      runIt();
+      return true;
+    }
+    if (mod && e.key === ".") {
+      stopIt();
       return true;
     }
     if (typing) return false;
@@ -1036,6 +1303,23 @@ export function createDiffuse(host) {
       if (f) chosen = new Set([...chosen].filter((id) => f.nodes.some((n) => n.id === id)));
       render();
       if (searching) renderSearch();
+    },
+    /** The runs this session. @param {{runs: Run[]}} event */
+    runs(event) {
+      runs = event.runs ?? [];
+      renderBar();
+      if (stageView === "graph") renderGraph();
+      if (panel === "queue") renderQueue();
+    },
+    /** The project's outputs. @param {{images: Image[]}} event */
+    gallery(event) {
+      images = event.images ?? [];
+      if (picked && !images.some((i) => i.path === picked)) picked = null;
+      if (!picked) picked = images[0]?.path ?? null;
+      if (stageView === "gallery") {
+        renderGallery();
+        if (panel === "inspector") renderPicked();
+      }
     },
     /** What forge is and has. @param {{known: Known, gateways: string[]}} event */
     known(event) {

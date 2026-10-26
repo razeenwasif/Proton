@@ -15,7 +15,8 @@
 //!   person's shell; it is sent as a bearer token and never written down,
 //!   logged or said in an error.
 //! - **Offline:** the gateway answered `503 {"error": "offline"}` — forge's
-//!   image server is not running. Nexus starts it from its Inference tab.
+//!   image server is not running (Nexus says `not_serving`, and `502` when
+//!   the server does not answer it). Nexus starts it from its Inference tab.
 //!
 //! ## A run as it happens
 //!
@@ -447,7 +448,9 @@ fn refusal(status: u16, mut reader: Box<dyn Read + Send>) -> Error {
     let code = body.get("error").and_then(Value::as_str).unwrap_or("").to_string();
     match (status, code.as_str()) {
         (401, _) => Error::Key,
-        (503, "offline") => Error::Offline,
+        // The design's word, and Nexus's: no image server running, or one
+        // that did not answer the gateway.
+        (503, "offline" | "not_serving") | (502, "not_serving") => Error::Offline,
         (400, "invalid") => {
             let nodes = body
                 .get("nodes")

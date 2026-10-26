@@ -5333,6 +5333,14 @@ function renderEvent(event) {
       diffuseMode.known(event);
       break;
 
+    case "diffuseRuns":
+      diffuseMode.runs(event);
+      break;
+
+    case "diffuseGallery":
+      diffuseMode.gallery(event);
+      break;
+
     case "rasterCanvas":
       rasterMode.canvas(event);
       break;

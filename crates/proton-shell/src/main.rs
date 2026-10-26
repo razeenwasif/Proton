@@ -304,6 +304,18 @@ fn read_game(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<ta
     std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
 }
 
+/// An image Diffuse shows — an output in the gallery, or one a run made —
+/// as bytes: where it is asked under the lock, read after.
+#[tauri::command(async)]
+fn read_diffuse(path: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
+    let file = match session.lock() {
+        Ok(it) => it.session.diffuse_file(&path),
+        Err(poisoned) => poisoned.into_inner().session.diffuse_file(&path),
+    };
+    let file = file.ok_or_else(|| format!("{path}: not an image Diffuse may read"))?;
+    std::fs::read(&file).map(tauri::ipc::Response::new).map_err(|e| format!("{path}: {e}"))
+}
+
 /// Tiles of the open canvas, as bytes — what the window fetches when the core
 /// changed them (undo, redo, the agent) or when its copy was found to differ.
 ///
@@ -651,6 +663,7 @@ fn main() {
             read_geometry,
             read_lab,
             read_game,
+            read_diffuse,
             read_raster,
             put_raster_blob,
             paste_raster_image,

@@ -5949,3 +5949,57 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .df-say { color: var(--text); }
 .df-address { display: grid; gap: 2px; padding: 4px 14px; }
 .df-address code, .df-pane-body code { font: var(--z-2xs) var(--zed); color: var(--text); word-break: break-all; }
+
+/* Diffuse's runs: the node at work outlined, its step and preview on its
+   card, the image it made under it; the Queue; the gallery. */
+.df-node.working { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok), 0 6px 18px rgba(0, 0, 0, .35); }
+.df-badge.run-running { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.df-badge.run-done { color: var(--ok); }
+.df-badge.run-cached, .df-badge.run-waiting { color: var(--muted); }
+.df-badge.run-running + .df-badge, .df-badge + .df-badge.run-running { margin-left: 0; }
+.df-work { display: grid; gap: 4px; padding: 0 8px 8px; }
+.df-bar-track { height: 4px; border-radius: 2px; background: var(--df-well); overflow: hidden; }
+.df-bar-fill { height: 100%; background: var(--ok); transition: width .2s ease; }
+.df-work-said { display: flex; justify-content: space-between; gap: 8px; color: var(--df-soft); font: 10.5px var(--zed); }
+.df-work-said span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.df-shot { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 6px; background: var(--df-well); }
+.df-shot.blurred { filter: saturate(.85); image-rendering: auto; }
+.df-shot.missing, .df-tile img.missing { opacity: .2; }
+.df-stop { color: var(--err); }
+.df-stop[hidden] { display: none; }
+.df-count { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--bg-deep); color: var(--accent); font: 10.5px var(--zed); line-height: 16px; text-align: center; }
+.df-count[hidden] { display: none; }
+.df-gallery { position: absolute; inset: 0; padding: 14px 16px; overflow: auto; background: var(--bg-deep); }
+.df-gallery[hidden] { display: none; }
+.df-gallery-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; font: var(--z-xs) var(--sans); color: var(--df-soft); }
+.df-field-inline { display: inline-flex; align-items: center; gap: 6px; }
+.df-field-inline select { padding: 4px 6px; border: 1px solid var(--df-line); border-radius: 6px; background: var(--df-well); color: var(--text); font: var(--z-2xs) var(--zed); }
+.df-gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+.df-tile { display: flex; flex-direction: column; gap: 6px; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.df-tile img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: var(--df-card); outline: 1px solid transparent; outline-offset: 2px; }
+.df-tile.on img { outline: 2px solid var(--accent); }
+.df-tile-said { display: flex; justify-content: space-between; gap: 6px; font: 11px var(--zed); color: var(--df-soft); }
+.df-tile-said span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.df-empty-note { display: grid; place-content: center; gap: 6px; min-height: 60%; text-align: center; color: var(--df-soft); font: var(--z-xs) var(--sans); }
+.df-empty-note p { margin: 0; }
+.df-big { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: var(--df-well); }
+.df-mono { font-family: var(--zed); font-size: 13px; }
+.df-made { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 4px 10px; padding: 10px 14px; font-size: 12px; color: var(--text); }
+.df-made span:nth-child(even) { overflow-wrap: anywhere; line-height: 1.45; }
+.df-run-card { display: grid; gap: 6px; margin: 0 12px 8px; padding: 10px 12px; border-radius: 8px; background: var(--df-card); border: 1px solid var(--df-line); font-size: 12px; }
+.df-run-card.running { border-color: color-mix(in srgb, var(--ok) 45%, var(--df-line)); }
+.df-run-card.failed { border-color: color-mix(in srgb, var(--err) 45%, var(--df-line)); }
+.df-run-card .df-actions { padding: 2px 0 0; }
+.df-run-head { display: flex; justify-content: space-between; gap: 8px; }
+.df-run-head b { color: var(--text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.df-run-state { color: var(--df-soft); font: 11px var(--zed); }
+.df-run-card.done .df-run-state { color: var(--ok); }
+.df-run-card.failed .df-run-state, .df-run-why { color: var(--err); }
+.df-run-why { line-height: 1.45; }
+.df-run-nodes { display: grid; gap: 2px; }
+.df-run-nodes div { display: flex; justify-content: space-between; gap: 8px; color: var(--df-soft); }
+.df-run-nodes .run-running, .df-run-nodes .run-done { color: var(--ok); }
+.df-run-nodes .run-cached { color: var(--muted); }
+.df-run-outs { display: flex; flex-wrap: wrap; gap: 6px; }
+.df-run-out { width: 56px; height: 56px; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: var(--df-well); cursor: pointer; }
+.df-run-out img { width: 100%; height: 100%; object-fit: cover; }

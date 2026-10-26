@@ -29,6 +29,7 @@
 //!   stream, and how the gateway and forge are.
 //! - [`cache`]: what forge served last, kept so graphs edit while it is off.
 //! - [`templates`]: starter graphs, as batches of ops.
+//! - [`png`]: an output's size and the graph that made it, from its PNG's head.
 
 pub mod cache;
 pub mod catalogue;
@@ -37,6 +38,7 @@ pub mod client;
 pub mod doc;
 pub mod flow;
 pub mod op;
+pub mod png;
 pub mod templates;
 pub mod text;
 

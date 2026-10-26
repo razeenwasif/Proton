@@ -1111,14 +1111,15 @@
           <div class="df-tabs" role="tablist" aria-label="Flows open" data-df-tabs></div>
           <div class="df-seg" role="group" aria-label="View">
             <button aria-pressed="true" data-df-view="graph">Graph</button>
-            <button aria-pressed="false" data-df-view="gallery" disabled title="Outputs show here once flows run">Gallery</button>
+            <button aria-pressed="false" data-df-view="gallery" title="The project's outputs">Gallery</button>
           </div>
           <span class="grow"></span>
           <button class="df-chip" data-df-chip title="How forge is — the Server tab says more"></button>
           <button class="hbtn" data-df-undo title="Undo  ⌘Z" aria-label="Undo" disabled><svg class="i"><use href="#i-undo"/></svg></button>
           <button class="hbtn" data-df-redo title="Redo  ⇧⌘Z" aria-label="Redo" disabled><svg class="i"><use href="#i-redo"/></svg></button>
           <button class="hbtn" data-df-save title="Save  ⌘S" disabled>Save</button>
-          <button class="cc-primary df-run" data-df-run disabled>▶ Run <kbd>⌘↩</kbd></button>
+          <button class="hbtn df-stop" data-df-stop hidden title="Stop the run  ⌘.">■ Stop</button>
+          <button class="cc-primary df-run" data-df-run disabled>▶ <span data-df-run-label>Run</span> <span class="df-count" data-df-count title="Runs not finished" hidden></span><kbd>⌘↩</kbd></button>
         </div>
         <div class="df-ask" data-df-ask hidden></div>
         <div class="df-banner" data-df-banner role="status" hidden></div>
@@ -1128,6 +1129,7 @@
             <div class="df-nodes" data-df-nodes></div>
           </div>
           <div class="df-empty" data-df-empty hidden></div>
+          <div class="scroll df-gallery" data-df-gallery hidden></div>
           <div class="df-search" data-df-search role="dialog" aria-label="Add a node" hidden></div>
         </div>
         <div class="df-foot" data-df-foot></div>
@@ -1137,10 +1139,12 @@
       <aside class="pane df-pane" id="diffuse-pane" data-showing="inspector">
         <header class="df-pane-head" role="tablist" aria-label="Inspector, server and the agent">
           <button class="dock-tab on" role="tab" aria-selected="true" data-df-panel="inspector">Inspector</button>
+          <button class="dock-tab" role="tab" aria-selected="false" data-df-panel="queue">Queue</button>
           <button class="dock-tab" role="tab" aria-selected="false" data-df-panel="server">Server</button>
           <button class="dock-tab" role="tab" aria-selected="false" data-df-panel="agent">Agent <span class="dot" data-diffuse-agent-dot hidden></span></button>
         </header>
         <div class="scroll df-pane-body" data-df-body="inspector" data-df-inspector></div>
+        <div class="scroll df-pane-body" data-df-body="queue" data-df-queue hidden></div>
         <div class="scroll df-pane-body" data-df-body="server" data-df-server hidden></div>
         <div class="df-agent" data-df-body="agent" hidden>
           <div class="scroll" data-agent-thread></div>
