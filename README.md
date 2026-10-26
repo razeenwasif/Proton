@@ -79,6 +79,13 @@ collision is why the mode chord is `⌃`.
 
 ## The thirteen modes
 
+Every mode keeps projects of its own: the folder open in Codex is not
+carried into Game, Canvas, Data or any other, and going back to a mode
+brings back the one it had. The first time a mode is entered with nothing
+open in it, it is given a folder of its own, `~/Proton/<Mode>` (Diffuse's
+is `~/Diffuse`); opening a folder there makes it that mode's. A folder open
+in several modes is one project, listed by each.
+
 See the [current capability matrix](docs/ARCHITECTURE.md) for implemented documents and runtime limitations.
 
 **Chat** · Claude Code itself — your `claude`, its tools, permissions,
@@ -102,9 +109,7 @@ dataframes come back as tables beside them, and an Agent tab shares the side
 with the table — it reads the notebook, runs its cells in your kernel, and
 proposes changes you accept or reject on the cells themselves. A notebook's
 unsaved changes are kept: saved when you open another, close the project or
-quit. Data keeps projects of its own, apart from Codex's: the folder open in
-Codex is not carried into it, and going back to Data brings back the one it
-had. Code cells are coloured as you type them, and prose cells are drawn as
+quit. Code cells are coloured as you type them, and prose cells are drawn as
 the agent's answers are, TeX included. SQL cells, charts and lineage back
 into the code are not built yet.
 

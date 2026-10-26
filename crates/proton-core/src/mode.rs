@@ -90,6 +90,30 @@ impl ModeId {
         }
     }
 
+    /// Its place in `ALL`, from 0.
+    pub fn index(self) -> usize {
+        ModeId::ALL.iter().position(|m| *m == self).unwrap_or(0)
+    }
+
+    /// What the rail calls it.
+    pub fn label(self) -> &'static str {
+        match self {
+            ModeId::Chat => "Chat",
+            ModeId::Codex => "Codex",
+            ModeId::Data => "Data",
+            ModeId::Research => "Research",
+            ModeId::Study => "Notebook",
+            ModeId::Design => "Design",
+            ModeId::Modeling => "Model",
+            ModeId::Game => "Game",
+            ModeId::Video => "Video",
+            ModeId::Tex => "LaTeX",
+            ModeId::Pdf => "Reader",
+            ModeId::Raster => "Canvas",
+            ModeId::Diffuse => "Diffuse",
+        }
+    }
+
     /// Whether text is typed here into the editor's buffers: Codex's, and
     /// LaTeX's, which is Codex's editor beside a PDF.
     pub fn edits_text(self) -> bool {

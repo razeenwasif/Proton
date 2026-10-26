@@ -25,16 +25,17 @@
 //! it meant, and the session takes it from there. Nothing about the modal
 //! engine has to know the session exists.
 //!
-//! ## Data keeps projects of its own
+//! ## Each mode keeps projects of its own
 //!
-//! The window has two sides. Data and Research are one; every other mode is
-//! the other — Codex, and the modes that work on the checkout the code is
-//! in: Chat, Design, Modeling, Game and Video. Each side lists the projects
-//! opened on it and shows one of them, so the folder open in Codex is not
-//! carried into Data: going to Data brings back the project Data had, and
-//! leaving it brings back Codex's. Notebooks and investigations live in a
-//! research folder more often than in the codebase. A folder open on both sides is still one workspace, listed and
-//! shown by both — two would be two file indexes over the same files.
+//! Every mode lists the projects opened in it and shows one of them, so the
+//! folder open in Codex is not carried into Game, Canvas or Diffuse: going
+//! to a mode brings back the project it had, and leaving it brings back the
+//! one the next mode had. The first time a mode is entered with nothing of
+//! its own, it is given a folder of its own — `~/Proton/<Mode>`, Diffuse's
+//! own folder for Diffuse — made then. A folder open in several modes is
+//! still one workspace, listed and shown by each: two would be two file
+//! indexes over the same files. A session made on a folder (`Session::new`,
+//! as tests make one) shows it in every mode until a mode opens another.
 
 use std::path::{Path, PathBuf};
 
@@ -126,56 +127,41 @@ const RECENTS: usize = 40;
 /// anything else is ignored rather than guessed at.
 const VERSION: u32 = 1;
 
-/// The half of the window a mode is in, which decides the project it shows.
-/// See the module documentation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Side {
-    Code,
-    Data,
-}
-
-impl Side {
-    fn of(mode: ModeId) -> Side {
-        match mode {
-            ModeId::Data | ModeId::Research | ModeId::Study | ModeId::Pdf => Side::Data,
-            _ => Side::Code,
-        }
-    }
-
-    fn other(self) -> Side {
-        match self {
-            Side::Code => Side::Data,
-            Side::Data => Side::Code,
-        }
-    }
-}
-
-/// Which sides list a workspace in their switcher.
+/// Which modes list a workspace in their switcher: a bit each, by
+/// `ModeId::index`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct Listed {
-    code: bool,
-    data: bool,
-}
+struct Listed(u32);
 
 impl Listed {
-    fn on(side: Side) -> Listed {
-        let mut listed = Listed::default();
-        listed.set(side, true);
-        listed
+    fn on(mode: ModeId) -> Listed {
+        Listed(1 << mode.index())
     }
 
-    fn has(self, side: Side) -> bool {
-        match side {
-            Side::Code => self.code,
-            Side::Data => self.data,
+    /// Listed by every mode: a session's first folder, until a mode opens
+    /// another.
+    fn all() -> Listed {
+        Listed((1 << ModeId::ALL.len()) - 1)
+    }
+
+    fn has(self, mode: ModeId) -> bool {
+        self.0 & (1 << mode.index()) != 0
+    }
+
+    fn set(&mut self, mode: ModeId, on: bool) {
+        match on {
+            true => self.0 |= 1 << mode.index(),
+            false => self.0 &= !(1 << mode.index()),
         }
     }
 
-    fn set(&mut self, side: Side, on: bool) {
-        match side {
-            Side::Code => self.code = on,
-            Side::Data => self.data = on,
-        }
+    /// Whether any mode but `mode` lists it.
+    fn elsewhere(self, mode: ModeId) -> bool {
+        self.0 & !(1 << mode.index()) != 0
+    }
+
+    /// The modes that list it.
+    fn modes(self) -> Vec<ModeId> {
+        ModeId::ALL.into_iter().filter(|m| self.has(*m)).collect()
     }
 }
 
@@ -183,13 +169,15 @@ impl Listed {
 pub struct Session {
     workspaces: Vec<Workspace>,
     active: usize,
-    /// Which sides list each workspace, index for index with `workspaces`.
+    /// Which modes list each workspace, index for index with `workspaces`.
     listed: Vec<Listed>,
-    /// The project the side that is not on screen shows, by root: Codex's
-    /// while Data is up, and Data's while any other mode is. `None` until
-    /// Data has been opened; the first time it is, it starts on the project
-    /// Codex has, because a side has to show something.
-    away: Option<PathBuf>,
+    /// The project each mode showed last, by root, by `ModeId::index`: what
+    /// going back to it brings back.
+    shown: Vec<Option<PathBuf>>,
+    /// Where a mode with no project of its own is given one: `~/Proton`, in
+    /// the app. `None` — a session made for a test — puts them under the
+    /// system's temporary folder, never the person's home.
+    homes: Option<PathBuf>,
     /// Projects opened before, most recent first. Includes the open ones.
     recents: Vec<PathBuf>,
     /// The workspace picker, when it is open. The session's rather than a
@@ -246,8 +234,9 @@ impl Session {
         Session {
             workspaces: vec![Workspace::rooted(root)],
             active: 0,
-            listed: vec![Listed::on(Side::Code)],
-            away: None,
+            listed: vec![Listed::all()],
+            shown: vec![None; ModeId::ALL.len()],
+            homes: None,
             recents: Vec::new(),
             picker: None,
             matcher: Matcher::new(),
@@ -537,6 +526,12 @@ impl Session {
         if let Some(dir) = store.as_deref().and_then(Path::parent) {
             session.pdf = crate::pdf::Pdfs::kept_in(dir.join("pdf.json")).with_ocr(proton_lab::ocr::OcrTools::find());
         }
+        // The app's session: modes start with no project of their own, given
+        // folders in ~/Proton; the folder it opens on is Codex's.
+        if store.is_some() {
+            session.homes = folder::home().map(|home| home.join("Proton"));
+            session.listed = vec![Listed::on(ModeId::Codex)];
+        }
         session.store = store;
         session.recents = saved
             .as_ref()
@@ -572,7 +567,7 @@ impl Session {
                 .collect();
             if !alive.is_empty() {
                 session.workspaces = alive.iter().map(|path| session.build(path)).collect();
-                session.listed = vec![Listed::on(Side::Code); session.workspaces.len()];
+                session.listed = vec![Listed::on(ModeId::Codex); session.workspaces.len()];
                 session.active = saved.open.get(saved.active)
                     .and_then(|root| alive.iter().position(|path| path == Path::new(root)))
                     .unwrap_or_else(|| saved.active.min(session.workspaces.len() - 1));
@@ -586,8 +581,10 @@ impl Session {
                         workspace.restore_layout(&stored.layout);
                     }
                 }
-                if let Some(sides) = &saved.sides {
-                    session.restore_sides(sides);
+                match (&saved.modes, &saved.sides) {
+                    (Some(modes), _) => session.restore_modes(modes),
+                    (None, Some(sides)) => session.restore_sides(sides),
+                    (None, None) => {}
                 }
             }
         }
@@ -674,6 +671,13 @@ impl Session {
     /// Where a file a Lab run left is, in the workspace on screen.
     pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
         self.active().lab_file(key)
+    }
+
+    /// Where modes with no project of their own are given one, in place of
+    /// `~/Proton`: for a test, which must never make folders in the home.
+    pub fn with_mode_homes(mut self, dir: impl Into<PathBuf>) -> Session {
+        self.homes = Some(dir.into());
+        self
     }
 
     /// An image Diffuse may show, in its folder.
@@ -800,7 +804,7 @@ impl Session {
 
             Command::OpenWorkspace { path } => self.open(&path),
             // By place in the switcher, which lists the side on screen.
-            Command::FocusWorkspace { index } => match self.listed_on(self.side()).get(index) {
+            Command::FocusWorkspace { index } => match self.listed_on(self.mode()).get(index) {
                 Some(&index) => self.focus(index),
                 None => vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)],
             },
@@ -811,7 +815,7 @@ impl Session {
                     false => vec![Event::Unsaved { files }],
                 }
             }
-            Command::CloseWorkspace { index } => match self.listed_on(self.side()).get(index) {
+            Command::CloseWorkspace { index } => match self.listed_on(self.mode()).get(index) {
                 Some(&index) => self.close(index),
                 None => vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)],
             },
@@ -905,25 +909,27 @@ impl Session {
     /// Hand a command to the active workspace, and take back anything it did
     /// not resolve.
     fn delegate(&mut self, command: Command) -> Vec<Event> {
-        let side = self.side();
+        let mode = self.mode();
         let mut events = self.active_mut().apply(command);
-        events.extend(self.crossed(side));
+        events.extend(self.crossed(mode));
         self.claim(events)
     }
 
-    /// A workspace that changed side by itself took its project along: a
-    /// notebook opened from Codex is Data's document, and a source file opened
-    /// from Data's finder is Codex's. The side it left goes on showing that
-    /// project and the side it went to shows it now, so both list it — and
-    /// the switcher on screen is the other side's.
-    fn crossed(&mut self, from: Side) -> Option<Event> {
-        let to = self.side();
+    /// A workspace that changed mode by itself took its project along: a
+    /// notebook opened from Codex is Data's document, a `.tex` file is
+    /// LaTeX's. The mode it left goes on showing that project and the mode
+    /// it went to shows it now, so both list it — and the switcher on screen
+    /// is the new mode's.
+    fn crossed(&mut self, from: ModeId) -> Option<Event> {
+        let to = self.mode();
         if to == from {
             return None;
         }
         let index = self.active;
+        let root = self.workspaces[index].root().to_path_buf();
         self.listed[index].set(to, true);
-        self.away = Some(self.workspaces[index].root().to_path_buf());
+        self.shown[from.index()] = Some(root.clone());
+        self.shown[to.index()] = Some(root);
         self.save();
         Some(self.workspaces_event())
     }
@@ -988,7 +994,7 @@ impl Session {
                 // on this side: a project only the other side has open is not
                 // where you were.
                 let here = folder::normalise(self.active().root());
-                let side = self.side();
+                let side = self.mode();
                 let theirs: Vec<PathBuf> = (0..self.workspaces.len())
                     .filter(|&index| !self.listed[index].has(side))
                     .map(|index| folder::normalise(self.workspaces[index].root()))
@@ -1027,7 +1033,7 @@ impl Session {
                 self.active().root().display().to_string(),
                 NoticeLevel::Info,
             )],
-            ExClaim::Cycle(by) => match self.listed_on(self.side()).len() {
+            ExClaim::Cycle(by) => match self.listed_on(self.mode()).len() {
                 // Saying so beats doing nothing: `:pn` with one project open
                 // is usually someone who meant to open a second.
                 1 => vec![notice(
@@ -1046,7 +1052,7 @@ impl Session {
     /// Drain every workspace, show only the active one.
     fn poll(&mut self) -> Vec<Event> {
         let active = self.active;
-        let side = self.side();
+        let side = self.mode();
         let mut events = Vec::new();
         let mut drawn = Vec::new();
         for (index, workspace) in self.workspaces.iter_mut().enumerate() {
@@ -1115,12 +1121,13 @@ impl Session {
             return self.focus(index);
         }
 
-        // Opened on the side on screen, and in its mode: a folder opened from
-        // Data is Data's.
+        // Opened in the mode on screen, and listed by it: a folder opened
+        // from Data is Data's.
         let mode = self.active().mode();
         let workspace = self.build(&root);
         self.workspaces.push(workspace);
-        self.listed.push(Listed::on(Side::of(mode)));
+        self.listed.push(Listed::on(mode));
+        self.shown[mode.index()] = Some(root.clone());
         self.active = self.workspaces.len() - 1;
         let mut events = self.active_mut().apply(Command::SetMode { mode });
         self.remember(&root);
@@ -1136,11 +1143,12 @@ impl Session {
         if index == self.active {
             return Vec::new();
         }
-        // The project changes and the mode does not. It comes to the side on
-        // screen, in that side's mode, whichever mode it was last shown in:
-        // picking a project is not picking a mode.
+        // The project changes and the mode does not. It comes to the mode on
+        // screen, whichever mode it was last shown in: picking a project is
+        // not picking a mode.
         let mode = self.active().mode();
-        self.listed[index].set(Side::of(mode), true);
+        self.listed[index].set(mode, true);
+        self.shown[mode.index()] = Some(self.workspaces[index].root().to_path_buf());
         self.active = index;
         let mut events = self.active_mut().apply(Command::SetMode { mode });
         let root = self.active().root().to_path_buf();
@@ -1150,9 +1158,9 @@ impl Session {
         events
     }
 
-    /// Step through the projects of the side on screen, wrapping.
+    /// Step through the projects of the mode on screen, wrapping.
     fn cycle(&mut self, by: i64) -> Vec<Event> {
-        let listed = self.listed_on(self.side());
+        let listed = self.listed_on(self.mode());
         let count = listed.len() as i64;
         if count < 2 {
             return Vec::new();
@@ -1161,24 +1169,38 @@ impl Session {
         self.focus(listed[(at + by).rem_euclid(count) as usize])
     }
 
-    /// Change mode. Within a side that is the workspace's business. Across
-    /// one the project changes too: going to Data brings back the one Data
-    /// had, leaving it brings back Codex's, and the one left waits.
+    /// Change mode, and with it the project: going to a mode brings back
+    /// the one it showed last, or the first it lists, or — the first time,
+    /// with none — a folder of its own.
     fn set_mode(&mut self, mode: ModeId) -> Vec<Event> {
-        let to = Side::of(mode);
-        if self.side() == to {
+        let from = self.mode();
+        if from == mode {
             return self.delegate(Command::SetMode { mode });
         }
         let here = self.active().root().to_path_buf();
-        let there = self
-            .away
-            .take()
-            .and_then(|root| self.index_of(&root))
-            .unwrap_or(self.active);
-        self.away = Some(here);
-        self.listed[there].set(to, true);
+        self.shown[from.index()] = Some(here);
+        let remembered =
+            self.shown[mode.index()].clone().and_then(|root| self.index_of(&root)).filter(|&i| self.listed[i].has(mode));
+        let there = match remembered.or_else(|| self.listed_on(mode).first().copied()) {
+            Some(index) => index,
+            None => match self.home_for(mode) {
+                Ok(index) => index,
+                Err(why) => {
+                    // No folder of its own could be made: the mode shows the
+                    // project on screen rather than nothing.
+                    let mut events = vec![notice(why, NoticeLevel::Warn)];
+                    let index = self.active;
+                    self.listed[index].set(mode, true);
+                    events.extend(self.active_mut().apply(Command::SetMode { mode }));
+                    events.push(self.workspaces_event());
+                    return events;
+                }
+            },
+        };
+        self.listed[there].set(mode, true);
+        self.shown[mode.index()] = Some(self.workspaces[there].root().to_path_buf());
 
-        // A prompt over one side's projects is not a prompt over the other's.
+        // A prompt over one mode's projects is not a prompt over another's.
         let mut events = Vec::new();
         if self.picker.take().is_some() {
             events.push(Event::PickerClosed);
@@ -1195,31 +1217,54 @@ impl Session {
         events
     }
 
+    /// A mode's own folder, made and opened, listed by it: Diffuse's folder
+    /// for Diffuse, `<homes>/<Mode>` for the rest.
+    fn home_for(&mut self, mode: ModeId) -> Result<usize, String> {
+        let dir = match mode {
+            ModeId::Diffuse => self.diffuse_home(),
+            _ => self
+                .homes
+                .clone()
+                .unwrap_or_else(|| std::env::temp_dir().join(format!("proton-modes-{}", std::process::id())))
+                .join(mode.label()),
+        };
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", folder::tilde(&dir)))?;
+        let root = folder::normalise(&dir);
+        if let Some(index) = self.index_of(&root) {
+            return Ok(index);
+        }
+        let workspace = self.build(&root);
+        self.workspaces.push(workspace);
+        self.listed.push(Listed::on(mode));
+        self.remember(&root);
+        Ok(self.workspaces.len() - 1)
+    }
+
     fn close(&mut self, index: usize) -> Vec<Event> {
         if index >= self.workspaces.len() {
             return vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)];
         }
-        let side = self.side();
+        let side = self.mode();
         let listed = self.listed_on(side);
         if listed.len() <= 1 {
             // There is no editor without a project, and an empty window with a
-            // "+" in it is a worse answer than refusing. A side is the same.
+            // "+" in it is a worse answer than refusing. A mode is the same.
             return vec![notice(
                 "that is the last workspace — open another first".into(),
                 NoticeLevel::Warn,
             )];
         }
         // Where to land, if it is the one on screen: its neighbour in this
-        // side's list.
+        // mode's list.
         let landing = (index == self.active).then(|| {
             let at = listed.iter().position(|&i| i == index).unwrap_or(0);
             listed[if at + 1 < listed.len() { at + 1 } else { at.saturating_sub(1) }]
         });
 
-        // Open on the other side as well: it stays open there and only leaves
-        // this side's list. Nothing is discarded, so unsaved work is no reason
+        // Open in another mode as well: it stays open there and only leaves
+        // this mode's list. Nothing is discarded, so unsaved work is no reason
         // to refuse.
-        if self.listed[index].has(side.other()) {
+        if self.listed[index].elsewhere(side) {
             self.listed[index].set(side, false);
             return match landing {
                 Some(next) => self.focus(next),
@@ -1288,42 +1333,82 @@ impl Session {
             .position(|w| w.root() == root || folder::normalise(w.root()) == root)
     }
 
-    /// The side on screen: the one the mode on screen is in.
-    fn side(&self) -> Side {
-        Side::of(self.active().mode())
+    /// The mode on screen.
+    fn mode(&self) -> ModeId {
+        self.active().mode()
     }
 
-    /// The workspaces a side lists, in the order they were opened.
-    fn listed_on(&self, side: Side) -> Vec<usize> {
+    /// The workspaces a mode lists, in the order they were opened.
+    fn listed_on(&self, side: ModeId) -> Vec<usize> {
         (0..self.workspaces.len())
             .filter(|&index| self.listed[index].has(side))
             .collect()
     }
 
-    /// Which side lists what, and what Data shows, as they were saved.
+    /// Which mode lists what, and what each shows, as they were saved.
+    fn restore_modes(&mut self, modes: &[StoredMode]) {
+        for listed in self.listed.iter_mut() {
+            *listed = Listed::default();
+        }
+        for stored in modes {
+            let Some(mode) = ModeId::from_slug(&stored.mode) else { continue };
+            for root in &stored.listed {
+                if let Some(index) = self.index_of(Path::new(root)) {
+                    self.listed[index].set(mode, true);
+                }
+            }
+            self.shown[mode.index()] = stored
+                .shown
+                .as_deref()
+                .and_then(|root| self.index_of(Path::new(root)))
+                .map(|i| self.workspaces[i].root().to_path_buf());
+        }
+        self.settle_listing();
+    }
+
+    /// The two sides of a session from before every mode kept its own:
+    /// Codex's projects are Codex's, Data's are Data's, Research's,
+    /// Notebook's and Reader's — and every other mode starts on a folder of
+    /// its own.
     fn restore_sides(&mut self, sides: &StoredSides) {
+        const DATA_SIDE: [ModeId; 4] = [ModeId::Data, ModeId::Research, ModeId::Study, ModeId::Pdf];
         for (listed, workspace) in self.listed.iter_mut().zip(&self.workspaces) {
             let root = workspace.root().display().to_string();
-            *listed = Listed {
-                code: sides.code.contains(&root),
-                data: sides.data.contains(&root),
-            };
-            // A project neither side lists would be open and out of reach.
-            if !listed.code && !listed.data {
-                listed.code = true;
+            *listed = Listed::default();
+            if sides.code.contains(&root) {
+                listed.set(ModeId::Codex, true);
+            }
+            if sides.data.contains(&root) {
+                for mode in DATA_SIDE {
+                    listed.set(mode, true);
+                }
             }
         }
-        // The window opens in Codex, on the project Codex had.
-        self.listed[self.active].code = true;
         let shown = sides
             .shown
             .as_deref()
             .and_then(|root| self.index_of(Path::new(root)))
-            .or_else(|| self.listed.iter().position(|listed| listed.data));
+            .or_else(|| self.listed.iter().position(|listed| listed.has(ModeId::Data)));
         if let Some(index) = shown {
-            self.listed[index].data = true;
-            self.away = Some(self.workspaces[index].root().to_path_buf());
+            for mode in DATA_SIDE {
+                self.listed[index].set(mode, true);
+                self.shown[mode.index()] = Some(self.workspaces[index].root().to_path_buf());
+            }
         }
+        self.settle_listing();
+    }
+
+    /// After a restore: nothing open and out of every mode's reach, and the
+    /// window opens in Codex, on the project Codex had.
+    fn settle_listing(&mut self) {
+        for listed in self.listed.iter_mut() {
+            if *listed == Listed::default() {
+                listed.set(ModeId::Codex, true);
+            }
+        }
+        let active = self.active;
+        self.listed[active].set(ModeId::Codex, true);
+        self.shown[ModeId::Codex.index()] = Some(self.workspaces[active].root().to_path_buf());
     }
 
     /* ── the workspace picker ─────────────────────────────────────── */
@@ -1452,9 +1537,9 @@ impl Session {
     /// is how you switch — and hiding them would make the picker useless for
     /// exactly the thing it is most often wanted for.
     fn known(&mut self, query: &str) -> Vec<PickerItem> {
-        // This side's projects, then the ones only the other side has open,
-        // which say so: choosing one brings it to this side as well.
-        let side = self.side();
+        // This mode's projects, then the ones only other modes have open,
+        // which say which: choosing one brings it to this mode as well.
+        let side = self.mode();
         let mut open: Vec<PathBuf> = Vec::new();
         let mut theirs: Vec<PathBuf> = Vec::new();
         for (index, workspace) in self.workspaces.iter().enumerate() {
@@ -1471,10 +1556,17 @@ impl Session {
                 .filter(|path| !open.contains(path) && !theirs.contains(path))
                 .cloned(),
         );
-        let elsewhere = match side {
-            Side::Code => "open in Data and Research",
-            Side::Data => "open in Codex",
-        };
+        // Which modes have each open, said before the matcher is borrowed.
+        let elsewhere: Vec<String> = paths
+            .iter()
+            .map(|path| {
+                let modes: Vec<&str> = self
+                    .index_of(path)
+                    .map(|index| self.listed[index].modes().into_iter().map(ModeId::label).collect())
+                    .unwrap_or_default();
+                format!("open in {}", modes.join(", "))
+            })
+            .collect();
 
         let names = folder::disambiguate(&paths);
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
@@ -1489,7 +1581,7 @@ impl Session {
                     detail: if open.contains(path) {
                         format!("open · {}", path.display())
                     } else if theirs.contains(path) {
-                        format!("{elsewhere} · {}", path.display())
+                        format!("{} · {}", elsewhere[found.index], path.display())
                     } else {
                         path.display().to_string()
                     },
@@ -1526,9 +1618,9 @@ impl Session {
 
     /* ── events ───────────────────────────────────────────────────── */
 
-    /// The switcher: what the side on screen has open.
+    /// The switcher: what the mode on screen has open.
     fn workspaces_event(&self) -> Event {
-        let listed = self.listed_on(self.side());
+        let listed = self.listed_on(self.mode());
         let paths: Vec<PathBuf> = listed
             .iter()
             .map(|&index| self.workspaces[index].root().into())
@@ -1566,13 +1658,16 @@ impl Session {
     pub fn save(&self) {
         let Some(file) = &self.store else { return };
         let root = |index: usize| self.workspaces[index].root().display().to_string();
-        // `active` is what the code side shows, because that is where the
-        // window opens — and what a build from before Data kept its own
-        // reads as the project on screen.
-        let (code, data) = match self.side() {
-            Side::Code => (Some(self.active), self.away.as_deref().and_then(|r| self.index_of(r))),
-            Side::Data => (self.away.as_deref().and_then(|r| self.index_of(r)), Some(self.active)),
+        // `active` is what Codex shows, because that is where the window
+        // opens — and what an older build reads as the project on screen.
+        let shown_by = |mode: ModeId| match self.mode() == mode {
+            true => Some(self.active),
+            false => self.shown[mode.index()]
+                .as_deref()
+                .and_then(|r| self.index_of(r))
+                .filter(|&i| self.listed[i].has(mode)),
         };
+        let code = shown_by(ModeId::Codex);
         let state = Stored {
             version: VERSION,
             open: self
@@ -1581,13 +1676,18 @@ impl Session {
                 .map(|w| w.root().display().to_string())
                 .collect(),
             active: code.unwrap_or(self.active),
-            // Only once Data has a project, so a file that never needed them
-            // is written as it always was.
-            sides: self.listed.iter().any(|listed| listed.data).then(|| StoredSides {
-                code: self.listed_on(Side::Code).into_iter().map(root).collect(),
-                data: self.listed_on(Side::Data).into_iter().map(root).collect(),
-                shown: data.map(root),
-            }),
+            sides: None,
+            modes: Some(
+                ModeId::ALL
+                    .into_iter()
+                    .filter(|&mode| !self.listed_on(mode).is_empty())
+                    .map(|mode| StoredMode {
+                        mode: mode.slug().to_string(),
+                        listed: self.listed_on(mode).into_iter().map(root).collect(),
+                        shown: shown_by(mode).map(root),
+                    })
+                    .collect(),
+            ),
             recents: self
                 .recents
                 .iter()
@@ -1634,14 +1734,27 @@ struct Stored {
     /// The project the code side shows, in `open`.
     active: usize,
     recents: Vec<String>,
-    /// Which side lists each project, and the one Data shows. Absent in a
-    /// file from before Data kept projects of its own, which restores every
-    /// project as Codex's, as it was.
+    /// Which side lists each project, and the one Data shows: a file from
+    /// before every mode kept its own. Read, never written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sides: Option<StoredSides>,
+    /// Which projects each mode lists, and the one it shows. Absent in an
+    /// older file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    modes: Option<Vec<StoredMode>>,
 }
 
-/// The two sides' lists, by root. See `Side`.
+/// One mode's projects, by root. See `Listed`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredMode {
+    mode: String,
+    listed: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shown: Option<String>,
+}
+
+/// The two sides' lists, by root, as a session from before every mode kept
+/// its own wrote them.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct StoredSides {
     code: Vec<String>,

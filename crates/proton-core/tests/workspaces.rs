@@ -282,13 +282,14 @@ fn closing_a_workspace_with_unsaved_work_is_refused() {
     session.apply(Command::OpenWorkspace {
         path: scratch.at("beta"),
     });
-    session.apply(Command::FocusWorkspace { index: 0 });
+    // Beta is Codex's alone: alpha, the session's first folder, is every
+    // mode's, and closing it here would only take it off Codex's list.
     session.apply(Command::OpenBuffer {
         path: "main.rs".into(),
     });
     keys(&mut session, "ix");
 
-    let events = session.apply(Command::CloseWorkspace { index: 0 });
+    let events = session.apply(Command::CloseWorkspace { index: 1 });
     assert_eq!(session.workspaces().len(), 2, "it is still open");
     assert!(
         notices(&events).iter().any(|n| n.contains("unsaved")),
@@ -406,50 +407,104 @@ fn a_project_opened_in_codex_is_not_carried_into_data() {
     assert_eq!(names.len(), 2, "{names:?}");
     assert_eq!(names[active], "beta");
 
-    // Every other mode is on Codex's side, and shows Codex's project.
+    // Every other mode keeps its own too: Chat has the session's first
+    // folder, not Codex's latest, and Design its own.
     mode(&mut session, ModeId::Chat);
-    assert!(session.active().root().ends_with("nested/alpha"));
+    assert_eq!(here(&session), "alpha", "Codex's latest was carried into Chat");
+    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
     mode(&mut session, ModeId::Design);
-    assert!(session.active().root().ends_with("nested/alpha"), "Chat to Design is not a change of project");
+    assert_eq!(here(&session), "alpha", "Chat's project was carried into Design");
+    mode(&mut session, ModeId::Chat);
+    assert_eq!(here(&session), "beta", "Chat did not bring its own back");
 }
 
 #[test]
-fn research_works_in_the_project_data_has() {
-    // Investigations, like notebooks, live in a research folder rather than
-    // in the codebase: Research is on Data's side.
-    let scratch = Scratch::new("research-side");
+fn research_and_notebook_keep_projects_of_their_own() {
+    // Each mode lists what was opened in it: Data's project is not
+    // Research's, nor Notebook's, and each comes back to its own.
+    let scratch = Scratch::new("own-each");
     let mut session = Session::new(scratch.at("alpha"));
     mode(&mut session, ModeId::Data);
     session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
     mode(&mut session, ModeId::Research);
-    assert_eq!((here(&session), session.active().mode()), ("beta".to_string(), ModeId::Research));
-    mode(&mut session, ModeId::Codex);
-    assert_eq!(here(&session), "alpha");
-    let events = mode(&mut session, ModeId::Research);
-    assert_eq!(here(&session), "beta", "back on Data's side, on its project");
-    assert!(tabs(&events).is_some(), "the switcher is redrawn for the side");
-}
-
-#[test]
-fn study_works_in_the_project_data_has() {
-    // A notebook is the person's, not the codebase's: Notebook sits with Data
-    // and Research, and moving between them is no change of project.
-    let scratch = Scratch::new("study-side");
-    let mut session = Session::new(scratch.at("alpha"));
-    mode(&mut session, ModeId::Data);
-    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Research), "Data's project was carried into Research");
+    session.apply(Command::OpenWorkspace { path: scratch.at("nested/alpha") });
     mode(&mut session, ModeId::Study);
-    assert_eq!((here(&session), session.active().mode()), ("beta".to_string(), ModeId::Study));
-    mode(&mut session, ModeId::Research);
-    assert_eq!(here(&session), "beta", "Notebook to Research is not a change of project");
-    mode(&mut session, ModeId::Codex);
     assert_eq!(here(&session), "alpha");
+    mode(&mut session, ModeId::Data);
+    assert_eq!(here(&session), "beta");
+    let events = mode(&mut session, ModeId::Research);
+    assert!(session.active().root().ends_with("nested/alpha"), "back in Research, not on its own project");
+    let (names, active) = tabs(&events).unwrap();
+    assert!(names[active].ends_with("alpha") && names.len() == 2, "the switcher is not Research's: {names:?}");
+    assert!(!names.contains(&"beta".to_string()), "Data's project is in Research's switcher: {names:?}");
 }
 
 #[test]
-fn latex_works_in_the_project_codex_has() {
-    // A paper is the project's, as its code is: LaTeX sits with Codex, and
-    // moving between them is no change of project.
+fn a_mode_with_no_project_of_its_own_is_given_a_folder_of_its_own() {
+    // The app's session: Codex has what was open; Game, the first time, has
+    // a folder of its own, made then — not Codex's project.
+    let scratch = Scratch::new("own-folder");
+    let homes = scratch.root.join("homes");
+    let store = scratch.root.join("session.json");
+    {
+        let mut session = Session::restore_from(Some(store.clone()), Some(PathBuf::from(scratch.at("alpha"))), None).with_mode_homes(&homes);
+        assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Codex));
+        let events = mode(&mut session, ModeId::Game);
+        assert_eq!(session.active().root(), folder_of(&homes.join("Game")), "Game was not given its own folder");
+        assert_eq!(tabs(&events).unwrap().0, ["Game".to_string()], "Codex's project is in Game's switcher");
+        session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
+        assert_eq!(here(&session), "beta");
+        mode(&mut session, ModeId::Codex);
+        assert_eq!(here(&session), "alpha", "Codex lost its project to Game");
+        mode(&mut session, ModeId::Raster);
+        assert!(session.active().root().ends_with("Canvas"), "Canvas has its own: {:?}", session.active().root());
+    }
+    // After a restart each mode still has its own.
+    let mut session = Session::restore_from(Some(store), None, None).with_mode_homes(&homes);
+    assert_eq!(here(&session), "alpha");
+    mode(&mut session, ModeId::Game);
+    assert_eq!(here(&session), "beta", "Game's project was not kept");
+    mode(&mut session, ModeId::Raster);
+    assert!(session.active().root().ends_with("Canvas"));
+}
+
+#[test]
+fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes() {
+    // A file from when the window had two sides: Codex's projects, Data's,
+    // and the one Data showed — read into Codex's and Data's, Research's,
+    // Notebook's and Reader's; every other mode starts on a folder of its own.
+    let scratch = Scratch::new("old-sides");
+    let homes = scratch.root.join("homes");
+    let store = scratch.root.join("session.json");
+    let alpha = folder_of(Path::new(&scratch.at("alpha"))).display().to_string();
+    let beta = folder_of(Path::new(&scratch.at("beta"))).display().to_string();
+    std::fs::write(
+        &store,
+        serde_json::json!({"version": 1, "open": [alpha, beta], "active": 0, "recents": [],
+                           "sides": {"code": [alpha], "data": [beta], "shown": beta}})
+        .to_string(),
+    )
+    .unwrap();
+    let mut session = Session::restore_from(Some(store), None, None).with_mode_homes(&homes);
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Codex));
+    for data_side in [ModeId::Data, ModeId::Research, ModeId::Study, ModeId::Pdf] {
+        mode(&mut session, data_side);
+        assert_eq!(here(&session), "beta", "{data_side:?} lost Data's project");
+    }
+    mode(&mut session, ModeId::Tex);
+    assert!(session.active().root().ends_with("LaTeX"), "LaTeX was given Codex's project: {:?}", session.active().root());
+}
+
+/// A folder as the session roots it: its links followed.
+fn folder_of(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap()
+}
+
+#[test]
+fn latex_starts_on_the_sessions_first_folder_and_keeps_its_own() {
+    // A session made on a folder shows it in every mode until a mode opens
+    // another: LaTeX, never having opened one, shows it.
     let scratch = Scratch::new("tex-side");
     let mut session = Session::new(scratch.at("alpha"));
     mode(&mut session, ModeId::Data);
@@ -457,7 +512,7 @@ fn latex_works_in_the_project_codex_has() {
     mode(&mut session, ModeId::Tex);
     assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Tex));
     mode(&mut session, ModeId::Codex);
-    assert_eq!(here(&session), "alpha", "LaTeX to Codex is not a change of project");
+    assert_eq!(here(&session), "alpha");
 }
 
 #[test]
@@ -540,7 +595,7 @@ fn a_notebook_opened_from_codex_takes_its_project_to_data() {
 }
 
 #[test]
-fn each_side_has_its_own_project_after_a_restart() {
+fn each_mode_has_its_own_project_after_a_restart() {
     let scratch = Scratch::new("data-restore");
     let store = scratch.root.join("session.json");
     {
@@ -562,7 +617,7 @@ fn each_side_has_its_own_project_after_a_restart() {
 }
 
 #[test]
-fn the_prompt_says_which_projects_the_other_side_has_open() {
+fn the_prompt_says_which_modes_have_a_project_open() {
     let scratch = Scratch::new("data-prompt");
     let mut session = Session::new(scratch.at("alpha"));
     mode(&mut session, ModeId::Data);
@@ -571,9 +626,9 @@ fn the_prompt_says_which_projects_the_other_side_has_open() {
 
     let events = session.apply(Command::OpenWorkspacePicker);
     let (_, labels, details) = picker(&events).unwrap();
-    assert_eq!(labels[..2], ["beta".to_string(), "alpha".to_string()], "this side's first");
+    assert_eq!(labels[..2], ["beta".to_string(), "alpha".to_string()], "this mode's first");
     assert!(details[0].starts_with("open ·"), "{details:?}");
-    assert!(details[1].starts_with("open in Codex ·"), "{details:?}");
+    assert!(details[1].starts_with("open in Chat, Codex,") && !details[1].contains("Data"), "{details:?}");
 }
 
 /* ── the agent's conversation ───────────────────────────────────── */
