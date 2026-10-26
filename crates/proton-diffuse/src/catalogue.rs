@@ -205,6 +205,22 @@ impl Input {
                     return Some(format!("{name} is at most {max}"));
                 }
             }
+            // A whole number on a step — a latent's size, a multiple of 8 —
+            // is on it, counted from its least, as the server checks it.
+            if whole {
+                if let (Some(step), Some(v)) =
+                    (self.step.as_ref().and_then(Number::as_i64).filter(|s| *s > 1), value.as_i64())
+                {
+                    let from = self.min.as_ref().and_then(Number::as_i64).unwrap_or(0);
+                    if (v - from).rem_euclid(step) != 0 {
+                        let below = v - (v - from).rem_euclid(step);
+                        return Some(format!(
+                            "{name} must be a multiple of {step}: {below} or {}, not {v}",
+                            below + step
+                        ));
+                    }
+                }
+            }
             None
         };
         match self.kind() {

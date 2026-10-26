@@ -32,7 +32,7 @@ use crate::workspace::notice;
 mod run;
 
 use run::{Control, Job, News};
-pub use run::{DiffuseRun, NodeRun, RunOutput, RunProgress, RunState};
+pub use run::{DiffuseRun, NodeRun, RunOutput, RunProblem, RunProgress, RunState};
 
 /// How many runs the Queue keeps, the newest.
 const RUNS_KEPT: usize = 50;
@@ -567,6 +567,7 @@ impl Diffuse {
             preview: None,
             outputs: Vec::new(),
             message: None,
+            problems: Vec::new(),
             seconds: None,
             started: run::now_ms(),
         });
@@ -688,6 +689,26 @@ impl Diffuse {
                     }
                     self.controls.remove(&id);
                 }
+                News::Refused { id, message, nodes } => {
+                    if let Some(r) = self.runs.iter_mut().find(|r| r.id == id) {
+                        r.state = RunState::Failed;
+                        r.message = Some(message);
+                        r.problems =
+                            nodes.into_iter().map(|(node, message)| RunProblem { node: Some(node), message }).collect();
+                    }
+                    self.controls.remove(&id);
+                }
+                News::Lost { id, message } => {
+                    if let Some(r) = self.runs.iter_mut().find(|r| r.id == id) {
+                        if !r.state.ended() {
+                            r.state = RunState::Lost;
+                            r.message = Some(message);
+                            r.progress = None;
+                            r.preview = None;
+                        }
+                    }
+                    self.controls.remove(&id);
+                }
                 News::Event { id, event } => self.heard(id, event),
             }
         }
@@ -742,8 +763,9 @@ impl Diffuse {
             RunEvent::Progress { id: node, step, steps } => r.progress = Some(RunProgress { node, step, steps }),
             RunEvent::Preview { jpeg, .. } => r.preview = Some(format!("data:image/jpeg;base64,{jpeg}")),
             RunEvent::Image { .. } => {}
-            RunEvent::Error { error, message, .. } => {
+            RunEvent::Error { id: node, error, message } => {
                 r.state = RunState::Failed;
+                r.problems.push(RunProblem { node, message: message.clone() });
                 r.message = Some(match error.as_str() {
                     "oom" => format!("forge ran out of GPU memory: {message}"),
                     "missing_model" => format!("forge hasn't that model: {message}"),

@@ -89,6 +89,13 @@ fn a_field_refuses_the_wrong_kind_of_value_and_one_out_of_range() {
     assert_eq!(field("steps").refuse(&json!(0)).unwrap(), "steps is at least 1");
     assert_eq!(field("steps").refuse(&json!(151)).unwrap(), "steps is at most 150");
     assert_eq!(field("steps").refuse(&json!(2.5)).unwrap(), "steps is a whole number");
+    // A latent's size is a multiple of 8, as Nexus refuses it.
+    let latent = catalogue.node("EmptyLatent").unwrap();
+    assert_eq!(
+        latent.input("height").unwrap().refuse(&json!(1964)).unwrap(),
+        "height must be a multiple of 8: 1960 or 1968, not 1964"
+    );
+    assert_eq!(latent.input("width").unwrap().refuse(&json!(1216)), None);
     assert_eq!(field("cfg").refuse(&json!(6.5)), None);
     assert_eq!(field("cfg").refuse(&json!("high")).unwrap(), "cfg is a number");
     assert_eq!(field("sampler").refuse(&json!(3)).unwrap(), "sampler is text");

@@ -3,8 +3,8 @@
 A small ComfyUI in Proton. You build a graph of nodes (load a checkpoint,
 encode a prompt, sample, decode, save), run it, and watch it work; the
 models run on forge, the RTX 4090 desktop, behind Nexus. Proton is the
-editor and the client. Status: design and screens agreed 2026-10-26; D0 to D4
-built: the format, the client, the mode, runs, and graphs in PNGs. Shared as the doc
+editor and the client. Status: design and screens agreed 2026-10-26; D0 to D5
+built: the format, the client, the mode, runs, graphs in PNGs, pictures and masks. Shared as the doc
 [Diffuse Design](https://claude.ai/artifact/DuvNm2Xh1dG8bMsRDD7dBa); the
 screens are the mockups in
 [Diffuse UI](https://claude.ai/artifact/QcvnmxeJPeNrnFNJ8gs9hG).
@@ -343,6 +343,26 @@ Trash; a flow's images stay when it goes.
   and held until ⌘S. New flows start from Text to image, Image to image,
   Inpaint, Hires fix or FLUX; the image inputs wait for D5's picture.
   ComfyUI's own PNGs (their `workflow` chunk) are not read.
+- **Pictures and masks** (D5, built): a Load Image takes a picture chosen,
+  dropped or taken from the gallery, kept as a PNG in the folder's `inputs/`
+  (through the shell's `put_diffuse_file`, raw bytes); its mask is painted in
+  a sheet over the graph and kept beside the flow as `<flow>.<node>.mask.png`.
+  A run uploads each picture first, its mask in its alpha (transparent where
+  masked, as ComfyUI's Load Image reads one), and names the upload in the
+  graph. An output goes to Canvas (a canvas made in Canvas's own project) or
+  to Game (into the open game's `art/` and its room).
+- **Failures** (2026-10-26, from a run that looked stuck): a graph forge
+  refuses (`400 invalid`) fails at once with its `message`, each node in
+  `nodes` marked on the graph with its words; an `error` event marks the run
+  failed and its node (or the run, with none) with the message; a node still
+  running when its run ended shows stopped. A stream that closes before
+  `done`, `error` or `cancelled` is opened again — it replays from the start,
+  so what was heard is passed over and no image saved twice — three more
+  times, a second longer each, and then the run is lost; a `404` is a run
+  forge no longer has. A worker that stops unexpectedly fails its run.
+  Whole-number fields on a step (a latent's 8) are put on it as they are set
+  and refused off it in Nexus's words; Empty Latent offers SDXL's sizes near
+  a megapixel.
 - **Runs** (D3, built): Run (`⌘↩`) sends the flow shown, as often as it
   is pressed; each run has a worker in the core that sends the graph,
   follows its event stream, fetches each image and writes it — a Save

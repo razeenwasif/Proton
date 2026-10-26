@@ -6046,3 +6046,15 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .df-mask-side { flex: none; width: 200px; display: flex; flex-direction: column; gap: 10px; padding: 12px; border-left: 1px solid var(--df-line); font: var(--z-xs) var(--sans); color: var(--df-soft); }
 .df-mask-side input[type="range"] { width: 100%; accent-color: var(--accent); }
 .df-mask-share { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--df-well); color: var(--text); line-height: 1.45; }
+
+/* A run that failed: where, and why. */
+.df-node.failed { border-color: var(--err); box-shadow: 0 0 0 1px var(--err), 0 6px 18px rgba(0, 0, 0, .35); }
+.df-badge.run-failed { background: color-mix(in srgb, var(--err) 20%, transparent); color: var(--err); }
+.df-badge.run-stopped { color: var(--warn); }
+.df-node-failed { padding: 6px 10px; color: color-mix(in srgb, var(--err) 75%, var(--text)); font-size: 11px; line-height: 1.4; }
+.df-node .df-node-failed { border-top: 1px solid color-mix(in srgb, var(--err) 25%, transparent); border-radius: 0 0 8px 8px; background: color-mix(in srgb, var(--err) 8%, transparent); }
+.df-foot-failed { color: var(--err); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
+.df-run-card.lost { border-color: color-mix(in srgb, var(--warn) 45%, var(--df-line)); }
+.df-run-card.lost .df-run-state { color: var(--warn); }
+.df-run-problems { margin: 0; padding-left: 16px; color: color-mix(in srgb, var(--err) 75%, var(--text)); line-height: 1.45; }
+.df-run-problems b { color: var(--text); font-weight: 500; }

@@ -65,8 +65,9 @@ pub enum Error {
     Key,
     /// `503 offline`: forge's image server is not running.
     Offline,
-    /// `400 invalid`: the server refused the graph, node by node.
-    Invalid(BTreeMap<String, String>),
+    /// `400 invalid`: the server refused the graph — what it said, and what
+    /// is wrong node by node.
+    Invalid { message: String, nodes: BTreeMap<String, String> },
     /// Any other error the server answered with.
     Server { status: u16, code: String, message: String },
     /// An answer that is not what the contract says.
@@ -81,10 +82,13 @@ impl Error {
             Error::Unreachable(why) => format!("atlas's gateway does not answer: {}", why.join("; ")),
             Error::Key => "the gateway does not take the key in NEXUS_KEY: check it in Nexus".into(),
             Error::Offline => "forge isn't serving images: start it in Nexus › Inference".into(),
-            Error::Invalid(nodes) => {
-                let each: Vec<String> = nodes.iter().map(|(id, why)| format!("node {id}: {why}")).collect();
-                format!("the server refused the graph: {}", each.join("; "))
-            }
+            Error::Invalid { message, nodes } => match (message.is_empty(), nodes.is_empty()) {
+                (false, _) => message.clone(),
+                (true, _) => {
+                    let each: Vec<String> = nodes.iter().map(|(id, why)| format!("node {id}: {why}")).collect();
+                    format!("the server refused the graph: {}", each.join("; "))
+                }
+            },
             Error::Server { status, code, message } => format!("the server answered {status} {code}: {message}"),
             Error::Unreadable(why) => format!("the server's answer is not what Proton expects: {why}"),
             Error::Lost(why) => format!("lost the run's progress: {why}"),
@@ -457,7 +461,8 @@ fn refusal(status: u16, mut reader: Box<dyn Read + Send>) -> Error {
                 .and_then(Value::as_object)
                 .map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("refused").to_string())).collect())
                 .unwrap_or_default();
-            Error::Invalid(nodes)
+            let message = body.get("message").and_then(Value::as_str).unwrap_or("").to_string();
+            Error::Invalid { message, nodes }
         }
         _ => {
             let message = body.get("message").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| {

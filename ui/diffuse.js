@@ -109,7 +109,12 @@ export function createDiffuse(host) {
     return p ? `${p.replace(/\.flow\.json$/, "")}.${node}.mask.png` : null;
   };
 
-  const ended = (/** @type {string} */ state) => state === "done" || state === "failed" || state === "cancelled";
+  const ended = (/** @type {string} */ state) => state === "done" || state === "failed" || state === "cancelled" || state === "lost";
+  /** What a run said went wrong at a node. @param {Node} node */
+  const failureAt = (node) => {
+    const r = lastRun();
+    return r && ended(r.state) ? (r.problems ?? []).find((p) => p.node === node.id) ?? null : null;
+  };
   /** The newest run of the flow shown. */
   const lastRun = () => runs.find((r) => r.flow === path()) ?? null;
   /** Its run still going, if one is. */
@@ -325,6 +330,11 @@ export function createDiffuse(host) {
     q("[data-df-foot]").innerHTML =
       `<span>${Math.round(camera().z * 100)}%</span><span>${f.nodes.length} nodes · ${f.links.length} wires</span>` +
       (problems.length ? `<span class="df-foot-problem">${problems.length === 1 ? "1 thing" : `${problems.length} things`} to fix before it runs</span>` : `<span class="df-foot-ok">ready to run</span>`) +
+      (() => {
+        const r = lastRun();
+        if (!r || !["failed", "lost"].includes(r.state)) return "";
+        return `<span class="df-foot-failed" title="${esc(r.message ?? "")}">run ${r.id} ${r.state === "lost" ? "lost" : "failed"}: ${esc(r.message ?? "")}</span>`;
+      })() +
       `<span class="grow"></span><span>double-click: add a node · drag from a socket: wire · ? keys</span>`;
   }
 
@@ -336,7 +346,10 @@ export function createDiffuse(host) {
     const r = lastRun();
     const going = r && !ended(r.state);
     const at = r?.nodes.find((n) => n.id === node.id);
-    const state = at ? at.state : going && !node.bypass ? "waiting" : "";
+    const failed = failureAt(node);
+    // A run that ended leaves nothing running: where it stopped is failed
+    // or stopped, never still at work.
+    const state = failed ? "failed" : at ? (at.state === "running" && !going ? "stopped" : at.state) : going && !node.bypass ? "waiting" : "";
     const said = state === "done" && at?.seconds !== null && at?.seconds !== undefined ? `done ${at.seconds.toFixed(1)} s` : state;
     const head =
       `<div class="df-node-head" data-df-grab="${esc(node.id)}"><b>${esc(kind?.title ?? node.type)}</b><span class="df-node-id">${esc(node.id)}</span>` +
@@ -371,7 +384,10 @@ export function createDiffuse(host) {
         return `<div class="df-pill"><span>${esc(field.name)}</span><span>${esc(shortValue(value))}${field.kind === "seed" && node.seed && node.seed !== "fixed" ? ` · ${esc(node.seed)}` : ""}</span></div>`;
       })
       .join("");
-    return `<div class="${classes}" data-df-node="${esc(node.id)}" style="left:${node.at[0]}px;top:${node.at[1]}px;width:${NODE_W}px">${head}<div class="df-rows">${rows}</div>${fields ? `<div class="df-fields">${fields}</div>` : ""}${atWork(node)}</div>`;
+    const failure = failureAt(node);
+    // Below the fields: above them, it would move the sockets off their wires.
+    const why = failure ? `<div class="df-node-failed" role="status">${esc(failure.message)}</div>` : "";
+    return `<div class="${classes}${failure ? " failed" : ""}" data-df-node="${esc(node.id)}" style="left:${node.at[0]}px;top:${node.at[1]}px;width:${NODE_W}px">${head}<div class="df-rows">${rows}</div>${fields ? `<div class="df-fields">${fields}</div>` : ""}${why}${atWork(node)}</div>`;
   }
 
   /** What a run shows on a card: the step at work and its preview, or the
@@ -646,6 +662,8 @@ export function createDiffuse(host) {
     box.innerHTML =
       `<div class="df-pad"><div class="df-title">${esc(kind.title)}</div><div class="df-sub">node ${esc(node.id)} · ${esc(kind.group)}${outs ? ` · makes ${esc(outs)}` : ""}</div></div>` +
       (mine.length ? `<ul class="df-problems">${mine.map((p) => `<li>${esc(p.message)}</li>`).join("")}</ul>` : "") +
+      (failureAt(node) ? `<p class="df-node-failed df-pad-x">Run ${lastRun()?.id} failed here: ${esc(failureAt(node)?.message ?? "")}</p>` : "") +
+      sizePresets(node, kind) +
       `<div class="df-fieldset">${fieldsOf(kind).map((field) => fieldHtml(node, field)).join("")}</div>` +
       inputsHtml(node, kind) +
       actions(node);
@@ -710,6 +728,30 @@ export function createDiffuse(host) {
       default:
         return `<div class="df-field">${label}<code class="df-faint">${esc(JSON.stringify(shownValue))}</code></div>`;
     }
+  }
+
+  /** SDXL's sizes near a megapixel, which it was trained on — for a node
+   *  with a width and a height on a step of 8, such as Empty Latent.
+   *  @param {Node} node @param {NodeType} kind */
+  function sizePresets(node, kind) {
+    const w = kind.inputs.find((i) => i.name === "width" && i.kind === "int");
+    const h = kind.inputs.find((i) => i.name === "height" && i.kind === "int");
+    if (!w || !h) return "";
+    const now = `${node.values.width ?? w.default}x${node.values.height ?? h.default}`;
+    const sizes = [[1024, 1024, "square"], [1152, 896, ""], [896, 1152, ""], [1216, 832, "3:2"], [832, 1216, "2:3"], [1344, 768, "16:9"], [768, 1344, "9:16"], [1536, 640, "wide"], [640, 1536, "tall"]];
+    const options = sizes.map(([a, b, said]) => `<option value="${a}x${b}"${`${a}x${b}` === now ? " selected" : ""}>${a} × ${b}${said ? ` · ${said}` : ""}</option>`).join("");
+    const other = sizes.some(([a, b]) => `${a}x${b}` === now) ? "" : `<option value="" selected>${esc(now.replace("x", " × "))} · your own</option>`;
+    return `<div class="df-fieldset"><label class="df-field">Size, as SDXL likes it<select data-df-size>${other}${options}</select><span class="df-faint">about a megapixel: SDXL models such as Illustrious draw best near it</span></label></div>`;
+  }
+
+  /** A number put on its field's step, counted from its least, and in its
+   *  range: a latent's 1964 is 1968. @param {HTMLInputElement} el @param {number} v */
+  function onStep(el, v) {
+    const step = Number(el.step);
+    const min = el.min === "" ? 0 : Number(el.min);
+    const max = el.max === "" ? Infinity : Number(el.max);
+    if (!Number.isFinite(step) || step <= 1) return v;
+    return Math.min(max, Math.max(min, min + Math.round((v - min) / step) * step));
   }
 
   /** What a choice is chosen from, or `null` when not known yet. @param {Input} field */
@@ -818,6 +860,9 @@ export function createDiffuse(host) {
               .join("")}</div>`
           : "") +
         (r.message ? `<div class="df-run-why">${esc(r.message)}</div>` : "") +
+        ((r.problems ?? []).filter((p) => p.node && p.message !== r.message).length
+          ? `<ul class="df-run-problems">${(r.problems ?? []).filter((p) => p.node).map((p) => `<li><b>${esc(titleOf(r, p.node ?? ""))}</b> ${esc(p.message)}</li>`).join("")}</ul>`
+          : "") +
         (r.outputs.filter((o) => o.kept).length
           ? `<div class="df-run-outs">${r.outputs
               .filter((o) => o.kept)
@@ -1461,7 +1506,16 @@ export function createDiffuse(host) {
       let value = raw;
       if (kind === "int" || kind === "float" || kind === "seed") value = raw.trim() === "" ? null : Number(raw);
       if (typeof value === "number" && !Number.isFinite(value)) return;
+      if (kind === "int" && typeof value === "number") {
+        value = onStep(el, value);
+        el.value = String(value);
+      }
       edit([{ op: "set", id: one, name: el.dataset.dfSet, value }]);
+      return;
+    }
+    if (el.matches("[data-df-size]") && one && el.value) {
+      const [w, h] = el.value.split("x").map(Number);
+      edit([{ op: "set", id: one, name: "width", value: w }, { op: "set", id: one, name: "height", value: h }]);
       return;
     }
     if (el.matches("[data-df-folder]")) {

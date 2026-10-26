@@ -19,7 +19,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use proton_diffuse::client::NodeState;
-use proton_diffuse::{Event, Graph};
+use proton_diffuse::{Error as ClientError, Event, Graph};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -48,6 +48,8 @@ pub struct DiffuseRun {
     pub outputs: Vec<RunOutput>,
     /// Why it failed.
     pub message: Option<String>,
+    /// Where it failed: each node forge refused or stopped at, and why.
+    pub problems: Vec<RunProblem>,
     /// How long forge took, from its start to its end.
     pub seconds: Option<f64>,
     /// When it was sent, in milliseconds since 1970.
@@ -66,12 +68,23 @@ pub enum RunState {
     Done,
     Failed,
     Cancelled,
+    /// Its progress could not be followed: the stream dropped and could not
+    /// be opened again, or forge no longer has it.
+    Lost,
 }
 
 impl RunState {
     pub fn ended(self) -> bool {
-        matches!(self, RunState::Done | RunState::Failed | RunState::Cancelled)
+        matches!(self, RunState::Done | RunState::Failed | RunState::Cancelled | RunState::Lost)
     }
+}
+
+/// What went wrong at a node — or, with none, with the run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "DiffuseRunProblem")]
+pub struct RunProblem {
+    pub node: Option<String>,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -108,10 +121,34 @@ pub struct RunOutput {
 /// What a worker tells the core.
 #[derive(Debug)]
 pub(super) enum News {
-    Queued { id: u32, run: String, position: u32 },
-    Event { id: u32, event: Event },
-    Saved { id: u32, output: RunOutput },
-    Failed { id: u32, message: String },
+    Queued {
+        id: u32,
+        run: String,
+        position: u32,
+    },
+    Event {
+        id: u32,
+        event: Event,
+    },
+    Saved {
+        id: u32,
+        output: RunOutput,
+    },
+    Failed {
+        id: u32,
+        message: String,
+    },
+    /// forge refused the graph: what it said, and each node's trouble.
+    Refused {
+        id: u32,
+        message: String,
+        nodes: BTreeMap<String, String>,
+    },
+    /// The run's progress could no longer be followed.
+    Lost {
+        id: u32,
+        message: String,
+    },
 }
 
 /// How the core stops a run: the flag a worker looks at before it is
@@ -174,9 +211,15 @@ pub(super) fn upload_bytes(picture: &Picture) -> Result<Vec<u8>, String> {
 pub(super) fn start(job: Job, tell: Sender<News>) {
     std::thread::spawn(move || {
         let id = job.id;
-        if let Err(message) = follow(&job, &tell) {
-            let _ = tell.send(News::Failed { id, message });
-        }
+        // Whatever happens to the worker, the run ends said: a worker that
+        // stopped without a word would leave it running for ever.
+        let followed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| follow(&job, &tell)));
+        let message = match followed {
+            Ok(Ok(())) => return,
+            Ok(Err(message)) => message,
+            Err(_) => "Proton's run worker stopped unexpectedly".to_string(),
+        };
+        let _ = tell.send(News::Failed { id, message });
     });
 }
 
@@ -195,27 +238,101 @@ fn follow(job: &Job, tell: &Sender<News>) -> Result<(), String> {
             node.values.insert(picture.field.clone(), serde_json::Value::String(upload.id));
         }
     }
-    let queued = client.run(&graph).map_err(|e| e.describe())?;
+    let queued = match client.run(&graph) {
+        Ok(queued) => queued,
+        // Refused at the door: what forge said, and each node's trouble.
+        Err(ClientError::Invalid { message, nodes }) => {
+            let message = if message.is_empty() { "forge refused the graph".to_string() } else { message };
+            let _ = tell.send(News::Refused { id, message, nodes });
+            return Ok(());
+        }
+        Err(e) => return Err(e.describe()),
+    };
     *job.control.run.lock().unwrap_or_else(|e| e.into_inner()) = Some(queued.run.clone());
     let _ = tell.send(News::Queued { id, run: queued.run.clone(), position: queued.position });
     // Stopped while it was on its way: stop it there too.
     if job.control.cancel.load(Ordering::Relaxed) {
         let _ = client.cancel(&queued.run);
     }
-    for event in client.events(&queued.run).map_err(|e| e.describe())? {
-        let event = event.map_err(|e| e.describe())?;
-        if let Event::Image { id: node, image, .. } = &event {
-            let bytes = client.image(image).map_err(|e| e.describe())?;
-            let (kept, prefix) = job.saves.get(node).cloned().unwrap_or((false, "image".into()));
-            let output = save(&job.root, &job.outputs, node, image, kept, &prefix, &bytes)?;
-            let _ = tell.send(News::Saved { id, output });
+    // The stream replays the run from its start (forge keeps it a day), so
+    // one that drops is opened again and what was heard already is passed
+    // over: no event is taken twice, no image saved twice. One that cannot
+    // be opened again leaves the run lost, never still running.
+    let mut heard = 0usize;
+    let mut tries = 0u32;
+    loop {
+        let events = match client.events(&queued.run) {
+            Ok(events) => events,
+            Err(ClientError::Server { status: 404, .. }) => {
+                let _ = tell.send(News::Lost { id, message: "forge no longer has this run".into() });
+                return Ok(());
+            }
+            Err(e) => {
+                if !wait_to_retry(&mut tries, &job.control) {
+                    let _ = tell.send(News::Lost {
+                        id,
+                        message: format!("the run's progress could not be followed: {}", e.describe()),
+                    });
+                    return Ok(());
+                }
+                continue;
+            }
+        };
+        let mut index = 0usize;
+        for event in events {
+            let event = match event {
+                Ok(event) => event,
+                // Cut off: open it again.
+                Err(ClientError::Lost(_)) => break,
+                Err(e) => return Err(e.describe()),
+            };
+            index += 1;
+            if index <= heard {
+                continue;
+            }
+            heard = index;
+            tries = 0;
+            if let Event::Image { id: node, image, .. } = &event {
+                let bytes = client.image(image).map_err(|e| e.describe())?;
+                let (kept, prefix) = job.saves.get(node).cloned().unwrap_or((false, "image".into()));
+                let output = save(&job.root, &job.outputs, node, image, kept, &prefix, &bytes)?;
+                let _ = tell.send(News::Saved { id, output });
+            }
+            let ended = event.ends();
+            if tell.send(News::Event { id, event }).is_err() || ended {
+                return Ok(());
+            }
         }
-        let ended = event.ends();
-        if tell.send(News::Event { id, event }).is_err() || ended {
-            break;
+        if !wait_to_retry(&mut tries, &job.control) {
+            let _ = tell.send(News::Lost {
+                id,
+                message: "the stream from forge closed before the run ended, and could not be opened again".into(),
+            });
+            return Ok(());
         }
     }
-    Ok(())
+}
+
+/// How many times a stream is opened again before the run is called lost.
+const RETRIES: u32 = 3;
+
+/// Wait before opening the stream again — longer each time — unless the run
+/// was stopped or the tries are spent: whether to try.
+fn wait_to_retry(tries: &mut u32, control: &Control) -> bool {
+    *tries += 1;
+    if *tries > RETRIES || control.cancel.load(Ordering::Relaxed) {
+        return false;
+    }
+    std::thread::sleep(retry_wait(*tries));
+    true
+}
+
+/// A test waits no time between tries; the app, a second more each time.
+fn retry_wait(tries: u32) -> std::time::Duration {
+    match std::env::var_os("PROTON_DIFFUSE_RETRY_MS") {
+        Some(ms) => std::time::Duration::from_millis(ms.to_string_lossy().parse().unwrap_or(0)),
+        None => std::time::Duration::from_secs(tries as u64),
+    }
 }
 
 /// Write an image where it belongs: a kept one as `<prefix>_<nnnn>.png` in

@@ -631,3 +631,129 @@ fn an_output_is_sent_to_canvas_as_a_canvas_and_to_game_only_with_a_game_open() {
     assert_eq!(space.active().mode(), ModeId::Game);
     assert!(warned(&to_game).unwrap().contains("open a game in Game"));
 }
+
+/// A gateway serving forge whose `POST /runs` answers `submit` and whose
+/// event stream answers `stream(n)` on its `n`th opening, from 1.
+fn scripted_gateway(
+    submit: (u16, &'static str),
+    stream: impl Fn(usize) -> server::Reply + Send + Sync + 'static,
+) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use server::{Fake, Reply};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let openings = std::sync::Arc::new(AtomicUsize::new(0));
+    let counted = openings.clone();
+    let fake = Fake::start(move |seen| match (seen.method.as_str(), seen.path.as_str()) {
+        ("GET", "/img/v1/status") => {
+            Reply::json(200, r#"{"gpu": {"name": "RTX 4090", "total": 25757220864, "used": 1}}"#)
+        }
+        ("GET", "/img/v1/nodes") => Reply::json(200, CATALOGUE),
+        ("GET", "/img/v1/models") => Reply::json(200, include_str!("../../proton-diffuse/tests/fixtures/models.json")),
+        ("POST", "/img/v1/runs") => Reply::json(submit.0, submit.1),
+        ("GET", "/img/v1/runs/r1/events") => stream(counted.fetch_add(1, Ordering::SeqCst) + 1),
+        ("GET", "/img/v1/images/image-abc123") => Reply::bytes("image/png", picture([1, 2, 3])),
+        _ => Reply::json(404, r#"{"error": "not_found", "message": "no"}"#),
+    });
+    (fake.base.clone(), openings)
+}
+
+/// A flow made, forge looked at through `base`, the flow run to its end: the run.
+fn run_against(tag: &str, base: &str) -> (proton_core::diffuse::DiffuseRun, PathBuf) {
+    std::env::set_var("NEXUS_KEY", "nx-test-0123456789");
+    std::env::set_var("PROTON_DIFFUSE_RETRY_MS", "0");
+    let (mut space, root) = with_flow(tag);
+    set_gateway(&root, Some(base));
+    space.apply(Command::DiffuseLook { again: false });
+    poll_until(&mut space, |e| known(e).is_some_and(|k| k.health.state == HealthState::Serving));
+    space.apply(Command::DiffuseRun { path: "lighthouse.flow.json".into() });
+    let heard = poll_until(&mut space, |e| runs(e).is_some_and(|r| r[0].state.ended()));
+    (runs(&heard).unwrap().remove(0), root)
+}
+
+const WHOLE_RUN: &str = concat!(
+    "event: queued\ndata: {\"position\": 0}\n\n",
+    "event: started\ndata: {}\n\n",
+    "event: node\ndata: {\"id\": \"5\", \"state\": \"running\"}\n\n",
+    "event: node\ndata: {\"id\": \"5\", \"state\": \"done\"}\n\n",
+    "event: image\ndata: {\"id\": \"7\", \"image\": \"image-abc123\", \"index\": 0, \"width\": 4, \"height\": 4}\n\n",
+    "event: done\ndata: {\"seconds\": 1.5}\n\n",
+);
+
+#[test]
+fn a_graph_forge_refuses_fails_at_once_with_its_words_on_the_nodes() {
+    let (base, _) = scripted_gateway(
+        (
+            400,
+            r#"{"error": "invalid", "message": "the graph can't run: height must be a multiple of 8", "nodes": {"4": "height must be a multiple of 8: 1960 or 1968, not 1964"}}"#,
+        ),
+        |_| server::Reply::stream(vec![]),
+    );
+    let (run, _) = run_against("refused", &base);
+    assert_eq!(run.state, proton_core::diffuse::RunState::Failed);
+    assert_eq!(run.message.as_deref(), Some("the graph can't run: height must be a multiple of 8"));
+    assert_eq!(run.problems.len(), 1);
+    assert_eq!(run.problems[0].node.as_deref(), Some("4"));
+    assert_eq!(run.problems[0].message, "height must be a multiple of 8: 1960 or 1968, not 1964");
+}
+
+#[test]
+fn a_run_that_fails_mid_way_says_where_and_why() {
+    let (base, _) = scripted_gateway((200, r#"{"run": "r1", "position": 0}"#), |_| {
+        server::Reply::stream(vec![(
+            Duration::ZERO,
+            "event: started\ndata: {}\n\nevent: node\ndata: {\"id\": \"5\", \"state\": \"running\"}\n\nevent: error\ndata: {\"id\": \"5\", \"error\": \"missing_model\", \"message\": \"sd_xl_base_1.0.safetensors isn't in checkpoints on this machine\"}\n\n",
+        )])
+    });
+    let (run, _) = run_against("midway", &base);
+    assert_eq!(run.state, proton_core::diffuse::RunState::Failed);
+    assert_eq!(
+        run.message.as_deref(),
+        Some("forge hasn't that model: sd_xl_base_1.0.safetensors isn't in checkpoints on this machine")
+    );
+    assert_eq!(run.problems[0].node.as_deref(), Some("5"));
+    // A run-wide error names no node.
+    let (base, _) = scripted_gateway((200, r#"{"run": "r1", "position": 0}"#), |_| {
+        server::Reply::stream(vec![(
+            Duration::ZERO,
+            "event: error\ndata: {\"id\": null, \"error\": \"internal\", \"message\": \"CUDA error\"}\n\n",
+        )])
+    });
+    let (run, _) = run_against("midway-null", &base);
+    assert_eq!((run.state, run.problems[0].node.clone()), (proton_core::diffuse::RunState::Failed, None));
+}
+
+#[test]
+fn a_stream_that_drops_is_opened_again_and_nothing_is_taken_twice() {
+    // The first opening stops after the run's start; the second replays it
+    // from the beginning, to its end.
+    let (base, openings) = scripted_gateway((200, r#"{"run": "r1", "position": 0}"#), |n| match n {
+        1 => server::Reply::stream(vec![(Duration::ZERO, &WHOLE_RUN[..WHOLE_RUN.find("event: node").unwrap()])]),
+        _ => server::Reply::stream(vec![(Duration::ZERO, WHOLE_RUN)]),
+    });
+    let (run, root) = run_against("reopened", &base);
+    assert_eq!(run.state, proton_core::diffuse::RunState::Done, "{run:?}");
+    assert_eq!(openings.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(run.outputs.len(), 1, "an image was taken twice");
+    assert!(
+        root.join("outputs/lighthouse/image_0001.png").is_file()
+            && !root.join("outputs/lighthouse/image_0002.png").exists()
+    );
+}
+
+#[test]
+fn a_stream_that_keeps_dropping_leaves_the_run_lost_and_a_run_gone_says_so() {
+    let (base, openings) = scripted_gateway((200, r#"{"run": "r1", "position": 0}"#), |_| {
+        server::Reply::stream(vec![(Duration::ZERO, "event: started\ndata: {}\n\n")])
+    });
+    let (run, _) = run_against("lost", &base);
+    assert_eq!(run.state, proton_core::diffuse::RunState::Lost, "{run:?}");
+    assert!(run.message.unwrap().contains("could not be opened again"));
+    assert_eq!(openings.load(std::sync::atomic::Ordering::SeqCst), 4, "opened once and tried three times more");
+    let (base, _) = scripted_gateway((200, r#"{"run": "r1", "position": 0}"#), |_| {
+        server::Reply::json(404, r#"{"error": "not_found", "message": "there is no run r1"}"#)
+    });
+    let (run, _) = run_against("gone", &base);
+    assert_eq!(
+        (run.state, run.message.as_deref()),
+        (proton_core::diffuse::RunState::Lost, Some("forge no longer has this run"))
+    );
+}

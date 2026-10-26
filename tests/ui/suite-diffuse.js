@@ -392,4 +392,40 @@ export async function diffuseChecks({test, assert, win, doc, $, settle, shown}) 
     const sends = sent(before, 'diffuseSend').map((c) => `${c.to} ${c.path}`);
     assert(JSON.stringify(sends) === JSON.stringify(['canvas outputs/lighthouse/image_0003.png', 'game outputs/lighthouse/image_0003.png']), `sent ${sends}`);
   });
+
+  await test('A run that fails says where and why on the graph, leaves nothing running, and a size is put on its step or chosen near a megapixel', async () => {
+    await answer({type: 'diffuseOpen', path: 'lighthouse.flow.json'});
+    ws().querySelector('[data-df-view="graph"]').click(); await settle();
+    await win.pushEvents([{type: 'diffuseRuns', runs: [run({id: 7, state: 'failed', message: "the graph can't run: height must be a multiple of 8",
+      nodes: [{id: '1', state: 'done', seconds: 0.2}, {id: '5', state: 'running', seconds: null}],
+      problems: [{node: '4', message: 'height must be a multiple of 8: 1960 or 1968, not 1964'}]})]}]);
+    await settle();
+    const latent = ws().querySelector('[data-df-node="4"]');
+    assert(latent.classList.contains('failed') && latent.textContent.includes('1960 or 1968, not 1964') && latent.querySelector('.run-failed'), 'the node forge refused is not marked with its words');
+    const sampler = ws().querySelector('[data-df-node="5"]');
+    assert(!sampler.classList.contains('working') && sampler.querySelector('.run-stopped') && !sampler.querySelector('.run-running'), 'a node of a failed run still looks at work');
+    assert($('[data-df-foot]').textContent.includes('run 7 failed'), `the foot says ${$('[data-df-foot]').textContent}`);
+    // Lost, in the Queue.
+    await win.pushEvents([{type: 'diffuseRuns', runs: [run({id: 8, state: 'lost', message: 'the stream from forge closed before the run ended, and could not be opened again'})]}]);
+    await settle();
+    ws().querySelector('[data-df-panel="queue"]').click(); await settle();
+    assert($('[data-df-queue] .df-run-card.lost')?.textContent.includes('could not be opened again'), 'a lost run is not shown as lost');
+    assert(ws().querySelector('[data-df-stop]').hidden, 'Stop is offered for a run that ended');
+    // A latent's size: 1964 is put on its step; a preset sets both sides.
+    ws().querySelector('[data-df-panel="inspector"]').click(); await settle();
+    ws().querySelector('[data-df-grab="4"]').dispatchEvent(new win.PointerEvent('pointerdown', {bubbles: true, button: 0, clientX: 0, clientY: 0, pointerId: 61}));
+    $('[data-df-stage]').dispatchEvent(new win.PointerEvent('pointerup', {bubbles: true, button: 0, clientX: 0, clientY: 0, pointerId: 61}));
+    await settle();
+    const height = /** @type {HTMLInputElement} */ (ws().querySelector('[data-df-set="height"]'));
+    height.value = '1964';
+    let before = win.commands.length;
+    height.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(JSON.stringify(sent(before, 'diffuseEdit')[0]?.ops) === JSON.stringify([{op: 'set', id: '4', name: 'height', value: 1968}]), `1964 was sent as ${JSON.stringify(sent(before, 'diffuseEdit')[0])}`);
+    const size = /** @type {HTMLSelectElement} */ (ws().querySelector('[data-df-size]'));
+    assert(size && [...size.options].some((o) => o.value === '1216x832'), 'no sizes near a megapixel are offered');
+    size.value = '1216x832';
+    before = win.commands.length;
+    size.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(JSON.stringify(sent(before, 'diffuseEdit')[0]?.ops) === JSON.stringify([{op: 'set', id: '4', name: 'width', value: 1216}, {op: 'set', id: '4', name: 'height', value: 832}]), 'a preset did not set both sides');
+  });
 }

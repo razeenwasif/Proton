@@ -68,9 +68,11 @@ fn a_refused_key_and_an_idle_forge_are_told_apart_and_the_key_is_never_said() {
     let health = client(vec![idle.base.clone()]).health();
     assert_eq!(health.state, HealthState::Offline);
     // Nexus's own words for it.
-    let nexus = Fake::start(|_| Reply::json(503, r#"{"error": "not_serving", "message": "no node is serving images"}"#));
+    let nexus =
+        Fake::start(|_| Reply::json(503, r#"{"error": "not_serving", "message": "no node is serving images"}"#));
     assert_eq!(client(vec![nexus.base.clone()]).status().unwrap_err(), Error::Offline);
-    let silent = Fake::start(|_| Reply::json(502, r#"{"error": "not_serving", "message": "the image server didn't answer"}"#));
+    let silent =
+        Fake::start(|_| Reply::json(502, r#"{"error": "not_serving", "message": "the image server didn't answer"}"#));
     assert_eq!(client(vec![silent.base.clone()]).status().unwrap_err(), Error::Offline);
     assert_eq!(health.url.as_deref(), Some(idle.base.as_str()));
     assert!(health.message.contains("Nexus › Inference"));
@@ -134,9 +136,21 @@ fn a_run_sends_the_graph_and_a_refusal_says_which_nodes() {
     });
     let error =
         proton_diffuse::Client::new(vec![refusing.base.clone()], Key::new(KEY).unwrap()).run(&graph).unwrap_err();
-    let Error::Invalid(nodes) = &error else { panic!("{error:?}") };
+    let Error::Invalid { message, nodes } = &error else { panic!("{error:?}") };
     assert_eq!(nodes["1"], "no checkpoint dreamshaper_8.safetensors");
+    assert_eq!(message, "");
     assert!(error.describe().contains("node 1"));
+    // Nexus's own words, as it says them.
+    let nexus = Fake::start(|_| {
+        Reply::json(
+            400,
+            r#"{"error": "invalid", "message": "the graph can't run: height must be a multiple of 8", "nodes": {"4": "height must be a multiple of 8: 1960 or 1968, not 1964"}}"#,
+        )
+    });
+    let error = proton_diffuse::Client::new(vec![nexus.base.clone()], Key::new(KEY).unwrap()).run(&graph).unwrap_err();
+    assert_eq!(error.describe(), "the graph can't run: height must be a multiple of 8");
+    let Error::Invalid { nodes, .. } = &error else { panic!("{error:?}") };
+    assert_eq!(nodes["4"], "height must be a multiple of 8: 1960 or 1968, not 1964");
 }
 
 #[test]
