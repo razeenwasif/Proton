@@ -1,30 +1,27 @@
 // Local layout preferences. Core mode/document state remains in app.js.
 export function createPanels(root, changed) {
   const sections = [...root.querySelectorAll('.workspace')];
-  /** Each section's widths, and a second set for a section that shows another
-   *  dock in its right column: LaTeX's PDF wants half the window where
-   *  Codex's agent wants a column. */
+  /** Each section's widths. */
   const states = new Map();
   const defaultsOf = new Map();
   const minPane = 172, minStage = 320;
   let drag = null;
   const active = () => root.querySelector('.workspace.on');
-  const variant = (section) => section.dataset.dock === 'typeset' ? `${section.dataset.ws}.typeset` : section.dataset.ws;
+  const variant = (section) => section.dataset.ws;
   const key = (section) => `proton.panes.${variant(section)}`;
   /** The widest a right pane may be dragged. */
-  const capOf = (section) => section.dataset.dock === 'typeset' ? 1600 : 800;
+  const cap = 800;
   /** The widths in use, made from the defaults and what was kept the first
    *  time a variant is shown. */
   function stateOf(section) {
     const name = variant(section);
     if (!states.has(name)) {
       const defaults = { ...defaultsOf.get(section) };
-      if (section.dataset.dock === 'typeset') defaults['--col-r'] = Math.max(420, Math.round((section.clientWidth || 1200) * 0.45));
       let saved;
       try { saved = JSON.parse(localStorage.getItem(key(section))); } catch { /* defaults */ }
       const state = { ...defaults, defaults };
       for (const prop of ['--col-l', '--col-r']) {
-        if (Number.isFinite(saved?.[prop])) state[prop] = Math.max(minPane, Math.min(saved[prop], capOf(section)));
+        if (Number.isFinite(saved?.[prop])) state[prop] = Math.max(minPane, Math.min(saved[prop], cap));
       }
       for (const prop of ['leftHidden', 'rightHidden']) if (typeof saved?.[prop] === 'boolean') state[prop] = saved[prop];
       if (saved?.preferred === 'right') state.preferred = 'right';
@@ -142,7 +139,7 @@ export function createPanels(root, changed) {
         if (event.key === 'Home') return reset();
         const direction = (event.key === 'ArrowRight' ? 1 : -1) * (prop === '--col-l' ? 1 : -1);
         const state = stateOf(section);
-        state[prop] = Math.max(minPane, Math.min(capOf(section), state[prop] + direction * 20));
+        state[prop] = Math.max(minPane, Math.min(cap, state[prop] + direction * 20));
         save(section); refresh();
       });
     });
@@ -160,7 +157,7 @@ export function createPanels(root, changed) {
     const box = section.getBoundingClientRect();
     const left = gutter.dataset.resize === '--col-l';
     const raw = left ? event.clientX - box.left - (section.dataset.ws === 'design' ? 66 : 0) : box.right - event.clientX;
-    stateOf(section)[gutter.dataset.resize] = Math.max(minPane, Math.min(capOf(section), Math.round(raw)));
+    stateOf(section)[gutter.dataset.resize] = Math.max(minPane, Math.min(cap, Math.round(raw)));
     refresh();
   });
   const finish = () => {

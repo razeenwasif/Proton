@@ -5,8 +5,6 @@ import {encodeMesh} from './meshbytes.js';
 import {createClaudePreview} from './preview-claude.js';
 import {createResearchPreview} from './preview-research.js';
 import {createStudyPreview} from './preview-study.js';
-import {createTexPreview} from './preview-tex.js';
-import {createPdfPreview} from './preview-pdf.js';
 import {createGamePreview} from './preview-game.js';
 import {createRasterPreview} from './preview-raster.js';
 import {createDiffusePreview} from './preview-diffuse.js';
@@ -17,8 +15,6 @@ export function createPreview(deliver, mockLatency) {
   const claude = createClaudePreview(deliver);
   const research = createResearchPreview(deliver);
   const study = createStudyPreview(deliver);
-  const tex = createTexPreview(deliver);
-  const pdfs = createPdfPreview(deliver);
   const games = createGamePreview(deliver);
   const rasters = createRasterPreview(deliver);
   const diffuses = createDiffusePreview(deliver);
@@ -873,8 +869,6 @@ FCM: NON-DROP FRAME
     }
     if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
     if (command.type.startsWith("study")) return study.command(command);
-    if (command.type.startsWith("tex")) return tex.command(command);
-    if (command.type.startsWith("pdf")) return pdfs.command(command);
     if (command.type.startsWith("game")) return games.command(command);
     if (command.type.startsWith("raster")) return rasters.command(command);
     if (command.type.startsWith("diffuse")) return diffuses.command(command);
@@ -1399,7 +1393,7 @@ FCM: NON-DROP FRAME
     }
     if (command.type === "setMode") {
       state.mode = command.mode;
-      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "tex" ? tex.entered() : []), ...(state.mode === "pdf" ? pdfs.entered() : []), ...(state.mode === "game" ? games.sync() : []), ...(state.mode === "raster" ? rasters.sync() : []), ...(state.mode === "diffuse" ? diffuses.sync() : [])];
+      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "game" ? games.sync() : []), ...(state.mode === "raster" ? rasters.sync() : []), ...(state.mode === "diffuse" ? diffuses.sync() : [])];
     }
     // A real traced step, dumped from the core by
     // `crates/proton-core/tests/dump_step.rs`. Real rather than invented,

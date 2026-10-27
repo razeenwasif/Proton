@@ -1,13 +1,11 @@
 import {orderingChecks} from './ordering.js';
 import {studyChecks} from './suite-study.js';
-import {texChecks} from './suite-tex.js';
-import {pdfChecks} from './suite-pdf.js';
 import {gameChecks} from './suite-game.js';
 import {rasterChecks} from './suite-raster.js';
 import {diffuseChecks} from './suite-diffuse.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
-const layoutKeys = [...['chat', 'codex', 'codex.typeset', 'design', 'modeling', 'game', 'raster', 'diffuse', 'video', 'data', 'research', 'study', 'pdf'].map((mode) => `proton.panes.${mode}`),
+const layoutKeys = [...['chat', 'codex', 'design', 'modeling', 'game', 'raster', 'diffuse', 'video', 'data', 'research', 'study'].map((mode) => `proton.panes.${mode}`),
   // Which artifact each conversation had open.
   'proton.chat.panes'];
 const savedLayouts = layoutKeys.map((key) => [key, localStorage.getItem(key)]);
@@ -153,7 +151,7 @@ await test('Narrow windows show the requested panel without squeezing out the ed
   assert(!section.querySelector('aside').hidden, 'wide layout did not restore sidebar');
 });
 await test('Each mode keeps a usable stage, and every one has a right panel to toggle', async () => {
-  for (const mode of ['chat', 'design', 'modeling', 'game', 'raster', 'diffuse', 'video', 'data', 'research', 'study', 'tex', 'pdf', 'codex']) {
+  for (const mode of ['chat', 'design', 'modeling', 'game', 'raster', 'diffuse', 'video', 'data', 'research', 'study', 'codex']) {
     await win.dispatch({type: 'setMode', mode}); await settle();
     const section = $('.workspace.on'), stage = section.querySelector('main');
     assert(stage.clientWidth >= 320, `${mode} lost its stage`);
@@ -1774,11 +1772,10 @@ await test('Research sits beside Data after Codex: ⌃4 opens it, in Codex\'s ch
   assert(!shown($('.titlebar [data-term-toggle]')), 'Research offers a terminal it cannot show');
   const tab = $('.titlebar [data-mode="research"]');
   assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃4'), 'the title bar does not show Research');
-  // Codex, Data and Research side by side, in the title bar and on the rail;
-  // LaTeX and PDF beside Notebook, keeping their keys, ⌃0 and ⌃-.
+  // Codex, Data and Research side by side, in the title bar and on the rail.
   for (const list of ['.tb-modes', '.mode-rail']) {
     const order = [...doc.querySelectorAll(`${list} [data-mode]`)].map((b) => b.dataset.mode).join();
-    assert(order === 'chat,codex,data,research,study,tex,pdf,design,modeling,game,raster,diffuse,video', `${list} is not in the new order: ${order}`);
+    assert(order === 'chat,codex,data,research,study,design,modeling,game,raster,diffuse,video', `${list} is not in the new order: ${order}`);
   }
   assert(asked().slice(opaque).at(-1) === ground, `Research did not ask for the ground: ${JSON.stringify(asked().slice(opaque))}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
@@ -1863,6 +1860,8 @@ await test('Research ranks the hypotheses, opens one whole, and lets another inv
   assert(win.commands.slice(asked).find((c) => c.type === 'researchFolder')?.folder === '~/Github/Research', 'the folder was not asked for');
   await win.pushEvents([{type: 'notice', level: 'error', text: '~/Github: no such folder'}]);
   assert(where.querySelector('[data-research-where-form] input')?.value === '~/Github/Research', 'a refusal lost what was typed');
+  // The refusal's banner put away, so it does not lie over the modes after.
+  $('.editor-message:not([hidden]) button')?.click();
   await win.pushEvents([{type: 'researchList', investigations: [researchSummary('sky', 'Why is the sky blue?'), researchSummary('cubes', 'Sums of three cubes', 0)], open: 'sky',
     folder: '~/Github/Research/'}, researchBoard()]);
   assert(!where.querySelector('form') && where.textContent.includes('Kept in ~/Github/Research/'), `the folder line did not follow: ${where.textContent}`);
@@ -2417,8 +2416,6 @@ await test('A long name in the project panel scrolls sideways instead of being c
   if (was) space.style.setProperty('--col-l', was); else space.style.removeProperty('--col-l');
 });
 await studyChecks({test, assert, win, doc, $, settle, key, shown});
-await texChecks({test, assert, win, doc, $, settle, key, shown});
-await pdfChecks({test, assert, win, doc, $, settle, key, shown});
 await gameChecks({test, assert, win, doc, $, settle, key, shown});
 await rasterChecks({test, assert, win, doc, $, settle, shown});
 await diffuseChecks({test, assert, win, doc, $, settle, shown});

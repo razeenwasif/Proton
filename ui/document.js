@@ -4,8 +4,8 @@
  * could mean, so it never becomes one — the core answers `openBuffer` on a
  * `.pdf` with `Event::Document` and this draws it over whatever mode is on
  * screen: Codex's code (not its shell), Data's notebook, a library citation's
- * page from anywhere. The drawing is `pdf-view.js`'s, which LaTeX's pane
- * shares; this is the panel it is drawn in, and the keys it takes.
+ * page from anywhere. The drawing is `pdf-view.js`'s; this is the panel it
+ * is drawn in, and the keys it takes.
  */
 
 import { readDocument } from "./bridge.js";
@@ -23,9 +23,6 @@ let shown = false;
 
 /** Which open is the current one, so one superseded while it reads stops. */
 let generation = 0;
-
-/** What is open, for the PDF mode to take it over. @type {{path: string, page: number} | null} */
-let current = null;
 
 function theView() {
   if (view) return view;
@@ -76,19 +73,7 @@ export async function openDocument(event) {
     return;
   }
   if (mine !== generation) return;
-  current = { path: event.path, page: event.page ?? 1 };
   await pdf.show(bytes, { page: event.page });
-}
-
-/** The file on screen, and the page it is at: what "Open in PDF" opens. */
-export function documentOpened() {
-  return current ? { path: current.path, page: view?.pages?.() ? currentPage() : current.page } : null;
-}
-
-/** The page on screen, as the viewer last said. */
-function currentPage() {
-  const at = /** @type {HTMLElement | null} */ (label("at") ?? null)?.textContent ?? "";
-  return Number(/page (\d+)/.exec(at)?.[1] ?? current?.page ?? 1);
 }
 
 export function closeDocument() {

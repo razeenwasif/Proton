@@ -28,16 +28,20 @@ export async function diffuseChecks({test, assert, win, doc, $, settle, shown}) 
   const press = (/** @type {string} */ k, /** @type {KeyboardEventInit} */ extra = {}) =>
     $('[data-df-stage]').dispatchEvent(new win.KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...extra}));
 
-  await test('Diffuse is the thirteenth mode, on ⌃\\, in the newer modes\' chrome, and lists the flows here', async () => {
+  await test('Diffuse is the eleventh mode, on ⌃- and still on ⌃\\, in the newer modes\' chrome, and lists the flows here', async () => {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
     const start = win.commands.length;
     let before = win.commands.length;
     doc.body.dispatchEvent(new win.KeyboardEvent('keydown', {key: '\\', code: 'Backslash', ctrlKey: true, bubbles: true, cancelable: true}));
     await settle();
     assert(sent(before, 'setMode').some((/** @type {any} */ c) => c.mode === 'diffuse'), '⌃\\ did not ask for Diffuse');
+    const again = win.commands.length;
+    doc.body.dispatchEvent(new win.KeyboardEvent('keydown', {key: '-', code: 'Minus', ctrlKey: true, bubbles: true, cancelable: true}));
+    await settle();
+    assert(sent(again, 'setMode').some((/** @type {any} */ c) => c.mode === 'diffuse'), '⌃- did not ask for Diffuse');
     await win.dispatch({type: 'setMode', mode: 'diffuse'}); await settle();
     const tab = $('.tb-modes [data-mode="diffuse"]');
-    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃\\') && tab.textContent === 'Diffuse', 'the title bar does not show Diffuse on ⌃\\');
+    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃-') && tab.textContent === 'Diffuse', 'the title bar does not show Diffuse on ⌃-');
     assert(ws()?.classList.contains('on') && shown($('.titlebar')) && !shown($('.statusline')), 'Diffuse does not wear the newer modes\' chrome');
     assert(sent(start, 'diffuseLook').length === 1, `coming on screen looked at forge ${sent(start, 'diffuseLook').length} times, not once`);
     await win.pushEvents(core.sync()); await settle();

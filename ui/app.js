@@ -16,7 +16,7 @@ import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
 import { HAS_SHELL, applyBackdrop, copyText, dispatch, dispatchMany, onEvents, onCommand, pasteText, readGeometry, readLab, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, wireWindowChrome, quitApp } from "./bridge.js";
-import { closeDocument, documentIsOpen, documentKey, documentOpened, documentShown, fitDocument, openDocument, zoomDocument } from "./document.js";
+import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, zoomDocument } from "./document.js";
 import { decodeMesh } from "./meshbytes.js";
 import { createOverlays } from "./overlays.js";
 import { createPanels } from "./panels.js";
@@ -34,9 +34,6 @@ import { createResearch } from "./research.js";
 import { createStudy } from "./study.js";
 import { createLab } from "./lab.js";
 import { createLean } from "./lean.js";
-import { createTex } from "./tex.js";
-import { createTexVisual } from "./tex-visual.js";
-import { createPdf } from "./pdf.js";
 import { createGame } from "./game.js";
 import { createRaster } from "./raster.js";
 import { createDiffuse } from "./diffuse.js";
@@ -472,18 +469,17 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["chat", "codex", "data", "research", "study", "design", "modeling", "game", "video", "tex", "pdf", "raster", "diffuse"];
+const MODES = ["chat", "codex", "data", "research", "study", "design", "modeling", "game", "video", "raster", "diffuse"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
 let activeMode = "codex";
 
-/** Whether the mode on screen types into the editor: Codex, and LaTeX, whose
- *  editor is Codex's. */
-const editsText = (mode = activeMode) => mode === "codex" || mode === "tex";
+/** Whether the mode on screen types into the editor: Codex. */
+const editsText = (mode = activeMode) => mode === "codex";
 
-/** The section a mode is drawn in: LaTeX is Codex's, with its own dock. */
-const wsOf = (mode) => (mode === "tex" ? "codex" : mode);
+/** The section a mode is drawn in. */
+const wsOf = (mode) => mode;
 
 /* ── the window's ground ───────────────────────────────────────────────
    Codex paints every pixel of its own, so the window under it need not be
@@ -507,7 +503,7 @@ function renderWindowGround(again = false) {
   if (!HAS_SHELL) return;
   // Chat, Data, Research and Notebook are drawn as Codex is — every pixel
   // the theme's ground — so they get the same opaque window.
-  const want = ["codex", "chat", "data", "research", "study", "tex", "pdf", "game", "raster", "diffuse"].includes(activeMode) ? hexOf(token("--bg")) : null;
+  const want = ["codex", "chat", "data", "research", "study", "game", "raster", "diffuse"].includes(activeMode) ? hexOf(token("--bg")) : null;
   if (!again && want === groundAsked) return;
   groundAsked = want;
   setOpaque(want);
@@ -540,9 +536,6 @@ function renderMode(mode) {
   $('.titlebar .tb-modes .mode[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
   modeEdges();
   $$(".workspace").forEach((w) => w.classList.toggle("on", w.dataset.ws === wsOf(mode)));
-  // LaTeX shows its own dock in Codex's section; Codex its own again.
-  const code = $('.workspace[data-ws="codex"]');
-  if (code && (mode === "tex" || mode === "codex")) code.dataset.dock = mode === "tex" ? "typeset" : "panels";
   closeAll();
   panels.refresh();
   // The container that was just revealed is empty — the splits were drawn
@@ -902,9 +895,6 @@ const research = createResearch({ root: document, dispatch });
 const lab = createLab({ root: document, dispatch, readLab });
 /* Lean and Mathlib, in which a mathematics investigation's proofs are checked. */
 const lean = createLean({ root: document, dispatch });
-const tex = createTex({ root: document, dispatch });
-const texVisual = createTexVisual({ root: document, dispatch });
-const pdf = createPdf({ root: document, dispatch, keys: showKeys });
 /* Game: Proton's own engine — the games here, a game's rooms, held until saved. */
 const game = createGame({ root: document, dispatch, keys: showKeys });
 // Canvas mode, "raster" in the code: "canvas" and "paint" already mean drawing here.
@@ -3914,7 +3904,6 @@ function renderLayout(layout) {
   // empty panel — Chat is the one that means it.
   const workspace = $(`.workspace[data-ws="${wsOf(layout.mode)}"]`);
   if (workspace) workspace.dataset.dock = layout.dock;
-  // The right column's width is the dock's own: LaTeX's PDF is wider.
   panels.refresh();
 }
 
@@ -4072,16 +4061,6 @@ document.addEventListener("click", (e) => {
 
   if (e.target.closest("[data-doc-close]")) {
     closeDocument();
-    return;
-  }
-  // The file on screen, taken over by the PDF mode, at the page it was at.
-  if (e.target.closest("[data-doc-in-pdf]")) {
-    const opened = documentOpened();
-    closeDocument();
-    if (opened) {
-      coreSetMode("pdf");
-      dispatch({ type: "pdfOpen", path: opened.path, page: opened.page });
-    }
     return;
   }
   if (e.target.closest("[data-doc-fit]")) {
@@ -5227,42 +5206,6 @@ function renderEvent(event) {
       study?.codeRan(event);
       break;
 
-    case "texEnv":
-      tex?.env(event);
-      break;
-
-    case "texBuild":
-      tex?.build(event);
-      break;
-
-    case "texLog":
-      tex?.log(event);
-      break;
-
-    case "texPackages":
-      tex?.packages(event);
-      break;
-
-    case "texSync":
-      tex?.sync(event);
-      break;
-
-    case "texOutline":
-      tex?.outline(event);
-      break;
-
-    case "texTemplates":
-      tex?.templates(event);
-      break;
-
-    case "texCitations":
-      tex?.citations(event);
-      break;
-
-    case "texBlocks":
-      texVisual?.blocks(event);
-      break;
-
     case "leanEnv":
       lean?.env(event);
       break;
@@ -5393,50 +5336,7 @@ function renderEvent(event) {
       break;
 
     case "document":
-      // In the PDF mode a PDF opened anywhere — a citation, the tree — is
-      // one of its tabs, not a viewer over it.
-      if (activeMode === "pdf") dispatch({ type: "pdfOpen", path: event.path, page: event.page ?? null });
-      else openDocument(event);
-      break;
-
-    case "pdfTabs":
-      pdf?.tabs(event);
-      break;
-
-    case "pdfView":
-      void pdf?.show(event);
-      break;
-
-    case "pdfComments":
-      pdf?.comments(event);
-      break;
-
-    case "pdfFields":
-      pdf?.fields(event);
-      break;
-
-    case "pdfPassword":
-      pdf?.password(event);
-      break;
-
-    case "pdfInfo":
-      pdf?.info(event);
-      break;
-
-    case "pdfOcr":
-      pdf?.ocrProgress(event);
-      break;
-
-    case "pdfOcrLangs":
-      pdf?.ocrLangs(event);
-      break;
-
-    case "pdfLibrary":
-      pdf?.libraryEvent(event);
-      break;
-
-    case "pdfCovers":
-      pdf?.covers(event);
+      openDocument(event);
       break;
 
     case "debug":
@@ -5675,24 +5575,24 @@ document.addEventListener("keydown", (e) => {
   // everywhere else on the system).
   if (e.ctrlKey && /^[0-9]$/.test(e.key)) {
     e.preventDefault();
-    // ⌃0 is the tenth, as it is on a keyboard's row of digits.
+    // ⌃0 is the tenth, Canvas, as it is on a keyboard's row of digits.
     coreSetMode(MODES[e.key === "0" ? 9 : Number(e.key) - 1]);
     return;
   }
-  // ⌃- is the eleventh, PDF: the key after 0 on the row. By where it is, not
-  // what it types, so it is the same key on every layout.
+  // ⌃- is the eleventh, Diffuse: the key after 0 on the row. By where it is,
+  // not what it types, so it is the same key on every layout.
   if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Minus") {
     e.preventDefault();
-    coreSetMode("pdf");
+    coreSetMode("diffuse");
     return;
   }
-  // ⌃= the twelfth, Canvas: the key after - on the row.
+  // ⌃= and ⌃\, which were Canvas's and Diffuse's before LaTeX and Reader
+  // left for Quark, still are.
   if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Equal") {
     e.preventDefault();
     coreSetMode("raster");
     return;
   }
-  // ⌃\ the thirteenth, Diffuse: the key after = and the brackets.
   if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Backslash") {
     e.preventDefault();
     coreSetMode("diffuse");
@@ -5754,10 +5654,6 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (activeMode === "pdf" && !terminalFocused && pdf?.key(e)) {
-    e.preventDefault();
-    return;
-  }
 
   // ⌃Space asks for completions outright. ⌃n and ⌃p walk the list, and are
   // sent through as keys because the core is what knows whether a popup is
@@ -5775,13 +5671,6 @@ document.addEventListener("keydown", (e) => {
 
   if (editsText() && !terminalFocused && !overlays.active && !documentIsOpen()
       && historyShortcut(e, dispatch, /Mac/.test(navigator.platform))) return;
-
-  // ⌘⏎ in LaTeX: where the cursor's line is in the PDF.
-  if (e.metaKey && e.key === "Enter" && activeMode === "tex") {
-    e.preventDefault();
-    dispatch({ type: "texSyncForward" });
-    return;
-  }
 
   // ⌘V in the editor pastes the system clipboard (⌃⇧V elsewhere: ⌃V is
   // vim's block selection), and the core puts it where vim's `"+` would. In
@@ -6475,7 +6364,7 @@ document.addEventListener("click", (e) => {
    this redraws whole on every change — there is no stored list of them a
    delta could describe. */
 function renderReview(event) {
-  // Every box: Codex's dock and LaTeX's pane each have one.
+  // Every box with one: Codex's dock's.
   const boxes = $$("[data-staged]");
   if (!boxes.length) return;
 
@@ -6827,10 +6716,6 @@ function paintAgent(event) {
   // Working where it cannot be seen: a dot on Data's Agent tab says so.
   const dot = $("[data-data-agent-dot]");
   if (dot && $(".data-side")?.dataset.showing !== "agent") dot.hidden = event.activity === "idle";
-  const texDot = $("[data-tex-agent-dot]");
-  if (texDot && $("#tex-pane")?.dataset.showing !== "agent") texDot.hidden = event.activity === "idle";
-  const pdfDot = $("[data-pdf-agent-dot]");
-  if (pdfDot && $("#pdf-pane")?.dataset.showing !== "agent") pdfDot.hidden = event.activity === "idle";
   const gameDot = $("[data-game-agent-dot]");
   if (gameDot && $("#game-pane")?.dataset.showing !== "agent") gameDot.hidden = event.activity === "idle";
   const rasterDot = $("[data-raster-agent-dot]");
@@ -6876,7 +6761,7 @@ function paintAgent(event) {
     send.classList.toggle("stop", event.activity !== "idle");
     send.setAttribute("aria-label", event.activity === "idle" ? "Send" : "Stop");
     // Codex's composer sends with Zed's paper plane; Chat keeps its arrow.
-    const idle = send.closest("#codex-dock, #tex-pane, #pdf-pane, #game-pane, #raster-pane, #diffuse-pane") ? "send" : "arrow-up";
+    const idle = send.closest("#codex-dock, #game-pane, #raster-pane, #diffuse-pane") ? "send" : "arrow-up";
     send.innerHTML = `<svg class="i"><use href="#i-${
       event.activity === "idle" ? idle : "stop"
     }"/></svg>`;

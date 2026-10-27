@@ -38,15 +38,19 @@ export async function rasterChecks({test, assert, win, doc, $, settle, shown}) {
   };
   const home = {type: 'rasterHome', canvases: [{path: 'hero.canvas', name: 'hero', preset: 'pixel', size: [96, 80]}]};
 
-  await test('Canvas is the twelfth mode, on ⌃=, in the newer modes\' chrome, and its home page lists the canvases here and makes another', async () => {
+  await test('Canvas is the tenth mode, on ⌃0 and still on ⌃=, in the newer modes\' chrome, and its home page lists the canvases here and makes another', async () => {
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
     let before = win.commands.length;
     doc.body.dispatchEvent(new win.KeyboardEvent('keydown', {key: '=', code: 'Equal', ctrlKey: true, bubbles: true, cancelable: true}));
     await settle();
     assert(sent(before, 'setMode').some((/** @type {any} */ c) => c.mode === 'raster'), '⌃= did not ask for Canvas');
+    const again = win.commands.length;
+    doc.body.dispatchEvent(new win.KeyboardEvent('keydown', {key: '0', code: 'Digit0', ctrlKey: true, bubbles: true, cancelable: true}));
+    await settle();
+    assert(sent(again, 'setMode').some((/** @type {any} */ c) => c.mode === 'raster'), '⌃0 did not ask for Canvas');
     await win.dispatch({type: 'setMode', mode: 'raster'}); await settle();
     const tab = $('.tb-modes [data-mode="raster"]');
-    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃=') && tab.textContent === 'Canvas', 'the title bar does not show Canvas on ⌃=');
+    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃0') && tab.textContent === 'Canvas', 'the title bar does not show Canvas on ⌃0');
     assert(ws()?.classList.contains('on') && shown($('.titlebar')) && !shown($('.statusline')), 'Canvas does not wear the newer modes\' chrome');
     await win.pushEvents([home, {type: 'rasterCanvas', canvas: null}]); await settle();
     assert(ws().classList.contains('raster-home') && !shown($('.raster-side')), 'with no canvas open, the home page is not the whole page');
