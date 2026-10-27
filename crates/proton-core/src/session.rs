@@ -217,11 +217,6 @@ pub struct Session {
     /// Notebook: the person's notebooks and the knowledge base they draw
     /// from, one for every project here.
     study: crate::study::Study,
-    /// The TeX every workspace here shares, given for a test; the machine's
-    /// otherwise.
-    tex: Option<std::sync::Arc<std::sync::Mutex<proton_lab::tex::TexEnv>>>,
-    /// The PDF mode's open PDFs: the person's, one set for every project here.
-    pdf: crate::pdf::Pdfs,
     /// Diffuse: the flows open, the runs, and what forge is — the person's,
     /// kept in Diffuse's own folder whichever project is open.
     diffuse: crate::diffuse::Diffuse,
@@ -257,8 +252,6 @@ impl Session {
             person: None,
             make_research: crate::research::Research::kept_in,
             study: crate::study::Study::new(),
-            tex: None,
-            pdf: crate::pdf::Pdfs::new(),
             diffuse: crate::diffuse::Diffuse::default(),
             flow_waits: Vec::new(),
         }
@@ -299,42 +292,6 @@ impl Session {
 
     pub fn plugins(&self) -> &crate::plugins::Plugins {
         &self.plugins
-    }
-
-    /// With this TeX rather than the machine's, for every workspace here and
-    /// every one opened later: for a test, which must not look in
-    /// `~/.proton/tex`, let alone typeset with it.
-    pub fn with_tex_env(mut self, env: proton_lab::tex::TexEnv) -> Session {
-        let env = std::sync::Arc::new(std::sync::Mutex::new(env));
-        for workspace in &mut self.workspaces {
-            workspace.share_tex(&env);
-        }
-        self.tex = Some(env);
-        self
-    }
-
-    /// With these programs for the PDF mode's OCR: stand-ins, for a test.
-    pub fn with_pdf_ocr(mut self, tools: proton_lab::ocr::OcrTools) -> Session {
-        self.pdf = std::mem::take(&mut self.pdf).with_ocr(Some(tools));
-        self
-    }
-
-    /// A PDF library of these folders, its covers drawn by `covers`, kept in
-    /// `kept` when given: for a test.
-    pub fn with_pdf_library(mut self, folders: Vec<String>, covers: Option<PathBuf>, kept: Option<PathBuf>) -> Session {
-        let pdf = match kept {
-            Some(file) => crate::pdf::Pdfs::kept_in(file),
-            None => std::mem::take(&mut self.pdf),
-        };
-        self.pdf = pdf.with_library(folders, covers);
-        self
-    }
-
-    /// One of the agent's PDF tools, run on the PDF on top, as the session
-    /// answers them when a workspace's agent calls one: the answer, and what
-    /// the window draws again.
-    pub fn pdf_tool(&mut self, name: &str, input: &serde_json::Value) -> (Result<String, String>, Vec<Event>) {
-        self.pdf.tool(name, input)
     }
 
     /// One of the agent's Diffuse tools, as the session answers them: now,
@@ -401,7 +358,6 @@ impl Session {
     pub fn with_person_settings(mut self, file: PathBuf) -> Session {
         let folder = crate::settings::Settings::at(file.clone()).research_folder();
         self.study = std::mem::take(&mut self.study).with_person_settings(&file);
-        self.pdf = std::mem::take(&mut self.pdf).with_person_settings(&file);
         self.diffuse.set_person(Some(file.clone()));
         self.person = Some(file);
         match folder {
@@ -416,23 +372,6 @@ impl Session {
     /// Refused while a round or a run is going, since the Research that has
     /// them is let go of. A folder that is not there is made only when its
     /// parent is, so a slip of the keyboard cannot make a tree of them.
-    /// A new LaTeX project from a template, opened as a workspace of its own
-    /// in LaTeX, on its main file.
-    fn tex_new(&mut self, template: &str, parent: &str, name: &str) -> Vec<Event> {
-        let parent = folder::normalise(&folder::expand(parent.trim()));
-        let made = match proton_tex::templates::create(template, &parent, name) {
-            Ok(made) => made,
-            Err(why) => return vec![notice(why, NoticeLevel::Error)],
-        };
-        let mut events = vec![notice(format!("Made {}.", folder::tilde(&made.folder)), NoticeLevel::Info)];
-        if self.active().mode() != ModeId::Tex {
-            events.extend(self.set_mode(ModeId::Tex));
-        }
-        events.extend(self.open(&made.folder.display().to_string()));
-        events.extend(self.active_mut().tex_begin(&made.main));
-        events
-    }
-
     fn set_research_folder(&mut self, typed: &str) -> Vec<Event> {
         let lock = |r: &std::sync::Arc<std::sync::Mutex<crate::research::Research>>| r.lock().map(|r| r.has_work()).unwrap_or(false);
         if self.research.as_ref().is_some_and(lock) || self.workspaces.iter().any(Workspace::research_busy) {
@@ -549,11 +488,6 @@ impl Session {
         // next time against wherever the app was launched from — which from
         // the Dock is `/`.
         let mut session = Session::new(folder::normalise(&start));
-        // The PDFs opened before are kept beside the session, and only where
-        // it is kept: a test's session remembers none.
-        if let Some(dir) = store.as_deref().and_then(Path::parent) {
-            session.pdf = crate::pdf::Pdfs::kept_in(dir.join("pdf.json")).with_ocr(proton_lab::ocr::OcrTools::find());
-        }
         // The app's session: modes start with no project of their own, given
         // folders in ~/Proton; the folder it opens on is Codex's.
         if store.is_some() {
@@ -663,8 +597,6 @@ impl Session {
                     .map(move |file| if many { format!("{project}/{file}") } else { file })
             })
             .collect();
-        // And the PDFs changed in the PDF mode, which are no project's.
-        files.extend(self.pdf.unsaved().into_iter().map(|name| format!("{name} (PDF)")));
         // And Diffuse's flows, which are in its own folder.
         files.extend(self.diffuse.unsaved().into_iter().map(|name| format!("{name} (Diffuse)")));
         files
@@ -674,7 +606,6 @@ impl Session {
     /// could not be, and why.
     pub fn save_unsaved(&mut self) -> Vec<String> {
         let mut failed: Vec<String> = self.workspaces.iter_mut().flat_map(|workspace| workspace.save_unsaved()).collect();
-        failed.extend(self.pdf.save_unsaved());
         failed.extend(self.diffuse.save_unsaved());
         failed
     }
@@ -689,11 +620,9 @@ impl Session {
             research.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
         }
         self.study.shutdown();
-        self.pdf.shutdown();
         // The machine's Lean, if it is being made: here, not in Research's
         // shutdown, which also runs when the investigations' folder moves.
         crate::research::quit_lean();
-        crate::tex::quit_tex();
     }
 
     /// Where a file a Lab run left is, in the workspace on screen.
@@ -869,11 +798,6 @@ impl Session {
 
     /// A file some workspace here opened in the document viewer — the page
     /// may still be showing one from a project it has since left.
-    /// The bytes of a view the PDF mode holds, by its key — never on disk.
-    pub fn document_bytes(&self, key: &str) -> Option<std::sync::Arc<Vec<u8>>> {
-        self.pdf.view_bytes(key)
-    }
-
     pub fn document_file(&self, path: &str) -> Option<PathBuf> {
         self.workspaces.iter().find_map(|w| w.document_file(Path::new(path))).or_else(|| self.study.document_file(Path::new(path)))
     }
@@ -952,20 +876,12 @@ impl Session {
                     let home = self.diffuse_home();
                     events.extend(self.diffuse.enter(&home));
                 }
-                if mode == ModeId::Pdf {
-                    let root = self.active().root().to_path_buf();
-                    let pdfs = self.active_mut().pdf_files();
-                    events.extend(self.pdf.enter(&root, pdfs));
-                }
                 events
             }
             Command::ResearchFolder { folder } => self.set_research_folder(&folder),
-            Command::TexNew { template, parent, name } => self.tex_new(&template, &parent, &name),
             // Notebook's are the session's: a notebook is the person's, not a project's.
             command if crate::study::handles(&command) => self.study.apply(command),
-            // As are PDF's: a PDF is the person's wherever it lives.
-            command if crate::pdf::handles(&command) => self.pdf.apply(command),
-            // And Diffuse's: its flows and images are in a folder of its own.
+            // As are Diffuse's: its flows and images are in a folder of its own.
             Command::DiffuseFolder { folder } => self.set_diffuse_folder(folder),
             Command::DiffuseSend { path, to } => self.diffuse_send(&path, &to),
             command if crate::diffuse::handles(&command) => {
@@ -1016,14 +932,10 @@ impl Session {
                 events
             }
 
-            // What `@pdf` and `@flow` stand for is the session's to say: the
-            // PDFs and the flows are its.
+            // What `@flow` stands for is the session's to say: the flows are
+            // its.
             Command::Ask { text } => {
                 let mentioned = crate::mention::found(&text);
-                if mentioned.contains(&crate::mention::Mention::Pdf) {
-                    let about = self.pdf.about();
-                    self.active_mut().set_pdf_about(about);
-                }
                 if mentioned.contains(&crate::mention::Mention::Flow) {
                     let about = self.flow_about();
                     self.active_mut().set_flow_about(about);
@@ -1045,8 +957,8 @@ impl Session {
     }
 
     /// A workspace that changed mode by itself took its project along: a
-    /// notebook opened from Codex is Data's document, a `.tex` file is
-    /// LaTeX's. The mode it left goes on showing that project and the mode
+    /// notebook opened from Codex is Data's document. The mode it left goes
+    /// on showing that project and the mode
     /// it went to shows it now, so both list it — and the switcher on screen
     /// is the new mode's.
     fn crossed(&mut self, from: ModeId) -> Option<Event> {
@@ -1189,26 +1101,20 @@ impl Session {
             workspace.set_quiet(index != active);
             let produced = workspace.apply(Command::Poll);
             workspace.set_quiet(false);
-            // The agent's PDF and Diffuse tools, answered from the session's
-            // PDFs and flows — whichever project's agent asked, since they
-            // are none's. A run it waits on is answered once it has ended.
+            // The agent's Diffuse tools, answered from the session's flows —
+            // whichever project's agent asked, since they are none's. A run
+            // it waits on is answered once it has ended.
             for (id, name, input) in workspace.take_session_calls() {
-                if crate::diffuse::TOOLS.contains(&name.as_str()) {
-                    let (said, events) = self.diffuse.tool(&home, &name, &input);
-                    match said {
-                        crate::diffuse::Said::Now(answer) => workspace.answer_tool(&id, answer),
-                        crate::diffuse::Said::Wait(run) => self.flow_waits.push((
-                            workspace.root().to_path_buf(),
-                            id,
-                            run,
-                            std::time::Instant::now() + FLOW_WAIT,
-                        )),
-                    }
-                    drawn.extend(events);
-                    continue;
+                let (said, events) = self.diffuse.tool(&home, &name, &input);
+                match said {
+                    crate::diffuse::Said::Now(answer) => workspace.answer_tool(&id, answer),
+                    crate::diffuse::Said::Wait(run) => self.flow_waits.push((
+                        workspace.root().to_path_buf(),
+                        id,
+                        run,
+                        std::time::Instant::now() + FLOW_WAIT,
+                    )),
                 }
-                let (answer, events) = self.pdf.tool(&name, &input);
-                workspace.answer_tool(&id, answer);
                 drawn.extend(events);
             }
             if index == active {
@@ -1224,7 +1130,6 @@ impl Session {
             events.extend(research.lock().unwrap_or_else(|e| e.into_inner()).poll());
         }
         events.extend(self.study.poll());
-        events.extend(self.pdf.poll());
         events.extend(self.diffuse.poll(&home));
         // Runs the agent waited on that have ended — or that it has waited
         // on long enough.
@@ -1254,9 +1159,6 @@ impl Session {
 
     fn build(&self, root: &Path) -> Workspace {
         let mut workspace = Workspace::rooted(root).sharing_plugins(&self.plugins).sharing_research(self.research.as_ref());
-        if let Some(tex) = &self.tex {
-            workspace.share_tex(tex);
-        }
         if self.servers {
             workspace.enable_language_servers();
         }
@@ -1530,11 +1432,10 @@ impl Session {
     }
 
     /// The two sides of a session from before every mode kept its own:
-    /// Codex's projects are Codex's, Data's are Data's, Research's,
-    /// Notebook's and Reader's — and every other mode starts on a folder of
-    /// its own.
+    /// Codex's projects are Codex's, Data's are Data's, Research's and
+    /// Notebook's — and every other mode starts on a folder of its own.
     fn restore_sides(&mut self, sides: &StoredSides) {
-        const DATA_SIDE: [ModeId; 4] = [ModeId::Data, ModeId::Research, ModeId::Study, ModeId::Pdf];
+        const DATA_SIDE: [ModeId; 3] = [ModeId::Data, ModeId::Research, ModeId::Study];
         for (listed, workspace) in self.listed.iter_mut().zip(&self.workspaces) {
             let root = workspace.root().display().to_string();
             *listed = Listed::default();

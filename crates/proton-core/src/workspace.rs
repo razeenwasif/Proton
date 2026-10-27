@@ -138,8 +138,6 @@ pub struct Workspace {
     /// `research/`, or the session's, where the person keeps them in a
     /// folder of their own and every project shows the same ones.
     research: Arc<Mutex<crate::research::Research>>,
-    /// The LaTeX mode: the machine's TeX as this workspace draws it.
-    tex: crate::tex::Tex,
     /// Whether `research` is the session's. The session polls and stops a
     /// shared one itself, once; were every workspace to poll it, what a
     /// round said could be drained by a project in the background and
@@ -166,13 +164,10 @@ pub struct Workspace {
     /// hash: so a streaming answer sends the entries from the first that
     /// changed rather than the whole conversation on every token.
     agent_sent: std::cell::RefCell<Vec<u64>>,
-    /// The agent's PDF and Diffuse tool calls, which the session answers: the
-    /// PDFs and the flows are its, not a project's. Deferred as a cell run
-    /// is, and for as long.
+    /// The agent's Diffuse tool calls, which the session answers: the flows
+    /// are its, not a project's. Deferred as a cell run is, and for as long.
     session_calls: Vec<(String, String, serde_json::Value)>,
-    /// What `@pdf` says in the next question, as the session last told it.
-    pdf_about: Option<String>,
-    /// What `@flow` says, likewise.
+    /// What `@flow` says in the next question, as the session last told it.
     flow_about: Option<String>,
     /// The file the open conversation lives in. `None` until it has a
     /// question in it — a conversation with nothing said is not worth a file.
@@ -339,7 +334,6 @@ impl Workspace {
             agent: Agent::new(&root.display().to_string()),
             claude: crate::claude::Claude::new(root),
             research: Arc::new(Mutex::new(crate::research::Research::new(root))),
-            tex: crate::tex::Tex::default(),
             research_shared: false,
             documents: std::collections::BTreeSet::new(),
             visualizer: Visualizer::new(root),
@@ -371,25 +365,6 @@ impl Workspace {
     pub fn with_language_servers(mut self) -> Self {
         self.enable_language_servers();
         self
-    }
-
-    /// With this TeX rather than the machine's: for a test, which must not
-    /// look in `~/.proton/tex` or ask GitHub.
-    pub fn with_tex_env(mut self, env: proton_lab::tex::TexEnv) -> Self {
-        self.tex = crate::tex::Tex::with_env(env);
-        self
-    }
-
-    /// The PDFs in the project, as far as it has been listed: for the PDF
-    /// mode's Open box. Listing is started if it has not been.
-    pub fn pdf_files(&mut self) -> Vec<String> {
-        self.pickers.warm();
-        self.pickers.ending(".pdf", 400)
-    }
-
-    /// A TeX shared with other workspaces: the session's, for a test.
-    pub fn share_tex(&mut self, env: &std::sync::Arc<std::sync::Mutex<proton_lab::tex::TexEnv>>) {
-        self.tex = crate::tex::Tex::sharing(env.clone());
     }
 
     /// The same, for a workspace that is already in a collection and cannot be
@@ -1607,41 +1582,6 @@ impl Workspace {
             | Command::DiffuseSend { .. }
             | Command::DiffuseGateways { .. }
             | Command::DiffuseFolder { .. } => Vec::new(),
-            // PDF is the window's too: the session answers it.
-            Command::PdfOpen { .. }
-            | Command::PdfClose { .. }
-            | Command::PdfFocus { .. }
-            | Command::PdfUndo
-            | Command::PdfRedo
-            | Command::PdfSave
-            | Command::PdfSaveAs { .. }
-            | Command::PdfRotate { .. }
-            | Command::PdfDelete { .. }
-            | Command::PdfInsertBlank { .. }
-            | Command::PdfMove { .. }
-            | Command::PdfInsertFile { .. }
-            | Command::PdfExtract { .. }
-            | Command::PdfSplit { .. }
-            | Command::PdfCombine { .. }
-            | Command::PdfComment { .. }
-            | Command::PdfReply { .. }
-            | Command::PdfEditComment { .. }
-            | Command::PdfDeleteComment { .. }
-            | Command::PdfSetField { .. }
-            | Command::PdfFlatten
-            | Command::PdfSetInfo { .. }
-            | Command::PdfProtect { .. }
-            | Command::PdfUnprotect
-            | Command::PdfSanitize
-            | Command::PdfCompress
-            | Command::PdfOcr { .. }
-            | Command::PdfOcrStop
-            | Command::PdfOcrLangs
-            | Command::PdfAt { .. }
-            | Command::PdfLibraryScan
-            | Command::PdfLibraryFolders { .. }
-            | Command::PdfCovers { .. }
-            | Command::PdfRenameBook { .. } => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }
@@ -1813,115 +1753,8 @@ impl Workspace {
                 let mut events = self.poll_servers();
                 // A canvas's save, written on a worker, has finished.
                 events.extend(self.raster.poll());
-                let (built, readable) = self.tex.poll();
-                // TeX installed: the editor's LaTeX server is its texlab.
-                if built.iter().any(|e| matches!(e, Event::TexEnv { env: proton_lab::tex::TexState::Ready { .. } })) {
-                    self.use_texlab();
-                }
-                // The PDF and the log a build made, for the window to read.
-                self.documents.extend(readable);
-                events.extend(built);
-                // An edit the visual editor did not make — a save's reload, a
-                // file opened — is drawn there too.
-                if self.tex.visual && self.mode == ModeId::Tex {
-                    events.extend(self.tex_blocks(false));
-                }
-                if self.tex.cite.searching() {
-                    let main = self.tex_main();
-                    events.extend(self.tex.cite.poll(main.as_deref()));
-                }
                 events
             }
-
-            Command::TexCompile => self.tex_compile(),
-            Command::TexStop => self.tex.stop(),
-            Command::TexSyncForward => {
-                let root = self.pickers.root().to_path_buf();
-                let buffer = self.editor.buffer();
-                let Some(path) = buffer.path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) }) else {
-                    return vec![notice("Open a file of the document first.".into(), NoticeLevel::Info)];
-                };
-                let line = buffer.position(buffer.cursor.offset).line as u32 + 1;
-                self.tex.sync_forward(&root, &path, line)
-            }
-            Command::TexSyncInverse { page, x, y } => match self.tex.sync_inverse(page, x, y) {
-                Some((path, line)) => self.apply(Command::JumpTo { mode: ModeId::Tex, path, line: line.saturating_sub(1) as usize, column: 0 }),
-                None => vec![notice("Nothing there was typeset from the source.".into(), NoticeLevel::Info)],
-            },
-            Command::TexSavePdf => {
-                let root = self.pickers.root().to_path_buf();
-                self.tex.save_pdf(&root)
-            }
-            Command::TexAddTemplate { template } => {
-                let root = self.pickers.root().to_path_buf();
-                match proton_tex::templates::add(&template, &root) {
-                    Ok(made) => {
-                        let mut events = vec![notice(format!("added {}", made.wrote.iter().map(|f| made.folder.join(f).strip_prefix(&root).map(|p| p.display().to_string()).unwrap_or_default()).collect::<Vec<_>>().join(", ")), NoticeLevel::Info)];
-                        events.extend(self.tex_begin(&made.main));
-                        events
-                    }
-                    Err(why) => vec![notice(why, NoticeLevel::Error)],
-                }
-            }
-            Command::TexCiteSearch { query } => {
-                let main = self.tex_main();
-                let papers = self.research().every_paper();
-                self.tex.cite.search(main.as_deref(), &papers, &query)
-            }
-            Command::TexCiteOnline => {
-                let query = self.tex.cite.query().to_string();
-                if query.is_empty() {
-                    return vec![notice("Type what to look for first.".into(), NoticeLevel::Info)];
-                }
-                let fetch = self.research().search_literature(&query);
-                self.tex.cite.online(fetch)
-            }
-            Command::TexCite { source, id } => self.tex_cite(&source, &id),
-            Command::TexWriteUp { slug } => self.tex_write_up(&slug),
-            Command::TexVisual { on, at } => {
-                self.tex.visual = on;
-                self.tex.drawn = None;
-                if on {
-                    return self.tex_blocks(true);
-                }
-                let mut events = Vec::new();
-                if let Some(at) = at {
-                    let buffer = self.editor.buffer_mut();
-                    let at = (at as usize).min(buffer.len_chars());
-                    buffer.cursor = buffer.clamp(proton_text::Cursor::at(at));
-                    events.extend(self.after_action(false));
-                }
-                events
-            }
-            Command::TexVisualEdit { version, start, end, old, latex } => self.tex_visual_edit(version, start as usize, end as usize, &old, &latex),
-            Command::TexVisualUndo { redo } => {
-                let buffer = self.editor.buffer_mut();
-                buffer.end_group();
-                let moved = if redo { buffer.redo() } else { buffer.undo() };
-                if !moved {
-                    return Vec::new();
-                }
-                self.resync();
-                let mut events = self.after_action(true);
-                events.extend(self.tex_blocks(false));
-                events
-            }
-            // A new project is a new workspace: the session makes it.
-            Command::TexNew { .. } => vec![notice("A new project is made by the window.".into(), NoticeLevel::Warn)],
-            Command::TexFindPackages { files } => self.tex.packages_do(|env| env.find_packages(files)),
-            Command::TexInstallPackages { packages } => self.tex.packages_do(|env| env.install_packages(packages)),
-            Command::TexForgetPackages => self.tex.packages_do(|env| {
-                env.forget_packages();
-                Ok(())
-            }),
-
-            Command::TexPlan { bundle } => self.tex.plan(bundle),
-            Command::TexCreate => self.tex.env_do(|env| env.create()),
-            Command::TexCancel => self.tex.env_do(|env| {
-                env.cancel();
-                Ok(())
-            }),
-            Command::TexRemove => self.tex.env_do(|env| env.remove()),
 
             Command::Complete => self.request_completion(),
 
@@ -2947,9 +2780,9 @@ impl Workspace {
                 // On by default: a formatter configured and not run is the
                 // surprise, not the other way round. Off is for a project
                 // whose formatter disagrees with its own history.
-                // Not a LaTeX file: texlab formats with latexindent, which
-                // TinyTeX does not have, and a save is typeset instead.
-                let tex = self.editor.buffer().path().is_some_and(crate::tex::is_source);
+                // Not a LaTeX file: texlab formats with latexindent, which is
+                // seldom installed.
+                let tex = self.editor.buffer().path().is_some_and(is_latex);
                 // C and C++ are left as written unless asked for: clangd's
                 // and clang-format's house style rewrites code that has its
                 // own. `␣lf` still formats one when asked.
@@ -2957,213 +2790,10 @@ impl Workspace {
                 if self.settings.bool("editor.formatOnSave", true) && !tex && (!c || self.settings.bool("editor.formatC", false)) {
                     events.extend(self.request_format(true));
                 }
-                if tex && (self.mode == ModeId::Tex || self.tex.used()) && self.settings.bool("tex.compileOnSave", true) {
-                    events.extend(self.tex_compile());
-                }
-                if tex && self.mode == ModeId::Tex {
-                    events.extend(self.tex_outline(false));
-                }
                 events
             }
             Err(err) => vec![notice(err.to_string(), NoticeLevel::Error)],
         }
-    }
-
-    /// The editor's LaTeX server is Proton's own texlab, once TeX is installed.
-    fn use_texlab(&mut self) {
-        if let Some(texlab) = self.tex.texlab() {
-            self.servers.set_program("latex", texlab);
-        }
-    }
-
-    /// A project just made from a template: its main file opened in LaTeX,
-    /// what TeX lacks for it offered or else typeset, and its outline drawn.
-    pub fn tex_begin(&mut self, main: &Path) -> Vec<Event> {
-        let mut events = self.apply(Command::JumpTo { mode: ModeId::Tex, path: main.display().to_string(), line: 0, column: 0 });
-        let root = self.pickers.root().to_path_buf();
-        let engine = self.settings.get("tex.engine").and_then(|v| v.as_str()).map(str::to_string);
-        events.extend(self.tex.begin(&root, main, engine.as_deref()));
-        events.extend(self.tex_outline(true));
-        events.push(self.tree_event());
-        events
-    }
-
-    /// The main file of the project's document, from the file being edited.
-    fn tex_main(&self) -> Option<PathBuf> {
-        let root = self.pickers.root().to_path_buf();
-        let active = self.editor.buffer().path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) });
-        crate::tex::main_of(&root, active.as_deref())
-    }
-
-    /// Cite a paper where the cursor is, in the `.tex` being edited: its
-    /// entry added to the document's `.bib` first, when it is new there.
-    fn tex_cite(&mut self, source: &str, id: &str) -> Vec<Event> {
-        let root = self.pickers.root().to_path_buf();
-        let Some(path) = self.editor.buffer().path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) }) else {
-            return vec![notice("Open the .tex file to cite in.".into(), NoticeLevel::Info)];
-        };
-        if path.extension().and_then(|e| e.to_str()) != Some("tex") {
-            return vec![notice("Open the .tex file to cite in.".into(), NoticeLevel::Info)];
-        }
-        let main = crate::tex::main_of(&root, Some(&path)).unwrap_or_else(|| path.clone());
-        let record = match source {
-            "bib" => None,
-            "research" => {
-                let Some((slug, paper)) = id.split_once('/') else { return vec![notice(format!("{id}: not a paper"), NoticeLevel::Error)] };
-                let found = self.research().investigation(slug).ok().and_then(|f| f.papers().into_iter().find(|p| p.id == paper));
-                match found {
-                    Some(paper) => Some(paper.record),
-                    None => return vec![notice(format!("{id}: no such paper"), NoticeLevel::Error)],
-                }
-            }
-            "online" => match self.tex.cite.online_record(id) {
-                Some(record) => Some(record),
-                None => return vec![notice("Search again: that result has gone.".into(), NoticeLevel::Warn)],
-            },
-            other => return vec![notice(format!("{other}: not somewhere papers are"), NoticeLevel::Error)],
-        };
-        // An entry is written to the file: not under edits not saved.
-        let (bibs, _) = crate::tex::cite::bib_files(&main);
-        if record.is_some() {
-            if let Some(open) = bibs.iter().find(|b| self.editor.find(b).is_some_and(|i| self.editor.buffers()[i].is_modified())) {
-                let name = open.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                return vec![notice(format!("Save {name} first: the entry is added to the file."), NoticeLevel::Warn)];
-            }
-        }
-        let cited = match record {
-            Some(record) => match crate::tex::cite::cite_record(&main, &record) {
-                Ok(cited) => cited,
-                Err(why) => return vec![notice(why, NoticeLevel::Error)],
-            },
-            None => crate::tex::cite::Cited { key: id.to_string(), added: None, unnamed: false },
-        };
-        let buffer = self.editor.buffer();
-        let at = buffer.cursor.offset;
-        let here = buffer.position(at);
-        let before: String = buffer.line(here.line).chars().take(here.column).collect();
-        let text = crate::tex::cite::cite_text(&before, &cited.key);
-        let length = text.chars().count();
-        self.editor.buffer_mut().apply(vec![proton_text::Edit::insert(at, text)], proton_text::Cursor::at(at + length));
-        self.resync();
-        let mut events = self.after_action(true);
-        if let Some(bib) = &cited.added {
-            self.editor.reread_changed_on_disk();
-            let name = bib.strip_prefix(&root).unwrap_or(bib).display().to_string();
-            let said = if cited.unnamed {
-                format!("added {} to {name} — the document names no bibliography yet: add \\bibliography{{references}} before \\end{{document}}", cited.key)
-            } else {
-                format!("added {} to {name}", cited.key)
-            };
-            events.push(notice(said, NoticeLevel::Info));
-            events.push(self.tree_event());
-        }
-        events
-    }
-
-    /// The file being edited as the visual editor draws it — when it has
-    /// changed since it was last drawn, or `always`. The figures it shows
-    /// are let through to the window.
-    fn tex_blocks(&mut self, always: bool) -> Vec<Event> {
-        let root = self.pickers.root().to_path_buf();
-        let buffer = self.editor.buffer();
-        let Some(path) = buffer.path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) }) else { return Vec::new() };
-        let now = (path.clone(), buffer.version());
-        if !always && self.tex.drawn.as_ref() == Some(&now) {
-            return Vec::new();
-        }
-        self.tex.drawn = Some(now);
-        let text = buffer.contents();
-        let version = buffer.version();
-        let blocks = proton_tex::blocks::blocks(&text);
-        // The macros are the main file's, which a chapter does not have.
-        let main = crate::tex::main_of(&root, Some(&path)).unwrap_or_else(|| path.clone());
-        let preamble = if main == path { text.clone() } else { std::fs::read_to_string(&main).unwrap_or_default() };
-        let preamble = preamble.split("\\begin{document}").next().unwrap_or("").to_string();
-        let macros = proton_tex::blocks::macros(&preamble);
-        // A figure's image, beside the main file as TeX looks for it, with
-        // the extensions it tries.
-        let dir = main.parent().unwrap_or(&root).to_path_buf();
-        let mut images = Vec::new();
-        for name in blocks.iter().filter_map(|b| b.image.clone()) {
-            let named = dir.join(&name);
-            let found = std::iter::once(named.clone())
-                .chain(["png", "jpg", "jpeg", "pdf"].iter().map(|e| named.with_extension(e)))
-                .find(|p| p.is_file() && p.starts_with(&root));
-            if let Some(found) = found {
-                if !images.iter().any(|(n, _): &(String, String)| *n == name) {
-                    self.documents.insert(found.clone());
-                    images.push((name, found.display().to_string()));
-                }
-            }
-        }
-        vec![Event::TexBlocks { path: path.display().to_string(), version, blocks, macros, images }]
-    }
-
-    /// A block edited in the visual editor: applied as the smallest change
-    /// that makes its span read `latex`, if the buffer is as it was drawn.
-    fn tex_visual_edit(&mut self, version: u64, start: usize, end: usize, old: &str, latex: &str) -> Vec<Event> {
-        let buffer = self.editor.buffer();
-        let fits = buffer.version() == version && start <= end && end <= buffer.len_chars() && buffer.slice(proton_text::Range::new(start, end)) == old;
-        if !fits {
-            // Drawn again from the buffer as it is: the edit is not lost to
-            // the person, who still sees it, but it is not guessed at.
-            let mut events = vec![notice("The source changed under that edit: it is drawn again as it stands.".into(), NoticeLevel::Warn)];
-            events.extend(self.tex_blocks(true));
-            return events;
-        }
-        let old_chars: Vec<char> = old.chars().collect();
-        let new_chars: Vec<char> = latex.chars().collect();
-        let prefix = old_chars.iter().zip(&new_chars).take_while(|(a, b)| a == b).count();
-        let suffix = old_chars[prefix..].iter().rev().zip(new_chars[prefix..].iter().rev()).take_while(|(a, b)| a == b).count();
-        if prefix == old_chars.len() && prefix == new_chars.len() {
-            return Vec::new();
-        }
-        let from = start + prefix;
-        let to = end - suffix;
-        let text: String = new_chars[prefix..new_chars.len() - suffix].iter().collect();
-        let length = text.chars().count();
-        let buffer = self.editor.buffer_mut();
-        buffer.end_group();
-        buffer.apply(vec![proton_text::Edit::replace(proton_text::Range::new(from, to), text)], proton_text::Cursor::at(from + length));
-        buffer.end_group();
-        self.resync();
-        let mut events = self.after_action(true);
-        events.extend(self.tex_blocks(false));
-        events
-    }
-
-    /// Write an investigation up as a paper in this project, and open it.
-    fn tex_write_up(&mut self, slug: &str) -> Vec<Event> {
-        let folder = match self.research().investigation(slug) {
-            Ok(folder) => folder,
-            Err(why) => return vec![notice(why, NoticeLevel::Error)],
-        };
-        let root = self.pickers.root().to_path_buf();
-        match crate::tex::writeup::write_up(&folder, &root) {
-            Ok(made) => {
-                let name = made.main.strip_prefix(&root).unwrap_or(&made.main).display().to_string();
-                let count = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
-                let mut events = vec![notice(format!("wrote {name}: {}, {}", count(made.figures, "figure"), count(made.papers, "reference")), NoticeLevel::Info)];
-                events.extend(self.tex_begin(&made.main));
-                events
-            }
-            Err(why) => vec![notice(why, NoticeLevel::Error)],
-        }
-    }
-
-    /// The document's outline, from the file being edited.
-    fn tex_outline(&mut self, always: bool) -> Vec<Event> {
-        let root = self.pickers.root().to_path_buf();
-        let active = self.editor.buffer().path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) });
-        self.tex.outline_event(&root, active.as_deref(), always)
-    }
-
-    /// Typeset the project from the file being edited.
-    fn tex_compile(&mut self) -> Vec<Event> {
-        let root = self.pickers.root().to_path_buf();
-        let active = self.editor.buffer().path().map(|p| if p.is_absolute() { p.to_path_buf() } else { root.join(p) });
-        let engine = self.settings.get("tex.engine").and_then(|v| v.as_str()).map(str::to_string);
-        self.tex.compile(&root, active.as_deref(), engine.as_deref())
     }
 
     /// Ask the server to format the active buffer.
@@ -3606,7 +3236,7 @@ impl Workspace {
         // `.` and `:` everywhere, and in a LaTeX file whatever texlab asks
         // for — its `\`, `{` and `,`. Other servers' own characters (Rust's
         // `(`, TypeScript's `"`) would open a list where none opened before.
-        let server = self.editor.buffer().path().is_some_and(|p| crate::tex::is_source(p) && self.servers.can(p).triggers_on(c));
+        let server = self.editor.buffer().path().is_some_and(|p| is_latex(p) && self.servers.can(p).triggers_on(c));
         let trigger = c == '.' || c == ':' || server;
         let feeding = self.popup.is_open() && (c.is_alphanumeric() || c == '_');
         if trigger || feeding {
@@ -4883,26 +4513,12 @@ impl Workspace {
             out.push_str(&match mention {
                 crate::mention::Mention::Selection => self.selected_text(),
                 crate::mention::Mention::Dataframe => self.selected_frame(),
-                crate::mention::Mention::Log => self.tex_log_text(),
-                crate::mention::Mention::Pdf => self.pdf_about.clone().unwrap_or_else(|| "No PDF is open in the PDF mode.".into()),
                 crate::mention::Mention::Game => self.game.about(),
                 crate::mention::Mention::Canvas => self.raster.about(self.root()),
                 crate::mention::Mention::Flow => self.flow_about.clone().unwrap_or_else(|| "Diffuse has not been opened.".into()),
             });
         }
         out
-    }
-
-    /// The last LaTeX build and its log, the source round each error read
-    /// from the buffers open — an edit not yet saved included — or the disk.
-    fn tex_log_text(&self) -> String {
-        self.tex.describe(|file| {
-            let path = self.pickers.resolve(file);
-            match self.editor.find(&path) {
-                Some(index) => Some(self.editor.buffers()[index].contents()),
-                None => std::fs::read_to_string(&path).ok(),
-            }
-        })
     }
 
     /// The text selected in the focused editor.
@@ -4973,9 +4589,8 @@ impl Workspace {
     /// question — "is there an answer yet?" — rather than knowing which tools
     /// are slow.
     pub fn call_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) -> ToolOutcome {
-        // The PDFs and the flows are the session's, which answers these after
-        // this poll.
-        if crate::pdf::TOOLS.contains(&name) || crate::diffuse::TOOLS.contains(&name) {
+        // The flows are the session's, which answers these after this poll.
+        if crate::diffuse::TOOLS.contains(&name) {
             self.session_calls.push((id.to_string(), name.to_string(), input.clone()));
             return ToolOutcome::Deferred;
         }
@@ -5015,13 +4630,9 @@ impl Workspace {
         self.agent.answer(id, answer);
     }
 
-    /// What `@pdf` says in the next question: the session's PDF on top.
+    /// What `@flow` says in the next question: the session's flow on top.
     pub fn set_flow_about(&mut self, about: String) {
         self.flow_about = Some(about);
-    }
-
-    pub fn set_pdf_about(&mut self, about: String) {
-        self.pdf_about = Some(about);
     }
 
     /// Begin embedding a question, if this search would be better for it.
@@ -5320,8 +4931,6 @@ impl Workspace {
                     .collect::<Vec<_>>()
                     .join("\n"))
             }
-
-            "latex_log" => Ok(self.tex_log_text()),
 
             "grep" => {
                 let query = text("query")?;
@@ -6639,17 +6248,6 @@ impl Workspace {
             events.extend(self.research().sync());
         }
 
-        // LaTeX says where TeX stands — installed, or what installing it
-        // is — and what the last build came to.
-        if mode == ModeId::Tex {
-            events.extend(self.tex.env_event(true));
-            events.extend(self.tex.last_event());
-            let investigations = self.research().investigations();
-            events.push(Event::TexTemplates { templates: proton_tex::templates::templates(), investigations });
-            events.extend(self.tex_outline(true));
-            self.use_texlab();
-        }
-
         // Design with nothing open goes looking, once. Asking somebody to
         // find their own stylesheet before the inspector will show anything
         // is a worse first run than guessing at the conventional name and
@@ -7694,6 +7292,15 @@ pub struct StoredView {
 /// A file name's extension, as the typing rules know languages by.
 fn extension_of(name: &str) -> String {
     name.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default()
+}
+
+
+/// Whether a file is LaTeX's — a `.tex`, a `.bib`, a package or a class:
+/// texlab completes on its own characters there, and is not asked to format
+/// it, which it does with latexindent, seldom installed.
+fn is_latex(path: &Path) -> bool {
+    const LATEX: [&str; 10] = ["tex", "bib", "sty", "cls", "bst", "bbx", "cbx", "ltx", "def", "cfg"];
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| LATEX.contains(&e))
 }
 
 #[cfg(test)]

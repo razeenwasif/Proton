@@ -29,14 +29,6 @@ pub enum ModeId {
     Modeling,
     Game,
     Video,
-    /// LaTeX, as Overleaf has it: Codex's own editor over the project's
-    /// `.tex` files, beside the PDF they make, the build's log and the agent.
-    /// "LaTeX" on the rail.
-    Tex,
-    /// PDFs, read and edited as Acrobat does: pages, comments, forms,
-    /// passwords, combining and splitting, OCR — held until saved. The
-    /// person's, whichever project is open. "Reader" on the rail.
-    Pdf,
     /// Pixel art and painting: layered pictures drawn with a pencil from a
     /// palette or with pressure-led brushes, and grown with seeded
     /// generators. "Canvas" on the rail; `raster` in the code, where "paint"
@@ -48,15 +40,14 @@ pub enum ModeId {
 }
 
 impl ModeId {
-    /// Ordered as the keys bind them, `1`–`9`, `0` for the tenth, `-` for
-    /// the eleventh, `=` for the twelfth and `\` for the thirteenth: Data
-    /// and Research beside Codex, the three a working day moves between,
-    /// Notebook after Research, then LaTeX and PDF, then Canvas, then
-    /// Diffuse. The rail and the title bar draw LaTeX and PDF beside
-    /// Notebook, the reading and writing modes together, and Canvas and
-    /// Diffuse beside Game, which they make pictures for — without moving
-    /// their keys.
-    pub const ALL: [ModeId; 13] = [
+    /// Ordered as the keys bind them, `1`–`9`, `0` for the tenth and `-`
+    /// for the eleventh: Data and Research beside Codex, the three a working
+    /// day moves between, Notebook after Research, then Canvas, then
+    /// Diffuse. The rail and the title bar draw Canvas and Diffuse beside
+    /// Game, which they make pictures for — without moving their keys.
+    /// (LaTeX and the Reader were the tenth and eleventh until they moved
+    /// to Quark.)
+    pub const ALL: [ModeId; 11] = [
         ModeId::Chat,
         ModeId::Codex,
         ModeId::Data,
@@ -66,8 +57,6 @@ impl ModeId {
         ModeId::Modeling,
         ModeId::Game,
         ModeId::Video,
-        ModeId::Tex,
-        ModeId::Pdf,
         ModeId::Raster,
         ModeId::Diffuse,
     ];
@@ -83,8 +72,6 @@ impl ModeId {
             ModeId::Data => "data",
             ModeId::Research => "research",
             ModeId::Study => "study",
-            ModeId::Tex => "tex",
-            ModeId::Pdf => "pdf",
             ModeId::Raster => "raster",
             ModeId::Diffuse => "diffuse",
         }
@@ -107,25 +94,22 @@ impl ModeId {
             ModeId::Modeling => "Model",
             ModeId::Game => "Game",
             ModeId::Video => "Video",
-            ModeId::Tex => "LaTeX",
-            ModeId::Pdf => "Reader",
             ModeId::Raster => "Canvas",
             ModeId::Diffuse => "Diffuse",
         }
     }
 
-    /// Whether text is typed here into the editor's buffers: Codex's, and
-    /// LaTeX's, which is Codex's editor beside a PDF.
+    /// Whether text is typed here into the editor's buffers: Codex's.
     pub fn edits_text(self) -> bool {
-        matches!(self, ModeId::Codex | ModeId::Tex)
+        matches!(self, ModeId::Codex)
     }
 
     pub fn from_slug(s: &str) -> Option<Self> {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`13`, one-indexed as the user sees them — `10` is `0` on the keys,
-    /// `11` is `-`, `12` is `=` and `13` is `\`.
+    /// `1`–`11`, one-indexed as the user sees them — `10` is `0` on the
+    /// keys and `11` is `-`.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }

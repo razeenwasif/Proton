@@ -163,8 +163,7 @@ pub const LANGUAGES: &[Language] = &[
     // headers starting the second. Each file is still announced as what it is
     // (`announced_as`). It formats too — with clang-format's rules and the
     // project's `.clang-format` — which is how `:fmt` and a save format C.
-    // texlab, for LaTeX and BibTeX: Proton's own, in `~/.proton/tex`, once
-    // TeX is installed (`Servers::set_program`); else whatever is on PATH.
+    // texlab, for LaTeX and BibTeX: whichever is on PATH.
     Language {
         id: "latex",
         program: "texlab",
@@ -238,9 +237,6 @@ pub struct Servers {
     /// Recorded rather than learned from a failed request: a save should not
     /// produce an error notice on every language with no formatter behind it.
     can: HashMap<&'static str, proton_lsp::Capable>,
-    /// A server's program where it is not the table's name on PATH: texlab
-    /// in Proton's own TeX.
-    programs: HashMap<&'static str, PathBuf>,
 }
 
 /// A question the editor is waiting on an answer to.
@@ -301,8 +297,7 @@ impl Servers {
         }
         if !self.clients.contains_key(language.id) {
             let args: Vec<String> = language.args.iter().map(|s| (*s).to_string()).collect();
-            let program = self.programs.get(language.id).map(|p| p.display().to_string()).unwrap_or_else(|| language.program.to_string());
-            match Client::spawn(language.id, &program, &args, &self.root) {
+            match Client::spawn(language.id, language.program, &args, &self.root) {
                 Ok(client) => {
                     self.clients.insert(language.id, client);
                     self.status.insert(language.id, ServerStatus::Starting);
@@ -420,18 +415,6 @@ impl Servers {
         let id = self.client_for(&path)?.references(&path, at);
         self.awaiting.insert(Ask::References, id);
         Some(id)
-    }
-
-    /// Start `id`'s server as `program`, rather than the table's name on PATH;
-    /// tried again if it could not be started before.
-    pub fn set_program(&mut self, id: &'static str, program: PathBuf) {
-        if self.programs.get(id) != Some(&program) {
-            self.programs.insert(id, program);
-            self.unavailable.remove(id);
-            if self.status.get(id) == Some(&ServerStatus::Unavailable) {
-                self.status.remove(id);
-            }
-        }
     }
 
     /// What this file's server said it would do. Everything false for a file
@@ -901,16 +884,10 @@ mod tests {
     }
 
     #[test]
-    fn latex_and_bibtex_go_to_texlab_and_proton_s_own_is_tried_once_it_is_installed() {
+    fn latex_and_bibtex_go_to_texlab() {
         let tex = language_for(Path::new("main.tex")).unwrap();
         assert_eq!((tex.id, tex.program), ("latex", "texlab"));
         assert_eq!(announced_as(Path::new("refs.bib"), "latex"), "bibtex");
         assert_eq!(announced_as(Path::new("main.tex"), "latex"), "latex");
-        let mut servers = Servers::new(".");
-        servers.unavailable.insert("latex");
-        servers.status.insert("latex", ServerStatus::Unavailable);
-        servers.set_program("latex", PathBuf::from("/Users/you/.proton/tex/texlab/texlab"));
-        assert!(!servers.unavailable.contains("latex") && !servers.status.contains_key("latex"), "tried again once its program is known");
-        assert_eq!(servers.programs.get("latex").map(|p| p.display().to_string()).as_deref(), Some("/Users/you/.proton/tex/texlab/texlab"));
     }
 }

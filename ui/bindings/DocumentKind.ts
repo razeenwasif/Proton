@@ -3,15 +3,12 @@
 /**
  * How a mode's work persists.
  *
- * **Every one of these is a text file that diffs in Git** — but two. That
+ * **Every one of these is a text file that diffs in Git** — but one. That
  * is the load-bearing rule of the project rather than a matter of taste: it
  * is what lets the agent edit a scene or a timeline by writing a patch
- * instead of driving a GUI, and what makes any of it reviewable. The first
- * is the PDF, which is the person's to read and mark rather than the
- * project's to write: it is changed through the core's own operations, each
- * undoable, and saved as an update appended to the file, its first bytes
- * kept. The second is a canvas's pixels: a picture is not text, so the rule
- * keeps what it can — a `canvas.json` that diffs, and layers that are
- * ordinary PNGs, written the same bytes for the same pixels.
+ * instead of driving a GUI, and what makes any of it reviewable. The one is
+ * a canvas's pixels: a picture is not text, so the rule keeps what it can —
+ * a `canvas.json` that diffs, and layers that are ordinary PNGs, written the
+ * same bytes for the same pixels.
  */
-export type DocumentKind = "conversation" | "source" | "notebook" | "component" | "scene" | "level" | "timeline" | "investigation" | "studyNotebook" | "manuscript" | "pdf" | "canvas" | "flow";
+export type DocumentKind = "conversation" | "source" | "notebook" | "component" | "scene" | "level" | "timeline" | "investigation" | "studyNotebook" | "canvas" | "flow";

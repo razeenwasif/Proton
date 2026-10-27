@@ -1399,48 +1399,6 @@ impl Research {
 
     /* ── the scientist ─────────────────────────────────────────────── */
 
-    /* ── for LaTeX ───────────────────────────────────────────────────── */
-
-    /// The investigations, newest first — the open one first of all — each
-    /// by its slug and title: for LaTeX's write-ups.
-    pub fn investigations(&self) -> Vec<(String, String)> {
-        let mut all: Vec<(String, String)> = self.store.list().iter().map(|f| (f.slug().to_string(), f.investigation().title.clone())).collect();
-        if let Some(open) = &self.open {
-            if let Some(at) = all.iter().position(|(slug, _)| slug == open) {
-                let first = all.remove(at);
-                all.insert(0, first);
-            }
-        }
-        all
-    }
-
-    /// An investigation's folder, by its slug.
-    pub fn investigation(&self, slug: &str) -> Result<Folder, String> {
-        self.store.open(slug)
-    }
-
-    /// Every investigation's papers, the open one's first, each with the
-    /// slug and title of the investigation it is in: for LaTeX's cite picker.
-    pub fn every_paper(&self) -> Vec<(String, String, proton_research::model::Paper)> {
-        let mut out = Vec::new();
-        for (slug, title) in self.investigations() {
-            if let Ok(folder) = self.store.open(&slug) {
-                out.extend(folder.papers().into_iter().map(|paper| (slug.clone(), title.clone(), paper)));
-            }
-        }
-        out
-    }
-
-    /// Ask the literature for `query`, for LaTeX's cite picker: every
-    /// source, a few papers each. `None` when there is nobody to ask.
-    pub fn search_literature(&mut self, query: &str) -> Option<proton_literature::fetch::Fetch> {
-        if !self.literature.live() {
-            return None;
-        }
-        let job = proton_literature::fetch::Job::Search { queries: vec![query.to_string()], sources: proton_research::model::LiteratureSource::ALL.to_vec(), per_query: 6 };
-        Some(self.literature.fetch(job))
-    }
-
     /// The open investigation's folder, for the scientist to write to.
     fn folder(&self) -> Result<Folder, String> {
         let slug = self.open.as_deref().ok_or("Make an investigation first.")?;

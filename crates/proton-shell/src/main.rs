@@ -231,17 +231,10 @@ fn could_be_a_project(cwd: &std::path::Path, exe_folder: Option<&std::path::Path
 fn read_document(path: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
     /// The largest file read for the page: the library reads none larger.
     const LARGEST: u64 = 128 * 1024 * 1024;
-    // A PDF the PDF mode holds is in memory, under a key: never on disk.
-    let (held, file) = match session.lock() {
-        Ok(it) => (it.session.document_bytes(&path), it.session.document_file(&path)),
-        Err(poisoned) => {
-            let it = poisoned.into_inner();
-            (it.session.document_bytes(&path), it.session.document_file(&path))
-        }
+    let file = match session.lock() {
+        Ok(it) => it.session.document_file(&path),
+        Err(poisoned) => poisoned.into_inner().session.document_file(&path),
     };
-    if let Some(bytes) = held {
-        return Ok(tauri::ipc::Response::new(bytes.as_ref().clone()));
-    }
     let file = file.ok_or_else(|| format!("{path}: not a document Proton opened"))?;
     let size = std::fs::metadata(&file).map_err(|err| format!("{path}: {err}"))?.len();
     if size > LARGEST {

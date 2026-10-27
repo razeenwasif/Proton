@@ -234,15 +234,6 @@ impl Agent {
                 }),
             },
             Tool {
-                name: "latex_log".into(),
-                description: "What the LaTeX project's last build said: the main file, the engine, and \
-                              each error with the source lines round it, what TeX lacked, and the first \
-                              warnings. Read-only. Use it before fixing a document that does not typeset; \
-                              the build runs again when a fix is saved."
-                    .into(),
-                input_schema: json!({ "type": "object", "properties": {} }),
-            },
-            Tool {
                 name: "open_buffer".into(),
                 description: "Open a file in the editor so the user can see it. Use when \
                               pointing at something worth looking at, not to read it."
@@ -402,88 +393,6 @@ impl Agent {
                               it — you cannot name a folder you have not seen listed."
                     .into(),
                 input_schema: json!({ "type": "object", "properties": {} }),
-            },
-            // PDFs: the one on top in the PDF mode. They are the session's,
-            // not a project's, so the session answers these (`pdf::agent`).
-            Tool {
-                name: "pdf_info".into(),
-                description: "The PDF on top in the PDF mode: its name, how many pages it has, the page \
-                              the person is reading, whether it has changes not saved, its properties, \
-                              bookmarks, form fields and comments, and the other PDFs open. Read-only. \
-                              Call it first when asked about the PDF or the paper the person is reading."
-                    .into(),
-                input_schema: json!({ "type": "object", "properties": {} }),
-            },
-            Tool {
-                name: "pdf_read".into(),
-                description: "The text of pages of the PDF on top, each headed by its number. With no \
-                              pages given, the page the person is reading; with only `from`, ten pages \
-                              from there. At most 30 pages at once. A page that is a picture, with no \
-                              text, says so."
-                    .into(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "from": { "type": "integer", "description": "First page, from 1." },
-                        "to": { "type": "integer", "description": "Last page, inclusive." }
-                    }
-                }),
-            },
-            Tool {
-                name: "pdf_search".into(),
-                description: "Find words in the PDF on top, case and line breaks ignored: each place \
-                              they are, with its page and the words round it. Use it to find which \
-                              page to read, or the exact words to quote to pdf_annotate."
-                    .into(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string" },
-                        "limit": { "type": "integer", "description": "How many places to show. Defaults to 20." }
-                    },
-                    "required": ["query"]
-                }),
-            },
-            Tool {
-                name: "pdf_annotate".into(),
-                description: "Comment on the PDF on top: highlight, underline or strike out a passage, \
-                              found by quoting its words as pdf_read or pdf_search gives them, or put a \
-                              note on a page, beside a quoted passage or in its top corner. The comment \
-                              is signed as the agent's and is held until the person saves: it shows on \
-                              their screen at once and they can undo it, so say what you marked rather \
-                              than that the file has changed."
-                    .into(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "page": { "type": "integer", "description": "The page, from 1." },
-                        "kind": { "type": "string", "enum": ["highlight", "underline", "strike", "note"], "description": "Defaults to highlight." },
-                        "quote": { "type": "string", "description": "The passage's words, exactly. Required to mark text; for a note, what it goes beside." },
-                        "occurrence": { "type": "integer", "description": "Which time the quote is on the page, from 1. Defaults to 1." },
-                        "text": { "type": "string", "description": "What the comment says. Required for a note." },
-                        "color": { "type": "string", "description": "#rrggbb. Highlights default to yellow." }
-                    },
-                    "required": ["page"]
-                }),
-            },
-            Tool {
-                name: "pdf_pages".into(),
-                description: "Rearrange the PDF on top: turn, delete or move pages, held until the person \
-                              saves and undone as their own changes are; or take pages out into a new \
-                              PDF, which is written at once, opened, and on top after. Pages are \
-                              numbered from 1, as the person sees them."
-                    .into(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "action": { "type": "string", "enum": ["rotate", "delete", "move", "extract"] },
-                        "pages": { "type": "array", "items": { "type": "integer" }, "description": "The pages, from 1." },
-                        "by": { "type": "integer", "description": "Rotate: degrees clockwise, 90, -90 or 180. Defaults to 90." },
-                        "before": { "type": "integer", "description": "Move: the page they go before; one past the last for the end." },
-                        "path": { "type": "string", "description": "Extract: the new PDF, as a path; ~ is home, and a relative one is in the project." }
-                    },
-                    "required": ["action", "pages"]
-                }),
             },
             // The game open in Game mode: the workspace's own (`game::agent`).
             Tool {
@@ -1399,7 +1308,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 31);
+        assert_eq!(tools.len(), 25);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the
@@ -1423,16 +1332,15 @@ mod tests {
                 editing.description
             );
         }
-        // The PDF tools that change it have to say the change waits for the
-        // person: told only "rotate the pages", a model reports a file
+        // The tools that change a document have to say the change waits for
+        // the person: told only "rotate the pages", a model reports a file
         // rewritten, and the person believes it.
-        for name in ["pdf_annotate", "pdf_pages", "game_edit", "game_import", "canvas_draw", "canvas_generate", "flow_edit"] {
+        for name in ["game_edit", "game_import", "canvas_draw", "canvas_generate", "flow_edit"] {
             let changing = tools.iter().find(|t| t.name == name).unwrap();
             assert!(changing.description.contains("held until the person saves"), "{name}: {}", changing.description);
         }
         // Every one the session answers is declared, and none it does not.
-        let declared: Vec<&str> = tools.iter().map(|t| t.name.as_str()).filter(|n| n.starts_with("pdf_")).collect();
-        assert_eq!(declared, crate::pdf::TOOLS);
+        assert!(!tools.iter().any(|t| t.name.starts_with("pdf_") || t.name == "latex_log"), "the Reader's and LaTeX's tools went to Quark");
         let declared: Vec<&str> = tools.iter().map(|t| t.name.as_str()).filter(|n| n.starts_with("game_")).collect();
         assert_eq!(declared, crate::game::TOOLS);
         let declared: Vec<&str> = tools.iter().map(|t| t.name.as_str()).filter(|n| n.starts_with("canvas_")).collect();

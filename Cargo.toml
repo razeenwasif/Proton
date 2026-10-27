@@ -25,10 +25,8 @@ members = [
     "crates/proton-study",
     "crates/proton-syntax",
     "crates/proton-term",
-    "crates/proton-pdf",
     "crates/proton-raster",
     "crates/proton-raster-runtime",
-    "crates/proton-tex",
     "crates/proton-text",
     "crates/proton-trace",
     "crates/proton-vcs",
@@ -47,8 +45,6 @@ repository = "https://github.com/razeenwasif/Proton"
 proton-agent = { path = "crates/proton-agent" }
 proton-claude = { path = "crates/proton-claude" }
 proton-voice = { path = "crates/proton-voice" }
-proton-tex = { path = "crates/proton-tex" }
-proton-pdf = { path = "crates/proton-pdf" }
 proton-council = { path = "crates/proton-council" }
 proton-core = { path = "crates/proton-core" }
 proton-dap = { path = "crates/proton-dap" }
@@ -99,8 +95,8 @@ opt-level = 2
 [profile.release]
 # Symbols were 16 MB of a 74 MB binary nobody debugs from the bundle; thin
 # LTO lets the crates be optimised across one another for a little time at
-# build. Unwinding stays: proton-pdf's `guarded` and the shell's recovery
-# from a poisoned lock catch panics, which `panic = "abort"` would end.
+# build. Unwinding stays: the shell's recovery from a poisoned lock catches
+# panics, which `panic = "abort"` would end.
 strip = true
 lto = "thin"
 

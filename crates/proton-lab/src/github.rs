@@ -1,5 +1,4 @@
-//! GitHub, asked what a release has to download: Lean's, elan's, TinyTeX's,
-//! texlab's. A few kilobytes from its API, asked only when the person asks
+//! GitHub, asked what a release has to download: Lean's and elan's. A few kilobytes from its API, asked only when the person asks
 //! for a plan; tests answer for it.
 
 use std::io::Read;

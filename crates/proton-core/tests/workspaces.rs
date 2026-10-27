@@ -472,8 +472,8 @@ fn a_mode_with_no_project_of_its_own_is_given_a_folder_of_its_own() {
 #[test]
 fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes() {
     // A file from when the window had two sides: Codex's projects, Data's,
-    // and the one Data showed — read into Codex's and Data's, Research's,
-    // Notebook's and Reader's; every other mode starts on a folder of its own.
+    // and the one Data showed — read into Codex's and Data's, Research's and
+    // Notebook's; every other mode starts on a folder of its own.
     let scratch = Scratch::new("old-sides");
     let homes = scratch.root.join("homes");
     let store = scratch.root.join("session.json");
@@ -488,12 +488,12 @@ fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes
     .unwrap();
     let mut session = Session::restore_from(Some(store), None, None).with_mode_homes(&homes);
     assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Codex));
-    for data_side in [ModeId::Data, ModeId::Research, ModeId::Study, ModeId::Pdf] {
+    for data_side in [ModeId::Data, ModeId::Research, ModeId::Study] {
         mode(&mut session, data_side);
         assert_eq!(here(&session), "beta", "{data_side:?} lost Data's project");
     }
-    mode(&mut session, ModeId::Tex);
-    assert!(session.active().root().ends_with("LaTeX"), "LaTeX was given Codex's project: {:?}", session.active().root());
+    mode(&mut session, ModeId::Design);
+    assert!(session.active().root().ends_with("Design"), "Design was given Codex's project: {:?}", session.active().root());
 }
 
 #[test]
@@ -515,15 +515,15 @@ fn folder_of(path: &Path) -> PathBuf {
 }
 
 #[test]
-fn latex_starts_on_the_sessions_first_folder_and_keeps_its_own() {
+fn a_mode_that_opened_none_starts_on_the_sessions_first_folder() {
     // A session made on a folder shows it in every mode until a mode opens
-    // another: LaTeX, never having opened one, shows it.
-    let scratch = Scratch::new("tex-side");
+    // another: Design, never having opened one, shows it.
+    let scratch = Scratch::new("first-side");
     let mut session = Session::new(scratch.at("alpha"));
     mode(&mut session, ModeId::Data);
     session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
-    mode(&mut session, ModeId::Tex);
-    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Tex));
+    mode(&mut session, ModeId::Design);
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Design));
     mode(&mut session, ModeId::Codex);
     assert_eq!(here(&session), "alpha");
 }

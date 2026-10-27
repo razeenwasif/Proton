@@ -4413,7 +4413,6 @@ name = "proton-core"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
- "lopdf",
  "proton-agent",
  "proton-claude",
  "proton-council",
@@ -4428,7 +4427,6 @@ dependencies = [
  "proton-literature",
  "proton-lsp",
  "proton-mesh",
- "proton-pdf",
  "proton-plugin",
  "proton-raster",
  "proton-research",
@@ -4436,7 +4434,6 @@ dependencies = [
  "proton-study",
  "proton-syntax",
  "proton-term",
- "proton-tex",
  "proton-text",
  "proton-trace",
  "proton-vcs",
@@ -4594,19 +4591,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proton-pdf"
-version = "0.0.1"
-dependencies = [
- "getrandom 0.3.4",
- "lopdf",
- "pdf-extract",
- "proton-library",
- "serde",
- "serde_json",
- "ts-rs",
-]
-
-[[package]]
 name = "proton-plugin"
 version = "0.0.1"
 dependencies = [
@@ -4715,16 +4699,6 @@ version = "0.0.1"
 dependencies = [
  "portable-pty",
  "vt100",
-]
-
-[[package]]
-name = "proton-tex"
-version = "0.0.1"
-dependencies = [
- "flate2",
- "serde",
- "serde_json",
- "ts-rs",
 ]
 
 [[package]]
