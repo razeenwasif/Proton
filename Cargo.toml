@@ -5,32 +5,23 @@ members = [
     "crates/proton-claude",
     "crates/proton-council",
     "crates/proton-core",
-    "crates/proton-game",
-    "crates/proton-game-runtime",
     "crates/proton-dap",
     "crates/proton-data",
-    "crates/proton-design",
-    "crates/proton-diffuse",
     "crates/proton-index",
     "crates/proton-lab",
     "crates/proton-library",
     "crates/proton-literature",
     "crates/proton-mcp",
     "crates/proton-lsp",
-    "crates/proton-mesh",
     "crates/proton-plugin",
     "crates/proton-research",
-    "crates/proton-scene",
     "crates/proton-shell",
     "crates/proton-study",
     "crates/proton-syntax",
     "crates/proton-term",
-    "crates/proton-raster",
-    "crates/proton-raster-runtime",
     "crates/proton-text",
     "crates/proton-trace",
     "crates/proton-vcs",
-    "crates/proton-video",
     "crates/proton-voice",
 ]
 
@@ -49,16 +40,10 @@ proton-council = { path = "crates/proton-council" }
 proton-core = { path = "crates/proton-core" }
 proton-dap = { path = "crates/proton-dap" }
 proton-data = { path = "crates/proton-data" }
-proton-design = { path = "crates/proton-design" }
-proton-diffuse = { path = "crates/proton-diffuse" }
-proton-game = { path = "crates/proton-game" }
-proton-raster = { path = "crates/proton-raster" }
-proton-scene = { path = "crates/proton-scene" }
 proton-index = { path = "crates/proton-index" }
 proton-library = { path = "crates/proton-library" }
 proton-literature = { path = "crates/proton-literature" }
 proton-mcp = { path = "crates/proton-mcp" }
-proton-mesh = { path = "crates/proton-mesh" }
 proton-lsp = { path = "crates/proton-lsp" }
 proton-plugin = { path = "crates/proton-plugin" }
 proton-research = { path = "crates/proton-research" }
@@ -69,7 +54,6 @@ proton-term = { path = "crates/proton-term" }
 proton-text = { path = "crates/proton-text" }
 proton-trace = { path = "crates/proton-trace" }
 proton-vcs = { path = "crates/proton-vcs" }
-proton-video = { path = "crates/proton-video" }
 gix = "0.87"
 portable-pty = "0.9"
 vt100 = "0.16"
@@ -84,12 +68,6 @@ ts-rs = "10"
 opt-level = 0
 
 [profile.dev.package."*"]
-opt-level = 2
-
-# Canvas's engine runs a brush's every dab under the session's lock, and in
-# every test: unoptimised it is twenty times slower. Workspace members are not
-# covered by "*" above.
-[profile.dev.package.proton-raster]
 opt-level = 2
 
 [profile.release]

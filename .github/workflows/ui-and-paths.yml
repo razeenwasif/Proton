@@ -55,7 +55,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked -p proton-agent --lib --test transport --test gemini --test assemble
       - run: cargo test --locked -p proton-core --lib
-      - run: cargo test --locked -p proton-core --test layout --test workspaces --test working_directory --test home_folder --test reliability --test diffuse
+      - run: cargo test --locked -p proton-core --test layout --test workspaces --test working_directory --test home_folder --test reliability
       # Research's investigations: the files, the scoring, the prompts.
       - run: cargo test --locked -p proton-research
       # The literature: the sources' answers as recorded, read offline; the
@@ -76,9 +76,6 @@ jobs:
         if: runner.os != 'Windows'
       - run: cargo test --locked -p proton-core --test study
         if: runner.os != 'Windows'
-      # Diffuse: flows, their edits and undo, and the checks — against the
-      # node catalogue in docs/DIFFUSE.md, the contract with Nexus.
-      - run: cargo test --locked -p proton-diffuse
       # Fish Audio's client, over a scripted transport: what speech is asked
       # as, a busy Fish asked again, refusals said without the key.
       - run: cargo test --locked -p proton-voice
