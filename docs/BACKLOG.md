@@ -178,3 +178,30 @@ Paused by the person on 2026-10-15; what follows is what the plan has left.
   - *Low-poly 3D* (Tunic): our own `.glb` reader, the vendored three.js for
     an orthographic camera, toon shading, outlines and shadows, and a
     capsule colliding with a triangle mesh in the sim.
+
+## Sheets
+
+A spreadsheet mode in Proton, after Google Sheets: Excel's work, in a tab
+of its own. Asked for on 2026-10-27; nothing is built and nothing is
+decided past what the person said. Open, to settle before a plan:
+
+- **What it holds.** Workbooks of sheets: cells of values and formulas,
+  types and number formats, column widths, frozen rows, filters and
+  sorting, conditional colour, charts, and comments on cells.
+- **Its formulas.** An engine of Proton's own: parsing A1 references and
+  ranges, recalculating what depends on a cell and only that, finding
+  cycles, and the functions people reach for first (SUM, AVERAGE, IF,
+  VLOOKUP/XLOOKUP, INDEX/MATCH, COUNTIF, text and date functions). Or a
+  crate for it, if one fits without bringing much with it.
+- **Files.** `.xlsx` read and written, so a sheet goes back to Excel and
+  Google Sheets as it came; `.csv` and `.tsv`. Open: whether a workbook is
+  kept as `.xlsx`, or in a format of Proton's own that diffs well in git.
+- **Drawing.** A grid of a million rows drawn by the rows on screen only,
+  as the Data mode's tables are, with Vim's keys moving the cursor cell to
+  cell, as in Data.
+- **The agent.** Tools to read a range, write cells and formulas, and make
+  a chart, as Data and Diffuse have; `@sheet` in a message.
+- **Sharing with the other modes.** A range to a Data notebook as a frame,
+  and a frame back as a sheet; a chart into LaTeX or Reader.
+- **Collaboration**, as Google Sheets has it, is not assumed: Proton is one
+  person's, and two people editing one sheet would need a server.
