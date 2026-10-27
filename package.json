@@ -5,11 +5,8 @@
   "scripts": {
     "check": "tsc -p ui/tsconfig.json",
     "test:transport": "node --test tests/ui/ordering.test.mjs",
-    "test:unit": "node --test tests/ui/ordering.test.mjs tests/ui/editor-row.test.mjs tests/ui/research.test.mjs tests/ui/literature.test.mjs tests/ui/study-code.test.mjs tests/ui/game-overlay.test.mjs tests/ui/game-scene.test.mjs tests/ui/game-runtime.test.mjs tests/ui/raster-runtime.test.mjs tests/ui/raster-view.test.mjs tests/ui/raster-sync.test.mjs tests/ui/raster-input.test.mjs tests/ui/raster-transform.test.mjs tests/ui/raster-frames.test.mjs tests/ui/game-skel.test.mjs tests/ui/game-fx.test.mjs tests/ui/diffuse-graph.test.mjs",
-    "test:browser": "playwright test",
-    "wasm": "node scripts/wasm.mjs",
-    "pretest:unit": "node scripts/wasm.mjs",
-    "pretest:browser": "node scripts/wasm.mjs"
+    "test:unit": "node --test tests/ui/ordering.test.mjs tests/ui/editor-row.test.mjs tests/ui/research.test.mjs tests/ui/literature.test.mjs tests/ui/study-code.test.mjs",
+    "test:browser": "playwright test"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

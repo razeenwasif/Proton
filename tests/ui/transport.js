@@ -67,52 +67,8 @@ window.__TAURI__ = {
       if (!response.ok) throw new Error(`${args.path}: not a document Proton opened`);
       return await response.arrayBuffer();
     }
-    // The open canvas's tiles, as a test's stand-in core lays them out.
-    if (name === 'read_raster') {
-      const bytes = await window.rasterRead?.(args.generation, args.layer, args.tiles);
-      if (!bytes) throw new Error(`layer ${args.layer} of canvas ${args.generation} is not open`);
-      return bytes;
-    }
-    // Pictures handed to the core, kept as a test can look at them.
-    if (name === 'put_raster_blob') {
-      (window.rasterBlobs ??= []).push(args);
-      return window.rasterBlobs.length;
-    }
-    if (name === 'paste_raster_image') return window.rasterPaste?.() ?? null;
     if (name === 'paste_text') return window.clipboardText ?? null;
     if (name === 'copy_text') { window.clipboardText = args?.text ?? null; return null; }
-    if (name === 'copy_raster_image') return true;
-    // The open game's images: the fixture game's, from the server.
-    // A picture written into Diffuse's folder: kept for the test to read.
-    if (name === 'put_diffuse_file') {
-      const path = options.headers?.['x-proton-path'];
-      (window.diffusePuts ??= []).push({path, bytes: args});
-      (window.diffuseFiles ??= {})[path] = args.buffer.slice(args.byteOffset, args.byteOffset + args.byteLength);
-      return path;
-    }
-    // Diffuse unlocked after the person's say-so: what a test's stand-in
-    // answers, or why it was not — numbered as a command's reply.
-    if (name === 'unlock_diffuse') {
-      (window.diffuseUnlocks ??= []).push(args.gallery);
-      const answer = await window.diffuseUnlock?.(args.gallery);
-      // An Error from the suite's own frame is not this frame's Error.
-      if (answer && !Array.isArray(answer) && typeof answer.message === 'string') throw answer.message;
-      return window.makeBatch(answer ?? []);
-    }
-    // An image Diffuse shows, as a test's stand-in core holds it.
-    if (name === 'read_diffuse') {
-      const bytes = window.diffuseFiles?.[args.path];
-      if (!bytes) throw new Error(`${args.path}: not an image Diffuse may read`);
-      return bytes;
-    }
-    if (name === 'read_game') {
-      // A test's own files first: an image cut up, say.
-      const own = window.gameFiles?.[args.key];
-      if (own !== undefined) return typeof own === 'string' ? new TextEncoder().encode(own).buffer : own;
-      const response = await fetch(`/tests/ui/fixtures/game/${args.key}`);
-      if (!response.ok) throw new Error(`${args.key}: not an image of the open game`);
-      return await response.arrayBuffer();
-    }
     // A Lab run's files, as a test puts them.
     if (name === 'read_lab') {
       const bytes = window.labFiles?.[args.key];

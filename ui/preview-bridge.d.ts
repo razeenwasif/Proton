@@ -1,13 +1,7 @@
 import type {WireCommand, WireEvent} from './protocol';
 
 /** Typed facade over legacy demo fixtures; implementation is not yet checked. */
-export function createPreview(deliver: (event: WireEvent) => void, latency: Map<string, number>): {
+export function createPreview(deliver: (event: WireEvent) => void): {
   send(command: WireCommand): Promise<WireEvent[]>;
-  readGeometry(key: string): Promise<ArrayBuffer>;
   readLab(key: string): Promise<ArrayBuffer>;
-  readGame(key: string): Promise<ArrayBuffer>;
-  readRaster(generation: number, layer: number, tiles: number[]): Promise<ArrayBuffer>;
-  readDiffuse(path: string): Promise<ArrayBuffer>;
-  putDiffuseFile(path: string, bytes: Uint8Array): Promise<string>;
-  unlockDiffuse(gallery: boolean): Promise<import('./protocol').WireEvent[]>;
 };

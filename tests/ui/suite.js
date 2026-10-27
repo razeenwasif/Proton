@@ -1,11 +1,8 @@
 import {orderingChecks} from './ordering.js';
 import {studyChecks} from './suite-study.js';
-import {gameChecks} from './suite-game.js';
-import {rasterChecks} from './suite-raster.js';
-import {diffuseChecks} from './suite-diffuse.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
-const layoutKeys = [...['chat', 'codex', 'design', 'modeling', 'game', 'raster', 'diffuse', 'video', 'data', 'research', 'study'].map((mode) => `proton.panes.${mode}`),
+const layoutKeys = [...['chat', 'codex', 'data', 'research', 'study'].map((mode) => `proton.panes.${mode}`),
   // Which artifact each conversation had open.
   'proton.chat.panes'];
 const savedLayouts = layoutKeys.map((key) => [key, localStorage.getItem(key)]);
@@ -151,7 +148,7 @@ await test('Narrow windows show the requested panel without squeezing out the ed
   assert(!section.querySelector('aside').hidden, 'wide layout did not restore sidebar');
 });
 await test('Each mode keeps a usable stage, and every one has a right panel to toggle', async () => {
-  for (const mode of ['chat', 'design', 'modeling', 'game', 'raster', 'diffuse', 'video', 'data', 'research', 'study', 'codex']) {
+  for (const mode of ['chat', 'data', 'research', 'study', 'codex']) {
     await win.dispatch({type: 'setMode', mode}); await settle();
     const section = $('.workspace.on'), stage = section.querySelector('main');
     assert(stage.clientWidth >= 320, `${mode} lost its stage`);
@@ -173,7 +170,7 @@ await test('Chat wears Codex\'s chrome: a title bar for the rails, no statusline
   assert(ground === expected, `Chat is not on the theme's ground: ${ground} vs ${expected}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
-await test('Codex trades the rails and statusline for a title bar, Data does too, and Design does not', async () => {
+await test('Codex trades the rails and statusline for a title bar, and Data does too', async () => {
   assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'Codex kept the old chrome');
   const bar = $('.titlebar').getBoundingClientRect(), app = $('.app').getBoundingClientRect();
   assert(Math.abs(bar.right - app.right) < 2 && bar.height > app.height - 4 && bar.width < 60,
@@ -188,10 +185,8 @@ await test('Codex trades the rails and statusline for a title bar, Data does too
   const data = $('.workspace[data-ws="data"]');
   assert(win.getComputedStyle(data).fontFamily.includes('JetBrains'), 'Data is not set in Codex\'s type');
   assert(!shown(data.querySelector('aside.side > header')) && !shown(data.querySelector('aside.side > .find')), 'Data\'s project panel kept its header');
-  await win.dispatch({type: 'setMode', mode: 'design'}); await settle();
-  assert(!shown($('.titlebar')) && shown($('.chrome-rail')) && shown($('.statusline')), 'Design lost its chrome');
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
-  assert(shown($('.titlebar')), 'title bar did not come back');
+  assert(shown($('.titlebar')), 'title bar went with Data');
 });
 await test('Codex can switch and open projects without the rails', async () => {
   const tiles = doc.querySelectorAll('.titlebar [data-workspace]');
@@ -1398,24 +1393,16 @@ await test('Each chat keeps its own artifacts pane, and one published while you 
 await test('No browser runtime errors', () => {
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
 });
-await test('Codex and Data ask for an opaque window in their ground, and the glass modes give it back', async () => {
+await test('Every mode asks for an opaque window in the theme\'s ground, and never gives it back', async () => {
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
   const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
-  let before = asked().length;
-  await win.pushEvents([{type: 'modeChanged', mode: 'design'}]);
-  assert(asked().slice(before).includes(null), `leaving Codex for Design kept the window opaque: ${JSON.stringify(asked().slice(before))}`);
-  before = asked().length;
-  $('.rail [data-mode="data"]')?.click(); await settle();
-  await win.pushEvents([{type: 'modeChanged', mode: 'data'}]);
-  assert(asked().slice(before).at(-1) === ground, `Data did not ask for the ground: ${JSON.stringify(asked().slice(before))}`);
-  before = asked().length;
-  await win.pushEvents([{type: 'modeChanged', mode: 'design'}]);
-  await win.pushEvents([{type: 'modeChanged', mode: 'codex'}]);
+  const before = asked().length;
+  for (const mode of ['chat', 'data', 'research', 'study', 'codex']) {
+    await win.pushEvents([{type: 'modeChanged', mode}]);
+  }
   const now = asked().slice(before);
-  assert(now.includes(null), `Design kept the window opaque: ${JSON.stringify(now)}`);
-  const last = now.at(-1);
-  assert(/^#[0-9a-f]{6}$/.test(last ?? ''), `Codex did not ask for its ground: ${JSON.stringify(now)}`);
-  assert(last === ground, `asked for ${last}, the theme's ground is ${ground}`);
+  assert(!now.includes(null), `a mode gave the opaque window back: ${JSON.stringify(now)}`);
+  assert(asked().at(-1) === ground, `asked for ${asked().at(-1)}, the theme's ground is ${ground}`);
 });
 await test('Codex provider selection clears the previous model and displays Astra', async () => {
   await win.dispatch({type: 'setSetting', key: 'agent.model', value: 'claude-opus-5'});
@@ -1762,7 +1749,7 @@ await test('A notebook draws an SVG figure as a picture, whose scripts and style
 await test('Research sits beside Data after Codex: ⌃4 opens it, in Codex\'s chrome and on an opaque ground', async () => {
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
   const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
-  await win.dispatch({type: 'setMode', mode: 'design'}); await settle();
+  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
   const before = win.commands.length, opaque = asked().length;
   doc.body.focus();
   key('4', {ctrlKey: true}); await settle();
@@ -1775,9 +1762,9 @@ await test('Research sits beside Data after Codex: ⌃4 opens it, in Codex\'s ch
   // Codex, Data and Research side by side, in the title bar and on the rail.
   for (const list of ['.tb-modes', '.mode-rail']) {
     const order = [...doc.querySelectorAll(`${list} [data-mode]`)].map((b) => b.dataset.mode).join();
-    assert(order === 'chat,codex,data,research,study,design,modeling,game,raster,diffuse,video', `${list} is not in the new order: ${order}`);
+    assert(order === 'chat,codex,data,research,study', `${list} is not in the new order: ${order}`);
   }
-  assert(asked().slice(opaque).at(-1) === ground, `Research did not ask for the ground: ${JSON.stringify(asked().slice(opaque))}`);
+  assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Research is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
 const researchRow = (id, elo, seat, title, status = 'active') => ({id, title, author: {seat, model: ''}, family: seat === 'claude' ? 'anthropic' : 'openai',
@@ -2416,9 +2403,6 @@ await test('A long name in the project panel scrolls sideways instead of being c
   if (was) space.style.setProperty('--col-l', was); else space.style.removeProperty('--col-l');
 });
 await studyChecks({test, assert, win, doc, $, settle, key, shown});
-await gameChecks({test, assert, win, doc, $, settle, key, shown});
-await rasterChecks({test, assert, win, doc, $, settle, shown});
-await diffuseChecks({test, assert, win, doc, $, settle, shown});
 await orderingChecks(test, assert);
 document.querySelector('#status').textContent = `${passed} passed · ${failed} failed`;
 document.title = `Proton UI tests: ${passed} passed, ${failed} failed`;

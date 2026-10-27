@@ -7,9 +7,7 @@ import {createTransport, keyCommand} from './transport.js';
 /** @type {import('./native-api').NativeApi | undefined} */
 const tauri = globalThis.__TAURI__;
 export const HAS_SHELL = Boolean(tauri);
-/** Browser-only delay controls, retained for geometry race checks. @type {Map<string, number>} */
-export const mockLatency = new Map();
-const preview = tauri ? null : import('./preview-bridge.js').then(module => module.createPreview(deliver, mockLatency));
+const preview = tauri ? null : import('./preview-bridge.js').then(module => module.createPreview(deliver));
 /** @param {Command} command */
 async function send(command) {
   if (tauri) return tauri.core.invoke('dispatch', {command});
@@ -58,13 +56,6 @@ export async function readDocument(path) {
   return body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(body);
 }
 
-/** One mesh, as bytes — the binary half of an `Event::Geometry`.
- *
- * From the shell through `ipc::Response`, which hands the webview an
- * ArrayBuffer; the page lays typed arrays straight over it. In the preview the
- * stand-in's mesh is encoded into the same layout first, so the decoder is
- * exercised here exactly as it is in the app.
- */
 /** A file a Lab run left, as bytes: `<investigation>/<run>/<path>`.
  *  @param {string} key */
 export async function readLab(key) {
@@ -75,84 +66,6 @@ export async function readLab(key) {
   }
   const body = await tauri.core.invoke("read_lab", { key });
   return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
-}
-
-/** An image of the open game, as bytes: a path inside its folder.
- *  @param {string} key */
-export async function readGame(key) {
-  if (!tauri) {
-    const adapter = await preview;
-    if (!adapter) throw new Error('Browser preview is unavailable');
-    return adapter.readGame(key);
-  }
-  const body = await tauri.core.invoke("read_game", { key });
-  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
-}
-
-/** An image Diffuse shows — an output, or one a run made — as bytes.
- *  @param {string} path */
-export async function readDiffuse(path) {
-  if (!tauri) {
-    const adapter = await preview;
-    if (!adapter) throw new Error('Browser preview is unavailable');
-    return adapter.readDiffuse(path);
-  }
-  const body = await tauri.core.invoke("read_diffuse", { path });
-  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
-}
-
-/** Unlock Diffuse — and its Gallery, with `gallery` — once the person has
- *  shown they are at the Mac: Touch ID or the Mac's password, asked by the
- *  shell, which takes the key from their keychain. The events it makes come
- *  in order with the rest; a refusal or a cancel throws, in words.
- *  @param {boolean} gallery */
-export async function unlockDiffuse(gallery) {
-  if (!tauri) {
-    const adapter = await preview;
-    if (!adapter) throw new Error('Browser preview is unavailable');
-    transport.deliver(await adapter.unlockDiffuse(gallery));
-    return;
-  }
-  await transport.receive(await tauri.core.invoke("unlock_diffuse", { gallery }));
-}
-
-/** A picture for Diffuse — chosen, dropped, a mask painted — written into
- *  Diffuse's folder at `path` (raw bytes, as Canvas's are): where it was
- *  written. @param {string} path @param {Uint8Array} bytes @returns {Promise<string>} */
-export async function putDiffuseFile(path, bytes) {
-  if (!tauri) {
-    const adapter = await preview;
-    if (!adapter) throw new Error('Browser preview is unavailable');
-    return adapter.putDiffuseFile(path, bytes);
-  }
-  return tauri.core.invoke("put_diffuse_file", bytes, { headers: { "x-proton-path": path } });
-}
-
-/** Tiles of one layer of the open canvas, as bytes (see the shell's
- *  `read_raster` for the layout). @param {number} generation @param {number} layer @param {number[]} tiles */
-export async function readRaster(generation, layer, tiles) {
-  if (!tauri) {
-    const adapter = await preview;
-    if (!adapter) throw new Error('Browser preview is unavailable');
-    return adapter.readRaster(generation, layer, tiles);
-  }
-  const body = await tauri.core.invoke("read_raster", { generation, layer, tiles });
-  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
-}
-
-/** A picture handed to the core — an image dropped on Canvas — as the
- *  request's raw body: its number, to bring in. @param {Uint8Array} bytes @returns {Promise<number>} */
-export async function putRasterBlob(bytes) {
-  // The browser preview has no core to keep it.
-  if (!tauri) throw new Error("bringing a picture in needs the app");
-  return tauri.core.invoke("put_raster_blob", bytes);
-}
-
-/** ⌘V in Canvas: a picture another app copied, kept by the core — its
- *  number — or none, for Canvas's own copy. @returns {Promise<number | null>} */
-export async function pasteRasterImage() {
-  if (!tauri) return null;
-  return tauri.core.invoke("paste_raster_image");
 }
 
 /** ⌘V in the editor: the clipboard's text, read by the shell — none if it
@@ -167,25 +80,6 @@ export async function pasteText() {
 export async function copyText(text) {
   if (tauri) return tauri.core.invoke("copy_text", { text });
   await navigator.clipboard?.writeText(text).catch(() => undefined);
-}
-
-/** Canvas's copy put on the system's clipboard as a PNG. @returns {Promise<boolean>} */
-export async function copyRasterImage() {
-  if (!tauri) return false;
-  return tauri.core.invoke("copy_raster_image");
-}
-
-/** @param {string} key */
-export async function readGeometry(key) {
-  if (!tauri) {
-    const adapter = await preview;
-    if (!adapter) throw new Error('Browser preview is unavailable');
-    return adapter.readGeometry(key);
-  }
-  const body = await tauri.core.invoke("read_geometry", { key });
-  // An ArrayBuffer, or a plain array of bytes on an older transport — which
-  // has to be copied into one before anything can be laid over it.
-  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
 }
 
 /** @param {import('./protocol').KeyInput} event */

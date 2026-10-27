@@ -5,18 +5,9 @@ export interface NativeApi {
   core: {
     invoke(name: 'dispatch', args: {command: WireCommand}): Promise<EventBatch>;
     invoke(name: 'read_document', args: {path: string}): Promise<ArrayBuffer | number[]>;
-    invoke(name: 'read_geometry', args: {key: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'read_lab', args: {key: string}): Promise<ArrayBuffer | number[]>;
-    invoke(name: 'read_game', args: {key: string}): Promise<ArrayBuffer | number[]>;
-    invoke(name: 'read_diffuse', args: {path: string}): Promise<ArrayBuffer | number[]>;
-    invoke(name: 'read_raster', args: {generation: number, layer: number, tiles: number[]}): Promise<ArrayBuffer | number[]>;
-    invoke(name: 'put_raster_blob', body: Uint8Array): Promise<number>;
-    invoke(name: 'put_diffuse_file', body: Uint8Array, options: {headers: Record<string, string>}): Promise<string>;
-    invoke(name: 'unlock_diffuse', args: {gallery: boolean}): Promise<{sequence: number, events: import('./protocol').WireEvent[]}>;
-    invoke(name: 'paste_raster_image'): Promise<number | null>;
     invoke(name: 'paste_text'): Promise<string | null>;
     invoke(name: 'copy_text', args: {text: string}): Promise<void>;
-    invoke(name: 'copy_raster_image'): Promise<boolean>;
     invoke(name: 'backdrop'): Promise<string>;
     invoke(name: 'set_backdrop', args: {material: string}): Promise<string>;
     invoke(name: 'set_opaque', args: {color: string | null}): Promise<void>;

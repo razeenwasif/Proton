@@ -5,9 +5,6 @@ node_modules
 /test-results/
 /playwright-report/
 *.log
-# Except the TeX logs proton-tex's tests `include_str!`. They are fixtures, not
-# output, and without them a fresh checkout's proton-tex does not compile.
-!crates/proton-tex/tests/fixtures/*.log
 .venv/
 
 # Conversations. A user's project commits these if they want them — they are
@@ -25,7 +22,3 @@ node_modules
 # path, so it is true on one machine and wrong on every other.
 .codex/
 
-# The engines the window runs as WebAssembly, built by scripts/wasm.mjs
-# (Game's simulation, Canvas's pictures)
-ui/game-runtime.wasm
-ui/raster-runtime.wasm

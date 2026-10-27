@@ -1,23 +1,15 @@
 /* Legacy browser-only fixtures. The native bridge never loads this module.
  * Its public boundary is described in preview-bridge.d.ts; the fixture
  * implementation remains outside the incremental strict-check boundary. */
-import {encodeMesh} from './meshbytes.js';
 import {createClaudePreview} from './preview-claude.js';
 import {createResearchPreview} from './preview-research.js';
 import {createStudyPreview} from './preview-study.js';
-import {createGamePreview} from './preview-game.js';
-import {createRasterPreview} from './preview-raster.js';
-import {createDiffusePreview} from './preview-diffuse.js';
 
-export function createPreview(deliver, mockLatency) {
-  let mockMesh = () => null;
+export function createPreview(deliver) {
   let send;
   const claude = createClaudePreview(deliver);
   const research = createResearchPreview(deliver);
   const study = createStudyPreview(deliver);
-  const games = createGamePreview(deliver);
-  const rasters = createRasterPreview(deliver);
-  const diffuses = createDiffusePreview(deliver);
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
@@ -126,33 +118,6 @@ export function createPreview(deliver, mockLatency) {
     ],
     problem: "",
   };
-  /* A theme, so Design mode has a palette to show without a core behind it.
-     These are the real tokens from `styles.css`, in the scopes they are
-     actually declared in — a mock palette of invented names would be the same
-     mistake Data mode's sidebar used to make. */
-  const theme = {
-    path: "C:/proton/ui/styles.css",
-    selected: 0,
-    problem: "",
-    tokens: [
-      { name: "--bg", value: "#16161e", scope: ":root", line: 20 },
-      { name: "--bg-deep", value: "#0f0f16", scope: ":root", line: 21 },
-      { name: "--accent", value: "#7aa2f7", scope: ":root", line: 26 },
-      { name: "--accent-2", value: "#bb9af7", scope: ":root", line: 27 },
-      { name: "--ok", value: "#9ece6a", scope: ":root", line: 28 },
-      { name: "--warn", value: "#e0af68", scope: ":root", line: 29 },
-      { name: "--err", value: "#f7768e", scope: ":root", line: 30 },
-      {
-        name: "--shadow",
-        value: "0 1px 2px rgba(0, 0, 0, .4)",
-        scope: ":root",
-        line: 31,
-      },
-      { name: "--accent", value: "#89b4fa", scope: ':root[data-theme="catppuccin"]', line: 62 },
-      { name: "--accent", value: "#83a598", scope: ':root[data-theme="gruvbox-dark"]', line: 104 },
-    ],
-  };
-
   /* Settings, so the page has something to read and write without a core.
      Starts empty on purpose: the panels have to render correctly when nothing
      has been chosen, which is every first run. */
@@ -186,435 +151,6 @@ export function createPreview(deliver, mockLatency) {
     type: "settings",
     values: settings,
     path: "C:/proton/.proton/settings.json",
-  });
-
-  const themeEvent = () => ({
-    type: "theme",
-    path: theme.path,
-    tokens: theme.tokens,
-    selected: theme.selected,
-    problem: theme.problem,
-  });
-
-  // A component for the artboard, so Design mode can be designed against
-  // something with real markup in it rather than an empty frame. It names
-  // tokens through `var()` with fallbacks, the way somebody else's component
-  // would — the artboard has to look right against a palette it did not
-  // choose.
-  const component = {
-    path: "C:/proton/ui/components/card.html",
-    document: false,
-    problem: "",
-    source: [
-      '<article class="card">',
-      '  <h3>Pricing</h3>',
-      '  <p>A component file, drawn with the project\u2019s own palette.</p>',
-      '  <button>Choose plan</button>',
-      '</article>',
-      '<style>',
-      '  .card { max-width: 340px; padding: 20px; border-radius: 12px;',
-      '          border: 1px solid var(--accent, #7aa2f7);',
-      '          background: var(--bg-deep, #0f0f16); }',
-      '  .card h3 { margin: 0 0 6px; color: var(--accent, #7aa2f7); }',
-      '  .card p { margin: 0 0 14px; opacity: .8; }',
-      '  .card button { border: 0; border-radius: 7px; padding: 9px 16px;',
-      '                 font: 600 13px system-ui;',
-      '                 background: var(--accent, #7aa2f7); color: var(--bg, #16161e); }',
-      '</style>',
-    ].join("\n"),
-  };
-
-  // Written out rather than parsed. Everywhere else in this file a mock is a
-  // fixture, and a second markup parser living here to serve one fixed
-  // component would be a second thing to keep correct — the real one is
-  // proton-design::markup and it has its own tests. The lines match the
-  // source above; change one and change the other.
-  const componentLayers = [
-    { tag: "article", id: "", classes: ["card"], text: "", line: 1, depth: 0,
-      leaf: false, path: "article:nth-child(1)" },
-    { tag: "h3", id: "", classes: [], text: "Pricing", line: 2, depth: 1, leaf: true,
-      path: "article:nth-child(1) > h3:nth-child(1)" },
-    { tag: "p", id: "", classes: [], text: "A component file, drawn with the project\u2019s own p\u2026",
-      line: 3, depth: 1, leaf: true, path: "article:nth-child(1) > p:nth-child(2)" },
-    { tag: "button", id: "", classes: [], text: "Choose plan", line: 4, depth: 1, leaf: true,
-      path: "article:nth-child(1) > button:nth-child(3)" },
-    { tag: "style", id: "", classes: [], text: "", line: 6, depth: 0, leaf: true,
-      path: "style:nth-child(2)" },
-  ];
-
-  // A scene for the outliner, so Modeling can be designed against a real
-  // tree. Written out rather than parsed, like every other fixture here; the
-  // real one is read from `scene.proton.json` by proton-scene.
-  const scene = {
-    path: "C:/proton/scene.proton.json",
-    problem: "",
-    selected: -1,
-    nodes: [
-      { id: "rig-1", name: "Satellite", kind: "empty", parent: "", depth: 0,
-        children: 3, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-      { id: "body-1", name: "Body", kind: "mesh", parent: "rig-1", depth: 1, material: "alu",
-        mesh: "meshes/body.obj",
-        children: 0, position: [0, 1.4, 0], rotation: [0, 32, 0], scale: [1, 1, 1] },
-      { id: "array-1", name: "SolarArray", kind: "mesh", parent: "rig-1", depth: 1,
-        mesh: "meshes/panel.obj",
-        children: 0, position: [1.8, 1.4, 0], rotation: [0, 0, 0], scale: [4, 1, 1] },
-      // A mesh naming a file nobody copied — the ordinary failure, and the one
-      // the viewport has to keep drawing something for.
-      { id: "dish-1", name: "Dish", kind: "mesh", parent: "rig-1", depth: 1,
-        mesh: "meshes/dish.obj",
-        children: 0, position: [-2, 1.4, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-      { id: "key-1", name: "Key Light", kind: "light", parent: "rig-1", depth: 1,
-        children: 0, position: [3, 4, 2], rotation: [-40, 25, 0], scale: [1, 1, 1] },
-      { id: "cam-1", name: "Camera", kind: "camera", parent: "", depth: 0,
-        children: 0, position: [6, 3, 6], rotation: [-12, 45, 0], scale: [1, 1, 1] },
-    ],
-  };
-
-  // One material, wired, so the graph panel can be designed against a real
-  // shape. `body-1` wears it; every other object wears none, which is the
-  // ordinary case and the one the panel has to handle too.
-  const materials = [
-    {
-      id: "alu",
-      name: "Brushed aluminium",
-      nodes: [
-        { id: "noise-1", kind: "noise", at: [14, 26],
-          params: [{ name: "detail", value: { number: 2 } },
-                   { name: "scale", value: { number: 6.4 } }] },
-        { id: "ramp-1", kind: "ramp", at: [14, 104],
-          params: [{ name: "fac", value: { number: 0.31 } }] },
-        { id: "bsdf-1", kind: "principled", at: [244, 34],
-          params: [{ name: "baseColor", value: { color: [0.28, 0.29, 0.31] } },
-                   { name: "metallic", value: { number: 0.9 } },
-                   { name: "roughness", value: { number: 0.24 } }] },
-        { id: "out-1", kind: "output", at: [470, 62], params: [] },
-      ],
-      links: [
-        { from: "noise-1:fac", to: "ramp-1:fac" },
-        { from: "ramp-1:color", to: "bsdf-1:roughness" },
-        { from: "bsdf-1:bsdf", to: "out-1:surface" },
-      ],
-    },
-  ];
-
-  // The same material, compiled. Written out by hand rather than compiled
-  // here: `Material::compile` is Rust, and a second compiler in the preview
-  // would be a thing that can disagree with the real one about what a graph
-  // means. This is a fixture of its output — the noise into a ramp into
-  // roughness, exactly as the graph above says.
-  const shaders = [
-    {
-      id: "alu",
-      ops: [
-        { op: "position" },
-        { op: "noise", at: 0, scale: 6.4, detail: 2 },
-        { op: "constant", value: [0, 0, 0] },
-        { op: "constant", value: [1, 1, 1] },
-        { op: "mix", a: 2, b: 3, fac: 1 },
-        { op: "constant", value: [0.28, 0.29, 0.31] },
-        { op: "constant", value: [0.9, 0.9, 0.9] },
-      ],
-      base: 5,
-      metallic: 6,
-      roughness: 4,
-      problem: "",
-    },
-  ];
-
-  /* Keep the hand-written program above in step with the graph beside it.
-   *
-   * Not a compiler, and deliberately not: `Material::compile` is Rust and a
-   * second one here would be a thing that can disagree with it about what a
-   * graph means. This only knows where *this fixture* put the constants that
-   * this fixture's three settings became, which is a fact about the fixture. */
-  const WHERE = { baseColor: 5, metallic: 6, "noise.scale": 1, "noise.detail": 1 };
-  const keepShaderInStep = (node, param, value) => {
-    const shader = shaders[0];
-    if (node === "bsdf-1") {
-      const at = WHERE[param];
-      if (at === undefined) return;
-      const n = value.number ?? null;
-      shader.ops[at] = {
-        op: "constant",
-        value: n === null ? [...value.color] : [n, n, n],
-      };
-    } else if (node === "noise-1") {
-      const n = value.number;
-      if (typeof n !== "number") return;
-      shader.ops[1] = { ...shader.ops[1], [param]: n };
-    }
-  };
-
-
-  // A cut and its captions, so Video mode can be designed against real
-  // documents. Written out like every other fixture here; the real ones are
-  // read from an `.edl` and an `.srt` by proton-video.
-  const cutSource = `TITLE: LAUNCH SEQUENCE
-FCM: NON-DROP FRAME
-
-001  AX       V     C        00:00:00:00 00:00:12:10 00:00:00:00 00:00:12:10
-* FROM CLIP NAME: launch_a.mov
-
-002  BX       V     C        00:00:04:00 00:00:09:12 00:00:12:10 00:00:17:22
-* FROM CLIP NAME: ground_cam.mp4
-
-003  AX       AA    C        00:00:00:00 00:00:17:22 00:00:00:00 00:00:17:22
-* FROM CLIP NAME: vo_take3.wav
-`;
-
-  // The rate is what turns a timecode into a frame number, so it lives in a
-  // variable the conversion reads rather than being baked into it. The real
-  // one re-parses the whole list when the rate changes; a mock that kept its
-  // frame counts would draw a timeline the core would never produce.
-  let fps = 24;
-  const at = (tc) => {
-    const [h, m, sec, f] = tc.split(":").map(Number);
-    return ((h * 60 + m) * 60 + sec) * fps + f;
-  };
-  const clip = (event, reel, channel, tracks, name, sIn, sOut, rIn, rOut) => ({
-    event, reel, channel, tracks, name, transition: "C", duration: "", source: "",
-    sourceIn: sIn, sourceOut: sOut, recordIn: rIn, recordOut: rOut,
-    start: at(rIn), end: at(rOut), line: 0,
-  });
-
-  const cut = {
-    path: "C:/launch/edit/launch.edl",
-    captionsPath: "C:/launch/edit/launch.srt",
-    title: "LAUNCH SEQUENCE",
-    problem: "",
-    selected: -1,
-    source: cutSource,
-    rate: { fps, drop: false },
-    clips: [
-      clip("001", "AX", "V", ["V1"], "launch_a.mov",
-           "00:00:00:00", "00:00:12:10", "00:00:00:00", "00:00:12:10"),
-      clip("002", "BX", "V", ["V1"], "ground_cam.mp4",
-           "00:00:04:00", "00:00:09:12", "00:00:12:10", "00:00:17:22"),
-      clip("003", "AX", "AA", ["A1", "A2"], "vo_take3.wav",
-           "00:00:00:00", "00:00:17:22", "00:00:00:00", "00:00:17:22"),
-    ],
-    tracks: ["V1", "A1", "A2"],
-    captions: [
-      { index: "1", start: "00:00:02,000", end: "00:00:05,500", startMs: 2000,
-        endMs: 5500, text: "...and that is the burn complete.", line: 2 },
-      { index: "2", start: "00:00:06,120", end: "00:00:09,000", startMs: 6120,
-        endMs: 9000, text: "Orbital insertion confirmed.", line: 6 },
-    ],
-    // One source really on disk and two not, which is the state a cut handed
-    // over on its own always arrives in.
-    media: [
-      { name: "launch_a.mov", path: "C:/launch/edit/media/launch_a.mov", reel: "AX",
-        uses: 1, found: true, audio: false },
-      { name: "ground_cam.mp4", path: "", reel: "BX", uses: 1, found: false, audio: false },
-      { name: "vo_take3.wav", path: "", reel: "AX", uses: 1, found: false, audio: true },
-    ],
-  };
-  cut.length = Math.max(...cut.clips.map((one) => one.end));
-
-  /** The event line one clip is on, for splicing it the way the real one does. */
-  const cutSourceLine = (one) =>
-    cut.source
-      .split("\n")
-      .find((line) => line.startsWith(one.event) && line.includes(one.recordIn)) ?? "";
-
-  /** Frame numbers, from the timecodes, at whatever rate is current. */
-  const recount = () => {
-    for (const one of cut.clips) {
-      one.start = at(one.recordIn);
-      one.end = at(one.recordOut);
-    }
-    cut.length = Math.max(...cut.clips.map((one) => one.end));
-  };
-
-  const cutEvent = () => ({ type: "cut", ...cut });
-
-
-  /* ── geometry ─────────────────────────────────────
-   *
-   * Built here rather than read from a file, because the preview has no disk.
-   * The shapes are the two the mock's objects wear: a solid, so culling is
-   * exercised, and a sheet, so the case that must *not* be culled is too. */
-
-  /** A box, as eight corners and twelve triangles. Closed. */
-  const boxMesh = (w, h, d) => {
-    const positions = [];
-    for (const x of [-w / 2, w / 2]) {
-      for (const y of [-h / 2, h / 2]) {
-        for (const z of [-d / 2, d / 2]) positions.push(x, y, z);
-      }
-    }
-    // Corner n is bit 2 = x, bit 1 = y, bit 0 = z.
-    const quad = (a, b, c, e) => [a, b, c, a, c, e];
-    const triangles = [
-      ...quad(0, 1, 3, 2), ...quad(4, 6, 7, 5),
-      ...quad(0, 4, 5, 1), ...quad(2, 3, 7, 6),
-      ...quad(0, 2, 6, 4), ...quad(1, 5, 7, 3),
-    ];
-    return {
-      positions, triangles, skipped: 0, closed: true,
-      bounds: [-w / 2, -h / 2, -d / 2, w / 2, h / 2, d / 2],
-    };
-  };
-
-  /** A flat panel: two triangles and a rim, so it is *not* closed. */
-  const panelMesh = (w, d) => ({
-    positions: [-w / 2, 0, -d / 2, w / 2, 0, -d / 2, w / 2, 0, d / 2, -w / 2, 0, d / 2],
-    triangles: [0, 1, 2, 0, 2, 3],
-    skipped: 0,
-    closed: false,
-    bounds: [-w / 2, 0, -d / 2, w / 2, 0, d / 2],
-  });
-
-  const meshes = {
-    "meshes/body.obj": boxMesh(1.2, 1.6, 1.2),
-    "meshes/panel.obj": panelMesh(1, 0.5),
-  };
-
-  /* ── the modifier stack ──────────────────────────────
-   *
-   * Enough of an evaluator for the panel to be designed against geometry that
-   * really changes. Mirror and array are exact and are three lines each.
-   *
-   * Subdivide here splits every triangle at its edge midpoints and stops: the
-   * count goes up four times a level, as it should, and the shape does *not*
-   * smooth. The real one is Loop subdivision in `proton-mesh`, and this is a
-   * stand-in for a preview with no Rust behind it — said out loud so that a
-   * picture from this file is never mistaken for a picture from the core. */
-
-  const stackOf = (node) =>
-    (node?.modifiers ?? []).filter((one) => one.known && !one.off);
-
-  const runStack = (mesh, stack) => {
-    let out = { ...mesh, positions: [...mesh.positions], triangles: [...mesh.triangles] };
-    for (const one of stack) {
-      if (one.kind === "mirror") {
-        const axis = { x: 0, y: 1, z: 2 }[one.axis] ?? 0;
-        const was = out.positions.length / 3;
-        const twin = [];
-        for (let v = 0; v < was; v++) {
-          const p = out.positions.slice(v * 3, v * 3 + 3);
-          if (one.weld && Math.abs(p[axis]) < 1e-6) {
-            twin.push(v);
-            continue;
-          }
-          twin.push(out.positions.length / 3);
-          p[axis] = -p[axis];
-          out.positions.push(...p);
-        }
-        const faces = [...out.triangles];
-        for (let t = 0; t < faces.length; t += 3) {
-          // Two corners swapped: a reflection reverses orientation.
-          out.triangles.push(twin[faces[t]], twin[faces[t + 2]], twin[faces[t + 1]]);
-        }
-      } else if (one.kind === "array") {
-        const count = Math.max(1, one.count | 0);
-        const was = out.positions.length / 3;
-        const pos = [...out.positions];
-        const tri = [...out.triangles];
-        out.positions = [];
-        out.triangles = [];
-        for (let copy = 0; copy < count; copy++) {
-          for (let i = 0; i < pos.length; i++) {
-            out.positions.push(pos[i] + one.offset[i % 3] * copy);
-          }
-          out.triangles.push(...tri.map((corner) => corner + was * copy));
-        }
-      } else if (one.kind === "subdivide") {
-        for (let level = 0; level < Math.min(4, one.levels | 0); level++) {
-          const mid = new Map();
-          const tri = [...out.triangles];
-          out.triangles = [];
-          const between = (a, b) => {
-            const at = `${Math.min(a, b)}:${Math.max(a, b)}`;
-            if (mid.has(at)) return mid.get(at);
-            const made = out.positions.length / 3;
-            for (let k = 0; k < 3; k++) {
-              out.positions.push((out.positions[a * 3 + k] + out.positions[b * 3 + k]) / 2);
-            }
-            mid.set(at, made);
-            return made;
-          };
-          for (let t = 0; t < tri.length; t += 3) {
-            const [a, b, c] = [tri[t], tri[t + 1], tri[t + 2]];
-            const [ab, bc, ca] = [between(a, b), between(b, c), between(c, a)];
-            out.triangles.push(a, ab, ca, b, bc, ab, c, ca, bc, ab, bc, ca);
-          }
-        }
-      }
-    }
-    // The box moved, and framing reads it.
-    const lo = [Infinity, Infinity, Infinity];
-    const hi = [-Infinity, -Infinity, -Infinity];
-    for (const v of out.triangles) {
-      for (let k = 0; k < 3; k++) {
-        lo[k] = Math.min(lo[k], out.positions[v * 3 + k]);
-        hi[k] = Math.max(hi[k], out.positions[v * 3 + k]);
-      }
-    }
-    out.bounds = [...lo, ...hi];
-    return out;
-  };
-
-  /** The key an object asks for its geometry by — the same rule the core uses. */
-  const keyOf = (node) =>
-    !node.mesh || !stackOf(node).length ? node.mesh ?? "" : `${node.mesh}@${node.id}`;
-
-  const geometryEvent = (path) => {
-    // `chair.obj@chair-3` is that object's copy of it.
-    const [file, id] = path.includes("@") ? path.split("@") : [path, null];
-    const base = meshes[file];
-    const node = id ? scene.nodes.find((one) => one.id === id) : null;
-    const mesh = base ? runStack(base, stackOf(node)) : null;
-    if (!mesh) {
-      // Exactly what the core sends for a mesh nobody copied.
-      return {
-        type: "geometry",
-        path,
-        ready: false,
-        bounds: [0, 0, 0, 0, 0, 0],
-        triangles: 0,
-        problem: `${file}: not there`,
-      };
-    }
-    // A description, as the core sends it. The mesh itself follows through
-    // `readGeometry`, as bytes, the same as it does from the shell.
-    return {
-      type: "geometry",
-      path,
-      ready: true,
-      bounds: mesh.bounds,
-      triangles: mesh.triangles.length / 3,
-      problem: "",
-    };
-  };
-  mockMesh = (path) => {
-    const [file, id] = path.includes("@") ? path.split("@") : [path, null];
-    const base = meshes[file];
-    const node = id ? scene.nodes.find((one) => one.id === id) : null;
-    return base ? runStack(base, stackOf(node)) : null;
-  };
-
-  const sceneEvent = () => ({
-    type: "scene",
-    materials,
-    shaders,
-    path: scene.path,
-    // `geometry` is derived, not stored — the same rule the core follows, so
-    // the viewport looks a result up by the same key either way.
-    nodes: scene.nodes.map((one) => ({ ...one, geometry: keyOf(one) })),
-    selected: scene.selected,
-    problem: scene.problem,
-    meshes: [...new Set(scene.nodes.map(keyOf).filter(Boolean))],
-  });
-
-  const artboardEvent = () => ({
-    type: "artboard",
-    path: component.path,
-    source: component.source,
-    document: component.document,
-    problem: component.problem,
-    layers: componentLayers,
-    selected: component.selected ?? -1,
   });
 
   /* What the agent has proposed to the notebook, as the core keeps it: by
@@ -850,13 +386,6 @@ FCM: NON-DROP FRAME
         tasksEvent(),
         pluginsEvent(),
         notebookEvent(),
-        themeEvent(),
-        artboardEvent(),
-        sceneEvent(),
-        ...games.sync(),
-        ...rasters.sync(),
-        ...diffuses.sync(),
-        cutEvent(),
         settingsEvent(),
         chatsEvent(),
         ...claude.sync(),
@@ -869,9 +398,6 @@ FCM: NON-DROP FRAME
     }
     if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
     if (command.type.startsWith("study")) return study.command(command);
-    if (command.type.startsWith("game")) return games.command(command);
-    if (command.type.startsWith("raster")) return rasters.command(command);
-    if (command.type.startsWith("diffuse")) return diffuses.command(command);
     if (command.type === "runCell") {
       // The shape of a real run: the cell goes busy, and the answer arrives
       // later on its own — which is what the panel has to survive.
@@ -904,192 +430,10 @@ FCM: NON-DROP FRAME
       if (hit) hit.title = command.title;
       return [chatsEvent()];
     }
-    if (command.type === "selectClip") {
-      cut.selected = command.index;
-      return [cutEvent()];
-    }
-    if (command.type === "setClipField") {
-      const one = cut.clips[command.index];
-      if (one) {
-        // Spliced, like the real one: the bytes that field occupies in the
-        // line are replaced and no column is re-aligned.
-        const was = one[command.field];
-        if (was && was !== command.value) {
-          const line = cutSourceLine(one);
-          cut.source = cut.source.replace(line, line.replace(was, command.value));
-          one[command.field] = command.value;
-          if (command.field === "recordIn") one.start = at(command.value);
-          if (command.field === "recordOut") one.end = at(command.value);
-          cut.length = Math.max(...cut.clips.map((c) => c.end));
-        }
-      }
-      return [cutEvent()];
-    }
-    if (command.type === "setCaptionField") {
-      const cue = cut.captions[command.index];
-      if (cue) cue[command.field] = command.value;
-      return [cutEvent()];
-    }
-    if (command.type === "setTimelineRate") {
-      fps = command.fps;
-      cut.rate = { fps, drop: cut.rate.drop };
-      recount();
-      return [cutEvent()];
-    }
-    if (command.type === "loadMesh") {
-      return [geometryEvent(command.path)];
-    }
-    if (command.type === "setNodeModifier") {
-      const node = scene.nodes[command.index];
-      const fresh = {
-        mirror: { kind: "mirror", axis: "x", weld: true, known: true, off: false,
-                  count: 2, offset: [1, 0, 0], levels: 1 },
-        array: { kind: "array", axis: "x", weld: true, known: true, off: false,
-                 count: 2, offset: [1, 0, 0], levels: 1 },
-        subdivide: { kind: "subdivide", axis: "x", weld: true, known: true, off: false,
-                     count: 2, offset: [1, 0, 0], levels: 1 },
-      }[command.kind];
-      if (!node || !fresh) {
-        return [{ type: "notice", text: `${command.kind} is not a modifier this build knows`,
-                  level: "error" }];
-      }
-      node.modifiers = [...(node.modifiers ?? []), { ...fresh }];
-      return [sceneEvent(), geometryEvent(keyOf(node))];
-    }
-    if (command.type === "removeNodeModifier") {
-      const node = scene.nodes[command.index];
-      if (node?.modifiers) node.modifiers.splice(command.row, 1);
-      return [sceneEvent(), geometryEvent(keyOf(node))];
-    }
-    if (command.type === "moveNodeModifier") {
-      const node = scene.nodes[command.index];
-      const stack = node?.modifiers;
-      if (stack && command.row < stack.length) {
-        const to = Math.min(Math.max(0, command.to), stack.length - 1);
-        stack.splice(to, 0, ...stack.splice(command.row, 1));
-      }
-      return [sceneEvent(), geometryEvent(keyOf(node))];
-    }
-    if (command.type === "setModifierField") {
-      const one = scene.nodes[command.index]?.modifiers?.[command.row];
-      if (one) {
-        const number = Number(command.value);
-        if (command.field === "off" || command.field === "weld") {
-          one[command.field] = command.value === "true";
-        } else if (command.field === "axis") {
-          one.axis = command.value;
-        } else if (command.field === "count") {
-          one.count = Math.max(1, Math.min(4096, number | 0));
-        } else if (command.field === "levels") {
-          one.levels = Math.max(0, Math.min(6, number | 0));
-        } else if (command.field.startsWith("offset")) {
-          const axis = { offsetX: 0, offsetY: 1, offsetZ: 2 }[command.field];
-          if (Number.isFinite(number)) one.offset[axis] = number;
-        }
-      }
-      const node = scene.nodes[command.index];
-      return [sceneEvent(), geometryEvent(keyOf(node))];
-    }
-    if (command.type === "setNodeMesh") {
-      const node = scene.nodes[command.index];
-      if (node) node.mesh = command.path;
-      return [sceneEvent()];
-    }
-    if (command.type === "selectNode") {
-      scene.selected = command.index;
-      return [sceneEvent()];
-    }
-    if (command.type === "renameNode") {
-      const node = scene.nodes[command.index];
-      if (node) node.name = command.name;
-      return [sceneEvent()];
-    }
-    if (command.type === "setMaterialParam") {
-      const m = materials.find((one) => one.id === command.material);
-      const node = m?.nodes.find((one) => one.id === command.node);
-      const param = node?.params.find((one) => one.name === command.param);
-      if (param) param.value = command.value;
-      keepShaderInStep(command.node, command.param, command.value);
-      return [sceneEvent()];
-    }
-    if (command.type === "moveGraphNode") {
-      const m = materials.find((one) => one.id === command.material);
-      const node = m?.nodes.find((one) => one.id === command.node);
-      if (node) node.at = command.at;
-      return [sceneEvent()];
-    }
-    if (command.type === "connectPorts") {
-      const m = materials.find((one) => one.id === command.material);
-      if (m) {
-        // The same two rules the real one enforces, so the preview refuses
-        // what the core would refuse rather than showing a wire that will not
-        // survive a reload.
-        const node = (port) => port.split(":")[0];
-        const reaches = (from, to) => {
-          const seen = new Set();
-          const stack = [from];
-          while (stack.length) {
-            const at = stack.pop();
-            if (at === to) return true;
-            if (seen.has(at)) continue;
-            seen.add(at);
-            for (const l of m.links) {
-              if (node(l.from) === at) stack.push(node(l.to));
-            }
-          }
-          return false;
-        };
-        if (node(command.from) === node(command.to)) return [];
-        if (reaches(node(command.to), node(command.from))) return [];
-        const existing = m.links.find((l) => l.to === command.to);
-        if (existing) existing.from = command.from;
-        else m.links.push({ from: command.from, to: command.to });
-      }
-      return [sceneEvent()];
-    }
-    if (command.type === "rewirePort") {
-      const m = materials.find((one) => one.id === command.material);
-      const moving = m?.links.find((l) => l.to === command.fromInput);
-      if (m && moving) {
-        m.links = m.links.filter((l) => l.to !== command.toInput);
-        moving.to = command.toInput;
-      }
-      return [sceneEvent()];
-    }
-    if (command.type === "disconnectPort") {
-      const m = materials.find((one) => one.id === command.material);
-      if (m) m.links = m.links.filter((l) => l.to !== command.to);
-      return [sceneEvent()];
-    }
-    if (command.type === "setNodeTransform") {
-      const node = scene.nodes[command.index];
-      if (node) node[command.part] = command.to;
-      return [sceneEvent()];
-    }
-    if (command.type === "selectLayer") {
-      component.selected = command.index;
-      return [artboardEvent()];
-    }
     // The reverse binding, in miniature: the mock's layer list is the fixture,
     // so an edit changes that and the source it came from. The real one
     // splices bytes; this only has to let the panel be designed against
     // something that responds.
-    if (command.type === "setLayerText") {
-      const layer = componentLayers[command.index];
-      if (layer && layer.text) {
-        component.source = component.source.replace(layer.text, command.text);
-        layer.text = command.text;
-      }
-      return [artboardEvent()];
-    }
-    if (command.type === "setLayerAttribute") {
-      const layer = componentLayers[command.index];
-      if (layer) {
-        if (command.name === "id") layer.id = command.value;
-        else layer.classes = command.value.split(/\s+/).filter(Boolean);
-      }
-      return [artboardEvent()];
-    }
     if (command.type === "setSetting") {
       const parts = command.key.split(".");
       const last = parts.pop();
@@ -1098,17 +442,6 @@ FCM: NON-DROP FRAME
       if (command.value === null) delete node[last];
       else node[last] = command.value;
       return [settingsEvent()];
-    }
-    if (command.type === "setToken") {
-      const hit = theme.tokens.find(
-        (t) => t.name === command.name && t.scope === command.scope,
-      );
-      if (hit) hit.value = command.value;
-      return [themeEvent()];
-    }
-    if (command.type === "selectToken") {
-      theme.selected = Math.min(command.index, theme.tokens.length - 1);
-      return [themeEvent()];
     }
     if (command.type === "selectCell") {
       notebook.cells.forEach((cell, i) => (cell.selected = i === command.index));
@@ -1393,7 +726,7 @@ FCM: NON-DROP FRAME
     }
     if (command.type === "setMode") {
       state.mode = command.mode;
-      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "game" ? games.sync() : []), ...(state.mode === "raster" ? rasters.sync() : []), ...(state.mode === "diffuse" ? diffuses.sync() : [])];
+      return [{ type: "modeChanged", mode: state.mode }];
     }
     // A real traced step, dumped from the core by
     // `crates/proton-core/tests/dump_step.rs`. Real rather than invented,
@@ -1494,11 +827,5 @@ FCM: NON-DROP FRAME
     if (state.vim === "Command") return [{ type: "cmdline", text: "", prompt: state.prompt }, vimEvent()];
     return state.vim === before ? [] : [vimEvent()];
   };
-  return {send, readLab: (key) => research.file(key), readGame: (key) => games.file(key), readRaster: (generation, layer, tiles) => rasters.tiles(generation, layer, tiles), readDiffuse: (path) => diffuses.file(path), putDiffuseFile: (path, bytes) => diffuses.put(path, bytes), unlockDiffuse: async (gallery) => diffuses.unlock(gallery), async readGeometry(key) {
-    const mesh = mockMesh(key);
-    const wait = mockLatency.get(key) ?? 0;
-    if (wait) await new Promise(done => setTimeout(done, wait));
-    if (!mesh) throw new Error(`${key}: no geometry to send`);
-    return encodeMesh(mesh);
-  }};
+  return {send, readLab: (key) => research.file(key)};
 }

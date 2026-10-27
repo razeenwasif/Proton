@@ -6,9 +6,9 @@ import type {NativeApi} from '../../ui/native-api';
 import {lineHtml} from '../../ui/editor-row.js';
 
 declare const native: NativeApi;
-native.core.invoke('read_geometry', {key: 'mesh'});
+native.core.invoke('read_lab', {key: 'sky/run-1/plot.png'});
 // @ts-expect-error Binary reads use a key, not a path.
-native.core.invoke('read_geometry', {path: 'mesh'});
+native.core.invoke('read_lab', {path: 'sky/run-1/plot.png'});
 // @ts-expect-error Native dispatch accepts only generated wire commands.
 native.core.invoke('dispatch', {command: {type: 'openBuffer'}});
 // @ts-expect-error Public bridge functions preserve their parameter types.

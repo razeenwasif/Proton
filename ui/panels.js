@@ -37,8 +37,7 @@ export function createPanels(root, changed) {
     const state = stateOf(section);
     const panes = [...section.querySelectorAll(':scope > aside')];
     const hasRight = panes.length > 1;
-    const fixed = section.dataset.ws === 'design' ? 66 : 0;
-    const room = Math.max(0, section.clientWidth - fixed - minStage - 2);
+    const room = Math.max(0, section.clientWidth - minStage - 2);
     let left = !state.leftHidden, right = hasRight && !state.rightHidden;
     // Keep the user's choices; temporarily show only the most recently
     // requested side when both would crowd the stage.
@@ -49,7 +48,7 @@ export function createPanels(root, changed) {
     const width = (side, visible) => visible ? Math.max(0, Math.min(state[`--col-${side}`], room)) : 0;
     section.style.setProperty('--col-l', `${width('l', left)}px`);
     section.style.setProperty('--col-r', `${width('r', right)}px`);
-    section.style.gridTemplateColumns = `${fixed ? '66px ' : ''}${left ? 'var(--col-l) 1px' : '0px 0px'} minmax(0,1fr)${hasRight ? (right ? ' 1px var(--col-r)' : ' 0px 0px') : ''}`;
+    section.style.gridTemplateColumns = `${left ? 'var(--col-l) 1px' : '0px 0px'} minmax(0,1fr)${hasRight ? (right ? ' 1px var(--col-r)' : ' 0px 0px') : ''}`;
     panes.forEach((pane, index) => {
       const willHide = !(index === 0 ? left : right);
       if (willHide && pane.contains(root.activeElement)) {
@@ -156,7 +155,7 @@ export function createPanels(root, changed) {
     const { section, gutter } = drag;
     const box = section.getBoundingClientRect();
     const left = gutter.dataset.resize === '--col-l';
-    const raw = left ? event.clientX - box.left - (section.dataset.ws === 'design' ? 66 : 0) : box.right - event.clientX;
+    const raw = left ? event.clientX - box.left : box.right - event.clientX;
     stateOf(section)[gutter.dataset.resize] = Math.max(minPane, Math.min(cap, Math.round(raw)));
     refresh();
   });
