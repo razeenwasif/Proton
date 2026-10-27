@@ -87,9 +87,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-claude` | Claude Code, Codex and Antigravity as engines: interactive, and unattended with structured answers |
 | `proton-research` | Investigations as files, and the co-scientist round as a pure state machine |
 | `proton-literature` | The literature's sources — arXiv, Semantic Scholar, OpenAlex, Crossref — each host asked no oftener than it asks, on a worker the core polls; open PDFs downloaded, capped and checked |
-| `proton-lab` | The Lab's Python — a conda environment, or a venv where there is no conda — planned, made and removed on the scientist's say-so, and the jobs that run for it; Lean and Mathlib, and TeX (TinyTeX, latexmk, texlab), made the same way, and the sandboxed builds |
-| `proton-tex` | LaTeX with no processes and no network: the log, the main file and engine, SyncTeX, the outline, BibTeX, templates, Markdown to LaTeX, and the visual editor's blocks |
-| `proton-pdf` | A PDF as the PDF mode changes it, with no processes: opened (with a password), changed by undoable operations, saved as an incremental update or whole and atomically; pages, combining, comments with their own appearances, forms, AES-256, cleaning, OCR's words grafted on, and each page's text with where it is |
+| `proton-lab` | The Lab's Python — a conda environment, or a venv where there is no conda — planned, made and removed on the scientist's say-so, and the jobs that run for it; and Lean and Mathlib, made the same way |
 | `proton-study` / `proton-voice` | Notebook's notebooks and their sources / speech from Fish Audio |
 | `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
 | `proton-data` | Notebook documents and kernel integration |
@@ -362,8 +360,7 @@ delete a line nobody can see.
 
 Before this, opening one failed outright: `read_to_string` refuses invalid
 UTF-8, so the whole of the old behaviour was an error notice. The viewer only
-reads; Open in Reader hands its file to the PDF mode, at the same page, to be
-changed there.
+reads; a PDF to be changed is Quark's.
 
 `ViewerKind` is a small closed set rather than "anything that is not text".
 A format belongs in it only once something can actually draw it — treating
@@ -1059,148 +1056,14 @@ ready. The tests read hand-written `lean --json` output
 and Lean, and run a whole round through `Live` with a stand-in `lean` in a
 stand-in home, in the sandbox; a real Lean is the scientist's to make.
 
-### LaTeX
+### LaTeX and the Reader
 
-The tenth mode (`ModeId::Tex`, ⌃0) is Codex's section drawn with a dock of
-its own: `data-dock="typeset"` swaps `#codex-dock` for `#tex-pane` (PDF, Log,
-Agent), so the editor beside it is Codex's — vim, splits, highlighting,
-language servers — and `ModeId::edits_text()` lets every gate that was
-Codex's take LaTeX too. The pane keeps a width of its own
-(`proton.panes.codex.typeset`).
-
-**TeX** is the machine's, made as Lean is (`proton-lab::tex`), in
-`~/.proton/tex` on two say-sos: the plan asks GitHub for TinyTeX's release
-(the full bundle, 210 MB, or TinyTeX-1) and texlab's, with the SHA-256
-digests GitHub publishes; making it downloads and checks both, unpacks them,
-installs latexmk with tlmgr if the bundle lacks it, and typesets a page in
-the sandbox before `ready.json` is written. A package a document lacks is
-found with `tlmgr search --global --file` and installed with `tlmgr install`,
-each on a say-so; a new project's classes and packages are checked with
-kpsewhich before its first build.
-
-**A build** (`proton-lab::tex::build`) is `latexmk -cd -pdf|-pdfxe|-pdflua
--synctex=1 -interaction=nonstopmode -file-line-error` in the sandbox, which
-reads the project and TeX and writes only the build's folder,
-`~/.proton/tex/builds/<project>-<hash>/<main>/` — never the project, so Git
-stays clean and a document cannot rewrite its own sources. `HOME`, `TMPDIR`
-and TeX's `TEXMF*` caches are inside that folder, `max_print_line` is wide
-enough that the log does not wrap, and shell escape is off. A save typesets
-again (a build under way is stopped first); the PDF is copied atomically to
-`view/` and allow-listed for the window, which draws it with `ui/pdf-view.js`
-and reads it again in place, page and zoom kept. Save PDF is the one write a
-build makes in the project, and only when asked.
-
-**`proton-tex`** is the pure half. `log` reads TeX's log by its file stack
-into errors, warnings and bad boxes, each with its file and line, and what
-TeX lacked; `project` finds the main file (`.proton/tex.json`, `% !TEX
-root`, the file being edited, a conventional name, the include graph) and
-the engine; `synctex` reads the `.synctex.gz` both ways, in PDF points;
-`outline` gives the headings and words across the include graph; `bib` reads
-`.bib` files tolerantly, keeping each entry's span, and writes entries with
-`lastnameYEARword` keys; `templates` holds six with `include_str!`;
-`markdown` turns Research's Markdown into LaTeX, `P003` into `\cite`; and
-`blocks` cuts a file into the visual editor's blocks, which join back into
-the source exactly.
-
-**The agent** reads the last build with `@log` or the read-only `latex_log`
-tool: up to twenty errors, each with the three source lines either side as
-the editor has them, unsaved or not. **Research** is a cite picker away —
-the document's `.bib`, every investigation's papers, and a search online
-only when asked, through Research's own literature source; the entry is
-added to the `.bib` once, and `\cite{key}` goes in at the cursor as one undo
-step — and `TexWriteUp` gathers an investigation into `paper/<slug>/`: its
-brief, hypotheses as the tournament ranked them, experiments, the runs'
-figures copied in, verdicts, overview, and a `references.bib` of its
-literature.
-
-**The visual editor** (`ui/tex-visual.js`) covers the panes as the
-document viewer does. The core sends the file being edited as blocks
-(`Event::TexBlocks`) whenever the buffer changes while it is on; the window
-draws paragraphs and headings as editable text — marks as elements, every
-command it does not draw as a locked chip that goes back as it came — and
-equations with KaTeX, and draws any block that would not come back exactly
-as its source instead. An edit is sent as the block's new text with the
-version and the text it replaced; the core applies the smallest replacement
-only if the span still holds that text, as one undo step, and the window
-leaves the block being typed in alone when the core's answer is what it
-already shows.
-
-### PDF
-
-The eleventh mode (`ModeId::Pdf`, ⌃-) is Acrobat's reader and editor, on
-the Data side. Its state is the session's (`crate::pdf::Pdfs`), as
-Notebook's is: a PDF is the person's wherever it lives, so its tabs, the
-files opened before (`pdf.json` in the session's folder) and an OCR job
-stay put whichever project is on screen. `Session` routes
-`crate::pdf::handles`, polls it, shuts it down, and asks it in `unsaved()`
-and `save_unsaved()`, so quitting with changes asks first.
-
-**The window draws; the core changes.** Each tab holds a
-`proton_pdf::Doc`, and what the window draws are bytes the core serialises
-after every change and names by a key, `pdfview:<tab>:<version>`;
-`read_document` serves them from the session (`Session::document_bytes`), so
-a file opened with its password is never written anywhere decrypted. The
-window reads a new version in place, its page and zoom kept. Form values
-are the one exception: typed into Proton's own inputs over the fields, sent
-as they rest, and answered `quiet`, so nothing is drawn again under the
-caret. Comments are Proton's overlays too, not pdf.js's annotation layer,
-and the page grid draws thumbnails from the same document.
-
-**`proton-pdf`** is pure — lopdf 0.42, the one pdf-extract already brought
-in, and nothing that runs a process. A change is an `Op` applied to the
-working document; undo replays the log from the document as opened, and the
-log is kept across saves, so undoing after ⌘S makes the tab dirty again.
-Saving writes an incremental update of exactly the objects that differ from
-the file on disk when every change since allows it (comments, form values,
-pages, properties, OCR) and the whole file otherwise (compressing, removing
-hidden data, passwords, a file that was encrypted, which is saved encrypted
-again); either way to a temporary file beside it, synced, renamed over it,
-and read back with its password before it is. Comments are written with
-their own appearance streams, so every viewer shows them; forms are filled
-with `NeedAppearances` and flattened by drawing each widget into its page;
-passwords are AES-256 (V5) with a key from `getrandom`; and every lopdf call
-is under `catch_unwind`, so a file lopdf cannot read opens read-only — pdf.js
-reads it anyway — with why it cannot be changed. `Secret` and `Protection`
-print as redacted, because the debug build logs each command.
-
-**OCR** (`proton-lab::ocr`) draws each page with `pdftoppm -r 300` and reads
-it with `tesseract … -c textonly_pdf=1 pdf`, a page at a time in the
-sandbox, in a folder of its own that goes when the job does, with a
-deadline per page and progress the core polls; Stop kills its process
-group. The text-only page tesseract writes is grafted onto the original as
-a form XObject, turned and scaled to the page as it is shown
-(`proton_pdf::ocr::placing`), as one change to undo. The window finds the
-pages with no text with pdf.js's `getTextContent` and offers to read them.
-
-**The library** (`pdf::library`) is the mode's home page: the PDFs in the
-folders named in the person's settings (`pdf.library`), `~/Documents/Books`
-when none are named and it is there. A worker walks them — hidden files,
-links and vendor folders passed over, a folder or file in iCloud never read —
-and reads each book's title, author and pages with lopdf's metadata-only
-loader (`proton_pdf::library::about`), cleaning what downloads and word
-processors leave in a title and falling back on the file's name. What it
-found is kept in `pdf-library.json` beside the session, so the next session's
-shelves are on screen while it walks again. Covers are asked for as their
-books come on screen (`PdfCovers`) and drawn on a worker by `pdftoppm` in the
-sandbox (`proton_lab::cover`), kept in `pdf-covers/` by the book's path, size
-and change, and sent as `data:` JPEGs — the window's CSP allows no other
-image a page did not ship. Where each PDF was left is kept with the files
-opened before (`pdf.json`, `PdfAt`), and opening one goes there.
-
-The rail and the title bar draw LaTeX and Reader (the PDF mode) beside Notebook; their keys
-stay ⌃0 and ⌃-, as `ModeId::ALL` keeps the order the keys bind.
-
-**The agent** has five tools on the PDF on top: `pdf_info`, `pdf_read`,
-`pdf_search`, `pdf_annotate` and `pdf_pages`. The agent lives in a
-workspace and the PDFs in the session, so `Workspace::call_tool` defers any
-`pdf_*` call, and after each workspace's poll the session runs it
-(`Pdfs::tool`) and hands back the answer, as a cell run is answered later;
-whichever project's agent asks, the PDFs are the same. Text and where it is
-come from pdf-extract's `OutputDev` (`proton_pdf::text`), so a passage the
-agent quotes is found whatever its case or line breaks and highlighted a
-line at a time. Its comments are signed `<you> (agent)`, and every change it
-makes waits for ⌘S and undoes as the person's do. The window tells the core
-which page is being read (`PdfAt`), which `@pdf` sends with its text.
+Both were modes here — LaTeX the tenth (`ModeId::Tex`, ⌃0), the Reader the
+eleventh (`ModeId::Pdf`, ⌃-) — and both moved to Quark, with `proton-tex`,
+`proton-pdf` and the Lab's TeX, OCR and covers, in October 2026. What stays is
+what other modes use: Codex edits `.tex` and `.bib` with texlab from `PATH`,
+and the document viewer draws PDFs for Codex, Research and Notebook. A saved
+session that names their slugs still loads; they are passed over.
 
 ### Notebook
 
@@ -1797,8 +1660,9 @@ user's choice.)
 Pixel art and painting, one mode with two presets: **Pixel**, a small grid
 seen through nearest-neighbour and drawn a pixel at a time from a palette,
 and **Paint**, a large canvas of pressure-led brushes over layers that blend.
-"Canvas" on the rail and ⌃=; `raster` in the code, where "paint" and "canvas"
-already mean drawing a frame (as PDF is `pdf` behind "Reader").
+"Canvas" on the rail and ⌃0 (⌃= too, its key before LaTeX and the Reader
+left); `raster` in the code, where "paint" and "canvas" already mean drawing a
+frame.
 
 **The engine** (`proton-raster`) is whole numbers only — no floats, no
 unordered maps, no arithmetic on `usize`, a test keeps it so — because it runs

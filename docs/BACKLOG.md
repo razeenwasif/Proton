@@ -202,6 +202,7 @@ decided past what the person said. Open, to settle before a plan:
 - **The agent.** Tools to read a range, write cells and formulas, and make
   a chart, as Data and Diffuse have; `@sheet` in a message.
 - **Sharing with the other modes.** A range to a Data notebook as a frame,
-  and a frame back as a sheet; a chart into LaTeX or Reader.
+  and a frame back as a sheet; a chart into Canvas, or out to Quark's
+  LaTeX.
 - **Collaboration**, as Google Sheets has it, is not assumed: Proton is one
   person's, and two people editing one sheet would need a server.

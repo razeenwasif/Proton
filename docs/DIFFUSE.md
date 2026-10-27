@@ -294,7 +294,7 @@ middle, tabs on the right.
 
 Diffuse keeps its flows and images in **a folder of its own** —
 `~/Diffuse`, or the person's `diffuse.folder` — whichever project is open
-in Codex, as Reader keeps PDFs; the paths below are in it. The Flows list
+in Codex, as Notebook keeps its notebooks; the paths below are in it. The Flows list
 says which folder and moves it. Deleting a flow or an image moves it to the
 Trash; a flow's images stay when it goes.
 

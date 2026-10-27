@@ -33,7 +33,7 @@ wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
 on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
 already call it `cmake`.
 
-Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃0`, `⌃-`, `⌃=` and `⌃\` switch mode · `␣` leader · `⌘K` Telescope ·
+Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃0` and `⌃-` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
 `␣w` splits · `` ⌃` `` terminal · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
@@ -56,7 +56,6 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-research/` | Research's investigations — the files each is, and the co-scientist round that grows it |
 | `crates/proton-literature/` | Research's literature — arXiv, Semantic Scholar and OpenAlex asked politely, citations checked, open PDFs kept |
 | `crates/proton-lab/` | Research's Lab — the Python its code runs in, and Lean with Mathlib, made with your say-so |
-| `crates/proton-pdf/` | The PDF mode's changes to a PDF — pages, comments, forms, passwords, cleaning — each undoable, saved as an update appended to the file |
 | `crates/proton-vcs/` | The gutter, and what git considers changed |
 | `crates/proton-dap/` | The debug-adapter client |
 | `crates/proton-term/` | The pseudo-terminal, and the screen it paints |
@@ -241,13 +240,13 @@ each group at the depth its name gives (`Far hills [800]`). The agent reads,
 checks, edits (held for you to save) and plays the game headless, comparing a
 route against the saved game, and `@game` sends it the game and the room on
 screen.
-**Canvas** · pixel art and painting, on ⌃=: one engine, two presets — Pixel,
+**Canvas** · pixel art and painting, on ⌃0: one engine, two presets — Pixel,
 a small grid drawn a pixel at a time from a palette, and Paint, a large
 canvas of pressure-led brushes over layers that blend. A canvas is a folder,
 `Name.canvas/`: a `canvas.json` that diffs and a PNG a layer. The window
 paints on its own copy, the engine built as WebAssembly, and the core makes
 every edit again on the canvas it saves, checking the two by a hash.
-**Diffuse** · image generation by node graph, a small ComfyUI, on ⌃\\: a
+**Diffuse** · image generation by node graph, a small ComfyUI, on ⌃-: a
 graph of nodes — load a checkpoint, encode a prompt, sample, decode, save —
 built here and run whole by Nexus's image server on forge, the desktop's
 RTX 4090. A flow is a `Name.flow.json` that diffs; the nodes there are come
@@ -260,39 +259,9 @@ Mac's password, and its Gallery asks again each time it is opened.
 captions from the `.srt` beside it. Both files are spliced, never re-printed.
 There is no program monitor: a frame of the programme is a decoded frame of
 video, and decoding needs ffmpeg.
-**LaTeX** · Overleaf's editor, in Proton, on ⌃0: Codex's own editor over a
-project's `.tex` files — vim, splits, texlab's completion — beside a pane for
-the PDF, the build's log and the agent. TeX is Proton's own (TinyTeX, latexmk
-and texlab in `~/.proton/tex`, installed on two say-sos), and a save
-typesets the document in the sandbox, its builds kept outside the project.
-Errors are a click from their line, a missing package is found and installed
-when you agree, and SyncTeX goes both ways (⌘⏎, and a double-click on the
-PDF). The outline and word count sit under the tree. New projects start from
-six templates; the agent reads the log with `@log`, and Fix asks it about an
-error. The cite picker finds papers in the `.bib`, in Research's literature
-or online, and an investigation can be written up as a paper. The visual
-editor edits paragraphs, headings and equations as they read, one undo step
-at a time.
-**Reader** · Acrobat's reader and editor, in Proton, on ⌃-: your PDFs in tabs,
-whichever project is open, drawn by pdf.js and changed by Proton's own core.
-It opens on your library — the books in `~/Documents/Books`, or the folders
-you name — a shelf for each folder, each book with its cover and title, the
-ones you are reading first; a book opens where you left it.
-Read them continuous, a page at a time or two up, turned, in sepia or at
-night; find as you type, and follow bookmarks, links and page labels.
-Highlight, underline and strike out what is selected; add notes, text boxes,
-ink and shapes, answer them, and they show in Preview and Acrobat. Fill in a
-form and flatten it. In the page grid, choose, turn, delete and drag pages,
-put in blanks and another PDF's pages, take some out, split it, or combine
-several. Set its properties, give it a password (AES-256) or take one off,
-remove hidden data, compress it. A page that is only a picture is made
-searchable by OCR — tesseract, on your Mac, sandboxed and stoppable. Every
-change waits for ⌘S, undoes even after a save, and is saved as an update
-appended to the file, so its first bytes are kept; closing or quitting with
-changes asks first. The agent sits beside the tools: it reads, searches,
-highlights a passage it quotes and rearranges pages — signed as its own, and
-held for you to save — and `@pdf` sends the page you are reading. `?` lists
-the keys.
+LaTeX and the Reader, once modes here on ⌃0 and ⌃-, are Quark's now: its
+editor, typesetting and visual editor, and its library and PDF editing. Codex
+still edits `.tex` and `.bib` files, with texlab when it is on `PATH`.
 
 ## The three things that hold it together
 
@@ -444,8 +413,8 @@ PDF a reader can be sent — and a citation opens Proton's own viewer at it.
 `␣fl` searches it, the agent searches it, and it is checked for changes while
 the editor runs. Any PDF opens in the viewer, from the tree or `␣ff` in any
 mode: its pages drawn as you reach them, its text selectable, `j`/`k` and
-Space to read, `+`/`−` and `0` to zoom and fit, Escape to put it away — or
-Open in Reader, to annotate or rearrange it in Reader at the same page.
+Space to read, `+`/`−` and `0` to zoom and fit, Escape to put it away. To
+annotate or rearrange one, open it in Quark.
 
 Nothing is read until you list it in `.proton/settings.json`, and nothing outside
 a listed directory is ever read — no symlink is followed out of one. A library
