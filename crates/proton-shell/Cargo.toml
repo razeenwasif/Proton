@@ -13,18 +13,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 proton-core = { workspace = true }
 proton-claude = { workspace = true }
-proton-raster = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { version = "2", features = ["macos-private-api", "image-png"] }
 window-vibrancy = "0.8.0"
 
 # Already in the tree through Tauri and window-vibrancy; named here to mark the
-# window opaque, which Tauri has no call for, and to watch for a pen
-# (`pen.rs`), whose event monitor takes a block.
+# window opaque, which Tauri has no call for, and to read and write the
+# clipboard's text (`pasteboard.rs`).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-block2 = "0.6"
-# The keychain, where Diffuse's key is kept (`vault.rs`): already in the tree
-# through the platform verifier.
-security-framework = "3"

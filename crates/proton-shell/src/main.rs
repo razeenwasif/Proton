@@ -5,9 +5,7 @@
 
 mod backdrop;
 mod pasteboard;
-mod pen;
 mod transport;
-mod vault;
 mod window;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -244,31 +242,6 @@ fn read_document(path: String, session: State<'_, Mutex<BridgeSession>>) -> Resu
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// One mesh, as bytes.
-///
-/// The binary half of `Event::Geometry`: the event says what a mesh is and
-/// whether it is ready, and this sends the mesh itself through `ipc::Response`,
-/// the same way `read_document` sends a PDF. As JSON a large mesh cost more to
-/// write out in Rust and parse back in the page than it did to move; as bytes
-/// the page lays typed arrays straight over the buffer it is handed.
-///
-/// The key is a string the page chose, so it goes through the same door the
-/// event did — `Modeling::mesh_bytes` refuses a path that climbs out of the
-/// scene's folder exactly as loading one does. Nothing new is reachable here.
-#[tauri::command]
-fn read_geometry(
-    key: String,
-    session: State<'_, Mutex<BridgeSession>>,
-) -> Result<tauri::ipc::Response, String> {
-    let bytes = match session.lock() {
-        Ok(mut it) => it.session.mesh_bytes(&key),
-        Err(poisoned) => poisoned.into_inner().session.mesh_bytes(&key),
-    };
-    bytes
-        .map(tauri::ipc::Response::new)
-        .ok_or_else(|| format!("{key}: no geometry to send"))
-}
-
 /// A file a Lab run left — a figure, a 3D scene — as bytes.
 ///
 /// Where it is is asked of the core under the session's lock, which only
@@ -284,136 +257,6 @@ fn read_lab(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tau
     std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
 }
 
-/// An image of the open game — a plane's art, a sprite — as bytes.
-///
-/// As with a Lab run's files: where it is is asked under the lock, which
-/// gives only an image inside the game's folder, and it is read after.
-#[tauri::command(async)]
-fn read_game(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
-    let path = match session.lock() {
-        Ok(it) => it.session.game_file(&key),
-        Err(poisoned) => poisoned.into_inner().session.game_file(&key),
-    };
-    let path = path.ok_or_else(|| format!("{key}: not a file of the open game the window may read"))?;
-    std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
-}
-
-/// An image Diffuse shows — an output in the gallery, or one a run made —
-/// as bytes: where it is asked under the lock, read after.
-#[tauri::command(async)]
-fn read_diffuse(path: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
-    let reader = match session.lock() {
-        Ok(it) => it.session.diffuse_reader(&path),
-        Err(poisoned) => poisoned.into_inner().session.diffuse_reader(&path),
-    };
-    // Opened off the lock: a picture is megabytes.
-    let (file, key) = reader.ok_or_else(|| format!("{path}: not an image Diffuse may show now"))?;
-    proton_core::diffuse::read_sealed(&file, key.as_ref()).map(tauri::ipc::Response::new)
-}
-
-/// Unlock Diffuse — and its Gallery, with `gallery` — once the person has
-/// shown they are at the Mac: Touch ID, or the Mac's password. The key comes
-/// from their keychain, made there the first time; it never reaches the
-/// page. The events the unlock makes, numbered as a command's.
-#[tauri::command(async)]
-fn unlock_diffuse(gallery: bool, session: State<'_, Mutex<BridgeSession>>) -> Result<EventBatch, String> {
-    vault::ask(if gallery { "open Diffuse's Gallery" } else { "unlock Diffuse" })?;
-    let sealed = match session.lock() {
-        Ok(it) => it.session.diffuse_has_sealed(),
-        Err(poisoned) => poisoned.into_inner().session.diffuse_has_sealed(),
-    };
-    let key = match vault::key()? {
-        Some(key) => key,
-        // A key made now would not open what is sealed: never one in its place.
-        None if sealed => return Err("Diffuse's files are sealed, and the key to them is not in your keychain".into()),
-        None => {
-            let key = proton_core::diffuse::Seal::generate().bytes();
-            vault::keep(&key)?;
-            key
-        }
-    };
-    let mut held = match session.lock() {
-        Ok(it) => it,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let events = held.session.unlock_diffuse(proton_core::diffuse::Seal::new(key), gallery)?;
-    Ok(held.batch(events))
-}
-
-/// A picture the page hands over for Diffuse — chosen, dropped, a mask
-/// painted — written into Diffuse's folder at the path its `x-proton-path`
-/// header names: where it was written. Raw bytes, as Canvas's are.
-#[tauri::command]
-fn put_diffuse_file(request: tauri::ipc::Request<'_>, session: State<'_, Mutex<BridgeSession>>) -> Result<String, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("a picture comes as raw bytes".into());
-    };
-    let path = request.headers().get("x-proton-path").and_then(|v| v.to_str().ok()).ok_or("no path for the picture")?.to_string();
-    let mut held = match session.lock() {
-        Ok(it) => it,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    held.session.diffuse_put(&path, bytes)
-}
-
-/// Tiles of the open canvas, as bytes — what the window fetches when the core
-/// changed them (undo, redo, the agent) or when its copy was found to differ.
-///
-/// Under the lock only the tiles are taken, shared rather than copied; they
-/// are written out after it is let go, so a large canvas fetched whole does
-/// not hold every other command up. The layout, all little-endian `u32`s:
-/// abi (1), generation, version (low, high), the last edit's number, how many
-/// tiles; then each tile's index and whether it holds anything, and its
-/// 64 × 64 RGBA if it does.
-#[tauri::command(async)]
-fn read_raster(generation: u32, layer: u32, tiles: Vec<u32>, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
-    let taken = match session.lock() {
-        Ok(it) => it.session.raster_tiles(generation, layer, &tiles),
-        Err(poisoned) => poisoned.into_inner().session.raster_tiles(generation, layer, &tiles),
-    };
-    let taken = taken.ok_or_else(|| format!("layer {layer} of canvas {generation} is not open"))?;
-    let present = taken.tiles.iter().filter(|(_, t)| t.is_some()).count();
-    let mut out = Vec::with_capacity(24 + taken.tiles.len() * 8 + present * proton_raster::tile::TILE_BYTES as usize);
-    for word in [1, taken.generation, taken.version as u32, (taken.version >> 32) as u32, taken.last_seq, taken.tiles.len() as u32] {
-        out.extend(word.to_le_bytes());
-    }
-    for (index, tile) in &taken.tiles {
-        out.extend(index.to_le_bytes());
-        out.extend((tile.is_some() as u32).to_le_bytes());
-        if let Some(tile) = tile {
-            out.extend_from_slice(&tile.px);
-        }
-    }
-    Ok(tauri::ipc::Response::new(out))
-}
-
-/// Bytes the page hands over — an image dropped on Canvas — kept by the core
-/// to bring in: its number, for `RasterImport`. The bytes come as the
-/// request's raw body, not JSON: a picture is megabytes.
-#[tauri::command]
-fn put_raster_blob(request: tauri::ipc::Request<'_>, session: State<'_, Mutex<BridgeSession>>) -> Result<u32, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("a picture comes as raw bytes".into());
-    };
-    let mut held = match session.lock() {
-        Ok(it) => it,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    held.session.raster_put_blob(bytes.clone())
-}
-
-/// ⌘V in Canvas: a picture another app copied, kept by the core to bring in
-/// — its number — or none, for Canvas to paste its own copy.
-#[tauri::command]
-fn paste_raster_image(session: State<'_, Mutex<BridgeSession>>) -> Result<Option<u32>, String> {
-    let Some(png) = pasteboard::take() else { return Ok(None) };
-    let mut held = match session.lock() {
-        Ok(it) => it,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    held.session.raster_put_blob(png).map(Some)
-}
-
 /// ⌘V in the editor: the clipboard's text, read here because a page is given
 /// it only when something editable has the focus, and the editor is drawn.
 #[tauri::command]
@@ -425,23 +268,6 @@ fn paste_text() -> Option<String> {
 #[tauri::command]
 fn copy_text(text: String) {
     pasteboard::put_text(&text);
-}
-
-/// ⌘C or ⌘X in Canvas, once the core has made the copy: its pixels put on
-/// the system's clipboard as a PNG, for other apps. Whether there were any.
-#[tauri::command]
-fn copy_raster_image(session: State<'_, Mutex<BridgeSession>>) -> bool {
-    let png = match session.lock() {
-        Ok(it) => it.session.raster_clip_png(),
-        Err(poisoned) => poisoned.into_inner().session.raster_clip_png(),
-    };
-    match png {
-        Some(png) => {
-            pasteboard::put(&png);
-            true
-        }
-        None => false,
-    }
 }
 
 /// Give the core a heartbeat.
@@ -691,7 +517,7 @@ fn main() {
         .register_uri_scheme_protocol("artifact", |_, request| artifact_page(&request))
         .register_uri_scheme_protocol("study", |_, request| study_media(&request))
         .manage(Mutex::new(BridgeSession::new(
-            Session::restore(requested_folder(), working_folder()).sealing_diffuse(),
+            Session::restore(requested_folder(), working_folder()),
         )))
         .invoke_handler(tauri::generate_handler![
             dispatch,
@@ -699,18 +525,9 @@ fn main() {
             set_backdrop,
             set_opaque,
             read_document,
-            read_geometry,
             read_lab,
-            read_game,
-            read_diffuse,
-            put_diffuse_file,
-            unlock_diffuse,
-            read_raster,
-            put_raster_blob,
-            paste_raster_image,
             paste_text,
             copy_text,
-            copy_raster_image,
             quit
         ])
         .setup(|app| {
@@ -737,8 +554,6 @@ fn main() {
             println!("[shell] backdrop: {applied}");
             app.manage(Surface::new(applied));
             keep_drawing(&window);
-            // A tablet's pressure, which WebKit does not give the page.
-            pen::watch(&window);
 
             spawn_poll(app.handle().clone());
 
