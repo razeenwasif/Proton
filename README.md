@@ -3,18 +3,15 @@
 # Proton
 
 A code editor that is also a chat client, a data notebook, a research
-workbench, a design tool, a 3D workspace, a game editor and a video editor —
-one window, thirteen modes, a shared Vim-style modal engine underneath all of
-them, and an agent that can act in any of them.
+workbench and a study notebook — one window, five modes, a shared Vim-style
+modal engine underneath all of them, and an agent that can act in any of them.
 
-**M0 through M7 are built**, and every mode in the window now reads and writes
-a real document. The editor, Telescope and language servers, the agent, the
-Code Visualizer, the plugin host, Data mode and Design mode all ship; Modeling
-has its scene, outliner, viewport and shader graph; Game is becoming an engine
-of Proton's own, for hand-drawn and pixel-art Metroidvanias first; Video reads
-and writes a cut and its captions. What is still to come is the machinery
-underneath two of them — the rest of that engine, and ffmpeg — and each of
-those is a real project of its own.
+Every mode in the window reads and writes a real document: the editor,
+Telescope and language servers, the agent, the Code Visualizer, the plugin
+host, Data's notebooks, Research's investigations and Notebook's sources all
+ship. The creative modes that were here — Design, Model, Game, Canvas, Diffuse
+and Video — moved to an app of their own in October 2026, and LaTeX and the
+Reader to Quark.
 
 ```bash
 git submodule update --init    # the Code Visualizer, vendored underneath M4
@@ -33,7 +30,7 @@ wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
 on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
 already call it `cmake`.
 
-Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃0` and `⌃-` switch mode · `␣` leader · `⌘K` Telescope ·
+Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃5` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
 `␣w` splits · `` ⌃` `` terminal · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
@@ -61,28 +58,22 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-term/` | The pseudo-terminal, and the screen it paints |
 | `crates/proton-plugin/` | The Wasmtime host, WIT interfaces and capability grants |
 | `crates/proton-trace/` | The Code Visualizer client |
-| `crates/proton-design/` | Theme tokens and component markup, for Design mode |
-| `crates/proton-game/` | Game mode's engine: its project format, editable documents, template, collision tracing and the fixed-point simulation |
-| `crates/proton-game-runtime/` | The simulation as WebAssembly, for the window's Play — built to `ui/game-runtime.wasm` by `scripts/game-wasm.mjs` |
-| `crates/proton-raster/` | Canvas mode's engine: layered pictures in 64-px tiles, blend modes, ops with undo, the `.canvas` folder format — in whole numbers only, so the window's WebAssembly and the core make the same pixels |
-| `crates/proton-diffuse/` | Diffuse's flows: the `.flow.json` format, its edits and undo, the graph checked against the server's node catalogue, and the client for Nexus's image server |
-| `crates/proton-raster-runtime/` | The raster engine as WebAssembly, the window's copy of a canvas — built to `ui/raster-runtime.wasm` by `scripts/wasm.mjs` |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
-| `ui/` | The front end — the app's real chrome, and the interactive prototype — all thirteen modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
+| `ui/` | The front end — the app's real chrome, and the interactive prototype — all five modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
 | `design/DESIGN.md` | The design system, the mode-by-mode spec, and which reference each idea came from |
 | `docs/ARCHITECTURE.md` | The build document — crate layout, the core/UI seam, the mode contract, milestones |
 | `docs/STACK.md` | Language, renderer, parser, plugin runtime — what is settled and what is still a real decision |
 | `docs/CODE-VISUALIZER.md` | Integration plan for [Code-Visualizer](https://github.com/razeenwasif/Code-Visualizer) |
 | `assets/` | The reference designs the whole thing was drawn from |
 
-## The thirteen modes
+## The five modes
 
 Every mode keeps projects of its own: the folder open in Codex is not
-carried into Game, Canvas, Data or any other, and going back to a mode
-brings back the one it had. The first time a mode is entered with nothing
-open in it, it is given a folder of its own, `~/Proton/<Mode>` (Diffuse's
-is `~/Diffuse`); opening a folder there makes it that mode's. A folder open
+carried into Data, Research or any other, and going back to a mode brings
+back the one it had. The first time a mode is entered with nothing open in
+it, it is given a folder of its own, `~/Proton/<Mode>`; opening a folder
+there makes it that mode's. A folder open
 in several modes is one project, listed by each.
 
 See the [current capability matrix](docs/ARCHITECTURE.md) for implemented documents and runtime limitations.
@@ -222,57 +213,21 @@ PuLP and its solver among them. Your folders are named in your own settings,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,
 having been told its size.
-**Design** · a web builder with a layer tree and an artboard, two-way bound to
-real component source and design tokens.
-**Modeling** · 3D — outliner, viewport, modifier stack and shader graph over a
-scene serialised to diffable JSON. An object names the `.obj` its geometry is
-in, a stack of operations says what to do to it, and the material graph is
-compiled into a program a WebGL renderer runs on every pixel.
-**Game** · Proton's own engine, made for a few kinds of game: hand-drawn,
-painted and pixel-art 2D on dozens of parallax planes, low-poly 3D, isometric
-rooms; Metroidvanias first, roguelites after. A game is a folder of JSON — the
-game, its world, a file per room — edited by ops the core applies whole or not
-at all, undone wherever they were made and held until saved. The rooms open as
-tabs over a stage that draws their art and what is solid, and ▶ plays the room
-on screen — the core's own simulation, as WebAssembly — with each run kept and
-checked against the core's. A layered `.psd` comes in as the room's planes,
-each group at the depth its name gives (`Far hills [800]`). The agent reads,
-checks, edits (held for you to save) and plays the game headless, comparing a
-route against the saved game, and `@game` sends it the game and the room on
-screen.
-**Canvas** · pixel art and painting, on ⌃0: one engine, two presets — Pixel,
-a small grid drawn a pixel at a time from a palette, and Paint, a large
-canvas of pressure-led brushes over layers that blend. A canvas is a folder,
-`Name.canvas/`: a `canvas.json` that diffs and a PNG a layer. The window
-paints on its own copy, the engine built as WebAssembly, and the core makes
-every edit again on the canvas it saves, checking the two by a hash.
-**Diffuse** · image generation by node graph, a small ComfyUI, on ⌃-: a
-graph of nodes — load a checkpoint, encode a prompt, sample, decode, save —
-built here and run whole by Nexus's image server on forge, the desktop's
-RTX 4090. A flow is a `Name.flow.json` that diffs; the nodes there are come
-from the server, so one Nexus adds needs no Proton release. The agent
-builds and runs flows too (`flow_info`, `flow_edit`, `flow_run`, `@flow`).
-Its flows and pictures are encrypted on disk, unlocked with Touch ID or the
-Mac's password, and its Gallery asks again each time it is opened.
-`docs/DIFFUSE.md` is the design and the contract with Nexus.
-**Video** · a multitrack timeline over a CMX3600 edit decision list, with the
-captions from the `.srt` beside it. Both files are spliced, never re-printed.
-There is no program monitor: a frame of the programme is a decoded frame of
-video, and decoding needs ffmpeg.
-LaTeX and the Reader, once modes here on ⌃0 and ⌃-, are Quark's now: its
-editor, typesetting and visual editor, and its library and PDF editing. Codex
-still edits `.tex` and `.bib` files, with texlab when it is on `PATH`.
+Design, Model, Game, Canvas, Diffuse and Video, once modes here on ⌃6–⌃-,
+are an app of their own now, and LaTeX and the Reader are Quark's. Codex
+still edits `.tex` and `.bib` files, with texlab when it is on `PATH`, and
+PDFs still open in the viewer from any mode.
 
 ## The three things that hold it together
 
 **Modal editing is an application service, not an editor feature.** The vim
 engine dispatches resolved actions — `Delete·Line` — and every mode implements
-the same verb set. `dd` deletes a line in Codex, a layer in Design and a clip in
-Video. Leader is `␣`, and Telescope is the spine: one fuzzy finder over files,
-symbols, artboards, scene objects, cells and traces.
+the same verb set. `dd` deletes a line in Codex and a cell in Data. Leader is
+`␣`, and Telescope is the spine: one fuzzy finder over files, symbols, cells
+and traces.
 
-**Every document is a text file that diffs in Git.** Scenes, timelines and
-artboards included. That is what lets the agent edit them by writing a patch
+**Every document is a text file that diffs in Git.** Notebooks,
+investigations and conversations included. That is what lets the agent edit them by writing a patch
 instead of driving a GUI, and what makes any of it reviewable.
 
 **The agent proposes, you apply.** An edit it asks for is staged in memory and
@@ -439,140 +394,6 @@ and works on a train.
 **M0–M7 done.** Real: buffers, splits, Telescope, tree-sitter highlighting,
 language servers, git gutters, the debugger, the terminal, the agent with tool
 use and per-hunk review, the Code Visualizer, the Wasm plugin host, Data mode
-with a live Jupyter kernel, the library above, and Design mode — a layer tree
-read out of your component, an artboard that renders it in a sandboxed frame,
-and edits that go both ways: a token or a layer changed here rewrites the file
-by splicing the bytes that one thing occupies, and a save in Codex comes back
-the other way.
-
-Modeling is real too, up to a point worth stating: `scene.proton.json`, an
-outliner over it, an inspector that writes it, a viewport you can orbit and
-click, and a shader graph whose boxes and wires are the material in the file.
-Geometry lives beside the scene rather than in it: an object names the `.obj`
-its surface is in, one relative path, and the viewport draws that surface —
-flat shaded, sorted back to front, back faces dropped only for a mesh that is
-actually closed, because culling a sheet would make a wall vanish when you
-orbited past its edge. A mesh nobody copied, one that will not parse, or one
-too big to draw falls back to a box — its *real* box, from the file, not a unit
-cube standing in for the loader's ignorance — and the inspector says which of
-those it is.
-
-How big is too big was measured rather than guessed. A 2D canvas charges about
-0.8 µs per drawn triangle, because a solid is one `fill()` each, and 80,000
-triangles is where orbiting stops holding 30 fps; the table is in
-`proton-core::modeling`. Past that the core sends the bounding box and not the
-vertices. The fix is not a larger number, it is WebGL — which is also what a
-painter's sort wants, since it is not a depth buffer and two triangles that
-intersect will show through one another.
-
-A mesh path is confined to the scene's own folder, checked both when this
-writes one and when it reads one back. A scene arrives from somewhere — an
-asset pack, a colleague, the agent — and one naming `../../.ssh/id_rsa` as a
-mesh would otherwise have this editor open that file and put it on screen.
-
-The stack is non-destructive, which is the whole point of one: the `.obj` is
-read and never written, so mirroring a character does not double the vertices
-in anybody's export and switching the mirror off gets the original back
-exactly. It lives in `scene.proton.json` as a handful of lines describing a
-change to a file it does not touch. Mirror, array and subdivide, each exact
-— Loop subdivision, boundary rule and all, so the rim of a plane is refined
-along itself rather than dragged toward the middle. Order is editable because
-order is the point: mirror then array is two rows of paired objects, array
-then mirror is one row reflected into two.
-
-How far a stack grows a mesh is known exactly before it runs — a mirror
-doubles, an array multiplies by its count, a level of subdivision is four
-times the last — so a stack that would make 1.6 million triangles is refused
-with that number in the message, rather than by running out of memory finding
-out. A modifier of a kind this build has never heard of is kept in the file,
-shown in the stack, and marked *not applied*: a bevel that quietly does
-nothing is a worse answer than one that says it did nothing.
-
-The material graph is compiled, not evaluated, in the core: what a graph means
-is the file's business, and a surface property that varies across a mesh is one
-value per triangle — eighty thousand colours crossing the seam on every nudge
-of a slider. A dozen instructions cross instead, and the viewport runs them.
-
-Those instructions become GLSL, and the GPU runs them per pixel. What it runs
-them through is the terms a metal/rough workflow is made of: a Lambert diffuse
-and a GGX specular with Smith and Schlick, metals taking their reflection
-colour from the base and losing their diffuse. What it has no way to do is the
-rest of a renderer — one light and no environment (the ambient is a flat grey
-room standing in for one, which is what makes a metal legible rather than a
-silhouette), no shadows, and nothing bouncing. A node kind the build cannot
-render is kept in the file, and the surface draws plain grey rather than a
-guess.
-
-The 2D canvas this replaced had said for four revisions that it was the wrong
-tool and should be *replaced rather than extended*, and it was right about all
-three of its limits. Occlusion is now decided per pixel, so two things that
-interpenetrate do; the material runs per pixel, so a noise is no longer as
-coarse as the mesh; and a million triangles draws in 0.3 ms, where filling
-paths ran out at ninety thousand. About four hundred lines went with it — a
-painter's sort, a scratch-buffer pool, a colour quantiser, a batch-size
-constant tuned to a rasteriser's quirk, and a software BSDF.
-
-Normals are worked out after the modifier stack rather than read from the
-file's `vn`, which every modifier would make wrong. Each vertex averages the
-faces around it by the angle they make there — not by area, which let how a
-quad happened to be triangulated tilt its corners — and faces are only
-averaged together across an edge gentler than 40°. A cube keeps its corners;
-a subdivided sphere comes out round, within 3° of radial on an actual sphere.
-Geometry crosses the seam as bytes, not JSON. The event that says a mesh
-changed carries its bounds and triangle count and nothing else; the page then
-asks for the mesh and gets one buffer back — a 48-byte header, then positions,
-normals and indices — and lays typed arrays straight over it, with no parse and
-no copy. On a 270,400-triangle sphere that is 6.4 MB against 13.3 MB of JSON,
-1.5 ms to write against 25 ms, and nothing to read against another 25 ms.
-Bytes from a different build are refused in words rather than drawn as garbage
-shaped like a mesh. What is left to pay for is reading the OBJ and working out
-its normals, about 0.4 µs a triangle, so the budget is 500,000 triangles.
-Each file is read once and kept for as long as an object wears it, so an edit
-to a stack runs only the stack and the normals: 56 ms on that sphere, down
-from 122 ms when every edit re-read the file.
-
-Game is an engine of Proton's own rather than an editor for somebody else's.
-An embedded engine's scenes play in its window and its runs are opaque to the
-agent; the kinds of game Proton is for — Hollow Knight's and Ori's painted
-planes, Dead Cells' lit pixels, Hades' and Tunic's isometric rooms — are
-narrow enough that an engine shaped to them is smaller than a general one.
-A game is `game.json`, `world.json` and a `.room.json` per room, written in
-the order the format declares with nothing empty said, so a diff of one reads
-as the change it was. A new game comes from a template whose art is drawn in
-code. The simulation is written once, in Rust on integers only, and runs
-natively for tests and the agent and as WebAssembly in the window, so a run
-played in one ends exactly where it does in the other.
-
-Canvas is a raster engine of Proton's own, for the two kinds of picture a
-game and a person most often want: pixel art, and painting. Layers are kept
-in 64-pixel tiles, shared until changed, and laid together by the W3C's blend
-modes in whole numbers, so the copy the window paints on — the same engine as
-WebAssembly — and the canvas the core saves are the same to the byte; an edit
-made in the window is checked against the core's by a hash of the tiles it
-touched, and fetched again from the core if they differ. Generators — palettes,
-sprites, noise, caves — are procedural and seeded, not a model.
-
-Video reads a cut: an `.edl` is one line per event and four timecodes per line,
-plain text that has diffed in Git since before Git, and the timeline draws each
-clip where its record timecode puts it. The captions come from the `.srt`
-beside it, and the media bin says which of the sources the cut refers to are
-actually on disk. An edit — a timecode, a reel, a line of dialogue — replaces
-the bytes that one field occupies and re-aligns no column, because these are
-interchange files and something else opens them next.
-
-The rate is the interesting part. An EDL does not record the rate its timecodes
-are counted at; `FCM:` says only whether the count drops frame *numbers*. So
-the rate is shown on the bar and can be changed there, and changing it writes
-nothing — the file is the same file, and what moves is what its timecodes mean.
-An assumption nobody can see is indistinguishable from a fact.
-
-What Video cannot do is show you the picture. The program monitor, waveforms,
-thumbnails, durations read from the media itself and any kind of render all
-need ffmpeg in a process of its own — which the process model already accounts
-for and which is not installed here. None of it is mimed.
-
-So: no screen in this window claims to do something it cannot. What remains is
-two real projects — the rest of Game's engine and an ffmpeg sidecar for
-Video.
+with a live Jupyter kernel, and the library above.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the milestones.

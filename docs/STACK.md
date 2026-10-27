@@ -88,10 +88,6 @@ But look at what the other modes need:
 
 | Mode | Needs |
 |---|---|
-| Design | Nested box layout, an artboard with its own cascade, drag-resize, breakpoints |
-| Modeling | 3D viewport, gizmos, a node graph |
-| Game | 2D/3D renderer, its own simulation as WebAssembly, profiler charts |
-| Video | Decoded frames on a timeline, scrubbing, waveforms |
 | Data | Virtualised tables, charts, notebook cells with rich output |
 | Chat | Markdown, code blocks, streaming reflow |
 | PDF | Pages drawn as they are reached, a text layer to select, overlays for comments and form fields |
@@ -162,15 +158,12 @@ fontdb) rather than writing it. Budget weeks, not days.
 
 ## Missing from the proposal
 
-Five things Proton needs that a generic editor stack does not cover:
+What Proton needs that a generic editor stack does not cover:
 
 | | |
 |---|---|
 | **Agent runtime** | `tokio` + `reqwest` with SSE streaming, a tool-dispatch layer, and the shadow worktree. Use `gix` for git — it is pure Rust and does not drag in libgit2's threading model. |
 | **Code Visualizer** | Upstream is Python and needs `gdb` with Python support. Proton has to supervise that process and ship a runtime — [`CODE-VISUALIZER.md`](CODE-VISUALIZER.md) covers it. On this machine, detect MSYS2 UCRT64 rather than asking. |
-| **Video decode** | `ffmpeg` bindings. There is no pure-Rust path that handles real footage. |
-| **3D** | `wgpu` directly for Modeling. For Game, this once said to embed an engine; it now has its own, because an embedded engine's runs are opaque to the agent and the niches it is for are narrow enough to build for: a fixed-point simulation in Rust (native and WebAssembly) and a WebGL2 renderer in the window. |
-| **PDF** | pdf.js to draw (vendored; it already drew the viewer), `lopdf` to change — the version `pdf-extract` brought in, so nothing new was downloaded — and `tesseract` with Poppler's `pdftoppm` for OCR, run as processes in the sandbox. PDFium would draw faster but is a C++ binary per platform; pdfcraft (a Rust Acrobat) was the feature list, not a dependency — it patches its own lopdf and is not on crates.io. |
 
 ## The one-line version
 

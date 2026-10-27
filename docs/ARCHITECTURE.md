@@ -1,9 +1,7 @@
 # Proton — architecture
 
 This document describes the implemented system and records its build history.
-All eleven modes read real documents. Modeling includes a WebGL renderer;
-Game is becoming an engine of Proton's own, and Video edits timelines but
-still needs media decoding. The design reference is [`DESIGN.md`](../design/DESIGN.md),
+All five modes read real documents. The design reference is [`DESIGN.md`](../design/DESIGN.md),
 and the tool choices are in [`STACK.md`](STACK.md).
 
 The capability table below describes current behavior. Milestone sections later
@@ -15,10 +13,6 @@ in this document retain historical decisions and measurements.
 | Codex | Text buffers, modal editing, search, splits, LSP/DAP, Git, terminal | Language servers, debuggers, and trace backends are external tools |
 | Data | `.ipynb` cells, kernel execution, outputs and dataframe views; an agent whose edits are proposed on the cells; unsaved changes kept | Execution requires a Jupyter kernel; no SQL cells, charts or lineage yet |
 | Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; figures and 3D scenes drawn in the Lab |
-| Design | CSS tokens and component markup, layers, source-linked artboard | Components requiring a build cannot be previewed directly |
-| Modeling | `.proton.json` scenes, OBJ geometry, transforms, modifiers, material graph, WebGL | Supported formats and viewport budget are bounded |
-| Game | Proton's own engine: a game's folder of JSON — game, world, rooms, prefabs — edited by ops held until saved, rooms as tabs over a stage of what is solid and where things stand | No renderer or runtime yet (G2–G5); 2D Metroidvania first |
-| Video | CMX3600 `.edl` timeline and `.srt` captions | No decoded video/program monitor |
 | Notebook | Notebooks of your own sources with a cited tutor on four engines; study guides, flashcards on FSRS, quizzes marked by another family, exams from past papers, audio overviews, slides | The tutor and studio spend each engine's plan, audio Fish credit |
 
 ```bash
@@ -52,7 +46,7 @@ dependency, and the front end is replaceable.**
       ╭─────────▼──────────╮        ╭────────────▼───────────╮
       │  proton-shell      │        │  GPU editor surface    │
       │  webview · chrome  │  ────▶ │  later, only if the    │
-      │  all eleven modes  │        │  latency budget fails  │
+      │  all five modes    │        │  latency budget fails  │
       ╰────────────────────╯        ╰────────────────────────╯
 ```
 
@@ -65,7 +59,7 @@ Two rules keep that seam honest:
    (`Delete·Line`, count 2), which is exactly the boundary that lets a different
    front end reuse it verbatim.
 
-The webview ships first because eleven modes demand it. The GPU surface is held
+The webview ships first because five modes demand it. The GPU surface is held
 in reserve for the editor pane alone, and only once a measured
 input-to-photon number justifies it. See STACK.md § "The actual decision".
 
@@ -91,9 +85,6 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-study` / `proton-voice` | Notebook's notebooks and their sources / speech from Fish Audio |
 | `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
 | `proton-data` | Notebook documents and kernel integration |
-| `proton-design` | Theme tokens and component markup |
-| `proton-scene` / `proton-mesh` | Scene documents and material graphs / geometry and modifiers |
-| `proton-game` / `proton-video` | Game's engine — its project format, editable documents and template / EDL timelines and captions |
 | `proton-plugin` | Wasmtime plugin host and capability grants |
 | `proton-trace` | Code Visualizer client and sidecar integration |
 | `proton-shell` | Tauri window, IPC, native backdrop, packaging |
@@ -530,7 +521,7 @@ is one you lose work in. `:bd` always means the buffer.
 node info (`char_to_utf16_cu` is O(log n)), which is the thing LSP needs and the
 thing that is painful to retrofit — verified, not assumed. Undo is a **tree**,
 not a stack, and it is per-buffer state in the core so `u` works identically in
-Codex and in Video.
+every buffer, whichever mode opened it.
 
 Large files are a policy in the open path, not a property of the rope: mmap,
 lazy newline indexing, skip tree-sitter over a size threshold, never notify the
@@ -749,7 +740,7 @@ failure mode:
   an unsorted tool list) shows up as a cost regression, not an error.
 - **Mid-conversation system messages** — appending `{"role": "system", ...}` to
   `messages` rather than editing top-level `system` — is supported on Opus 5 and
-  is exactly right for Proton: "the user switched to Video mode", "the trace
+  is exactly right for Proton: "the user switched to Data mode", "the trace
   finished", without invalidating the cached prefix.
 - **Context editing** (beta `context-management-2025-06-27`,
   `clear_tool_uses_20250919`) matters more here than in most apps. A trace JSON
@@ -1056,14 +1047,19 @@ ready. The tests read hand-written `lean --json` output
 and Lean, and run a whole round through `Live` with a stand-in `lean` in a
 stand-in home, in the sandbox; a real Lean is the scientist's to make.
 
-### LaTeX and the Reader
+### Modes that moved
 
-Both were modes here — LaTeX the tenth (`ModeId::Tex`, ⌃0), the Reader the
-eleventh (`ModeId::Pdf`, ⌃-) — and both moved to Quark, with `proton-tex`,
-`proton-pdf` and the Lab's TeX, OCR and covers, in October 2026. What stays is
-what other modes use: Codex edits `.tex` and `.bib` with texlab from `PATH`,
-and the document viewer draws PDFs for Codex, Research and Notebook. A saved
-session that names their slugs still loads; they are passed over.
+Eight modes that were here moved to apps of their own in October 2026: LaTeX
+and the Reader to Quark, with `proton-tex`, `proton-pdf` and the Lab's TeX, OCR
+and covers; and Design, Model, Game, Video, Canvas and Diffuse to an app of
+their own, with `proton-design`, `proton-scene`, `proton-mesh`, `proton-game`
+and its runtime, `proton-raster` and its runtime, `proton-diffuse` and
+`proton-video`, the window's WebAssembly build, and the shell's mesh, picture,
+pen and keychain code. What stays is what the five modes use: Codex edits
+`.tex` and `.bib` with texlab from `PATH`, the document viewer draws PDFs for
+Codex, Research and Notebook, and the Lab's 3D scenes are drawn by three.js. A
+saved session that names their slugs still loads: they are passed over, and a
+project only they listed is closed rather than given to Codex.
 
 ### Notebook
 
@@ -1351,572 +1347,6 @@ close themselves, ⌘/ to comment and ⌘⏎ to run. TeX JSON ate is mended in w
 is written about a problem, never in its code, where a tab before `out` is a
 tab.
 
-### Game
-
-Proton's own engine, specialised rather than general: hand-drawn and painted
-2D on dozens of parallax planes (Hollow Knight, Ori), pixel art lit like a
-modern game (Dead Cells), isometric rooms (Hades) and low-poly 3D (Tunic);
-Metroidvanias first, roguelites after. It replaced a Godot `.tscn` viewer: an
-embedded engine's scenes play in its own window and its runs are opaque to
-the agent, and these niches are narrow enough for an engine shaped to them.
-
-**The document.** A game is a folder: `game.json` (view, controller,
-abilities, input, where it starts), `world.json` (areas, and where each room
-sits on one canvas), `rooms/<id>.room.json` (planes of art at depths,
-collision as polylines, entities, lights, spawns) and `prefabs/*.prefab.json`.
-`proton-game::format` types it; every field defaults, so a hand-written file
-needs only what it means. The writer (`text.rs`) puts number arrays on one
-line, leaves out what is empty, and keeps the order the structs declare — by
-writing compact JSON and reading it back into an ordered tree, because
-`serde_json`'s `Value` sorts keys in this workspace (`preserve_order` is off,
-and turning it on would reorder every other mode's files).
-
-**Edits.** The window sends one gesture as `gameEdit {target, ops}`; an op's
-path addresses a list member by its id (`["planes", "#sky", "depth"]`), so an
-edit lands on the plane it meant even if the planes were reordered meanwhile.
-The batch is applied to a copy, read back as the document's type and checked,
-and replaces the document only if all of that holds. Each document keeps its
-own undo; the core keeps the order edits were made in, so ⌘Z undoes the
-newest wherever it was. Nothing is written until ⌘S, and unsaved rooms join
-the quit prompt. Every path a file names is held to the game's folder past
-symlinks (`path::inside`).
-
-**The editor** (`proton-core/src/game`, `ui/game.js`) is per project, as
-Modeling is. With no game open the home page lists the project's games and
-makes a new one from a template whose art is drawn in code. An open game has
-World / Layers / Entities / Assets on the left, its rooms as tabs over the
-stage, and Inspector / Run / Agent on the right.
-
-**The stage.** A room's art is drawn by `ui/game-render.js` — WebGL 2, one
-unit quad drawn instanced, each image a mipmapped texture (or sampled nearest
-for pixel art), a plane's haze mixed in by the shader, the blend a plane or
-item asks for — from a list `ui/game-scene.js` lays out. A plane `depth`
-behind the play plane moves `focal / (focal + depth)` as fast as it; the
-editor shows the room as the game's camera would see it centred on the stage,
-with that camera's frame drawn, and its own pan and zoom move over the
-picture. Images reach the window through `read_game`, a byte command that
-gives only an image inside the open game's folder (a texture from a custom
-scheme would be cross-origin, which WebGL refuses). Over the art,
-`ui/game-overlay.js` draws what is solid and where things stand. A click
-picks what is there — images by their opaque pixels, so leaves in front of
-the camera do not take a click meant for the stone between them; a drag
-sends one edit when it ends; a selected image scales from its corner; planes
-can be hidden, locked or shown alone, which is the editor's and never saved;
-and an image dragged in from Assets is placed where it lands, in the plane's
-own pixels.
-
-**Art brought in** (`proton-game::import`). A painter's layered `.psd`, or a
-`.png`, in the game's folder becomes a room's planes from its inspector (or
-the agent's `game_import`). A group is a plane, at the depth its name gives in
-square brackets — `Far hills [800]`, `Leaves [-150]`, `[still]` for a sky that
-does not move — and a `[play]` group's layers join the room's play plane; a
-layer outside any group is a plane of its own. Each layer is trimmed to where
-it is not clear and written as a PNG under `art/<file>/`; one wider or taller
-than 2048 px is cut into pieces with an `.img.json` saying where each goes and
-the empty pieces dropped, and the window draws the pieces as one image —
-placed, flipped and turned about the whole's middle, picked as one. Normal
-maps can be made from brightness for the lights to come. The PSD reader is
-our own and reads the common file: 8 bits a channel, RGB or grayscale, layers
-raw, run-length or zipped, layer masks applied; CMYK, 16 and 32 bits and
-`.psb` are refused with what to save instead, and effects, adjustment layers,
-clipping and hidden layers are left out with a note naming the layer. The
-images are written at once; the room's change is one held edit. `import.json`
-remembers what each file made, so importing it again replaces that rather than
-adding a copy, and the Assets tab marks a file saved again since; an image an
-earlier import wrote and this one does not is named, never deleted. The
-reader is tested against files a test-only writer makes to Adobe's
-description.
-
-**Collision** is polylines in the room's own pixels, each solid, one-way,
-hazard or not-a-wall. The pen lays one a click at a time (⇧ holds it to
-eighths of a turn, and it snaps to points already there); a selected line's
-points drag one edit at a time, ⌥ adds one and a double click takes one
-away. Ground painted rather than tiled can be traced instead
-(`proton-game::trace`): the image's alpha thresholded, walked with marching
-squares into closed outlines — a saddle's two corners kept apart, holes and
-all — and each outline simplified with Douglas–Peucker to the few points a
-designer would have placed, then placed, scaled and turned as the image is.
-
-**The simulation** (`proton-game::sim`) is the game's rules, in Rust, on
-integers only: positions and speeds in 1/256 px (`Fx`), so every build — the
-core's, the window's WebAssembly — makes the same run, and a test keeps
-floats out of its state. `World::cook` turns the documents, saved or not, into
-segments, doors, gates, pickups and zones; `Sim::step` runs one tick of held
-input. Movement is one axis then the other, a pixel at a time, bisected to
-exact contact: slopes are climbed by lifting up to twice the step and walked
-down without leaving them, one-way ledges hold only what comes down onto
-them clear (down and jump drops through), and a hazard puts the player back
-on the last ground clear of it. The controller is a platformer's: the jump is
-the exact parabola `game.json` asks for (height and time to the apex), with
-coyote time and a jump buffer to the frame, a cut for a short tap, a dash,
-wall slides and wall jumps and air jumps, each gated by its ability bit. A
-run's state hashes to one number (FNV), and a replay is its input as runs of
-ticks.
-
-**Play.** The same simulation, built for `wasm32-unknown-unknown` as
-`proton-game-runtime` — a plain C ABI (`pg_load`, `pg_start`, `pg_step`,
-`pg_frame` and the hash), no bindings generator — is copied to
-`ui/game-runtime.wasm` by `scripts/game-wasm.mjs`, which the tests' pre-steps
-and the app's `beforeBuildCommand` run, so it is never older than the Rust
-and is not committed. ▶ asks the core for a run of the room on screen
-(`gamePlay`); the core cooks the world as it is now and sends it with where to
-start and the game's key bindings, and `ui/game-play.js` steps it at the
-game's tick on a fixed clock, drawing each screen frame eased between the last
-two ticks, through the editor's own renderer. While it plays, the game has
-every key but ⌘ ones, ⌃ with a digit and ⎋, which stops it; Pause holds it and
-Step runs exactly one tick. On stopping, the input held tick by tick goes back
-(`gameRecorded`); the core runs it again natively and keeps it in the Run tab
-with whether the two runs ended in the same state — the two builds checked
-against each other on every run, as a test checks them on a committed replay
-(natively in cargo, in node, and in WebKit under the app's CSP). The CSP
-allows WebAssembly by `'wasm-unsafe-eval'` and nothing wider: `eval` stays
-refused, and `ui/serve.mjs?csp=1` serves a page with the app's own policy so a
-test sees both.
-
-**The agent** has four tools on the open game (`game::agent`), answered in
-the workspace, whose the game is. `game_info` gives the game in a page — its
-controller's numbers, abilities, rooms with their spawns and entities, what
-is unsaved, its problems, the person's runs — or one document's JSON as it is
-now, from which the paths `game_edit` takes are read. `game_edit` sends the
-same ops the person's gestures do, so its change is one step of their undo,
-refused whole if it would leave a document invalid, and held until they save;
-it says which problems it newly leaves. `game_check` adds rooms with no
-collision or spawn, and whether the game cooks at all, to the documents'
-problems. `game_play` plays the game headless, natively, from actions held
-for counts of ticks (or a run the person played, by its number), and says
-where the player ended, where it was hurt, which rooms it entered and what it
-gained, with its place every few ticks; when the game has unsaved changes the
-same inputs are played on the game as last saved too, so a ledge raised past
-jump height shows as a route that worked before the edit and fails after it.
-Its path is sent to the window (`GamePath`) and drawn over the rooms it
-crossed until ⎋. `@game` sends the summary and the room on screen.
-
-**Animation** (G9a). Every importer makes one kind of file, an
-`.anim.json`: frames, each a rectangle of a sheet placed where it sits on the
-sprite's own canvas and shown for its milliseconds; clips, runs of frames
-played on, back, or to the end and back, as many times as they say; boxes
-over the frames; and cues, names said when a frame is shown. An Aseprite
-file (read by Canvas's reader, now with slices and user data) has each frame
-laid together by Canvas's compositor — hidden layers out, blend modes kept —
-trimmed of what is clear, the same picture kept once, and packed onto sheets
-of at most 2048 pixels a side with clear pixels between; its tags become
-clips; a slice called `hit…` or `attack…` a hitbox, `hurt…` a hurtbox, and
-one called `feet`, `pivot`, `origin` or `anchor` where the sprite stands in
-each frame; a cel's text a cue. A sprite sheet's JSON — Aseprite's, as an
-array or a map of frames (put back in their numbers' order), or Canvas's —
-is read as it is, the sheet left where it is; a frame turned on its sheet is
-refused. Canvas's Send makes an animated canvas the open game's animation
-rather than a still in its room. The images are written at once, as an
-import's are; `import.json` records what each made.
-
-A prefab plays an animation once its sprite names it: each state the sim
-knows — standing, running, rising, falling, dashing, on a wall, hurt — plays
-the clip of its name, or the one the prefab's `clips` map chooses, or the
-nearest (a fall is a jump coming down). The sim plays it in whole numbers:
-frame times cooked to ticks, the clip begun when the state changes, held on
-its last frame when played out, and its cues said as `Happened::Cue`, so a
-run's frames and cues are the same natively and in WebAssembly (a second
-committed replay checks it, frames and cues counted) and the agent's
-`game_play` says which cues it heard. A still player's run hashes as it did
-before animation, and its cooked world is byte for byte what it was. The
-runtime's ABI is 2: a record names its frame and clip, and `pg_cues` the
-cues of the last tick. The window draws a frame as a part of its sheet,
-flipped about the feet; the editor shows each thing as the frame it rests
-on; an animation's inspector plays any clip small and says its boxes, cues
-and who plays it; a prefab's says which clip each state plays; and the Run
-tab can draw hitboxes and hurtboxes over a run.
-
-**Skeletons** (G9b). A DragonBones armature — `<name>_ske.json`, its atlas
-`<name>_tex.json` and image beside it — is made into a `.skel.json`: bones,
-parents first, standing at rest as a place, a turn, a skew and a scale; slots
-back to front, each with the parts it can show and a colour; and every part
-a mesh whose points are each carried by up to four bones, so a rigid image
-and a skinned mesh are drawn the same way. An image is four points on its
-slot's bone where its pivot, its trimmed region and its own transform put
-them; a weighted mesh's points are found on each bone that weighs them —
-placed as bound (`slotPose`) and taken back through the bone's bound pose
-(`bonePose`), as DragonBones' own parser does; a region turned on the atlas
-is read across as its Pixi runtime reads it; a bounding box is a shape on its
-bone, a hitbox or hurtbox by its name. A clip keeps DragonBones' keys as
-offsets from rest — moved, turned (unwound by `clockwise` exactly as its
-parser unwinds), scaled — each eased by `tweenEasing` (quadratic in, out or
-both, by an amount) or a Bézier `curve`; slots' parts and colours; events as
-cues. Inverse kinematics, deforming keys, draw-order keys and nested
-armatures are left out and said. A skeleton has at most 64 bones: what the
-shader holds.
-
-The sim needs no skeleton: a skeleton's clips are cooked into runs of
-one-tick frames, so it plays them as it plays an animation's — by state, on
-a loop or held, cues said at their ticks — and a run's frame says the clip
-and the tick of it. The window (`ui/game-skel.js`, tested in node against
-transforms worked out by hand and against the core's own count of ticks)
-poses the clip at that moment — each bone's world matrix, each slot's part
-and colour — and the renderer's second program carries each point by its
-bones' matrices in the vertex shader, the parts' buffers made once a
-skeleton, flipped about the feet like any sprite (the same pixels in
-Chromium and WebKit). The inspector poses a clip small on a 2D canvas, each
-triangle drawn from the atlas by the map that takes it where its points
-land; the Run tab's boxes follow the bones.
-
-**Light and atmosphere** (G8). A lit plane's art — and what stands on it,
-the player included — is the room's ambient colour (white, the art as
-painted, when not said) plus each light's colour times its intensity,
-falling off to nothing at its reach: where the art has a normal map (one an
-import made from its brightness, cut the same way) shaded by the angle the
-light meets it at from its height before the planes, and otherwise lit
-straight on. Up to sixteen lights a frame, nearest the camera first, each
-where its plane's parallax puts it, in the fragment shader of both programs
-(skeletons too). A light can glow — a halo laid additively in the air before
-its plane — and flicker, by a few sines out of step on the run's own clock,
-so a run played back wavers alike. A room's fog hazes planes by depth (none
-nearer than `near`, `amount` at `far`) where a plane has no haze of its own.
-Afterwards, when finished: the picture is drawn into a texture, its bright
-part blurred small (at half or a quarter size) and laid back over it, its
-colours looked up in a grade — a strip of a 3D table, n² by n, as colour
-editors export — and its corners darkened. Play finishes by the window's
-quality (low draws plain); the editor shows the finish on ⇧P. The light tool
-(`l`) places a light where it is clicked; glow, height, fog and the finish
-are fields; the Run tab reads out frame times. Lights stay out of the sim:
-the cooked world and every run's hash are what they were. The renderer's
-probes — lit and unlit, a normal map lit from the side it faces, bloom only
-when finished, a grade turning red to cyan, the vignette — give the same
-pixels in Chromium and WebKit.
-
-**Combat and things in rooms** (G10). Every entity of a game's own prefab
-is now simulated, not only drawn by the editor: the cook makes each prefab a
-room places an `Actor` (its body and look, its health, what it does and the
-numbers it does it by — per tick, fixed point; `format::PARAMS` says each
-behaviour's numbers and their defaults) and each placement a `Placed` (where,
-which way, a patrol's ends, the flag beating it sets). The sim
-(`sim/fight.rs`, integers only, held to that by the no-floats test) runs the
-four behaviours built in — a crawler walks the ground and turns at walls,
-ledges and its patrol's ends; a flyer drifts toward the player it sees and
-home when it does not; a charger watches, winds up, rushes and rests; a
-turret shoots at the player it sees, its shots moving through the room's
-lines a few pixels at a time — and a still thing stands. The player swings
-on attack (up with up held, down with down held in the air): where the
-player's animation has hitboxes the swing hurts there, frame by frame, else
-in the game's reach before them for its first frames (`game.json`'s
-`combat`). A blow is a hitbox overlapping a hurtbox — an animation's own
-boxes where it has them, else the body. A swing hits each thing once; a hit
-holds the whole game still for a few ticks (hitstop, presses meanwhile kept
-for after), throws the thing, pushes the player back, and a swing down
-bounces off what it meets. Hurt, the player loses health, is thrown, stunned
-and spared for a while; out of health they die, and wake at the last bench
-rested at (a `save_point`, rested at with up) with the room as it was. Flags
-are named by entities' props: beating a thing with a `flag` sets it and
-keeps it beaten; a `trigger` sets one when walked into; an `ability_gate`
-with one stays shut until it is set. A skeleton's boxes are posed once, when
-the world is cooked (`Skel::pose`, the port of `game-skel.js`), into
-per-tick boxes like an animation's. Runtime ABI 3: a frame's header carries
-health, the most health, things beaten and hitstop; each record who it is
-(0 the player, a thing one more than its place, a shot `SHOT` and more) and
-bits for flipped, just hurt (drawn white) and spared (drawn faint); a shot
-with no image is drawn as a glow; `pg_boxes` gives the boxes the run tests,
-which the Run tab draws when asked rather than working them out again. The
-inspector sets a prefab's health and behaviour, the game's swing, an
-entity's patrol, facing and flag; a prefab is placed by dragging its row
-onto the stage. A fight replayed (`game-fight.json`) ends in the same hash,
-frames, boxes and events natively and in the WebAssembly; the agent's
-`game_play` says what was swung at, beaten, and the health left.
-
-**Feel and sound** (G11). `game.json` gains `feel` (how far the camera
-looks ahead, how hard a blow shakes the screen, how much a body squashes)
-and `audio` (how loud sounds and music are, and the file each event plays —
-`format::SOUND_EVENTS` or any cue an animation says). The look-ahead is the
-sim's — the camera's target leads the player the way they face, eased as
-the camera always is — so it is in every run's hash; everything else is
-the window's and never touches a run. `ui/game-fx.js` draws particles as
-closed functions of time and a seed: a room's emitters (motes, rain, snow,
-leaves, embers, dust) laid over the part of their plane the camera sees,
-tiled from the room's origin so they stay put as the camera moves; bursts
-(dust on a jump and a landing, a dash's trail, sparks on a blow, a burst
-where a thing was beaten, a hurt, a rest) begun at the tick something
-happened and worked out from it — so a run played back shows the same
-particles at any frame rate. Sizes and speeds are a 1080-high view's,
-scaled to the game's. `game-play.js` reads what each tick said — the bits,
-and who began flashing or went missing between frames — for where bursts
-start, stretches the player into a jump and squashes it on landing, and
-shakes the camera from a noise of the tick. `ui/game-audio.js` plays each
-tick's sounds once each (a death's over the hurt under it) through Web
-Audio, at most four of one sound at a time, and an area's music
-(`world.json`'s `areas[].music`) looping, crossfaded as rooms change areas;
-the context is made or woken by the click or key that starts a run, as a
-window must. The template's sounds are made in code, like its art — waves
-and seeded noise shaped by adds and multiplies, so they are the same bytes
-everywhere. The core now serves the window `.anim.json`, `.skel.json`,
-`.wav`, `.mp3` and `.m4a` as well as images (animations and skeletons had
-been refused in the app, though not by the tests' stand-in). The editor:
-feel and loudness in the game's settings with a sound for each event and
-cue, an area's name, colour and music when its heading in the World tab is
-picked, ▶ Listen on a sound, Silent in the Run tab.
-
-**What comes next** (the plan's G12–G14): the world map and progression,
-hot reload with a gamepad, and a web export. (Spine was dropped by the
-user's choice.)
-
-### Canvas
-
-Pixel art and painting, one mode with two presets: **Pixel**, a small grid
-seen through nearest-neighbour and drawn a pixel at a time from a palette,
-and **Paint**, a large canvas of pressure-led brushes over layers that blend.
-"Canvas" on the rail and ⌃0 (⌃= too, its key before LaTeX and the Reader
-left); `raster` in the code, where "paint" and "canvas" already mean drawing a
-frame.
-
-**The engine** (`proton-raster`) is whole numbers only — no floats, no
-unordered maps, no arithmetic on `usize`, a test keeps it so — because it runs
-twice. A layer's pixels are straight RGBA in 64 × 64 tiles: the size of what
-an undo step keeps, of what the window is sent, and of what a sparse layer
-holds; tiles are shared (`Arc`) until changed and absent when clear. Layers
-are laid together by the W3C's separable blend modes (and add and subtract),
-premultiplied at 16 bits a channel so a stack of half-clear layers loses no
-shade, each within one of the formula in floats. Every change is an `Op`,
-applied whole or not at all, reporting the tiles it touched; history keeps the
-tiles as they were, held to bytes and steps, and a state number says whether
-the canvas is saved — undoing to the saved state is saved.
-
-**Two copies.** The window keeps its own copy of the canvas in the same
-engine built as WebAssembly (`proton-raster-runtime`, a plain C ABI, built by
-`scripts/wasm.mjs` with Game's) and lays it together there, so what is shown
-is the integer code the core exports with; WebGL only shows one texture,
-updated a rectangle at a time straight from the engine's memory
-(`UNPACK_ROW_LENGTH`), over a checkerboard. An edit is made there first and
-shown at once, then sent numbered (`RasterEdit`); the core makes it on the
-canvas it saves and answers with a hash of the tiles it touched. The window
-compares; when they differ, or the core refused, its copy is made again from
-the core's through `read_raster` — a byte command that takes the tiles under
-the lock, shared, and writes them out after letting go. What the core changes
-itself — undo, redo, the agent — is pushed as the tiles it changed, the layer
-list first. `generation` numbers each canvas opened, so nothing about one is
-taken for the next. The WebAssembly's memory is capped at a gigabyte, so a
-canvas too large for it fails with a reason; the probe confirms WebKit grows
-it that far and no further, under the app's CSP.
-
-**On disk** a canvas is a folder, `Name.canvas/`: `canvas.json` (size, preset,
-palette, layers, and an animation's frames and tags) written last and in
-declared order, a full-size PNG a layer in each frame —
-indexed for a pixel layer of 256 colours or fewer — and `flat.png` for pixel
-canvases. The same pixels write the same bytes, so a layer nobody touched
-never shows in a diff. ⌘S writes on a worker from a snapshot that shares the
-tiles; quitting saves at once, after any save under way.
-
-**The pixel tools.** A stroke is not painted dab by dab: it is first the
-pixels it covers, a mask that counts the stamps over each, and the layer is
-what was under it with the mask painted over once — so a line crossing
-itself is no darker where it crosses. The pencil joins its points with
-Bresenham's lines; pixel-perfect, it takes the corner pixel out of each L as
-the next pixel comes, and the window, which paints the stroke as it is drawn
-(points go to its copy a frame at a time, coalesced events included), makes
-each tile again from what was under it and the mask as it stands — so a
-stroke drawn in pieces is, to the pixel, the stroke the core makes whole
-(tested natively over random strokes, and in the WebAssembly). Tips are 1 to
-64 pixels, square or round, mirrored across or down the middle; the eraser
-clears; alpha-lock colours only what is there. A bucket takes what is like
-the pixel clicked within a tolerance — four- or eight-connected, or
-everywhere — and every clear pixel is like every other. Lines, rectangles
-and ellipses (Zingl's rasteriser) are shown while dragged, as a preview the
-copy takes back, and sent when let go. A swatch recoloured changes every
-pixel of it and the palette as one edit; a new pixel canvas starts with
-sixteen colours of Proton's own, and a pixel grid shows once a pixel is six
-screen pixels or more.
-
-**When the copies disagree** (`ui/raster-sync.js`, a state machine the node
-tests drive): an edit's touched tiles are what is fetched again, not the
-canvas; a stale tile waits while an edit on its way touches it; and a tile
-that arrives older than the last edit sent to it — `read_raster` says which
-edit the core had made — is fetched again rather than put. An edit to the
-layers themselves that disagrees still loads the canvas again whole. ⎋ or
-⌘Z while drawing takes the stroke back and sends nothing.
-
-**Brushes** (`brush.rs`) lay round dabs a spacing apart along the path —
-the distance to the next carried from one segment to the next, so where they
-fall depends only on the points, never on how many came at a time. A dab's
-size, flow and most cover each hang as much as the brush says on the pen's
-pressure; its falloff runs from solid out to its hardness, then by
-smoothstep to nothing, at least a pixel soft, read from tables made with
-integer roots. A brush's mask holds how much each pixel is covered: a dab
-raises it toward the stroke's opacity by its flow — Photoshop's flow and
-opacity — so dabs build up and a stroke crossing itself never covers more
-than its opacity. A soft eraser takes away as much as the brush would cover.
-Four brushes to start from (Round, Ink, Soft, Marker), a pressure curve
-(soft, even, firm) and a stabiliser — a string the brush is pulled along by,
-which a wobble shorter than it never reaches — are the window's; the curve
-and the string are applied once, in the window, before either copy sees the
-points.
-
-**The pen.** WebKit on the Mac gives a page no pen: a tablet's pen — a
-drawing tablet's, or Sidecar's Apple Pencil — arrives as a mouse, with no
-pressure and no coalesced events (a probe of this WebKit, 2026-10-14, sent it
-tablet-point events with pressure and tilt and saw neither on the page). So
-the shell (`pen.rs`) watches the app's own events with a local AppKit
-monitor and, for a tablet's, calls the page's `__protonPen` through the
-WKWebView before the event goes on to it; both reach the page in that order,
-so the pressure is there when the pointer event comes. A browser that does
-know a pen gives its pressure on the event; a mouse presses fully. The pen's
-eraser end, near the tablet, erases with whatever tool is chosen.
-
-**Keeping up with the pen** (`tests/ui/raster-bench.mjs`, and the same in
-WebKit through `raster-bench.html`): a 4096 × 4096 canvas of sixteen layers
-with pixels under the stroke, a 200 px soft brush on the pressure, a pen
-moving a thousand pixels a second. Laying the layers together is the cost,
-so the window does less of it: only the part of a tile a frame's dabs
-changed; under a stroke, the layers below its layer laid together once a
-tile and kept (a fold stopped part-way — the same arithmetic); and a budget
-a frame, what does not fit waiting for the next, which is given more while
-the ink is behind. Painting on the top layer, frames take 3 ms at the 95th
-percentile in WebKit, the ink at most a frame behind; under fifteen layers
-mostly in blend modes, 6 ms, the ink at most two frames behind. The same
-budget lets a large canvas opened show tile by tile. Seen smaller than
-itself, a paint canvas is drawn from mipmaps made again once it is still.
-
-**Selections** (`select.rs`) are how much of each pixel an edit may change:
-the alpha of a grid the canvas's size, none at all when nothing is selected.
-A rectangle is whole pixels; an ellipse or a lasso is made from the spans it
-crosses, four rows and columns of samples a pixel on a paint canvas (soft by
-a pixel) and the pixel's middle on a pixel one (hard); the wand is the
-bucket's flood. A feather blurs the shape before it joins what was
-selected — in its place, added (⇧), taken away (⌥) or kept where both are
-(⇧⌥). Wholly selected tiles share one tile, so selecting all of a large
-canvas costs one. Every edit — pencil, brush, bucket, shapes, a colour
-replaced — is held to it a tile at a time, what it made mixed with what was
-there by how selected each pixel is, colours weighed by alpha so a soft edge
-does not darken. To the window the selection is layer 0: its tiles are
-hashed with an edit's, fetched when they disagree, pushed by undo, and
-loaded with the canvas, so the two copies' selections cannot drift apart.
-The window draws marching ants along its edges (`rr_outline`).
-
-**Moving pixels** (`sample.rs`): ⌫ clears what is selected; ⌘C copies it and
-⌘X cuts it into the canvas's clipboard, and ⌘V pastes that as a new layer
-where it was. The move tool, and ⌘T with handles to scale (in proportion
-unless ⇧) and turn (by fifteen degrees with ⇧), lift what is selected — all
-of the layer when nothing is — onto a texture of its own, and the GPU draws
-it where the transform puts it over what is left; nothing is sampled until
-it is kept (↩, or letting go of the move tool). Then it is one op carrying
-the transform inverted, in 1/65536, made once in the window
-(`raster-transform.js`), so both copies sample the same places: the nearest
-pixel on a pixel canvas, the four about it on a paint one, and rows copied
-for a move by whole pixels. The selection moves with what it selected.
-
-**The whole canvas** turns by quarters and mirrors exactly, resizes (halving
-by averaging first while it is twice the size or more), and crops to what is
-selected; each is undone like any edit. A change to the canvas's size is not
-made in the window's copy: the core makes it, and the copy is loaded again
-at the new size — as it is after any edit the copy could not make itself,
-which the window now waits on and follows with a reload when the core makes
-it. In WebKit, on a 4096 × 4096 canvas, selecting an ellipse takes about
-70 ms, moving the whole layer 45 ms, and turning it smoothly half a second.
-
-**Making from a seed** (`gen/`, `filter.rs`; the Make tab beside the
-inspector). Procedural only, offline, the same pixels in every build from
-the same seed:
-- palette ramps, made in OKLab in whole numbers — a colour's darker and
-  lighter steps, the hue turning toward yellow as it lightens and away as it
-  darkens, chroma easing at the ends, held to what sRGB can show; sRGB's
-  curve and the sines are tables checked against their formulas in floats;
-- sprites from Proton's own half-templates (a ship, a creature, an item):
-  cells decided by the seed and mirrored, outlined where they meet nothing,
-  shaded from a ramp lighter toward the top;
-- value and gradient noise in octaves (fBm) laid out in a ramp or the
-  palette — banded, Bayer-dithered or smooth;
-- caves from a cellular automaton, walled at the edges or repeating as a
-  tile.
-
-Filters make a layer over: an outline round what is there or on its own
-edge, a drop shadow (offset, blurred), pixelate, and fewer colours — median
-cut, in a fixed order, or the palette's, dithered or not, kept as the
-palette if asked. Scale2x and Scale3x grow the canvas with a pixel picture's
-diagonals kept diagonal; the selection grows square. A generator or filter
-is shown on the window's copy as its settings change (`rr_preview`) and is
-one edit when kept, held to what is selected; leaving the tab, or drawing,
-takes back what was only shown.
-
-**In and out** (`port.rs`; the PSD reader and writer and the PNG code now
-`proton-raster`'s `io`, which Game's importer uses). A canvas is written
-beside its folder as a flattened PNG — each pixel a square of 1, 2, 4 or 8
-for pixel art — or a layered PSD: each layer trimmed, its opacity, whether
-it is shown and its blend mode by Photoshop's key, and a merged image that
-keeps its transparency (four channels, the layer count negative, as Adobe
-describes it), run-length encoded; it reads back through our own reader as
-the canvas it was. Sent to a game, it is written into the game's `art/` —
-layered, each layer a plane by the depth its name gives, or flat — and
-imported into the room when that game is the one open. A PNG or a PSD in
-the project comes in as a canvas of its own (a pixel canvas when small, its
-few colours the palette) or as layers on the open one, one step of undo: a
-PSD's layers where its canvas had them, a single picture in the middle. A
-picture dropped on the window is handed to the core as the request's raw
-body (`put_raster_blob`), not JSON; ⌘V asks the shell, which reads the
-system's pasteboard itself — WebKit gives a page no clipboard image without
-something editable focused — as a PNG, or a TIFF made one. ⌘C puts Canvas's
-copy on the pasteboard as a PNG for other apps and remembers the change
-count, so ⌘V with nothing copied since pastes Canvas's own copy, where it
-was.
-
-**The agent's tools** (`raster/agent.rs`). `canvas_info` says the canvas —
-its size, palette by swatch number, layers top first with where each has
-pixels, what is selected — and, asked, a part of it as a grid of letters,
-one a colour with a legend, so a model can see pixel art before changing
-it; `@canvas` sends the same, with the whole grid for small pixel art.
-`canvas_new` makes one and opens it. `canvas_draw` takes marks in pixels —
-pixels set, a pencil line through points, rectangles and ellipses, a
-bucket, an erase, or any op as the window sends it — with colours as hex,
-RGBA or a swatch's number, on the top layer, a named one or a new one;
-`canvas_generate` runs a generator (a seed chosen if none is given and said
-back), a filter, or adds a ramp to the palette; `canvas_export` writes a PNG
-or PSD, or sends the canvas to a game and, when it is open, into its room.
-A call's marks are applied together or not at all (`Canvas::apply_all`) and
-are one step of the person's undo, held until they save and kept to what is
-selected; the window is sent the layers and the tiles that changed, as
-undo sends them.
-
-**Frames** (P8). A canvas may be an animation: frames, each shown for its
-own time, and every layer's pixels in each frame — its cels. A cel is known
-by a number, as a layer is: the layer's id and 65 536 times its frame, so a
-layer's own id is its first frame and everything that addresses tiles by
-layer — the window's fetches, the hash on every answer, undo's patches —
-addresses cels unchanged. An op that draws names the cel it draws in; ops
-add a frame (clear, or a copy of one, sharing its tiles until drawn on),
-take one out, move one, set how long frames show, set the tags, and copy one
-cel over another. Tags are runs of frames with a name and a way to play —
-on, back, to the end and back — that become a game's animations; a copy of
-a tag's last frame put straight after it joins the tag. Frames are compared
-place by place, so a frame added or moved tells the window every tile now
-different at each place, and the window, which made the same op on its
-own copy, agrees. A still picture is what it was: its hash, its folder
-(format 1) and its ops are unchanged, and a canvas with frames is written
-as format 2, which an older Proton refuses rather than opening its first
-frame and saving the rest away. A later frame's layer file is
-`layers/<id>-<n>.png`, written only where it has pixels.
-
-The window shows one frame and draws in it. The timeline under the picture
-shows every frame small (`rr_thumb`), plays them — every frame, or a tag's,
-each for its time, round until stopped (`ui/raster-frames.js`, tested in
-node) — and adds, copies (⇧N), moves (drag) and takes out frames; `,` and
-`.` step through them, ↩ plays and stops. Onion skin (⇧O) lays the frames
-either side faintly under each layer — the frames before tinted red, after
-blue, fading with distance — in the composite only, never the picture: the
-eyedropper, an export and the core never see it. While frames changed here
-are on their way, the window keeps its own copy's frames rather than an
-older word from the core, which would put a copied frame's pixels away. The
-core is told the frame shown (`RasterShow`), which is what the agent draws
-in unless told another.
-
-Out, a frame is written as a PNG (`name-3.png`) or a PSD of that frame, and
-every frame as a sprite sheet — in a row, or as near a square as they make,
-larger by whole pixels if asked — with the JSON Aseprite writes beside one:
-each frame's place and time, the tags and their direction, the layers. Sent
-to a game, an animation's sheet and JSON go into `art/` beside the frame.
-In, an Aseprite file (`aseprite.rs`, read as its published format describes
-it: RGBA, grayscale or indexed pixels, raw, zlib-compressed or linked cels,
-layers in groups, tags, the palette in its new chunk or its old) comes in as
-a canvas of its frames, tags and palette; what Canvas cannot hold is said —
-a tilemap or reference layer left out, a group's opacity laid onto its
-layers, a blend mode Canvas lacks — and a cel's opacity is laid into its
-pixels' alpha, which draws the same. The reader is shared with Game, whose
-animation import (G9) comes next. The agent animates with `canvas_frames` —
-frames added, copied, taken out, moved and timed, and tags, counted from 1 —
-and draws, makes and exports in a frame by `frame`.
-
 ### Trace
 
 Code Visualizer, sidecar first and native second — [`CODE-VISUALIZER.md`](CODE-VISUALIZER.md)
@@ -1940,9 +1370,9 @@ trait Mode {
 }
 ```
 
-That is the whole contract. Chat, Codex, Design, Modeling, Game, Video, Data,
-Research and Notebook are the nine that ship; nothing about them is
-privileged, and the eighth and ninth were extensions rather than forks.
+That is the whole contract. Chat, Codex, Data, Research and Notebook are the
+five that ship; nothing about them is privileged, and Research and Notebook,
+the fourth and fifth, were extensions rather than forks.
 
 **It is built, in `proton-core::contract`, and it is a struct rather than a
 trait.** Every answer above is data: none of it needs to run, and a mode that
@@ -1979,16 +1409,13 @@ bearing rule of the entire project:
 |---|---|
 | Chat | `.proton/chats/*.json` — messages, tool calls, artifact refs |
 | Codex | Source files |
-| Design | Component source + `theme.css` tokens |
-| Modeling | `scene.proton.json` + the `.obj` files it names |
-| Game | `game.json`, `world.json`, `rooms/*.room.json`, `prefabs/*.prefab.json` |
-| Video | `.edl` + sidecar `.srt` |
 | Data | `.ipynb` + `.sql` |
 | Research | `research/<slug>/` — Markdown with TOML front matter, `tournament.jsonl`; papers as `literature/P003.md`, their PDFs beside them and out of Git |
-| PDF | The PDF itself — the one document that is not text, and is the person's rather than a project's. Saved as an update appended to it, so the bytes it had are kept and a diff is the update |
+| Notebook | `~/Github/Notebooks/<slug>/` — the notebook, its sources and notes in JSON and Markdown, its chats, and what the studio made |
 
-It is not tidiness. It is what lets the agent edit a scene or a timeline by
-writing a patch instead of driving a GUI, and what makes any of it reviewable.
+It is not tidiness. It is what lets the agent edit a notebook or an
+investigation by writing a patch instead of driving a GUI, and what makes any of
+it reviewable.
 
 ---
 
@@ -2795,7 +2222,7 @@ as columns and rows, and the jump works from both ends — `JumpTo` for a known
 place, and a click on any table cell to search the project for that value,
 which is "open sat 17 in Codex" as it is actually reached.
 
-**M7 — Design mode.** Two-way binding between artboard and component source.
+**M7 — Design mode.** (Moved to an app of its own in October 2026; kept here as history.) Two-way binding between artboard and component source.
 The hardest of the seven, because the binding has to survive a human editing
 both sides.
 
@@ -2838,49 +2265,18 @@ into it, saves, and finds the artboard holding the new markup; and edits a
 layer from the design side and finds the file changed and otherwise untouched.
 Clicking the picture selects the layer, which the milestone did not ask for.
 
-**Modeling, Game, Video — implemented documents; remaining runtime work.**
-These followed M0–M7. Game playback and Video decoding remain separate projects.
+**Modeling, Game, Video — documents, then engines.** These followed M0–M7 and
+moved to an app of their own in October 2026, with Canvas and Diffuse; their
+history is in that app.
 
-*Where these stand.* All three now have their documents and the panels that
-read and write them: `scene.proton.json` with an outliner, viewport and shader
-graph; a game's folder with its world, rooms and an inspector (Game was a
-Godot `.tscn` viewer until it became an engine of Proton's own — § 3, Game);
-a CMX3600 `.edl` and its `.srt` sidecar with a multitrack timeline and
-captions. The remaining runtime work is Game's renderer and runtime and an
-ffmpeg process for Video. Modeling has since grown a mesh loader —
-`proton-mesh` reads a Wavefront OBJ, which keeps the diffable-document rule
-true all the way down, since the geometry file is text as well — and the
-viewport draws real surfaces up to a measured budget, with a non-destructive
-modifier stack over them — kept in the scene, so it is a few diffable lines
-describing a change to a mesh file it never writes — and materials compiled
-from the graph in the file into a short program the viewport runs per triangle.
-Doing the document first was what made all of this possible: none of the three
-needed a renderer to become real, and none of them mimes one now.
-
-Modeling's viewport is now WebGL, which is what this section kept predicting.
-The three limits it named are gone: occlusion is per pixel, the material runs
-per pixel, and the frame is no longer what bounds a mesh's size — a million
-triangles measured 0.3 ms. What bounded it next was the seam, at about 50 bytes
-of JSON a triangle once vertex normals travel with the positions, and the
-answer to that was a binary channel rather than a larger number. It is one of
-two exceptions to "JSON on the seam": `Event::Geometry` describes a mesh and says
-whether it is ready, and the page then calls the shell's `read_geometry`, which
-returns a raw `ipc::Response` in the layout `proton-mesh/src/bytes.rs` pins
-down. Every section starts four-byte aligned so the page's typed arrays are
-views onto the buffer. A late answer for a key that has since been asked again
-is dropped, and switching scenes clears every mesh the last one uploaded. The
-budget — 500,000 triangles — is now set by reading and shading the mesh, not by
-moving it.
-
-The other is the Lab's: `Event::ResearchRun` names the pictures and 3D scenes a
+**The Lab's files on the seam.** `Event::ResearchRun` names the pictures and 3D scenes a
 run saved, and the page asks the shell's `read_lab` for each by
 `<investigation>/<run>/<path>`. The core says where the file is, under the
 session's lock, and gives only a file inside that run's folder of a kind the
 Lab shows — no `..`, no absolute path, no link out, no code; the shell reads it
 after letting go of the lock. A scene is drawn by `ui/lab3d.js` with three.js —
 `ui/vendor/three/`, its own build files unminified and imported the first time
-a scene is opened — rather than Modeling's renderer, which is one context bound
-to its viewport: spheres, bonds and arrows sharing three geometries, points as
+a scene is opened: spheres, bonds and arrows sharing three geometries, points as
 one instanced mesh, lines and meshes, OrbitControls, and frames built the
 first time they are shown. It draws only on a change, so a scene left open
 costs nothing.

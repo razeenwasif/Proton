@@ -97,88 +97,6 @@ Research's milestones after Lean (P0–P7, `6c103a9`).
 - **The Lab on Linux and Windows.** bubblewrap has never been run for real,
   and the Lab is Unix-only (no `Scripts\python.exe`).
 
-## Canvas
-
-Pixel art and painting in one mode, Pixel and Paint (P0–P8). What waits on
-the person, and what the plan put off until a measurement or a request
-calls for it.
-
-### Waiting on the person
-
-- **A pen on real hardware.** WebKit hands a tablet's events to the page as
-  a mouse with no pressure, so the shell reads them with an AppKit monitor
-  (`pen.rs`). Pressure from the drawing tablet and from the iPad's Pencil
-  through Sidecar has never been tried on either.
-- **The paths only the app has.** Pasting and copying through the real
-  pasteboard, and pictures dropped and uploaded as raw bytes over Tauri's
-  IPC, are tested against stand-ins.
-- **The agent drawing.** `canvas_*` are tested through `run_tool`; a real
-  model using them is a live round, run with the person's go-ahead.
-
-### Later builds
-
-- **More brushes.** Smudge, blur and liquify; brushes with a texture or a
-  grain; a pen's tilt.
-- **More to a layer.** Masks, clipping and adjustment layers; blend modes
-  that are not per channel (hue, saturation, colour, luminosity); 16 bits a
-  channel.
-- **Text** on a layer.
-- **Larger canvases** than 4096 pixels a side, and turning the view.
-- **More generators.** Tiles by wave-function collapse; RotSprite for
-  turning pixel art without its pixels going ragged.
-- **More formats.** OpenRaster and Krita's files; colour profiles (sRGB is
-  assumed now).
-- **SIMD** in the WebAssembly, if a measurement shows a brush wants it.
-
-## Game
-
-Proton's own 2D-first engine, Metroidvania first. G0–G11 are built (G0–G6 on
-master; G7–G11 on `codex-zed-look`, with G11 not yet in the installed app).
-Paused by the person on 2026-10-15; what follows is what the plan has left.
-
-### Waiting on the person
-
-- **Files made by the real tools.** The PSD, Aseprite and DragonBones
-  readers are tested only against files our own test writers make, by the
-  published formats. A real Photoshop-saved `.psd`, an Aseprite-saved
-  `.aseprite` with tags, slices and user data, and a DragonBones export
-  with meshes and bounding boxes would each confirm the reading.
-- **Hearing a run.** The template's sounds are made in code and checked as
-  files, never listened to; and only Chromium has been seen to let a
-  click on Play wake the sound — the app's WebKit should, from a real
-  click.
-- **How games get code of their own.** Every behaviour is built in
-  (crawler, flyer, charger, turret, still). Open: modules of the game's own
-  compiled to WebAssembly behind an ABI, or a scripting language — and what
-  either may touch of a run, which must stay deterministic.
-
-### Later builds
-
-- **World and progression (G12).** A World view: rooms on a canvas, dragged
-  into place, doors linked where their edges touch. Save slots
-  (`.proton/game/saves`) — benches to rest at and wake by are built (G10).
-  The in-game map, drawn from the rooms visited. A lock-and-key check
-  (`check.rs`) that finds pickups that cannot be reached and rooms that can
-  be entered and not left, tested on worlds made to softlock.
-- **Hot reload, gamepad, rebinding (G13).** `pg_patch`: an edit taken into
-  a run that is playing, its state kept. Gamepads, and keys rebound.
-- **Web export (G14).** A game as a page that plays outside Proton: the
-  shell gathers the runtime through `AppHandle::asset_resolver()`, the core
-  writes the cooked world and the art; tested by Playwright serving an
-  exported fixture and playing a replay.
-- **Other kinds of game.** Coarse until one is wanted:
-  - *A pixel roguelite* (Dead Cells): a low-resolution target scaled by
-    whole numbers, rooms as chunks with tagged exits joined by a seeded
-    generator and every layout checked by G12's analysis, a run's state
-    apart from what is kept between runs, permadeath, loot tables, and an
-    agent tool reporting statistics per seed.
-  - *Isometric 2D* (Hades): a 2:1 projection sorted by footprint, an
-    eight-way controller colliding on the ground plane, fading what hides
-    the player.
-  - *Low-poly 3D* (Tunic): our own `.glb` reader, the vendored three.js for
-    an orthographic camera, toon shading, outlines and shadows, and a
-    capsule colliding with a triangle mesh in the sim.
-
 ## Sheets
 
 A spreadsheet mode in Proton, after Google Sheets: Excel's work, in a tab
@@ -200,9 +118,8 @@ decided past what the person said. Open, to settle before a plan:
   as the Data mode's tables are, with Vim's keys moving the cursor cell to
   cell, as in Data.
 - **The agent.** Tools to read a range, write cells and formulas, and make
-  a chart, as Data and Diffuse have; `@sheet` in a message.
+  a chart, as Data has; `@sheet` in a message.
 - **Sharing with the other modes.** A range to a Data notebook as a frame,
-  and a frame back as a sheet; a chart into Canvas, or out to Quark's
-  LaTeX.
+  and a frame back as a sheet; a chart out to Quark's LaTeX.
 - **Collaboration**, as Google Sheets has it, is not assumed: Proton is one
   person's, and two people editing one sheet would need a server.

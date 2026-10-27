@@ -1,8 +1,13 @@
 # Proton — design
 
-Proton is one workspace with eleven modes, a modal editor underneath all of them,
-and an agent that can act in any of them. It is not a code editor with extra
-tabs bolted on; the tabs are the point.
+Proton is one workspace with five modes — Chat, Codex, Data, Research and
+Notebook — a modal editor underneath all of them, and an agent that can act in
+any of them. It is not a code editor with extra tabs bolted on; the tabs are the
+point.
+
+Design, Model, Game, Video, Canvas and Diffuse moved to an app of their own in
+October 2026, and LaTeX and the Reader to Quark. The references below still
+say where each idea came from, and some name those modes.
 
 Run the prototype:
 
@@ -568,51 +573,6 @@ insight that makes it worth having in the same pane as the agent is on screen
 in the prototype — Choreographer reports skipped frames on Android for the same
 reason the web target janks, and one fix covers both.
 
-### Design
-
-The web builder. Layers tree on the left, artboard in the middle with
-desktop/tablet/phone breakpoints and a Design / Code / Preview toggle, style
-inspector on the right. Two things make it not-Webflow:
-
-- **Two-way binding to real files.** The tree shows which layers are bound to
-  `Dashboard.tsx` and `theme.css`; editing tokens in the inspector rewrites the
-  Tailwind theme, and editing the component in Codex updates the artboard. The
-  generated code is shown, not hidden.
-- **Pagepilot** reviews the layout rather than generating it — "this grid drops
-  to one column below 640px but the video keeps a 16:9 box; it will overflow by
-  24px."
-
-Collaborators appear as labelled cursors on the artboard.
-
-### Modeling
-
-3D. Outliner, viewport with a transform gizmo and Object / Edit / Sculpt /
-Shading modes, primitives (Cube · Sphere · Plane), a shader node graph docked
-under the viewport, and a modifier stack on the right. The whole scene
-serialises to `scene.proton.json` so it diffs and merges in Git — which is what
-lets the agent edit a scene by writing a patch instead of driving a GUI.
-
-### Game
-
-Proton's own engine, for a few kinds of game rather than every kind:
-hand-drawn and painted 2D on many parallax planes, lit pixel art, isometric
-rooms, low-poly 3D; Metroidvanias first, roguelites after. Engine-shaped:
-the world and its rooms, play/pause/step/stop transport, a game view with
-collision shapes and navmesh overlays, an inspector bound to the selected node,
-and Output / Debugger / Profiler / Network below. Hot reload preserves state.
-The agent's leverage here is **replay** — it changes a jump curve, then replays
-30 seconds of recorded input against both builds and reports 7 missed inputs
-became 0. That is a claim you can check.
-
-### Video
-
-An NLE. Media bin, program monitor, and a timeline with text, two video tracks
-and audio. Generated assets are tagged in the bin and coloured differently on
-the timeline, so you always know what the model made. The agent's work is
-listed as the operations it actually ran — `scene.detect`, `transcribe`,
-`rough.cut`, `generate` — with counts, and it hands back an `.edl` and a
-sidecar `.srt` rather than a flattened render.
-
 ### Data
 
 Drawn as Codex is: the title bar down the right, the project panel as
@@ -627,9 +587,8 @@ title bar, and its own project on screen. Going to Data brings back the one
 Data had, whatever Codex has open since, and leaving it brings back Codex's.
 Research works in Data's project too, for the same reason — unless its
 investigations are kept in a folder of their own (`research.folder`), when
-every project shows the same ones. Every other
-mode — Chat, Design, Modeling, Game, Video — works on the checkout the code
-is in, and shares Codex's. The first visit starts on
+every project shows the same ones. Chat works on the checkout the code is
+in, and shares Codex's. The first visit starts on
 Codex's project, because a side has to show something; open another from
 Data's switcher and the two are separate from then on, across restarts.
 Opening a notebook from Codex takes its project to Data, since that is where
