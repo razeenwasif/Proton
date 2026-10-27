@@ -1,7 +1,7 @@
 //! The mode contract: four slots, a verb table, and a document.
 //!
 //! A mode is the unit of "which application am I in", and the claim the whole
-//! project rests on is that eleven of them can share one editor because a mode
+//! project rests on is that five of them can share one editor because a mode
 //! is a small, closed thing:
 //!
 //! ```text
@@ -59,10 +59,6 @@ pub enum Slot {
     Panels,
     /// A single table, large enough to read.
     Table,
-    /// Layers, for the modes that have them.
-    Layers,
-    /// Properties of whatever is selected.
-    Inspector,
     /// A project's investigations.
     Investigations,
     /// One investigation: its overview, its hypotheses ranked, the round's work.
@@ -76,21 +72,14 @@ pub enum Slot {
     Tutor,
     /// What can be made from the sources, and what has been.
     Studio,
-    /// A picture, to draw on.
-    Canvas,
-    /// A graph of nodes and the wires between them, to build and run.
-    Graph,
 }
 
 /// How a mode's work persists.
 ///
-/// **Every one of these is a text file that diffs in Git** — but one. That
-/// is the load-bearing rule of the project rather than a matter of taste: it
-/// is what lets the agent edit a scene or a timeline by writing a patch
-/// instead of driving a GUI, and what makes any of it reviewable. The one is
-/// a canvas's pixels: a picture is not text, so the rule keeps what it can —
-/// a `canvas.json` that diffs, and layers that are ordinary PNGs, written the
-/// same bytes for the same pixels.
+/// **Every one of these is a text file that diffs in Git.** That is the
+/// load-bearing rule of the project rather than a matter of taste: it is what
+/// lets the agent edit a notebook or an investigation by writing a patch
+/// instead of driving a GUI, and what makes any of it reviewable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
@@ -101,28 +90,12 @@ pub enum DocumentKind {
     Source,
     /// `.ipynb` and `.sql`.
     Notebook,
-    /// Component source plus `theme.css` tokens.
-    Component,
-    /// `scene.proton.json`
-    Scene,
-    /// A game's folder: `game.json`, `world.json`, a `.room.json` per room
-    /// and a `.prefab.json` per prefab — Proton's own engine's files.
-    Level,
-    /// An `.edl` and its sidecar captions.
-    Timeline,
     /// `research/<slug>/`: Markdown hypotheses and reviews, a JSON-lines
     /// tournament, the plan and the logs.
     Investigation,
     /// `~/Github/Notebooks/<slug>/`: the notebook, its sources and notes in
     /// JSON and Markdown, its chats, and what the studio made.
     StudyNotebook,
-    /// A `.canvas` folder: `canvas.json`, which diffs, and a PNG a layer —
-    /// pictures, which no text can be; each saved the same bytes when the
-    /// same pixels, so an untouched layer never shows in a diff.
-    Canvas,
-    /// A `.flow.json`: a graph of nodes and links, written so moving a node
-    /// changes one line.
-    Flow,
 }
 
 /// The whole of a mode, as anything outside it needs to know.
@@ -172,30 +145,6 @@ impl Layout {
                 Slot::Table,
                 DocumentKind::Notebook,
             ),
-            ModeId::Design => (
-                Slot::Layers,
-                Slot::Editor,
-                Slot::Inspector,
-                DocumentKind::Component,
-            ),
-            ModeId::Modeling => (
-                Slot::Layers,
-                Slot::Editor,
-                Slot::Inspector,
-                DocumentKind::Scene,
-            ),
-            ModeId::Game => (
-                Slot::Layers,
-                Slot::Editor,
-                Slot::Inspector,
-                DocumentKind::Level,
-            ),
-            ModeId::Video => (
-                Slot::Explorer,
-                Slot::Editor,
-                Slot::Inspector,
-                DocumentKind::Timeline,
-            ),
             // The investigations to pick from, the one picked, and the Lab
             // beside it: what a run drew wants to be seen next to the
             // hypothesis it tests.
@@ -212,22 +161,6 @@ impl Layout {
                 Slot::Tutor,
                 Slot::Studio,
                 DocumentKind::StudyNotebook,
-            ),
-            // Procreate's and Aseprite's: the layers, the picture, and what
-            // is selected — the brush, the layer — beside the agent.
-            ModeId::Raster => (
-                Slot::Layers,
-                Slot::Canvas,
-                Slot::Inspector,
-                DocumentKind::Canvas,
-            ),
-            // ComfyUI's: the flows and the nodes there are, the graph, and
-            // the node selected beside the queue and the agent.
-            ModeId::Diffuse => (
-                Slot::Explorer,
-                Slot::Graph,
-                Slot::Inspector,
-                DocumentKind::Flow,
             ),
         };
         Layout {
@@ -261,7 +194,7 @@ mod tests {
 
     #[test]
     fn every_mode_has_a_layout_and_a_document() {
-        // The contract is only a contract if it covers all eleven. A mode
+        // The contract is only a contract if it covers all five. A mode
         // added later fails to compile rather than falling through to a
         // default that puts an editor where its stage should be.
         for mode in ModeId::ALL {

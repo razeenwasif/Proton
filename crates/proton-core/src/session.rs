@@ -28,11 +28,10 @@
 //! ## Each mode keeps projects of its own
 //!
 //! Every mode lists the projects opened in it and shows one of them, so the
-//! folder open in Codex is not carried into Game, Canvas or Diffuse: going
-//! to a mode brings back the project it had, and leaving it brings back the
-//! one the next mode had. The first time a mode is entered with nothing of
-//! its own, it is given a folder of its own — `~/Proton/<Mode>`, Diffuse's
-//! own folder for Diffuse — made then. A folder open in several modes is
+//! folder open in Codex is not carried into Research or Notebook: going to
+//! a mode brings back the project it had, and leaving it brings back the one
+//! the next mode had. The first time a mode is entered with nothing of its
+//! own, it is given a folder of its own — `~/Proton/<Mode>` — made then. A folder open in several modes is
 //! still one workspace, listed and shown by each: two would be two file
 //! indexes over the same files. A session made on a folder (`Session::new`,
 //! as tests make one) shows it in every mode until a mode opens another.
@@ -178,8 +177,6 @@ pub struct Session {
     /// the app. `None` — a session made for a test — puts them under the
     /// system's temporary folder, never the person's home.
     homes: Option<PathBuf>,
-    /// Whether `homes` is a test's: Diffuse's folder goes there too.
-    test_homes: bool,
     /// Projects opened before, most recent first. Includes the open ones.
     recents: Vec<PathBuf>,
     /// The workspace picker, when it is open. The session's rather than a
@@ -217,16 +214,7 @@ pub struct Session {
     /// Notebook: the person's notebooks and the knowledge base they draw
     /// from, one for every project here.
     study: crate::study::Study,
-    /// Diffuse: the flows open, the runs, and what forge is — the person's,
-    /// kept in Diffuse's own folder whichever project is open.
-    diffuse: crate::diffuse::Diffuse,
-    /// Runs the agent is waiting on: the project whose agent asked, its call,
-    /// the run, and when to stop waiting.
-    flow_waits: Vec<(PathBuf, String, u32, std::time::Instant)>,
 }
-
-/// How long the agent waits on a run before it is told to look again later.
-const FLOW_WAIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 impl Session {
     /// One workspace, no persistence, no language servers. What tests want.
@@ -240,7 +228,6 @@ impl Session {
             listed: vec![Listed::all()],
             shown: vec![None; ModeId::ALL.len()],
             homes: None,
-            test_homes: false,
             recents: Vec::new(),
             picker: None,
             matcher: Matcher::new(),
@@ -252,8 +239,6 @@ impl Session {
             person: None,
             make_research: crate::research::Research::kept_in,
             study: crate::study::Study::new(),
-            diffuse: crate::diffuse::Diffuse::default(),
-            flow_waits: Vec::new(),
         }
     }
 
@@ -292,24 +277,6 @@ impl Session {
 
     pub fn plugins(&self) -> &crate::plugins::Plugins {
         &self.plugins
-    }
-
-    /// One of the agent's Diffuse tools, as the session answers them: now,
-    /// or once a run has ended (`flow_waited`); and what the window draws
-    /// again.
-    pub fn flow_tool(&mut self, name: &str, input: &serde_json::Value) -> (crate::diffuse::Said, Vec<Event>) {
-        let home = self.diffuse_home();
-        self.diffuse.tool(&home, name, input)
-    }
-
-    /// What `@flow` sends: Diffuse, and the flow on screen.
-    pub fn flow_about(&self) -> String {
-        self.diffuse.about(&self.diffuse_home())
-    }
-
-    /// What run `id` came to, once it has ended.
-    pub fn flow_waited(&self, id: u32) -> Option<Result<String, String>> {
-        self.diffuse.waited(id)
     }
 
     /// Notebook's, made otherwise: for a test, one that says which of its
@@ -358,7 +325,6 @@ impl Session {
     pub fn with_person_settings(mut self, file: PathBuf) -> Session {
         let folder = crate::settings::Settings::at(file.clone()).research_folder();
         self.study = std::mem::take(&mut self.study).with_person_settings(&file);
-        self.diffuse.set_person(Some(file.clone()));
         self.person = Some(file);
         match folder {
             Some(folder) => self.with_research_in(&folder),
@@ -576,18 +542,11 @@ impl Session {
         &mut self.workspaces[self.active]
     }
 
-    /// One mesh as bytes, from the workspace on screen — the binary half of
-    /// `Event::Geometry`. See `Modeling::mesh_bytes`.
-    pub fn mesh_bytes(&mut self, key: &str) -> Option<Vec<u8>> {
-        self.active_mut().mesh_bytes(key)
-    }
-
     /// The files with unsaved changes in every open project, named with
     /// their project when more than one is open.
     pub fn unsaved(&self) -> Vec<String> {
         let many = self.workspaces.len() > 1;
-        let mut files: Vec<String> = self
-            .workspaces
+        self.workspaces
             .iter()
             .flat_map(|workspace| {
                 let project = folder::name_of(workspace.root());
@@ -596,18 +555,13 @@ impl Session {
                     .into_iter()
                     .map(move |file| if many { format!("{project}/{file}") } else { file })
             })
-            .collect();
-        // And Diffuse's flows, which are in its own folder.
-        files.extend(self.diffuse.unsaved().into_iter().map(|name| format!("{name} (Diffuse)")));
-        files
+            .collect()
     }
 
     /// Save every file with unsaved changes in every project; the ones that
     /// could not be, and why.
     pub fn save_unsaved(&mut self) -> Vec<String> {
-        let mut failed: Vec<String> = self.workspaces.iter_mut().flat_map(|workspace| workspace.save_unsaved()).collect();
-        failed.extend(self.diffuse.save_unsaved());
-        failed
+        self.workspaces.iter_mut().flat_map(|workspace| workspace.save_unsaved()).collect()
     }
 
     /// Proton is going: what every workspace has running that would outlive
@@ -634,166 +588,7 @@ impl Session {
     /// `~/Proton`: for a test, which must never make folders in the home.
     pub fn with_mode_homes(mut self, dir: impl Into<PathBuf>) -> Session {
         self.homes = Some(dir.into());
-        self.test_homes = true;
         self
-    }
-
-    /// An image Diffuse may show, in its folder.
-    pub fn diffuse_file(&self, rel: &str) -> Option<PathBuf> {
-        self.diffuse_reader(rel).map(|(path, _)| path)
-    }
-
-    /// Where a picture the window may read is, and the key to open it with:
-    /// read off the session's lock, as the shell does.
-    pub fn diffuse_reader(&self, rel: &str) -> Option<(PathBuf, Option<proton_diffuse::Seal>)> {
-        self.diffuse.reader(&self.diffuse_home(), rel)
-    }
-
-    /// Seal Diffuse's files on disk, as the app does: locked until the person
-    /// unlocks it.
-    pub fn sealing_diffuse(mut self) -> Session {
-        self.diffuse.seal_files();
-        self
-    }
-
-    /// The person unlocked Diffuse — and its Gallery, with `gallery` — and
-    /// the shell has the key their keychain keeps.
-    pub fn unlock_diffuse(&mut self, key: proton_diffuse::Seal, gallery: bool) -> Result<Vec<Event>, String> {
-        let home = self.diffuse_home();
-        self.diffuse.unlock(&home, key, gallery)
-    }
-
-    /// Whether Diffuse waits for its key.
-    pub fn diffuse_locked(&self) -> bool {
-        self.diffuse.locked()
-    }
-
-    /// Whether anything in Diffuse's folder is sealed already.
-    pub fn diffuse_has_sealed(&self) -> bool {
-        self.diffuse.has_sealed(&self.diffuse_home())
-    }
-
-    /// Diffuse's folder: the person's `diffuse.folder`, or `~/Diffuse`. Made
-    /// only when something is written there. A test's session — one given
-    /// homes of its own, or keeping no session file — never names the
-    /// person's.
-    pub fn diffuse_home(&self) -> PathBuf {
-        let chosen = self.person.clone().map(crate::settings::Settings::at).map(|s| s.string("diffuse.folder", "")).unwrap_or_default();
-        match chosen.trim() {
-            "" if self.test_homes => self.homes.clone().unwrap_or_else(std::env::temp_dir).join("Diffuse"),
-            "" if self.store.is_none() => std::env::temp_dir().join(format!("proton-modes-{}", std::process::id())).join("Diffuse"),
-            "" => folder::home().unwrap_or_else(std::env::temp_dir).join("Diffuse"),
-            typed => folder::expand(typed),
-        }
-    }
-
-    /// A picture the window hands over, written into Diffuse's folder: see
-    /// `diffuse::Diffuse::put`. Where it was written.
-    pub fn diffuse_put(&mut self, rel: &str, bytes: &[u8]) -> Result<String, String> {
-        let home = self.diffuse_home();
-        self.diffuse.put(&home, rel, bytes)
-    }
-
-    /// An output to Canvas or Game, in the project that mode shows — whose
-    /// own it is, now each mode has its own: Canvas makes a canvas of it, as
-    /// of a picture dropped on it; Game writes it into the open game's `art/`
-    /// and brings it into the room on screen.
-    fn diffuse_send(&mut self, path: &str, to: &str) -> Vec<Event> {
-        let home = self.diffuse_home();
-        // Sent as a plain picture: Canvas and Game keep theirs so.
-        let bytes = match self.diffuse.image(&home, path) {
-            Some(Ok(bytes)) => bytes,
-            Some(Err(why)) => return vec![notice(why, NoticeLevel::Error)],
-            None => return vec![notice(format!("{path} is not an image Diffuse may send"), NoticeLevel::Warn)],
-        };
-        let name = path.rsplit('/').next().filter(|n| !n.is_empty()).unwrap_or("image.png").to_string();
-        match to {
-            "canvas" => {
-                let mut events = self.set_mode(ModeId::Raster);
-                match self.active_mut().raster_put_blob(bytes) {
-                    Ok(blob) => events.extend(self.delegate(Command::RasterImport {
-                        path: None,
-                        blob: Some(blob),
-                        layer: false,
-                        above: None,
-                        name: Some(name),
-                    })),
-                    Err(why) => events.push(notice(why, NoticeLevel::Error)),
-                }
-                events
-            }
-            "game" => {
-                let mut events = self.set_mode(ModeId::Game);
-                let Some(game) = self.active().game_dir() else {
-                    events.push(notice("open a game in Game, then send the picture to it again".into(), NoticeLevel::Warn));
-                    return events;
-                };
-                let stem = name.trim_end_matches(".png");
-                let mut rel = format!("art/{stem}.png");
-                let mut n = 2;
-                while game.join(&rel).exists() {
-                    rel = format!("art/{stem}-{n}.png");
-                    n += 1;
-                }
-                if let Err(e) = proton_diffuse::doc::write_atomically(&game.join(&rel), &bytes) {
-                    events.push(notice(format!("{rel}: {e}"), NoticeLevel::Error));
-                    return events;
-                }
-                events.extend(self.delegate(Command::GameImport { source: rel, room: None, scale: None, normals: false }));
-                events
-            }
-            other => vec![notice(format!("Diffuse sends to Canvas or Game, not {other}"), NoticeLevel::Warn)],
-        }
-    }
-
-    /// Keep Diffuse's flows and images in another folder — none, the default
-    /// — written to the person's own settings. Refused while a flow has
-    /// changes, which would be left behind.
-    fn set_diffuse_folder(&mut self, folder: Option<String>) -> Vec<Event> {
-        let unsaved = self.diffuse.unsaved();
-        if !unsaved.is_empty() {
-            return vec![notice(format!("save or discard {}'s changes before moving Diffuse's folder", unsaved.join(", ")), NoticeLevel::Warn)];
-        }
-        let Some(file) = self.person.clone() else {
-            return vec![notice("Proton has no settings of your own to keep Diffuse's folder in".into(), NoticeLevel::Warn)];
-        };
-        let typed = folder.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
-        if let Some(typed) = &typed {
-            let path = folder::expand(typed);
-            if path.exists() && !path.is_dir() {
-                return vec![notice(format!("{typed} is a file, not a folder"), NoticeLevel::Warn)];
-            }
-        }
-        let value = typed.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null);
-        if let Err(why) = crate::settings::Settings::at(file).set("diffuse.folder", value) {
-            return vec![notice(why, NoticeLevel::Error)];
-        }
-        self.diffuse.moved();
-        let home = self.diffuse_home();
-        let mut events = self.diffuse.enter(&home);
-        events.extend(self.diffuse.apply(&home, Command::DiffuseLook { again: false }));
-        events
-    }
-
-    /// Where an image of the game open in the project on screen is.
-    pub fn game_file(&self, key: &str) -> Option<PathBuf> {
-        self.active().game_file(key)
-    }
-
-    /// A picture the window hands over — pasted, dropped — kept by Canvas in
-    /// the project on screen, to bring in: its number.
-    pub fn raster_put_blob(&mut self, bytes: Vec<u8>) -> Result<u32, String> {
-        self.active_mut().raster_put_blob(bytes)
-    }
-
-    /// What Canvas last copied there, as a PNG, for the system's clipboard.
-    pub fn raster_clip_png(&self) -> Option<Vec<u8>> {
-        self.active().raster_clip_png()
-    }
-
-    /// Tiles of the canvas open in the project on screen, shared.
-    pub fn raster_tiles(&self, generation: u32, layer: u32, tiles: &[u32]) -> Option<crate::raster::RasterTiles> {
-        self.active().raster_tiles(generation, layer, tiles)
     }
 
     /// A file some workspace here opened in the document viewer — the page
@@ -872,22 +667,11 @@ impl Session {
                 if mode == ModeId::Study {
                     events.extend(self.study.enter());
                 }
-                if mode == ModeId::Diffuse {
-                    let home = self.diffuse_home();
-                    events.extend(self.diffuse.enter(&home));
-                }
                 events
             }
             Command::ResearchFolder { folder } => self.set_research_folder(&folder),
             // Notebook's are the session's: a notebook is the person's, not a project's.
             command if crate::study::handles(&command) => self.study.apply(command),
-            // As are Diffuse's: its flows and images are in a folder of its own.
-            Command::DiffuseFolder { folder } => self.set_diffuse_folder(folder),
-            Command::DiffuseSend { path, to } => self.diffuse_send(&path, &to),
-            command if crate::diffuse::handles(&command) => {
-                let home = self.diffuse_home();
-                self.diffuse.apply(&home, command)
-            }
 
             // While the workspace picker is open it owns the keyboard, exactly
             // as Telescope does inside a workspace — and for the same reason.
@@ -927,20 +711,7 @@ impl Session {
             Command::Sync => {
                 let mut events = self.delegate(Command::Sync);
                 events.push(self.workspaces_event());
-                let home = self.diffuse_home();
-                events.extend(self.diffuse.events(&home));
                 events
-            }
-
-            // What `@flow` stands for is the session's to say: the flows are
-            // its.
-            Command::Ask { text } => {
-                let mentioned = crate::mention::found(&text);
-                if mentioned.contains(&crate::mention::Mention::Flow) {
-                    let about = self.flow_about();
-                    self.active_mut().set_flow_about(about);
-                }
-                self.delegate(Command::Ask { text })
             }
 
             other => self.delegate(other),
@@ -1095,28 +866,10 @@ impl Session {
         let active = self.active;
         let side = self.mode();
         let mut events = Vec::new();
-        let mut drawn = Vec::new();
-        let home = self.diffuse_home();
         for (index, workspace) in self.workspaces.iter_mut().enumerate() {
             workspace.set_quiet(index != active);
             let produced = workspace.apply(Command::Poll);
             workspace.set_quiet(false);
-            // The agent's Diffuse tools, answered from the session's flows —
-            // whichever project's agent asked, since they are none's. A run
-            // it waits on is answered once it has ended.
-            for (id, name, input) in workspace.take_session_calls() {
-                let (said, events) = self.diffuse.tool(&home, &name, &input);
-                match said {
-                    crate::diffuse::Said::Now(answer) => workspace.answer_tool(&id, answer),
-                    crate::diffuse::Said::Wait(run) => self.flow_waits.push((
-                        workspace.root().to_path_buf(),
-                        id,
-                        run,
-                        std::time::Instant::now() + FLOW_WAIT,
-                    )),
-                }
-                drawn.extend(events);
-            }
             if index == active {
                 events = produced;
             }
@@ -1130,27 +883,6 @@ impl Session {
             events.extend(research.lock().unwrap_or_else(|e| e.into_inner()).poll());
         }
         events.extend(self.study.poll());
-        events.extend(self.diffuse.poll(&home));
-        // Runs the agent waited on that have ended — or that it has waited
-        // on long enough.
-        let mut waits = std::mem::take(&mut self.flow_waits);
-        waits.retain(|(root, call, run, until)| {
-            let answer = match self.diffuse.waited(*run) {
-                Some(answer) => answer,
-                None if std::time::Instant::now() >= *until => Ok(format!(
-                    "Run {run} is still going after {} minutes; flow_info says how it goes.",
-                    FLOW_WAIT.as_secs() / 60
-                )),
-                None => return true,
-            };
-            // A project closed meanwhile has no turn to answer.
-            if let Some(workspace) = self.workspaces.iter_mut().find(|w| w.root() == root.as_path()) {
-                workspace.answer_tool(call, answer);
-            }
-            false
-        });
-        self.flow_waits = waits;
-        events.extend(drawn);
         events.extend(self.crossed(side));
         self.claim(events)
     }
@@ -1282,17 +1014,13 @@ impl Session {
         events
     }
 
-    /// A mode's own folder, made and opened, listed by it: Diffuse's folder
-    /// for Diffuse, `<homes>/<Mode>` for the rest.
+    /// A mode's own folder, `<homes>/<Mode>`, made and opened, listed by it.
     fn home_for(&mut self, mode: ModeId) -> Result<usize, String> {
-        let dir = match mode {
-            ModeId::Diffuse => self.diffuse_home(),
-            _ => self
-                .homes
-                .clone()
-                .unwrap_or_else(|| std::env::temp_dir().join(format!("proton-modes-{}", std::process::id())))
-                .join(mode.label()),
-        };
+        let dir = self
+            .homes
+            .clone()
+            .unwrap_or_else(|| std::env::temp_dir().join(format!("proton-modes-{}", std::process::id())))
+            .join(mode.label());
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", folder::tilde(&dir)))?;
         let root = folder::normalise(&dir);
         if let Some(index) = self.index_of(&root) {
@@ -1415,8 +1143,14 @@ impl Session {
         for listed in self.listed.iter_mut() {
             *listed = Listed::default();
         }
+        // Projects a mode that has left Proton listed — Game's, Canvas's,
+        // Diffuse's own folders, say — and no mode here does.
+        let mut left: Vec<usize> = Vec::new();
         for stored in modes {
-            let Some(mode) = ModeId::from_slug(&stored.mode) else { continue };
+            let Some(mode) = ModeId::from_slug(&stored.mode) else {
+                left.extend(stored.listed.iter().filter_map(|root| self.index_of(Path::new(root))));
+                continue;
+            };
             for root in &stored.listed {
                 if let Some(index) = self.index_of(Path::new(root)) {
                     self.listed[index].set(mode, true);
@@ -1428,7 +1162,26 @@ impl Session {
                 .and_then(|root| self.index_of(Path::new(root)))
                 .map(|i| self.workspaces[i].root().to_path_buf());
         }
+        self.forget_left(left);
         self.settle_listing();
+    }
+
+    /// The projects only modes that have left listed, closed rather than
+    /// handed to Codex: their folders stay on disk, out of every list. The
+    /// one on screen is kept, as Codex's.
+    fn forget_left(&mut self, mut left: Vec<usize>) {
+        left.sort_unstable();
+        left.dedup();
+        for index in left.into_iter().rev() {
+            if index == self.active || self.listed[index] != Listed::default() || self.workspaces.len() <= 1 {
+                continue;
+            }
+            self.workspaces.remove(index).shutdown();
+            self.listed.remove(index);
+            if index < self.active {
+                self.active -= 1;
+            }
+        }
     }
 
     /// The two sides of a session from before every mode kept its own:

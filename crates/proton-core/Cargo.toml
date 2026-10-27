@@ -15,15 +15,6 @@ proton-literature = { workspace = true }
 proton-lab = { workspace = true }
 proton-council = { workspace = true }
 proton-data = { workspace = true }
-proton-design = { workspace = true }
-proton-diffuse = { workspace = true }
-# Deleting a flow or an image moves it to the Trash, as the conversation
-# list does: the same build as proton-claude's.
-trash = "5"
-proton-game = { workspace = true }
-proton-raster = { workspace = true }
-proton-video = { workspace = true }
-proton-scene = { workspace = true }
 proton-dap = { workspace = true }
 proton-index = { workspace = true }
 proton-library = { workspace = true }
@@ -32,7 +23,6 @@ proton-voice = { workspace = true }
 # A picture the window drew comes back as base64.
 base64 = "0.22"
 proton-lsp = { workspace = true }
-proton-mesh = { workspace = true }
 proton-plugin = { workspace = true }
 proton-syntax = { workspace = true }
 proton-trace = { workspace = true }

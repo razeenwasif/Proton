@@ -3,20 +3,12 @@ import type { Action } from "./Action";
 import type { ChatEngine } from "./ChatEngine";
 import type { ClaudeAnswer } from "./ClaudeAnswer";
 import type { ClaudeImage } from "./ClaudeImage";
-import type { DiffuseGraph } from "./DiffuseGraph";
-import type { DiffuseOp } from "./DiffuseOp";
 import type { Direction } from "./Direction";
-import type { GameOp } from "./GameOp";
 import type { HypothesisStatus } from "./HypothesisStatus";
 import type { Key } from "./Key";
 import type { LiteratureSource } from "./LiteratureSource";
 import type { ModeId } from "./ModeId";
-import type { ParamValue } from "./ParamValue";
-import type { Part } from "./Part";
 import type { PickerKind } from "./PickerKind";
-import type { RasterFormat } from "./RasterFormat";
-import type { RasterOp } from "./RasterOp";
-import type { RasterPreset } from "./RasterPreset";
 import type { ResearchDiscipline } from "./ResearchDiscipline";
 import type { ResearchSeat } from "./ResearchSeat";
 import type { StudyCardKind } from "./StudyCardKind";
@@ -55,31 +47,7 @@ png: string, } | { "type": "studyLesson", objective: string, } | { "type": "open
 /**
  * The line the cursor is on when absent.
  */
-line: number | null, } | { "type": "refreshRepo" } | { "type": "runCell", index: number, } | { "type": "setCell", index: number, source: string, } | { "type": "addCell", code: boolean, } | { "type": "removeCell", index: number, } | { "type": "selectCell", index: number, } | { "type": "runAll" } | { "type": "openTheme", path: string, } | { "type": "setToken", name: string, scope: string, value: string, } | { "type": "selectToken", index: number, } | { "type": "showComponent", path: string, } | { "type": "selectLayer", index: number, } | { "type": "setLayerText", index: number, text: string, } | { "type": "setLayerAttribute", index: number, name: string, value: string, } | { "type": "openScene", path: string, } | { "type": "selectNode", index: number, } | { "type": "renameNode", index: number, name: string, } | { "type": "setNodeTransform", index: number, part: Part, to: [number, number, number], } | { "type": "setNodeMesh", index: number, path: string, } | { "type": "setNodeModifier", index: number, kind: string, } | { "type": "removeNodeModifier", index: number, row: number, } | { "type": "moveNodeModifier", index: number, row: number, to: number, } | { "type": "setModifierField", index: number, row: number, field: string, value: string, } | { "type": "loadMesh", path: string, } | { "type": "reparentNode", index: number, parent: string, } | { "type": "addNode", kind: string, name: string, } | { "type": "removeNode", index: number, } | { "type": "gameOpen", path: string, } | { "type": "gameNew", name: string, template: string, folder?: string, } | { "type": "gameClose", discard: boolean, } | { "type": "gameOpenRoom", room: string, } | { "type": "gameCloseRoom", room: string, } | { "type": "gameFocus", room: string, } | { "type": "gameEdit", target: string, ops: Array<GameOp>, 
-/**
- * What the change was, in words, for the undo history.
- */
-label: string, } | { "type": "gameImport", source: string, 
-/**
- * The room; the one on screen when not said.
- */
-room?: string, scale?: number, 
-/**
- * Make normal maps from the art's brightness, for lights.
- */
-normals: boolean, } | { "type": "gameTrace", room: string, item: string, 
-/**
- * The alpha at which a pixel counts as solid, 0–255.
- */
-threshold?: number, 
-/**
- * How far a simplified outline may stray, in the image's pixels.
- */
-tolerance?: number, } | { "type": "gamePlay", room?: string, at?: [number, number], abilities: Array<string>, recording?: number, } | { "type": "gameRecorded", room: number, at: [number, number], abilities: number, replay: Array<[number, number]>, hash: string, } | { "type": "gameUndo" } | { "type": "gameRedo" } | { "type": "gameSave" } | { "type": "rasterOpen", path: string, } | { "type": "rasterNew", name: string, preset: RasterPreset, width: number, height: number, folder?: string, } | { "type": "rasterClose", discard: boolean, } | { "type": "rasterEdit", generation: number, seq: number, op: RasterOp, label: string, } | { "type": "rasterUndo" } | { "type": "rasterRedo" } | { "type": "rasterSave" } | { "type": "rasterExport", format: RasterFormat, scale?: number, frame?: number, columns?: number, } | { "type": "rasterShow", frame: number, } | { "type": "rasterSend", game: string, layers: boolean, } | { "type": "rasterImport", path?: string, blob?: number, layer: boolean, above?: number, 
-/**
- * What a picture handed over is called: a dropped file's name.
- */
-name?: string, } | { "type": "diffuseOpen", path: string, } | { "type": "diffuseNew", name: string, template?: string, } | { "type": "diffuseClose", path: string, discard: boolean, } | { "type": "diffuseEdit", path: string, ops: Array<DiffuseOp>, } | { "type": "diffuseUndo" } | { "type": "diffuseRedo" } | { "type": "diffuseSave" } | { "type": "diffuseLook", again: boolean, } | { "type": "diffuseRun", path: string, } | { "type": "diffuseCancel", id: number, } | { "type": "diffuseGallery" } | { "type": "diffuseGalleryLock" } | { "type": "diffuseLock" } | { "type": "diffuseFolder", folder?: string, } | { "type": "diffuseOpenImage", path: string, } | { "type": "diffuseOpenGraph", name: string, graph: DiffuseGraph, } | { "type": "diffuseSend", path: string, to: string, } | { "type": "diffuseDelete", path: string, } | { "type": "diffuseDeleteImages", paths: Array<string>, } | { "type": "diffuseGateways", home?: string, away?: string, } | { "type": "openTimeline", path: string, } | { "type": "selectClip", index: number, } | { "type": "setClipField", index: number, field: string, value: string, } | { "type": "setCaptionField", index: number, field: string, value: string, } | { "type": "setTimelineRate", fps: number, } | { "type": "setMaterialParam", material: string, node: string, param: string, value: ParamValue, } | { "type": "moveGraphNode", material: string, node: string, at: [number, number], } | { "type": "connectPorts", material: string, from: string, to: string, } | { "type": "rewirePort", material: string, fromInput: string, toInput: string, } | { "type": "disconnectPort", material: string, to: string, } | { "type": "revealLayer", index: number, } | { "type": "setSetting", key: string, value: unknown, } | { "type": "convene", question: string, } | { "type": "openDebate", name: string, } | { "type": "setLibraryScope", sources: Array<string>, } | { "type": "refreshLibrary" } | { "type": "openCitation", cite: string, } | { "type": "askToQuit" } | { "type": "saveNotebook" } | { "type": "answerProposal", id: number, accept: boolean, } | { "type": "jumpTo", mode: ModeId, path: string, 
+line: number | null, } | { "type": "refreshRepo" } | { "type": "runCell", index: number, } | { "type": "setCell", index: number, source: string, } | { "type": "addCell", code: boolean, } | { "type": "removeCell", index: number, } | { "type": "selectCell", index: number, } | { "type": "runAll" } | { "type": "setSetting", key: string, value: unknown, } | { "type": "convene", question: string, } | { "type": "openDebate", name: string, } | { "type": "setLibraryScope", sources: Array<string>, } | { "type": "refreshLibrary" } | { "type": "openCitation", cite: string, } | { "type": "askToQuit" } | { "type": "saveNotebook" } | { "type": "answerProposal", id: number, accept: boolean, } | { "type": "jumpTo", mode: ModeId, path: string, 
 /**
  * Zero-based, as every line number crossing this bus is.
  */

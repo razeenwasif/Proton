@@ -1,4 +1,4 @@
-//! `@selection`, `@dataframe`, `@game`: naming what the model may look at.
+//! `@selection` and `@dataframe`: naming what the model may look at.
 //!
 //! The design's phrasing is the specification: *what the model can see is a
 //! chip you can point at*. A question about "this" is a question the model
@@ -28,13 +28,6 @@ pub enum Mention {
     Selection,
     /// The table the selected notebook cell produced.
     Dataframe,
-    /// The game open in Game mode, and the room on screen.
-    Game,
-    /// The canvas open in Canvas mode — and small pixel art's pixels.
-    Canvas,
-    /// The flow on screen in Diffuse: its nodes, values and links, and what
-    /// stops it running.
-    Flow,
 }
 
 impl Mention {
@@ -43,14 +36,11 @@ impl Mention {
         match self {
             Mention::Selection => "@selection",
             Mention::Dataframe => "@dataframe",
-            Mention::Game => "@game",
-            Mention::Canvas => "@canvas",
-            Mention::Flow => "@flow",
         }
     }
 
     /// Every mention this build understands, for the composer's chips.
-    pub const ALL: [Mention; 5] = [Mention::Selection, Mention::Dataframe, Mention::Game, Mention::Canvas, Mention::Flow];
+    pub const ALL: [Mention; 2] = [Mention::Selection, Mention::Dataframe];
 }
 
 /// The mentions in a question, in the order they were written, without repeats.
@@ -111,16 +101,9 @@ mod tests {
     }
 
     #[test]
-    fn the_modes_own_are_ones_too() {
-        assert_eq!(found("shade @game, then @selection"), [Mention::Game, Mention::Selection]);
-        assert_eq!(found("why can't I reach the ledge in @game?"), [Mention::Game]);
-        assert!(found("@games are fun").is_empty());
-        assert_eq!(found("shade the sword in @canvas"), [Mention::Canvas]);
-        assert!(found("@canvases").is_empty());
-        assert_eq!(found("run @flow at 1216×832"), [Mention::Flow]);
-        assert!(found("@flows").is_empty());
-        assert!(found("mail@game.org and @gamers").is_empty());
-        assert!(found("@log and @pdf went with LaTeX and the Reader").is_empty());
+    fn a_word_that_only_starts_like_one_is_not_one() {
+        assert!(found("@selections and mail@selection.org").is_empty());
+        assert!(found("@game, @canvas, @flow, @log and @pdf went with their modes").is_empty());
     }
 
     #[test]

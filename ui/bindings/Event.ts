@@ -3,7 +3,6 @@ import type { Action } from "./Action";
 import type { Activity } from "./Activity";
 import type { Artifact } from "./Artifact";
 import type { BufferTab } from "./BufferTab";
-import type { Caption } from "./Caption";
 import type { CellAt } from "./CellAt";
 import type { CellView } from "./CellView";
 import type { ChangeView } from "./ChangeView";
@@ -13,25 +12,14 @@ import type { ClaudeCapabilities } from "./ClaudeCapabilities";
 import type { ClaudeItem } from "./ClaudeItem";
 import type { ClaudeSession } from "./ClaudeSession";
 import type { ClaudeStatus } from "./ClaudeStatus";
-import type { Clip } from "./Clip";
 import type { Completion } from "./Completion";
 import type { DebateSummary } from "./DebateSummary";
 import type { DebugFrame } from "./DebugFrame";
 import type { DebugPhase } from "./DebugPhase";
 import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
-import type { DiffuseImage } from "./DiffuseImage";
-import type { DiffuseKnown } from "./DiffuseKnown";
-import type { DiffuseRun } from "./DiffuseRun";
-import type { DiffuseView } from "./DiffuseView";
 import type { Entry } from "./Entry";
 import type { ExperimentRow } from "./ExperimentRow";
-import type { GameFound } from "./GameFound";
-import type { GamePathPart } from "./GamePathPart";
-import type { GameProjectView } from "./GameProjectView";
-import type { GameRoom } from "./GameRoom";
-import type { GameTemplate } from "./GameTemplate";
-import type { Geometry } from "./Geometry";
 import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
 import type { HypothesisDetail } from "./HypothesisDetail";
@@ -40,16 +28,12 @@ import type { LabEnv } from "./LabEnv";
 import type { LabRun } from "./LabRun";
 import type { LabRunDetail } from "./LabRunDetail";
 import type { LabSandbox } from "./LabSandbox";
-import type { Layer } from "./Layer";
 import type { Layout } from "./Layout";
 import type { LeanEnv } from "./LeanEnv";
 import type { LibrarySource } from "./LibrarySource";
 import type { LiteratureRow } from "./LiteratureRow";
 import type { LiteratureSourceRow } from "./LiteratureSourceRow";
-import type { Material } from "./Material";
-import type { MediaItem } from "./MediaItem";
 import type { ModeId } from "./ModeId";
-import type { Node } from "./Node";
 import type { NoticeLevel } from "./NoticeLevel";
 import type { PaperDetail } from "./PaperDetail";
 import type { PaperResult } from "./PaperResult";
@@ -58,9 +42,6 @@ import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
 import type { PluginView } from "./PluginView";
 import type { ProposalView } from "./ProposalView";
-import type { RasterFound } from "./RasterFound";
-import type { RasterView } from "./RasterView";
-import type { Rate } from "./Rate";
 import type { RepoFile } from "./RepoFile";
 import type { ResearchDiscipline } from "./ResearchDiscipline";
 import type { ResearchSeatRow } from "./ResearchSeatRow";
@@ -69,7 +50,6 @@ import type { ResearchTask } from "./ResearchTask";
 import type { RoundStatus } from "./RoundStatus";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
-import type { Shader } from "./Shader";
 import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
@@ -121,7 +101,6 @@ import type { Summary } from "./Summary";
 import type { Task } from "./Task";
 import type { TermRun } from "./TermRun";
 import type { ThemeView } from "./ThemeView";
-import type { Token } from "./Token";
 import type { TraceState } from "./TraceState";
 import type { TreeRow } from "./TreeRow";
 import type { ViewerKind } from "./ViewerKind";
@@ -443,139 +422,7 @@ meaning: string,
  * Whether the vectors are still being made. The panel says so; the
  * distinction between "not yet" and "never" is the whole point.
  */
-learning: boolean, } | { "type": "artboard", 
-/**
- * Empty when nothing is on the artboard.
- */
-path: string, 
-/**
- * The markup, exactly as the file has it.
- *
- * Sent as source rather than as anything pre-rendered, because the
- * only safe place to render it is inside a sandboxed frame in the
- * webview — the core has no business building markup, and the shell
- * must not be handed something that looks ready to inject.
- */
-source: string, 
-/**
- * Whether the source is a whole page, which is wrapped differently
- * from a fragment.
- */
-document: boolean, 
-/**
- * Why there is nothing to draw, when there is a reason worth showing.
- */
-problem: string, 
-/**
- * The element tree, in document order, for the layer panel.
- */
-layers: Array<Layer>, 
-/**
- * Which layer is selected, as an index into `layers`. `usize::MAX`
- * when none is — an index nothing can equal, rather than an
- * `Option`, because every consumer of this is comparing.
- */
-selected: number, } | { "type": "scene", 
-/**
- * Empty when none is open.
- */
-path: string, 
-/**
- * Every object, parents before children, with depth filled in.
- */
-nodes: Array<Node>, 
-/**
- * Which one is selected, or `usize::MAX` for none.
- */
-selected: number, 
-/**
- * Why there is no scene, when there is a reason worth showing.
- */
-problem: string, 
-/**
- * Every material in the scene, with its graph.
- *
- * All of them rather than only the selected object's: they are small,
- * the panel switches between them as the selection moves, and sending
- * one at a time would mean a round trip on every click in the
- * outliner.
- */
-materials: Array<Material>, 
-/**
- * Those same materials, compiled into programs a renderer can run.
- *
- * Compiled here rather than evaluated here: a surface property that
- * varies across a mesh is one value per triangle, and at this
- * project's budget that is eighty thousand colours crossing the seam
- * on every nudge of a slider. A dozen instructions cross instead.
- */
-shaders: Array<Shader>, 
-/**
- * Every distinct mesh the scene names, so the front end can ask for
- * the ones it does not already hold.
- */
-meshes: Array<string>, } | { "type": "geometry" } & Geometry | { "type": "gameHome", games: Array<GameFound>, templates: Array<GameTemplate>, } | { "type": "gameProject", project: GameProjectView | null, } | { "type": "gamePlay", world: string, 
-/**
- * Room, x, y (1/256 px), abilities.
- */
-start: [number, number, number, number], rooms: Array<GameRoom>, keys: Array<[string, number]>, replay: Array<[number, number]> | null, } | { "type": "gamePath", parts: Array<GamePathPart>, } | { "type": "gameRoom", room: GameRoom | null, revision: number, } | { "type": "rasterHome", canvases: Array<RasterFound>, images: Array<string>, games: Array<string>, } | { "type": "rasterCanvas", canvas: RasterView | null, } | { "type": "rasterApplied", generation: number, seq: number, version: number, hash: string, refused: string | null, dirty: boolean, canUndo: boolean, canRedo: boolean, } | { "type": "rasterChanged", generation: number, version: number, tiles: Array<[number, Array<number>]>, meta: boolean, } | { "type": "diffuseView", view: DiffuseView, } | { "type": "diffuseKnown", known: DiffuseKnown, gateways: Array<string>, } | { "type": "diffuseRuns", runs: Array<DiffuseRun>, } | { "type": "diffuseGallery", images: Array<DiffuseImage>, locked: boolean, } | { "type": "cut", 
-/**
- * Empty when none is open.
- */
-path: string, 
-/**
- * From the list's `TITLE:` line.
- */
-title: string, clips: Array<Clip>, 
-/**
- * The lanes, top to bottom, as an NLE stacks them.
- */
-tracks: Array<string>, captions: Array<Caption>, 
-/**
- * Empty when the cut has no caption file beside it, which is
- * ordinary rather than a problem.
- */
-captionsPath: string, 
-/**
- * The sources the cut refers to, and whether they are on disk.
- */
-media: Array<MediaItem>, 
-/**
- * How the list is being counted.
- *
- * Sent so the front end can *show* it. An EDL does not record its
- * rate, so this is an assumption, and an assumption nobody can see is
- * indistinguishable from a fact.
- */
-rate: Rate, 
-/**
- * Where the programme ends, in frames — the width of the ruler.
- */
-length: bigint, 
-/**
- * The list's text.
- */
-source: string, 
-/**
- * Which event is selected, or `usize::MAX`.
- */
-selected: number, 
-/**
- * Why there is no cut, when there is a reason worth showing.
- */
-problem: string, } | { "type": "theme", 
-/**
- * Empty when none is open, which is how the panel knows to say so.
- */
-path: string, tokens: Array<Token>, 
-/**
- * Which one the inspector is on.
- */
-selected: number, 
-/**
- * Why there is no theme, when there is a reason worth showing.
- */
-problem: string, } | { "type": "layout", layout: Layout, } | { "type": "repo", 
+learning: boolean, } | { "type": "layout", layout: Layout, } | { "type": "repo", 
 /**
  * `None` outside a repository, on a detached `HEAD`, or before the
  * first commit. All three mean the same thing to the panel.

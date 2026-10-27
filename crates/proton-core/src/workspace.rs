@@ -84,7 +84,6 @@ pub struct Workspace {
     term_sent: Vec<u64>,
     /// The notebook Data mode has open, and the kernel running it.
     data: crate::data::Data,
-    design: crate::design::Design,
     settings: crate::settings::Settings,
     /// Polled while another project is on screen: what it hears is taken in,
     /// but its notebook, terminal and conversation are not drawn into events
@@ -114,14 +113,6 @@ pub struct Workspace {
     /// them. Read from the settings so it survives a restart — somebody
     /// working through one subject for a week should not re-tick it daily.
     library_scope: proton_library::Scope,
-    /// The scene Modeling mode is editing.
-    modeling: crate::modeling::Modeling,
-    /// The game Game mode has open, and the rooms it shows.
-    game: crate::game::Game,
-    /// The canvas open in Canvas mode, with its history and its saves.
-    raster: crate::raster::Raster,
-    /// The cut Video mode is showing, and the captions beside it.
-    video: crate::video::Video,
     /// The local model that turns a question into a vector, when the settings
     /// name one. `None` is lexical search, which is a complete answer.
     embedder: Option<proton_library::Embedder>,
@@ -164,11 +155,6 @@ pub struct Workspace {
     /// hash: so a streaming answer sends the entries from the first that
     /// changed rather than the whole conversation on every token.
     agent_sent: std::cell::RefCell<Vec<u64>>,
-    /// The agent's Diffuse tool calls, which the session answers: the flows
-    /// are its, not a project's. Deferred as a cell run is, and for as long.
-    session_calls: Vec<(String, String, serde_json::Value)>,
-    /// What `@flow` says in the next question, as the session last told it.
-    flow_about: Option<String>,
     /// The file the open conversation lives in. `None` until it has a
     /// question in it — a conversation with nothing said is not worth a file.
     chat_path: Option<PathBuf>,
@@ -569,25 +555,19 @@ impl Workspace {
     /// asks before closing it, because a closed workspace takes its buffers
     /// with it and there is no undo for that.
     pub fn is_modified(&self) -> bool {
-        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.game.unsaved().is_empty() || !self.raster.unsaved().is_empty()
+        self.editor.buffers().iter().any(|b| b.is_modified())
     }
 
     /// The files with unsaved changes, as the project names them.
     pub fn unsaved(&self) -> Vec<String> {
-        let mut files: Vec<String> = self
-            .editor
+        self.editor
             .unsaved()
             .iter()
             .map(|buffer| match buffer.path() {
                 Some(path) => self.root.shown(path),
                 None => buffer.name(),
             })
-            .collect();
-        // A game's rooms are held until ⌘S, as a buffer is.
-        files.extend(self.game.unsaved());
-        // So is a canvas.
-        files.extend(self.raster.unsaved());
-        files
+            .collect()
     }
 
     /// Save every file with unsaved changes; the ones that could not be, and
@@ -597,10 +577,7 @@ impl Workspace {
         if failed.len() != self.editor.unsaved().len() {
             self.resync();
         }
-        let mut failed: Vec<String> = failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect();
-        failed.extend(self.game.save_unsaved());
-        failed.extend(self.raster.save_unsaved());
-        failed
+        failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect()
     }
 
     /// Abandon a half-typed leader sequence.
@@ -632,42 +609,6 @@ impl Workspace {
             self.editor.buffer_mut().end_group();
         }
         match command {
-            // Game mode's own, answered by its module as PDF's and
-            // Notebook's are by theirs.
-            // Art sent to a game is Canvas's to write and, when that game is
-            // the one open, Game's to import.
-            Command::RasterSend { game, layers } => match self.send_canvas(&game, layers) {
-                Ok((said, mut events)) => {
-                    events.insert(0, notice(said, NoticeLevel::Info));
-                    events
-                }
-                Err(why) => vec![notice(why, NoticeLevel::Warn)],
-            },
-            command if crate::raster::handles(&command) => {
-                let root = self.root().to_path_buf();
-                let wrote = matches!(command, Command::RasterExport { .. });
-                let mut events = self.raster.apply(&root, command);
-                if wrote {
-                    // A file written beside the canvas: another to bring in.
-                    events.push(self.raster.home_event(&root));
-                }
-                if events.iter().any(|e| matches!(e, Event::RasterHome { .. })) {
-                    // A canvas made is files the tree and git see.
-                    events.push(self.tree_event());
-                    events.push(self.repo_event());
-                }
-                events
-            }
-            command if crate::game::handles(&command) => {
-                let root = self.root().to_path_buf();
-                let mut events = self.game.apply(&root, command);
-                if events.iter().any(|e| matches!(e, Event::GameProject { .. })) {
-                    // A game made or saved is files the tree and git see.
-                    events.push(self.tree_event());
-                    events.push(self.repo_event());
-                }
-                events
-            }
             Command::Sync => {
                 // The front end connecting is the signal that the window is
                 // up, which is the right moment to start walking the tree: not
@@ -715,10 +656,6 @@ impl Workspace {
                     // notebook open would otherwise show an empty stage until
                     // something happened to change a cell.
                     self.notebook_event(),
-                    self.theme_event(),
-                    self.artboard_event(),
-                    self.scene_event(),
-                    self.cut_event(),
                     self.settings_event(),
                     self.library_event(),
                     self.council_event(),
@@ -729,11 +666,6 @@ impl Workspace {
                 ]);
                 events.extend(self.claude.sync());
                 events.extend(self.research().sync());
-                // The games here, the one open and the room on screen.
-                let root = self.root().to_path_buf();
-                events.extend(self.game.events(&root));
-                // The canvases here, and the one open.
-                events.extend(self.raster.events(&root));
                 events
             }
 
@@ -798,276 +730,6 @@ impl Workspace {
             Command::SelectCell { index } => {
                 self.data.select_cell(index);
                 vec![Event::CellSelected { index: self.data.selected() }]
-            }
-
-            /* ── themes ────────────────────────────────────── */
-            Command::OpenTheme { path } => {
-                let full = self.pickers.root().join(&path);
-                match self.design.open(&full) {
-                    Ok(()) => vec![self.theme_event()],
-                    Err(why) => vec![notice(why, NoticeLevel::Error)],
-                }
-            }
-
-            Command::SetToken { name, scope, value } => {
-                match self.design.set(&name, &scope, &value) {
-                    // Nothing changed: the token is not there, or it already had
-                    // that value. Neither is worth an event or a notice.
-                    Ok(false) => Vec::new(),
-                    // The file on disk moved, so anything showing it has to be
-                    // told — the gutter, the tree, and the buffer if Codex has the
-                    // same file open, which for a two-way binding it often does.
-                    Ok(true) => {
-                        let mut events = vec![self.theme_event()];
-                        events.push(self.repo_event());
-                        events.extend(self.every_view());
-                        events
-                    }
-                    Err(why) => vec![notice(why, NoticeLevel::Error)],
-                }
-            }
-
-            Command::SelectToken { index } => {
-                self.design.select(index);
-                vec![self.theme_event()]
-            }
-
-            Command::SetLayerText { index, text } => {
-                let done = self.design.set_layer_text(index, &text);
-                self.after_layer_write(done)
-            }
-
-            Command::SetLayerAttribute { index, name, value } => {
-                let done = self.design.set_layer_attribute(index, &name, &value);
-                self.after_layer_write(done)
-            }
-
-            /* ── cuts and captions ─────────────────────────── */
-            Command::OpenTimeline { path } => {
-                let full = self.pickers.resolve(&path);
-                // The event goes out either way: "that file is not a cut"
-                // belongs on the timeline, where somebody is looking for it.
-                match self.video.open(&full) {
-                    Ok(()) => vec![self.cut_event()],
-                    Err(why) => vec![self.cut_event(), notice(why, NoticeLevel::Warn)],
-                }
-            }
-
-            Command::SelectClip { index } => match self.video.select(index) {
-                true => vec![self.cut_event()],
-                false => Vec::new(),
-            },
-
-            Command::SetClipField {
-                index,
-                field,
-                value,
-            } => match self.video.set_clip_field(index, &field, &value) {
-                Ok(false) => Vec::new(),
-                Ok(true) => {
-                    // The list just moved on disk, so the gutter, the tree and
-                    // any buffer holding it are told.
-                    let mut events = vec![self.cut_event(), self.repo_event()];
-                    events.extend(self.every_view());
-                    events
-                }
-                Err(why) => vec![notice(why, NoticeLevel::Error)],
-            },
-
-            Command::SetCaptionField {
-                index,
-                field,
-                value,
-            } => match self.video.set_caption_field(index, &field, &value) {
-                Ok(false) => Vec::new(),
-                Ok(true) => {
-                    let mut events = vec![self.cut_event(), self.repo_event()];
-                    events.extend(self.every_view());
-                    events
-                }
-                Err(why) => vec![notice(why, NoticeLevel::Error)],
-            },
-
-            Command::SetTimelineRate { fps } => match self.video.set_rate(fps) {
-                Ok(false) => Vec::new(),
-                // Nothing was written — the file is the same file. What
-                // changed is what its timecodes are taken to mean.
-                Ok(true) => vec![self.cut_event()],
-                Err(why) => vec![notice(why, NoticeLevel::Error)],
-            },
-
-            /* ── scenes ────────────────────────────────────── */
-            Command::OpenScene { path } => {
-                let full = self.pickers.resolve(&path);
-                // The event goes out either way: "that file is not a scene"
-                // belongs in the outliner, where somebody is looking for the
-                // objects, and not only in a notice.
-                match self.modeling.open(&full) {
-                    Ok(()) => vec![self.scene_event()],
-                    Err(why) => vec![self.scene_event(), notice(why, NoticeLevel::Warn)],
-                }
-            }
-
-            Command::SelectNode { index } => match self.modeling.select(index) {
-                true => vec![self.scene_event()],
-                false => Vec::new(),
-            },
-
-            Command::RenameNode { index, name } => {
-                let done = self.node_at(index, |space, id| space.modeling.rename(&id, &name));
-                self.after_scene_write(done)
-            }
-
-            Command::SetNodeTransform { index, part, to } => {
-                let done = self.node_at(index, |space, id| {
-                    space.modeling.set_transform(&id, part, to)
-                });
-                self.after_scene_write(done)
-            }
-
-            Command::SetNodeMesh { index, path } => {
-                let done = self.node_at(index, |space, id| space.modeling.set_mesh(&id, &path));
-                self.after_scene_write(done)
-            }
-
-            Command::LoadMesh { path } => vec![Event::Geometry(self.modeling.geometry(&path))],
-
-            Command::SetNodeModifier { index, kind } => {
-                let done = self.node_at(index, |space, id| {
-                    space
-                        .modeling
-                        .modify(&id, |scene, id| scene.add_modifier(id, &kind).map(|_| true))
-                });
-                self.after_stack_write(index, done)
-            }
-
-            Command::RemoveNodeModifier { index, row } => {
-                let done = self.node_at(index, |space, id| {
-                    space
-                        .modeling
-                        .modify(&id, |scene, id| scene.remove_modifier(id, row))
-                });
-                self.after_stack_write(index, done)
-            }
-
-            Command::MoveNodeModifier { index, row, to } => {
-                let done = self.node_at(index, |space, id| {
-                    space
-                        .modeling
-                        .modify(&id, |scene, id| scene.move_modifier(id, row, to))
-                });
-                self.after_stack_write(index, done)
-            }
-
-            Command::SetModifierField {
-                index,
-                row,
-                field,
-                value,
-            } => {
-                let done = self.node_at(index, |space, id| {
-                    space
-                        .modeling
-                        .modify(&id, |scene, id| scene.set_modifier(id, row, &field, &value))
-                });
-                self.after_stack_write(index, done)
-            }
-
-            Command::ReparentNode { index, parent } => {
-                let done = self.node_at(index, |space, id| space.modeling.reparent(&id, &parent));
-                self.after_scene_write(done)
-            }
-
-            Command::AddNode { kind, name } => {
-                // Under whatever is selected, which is what "add" means when
-                // something is highlighted. Nothing selected adds at the root.
-                let parent = self.modeling.selected_id().unwrap_or_default();
-                match self.modeling.add(&kind, &name, &parent) {
-                    Ok(_) => self.after_scene_write(Ok(true)),
-                    Err(why) => vec![notice(why, NoticeLevel::Error)],
-                }
-            }
-
-            Command::RemoveNode { index } => {
-                let done = self.node_at(index, |space, id| {
-                    space.modeling.remove(&id).map(|gone| gone > 0)
-                });
-                self.after_scene_write(done)
-            }
-
-            Command::SetMaterialParam {
-                material,
-                node,
-                param,
-                value,
-            } => {
-                let done = self.modeling.set_param(&material, &node, &param, value);
-                self.after_scene_write(done)
-            }
-
-            Command::MoveGraphNode { material, node, at } => {
-                let done = self.modeling.move_graph_node(&material, &node, at);
-                self.after_scene_write(done)
-            }
-
-            Command::ConnectPorts { material, from, to } => {
-                let done = self.modeling.connect(&material, &from, &to);
-                self.after_scene_write(done)
-            }
-
-            Command::RewirePort {
-                material,
-                from_input,
-                to_input,
-            } => {
-                let done = self.modeling.rewire(&material, &from_input, &to_input);
-                self.after_scene_write(done)
-            }
-
-            Command::DisconnectPort { material, to } => {
-                let done = self.modeling.disconnect(&material, &to);
-                self.after_scene_write(done)
-            }
-
-            Command::SelectLayer { index } => match self.design.select_layer(index) {
-                true => vec![self.artboard_event()],
-                false => Vec::new(),
-            },
-
-            Command::RevealLayer { index } => {
-                let Some((path, line)) = self.design.layer_place(index) else {
-                    return Vec::new();
-                };
-                // Selected as well as revealed. Going to a layer's source and
-                // leaving the tree pointing somewhere else would be two panels
-                // disagreeing about what is being looked at.
-                self.design.select_layer(index);
-                // Through `jump_to`, which is what every other "go to this
-                // place in a file" already uses — it opens the buffer, moves
-                // the cursor, and resyncs the views. A second path would be a
-                // second set of bugs about which pane ends up focused.
-                let mut events = self.set_mode(ModeId::Codex);
-                events.extend(self.jump_to(Some(proton_lsp::Jump {
-                    path,
-                    // `Jump` counts from zero, as LSP does; a `Layer` counts
-                    // from one, as an editor's gutter does.
-                    line: line.saturating_sub(1) as u32,
-                    character: 0,
-                })));
-                events.push(self.artboard_event());
-                events
-            }
-
-            Command::ShowComponent { path } => {
-                let full = self.pickers.resolve(&path);
-                // The event goes out either way. A failure is a thing to draw
-                // on the artboard — "that file has to be built first" belongs
-                // where somebody is looking for the component, not only in a
-                // notice.
-                match self.design.show(&full) {
-                    Ok(()) => vec![self.artboard_event()],
-                    Err(why) => vec![self.artboard_event(), notice(why, NoticeLevel::Warn)],
-                }
             }
 
             /* ── settings ──────────────────────────────────── */
@@ -1463,7 +1125,6 @@ impl Workspace {
                 // of it. Nothing is written for an empty conversation.
                 self.agent.clear();
                 self.waiting.clear();
-                self.session_calls.clear();
                 self.chat_path = None;
                 vec![self.agent_event(), self.chats_event()]
             }
@@ -1534,54 +1195,6 @@ impl Workspace {
             Command::ResearchFolder { .. } => {
                 vec![notice("Where investigations are kept is set for the whole window.".into(), NoticeLevel::Warn)]
             }
-            // Answered above, by the game's module.
-            Command::GameOpen { .. }
-            | Command::GameNew { .. }
-            | Command::GameClose { .. }
-            | Command::GameOpenRoom { .. }
-            | Command::GameCloseRoom { .. }
-            | Command::GameFocus { .. }
-            | Command::GameEdit { .. }
-            | Command::GameTrace { .. }
-            | Command::GameImport { .. }
-            | Command::GamePlay { .. }
-            | Command::GameRecorded { .. }
-            | Command::GameUndo
-            | Command::GameRedo
-            | Command::GameSave => Vec::new(),
-            // And these by Canvas's.
-            Command::RasterOpen { .. }
-            | Command::RasterNew { .. }
-            | Command::RasterClose { .. }
-            | Command::RasterEdit { .. }
-            | Command::RasterUndo
-            | Command::RasterRedo
-            | Command::RasterSave
-            | Command::RasterExport { .. }
-            | Command::RasterImport { .. }
-            | Command::RasterShow { .. } => Vec::new(),
-            // And these by Diffuse's — the session's, as a flow is the
-            // person's, kept in Diffuse's own folder, not a project's.
-            Command::DiffuseOpen { .. }
-            | Command::DiffuseNew { .. }
-            | Command::DiffuseClose { .. }
-            | Command::DiffuseEdit { .. }
-            | Command::DiffuseUndo
-            | Command::DiffuseRedo
-            | Command::DiffuseSave
-            | Command::DiffuseLook { .. }
-            | Command::DiffuseRun { .. }
-            | Command::DiffuseCancel { .. }
-            | Command::DiffuseGallery
-            | Command::DiffuseGalleryLock
-            | Command::DiffuseLock
-            | Command::DiffuseDelete { .. }
-            | Command::DiffuseDeleteImages { .. }
-            | Command::DiffuseOpenImage { .. }
-            | Command::DiffuseOpenGraph { .. }
-            | Command::DiffuseSend { .. }
-            | Command::DiffuseGateways { .. }
-            | Command::DiffuseFolder { .. } => Vec::new(),
             // Notebook is the window's, whichever project is open: the
             // session answers its commands before a workspace sees them.
             Command::StudyFolder { .. }
@@ -1745,16 +1358,10 @@ impl Workspace {
                 // code — but nothing is waiting on it any more. Leaving these
                 // would answer into a turn that no longer exists.
                 self.waiting.clear();
-                self.session_calls.clear();
                 vec![self.agent_event()]
             }
 
-            Command::Poll => {
-                let mut events = self.poll_servers();
-                // A canvas's save, written on a worker, has finished.
-                events.extend(self.raster.poll());
-                events
-            }
+            Command::Poll => self.poll_servers(),
 
             Command::Complete => self.request_completion(),
 
@@ -2235,40 +1842,25 @@ impl Workspace {
 
         match accepted {
             Accepted::OpenPath { path, line, column } => {
-                // Mode-specific opening actions use the same picker, but their
-                // documents belong to their existing loaders, not a text buffer.
-                let extension = Path::new(&path).extension().and_then(|x| x.to_str());
-                let document = match (self.mode, extension) {
-                    (ModeId::Design, Some("css")) => Some(Command::OpenTheme { path: path.clone() }),
-                    (ModeId::Modeling, Some("json")) if path.ends_with(".proton.json") =>
-                        Some(Command::OpenScene { path: path.clone() }),
-                    (ModeId::Video, Some("edl")) => Some(Command::OpenTimeline { path: path.clone() }),
-                    _ => None,
-                };
-                // Grep and symbol results carry a location and must still
-                // reveal that exact line in the editor.
-                if let Some(command) = document.filter(|_| line.is_none()) {
-                    events.extend(self.apply(command));
-                } else {
-                    let opened = self.open_path(&path);
-                    let text_opened = opened.iter().any(|event| matches!(event, Event::Buffers { .. }));
-                    events.extend(opened);
-                    if text_opened {
-                        // Text is edited in Codex — or here, in LaTeX, whose
-                        // editor is Codex's.
-                        if !self.mode.edits_text() {
-                            events.extend(self.set_mode(ModeId::Codex));
-                        }
-                        if let Some(line) = line {
-                            let buf = self.editor.buffer_mut();
-                            let at = buf.offset_of(proton_text::Position {
-                                line,
-                                column: column.unwrap_or(0),
-                            });
-                            buf.cursor = buf.clamp(buf.cursor.moved_to(at));
-                        }
-                        events.extend(self.after_action(true));
+                let opened = self.open_path(&path);
+                let text_opened = opened.iter().any(|event| matches!(event, Event::Buffers { .. }));
+                events.extend(opened);
+                if text_opened {
+                    // Text is edited in Codex.
+                    if !self.mode.edits_text() {
+                        events.extend(self.set_mode(ModeId::Codex));
                     }
+                    // Grep and symbol results carry a location: that exact
+                    // line, revealed.
+                    if let Some(line) = line {
+                        let buf = self.editor.buffer_mut();
+                        let at = buf.offset_of(proton_text::Position {
+                            line,
+                            column: column.unwrap_or(0),
+                        });
+                        buf.cursor = buf.clamp(buf.cursor.moved_to(at));
+                    }
+                    events.extend(self.after_action(true));
                 }
             }
             Accepted::OpenCitation { cite } => {
@@ -2751,32 +2343,6 @@ impl Workspace {
                     notice(format!("wrote {name}"), NoticeLevel::Info),
                     self.buffers_event(),
                 ];
-                // The other direction of the two-way binding. Editing the
-                // theme as text in Codex and saving it has to reach the
-                // inspector, or the palette on screen is the one the file had
-                // when Design mode was opened.
-                // A scene edited as text in Codex, or patched by the agent,
-                // has to reach the outliner.
-                if self.modeling.reload() {
-                    events.push(self.scene_event());
-                }
-                // Geometry lives in files this editor does not own — a mesh is
-                // re-exported from Blender, not edited here — so the ones
-                // already read are checked for having moved.
-                events.extend(self.modeling.restale().into_iter().map(Event::Geometry));
-                // A cut edited as text, and the caption file whatever
-                // transcribed the dialogue may have only just written.
-                if self.video.reload() {
-                    events.push(self.cut_event());
-                }
-                if self.design.reload() {
-                    events.push(self.theme_event());
-                    // *Editing the component in Codex updates the artboard* —
-                    // the half of M7 that runs in this direction. The saved
-                    // file is usually the one on the artboard, and `reload`
-                    // has already decided whether anything actually moved.
-                    events.push(self.artboard_event());
-                }
                 // On by default: a formatter configured and not run is the
                 // surprise, not the other way round. Off is for a project
                 // whose formatter disagrees with its own history.
@@ -3697,13 +3263,6 @@ impl Workspace {
         }
     }
 
-    /// One mesh as bytes — what `Event::Geometry` described, in the layout
-    /// `proton-mesh` writes. Outside `apply` because it is not a command: it
-    /// changes nothing and produces no events, and its answer is not JSON.
-    pub fn mesh_bytes(&mut self, key: &str) -> Option<Vec<u8>> {
-        self.modeling.mesh_bytes(key)
-    }
-
     /// Proton is going: the notebook's kernel is stopped, and Research's runs
     /// are stopped and its calls let go — the project's own, that is; the
     /// session stops one it shares.
@@ -3722,60 +3281,6 @@ impl Workspace {
     /// Where a file a Lab run left is: see `Research::lab_file`.
     pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
         self.research().lab_file(key)
-    }
-
-    /// Where an image of the open game is: see `game::Game::file`.
-    pub fn game_file(&self, key: &str) -> Option<PathBuf> {
-        self.game.file(key)
-    }
-
-    /// The open canvas into a game: written into its `art/` by Canvas and,
-    /// when it is the game open in Game mode, imported by Game. What was done
-    /// in words, and what the window is sent.
-    fn send_canvas(&mut self, game: &str, layers: bool) -> Result<(String, Vec<Event>), String> {
-        let root = self.root().to_path_buf();
-        let (dir, source, sheet) = self.raster.send(&root, game, layers)?;
-        let mut said = match &sheet {
-            Some(json) => format!("wrote {source} and the sheet {json} in {}", if game.is_empty() { "the game" } else { game }),
-            None => format!("wrote {source} in {}", if game.is_empty() { "the game" } else { game }),
-        };
-        let mut events = Vec::new();
-        let open = self.game.root().and_then(|r| std::fs::canonicalize(r).ok());
-        if open.is_some_and(|r| r == dir) {
-            // An animation comes in as one, not as its frame put in a room.
-            match self.game.import_art(sheet.as_deref().unwrap_or(&source), None, None, false) {
-                Ok(done) => {
-                    said = format!("{said}, and {}", done.said);
-                    events.extend(done.notes.into_iter().map(|n| notice(n, NoticeLevel::Warn)));
-                    events.extend(done.events);
-                }
-                Err(why) => said = format!("{said}, but did not import it: {why}"),
-            }
-        } else {
-            said.push_str("; it is imported from that game's Assets once it is open in Game mode");
-        }
-        events.push(self.tree_event());
-        Ok((said, events))
-    }
-
-    /// The folder of the game open in Game mode, if one is.
-    pub fn game_dir(&self) -> Option<PathBuf> {
-        self.game.root().map(|root| root.to_path_buf())
-    }
-
-    /// A picture the window hands over, kept to bring in: its number.
-    pub fn raster_put_blob(&mut self, bytes: Vec<u8>) -> Result<u32, String> {
-        self.raster.put_blob(bytes)
-    }
-
-    /// What Canvas last copied, as a PNG, for the system's clipboard.
-    pub fn raster_clip_png(&self) -> Option<Vec<u8>> {
-        self.raster.clip_png()
-    }
-
-    /// Tiles of the open canvas, shared: see `raster::Raster::tiles`.
-    pub fn raster_tiles(&self, generation: u32, layer: u32, tiles: &[u32]) -> Option<crate::raster::RasterTiles> {
-        self.raster.tiles(generation, layer, tiles)
     }
 
     /// A file to show in the document viewer, remembered so the shell will
@@ -4263,20 +3768,6 @@ impl Workspace {
             if call.name == "edit_file" {
                 events.push(self.review_event());
             }
-            // An edit to the game, or a run drawn over its room.
-            if crate::game::TOOLS.contains(&call.name.as_str()) {
-                events.extend(self.game.take_pending());
-            }
-            // A canvas made, drawn on or written out: on screen at once.
-            if crate::raster::TOOLS.contains(&call.name.as_str()) {
-                let pending = self.raster.take_pending();
-                let files = pending.iter().any(|e| matches!(e, Event::RasterHome { .. }));
-                events.extend(pending);
-                if files {
-                    events.push(self.tree_event());
-                    events.push(self.repo_event());
-                }
-            }
             self.agent.answer(&call.id, answer);
         }
 
@@ -4513,9 +4004,6 @@ impl Workspace {
             out.push_str(&match mention {
                 crate::mention::Mention::Selection => self.selected_text(),
                 crate::mention::Mention::Dataframe => self.selected_frame(),
-                crate::mention::Mention::Game => self.game.about(),
-                crate::mention::Mention::Canvas => self.raster.about(self.root()),
-                crate::mention::Mention::Flow => self.flow_about.clone().unwrap_or_else(|| "Diffuse has not been opened.".into()),
             });
         }
         out
@@ -4589,11 +4077,6 @@ impl Workspace {
     /// question — "is there an answer yet?" — rather than knowing which tools
     /// are slow.
     pub fn call_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) -> ToolOutcome {
-        // The flows are the session's, which answers these after this poll.
-        if crate::diffuse::TOOLS.contains(&name) {
-            self.session_calls.push((id.to_string(), name.to_string(), input.clone()));
-            return ToolOutcome::Deferred;
-        }
         if name == "search_library" {
             if let Some(deferred) = self.start_library_search(id, input) {
                 return deferred;
@@ -4616,23 +4099,6 @@ impl Workspace {
             // a cell that never began.
             Err(why) => ToolOutcome::Answered(Err(why)),
         }
-    }
-
-    /// The agent's PDF and Diffuse tool calls since the last time, for the
-    /// session to answer from its PDFs and flows.
-    pub fn take_session_calls(&mut self) -> Vec<(String, String, serde_json::Value)> {
-        std::mem::take(&mut self.session_calls)
-    }
-
-    /// Answer a call the session ran. The turn goes on at the next poll,
-    /// once every call it made is answered.
-    pub fn answer_tool(&mut self, id: &str, answer: Result<String, String>) {
-        self.agent.answer(id, answer);
-    }
-
-    /// What `@flow` says in the next question: the session's flow on top.
-    pub fn set_flow_about(&mut self, about: String) {
-        self.flow_about = Some(about);
     }
 
     /// Begin embedding a question, if this search would be better for it.
@@ -4895,24 +4361,6 @@ impl Workspace {
         };
 
         match name {
-            // The game open in Game mode, answered by its module.
-            name if crate::game::TOOLS.contains(&name) => self.game.tool(name, input),
-            // The canvas open in Canvas mode — sent to a game by the workspace,
-            // which holds the game too.
-            "canvas_export" if input.get("game").is_some() => {
-                if !self.raster.is_open() {
-                    return Err("No canvas is open in Canvas mode.".into());
-                }
-                let game = input.get("game").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                let layers = input.get("layers").and_then(|v| v.as_bool()).unwrap_or(true);
-                let (said, events) = self.send_canvas(&game, layers)?;
-                self.raster.add_pending(events);
-                Ok(format!("{}.", said[..1].to_uppercase() + &said[1..]))
-            }
-            name if crate::raster::TOOLS.contains(&name) => {
-                let root = self.root().to_path_buf();
-                self.raster.tool(&root, name, input)
-            }
             "read_file" => {
                 let path = text("path")?;
                 let buffer = proton_text::Buffer::open(self.pickers.resolve(&path))
@@ -5834,150 +5282,6 @@ impl Workspace {
         }
     }
 
-    /// What Design mode's inspector draws.
-    /// What everything that writes the component has to say afterwards.
-    ///
-    /// The file on disk moved, so the same things have to be told as when a
-    /// token is written: the artboard, the gutter, the tree, and the buffer if
-    /// Codex has this file open — which, for a two-way binding, it often does.
-    fn after_layer_write(&mut self, done: Result<bool, String>) -> Vec<Event> {
-        match done {
-            Ok(false) => Vec::new(),
-            Ok(true) => {
-                let mut events = vec![self.artboard_event(), self.repo_event()];
-                events.extend(self.every_view());
-                events
-            }
-            Err(why) => vec![notice(why, NoticeLevel::Error)],
-        }
-    }
-
-    /// Run something against the node at an outliner row.
-    ///
-    /// By index because that is what a click gives, and by id inside because
-    /// that is what survives the tree being rebuilt underneath.
-    fn node_at(
-        &mut self,
-        index: usize,
-        change: impl FnOnce(&mut Workspace, String) -> Result<bool, String>,
-    ) -> Result<bool, String> {
-        let Some(id) = self
-            .modeling
-            .nodes()
-            .into_iter()
-            .nth(index)
-            .map(|one| one.id)
-        else {
-            return Err(format!("there is no node at row {index}"));
-        };
-        change(self, id)
-    }
-
-    /// What everything that writes the scene has to say afterwards.
-    fn after_scene_write(&mut self, done: Result<bool, String>) -> Vec<Event> {
-        match done {
-            Ok(false) => Vec::new(),
-            Ok(true) => {
-                // The file on disk moved, so the same things have to be told
-                // as when a token is written: the gutter, the tree, and the
-                // buffer if Codex has this file open.
-                let mut events = vec![self.scene_event(), self.repo_event()];
-                events.extend(self.every_view());
-                events
-            }
-            Err(why) => vec![notice(why, NoticeLevel::Error)],
-        }
-    }
-
-    /// A stack changed: the file moved, and so did the geometry it describes.
-    ///
-    /// The scene event alone would not be enough. A key is the mesh and the
-    /// object, not the settings — so turning a mirror off leaves the key where
-    /// it was, and a front end that only asks for keys it has never seen would
-    /// go on drawing the old result forever.
-    fn after_stack_write(&mut self, index: usize, done: Result<bool, String>) -> Vec<Event> {
-        let mut events = self.after_scene_write(done);
-        if events.is_empty() {
-            return events;
-        }
-        if let Some(node) = self.modeling.nodes().into_iter().nth(index) {
-            if !node.geometry.is_empty() {
-                events.push(Event::Geometry(self.modeling.geometry(&node.geometry)));
-            }
-        }
-        events
-    }
-
-    fn cut_event(&self) -> Event {
-        Event::Cut {
-            path: self
-                .video
-                .path()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            captions_path: self
-                .video
-                .captions_path()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            title: self.video.title(),
-            clips: self.video.clips(),
-            tracks: self.video.tracks(),
-            captions: self.video.captions(),
-            media: self.video.media(),
-            rate: self.video.rate(),
-            length: self.video.length(),
-            source: self.video.source(),
-            selected: self.video.selected(),
-            problem: self.video.problem().unwrap_or_default().to_string(),
-        }
-    }
-
-    fn scene_event(&self) -> Event {
-        Event::Scene {
-            path: self
-                .modeling
-                .path()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            nodes: self.modeling.nodes(),
-            selected: self.modeling.selected(),
-            problem: self.modeling.problem().unwrap_or_default().to_string(),
-            shaders: self.modeling.shaders(),
-            materials: self.modeling.materials(),
-            meshes: self.modeling.wanted(),
-        }
-    }
-
-    fn artboard_event(&self) -> Event {
-        let component = self.design.component();
-        Event::Artboard {
-            path: component
-                .map(|one| one.path().display().to_string())
-                .unwrap_or_default(),
-            source: component
-                .map(|one| one.source().to_string())
-                .unwrap_or_default(),
-            document: component.is_some_and(|one| one.is_document()),
-            problem: self.design.trouble().unwrap_or_default().to_string(),
-            layers: self.design.layers(),
-            selected: self.design.layer(),
-        }
-    }
-
-    fn theme_event(&self) -> Event {
-        Event::Theme {
-            path: self
-                .design
-                .path()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            tokens: self.design.tokens(),
-            selected: self.design.selected(),
-            problem: self.design.problem().unwrap_or_default().to_string(),
-        }
-    }
-
     fn splits_event(&self) -> Event {
         Event::Splits {
             views: self
@@ -6248,82 +5552,6 @@ impl Workspace {
             events.extend(self.research().sync());
         }
 
-        // Design with nothing open goes looking, once. Asking somebody to
-        // find their own stylesheet before the inspector will show anything
-        // is a worse first run than guessing at the conventional name and
-        // saying which one was picked.
-        if mode == ModeId::Design && !self.design.is_open() {
-            if let Some(path) = crate::design::discover(self.pickers.root()) {
-                if self.design.open(&path).is_ok() {
-                    events.push(notice(
-                        format!("theme: {}", path.display()),
-                        NoticeLevel::Info,
-                    ));
-                }
-            }
-            events.push(self.theme_event());
-        }
-        // Game opens the project when the project is a game, and otherwise
-        // shows the games it holds.
-        if mode == ModeId::Game {
-            let root = self.root().to_path_buf();
-            events.extend(self.game.enter(&root));
-        }
-        // Canvas shows the project's canvases, and the one open.
-        if mode == ModeId::Raster {
-            let root = self.root().to_path_buf();
-            events.extend(self.raster.enter(&root));
-        }
-
-        // Video goes looking on the same terms, once — and re-reads on the way
-        // back in. Its second document is the difference: a transcription is
-        // usually written by something else, minutes after the cut was opened,
-        // and a caption file that appeared while somebody was in another mode
-        // should be there when they come back rather than after a save.
-        if mode == ModeId::Video {
-            if self.video.is_open() {
-                self.video.reload();
-            } else if let Some(path) = crate::video::discover(self.pickers.root()) {
-                if self.video.open(&path).is_ok() {
-                    events.push(notice(
-                        format!("cut: {}", path.display()),
-                        NoticeLevel::Info,
-                    ));
-                }
-            }
-            events.push(self.cut_event());
-        }
-        // Modeling goes looking on the same terms, once — and re-checks its
-        // geometry on the way back in. A mesh is authored somewhere else and
-        // re-exported, and coming back to this mode is exactly when somebody
-        // has just done that. (Sitting in Modeling while Blender writes the
-        // file still needs a trip out and back; noticing sooner would mean a
-        // watcher thread, which is a bigger thing than this buys.)
-        if mode == ModeId::Modeling {
-            if !self.modeling.is_open() {
-                if let Some(path) = crate::modeling::discover(self.pickers.root()) {
-                    if self.modeling.open(&path).is_ok() {
-                        events.push(notice(
-                            format!("scene: {}", path.display()),
-                            NoticeLevel::Info,
-                        ));
-                    }
-                }
-            } else if self.modeling.reload() {
-                events.push(self.scene_event());
-            }
-            events.extend(self.modeling.restale().into_iter().map(Event::Geometry));
-            events.push(self.scene_event());
-        }
-        // The artboard goes looking on the same terms, and separately: a
-        // project can have a palette and no component, or a component and no
-        // palette, and neither absence should stop the other being found.
-        if mode == ModeId::Design && self.design.component().is_none() {
-            if let Some(path) = crate::design::discover_component(self.pickers.root()) {
-                let _ = self.design.show(&path);
-            }
-            events.push(self.artboard_event());
-        }
         events
     }
 

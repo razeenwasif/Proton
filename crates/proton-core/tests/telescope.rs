@@ -132,30 +132,6 @@ fn accepting_a_notebook_loads_cells_in_data_mode() {
 }
 
 #[test]
-fn design_file_search_loads_a_theme_but_grep_reveals_its_source() {
-    let root = std::env::temp_dir().join(format!("proton-picker-theme-{}", std::process::id()));
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(root.join("palette.css"), ":root {\n  --review-accent: #123456;\n}\n").unwrap();
-    let mut ws = Workspace::rooted(&root);
-    ws.apply(Command::SetMode { mode: ModeId::Design });
-    opened(&mut ws, " ff");
-    ws.apply(Command::PickerQuery { text: "palette.css".into() });
-    let events = ws.apply(Command::Key { key: Key::named("Enter") });
-    assert_eq!(ws.mode(), ModeId::Design);
-    assert!(events.iter().any(|e| matches!(e, Event::Theme { path, .. } if path.ends_with("palette.css"))));
-    assert_eq!(ws.editor().buffer().name(), "[No Name]");
-
-    opened(&mut ws, " fg");
-    ws.apply(Command::PickerQuery { text: "review-accent".into() });
-    ws.apply(Command::Key { key: Key::named("Enter") });
-    assert_eq!(ws.mode(), ModeId::Codex);
-    assert_eq!(ws.editor().buffer().name(), "palette.css");
-    let buffer = ws.editor().buffer();
-    assert_eq!(buffer.position(buffer.cursor.offset).line, 1);
-    std::fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
 fn escape_closes_without_opening_anything() {
     let mut ws = workspace();
     opened(&mut ws, " ff");

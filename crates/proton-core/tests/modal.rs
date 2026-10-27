@@ -195,13 +195,14 @@ fn mode_ids_round_trip_through_their_slugs_and_indices() {
         assert_eq!(ModeId::from_index(i + 1), Some(*mode));
     }
     assert_eq!(ModeId::from_index(0), None);
-    assert_eq!(ModeId::from_index(12), None);
-    // Notebook is ⌃5, after Research; Canvas the tenth, ⌃0; Diffuse the
-    // eleventh, ⌃-. LaTeX and the Reader, once these, are Quark's.
+    assert_eq!(ModeId::from_index(6), None);
+    // Notebook is ⌃5, after Research, and the last. The modes that left —
+    // LaTeX and the Reader for Quark, and Design, Model, Game, Video, Canvas
+    // and Diffuse for an app of their own — are no slug's.
     assert_eq!(ModeId::from_index(5), Some(ModeId::Study));
-    assert_eq!(ModeId::from_index(10), Some(ModeId::Raster));
-    assert_eq!(ModeId::from_index(11), Some(ModeId::Diffuse));
-    assert_eq!((ModeId::from_slug("tex"), ModeId::from_slug("pdf")), (None, None));
+    for gone in ["tex", "pdf", "design", "modeling", "game", "video", "raster", "diffuse"] {
+        assert_eq!(ModeId::from_slug(gone), None, "{gone}");
+    }
 }
 
 #[test]
