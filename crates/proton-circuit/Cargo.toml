@@ -10,3 +10,5 @@ repository.workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Digital's .dig files are XML; quick-xml is in the tree already.
+quick-xml = "0.41"

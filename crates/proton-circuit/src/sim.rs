@@ -272,6 +272,12 @@ impl Sim {
         self.nets[net].value
     }
 
+    /// What a part puts out on its output `i`: an input's value, a
+    /// register's.
+    pub fn output(&self, part: PartId, i: usize) -> Value {
+        self.parts[part].out_vals.get(i).copied().unwrap_or(Value::high_z(1))
+    }
+
     /// What a part reads on its first input: an output's value.
     pub fn shown(&self, part: PartId) -> Value {
         self.parts[part].ins.first().map_or(Value::high_z(1), |n| self.nets[*n].value)
@@ -286,12 +292,20 @@ impl Sim {
         &self.parts[part].state.mem
     }
 
-    pub fn load(&mut self, part: PartId, words: &[u64]) {
+    /// Words written into a memory part from address 0, and what it reads
+    /// out run again.
+    pub fn load(&mut self, part: PartId, words: &[u64]) -> Result<usize, SimError> {
         let mem = &mut self.parts[part].state.mem;
         if mem.len() < words.len() {
             mem.resize(words.len(), 0);
         }
         mem[..words.len()].copy_from_slice(words);
+        self.run_from(&[part])
+    }
+
+    /// The nets whose names end in `name`, for looking inside a circuit.
+    pub fn find(&self, name: &str) -> Vec<(NetId, &str)> {
+        self.nets.iter().enumerate().filter(|(_, n)| n.name.ends_with(name)).map(|(i, n)| (i, n.name.as_str())).collect()
     }
 
     /// How many parts keep state: the clocked ones.

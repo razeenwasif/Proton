@@ -75,9 +75,9 @@ pub enum Kind {
     Rom { data: Vec<u64> },
     /// In: n one-bit inputs. Out: the table's entry for them.
     Lut { table: Vec<u64> },
-    /// Bits regrouped: In: groups of `ins` widths, low bits first. Out:
-    /// groups of `outs` widths, each (first bit, width) of the whole.
-    Splitter { ins: Vec<u8>, outs: Vec<(u8, u8)> },
+    /// Bits regrouped. In: groups, each (first bit, width) of the whole bus.
+    /// Out: groups, each (first bit, width) of it.
+    Splitter { ins: Vec<(u8, u8)>, outs: Vec<(u8, u8)> },
     /// In: a. Out: a sign-extended (or 0-extended) to the output's width.
     BitExtender { signed: bool },
     /// In: a, sel. Out: bit sel of a.
@@ -277,12 +277,10 @@ pub fn eval(kind: &Kind, state: &mut State, ins: &[Value], outs: &[u8], settled:
         Kind::Splitter { ins: widths, outs: groups } => {
             let mut bus = 0u128;
             let mut z = 0u128;
-            let mut at = 0u32;
-            for (i, wd) in widths.iter().enumerate() {
+            for (i, (lo, wd)) in widths.iter().enumerate() {
                 let v = ins.get(i).copied().unwrap_or(Value::high_z(*wd));
-                bus |= ((v.v & mask(*wd)) as u128) << at;
-                z |= ((v.z & mask(*wd)) as u128) << at;
-                at += *wd as u32;
+                bus |= ((v.v & mask(*wd)) as u128) << lo;
+                z |= ((v.z & mask(*wd)) as u128) << lo;
             }
             groups
                 .iter()
@@ -344,7 +342,7 @@ mod tests {
         assert_eq!(sh(true, Shift::Logical, 0b1001_0001, 2), 0b0100_0100);
         assert_eq!(sh(false, Shift::Arithmetic, 0b1000_0000, 3), 0b1111_0000);
         assert_eq!(sh(false, Shift::Rotate, 0b0000_0011, 1), 0b1000_0001);
-        assert_eq!(run(Kind::Splitter { ins: vec![4, 4], outs: vec![(0, 8), (2, 4)] }, &[(0xa, 4), (0x5, 4)], &[8, 4]), vec![0x5a, 0x6]);
+        assert_eq!(run(Kind::Splitter { ins: vec![(0, 4), (4, 4)], outs: vec![(0, 8), (2, 4)] }, &[(0xa, 4), (0x5, 4)], &[8, 4]), vec![0x5a, 0x6]);
         assert_eq!(run(Kind::BitExtender { signed: true }, &[(0b100, 3)], &[8]), vec![0xfc]);
         assert_eq!(run(Kind::BitSelector, &[(0b100, 3), (2, 2)], &[1]), vec![1]);
     }

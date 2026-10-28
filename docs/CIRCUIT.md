@@ -22,11 +22,20 @@ build circuits too. Asked for on 2026-10-28.
 - **Nothing is taken from Digital's code.** Digital is GPL-3.0 and Proton is
   MIT, so this is built from how Digital *behaves* (its documentation and
   using it), never by reading or translating its sources. The tests use
-  circuits made here, not Digital's examples. Reading `.dig` files (C7) reads
-  a file format, which is fine; we ship none of theirs.
+  circuits made here, not Digital's examples. Reading `.dig` files reads a
+  file format, which is fine; we ship none of theirs. Where each part's pins
+  sit was worked out from drawn files: a pin that touches nothing is one
+  placed wrong (`cargo run -p proton-circuit --example loose_pins`).
+- **Checked against a real design.** The person's 16-bit CPU from their
+  architecture course, kept outside the repo, runs with all its own test
+  tables when `PROTON_CIRCUIT_DIG_DIR` names its folder (`cargo test --release
+  -p proton-circuit --test digital_files -- --ignored`): 79 of 79 pass, the
+  extended CPU's 5,574 parts in under a second.
 - **Built now,** after Excel, at the person's word on 2026-10-28.
-- **Digital's `.dig` files are read** (C7), parts that cannot be mapped named
-  when the file opens.
+- **Digital's `.dig` files are read**, parts that cannot be mapped named
+  when the file opens. The reader and the test language came forward into
+  C0, so the engine could be checked against the person's CPU from the start;
+  opening `.dig` files in the mode is still C7.
 
 ## The format: `Name.circuit/`
 
@@ -210,7 +219,7 @@ Each lands with its tests passing.
 
 | | What | Proved by |
 |---|---|---|
-| **C0** | `proton-circuit`: values, nets, gates, flip-flops, registers, RAM, ROM, the event simulator, settling, oscillation and conflicts, the `.circ` format | each part's table; settling; oscillation named; format round trips |
+| **C0** | `proton-circuit`: values, nets, gates, flip-flops, registers, RAM, ROM, the event simulator, settling, oscillation and conflicts, the `.circ` format; brought forward, the `.dig` reader and Digital's test language | each part's table; settling; oscillation named; format round trips; the person's CPU passing its own tables |
 | **C1** | The mode: `ModeId::Circuit` on ⌃7, its home page of projects, opening and making one, a circuit drawn, ⌘S and the quit prompt | core tests of the events; the browser suite |
 | **C2** | Editing: placing, wiring, moving, rotating, deleting, settings, copy and paste, undo | core tests; the browser suite |
 | **C3** | Running: live, step, single-gate step, quick run and Break; inputs clicked, displays drawn, wires coloured | core tests; the browser suite; a measured speed |

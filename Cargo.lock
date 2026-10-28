@@ -4334,6 +4334,7 @@ dependencies = [
 name = "proton-circuit"
 version = "0.0.1"
 dependencies = [
+ "quick-xml",
  "serde",
  "serde_json",
 ]
