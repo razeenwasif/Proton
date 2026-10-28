@@ -879,7 +879,8 @@ async function dismissOverlay() {
  * the command line, the picker — would toggle the overlay off on every second
  * key, which looks exactly like the panel flickering. Use `show`.
  */
-async function open(id) {
+/** @param {string} id @param {string} [kind] Which picker Telescope opens on: files unless said. */
+async function open(id, kind = "files") {
   const wasOpen = overlays.active === id;
   if (overlays.active || pickerOpen) await dismissOverlay();
   if (wasOpen) return;
@@ -889,7 +890,7 @@ async function open(id) {
     $("[data-picker-query]").value = "";
     $("[data-picker-results]").innerHTML = '<div class="empty">Opening search…</div>';
     show(id);
-    await dispatch({ type: "openPicker", kind: "files" });
+    await dispatch({ type: "openPicker", kind });
     return;
   }
   show(id);
@@ -900,7 +901,7 @@ function show(id) {
   overlays.show(id);
 }
 
-$$("[data-open]").forEach((el) => el.addEventListener("click", () => open(el.dataset.open)));
+$$("[data-open]").forEach((el) => el.addEventListener("click", () => open(el.dataset.open, el.dataset.picker)));
 $$("[data-close]").forEach((el) => el.addEventListener("click", dismissOverlay));
 $("#scrim").addEventListener("click", dismissOverlay);
 

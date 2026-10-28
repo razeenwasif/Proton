@@ -188,6 +188,15 @@ await test('Codex trades the rails and statusline for a title bar, and Data does
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   assert(shown($('.titlebar')), 'title bar went with Data');
 });
+await test('The rail names only keys that do something, and its plugin button opens the plugin commands', async () => {
+  const titles = [...doc.querySelectorAll('.rail button[title]')].map((b) => b.title).join(' | ');
+  for (const dead of ['␣aa', '␣cv', '␣dd', '␣px']) assert(!titles.includes(dead), `the rail still names ${dead}: ${titles}`);
+  assert(titles.includes('Chat  ⌃1') && titles.includes('␣ct') && titles.includes('Plugin commands  ␣pc'), `the rail's keys: ${titles}`);
+  const before = win.commands.length;
+  $('.rail [data-picker="pluginCommands"]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'openPicker' && c.kind === 'pluginCommands'), 'the plugin button did not open the plugin commands');
+  $('#scrim').click(); await settle();
+});
 await test('Codex can switch and open projects without the rails', async () => {
   const tiles = doc.querySelectorAll('.titlebar [data-workspace]');
   assert(tiles.length === 1 && shown(tiles[0]) && tiles[0].getAttribute('aria-selected') === 'true', 'no project tiles in the title bar');
