@@ -617,6 +617,15 @@ pub enum Command {
         sheet: u32,
         index: u32,
     },
+    /// A range sent to Data: written as CSV, and a cell that reads it
+    /// into a dataframe put in the notebook open (or a new one).
+    SheetToData {
+        generation: u32,
+        sheet: u32,
+        range: String,
+    },
+    /// The selected notebook cell's dataframe brought to Excel as a sheet.
+    SheetFromData,
     SheetUndo,
     SheetRedo,
     /// Show another sheet.

@@ -228,5 +228,23 @@ fn excel_shows_its_workbooks_and_the_quit_prompt_names_an_unsaved_one() {
     let read = space.run_tool("sheet_read", &serde_json::json!({"range": "A1:D2"})).unwrap();
     assert!(read.ends_with("2\t1\t2\t3\t30\n"), "{read}");
     assert!(space.with_context("what is @sheet about?").contains("# @sheet\nSheet q1 of reports/q1.csv"));
+
+    // A range to Data: written out, and read in by a cell of a new notebook.
+    let events = space.apply(Command::SheetToData { generation, sheet: 0, range: "A1:D2".into() });
+    assert!(events.iter().any(|e| matches!(e, Event::ModeChanged { mode: ModeId::Data })), "Data is not shown");
+    let csv = root.join(".proton/excel/q1-q1-a1-d2.csv");
+    assert_eq!(std::fs::read_to_string(&csv).unwrap(), "a,b,,\n1,2,3,30\n");
+    let cell = events
+        .iter()
+        .find_map(|e| match e {
+            Event::Notebook { cells, .. } => cells.last().map(|c| c.source.clone()),
+            _ => None,
+        })
+        .expect("the notebook drawn");
+    assert!(cell.contains("pd.read_csv(") && cell.contains("q1-q1-a1-d2.csv"), "{cell}");
+    assert!(root.join("from-excel.ipynb").exists());
+    // A cell with no table has nothing to bring back.
+    let back = space.apply(Command::SheetFromData);
+    assert!(back.iter().any(|e| matches!(e, Event::Notice { .. })));
     let _ = std::fs::remove_dir_all(root);
 }

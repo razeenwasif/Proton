@@ -326,6 +326,20 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
     key('Escape'); await settle();
   });
 
+  await test('A range goes to Data from the format bar, and a table comes back from Data\'s dock', async () => {
+    await win.pushEvents([book({active: 0, version: 10})]); await settle();
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    scroll.focus();
+    key('g'); key('g'); key('0'); key('v'); key('j'); key('l'); await settle();
+    const before = win.commands.length;
+    ws().querySelector('[data-sheet-to-data]').click(); await settle();
+    const to = sent(before, 'sheetToData')[0];
+    assert(to?.range === 'A1:B2' && to.generation === 3, `sent ${JSON.stringify(to)}`);
+    key('Escape'); await settle();
+    $('[data-df-to-sheet]').click(); await settle();
+    assert(sent(before, 'sheetFromData').length === 1, 'Data\'s dock did not send its table');
+  });
+
   await test('Scrolling a long way asks for the rows there, and the grid goes on', async () => {
     await win.pushEvents([book({active: 0, version: 2})]); await settle();
     const scroll = ws().querySelector('[data-sheet-scroll]');

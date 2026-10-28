@@ -1377,6 +1377,9 @@ impl Workspace {
 
             Command::Poll => self.poll_servers(),
 
+            Command::SheetToData { generation, sheet, range } => self.sheet_to_data(generation, sheet as usize, &range),
+            Command::SheetFromData => self.data_to_sheet(),
+
             command @ (Command::SheetNew { .. }
             | Command::SheetOpen { .. }
             | Command::SheetClose { .. }
@@ -4276,6 +4279,73 @@ impl Workspace {
     /// Open a notebook in Data, keeping the one already open if it is that
     /// one, and saving the one open first if it has changes — opening another
     /// would otherwise lose them. Refused if that save fails.
+    /// A range of the workbook open into Data: its values written as CSV
+    /// under `.proton/excel/`, and a cell that reads it with pandas put at
+    /// the end of the notebook open — or of a new `from-excel.ipynb` — for
+    /// the person to run.
+    fn sheet_to_data(&mut self, generation: u32, sheet: usize, range: &str) -> Vec<Event> {
+        let root = self.root().to_path_buf();
+        let (csv, label) = match self.sheets.range_csv(generation, sheet, range) {
+            Ok(x) => x,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let dir = root.join(".proton").join("excel");
+        let file = dir.join(format!("{label}.csv"));
+        if let Err(why) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, csv)) {
+            return vec![notice(format!("{}: {why}", file.display()), NoticeLevel::Error)];
+        }
+        if !self.data.is_open() {
+            let path = root.join("from-excel.ipynb");
+            if !path.exists() {
+                let empty = r#"{"cells": [], "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}, "language_info": {"name": "python"}}, "nbformat": 4, "nbformat_minor": 5}"#;
+                if let Err(why) = std::fs::write(&path, empty) {
+                    return vec![notice(format!("{}: {why}", path.display()), NoticeLevel::Error)];
+                }
+            }
+            if let Err(why) = self.open_notebook(&path) {
+                return vec![notice(why, NoticeLevel::Warn)];
+            }
+        }
+        let shown = serde_json::to_string(&file.display().to_string()).unwrap_or_default();
+        let code = format!("import pandas as pd\n\nsheet_df = pd.read_csv({shown})\nsheet_df");
+        let Some(index) = self.data.add_cell(true) else {
+            return vec![notice("the notebook could not take a cell".into(), NoticeLevel::Warn)];
+        };
+        self.data.set_source(index, &code);
+        self.data.select_cell(index);
+        let mut events = self.set_mode(ModeId::Data);
+        events.push(self.notebook_event());
+        events.push(Event::CellSelected { index });
+        events.push(self.tree_event());
+        events.push(notice(format!("{range} is in the notebook as sheet_df: run the cell to load it"), NoticeLevel::Info));
+        events
+    }
+
+    /// The selected notebook cell's dataframe, as a sheet in Excel.
+    fn data_to_sheet(&mut self) -> Vec<Event> {
+        let index = self.data.selected();
+        let table = self.data.cell_at(index).and_then(|cell| {
+            cell.outputs.iter().find_map(|output| match output {
+                crate::data::OutputView::Table { table } => Some(table.clone()),
+                _ => None,
+            })
+        });
+        let Some(table) = table else {
+            return vec![notice("the selected cell has no table: run one that ends in a dataframe".into(), NoticeLevel::Warn)];
+        };
+        let root = self.root().to_path_buf();
+        let mut events = self.sheets.add_table(&root, &format!("Cell {index}"), &table.columns, &table.rows);
+        events.extend(self.set_mode(ModeId::Sheet));
+        events.push(self.tree_event());
+        if let Some(total) = table.total.filter(|t| *t > table.rows.len()) {
+            events.push(notice(
+                format!("the notebook showed {} of the frame's {total} rows, and those are what came: write it out with to_csv to bring all of it", table.rows.len()),
+                NoticeLevel::Warn,
+            ));
+        }
+        events
+    }
+
     fn open_notebook(&mut self, path: &Path) -> Result<(), String> {
         if self.data.path() == Some(path) {
             return Ok(());

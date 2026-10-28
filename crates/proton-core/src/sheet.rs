@@ -1016,6 +1016,75 @@ impl Sheets {
         (sheet < open.book.workbook().sheets.len()).then(|| cells_event(open, sheet, rows, cols, None))
     }
 
+    /* ── to and from Data ──────────────────────────────────────────── */
+
+    /// A range as CSV for pandas — values as they come to, unformatted —
+    /// and a name for its file: the workbook's, the sheet's, the range's.
+    pub fn range_csv(&mut self, generation: u32, sheet: usize, range: &str) -> Result<(String, String), String> {
+        let open = self.checked(generation, sheet).map_err(|_| "that workbook is no longer open".to_string())?;
+        let r = proton_sheet::arrange::range_in(&open.book, sheet, range).ok_or_else(|| format!("{range} is not a range"))?;
+        if r.rows() as u64 * r.cols() as u64 > MOST_CLIP * 4 {
+            return Err("that is more cells than are sent to Data at once".into());
+        }
+        let mut csv = String::new();
+        for row in r.start.row..=r.end.row {
+            let fields: Vec<String> = (r.start.col..=r.end.col)
+                .map(|col| {
+                    let v = value_text(&open.book.value(sheet, CellRef::new(row, col)));
+                    if v.contains([',', '"', '\n', '\r']) { format!("\"{}\"", v.replace('"', "\"\"")) } else { v }
+                })
+                .collect();
+            csv.push_str(&fields.join(","));
+            csv.push('\n');
+        }
+        let label = slug(&format!("{}-{}-{}", open.name, open.book.workbook().sheets[sheet].name, r.name().replace(':', "-")));
+        Ok((csv, label))
+    }
+
+    /// A table — a notebook's dataframe — as a sheet: a new one in the
+    /// workbook open, or a new workbook's when none is. One step to undo.
+    pub fn add_table(&mut self, root: &Path, title: &str, columns: &[String], rows: &[Vec<String>]) -> Vec<Event> {
+        let mut events = Vec::new();
+        if self.open.is_none() {
+            let name = (1..).map(|n| if n == 1 { "from-data".to_string() } else { format!("from-data-{n}") }).find(|n| !root.join(format!("{n}.{EXTENSION}")).exists()).unwrap_or_default();
+            events.extend(self.new_book(root, &name, None));
+            if self.open.is_none() {
+                return events;
+            }
+        }
+        let typed = |v: &str| if v.starts_with(['=', '\'']) { format!("'{v}") } else { v.to_string() };
+        let mut cells = std::collections::BTreeMap::new();
+        for (c, h) in columns.iter().enumerate() {
+            if !h.is_empty() {
+                cells.insert(CellRef::new(0, c as u32), Cell { input: typed(h), style: 0 });
+            }
+        }
+        for (r, row) in rows.iter().enumerate() {
+            for (c, v) in row.iter().enumerate() {
+                if !v.is_empty() {
+                    cells.insert(CellRef::new(r as u32 + 1, c as u32), Cell { input: typed(v), style: 0 });
+                }
+            }
+        }
+        let title = title.chars().filter(|c| !"[]:*?/\\".contains(*c)).take(31).collect::<String>();
+        events.extend(self.reshape(|wb, _| {
+            // A workbook just made has one empty sheet: the table is that.
+            let fresh = wb.sheets.len() == 1 && wb.sheets[0].cells.is_empty();
+            let name = (1..).map(|n| if n == 1 { title.clone() } else { format!("{title} {n}") }).find(|n| wb.sheet_index(n).is_none() || (fresh && n == &title)).unwrap_or_default();
+            if fresh {
+                wb.sheets[0].name = name;
+                wb.sheets[0].cells = cells;
+                return Ok(0);
+            }
+            let id = wb.fresh_id();
+            let mut sheet = proton_sheet::Sheet::new(&id, &name);
+            sheet.cells = cells;
+            wb.sheets.push(sheet);
+            Ok(wb.sheets.len() - 1)
+        }));
+        events
+    }
+
     /* ── the agent ─────────────────────────────────────────────────── */
 
     /// What the agent's last calls changed on screen.
@@ -1793,6 +1862,28 @@ mod tests {
         sheets.tool(&root, "sheet_write", &serde_json::json!({"cells": [{"at": "C1", "input": 5}]})).unwrap();
         sheets.apply(&root, Command::SheetUndo);
         assert_eq!(cell_at(&sheets.open.as_ref().unwrap().book, 0, CellRef::parse("C1").unwrap()).input, "", "an agent's write is undone as one step");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_range_goes_to_data_as_csv_and_a_table_comes_back_as_a_sheet() {
+        let root = scratch("data");
+        let mut sheets = Sheets::default();
+        // No workbook open: the table makes one.
+        let made = sheets.add_table(&root, "Cell 3", &["".into(), "name".into(), "n".into()], &[vec!["0".into(), "Ada".into(), "36".into()], vec!["1".into(), "=x".into(), "1,200".into()]]);
+        let b = book_of(&made).unwrap();
+        assert_eq!((b.path.as_str(), b.sheets.len(), b.sheets[0].name.as_str()), ("from-data.sheet", 1, "Cell 3"));
+        let book = &sheets.open.as_ref().unwrap().book;
+        assert_eq!((book.value(0, CellRef::parse("C3").unwrap()), cell_at(book, 0, CellRef::parse("B3").unwrap()).input), (Value::Number(1200.0), "'=x".to_string()));
+        // Again: a second sheet, named apart.
+        let again = sheets.add_table(&root, "Cell 3", &["a".into()], &[vec!["1".into()]]);
+        assert_eq!(book_of(&again).unwrap().sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["Cell 3", "Cell 3 2"]);
+        sheets.apply(&root, Command::SheetUndo);
+        assert_eq!(sheets.open.as_ref().unwrap().book.workbook().sheets.len(), 1, "one step");
+        let g = sheets.open.as_ref().unwrap().generation;
+        let (csv, label) = sheets.range_csv(g, 0, "A1:C3").unwrap();
+        assert_eq!(csv, ",name,n\n0,Ada,36\n1,=x,1200\n");
+        assert_eq!(label, "from-data-cell-3-a1-c3");
         let _ = std::fs::remove_dir_all(root);
     }
 

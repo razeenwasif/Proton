@@ -534,6 +534,8 @@ function renderMode(mode) {
 }
 
 $$(".mode").forEach((b) => b.addEventListener("click", () => coreSetMode(b.dataset.mode)));
+// A notebook's table, brought to Excel as a sheet.
+$("[data-df-to-sheet]")?.addEventListener("click", () => dispatch({ type: "sheetFromData" }));
 $$("[data-mode-go]").forEach((el) =>
   el.addEventListener("click", () => coreSetMode(el.dataset.modeGo)),
 );

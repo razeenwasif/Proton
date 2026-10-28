@@ -619,6 +619,7 @@ export function createSheet(host) {
       case "nofilter": send({ type: "sheetFilter", range: null }); return;
       case "rules": openRules(); return;
       case "chart": addChart(["line", "bar", "scatter", "pie"].includes(arg) ? arg : "bar"); return;
+      case "data": send({ type: "sheetToData", range: arg || rangeName(region(true)) }); return;
       case "delete": deleteLines(arg.startsWith("col")); return;
       default: {
         // `:B7` goes there.
@@ -766,18 +767,20 @@ export function createSheet(host) {
     <button class="xl-tool" data-sheet-sort="down" title="Sort Z→A by this column  :sort desc">Z↓</button>
     <button class="xl-tool" data-sheet-filter title="Filter  :filter">▾</button>
     <button class="xl-tool" data-sheet-rules title="Conditional colour  :rules">◐</button>
-    <button class="xl-tool" data-sheet-chart title="A chart of the selection  :chart">▥</button>`;
+    <button class="xl-tool" data-sheet-chart title="A chart of the selection  :chart">▥</button>
+    <button class="xl-tool" data-sheet-to-data title="Send the selection to Data as a dataframe  :data">→ Data</button>`;
   els.tools.addEventListener("mousedown", (e) => {
     // Clicking a tool leaves the keyboard with the grid.
     if (e.target instanceof Element && e.target.closest("button")) e.preventDefault();
   });
   els.tools.addEventListener("click", (e) => {
-    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("[data-sheet-style], [data-sheet-clear-style], [data-sheet-sort], [data-sheet-filter], [data-sheet-rules], [data-sheet-chart]")) : null;
+    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("[data-sheet-style], [data-sheet-clear-style], [data-sheet-sort], [data-sheet-filter], [data-sheet-rules], [data-sheet-chart], [data-sheet-to-data]")) : null;
     if (!b || !state.book) return;
     if (b.dataset.sheetSort) return sortBy(b.dataset.sheetSort === "down");
     if (b.dataset.sheetFilter !== undefined) return toggleFilter();
     if (b.dataset.sheetRules !== undefined) return openRules();
     if (b.dataset.sheetChart !== undefined) return addChart();
+    if (b.dataset.sheetToData !== undefined) return send({ type: "sheetToData", range: rangeName(region(true)) });
     const k = b.dataset.sheetStyle;
     if (b.dataset.sheetClearStyle !== undefined) format({ bold: false, italic: false, underline: false, wrap: false, color: "", fill: "", align: "", format: "" });
     else if (k === "bold" || k === "italic" || k === "underline" || k === "wrap") toggle(k);
