@@ -539,7 +539,7 @@ pub enum Command {
         generation: u32,
         sheet: u32,
         range: String,
-        patch: crate::sheet::SheetStylePatch,
+        patch: Box<crate::sheet::SheetStylePatch>,
     },
     /// A column's width in points, or the default's.
     SheetWidth {

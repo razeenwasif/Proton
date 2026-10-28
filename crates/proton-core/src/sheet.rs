@@ -332,7 +332,7 @@ impl Sheets {
             Command::SheetCopy { generation, sheet, range, cut } => self.copy(generation, sheet as usize, &range, cut),
             Command::SheetPaste { generation, sheet, at, text } => self.paste(generation, sheet as usize, &at, &text),
             Command::SheetFill { generation, sheet, from, to } => self.fill(generation, sheet as usize, &from, &to),
-            Command::SheetFormat { generation, sheet, range, patch } => self.format(generation, sheet as usize, &range, patch),
+            Command::SheetFormat { generation, sheet, range, patch } => self.format(generation, sheet as usize, &range, *patch),
             Command::SheetInsert { generation, sheet, cols, at, n } => self.lines(generation, sheet as usize, cols, at, n, true),
             Command::SheetDelete { generation, sheet, cols, at, n } => self.lines(generation, sheet as usize, cols, at, n, false),
             Command::SheetWidth { generation, sheet, col, width } => {
@@ -1193,8 +1193,8 @@ mod tests {
         assert_eq!(input(&sheets, "B1"), "=A1*10");
 
         // Formats change only what they say, and undo takes them back.
-        sheets.apply(&root, Command::SheetFormat { generation: g, sheet: 0, range: "A1:B1".into(), patch: SheetStylePatch { bold: Some(true), ..Default::default() } });
-        let f = sheets.apply(&root, Command::SheetFormat { generation: g, sheet: 0, range: "A1".into(), patch: SheetStylePatch { format: Some("0.00".into()), ..Default::default() } });
+        sheets.apply(&root, Command::SheetFormat { generation: g, sheet: 0, range: "A1:B1".into(), patch: Box::new(SheetStylePatch { bold: Some(true), ..Default::default() }) });
+        let f = sheets.apply(&root, Command::SheetFormat { generation: g, sheet: 0, range: "A1".into(), patch: Box::new(SheetStylePatch { format: Some("0.00".into()), ..Default::default() }) });
         let a1 = cells_of(&f).into_iter().find(|c| c.row == 0 && c.col == 0).unwrap();
         let styles = book_of(&f).unwrap().styles;
         assert!(styles[a1.style as usize].bold && styles[a1.style as usize].format == "0.00" && a1.text == "1.00", "{a1:?}");
