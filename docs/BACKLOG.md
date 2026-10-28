@@ -97,29 +97,9 @@ Research's milestones after Lean (P0–P7, `6c103a9`).
 - **The Lab on Linux and Windows.** bubblewrap has never been run for real,
   and the Lab is Unix-only (no `Scripts\python.exe`).
 
-## Sheets
+## Excel
 
-A spreadsheet mode in Proton, after Google Sheets: Excel's work, in a tab
-of its own. Asked for on 2026-10-27; nothing is built and nothing is
-decided past what the person said. Open, to settle before a plan:
-
-- **What it holds.** Workbooks of sheets: cells of values and formulas,
-  types and number formats, column widths, frozen rows, filters and
-  sorting, conditional colour, charts, and comments on cells.
-- **Its formulas.** An engine of Proton's own: parsing A1 references and
-  ranges, recalculating what depends on a cell and only that, finding
-  cycles, and the functions people reach for first (SUM, AVERAGE, IF,
-  VLOOKUP/XLOOKUP, INDEX/MATCH, COUNTIF, text and date functions). Or a
-  crate for it, if one fits without bringing much with it.
-- **Files.** `.xlsx` read and written, so a sheet goes back to Excel and
-  Google Sheets as it came; `.csv` and `.tsv`. Open: whether a workbook is
-  kept as `.xlsx`, or in a format of Proton's own that diffs well in git.
-- **Drawing.** A grid of a million rows drawn by the rows on screen only,
-  as the Data mode's tables are, with Vim's keys moving the cursor cell to
-  cell, as in Data.
-- **The agent.** Tools to read a range, write cells and formulas, and make
-  a chart, as Data has; `@sheet` in a message.
-- **Sharing with the other modes.** A range to a Data notebook as a frame,
-  and a frame back as a sheet; a chart out to Quark's LaTeX.
-- **Collaboration**, as Google Sheets has it, is not assumed: Proton is one
-  person's, and two people editing one sheet would need a server.
+The spreadsheet mode asked for on 2026-10-27 as Sheets and named Excel on
+2026-10-28 is planned in [`EXCEL.md`](EXCEL.md): a workbook as a folder of
+text, `.xlsx` and `.csv` in and out, Proton's own formula engine, sorting,
+filters, colour, charts, the agent and Data — milestones E0–E8, being built.
