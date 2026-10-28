@@ -103,3 +103,18 @@ The spreadsheet mode asked for on 2026-10-27 as Sheets and named Excel on
 2026-10-28 is planned in [`EXCEL.md`](EXCEL.md): a workbook as a folder of
 text, `.xlsx` and `.csv` in and out, Proton's own formula engine, sorting,
 filters, colour, charts, the agent and Data — milestones E0–E8, being built.
+
+## Circuit
+
+A digital logic mode after hneemann's Digital, asked for on 2026-10-28, is
+planned in [`CIRCUIT.md`](CIRCUIT.md). It covers:
+- gates, flip-flops, memories and buses drawn and simulated as Digital does,
+  in a `Name.circuit/` folder of text;
+- test tables;
+- truth tables, Quine–McCluskey, K-maps, synthesis and an FSM editor;
+- Verilog, VHDL and SVG out, and `.dig` in;
+- the agent and Notebook's exercises.
+
+Milestones are C0–C9. Waits on: Excel, then Notebook's and Research's
+backlogs; the label, the key (⌃7 proposed) and the open points in the plan's
+"To decide".
