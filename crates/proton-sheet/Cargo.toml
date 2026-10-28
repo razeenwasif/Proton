@@ -10,6 +10,9 @@ repository.workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+# .xlsx: its XML, and the deflate inside its zip. Both are in the tree already.
+quick-xml = "0.41"
+flate2 = "1"
 
 # The local time TODAY and NOW say, read as the C library has it: already in
 # the tree, where a date crate is only there under another's features.

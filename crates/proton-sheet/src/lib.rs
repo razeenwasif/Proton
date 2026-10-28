@@ -7,10 +7,12 @@
 //!   only where a change reaches.
 //! - [`functions`]: the functions formulas call.
 //! - [`numfmt`]: Excel's number formats, for showing a value.
+//! - [`xlsx`], [`csv`]: Excel's files and delimited text, opened and saved.
 //! - [`refs`], [`value`], [`dates`]: references, values, and dates as
 //!   Excel's serial numbers.
 
 pub mod book;
+pub mod csv;
 pub mod dates;
 pub mod folder;
 pub mod formula;
@@ -19,6 +21,9 @@ pub mod model;
 pub mod numfmt;
 pub mod refs;
 pub mod value;
+pub mod xlsx;
+mod xml;
+mod zip;
 
 pub use book::Book;
 pub use model::{Cell, Sheet, Style, Workbook};
