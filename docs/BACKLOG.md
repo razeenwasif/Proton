@@ -100,12 +100,53 @@ Research's milestones after Lean (P0–P7, `6c103a9`).
 ## Excel
 
 The spreadsheet mode asked for on 2026-10-27 as Sheets and named Excel on
-2026-10-28 is built, E0–E8, as [`EXCEL.md`](EXCEL.md) planned it. Left for
-later, as asked for: `.xlsx`'s merged cells, conditional formats and filters
-kept through a save (read today as "not kept" and said); a column's whole
-sum read without visiting every row of the band; the engine's memory at a
-million rows (about 0.7–1 GB); two people editing one sheet, which would
-need a server.
+2026-10-28 is built, E0–E8, as [`EXCEL.md`](EXCEL.md) planned it, and
+installed on 2026-10-28. What is left of it.
+
+### Waiting on the person
+
+- **Excel in the installed app, with your own workbooks.** Open real `.xlsx`
+  and `.csv` files of yours — ones Excel or Google Sheets made, not Proton —
+  and say what breaks or what you reach for that is missing. Everything so far
+  was tested in the browser and the core.
+- **Charts checked in Excel.** Charts written into an `.xlsx` are read back by
+  Proton's own reader; Quick Look draws no charts, and Excel is not on this
+  Mac to open one in.
+
+### Later builds
+
+- **.xlsx features kept through a save.** Merged cells, conditional formats,
+  filters, comments and data validation are read today as "not kept", and said
+  when the file opens; keeping them means writing them back as Excel does.
+  Pictures, pivot tables and macros the same.
+- **Borders, fonts and row heights.** Cell borders, a font's family and size,
+  and rows of their own height; today a style is bold, italic, underline,
+  colours, alignment, wrapping and a number format.
+- **Merging, and hiding rows and columns.** Cells merged across a range; rows
+  and columns hidden and shown again by hand, not only by a filter.
+- **Find and replace in the grid.** `/` to search the sheet's values and
+  formulas, `n` and `N` between matches, and a replace; the plan names `/`,
+  which is not wired yet.
+- **Formula completion.** Function names and their arguments offered as a
+  formula is typed, and the cells a formula reads outlined in the grid.
+- **Spilled arrays and dynamic-array functions.** A formula's array result
+  filling the cells below and beside it, as Excel 365's do; then FILTER, SORT,
+  UNIQUE and SEQUENCE. Today a cell shows an array's first value.
+- **More functions.** Excel has about 500 to Proton's 140: financial (PMT,
+  NPV, IRR, FV), regular expressions, LET and LAMBDA, and the rest as asked
+  for.
+- **Pivot tables.** Summaries of a range by rows and columns, kept in the
+  workbook and redrawn as its cells change.
+- **Comments on cells.** Notes on a cell, kept in `comments.json` as the
+  folder format already plans, and to and from `.xlsx`.
+- **Printing.** A sheet or a range to the printer or a PDF, with page breaks
+  and headers.
+- **A million rows, lighter.** Opening a million formulas takes 4 s and about
+  0.7–1 GB; a whole-column sum visits every cell of its rows. Keeping each
+  column's cells apart, and the formulas' trees smaller, would bring both down
+  (`EXCEL.md`, Measured).
+- **Two people on one sheet.** Editing a workbook together would need a
+  server; a workbook is one person's for now.
 
 ## Circuit
 
