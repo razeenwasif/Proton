@@ -1,0 +1,17 @@
+[package]
+name = "proton-sheet"
+description = "Excel mode's workbooks: cells and formulas, a formula engine that recalculates only what depends on a change, number formats, and the `Name.sheet/` folder that diffs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# The local time TODAY and NOW say, read as the C library has it: already in
+# the tree, where a date crate is only there under another's features.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
