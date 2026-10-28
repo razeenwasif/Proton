@@ -50,6 +50,7 @@
     "study-slides.js",
     "study-graphic.js",
     "study-code.js",
+    "sheet.js",
     "pdf-view.js",
     "document.js"
   ]

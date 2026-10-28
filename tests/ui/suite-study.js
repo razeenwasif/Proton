@@ -3,7 +3,7 @@
 
 /** @param {{test: Function, assert: Function, win: any, doc: Document, $: (s: string) => any, settle: () => Promise<void>, key: Function, shown: (el: any) => boolean}} t */
 export async function studyChecks({test, assert, win, doc, $, settle, key, shown}) {
-  await test('Notebook sits after Research: ⌃5 opens it, in Codex\'s chrome and on an opaque ground, and is the last: ⌃6 is no mode', async () => {
+  await test('Notebook sits after Research: ⌃5 opens it, in Codex\'s chrome and on an opaque ground, and Excel follows it on ⌃6', async () => {
     const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
     const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
     await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
@@ -21,7 +21,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Notebook is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
     const before6 = win.commands.length;
     key('6', {ctrlKey: true}); await settle();
-    assert(!win.commands.slice(before6).some((c) => c.type === 'setMode'), '⌃6 asked for a mode');
+    assert(win.commands.slice(before6).some((c) => c.type === 'setMode' && c.mode === 'sheet'), '⌃6 did not ask for Excel');
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 

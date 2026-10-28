@@ -31,6 +31,7 @@ import { createTerminalGL, xtermHex } from "./term-gl.js";
 import { createClaude } from "./claude.js";
 import { createResearch } from "./research.js";
 import { createStudy } from "./study.js";
+import { createSheet } from "./sheet.js";
 import { createLab } from "./lab.js";
 import { createLean } from "./lean.js";
 import { markdown } from "./markdown.js";
@@ -453,7 +454,7 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["chat", "codex", "data", "research", "study"];
+const MODES = ["chat", "codex", "data", "research", "study", "sheet"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -528,6 +529,7 @@ function renderMode(mode) {
     renderSplits(lastSplits.views, lastSplits.focused, lastSplits.vertical);
   }
   if (mode === "data" && lastNotebook) renderNotebook(lastNotebook);
+  if (mode === "sheet") sheet?.shown();
   requestAnimationFrame(reportEveryViewport);
 }
 
@@ -856,6 +858,7 @@ const lean = createLean({ root: document, dispatch });
 /* Notebook: notebooks of your own sources, and the knowledge base they are
    chosen from. Drawn from what the core reads of them. */
 const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
+const sheet = createSheet({ root: document, dispatch });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -3349,6 +3352,16 @@ function renderEvent(event) {
       lab?.env(event);
       break;
 
+    case "sheetHome":
+      sheet?.home(event);
+      break;
+    case "sheetBook":
+      sheet?.book(event);
+      break;
+    case "sheetCells":
+      sheet?.cells(event);
+      break;
+
     case "studyList":
       study?.list(event);
       break;
@@ -3731,7 +3744,7 @@ document.addEventListener("keydown", (e) => {
   // below (⌃-prefixed commands are exactly what a Vim keymap is made of,
   // and on macOS ⌃K in particular already means "kill to end of line"
   // everywhere else on the system).
-  if (e.ctrlKey && /^[1-5]$/.test(e.key)) {
+  if (e.ctrlKey && /^[1-6]$/.test(e.key)) {
     e.preventDefault();
     coreSetMode(MODES[Number(e.key) - 1]);
     return;

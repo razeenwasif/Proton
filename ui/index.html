@@ -198,6 +198,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="data"><svg class="i"><use href="#i-chart"/></svg><span>Data</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="research"><svg class="i"><use href="#i-flask"/></svg><span>Research</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="study"><svg class="i"><use href="#i-book"/></svg><span>Notebook</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="sheet"><svg class="i"><use href="#i-table"/></svg><span>Excel</span></button>
       </div>
 
       <div class="rail-drag" aria-hidden="true"></div>
@@ -784,6 +785,68 @@
         <div class="scroll st-studio-body" data-study-studio-body></div>
       </aside>
     </section>
+
+    <!-- Excel: workbooks of sheets, formulas worked out as they are typed.
+         Down the left the project's workbooks; in the middle the one open,
+         as a grid drawn by the rows on screen, with the name box and the
+         formula bar above it and the sheets' tabs below; or, when none is
+         open, a page to open or make one (ui/sheet.js). -->
+    <section class="workspace xl" data-ws="sheet"
+             style="--col-l:240px; grid-template-columns: var(--col-l) 1px minmax(0,1fr);">
+      <aside class="pane side xl-side">
+        <div class="cc-side-head">
+          <button class="cc-new" data-sheet-new title="New workbook"><svg class="i"><use href="#i-plus"/></svg>New workbook</button>
+        </div>
+        <!-- From Event::SheetHome: .sheet folders, .xlsx, .csv and .tsv. -->
+        <div class="scroll xl-list" data-sheet-list></div>
+      </aside>
+
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
+
+      <main class="pane xl-main">
+        <div class="xl-home" data-sheet-home>
+          <h2>Excel</h2>
+          <p>Open a workbook from this project, or make one. A workbook is kept as a <code>.sheet</code> folder of text that diffs; <code>.xlsx</code>, <code>.csv</code> and <code>.tsv</code> are opened and saved as themselves.</p>
+          <form class="xl-form" data-sheet-form>
+            <input type="text" placeholder="Name" aria-label="Workbook name" required>
+            <select aria-label="Keep it as">
+              <option value="sheet">a .sheet folder</option>
+              <option value="xlsx">.xlsx</option>
+              <option value="csv">.csv</option>
+            </select>
+            <button type="submit">Make</button>
+          </form>
+          <div class="xl-found" data-sheet-found></div>
+        </div>
+
+        <div class="xl-book" data-sheet-book hidden>
+          <header class="xl-head">
+            <span class="xl-title" data-sheet-title></span>
+            <i class="xl-dirty" data-sheet-dirty title="Unsaved — ⌘S" hidden></i>
+            <span class="grow"></span>
+            <button class="tb-btn" data-sheet-save title="Save  ⌘S" aria-label="Save"><svg class="i"><use href="#i-check"/></svg></button>
+            <button class="tb-btn" data-sheet-close title="Close the workbook" aria-label="Close the workbook"><svg class="i"><use href="#i-close"/></svg></button>
+          </header>
+          <div class="xl-bar">
+            <input class="xl-name" data-sheet-name aria-label="Name box" spellcheck="false">
+            <span class="xl-fx">fx</span>
+            <input class="xl-formula" data-sheet-bar aria-label="Formula bar" spellcheck="false">
+          </div>
+          <div class="xl-grid">
+            <div class="xl-colhead" data-sheet-colhead></div>
+            <div class="xl-rowhead" data-sheet-rowhead></div>
+            <div class="xl-corner"></div>
+            <div class="xl-scroll" data-sheet-scroll tabindex="0" aria-label="Cells">
+              <div class="xl-space" data-sheet-space>
+                <div class="xl-cells" data-sheet-cells></div>
+              </div>
+            </div>
+            <input class="xl-editor" data-sheet-editor hidden spellcheck="false" aria-label="Cell">
+          </div>
+          <footer class="xl-tabs" role="tablist" aria-label="Sheets" data-sheet-tabs></footer>
+        </div>
+      </main>
+    </section>
   </div>
 
   <!-- ══ title bar — Codex only ═══════════════════════════════════
@@ -791,7 +854,7 @@
        one ground from edge to edge. The title bar it does keep stands on its
        end down the right edge, so the code has the window's full height. It
        holds what the rails held that Codex still needs: the window controls,
-       the modes — so the window can be left by mouse as well as by ⌃1–⌃5 —
+       the modes — so the window can be left by mouse as well as by ⌃1–⌃6 —
        and the panel toggles a hidden statusline would otherwise take with
        it. The empty stretch between them is the window's drag surface.
        After the body in the source because it is after it on screen, so Tab
@@ -810,6 +873,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="data" title="Data  ⌃3"><span>Data</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="research" title="Research  ⌃4"><span>Research</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="study" title="Notebook  ⌃5"><span>Notebook</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="sheet" title="Excel  ⌃6"><span>Excel</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
     <div class="tb-actions">

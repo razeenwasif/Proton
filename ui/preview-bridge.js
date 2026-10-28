@@ -4,12 +4,14 @@
 import {createClaudePreview} from './preview-claude.js';
 import {createResearchPreview} from './preview-research.js';
 import {createStudyPreview} from './preview-study.js';
+import {createSheetPreview} from './preview-sheet.js';
 
 export function createPreview(deliver) {
   let send;
   const claude = createClaudePreview(deliver);
   const research = createResearchPreview(deliver);
   const study = createStudyPreview(deliver);
+  const sheet = createSheetPreview(deliver);
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
@@ -391,6 +393,7 @@ export function createPreview(deliver) {
         ...claude.sync(),
         ...research.sync(),
         ...study.sync(),
+        ...sheet.sync(),
       ];
     }
     if (command.type.startsWith("claude") || command.type.startsWith("chatFolder") || command.type === "forgetArtifact" || command.type === "openLink") {
@@ -398,6 +401,7 @@ export function createPreview(deliver) {
     }
     if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
     if (command.type.startsWith("study")) return study.command(command);
+    if (command.type.startsWith("sheet")) return sheet.command(command);
     if (command.type === "runCell") {
       // The shape of a real run: the cell goes busy, and the answer arrives
       // later on its own — which is what the panel has to survive.
@@ -726,7 +730,7 @@ export function createPreview(deliver) {
     }
     if (command.type === "setMode") {
       state.mode = command.mode;
-      return [{ type: "modeChanged", mode: state.mode }];
+      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "sheet" ? sheet.sync() : [])];
     }
     // A real traced step, dumped from the core by
     // `crates/proton-core/tests/dump_step.rs`. Real rather than invented,
