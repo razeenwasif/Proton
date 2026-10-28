@@ -593,6 +593,24 @@ pub enum Command {
         sheet: u32,
         index: u32,
     },
+    /// A chart added over a range.
+    SheetChartAdd {
+        generation: u32,
+        sheet: u32,
+        chart: Box<crate::sheet::SheetChart>,
+    },
+    /// A chart moved, resized, retitled or made another kind.
+    SheetChartSet {
+        generation: u32,
+        sheet: u32,
+        index: u32,
+        chart: Box<crate::sheet::SheetChart>,
+    },
+    SheetChartRemove {
+        generation: u32,
+        sheet: u32,
+        index: u32,
+    },
     SheetUndo,
     SheetRedo,
     /// Show another sheet.

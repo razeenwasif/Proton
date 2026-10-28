@@ -109,6 +109,21 @@ export function createSheetPreview(deliver) {
     return { row, col, text, input, style: 0, kind, color: null, fill: null, bold: false };
   }
 
+  /** A chart and its series, read as the core reads them: the first row
+   *  names, the first column categories. @param {number} s @param {any} chart */
+  function chartView(s, chart) {
+    const [a, b = a] = chart.range.split(":");
+    const [r0, c0] = parse(a) ?? [0, 0], [r1, c1] = parse(b) ?? [0, 0];
+    const at = (/** @type {number} */ r, /** @type {number} */ c) => value(s, `${colName(c)}${r + 1}`);
+    const header = c1 > c0 && typeof at(r0, c0 + 1) === "string";
+    const rows = [];
+    for (let r = r0 + (header ? 1 : 0); r <= r1; r++) rows.push(r);
+    const num = (/** @type {any} */ v) => (typeof v === "number" ? v : null);
+    const series = [];
+    for (let c = c1 > c0 ? c0 + 1 : c0; c <= c1; c++) series.push([header ? String(at(r0, c)) : `Series ${series.length + 1}`, rows.map((r) => num(at(r, c)))]);
+    return { chart, categories: rows.map((r) => (c1 > c0 ? String(at(r, c0)) : String(r - r0 + 1))), xs: rows.map((r) => num(at(r, c0))), series };
+  }
+
   const bookEvent = () => ({
     type: "sheetBook",
     book: book && {
@@ -122,7 +137,8 @@ export function createSheetPreview(deliver) {
           rows = Math.max(rows, r + 1);
           cols = Math.max(cols, c + 1);
         }
-        return { name: sh.name, rows, cols, frozen: sh.frozen ?? [0, 0], widths: [...(sh.widths ?? new Map())], hidden: [], filter: null, rules: [] };
+        return { name: sh.name, rows, cols, frozen: sh.frozen ?? [0, 0], widths: [...(sh.widths ?? new Map())], hidden: [], filter: null, rules: [],
+          charts: (sh.charts ?? []).map((/** @type {any} */ chart) => chartView(book?.sheets.indexOf(sh) ?? 0, chart)) };
       }),
     },
   });
@@ -154,6 +170,8 @@ export function createSheetPreview(deliver) {
   }
 
   open("budget.sheet", BUDGET);
+  // A chart on the budget, to design against.
+  if (book) /** @type {any} */ (book.sheets[0]).charts = [{ kind: "bar", range: "A1:B5", title: "Monthly costs", at: "E2", width: 420, height: 260 }];
   // A workbook made since: only what a test puts in it.
   const made = /** @type {Record<string, Record<string, string>>} */ ({});
 
@@ -253,6 +271,18 @@ export function createSheetPreview(deliver) {
             .flatMap((/** @type {string} */ line, /** @type {number} */ r) => line.split("\t").map((v, c) => [`${colName(c0 + c)}${r0 + r + 1}`, v]));
           put(command.sheet, cells);
           return [bookEvent(), cellsEvent()].filter(Boolean);
+        }
+        case "sheetChartAdd":
+        case "sheetChartSet":
+        case "sheetChartRemove": {
+          if (!book) return [];
+          const sh = /** @type {any} */ (book.sheets[command.sheet]);
+          sh.charts ??= [];
+          if (command.type === "sheetChartAdd") sh.charts.push(command.chart);
+          else if (command.type === "sheetChartSet") sh.charts[command.index] = command.chart;
+          else sh.charts.splice(command.index, 1);
+          book.state = ++states;
+          return [bookEvent()];
         }
         default:
           // Fills, formats, rows and columns are the real engine's.

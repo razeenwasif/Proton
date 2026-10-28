@@ -51,6 +51,7 @@
     "study-graphic.js",
     "study-code.js",
     "sheet.js",
+    "sheet-chart.js",
     "pdf-view.js",
     "document.js"
   ]

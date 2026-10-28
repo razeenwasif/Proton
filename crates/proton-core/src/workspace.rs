@@ -1397,6 +1397,9 @@ impl Workspace {
             | Command::SheetFilterSet { .. }
             | Command::SheetRuleAdd { .. }
             | Command::SheetRuleRemove { .. }
+            | Command::SheetChartAdd { .. }
+            | Command::SheetChartSet { .. }
+            | Command::SheetChartRemove { .. }
             | Command::SheetUndo
             | Command::SheetRedo
             | Command::SheetTab { .. }

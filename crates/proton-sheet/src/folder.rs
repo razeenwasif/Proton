@@ -15,7 +15,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Cell, Filter, Frozen, Rule, Sheet, Style, Workbook};
+use crate::model::{Cell, Chart, Filter, Frozen, Rule, Sheet, Style, Workbook};
 use crate::refs::{col_name, col_of, CellRef};
 
 const VERSION: u32 = 1;
@@ -33,6 +33,8 @@ struct StoredSheet {
     filter: Option<Filter>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     rules: Vec<Rule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    charts: Vec<Chart>,
 }
 
 fn is_unfrozen(f: &Frozen) -> bool {
@@ -134,6 +136,7 @@ pub fn workbook_text(wb: &Workbook) -> String {
                 frozen: s.frozen,
                 filter: s.filter.clone(),
                 rules: s.rules.clone(),
+                charts: s.charts.clone(),
             })
             .collect(),
         styles: wb.styles.iter().skip(1).cloned().collect(),
@@ -174,7 +177,7 @@ pub fn read(dir: &Path) -> Result<Workbook, String> {
             let col = col_of(&letters).ok_or_else(|| format!("{shown}: “{letters}” is not a column"))?;
             widths.insert(col, w);
         }
-        sheets.push(Sheet { id: s.id, name: s.name, cells, widths, frozen: s.frozen, filter: s.filter, rules: s.rules });
+        sheets.push(Sheet { id: s.id, name: s.name, cells, widths, frozen: s.frozen, filter: s.filter, rules: s.rules, charts: s.charts });
     }
     if sheets.is_empty() {
         return Err(format!("{shown} has no sheets"));
@@ -254,6 +257,7 @@ mod tests {
             color: None,
             bold: true,
         });
+        wb.sheets[0].charts.push(crate::model::Chart { kind: crate::model::ChartKind::Bar, range: "A1:B3".into(), title: "Costs".into(), at: "D2".into(), width: 480, height: 300 });
         wb
     }
 

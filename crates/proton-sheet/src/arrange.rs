@@ -333,3 +333,68 @@ mod tests {
         assert_eq!((fill("A1").as_deref(), fill("A2").as_deref(), fill("A3").as_deref()), (Some("#000000"), Some("#808080"), Some("#ffffff")));
     }
 }
+
+/// A chart's data: its categories (or x values) and its series, each
+/// with its name and a value per category, none where a cell is not a
+/// number. At most `MOST_POINTS` categories.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartData {
+    pub categories: Vec<String>,
+    pub xs: Vec<Option<f64>>,
+    pub series: Vec<(String, Vec<Option<f64>>)>,
+}
+
+pub const MOST_POINTS: usize = 5000;
+
+/// A chart's range, whether its first row names the series, and whether
+/// its first column gives the categories.
+pub fn chart_shape(book: &Book, sheet: usize, range: &str) -> Option<(Range, bool, bool)> {
+    let r = range_in(book, sheet, range)?;
+    let labelled = r.cols() > 1;
+    let header = (r.start.col + u32::from(labelled)..=r.end.col).any(|c| matches!(book.value(sheet, CellRef::new(r.start.row, c)), Value::Text(_)));
+    Some((r, header, labelled))
+}
+
+/// What a chart over `range` draws. The first row names the series when
+/// any cell after the first in it is text; the first column gives the
+/// categories when the range is wider than one column.
+pub fn chart_data(book: &Book, sheet: usize, range: &str) -> Option<ChartData> {
+    let (r, header, labelled) = chart_shape(book, sheet, range)?;
+    let first_row = r.start.row + u32::from(header);
+    let value_cols: Vec<u32> = (r.start.col + u32::from(labelled)..=r.end.col).collect();
+    let rows: Vec<u32> = (first_row..=r.end.row).take(MOST_POINTS).collect();
+    let num = |v: Value| if let Value::Number(n) = v { Some(n) } else { None };
+    let categories = rows
+        .iter()
+        .map(|row| if labelled { shown(book, sheet, CellRef::new(*row, r.start.col)) } else { (row - first_row + 1).to_string() })
+        .collect();
+    let xs = rows.iter().map(|row| if labelled { num(book.value(sheet, CellRef::new(*row, r.start.col))) } else { Some((row - first_row + 1) as f64) }).collect();
+    let series = value_cols
+        .iter()
+        .map(|c| {
+            let name = if header { shown(book, sheet, CellRef::new(r.start.row, *c)) } else { format!("Series {}", c - value_cols[0] + 1) };
+            (name, rows.iter().map(|row| num(book.value(sheet, CellRef::new(*row, *c)))).collect())
+        })
+        .collect();
+    Some(ChartData { categories, xs, series })
+}
+
+#[cfg(test)]
+mod chart_tests {
+    use super::*;
+    use crate::model::Workbook;
+
+    #[test]
+    fn a_chart_reads_its_names_categories_and_values() {
+        let mut wb = Workbook::default();
+        for (at, v) in [("A1", "Month"), ("B1", "Rent"), ("C1", "Food"), ("A2", "Jan"), ("B2", "1450"), ("C2", "300"), ("A3", "Feb"), ("B3", "1450"), ("C3", "x")] {
+            wb.sheets[0].cells.insert(CellRef::parse(at).unwrap(), Cell { input: v.into(), style: 0 });
+        }
+        let b = Book::new(wb);
+        let d = chart_data(&b, 0, "A1:C3").unwrap();
+        assert_eq!(d.categories, vec!["Jan", "Feb"]);
+        assert_eq!(d.series, vec![("Rent".to_string(), vec![Some(1450.0), Some(1450.0)]), ("Food".to_string(), vec![Some(300.0), None])]);
+        let one = chart_data(&b, 0, "B2:B3").unwrap();
+        assert_eq!((one.categories.clone(), one.series[0].0.clone()), (vec!["1".to_string(), "2".to_string()], "Series 1".to_string()));
+    }
+}

@@ -359,6 +359,7 @@ pub fn read(bytes: &[u8]) -> Result<Read, String> {
             dropped.push(format!("conditional formats on “{name}”"));
         }
         let mut sheet = Sheet::new(&format!("s{}", i + 1), &name);
+        sheet.charts = read_charts(&zip, path);
         sheet.cells = read.cells;
         sheet.widths = read.widths;
         sheet.frozen = read.frozen;
@@ -389,7 +390,7 @@ pub fn read(bytes: &[u8]) -> Result<Read, String> {
         }
     };
     for n in zip.names() {
-        if n.starts_with("xl/charts/") {
+        if n.starts_with("xl/charts/chart") && n.ends_with(".xml") && !workbook.sheets.iter().any(|s| !s.charts.is_empty()) {
             seen("charts");
         } else if n.starts_with("xl/media/") {
             seen("pictures");
@@ -429,6 +430,176 @@ fn file_formula(input: &str) -> String {
         Ok(e) if FUTURE.iter().any(|f| src.to_ascii_uppercase().contains(f)) => prefix(&e).write(),
         _ => src.to_string(),
     }
+}
+
+/// A range as a chart's reference: the sheet's name, `$`s.
+fn absolute(sheet: &str, r: crate::refs::Range) -> String {
+    let at = |c: CellRef| format!("${}${}", crate::refs::col_name(c.col), c.row + 1);
+    let body = if r.start == r.end { at(r.start) } else { format!("{}:{}", at(r.start), at(r.end)) };
+    format!("{}{body}", formula::sheet_prefix(sheet))
+}
+
+/// A chart's part: its kind, title and series, each series' references
+/// into the sheet and the values they had, so a program shows it before
+/// working anything out.
+fn chart_xml(book: &Book, si: usize, chart: &crate::model::Chart) -> String {
+    use crate::model::ChartKind;
+    let name = &book.workbook().sheets[si].name;
+    let mut series = String::new();
+    if let Some((r, header, labelled)) = crate::arrange::chart_shape(book, si, &chart.range) {
+        let first = r.start.row + u32::from(header);
+        let span = |c: u32| crate::refs::Range::new(CellRef::new(first, c), CellRef::new(r.end.row.max(first), c));
+        let rows = (first..=r.end.row.max(first)).collect::<Vec<u32>>();
+        let cache_num = |c: u32| {
+            let pts: String = rows
+                .iter()
+                .enumerate()
+                .filter_map(|(i, row)| match book.value(si, CellRef::new(*row, c)) {
+                    Value::Number(n) => Some(format!("<c:pt idx=\"{i}\"><c:v>{}</c:v></c:pt>", number_text(n))),
+                    _ => None,
+                })
+                .collect();
+            format!("<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"{}\"/>{pts}</c:numCache>", rows.len())
+        };
+        let cache_str = |c: u32| {
+            let pts: String = rows.iter().enumerate().map(|(i, row)| format!("<c:pt idx=\"{i}\"><c:v>{}</c:v></c:pt>", esc(&crate::arrange::shown(book, si, CellRef::new(*row, c))))).collect();
+            format!("<c:strCache><c:ptCount val=\"{}\"/>{pts}</c:strCache>", rows.len())
+        };
+        let value_cols: Vec<u32> = (r.start.col + u32::from(labelled)..=r.end.col).collect();
+        for (i, c) in value_cols.iter().enumerate() {
+            let tx = if header {
+                let at = CellRef::new(r.start.row, *c);
+                format!("<c:tx><c:strRef><c:f>{}</c:f><c:strCache><c:ptCount val=\"1\"/><c:pt idx=\"0\"><c:v>{}</c:v></c:pt></c:strCache></c:strRef></c:tx>", esc(&absolute(name, crate::refs::Range::cell(at))), esc(&crate::arrange::shown(book, si, at)))
+            } else {
+                String::new()
+            };
+            let (cat_tag, val_tag) = if chart.kind == ChartKind::Scatter { ("c:xVal", "c:yVal") } else { ("c:cat", "c:val") };
+            let cat = if labelled {
+                let f = esc(&absolute(name, span(r.start.col)));
+                if chart.kind == ChartKind::Scatter {
+                    format!("<{cat_tag}><c:numRef><c:f>{f}</c:f>{}</c:numRef></{cat_tag}>", cache_num(r.start.col))
+                } else {
+                    format!("<{cat_tag}><c:strRef><c:f>{f}</c:f>{}</c:strRef></{cat_tag}>", cache_str(r.start.col))
+                }
+            } else {
+                String::new()
+            };
+            let val = format!("<{val_tag}><c:numRef><c:f>{}</c:f>{}</c:numRef></{val_tag}>", esc(&absolute(name, span(*c))), cache_num(*c));
+            let marker = if chart.kind == ChartKind::Line { "<c:marker><c:symbol val=\"none\"/></c:marker>" } else { "" };
+            series.push_str(&format!("<c:ser><c:idx val=\"{i}\"/><c:order val=\"{i}\"/>{tx}{marker}{cat}{val}</c:ser>"));
+        }
+    }
+    let axes_ids = "<c:axId val=\"500000001\"/><c:axId val=\"500000002\"/>";
+    let axis = |tag: &str, id: u32, cross: u32, pos: &str| {
+        format!("<c:{tag}><c:axId val=\"{id}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/><c:axPos val=\"{pos}\"/><c:crossAx val=\"{cross}\"/></c:{tag}>")
+    };
+    let plot = match chart.kind {
+        ChartKind::Bar => format!("<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>{series}{axes_ids}</c:barChart>{}{}", axis("catAx", 500000001, 500000002, "b"), axis("valAx", 500000002, 500000001, "l")),
+        ChartKind::Line => format!("<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>{series}<c:marker val=\"1\"/>{axes_ids}</c:lineChart>{}{}", axis("catAx", 500000001, 500000002, "b"), axis("valAx", 500000002, 500000001, "l")),
+        ChartKind::Scatter => format!("<c:scatterChart><c:scatterStyle val=\"lineMarker\"/><c:varyColors val=\"0\"/>{series}{axes_ids}</c:scatterChart>{}{}", axis("valAx", 500000001, 500000002, "b"), axis("valAx", 500000002, 500000001, "l")),
+        ChartKind::Pie => format!("<c:pieChart><c:varyColors val=\"1\"/>{series}<c:firstSliceAng val=\"0\"/></c:pieChart>"),
+    };
+    let title = if chart.title.is_empty() {
+        "<c:autoTitleDeleted val=\"1\"/>".to_string()
+    } else {
+        format!("<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>{}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title><c:autoTitleDeleted val=\"0\"/>", esc(&chart.title))
+    };
+    format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><c:chart>{title}<c:plotArea><c:layout/>{plot}</c:plotArea><c:legend><c:legendPos val=\"r\"/><c:overlay val=\"0\"/></c:legend><c:plotVisOnly val=\"1\"/></c:chart></c:chartSpace>")
+}
+
+/// A sheet's charts read from its drawing: where each is, its kind, its
+/// title, and the range its series' references cover.
+fn read_charts(zip: &Archive, sheet_path: &str) -> Vec<crate::model::Chart> {
+    use crate::model::{Chart, ChartKind};
+    let (dir, file) = sheet_path.rsplit_once('/').unwrap_or(("", sheet_path));
+    let rels_of = |dir: &str, file: &str| -> HashMap<String, String> {
+        zip.text(&format!("{dir}/_rels/{file}.rels"))
+            .ok()
+            .and_then(|t| tree(&t).ok())
+            .map(|r| r.all("Relationship").filter_map(|x| Some((x.attr("Id")?.to_string(), resolve_target(dir, x.attr("Target")?)))).collect())
+            .unwrap_or_default()
+    };
+    let sheet_rels = rels_of(dir, file);
+    let mut out = Vec::new();
+    for target in sheet_rels.values().filter(|t| t.contains("/drawings/")) {
+        let Ok(drawing) = zip.text(target).map_err(|_| ()).and_then(|t| tree(&t).map_err(|_| ())) else { continue };
+        let (ddir, dfile) = target.rsplit_once('/').unwrap_or(("", target));
+        let drels = rels_of(ddir, dfile);
+        for anchor in drawing.children.iter().filter(|a| a.name == "twoCellAnchor" || a.name == "oneCellAnchor") {
+            let cell = |n: Option<&crate::xml::Node>| -> (u32, u32, u64, u64) {
+                let v = |k: &str| n.and_then(|n| n.child(k)).and_then(|x| x.text.trim().parse::<u64>().ok()).unwrap_or(0);
+                (v("col") as u32, v("row") as u32, v("colOff"), v("rowOff"))
+            };
+            let (c0, r0, _, _) = cell(anchor.child("from"));
+            let (c1, r1, co, ro) = cell(anchor.child("to"));
+            // The chart the frame shows, wherever in the frame it is.
+            fn find<'a>(n: &'a crate::xml::Node, name: &str) -> Option<&'a crate::xml::Node> {
+                if n.name == name {
+                    return Some(n);
+                }
+                n.children.iter().find_map(|c| find(c, name))
+            }
+            let Some(id) = find(anchor, "chart").and_then(|c| c.attr("id")) else { continue };
+            let Some(Ok(xml)) = drels.get(id).map(|p| zip.text(p)) else { continue };
+            let Ok(space) = tree(&xml) else { continue };
+            let Some(plot) = find(&space, "plotArea") else { continue };
+            let Some(kind_node) = plot.children.iter().find(|c| c.name.ends_with("Chart")) else { continue };
+            let kind = match kind_node.name.as_str() {
+                "barChart" | "bar3DChart" => ChartKind::Bar,
+                "scatterChart" => ChartKind::Scatter,
+                "pieChart" | "pie3DChart" | "doughnutChart" => ChartKind::Pie,
+                _ => ChartKind::Line,
+            };
+            // Every reference in the series: the range is what they cover.
+            let mut refs = Vec::new();
+            fn formulas(n: &crate::xml::Node, out: &mut Vec<String>) {
+                if n.name == "f" {
+                    out.push(n.text.clone());
+                }
+                for c in &n.children {
+                    formulas(c, out);
+                }
+            }
+            for ser in kind_node.all("ser") {
+                formulas(ser, &mut refs);
+            }
+            let mut span: Option<crate::refs::Range> = None;
+            for f in &refs {
+                let body = f.rsplit_once('!').map_or(f.as_str(), |(_, b)| b).replace('$', "");
+                let Some(r) = crate::refs::Range::parse(&body) else { continue };
+                span = Some(match span {
+                    None => r,
+                    Some(s) => crate::refs::Range::new(
+                        CellRef::new(s.start.row.min(r.start.row), s.start.col.min(r.start.col)),
+                        CellRef::new(s.end.row.max(r.end.row), s.end.col.max(r.end.col)),
+                    ),
+                });
+            }
+            let Some(range) = span else { continue };
+            let title = find(&space, "title").map(|t| {
+                fn texts(n: &crate::xml::Node, out: &mut String) {
+                    if n.name == "t" {
+                        out.push_str(&n.text);
+                    }
+                    for c in &n.children {
+                        texts(c, out);
+                    }
+                }
+                let mut s = String::new();
+                texts(t, &mut s);
+                s
+            });
+            out.push(Chart {
+                kind,
+                range: range.name(),
+                title: title.unwrap_or_default(),
+                at: CellRef::new(r0, c0).name(),
+                width: ((c1.saturating_sub(c0)) * 64 + (co / 9525) as u32).max(120),
+                height: ((r1.saturating_sub(r0)) * 20 + (ro / 9525) as u32).max(80),
+            });
+        }
+    }
+    out
 }
 
 fn number_text(n: f64) -> String {
@@ -542,6 +713,9 @@ pub fn write(book: &Book) -> Result<Vec<u8>, String> {
     };
     let mut parts: Vec<(String, Vec<u8>)> = Vec::new();
     let mut sheet_parts = Vec::new();
+    // The sheets with charts, and the charts' numbers, for the content types.
+    let mut drawings: Vec<usize> = Vec::new();
+    let mut charts_made: Vec<usize> = Vec::new();
     for (si, sheet) in wb.sheets.iter().enumerate() {
         let mut x = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">");
         if let Some(u) = sheet.used() {
@@ -614,8 +788,45 @@ pub fn write(book: &Book) -> Result<Vec<u8>, String> {
         if row.is_some() {
             x.push_str("</row>");
         }
-        x.push_str("</sheetData></worksheet>");
+        x.push_str("</sheetData>");
+        if !sheet.charts.is_empty() {
+            x.push_str("<drawing r:id=\"rId1\"/>");
+            drawings.push(si);
+        }
+        x.push_str("</worksheet>");
         sheet_parts.push((format!("xl/worksheets/sheet{}.xml", si + 1), x.into_bytes()));
+    }
+    // Each sheet's charts: a drawing that places them, and a part each.
+    let mut chart_n = 0;
+    for (d, &si) in drawings.iter().enumerate() {
+        let (d, sheet) = (d + 1, &wb.sheets[si]);
+        sheet_parts.push((
+            format!("xl/worksheets/_rels/sheet{}.xml.rels", si + 1),
+            format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing{d}.xml\"/></Relationships>").into_bytes(),
+        ));
+        let mut anchors = String::new();
+        let mut rels = String::new();
+        for (k, chart) in sheet.charts.iter().enumerate() {
+            chart_n += 1;
+            let at = CellRef::parse(&chart.at).unwrap_or(CellRef::new(0, 0));
+            let (cols, col_off) = (chart.width / 64, (chart.width % 64) as u64 * 9525);
+            let (rows, row_off) = (chart.height / 20, (chart.height % 20) as u64 * 9525);
+            anchors.push_str(&format!(
+                "<xdr:twoCellAnchor><xdr:from><xdr:col>{}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>{}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>{}</xdr:col><xdr:colOff>{col_off}</xdr:colOff><xdr:row>{}</xdr:row><xdr:rowOff>{row_off}</xdr:rowOff></xdr:to><xdr:graphicFrame macro=\"\"><xdr:nvGraphicFramePr><xdr:cNvPr id=\"{}\" name=\"Chart {}\"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"rId{}\"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>",
+                at.col, at.row, at.col + cols, at.row + rows, k + 2, k + 1, k + 1
+            ));
+            rels.push_str(&format!("<Relationship Id=\"rId{}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart{chart_n}.xml\"/>", k + 1));
+            sheet_parts.push((format!("xl/charts/chart{chart_n}.xml"), chart_xml(book, si, chart).into_bytes()));
+            charts_made.push(chart_n);
+        }
+        sheet_parts.push((
+            format!("xl/drawings/drawing{d}.xml"),
+            format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">{anchors}</xdr:wsDr>").into_bytes(),
+        ));
+        sheet_parts.push((
+            format!("xl/drawings/_rels/drawing{d}.xml.rels"),
+            format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{rels}</Relationships>").into_bytes(),
+        ));
     }
 
     let ns = "xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"";
@@ -645,6 +856,12 @@ pub fn write(book: &Book) -> Result<Vec<u8>, String> {
     let mut types = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>");
     for i in 1..=n {
         types.push_str(&format!("<Override PartName=\"/xl/worksheets/sheet{i}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"));
+    }
+    for d in 1..=drawings.len() {
+        types.push_str(&format!("<Override PartName=\"/xl/drawings/drawing{d}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>"));
+    }
+    for c in &charts_made {
+        types.push_str(&format!("<Override PartName=\"/xl/charts/chart{c}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>"));
     }
     types.push_str("<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/><Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/></Types>");
 
@@ -697,6 +914,7 @@ mod tests {
         s.widths.insert(0, 140.0);
         s.widths.insert(3, 60.0);
         s.frozen = Frozen { rows: 1, cols: 1 };
+        s.charts.push(crate::model::Chart { kind: crate::model::ChartKind::Bar, range: "A1:B3".into(), title: "Costs".into(), at: "E2".into(), width: 480, height: 300 });
         let mut other = Sheet::new("s2", "Q1 & Q2");
         other.cells.insert(CellRef::new(0, 0), Cell { input: "=Sheet1!B4*2".into(), style: 0 });
         other.cells.insert(CellRef::new(1, 0), Cell { input: "line one\nline two".into(), style: 0 });

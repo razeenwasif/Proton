@@ -108,6 +108,32 @@ pub struct Rule {
     pub bold: bool,
 }
 
+/// What kind of chart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChartKind {
+    #[default]
+    Line,
+    Bar,
+    Scatter,
+    Pie,
+}
+
+/// A chart over a range: its first row the series' names when it is text,
+/// its first column the categories (or a scatter's x). Placed with its top
+/// left at a cell, and sized in pixels.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Chart {
+    pub kind: ChartKind,
+    pub range: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    /// The cell its top left corner is on.
+    pub at: String,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// One sheet.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Sheet {
@@ -122,6 +148,7 @@ pub struct Sheet {
     pub filter: Option<Filter>,
     /// Conditional colours, the first that applies to a cell winning.
     pub rules: Vec<Rule>,
+    pub charts: Vec<Chart>,
 }
 
 impl Sheet {

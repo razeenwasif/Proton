@@ -213,6 +213,68 @@ impl From<SheetRuleView> for proton_sheet::model::Rule {
     }
 }
 
+/// What kind of chart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "lowercase")]
+pub enum SheetChartKind {
+    Line,
+    Bar,
+    Scatter,
+    Pie,
+}
+
+/// A chart as it is kept: over a range, at a cell, so many pixels big.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct SheetChart {
+    pub kind: SheetChartKind,
+    pub range: String,
+    pub title: String,
+    pub at: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl From<&proton_sheet::model::Chart> for SheetChart {
+    fn from(c: &proton_sheet::model::Chart) -> Self {
+        use proton_sheet::model::ChartKind as K;
+        let kind = match c.kind {
+            K::Line => SheetChartKind::Line,
+            K::Bar => SheetChartKind::Bar,
+            K::Scatter => SheetChartKind::Scatter,
+            K::Pie => SheetChartKind::Pie,
+        };
+        SheetChart { kind, range: c.range.clone(), title: c.title.clone(), at: c.at.clone(), width: c.width, height: c.height }
+    }
+}
+
+impl From<SheetChart> for proton_sheet::model::Chart {
+    fn from(c: SheetChart) -> Self {
+        use proton_sheet::model::ChartKind as K;
+        let kind = match c.kind {
+            SheetChartKind::Line => K::Line,
+            SheetChartKind::Bar => K::Bar,
+            SheetChartKind::Scatter => K::Scatter,
+            SheetChartKind::Pie => K::Pie,
+        };
+        proton_sheet::model::Chart { kind, range: c.range, title: c.title, at: c.at, width: c.width.clamp(120, 4000), height: c.height.clamp(80, 4000) }
+    }
+}
+
+/// A chart and what it draws: its categories (or a scatter's x values) and
+/// its series, a value or none for each category.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct SheetChartView {
+    pub chart: SheetChart,
+    pub categories: Vec<String>,
+    pub xs: Vec<Option<f64>>,
+    pub series: Vec<(String, Vec<Option<f64>>)>,
+}
+
 /// A sheet's filter: its range, and the columns that have a condition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
@@ -240,6 +302,8 @@ pub struct SheetTabView {
     pub hidden: Vec<[u32; 2]>,
     pub filter: Option<SheetFilterView>,
     pub rules: Vec<SheetRuleView>,
+    /// Its charts; only the sheet shown's with what they draw.
+    pub charts: Vec<SheetChartView>,
 }
 
 /// The workbook open: everything but its cells, which the window asks for
@@ -498,6 +562,9 @@ impl Sheets {
                     Ok(active)
                 })
             }
+            Command::SheetChartAdd { generation, sheet, chart } => self.charts(generation, sheet as usize, None, Some(*chart)),
+            Command::SheetChartSet { generation, sheet, index, chart } => self.charts(generation, sheet as usize, Some(index as usize), Some(*chart)),
+            Command::SheetChartRemove { generation, sheet, index } => self.charts(generation, sheet as usize, Some(index as usize), None),
             Command::SheetInsert { generation, sheet, cols, at, n } => self.lines(generation, sheet as usize, cols, at, n, true),
             Command::SheetDelete { generation, sheet, cols, at, n } => self.lines(generation, sheet as usize, cols, at, n, false),
             Command::SheetWidth { generation, sheet, col, width } => {
@@ -788,6 +855,30 @@ impl Sheets {
         self.change(sheet, cells)
     }
 
+    /// A chart added (no index), changed, or taken away (no chart).
+    fn charts(&mut self, generation: u32, sheet: usize, index: Option<usize>, chart: Option<SheetChart>) -> Vec<Event> {
+        if let Err(events) = self.checked(generation, sheet) {
+            return events;
+        }
+        self.reshape(|wb, active| {
+            let charts = &mut wb.sheets[sheet].charts;
+            if let Some(c) = &chart {
+                if proton_sheet::Range::parse(c.range.trim()).is_none() || CellRef::parse(&c.at).is_none() {
+                    return Err(format!("a chart needs a range and a cell to sit on, not {} at {}", c.range, c.at));
+                }
+            }
+            match (index, chart) {
+                (None, Some(c)) => charts.push(c.into()),
+                (Some(i), Some(c)) if i < charts.len() => charts[i] = c.into(),
+                (Some(i), None) if i < charts.len() => {
+                    charts.remove(i);
+                }
+                _ => return Err("there is no such chart".into()),
+            }
+            Ok(active)
+        })
+    }
+
     /// Rows or columns put in or taken out, every formula following.
     fn lines(&mut self, generation: u32, sheet: usize, cols: bool, at: u32, n: u32, insert: bool) -> Vec<Event> {
         if let Err(events) = self.checked(generation, sheet) {
@@ -961,6 +1052,19 @@ impl Sheets {
                                 columns: f.columns.keys().filter_map(|l| proton_sheet::refs::col_of(l)).collect(),
                             }),
                             rules: s.rules.iter().map(SheetRuleView::from).collect(),
+                            charts: s
+                                .charts
+                                .iter()
+                                .map(|c| {
+                                    let data = (i == open.active).then(|| proton_sheet::arrange::chart_data(&open.book, i, &c.range)).flatten();
+                                    SheetChartView {
+                                        chart: SheetChart::from(c),
+                                        categories: data.as_ref().map(|d| d.categories.clone()).unwrap_or_default(),
+                                        xs: data.as_ref().map(|d| d.xs.clone()).unwrap_or_default(),
+                                        series: data.map(|d| d.series).unwrap_or_default(),
+                                    }
+                                })
+                                .collect(),
                         }
                     })
                     .collect(),
@@ -1421,8 +1525,15 @@ mod tests {
         let b2 = cells_of(&added).into_iter().find(|c| c.row == 1 && c.col == 1).expect("the cells redrawn");
         let b3 = cells_of(&added).into_iter().find(|c| c.row == 2 && c.col == 1).unwrap();
         assert_eq!((b2.fill.as_deref(), b2.bold, b3.fill.as_deref()), (Some("#ffcccc"), true, None));
+        let chart = SheetChart { kind: SheetChartKind::Bar, range: "A1:B4".into(), title: "Kg".into(), at: "D2".into(), width: 400, height: 260 };
+        let made = sheets.apply(&root, Command::SheetChartAdd { generation: g, sheet: 0, chart: Box::new(chart.clone()) });
+        let view = &book_of(&made).unwrap().sheets[0].charts[0];
+        assert_eq!((view.categories.clone(), view.series.clone()), (vec!["pear".to_string(), "apple".into(), "fig".into()], vec![("Kg".to_string(), vec![Some(12.0), Some(4.0), Some(20.0)])]));
+        let moved = sheets.apply(&root, Command::SheetChartSet { generation: g, sheet: 0, index: 0, chart: Box::new(SheetChart { at: "F9".into(), kind: SheetChartKind::Pie, ..chart }) });
+        assert_eq!(book_of(&moved).unwrap().sheets[0].charts[0].chart.at, "F9");
         sheets.apply(&root, Command::SheetSave);
         let back = proton_sheet::folder::read(&root.join("arrange.sheet")).unwrap();
+        assert_eq!((back.sheets[0].charts.len(), back.sheets[0].charts[0].kind), (1, proton_sheet::model::ChartKind::Pie));
         assert_eq!((back.sheets[0].rules.len(), back.sheets[0].filter.as_ref().map(|f| f.columns.len())), (1, Some(1)));
         let _ = std::fs::remove_dir_all(root);
     }

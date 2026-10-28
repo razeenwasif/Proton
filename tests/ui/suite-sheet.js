@@ -9,7 +9,7 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
   const sent = (/** @type {number} */ from, /** @type {string} */ type) => win.commands.slice(from).filter((/** @type {any} */ c) => c.type === type);
   const plain = {bold: false, italic: false, underline: false, color: null, fill: null, format: '', align: null, wrap: false};
   const book = (/** @type {Partial<any>} */ more = {}) => ({type: 'sheetBook', book: {path: 'budget.sheet', name: 'budget', kind: 'folder',
-    sheets: [{name: 'Sheet1', rows: 7, cols: 3, frozen: [0, 0], widths: [[0, 90]], hidden: [], filter: null, rules: []}, {name: 'Q2', rows: 0, cols: 0, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: []}],
+    sheets: [{name: 'Sheet1', rows: 7, cols: 3, frozen: [0, 0], widths: [[0, 90]], hidden: [], filter: null, rules: [], charts: []}, {name: 'Q2', rows: 0, cols: 0, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: [], charts: []}],
     active: 0, styles: [plain, {...plain, bold: true, fill: '#ffff00'}], generation: 3, version: 1, dirty: false, canUndo: false, canRedo: false, dropped: [], ...more}});
   const cell = (/** @type {number} */ row, /** @type {number} */ col, /** @type {string} */ text, input = text, kind = 't', style = 0) =>
     ({row, col, text, input, style, kind, color: null, fill: null, bold: false});
@@ -184,7 +184,7 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
   });
 
   await test('Frozen rows stay on screen as the grid scrolls, and a click there picks them', async () => {
-    await win.pushEvents([book({active: 0, version: 4, sheets: [{name: 'Sheet1', rows: 500, cols: 3, frozen: [1, 0], widths: [], hidden: [], filter: null, rules: []}, {name: 'Q2', rows: 0, cols: 0, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: []}]}),
+    await win.pushEvents([book({active: 0, version: 4, sheets: [{name: 'Sheet1', rows: 500, cols: 3, frozen: [1, 0], widths: [], hidden: [], filter: null, rules: [], charts: []}, {name: 'Q2', rows: 0, cols: 0, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: [], charts: []}]}),
       cells([cell(0, 0, 'Item', 'Item', 't'), cell(300, 0, 'deep', 'deep', 't')])]);
     await settle();
     const scroll = ws().querySelector('[data-sheet-scroll]');
@@ -232,7 +232,7 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
   });
 
   await test('A filter hides its rows from the grid, its ▾ lists the values to tick, and sorting and colour rules are asked for', async () => {
-    const tabOf = (/** @type {any} */ more) => ({name: 'Sheet1', rows: 6, cols: 2, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: [], ...more});
+    const tabOf = (/** @type {any} */ more) => ({name: 'Sheet1', rows: 6, cols: 2, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: [], charts: [], ...more});
     await win.pushEvents([book({active: 0, version: 6, sheets: [tabOf({hidden: [[2, 3]], filter: {range: 'A1:B6', columns: [1]}})]}),
       cells([cell(0, 0, 'Fruit'), cell(0, 1, 'Kg'), cell(1, 0, 'pear'), cell(2, 0, 'apple'), cell(3, 0, 'fig'), cell(4, 0, 'kiwi'), cell(4, 1, '9', '9', 'n', 0)])]);
     await settle();
@@ -278,6 +278,37 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
     const nine = /** @type {HTMLElement} */ (ws().querySelector('[data-cell="4,1"]'));
     assert(nine?.style.background.includes('255, 0, 0') && nine.style.fontWeight === '700', 'a rule\'s colour is not drawn');
     await win.pushEvents([book({active: 0, version: 7})]); await settle();
+  });
+
+  await test('A chart is drawn from its series, moved by its header, made another kind, and removed', async () => {
+    const chart = {kind: 'bar', range: 'A1:B3', title: 'Costs', at: 'E2', width: 400, height: 260};
+    const view = {chart, categories: ['Rent', 'Food'], xs: [null, null], series: [['Cost', [1450, -300]]]};
+    await win.pushEvents([book({active: 0, version: 8, sheets: [{name: 'Sheet1', rows: 3, cols: 2, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: [], charts: [view]}]})]);
+    await settle();
+    const el = /** @type {HTMLElement} */ (ws().querySelector('[data-chart="0"]'));
+    assert(el && parseFloat(el.style.left) === 52 + 4 * 72 && parseFloat(el.style.top) === 24 + 24, `the chart is at ${el?.style.left}, ${el?.style.top}`);
+    assert(el.querySelectorAll('svg rect').length === 2 && el.querySelector('.xl-chart-title').textContent === 'Costs', 'the bars or the title are not drawn');
+    const before = win.commands.length;
+    const head = el.querySelector('[data-chart-drag]');
+    const x = head.getBoundingClientRect().left + 200, y = head.getBoundingClientRect().top + 10;
+    head.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, button: 0, clientX: x, clientY: y}));
+    win.dispatchEvent(new win.MouseEvent('mousemove', {bubbles: true, clientX: x + 72, clientY: y + 48}));
+    win.dispatchEvent(new win.MouseEvent('mouseup', {bubbles: true})); await settle();
+    const moved = sent(before, 'sheetChartSet')[0];
+    assert(moved?.index === 0 && moved.chart.at === 'F4' && moved.chart.range === 'A1:B3', `moving it sent ${JSON.stringify(moved)}`);
+    const kind = el.querySelector('[data-chart-kind]');
+    kind.value = 'pie'; kind.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(sent(before, 'sheetChartSet')[1]?.chart.kind === 'pie', 'the kind did not change');
+    el.querySelector('[data-chart-remove]').click(); await settle();
+    assert(sent(before, 'sheetChartRemove')[0]?.index === 0, 'the chart was not removed');
+    // The format bar's chart button charts the selection, beside it.
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    scroll.focus();
+    key('g'); key('g'); key('0'); key('v'); key('j'); key('j'); key('l'); await settle();
+    ws().querySelector('[data-sheet-chart]').click(); await settle();
+    const made = sent(before, 'sheetChartAdd')[0]?.chart;
+    assert(made?.range === 'A1:B3' && made.at === 'D1' && made.kind === 'bar', `the chart button made ${JSON.stringify(made)}`);
+    key('Escape'); await settle();
   });
 
   await test('Scrolling a long way asks for the rows there, and the grid goes on', async () => {

@@ -14,6 +14,7 @@
  * anything about another one is dropped. */
 
 import { escapeHtml as esc, icon } from "./html.js";
+import { chartSvg } from "./sheet-chart.js";
 
 /** @typedef {import("./bindings/SheetBookView").SheetBookView} BookView */
 /** @typedef {import("./bindings/SheetCellView").SheetCellView} CellView */
@@ -98,6 +99,7 @@ export function createSheet(host) {
     tabs: q("[data-sheet-tabs]"),
     tools: q("[data-sheet-tools]"),
     editor: /** @type {HTMLInputElement} */ (q("[data-sheet-editor]")),
+    charts: q("[data-sheet-charts]"),
   };
 
   const state = {
@@ -229,7 +231,47 @@ export function createSheet(host) {
     layout();
     ask(true);
     draw();
+    renderCharts();
     showSelected();
+  }
+
+  /** A chart's corner on the cells it sits on. @param {string} at */
+  function chartCorner(at) {
+    const [r, c] = parseCell(at) ?? [0, 0];
+    return { x: HEAD_W + colX(c), y: HEAD_H + rowY(r) };
+  }
+
+  function renderCharts() {
+    const charts = tab()?.charts ?? [];
+    els.charts.innerHTML = charts
+      .map((view, i) => {
+        const { x, y } = chartCorner(view.chart.at);
+        const { width: w, height: h } = view.chart;
+        const kinds = ["line", "bar", "scatter", "pie"].map((k) => `<option value="${k}"${k === view.chart.kind ? " selected" : ""}>${k[0].toUpperCase()}${k.slice(1)}</option>`).join("");
+        return `<div class="xl-chart" data-chart="${i}" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px">
+          <header class="xl-chart-head" data-chart-drag="${i}" title="Drag to move · double-click the title to rename">
+            <span class="xl-chart-title" data-chart-title="${i}">${esc(view.chart.title || view.chart.range)}</span>
+            <select data-chart-kind="${i}" aria-label="Kind of chart">${kinds}</select>
+            <button data-chart-remove="${i}" title="Remove the chart">✕</button>
+          </header>
+          ${chartSvg(view, w, h - 28)}
+          <i class="xl-chart-size" data-chart-size="${i}" title="Drag to resize"></i>
+        </div>`;
+      })
+      .join("");
+  }
+
+  /** A chart changed: moved, resized, retitled, another kind. @param {number} i @param {Partial<import("./bindings/SheetChart").SheetChart>} change */
+  function setChart(i, change) {
+    const view = tab()?.charts[i];
+    if (view) send({ type: "sheetChartSet", index: i, chart: { ...view.chart, ...change } });
+  }
+
+  /** A chart over the selection (or the rows in use), to its right. @param {string} kind */
+  function addChart(kind = "bar") {
+    const r = region(true);
+    const at = cellName(r.r0, r.c1 + 2);
+    send({ type: "sheetChartAdd", chart: { kind, range: rangeName(r), title: "", at, width: 480, height: 300 } });
   }
 
   function layout() {
@@ -560,6 +602,7 @@ export function createSheet(host) {
       case "filter": toggleFilter(); return;
       case "nofilter": send({ type: "sheetFilter", range: null }); return;
       case "rules": openRules(); return;
+      case "chart": addChart(["line", "bar", "scatter", "pie"].includes(arg) ? arg : "bar"); return;
       case "delete": deleteLines(arg.startsWith("col")); return;
       default: {
         // `:B7` goes there.
@@ -706,17 +749,19 @@ export function createSheet(host) {
     <button class="xl-tool" data-sheet-sort="up" title="Sort A→Z by this column  :sort">A↓</button>
     <button class="xl-tool" data-sheet-sort="down" title="Sort Z→A by this column  :sort desc">Z↓</button>
     <button class="xl-tool" data-sheet-filter title="Filter  :filter">▾</button>
-    <button class="xl-tool" data-sheet-rules title="Conditional colour  :rules">◐</button>`;
+    <button class="xl-tool" data-sheet-rules title="Conditional colour  :rules">◐</button>
+    <button class="xl-tool" data-sheet-chart title="A chart of the selection  :chart">▥</button>`;
   els.tools.addEventListener("mousedown", (e) => {
     // Clicking a tool leaves the keyboard with the grid.
     if (e.target instanceof Element && e.target.closest("button")) e.preventDefault();
   });
   els.tools.addEventListener("click", (e) => {
-    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("[data-sheet-style], [data-sheet-clear-style], [data-sheet-sort], [data-sheet-filter], [data-sheet-rules]")) : null;
+    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("[data-sheet-style], [data-sheet-clear-style], [data-sheet-sort], [data-sheet-filter], [data-sheet-rules], [data-sheet-chart]")) : null;
     if (!b || !state.book) return;
     if (b.dataset.sheetSort) return sortBy(b.dataset.sheetSort === "down");
     if (b.dataset.sheetFilter !== undefined) return toggleFilter();
     if (b.dataset.sheetRules !== undefined) return openRules();
+    if (b.dataset.sheetChart !== undefined) return addChart();
     const k = b.dataset.sheetStyle;
     if (b.dataset.sheetClearStyle !== undefined) format({ bold: false, italic: false, underline: false, wrap: false, color: "", fill: "", align: "", format: "" });
     else if (k === "bold" || k === "italic" || k === "underline" || k === "wrap") toggle(k);
@@ -913,10 +958,55 @@ export function createSheet(host) {
   }
 
   /** What a drag is doing: selecting, filling from the handle, or widening a column. */
-  let drag = /** @type {null | {kind: "select"} | {kind: "fill", from: Sel} | {kind: "width", col: number, x: number, w: number}} */ (null);
+  let drag = /** @type {null | {kind: "select"} | {kind: "fill", from: Sel} | {kind: "width", col: number, x: number, w: number}
+    | {kind: "chart" | "chartSize", i: number, x: number, y: number, el: HTMLElement, left: number, top: number, w: number, h: number}} */ (null);
+  els.charts.addEventListener("mousedown", (e) => {
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    const el = /** @type {HTMLElement | null} */ (t?.closest(".xl-chart") ?? null);
+    if (!t || !el || e.button !== 0) return;
+    if (t.closest("select, button")) return;
+    const i = Number(el.dataset.chart);
+    const move = t.closest("[data-chart-drag]") && !t.closest("[data-chart-title]") ? "chart" : t.dataset.chartSize !== undefined ? "chartSize" : null;
+    if (!move) return;
+    drag = { kind: move, i, x: e.clientX, y: e.clientY, el, left: el.offsetLeft, top: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
+    e.preventDefault();
+  });
+  els.charts.addEventListener("change", (e) => {
+    const t = e.target instanceof HTMLSelectElement ? e.target : null;
+    if (t?.dataset.chartKind !== undefined) setChart(Number(t.dataset.chartKind), { kind: /** @type {any} */ (t.value) });
+  });
+  els.charts.addEventListener("click", (e) => {
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    if (t?.dataset.chartRemove !== undefined) send({ type: "sheetChartRemove", index: Number(t.dataset.chartRemove) });
+  });
+  els.charts.addEventListener("dblclick", (e) => {
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    if (t?.dataset.chartTitle === undefined) return;
+    e.stopPropagation();
+    const i = Number(t.dataset.chartTitle);
+    const field = document.createElement("input");
+    field.className = "xl-chart-rename";
+    field.value = tab()?.charts[i]?.chart.title ?? "";
+    t.replaceChildren(field);
+    field.focus();
+    let done = false;
+    const finish = (/** @type {boolean} */ keep) => {
+      if (done) return;
+      done = true;
+      if (keep) setChart(i, { title: field.value.trim() });
+      else renderCharts();
+    };
+    field.addEventListener("keydown", (k) => {
+      if (k.key === "Enter") finish(true);
+      else if (k.key === "Escape") finish(false);
+      k.stopPropagation();
+    });
+    field.addEventListener("blur", () => finish(true));
+  });
   els.scroll.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || !state.book) return;
     const t = e.target instanceof HTMLElement ? e.target : null;
+    if (t?.closest(".xl-chart")) return;
     if (t?.dataset.filterCol !== undefined) {
       e.preventDefault();
       send({ type: "sheetFilterValues", col: Number(t.dataset.filterCol) });
@@ -968,6 +1058,16 @@ export function createSheet(host) {
   });
   window.addEventListener("mousemove", (e) => {
     if (!drag) return;
+    if (drag.kind === "chart") {
+      drag.el.style.left = `${Math.max(HEAD_W, drag.left + e.clientX - drag.x)}px`;
+      drag.el.style.top = `${Math.max(HEAD_H, drag.top + e.clientY - drag.y)}px`;
+      return;
+    }
+    if (drag.kind === "chartSize") {
+      drag.el.style.width = `${Math.max(160, drag.w + e.clientX - drag.x)}px`;
+      drag.el.style.height = `${Math.max(120, drag.h + e.clientY - drag.y)}px`;
+      return;
+    }
     if (drag.kind === "width") {
       widths.set(drag.col, Math.max(16, drag.w + e.clientX - drag.x));
       layout();
@@ -977,7 +1077,7 @@ export function createSheet(host) {
     const [r, c] = cellUnder(e);
     if (drag.kind === "select") {
       if (r !== state.to[0] || c !== state.to[1]) select(r, c, true);
-    } else {
+    } else if (drag.kind === "fill") {
       // The fill goes the way the pointer went furthest: down or across.
       const f = drag.from;
       const down = Math.abs(r - f.r1) >= Math.abs(c - f.c1);
@@ -989,7 +1089,13 @@ export function createSheet(host) {
     const d = drag;
     drag = null;
     if (!d || !state.book) return;
-    if (d.kind === "width") {
+    if (d.kind === "chart") {
+      // It sits on the cell its corner was dropped on.
+      const r = rowAt(d.el.offsetTop - HEAD_H), c = colAt(d.el.offsetLeft - HEAD_W);
+      setChart(d.i, { at: cellName(r, c) });
+    } else if (d.kind === "chartSize") {
+      setChart(d.i, { width: d.el.offsetWidth, height: d.el.offsetHeight });
+    } else if (d.kind === "width") {
       send({ type: "sheetWidth", col: d.col, width: Math.round(width(d.col) * 75) / 100 });
     } else if (d.kind === "fill") {
       const to = selection();
