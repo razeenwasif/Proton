@@ -159,6 +159,5 @@ planned in [`CIRCUIT.md`](CIRCUIT.md). It covers:
 - Verilog, VHDL and SVG out, and `.dig` in;
 - the agent and Notebook's exercises.
 
-Milestones are C0–C9. Waits on: Excel, then Notebook's and Research's
-backlogs; the label, the key (⌃7 proposed) and the open points in the plan's
-"To decide".
+Milestones are C0–C9, being built from 2026-10-28: "Circuit" on ⌃7, the
+simulator in the core, Digital's `.dig` files read in C7.

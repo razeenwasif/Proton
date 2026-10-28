@@ -7,7 +7,7 @@ their values. You check them against test tables, and get truth tables,
 minimised expressions and circuits from one another. An agent can read and
 build circuits too. Asked for on 2026-10-28.
 
-## Proposed (to confirm)
+## Decided (2026-10-28)
 
 - **The label is "Circuit"**, on the rail and the title bar, on **⌃7**, after
   Excel's ⌃6. In the code it is `circuit`: `ModeId::Circuit`, the crate
@@ -24,8 +24,9 @@ build circuits too. Asked for on 2026-10-28.
   using it), never by reading or translating its sources. The tests use
   circuits made here, not Digital's examples. Reading `.dig` files (C7) reads
   a file format, which is fine; we ship none of theirs.
-- **It comes after the work already queued:** Excel (E0–E8), then Notebook's
-  backlog, then Research's.
+- **Built now,** after Excel, at the person's word on 2026-10-28.
+- **Digital's `.dig` files are read** (C7), parts that cannot be mapped named
+  when the file opens.
 
 ## The format: `Name.circuit/`
 
@@ -220,10 +221,8 @@ Each lands with its tests passing.
 | **C8** | The agent's tools, `@circuit`, Notebook's exercises | through `run_tool`, as the other tools are tested |
 | **C9** | Measured: a small CPU in quick run at 100 kHz or more, a 2,500-part circuit drawn at 60 fps; docs; the status page | timing budgets |
 
-## To decide
+## Decided at the start
 
-- **The label and key:** "Circuit" on ⌃7, or another name.
-- **Where the simulator runs:** in the core (proposed: one engine, and tests
-  and the agent see what the window sees), or as WebAssembly in the window, if
-  C3's measurements show clicks feel slow.
-- **Whether `.dig` import is wanted** at all, or circuits start here only.
+On 2026-10-28: the label "Circuit" on ⌃7; the simulator in the core (moved to
+WebAssembly in the window only if C3's measurements show clicks feel slow);
+and `.dig` import in C7.
