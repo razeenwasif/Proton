@@ -62,7 +62,7 @@ export function createSheetPreview(deliver) {
     { path: "budget.sheet", name: "budget", kind: "folder" },
     { path: "data/people.csv", name: "people", kind: "csv" },
   ];
-  /** @type {{path: string, name: string, kind: string, sheets: {name: string, cells: Map<string, string>}[], active: number, generation: number, version: number, done: any[], undone: any[], saved: number, state: number} | null} */
+  /** @type {{path: string, name: string, kind: string, sheets: {name: string, cells: Map<string, string>, frozen?: number[], widths?: Map<number, number>}[], active: number, generation: number, version: number, done: any[], undone: any[], saved: number, state: number} | null} */
   let book = null;
   let generations = 0;
   let states = 0;
@@ -122,7 +122,7 @@ export function createSheetPreview(deliver) {
           rows = Math.max(rows, r + 1);
           cols = Math.max(cols, c + 1);
         }
-        return { name: sh.name, rows, cols, frozen: [0, 0], widths: [] };
+        return { name: sh.name, rows, cols, frozen: sh.frozen ?? [0, 0], widths: [...(sh.widths ?? new Map())] };
       }),
     },
   });
@@ -223,8 +223,40 @@ export function createSheetPreview(deliver) {
           book.active = Math.min(book.active, book.sheets.length - 1);
           book.state = ++states;
           return [bookEvent(), cellsEvent()].filter(Boolean);
+        case "sheetFreeze":
+          if (book) book.sheets[command.sheet].frozen = [command.rows, command.cols];
+          return [bookEvent(), cellsEvent()].filter(Boolean);
+        case "sheetWidth": {
+          if (!book) return [];
+          const sh = book.sheets[command.sheet];
+          sh.widths ??= new Map();
+          if (command.width === null) sh.widths.delete(command.col);
+          else sh.widths.set(command.col, command.width);
+          return [bookEvent(), cellsEvent()].filter(Boolean);
+        }
+        case "sheetCopy": {
+          if (!book) return [];
+          const [a, b = a] = command.range.split(":");
+          const [r0, c0] = parse(a) ?? [0, 0], [r1, c1] = parse(b) ?? [0, 0];
+          const lines = [];
+          for (let r = r0; r <= r1; r++) {
+            const line = [];
+            for (let c = c0; c <= c1; c++) line.push(cellView(command.sheet, `${colName(c)}${r + 1}`).text);
+            lines.push(line.join("\t"));
+          }
+          return [{ type: "sheetClip", text: lines.join("\n") + "\n" }];
+        }
+        case "sheetPaste": {
+          if (!book) return [];
+          const [r0, c0] = parse(command.at) ?? [0, 0];
+          const cells = command.text.replace(/\r/g, "").replace(/\n$/, "").split("\n")
+            .flatMap((/** @type {string} */ line, /** @type {number} */ r) => line.split("\t").map((v, c) => [`${colName(c0 + c)}${r0 + r + 1}`, v]));
+          put(command.sheet, cells);
+          return [bookEvent(), cellsEvent()].filter(Boolean);
+        }
         default:
-          return [];
+          // Fills, formats, rows and columns are the real engine's.
+          return command.type.startsWith("sheet") ? [{ type: "notice", text: "the preview does not do that: the app does", level: "info" }] : [];
       }
     },
   };

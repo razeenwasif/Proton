@@ -494,6 +494,67 @@ pub enum Command {
         sheet: u32,
         cells: Vec<(String, String)>,
     },
+    /// The cells of a range onto the clipboard, as tab-separated values;
+    /// kept here too, so pasting them brings their formulas. A cut is
+    /// emptied when it is pasted.
+    SheetCopy {
+        generation: u32,
+        sheet: u32,
+        range: String,
+        cut: bool,
+    },
+    /// Text pasted at a cell: what was copied here, or tab-separated text.
+    SheetPaste {
+        generation: u32,
+        sheet: u32,
+        at: String,
+        text: String,
+    },
+    /// `to`, which starts with `from`, filled from it: a series continued,
+    /// formulas moved.
+    SheetFill {
+        generation: u32,
+        sheet: u32,
+        from: String,
+        to: String,
+    },
+    /// Rows, or `cols`, put in before `at`.
+    SheetInsert {
+        generation: u32,
+        sheet: u32,
+        cols: bool,
+        at: u32,
+        n: u32,
+    },
+    /// Rows, or `cols`, taken out from `at`.
+    SheetDelete {
+        generation: u32,
+        sheet: u32,
+        cols: bool,
+        at: u32,
+        n: u32,
+    },
+    /// A range's style changed: only the parts the patch gives.
+    SheetFormat {
+        generation: u32,
+        sheet: u32,
+        range: String,
+        patch: crate::sheet::SheetStylePatch,
+    },
+    /// A column's width in points, or the default's.
+    SheetWidth {
+        generation: u32,
+        sheet: u32,
+        col: u32,
+        width: Option<f64>,
+    },
+    /// The rows and columns that stay put while the rest scrolls.
+    SheetFreeze {
+        generation: u32,
+        sheet: u32,
+        rows: u32,
+        cols: u32,
+    },
     SheetUndo,
     SheetRedo,
     /// Show another sheet.
@@ -1350,6 +1411,10 @@ pub enum Event {
     /// The project's workbooks, for Excel mode's home page.
     SheetHome {
         workbooks: Vec<crate::sheet::SheetFound>,
+    },
+    /// What was copied, for the system clipboard.
+    SheetClip {
+        text: String,
     },
     /// The workbook open — its sheets, styles and whether it is saved — or none.
     SheetBook {

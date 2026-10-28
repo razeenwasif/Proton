@@ -18,7 +18,8 @@
 
 use std::path::{Path, PathBuf};
 
-use proton_sheet::{numfmt, Book, CellRef, Value, Workbook};
+use proton_sheet::edit::{self, Axis};
+use proton_sheet::{numfmt, Book, Cell, CellRef, Range, Value, Workbook};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -32,6 +33,8 @@ pub const EXTENSION: &str = "sheet";
 /// for what is on screen, and a screen holds far fewer.
 const MOST_ROWS: u32 = 400;
 const MOST_COLS: u32 = 120;
+/// No more cells than this are copied, filled or formatted in one go.
+const MOST_CLIP: u64 = 250_000;
 
 /// What a workbook is kept as on disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -98,6 +101,52 @@ impl From<&proton_sheet::Style> for SheetStyle {
     }
 }
 
+/// A change to cells' style: only the parts given, the rest kept. An empty
+/// colour, alignment or format clears it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct SheetStylePatch {
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+    pub wrap: Option<bool>,
+    pub color: Option<String>,
+    pub fill: Option<String>,
+    pub align: Option<String>,
+    pub format: Option<String>,
+}
+
+impl SheetStylePatch {
+    fn apply(&self, s: &mut proton_sheet::Style) {
+        let some = |v: &String| (!v.is_empty()).then(|| v.clone());
+        if let Some(b) = self.bold {
+            s.bold = b;
+        }
+        if let Some(b) = self.italic {
+            s.italic = b;
+        }
+        if let Some(b) = self.underline {
+            s.underline = b;
+        }
+        if let Some(b) = self.wrap {
+            s.wrap = b;
+        }
+        if let Some(c) = &self.color {
+            s.color = some(c);
+        }
+        if let Some(c) = &self.fill {
+            s.fill = some(c);
+        }
+        if let Some(a) = &self.align {
+            s.align = some(a).filter(|a| matches!(a.as_str(), "left" | "center" | "right"));
+        }
+        if let Some(f) = &self.format {
+            s.format = f.clone();
+        }
+    }
+}
+
 /// One sheet's tab, and what the grid needs to lay it out.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
@@ -159,8 +208,9 @@ pub struct SheetCellView {
 /// One undoable change.
 #[derive(Debug, Clone)]
 enum Step {
-    /// Cells of one sheet, as they were and as they became.
-    Cells { sheet: usize, before: Vec<(CellRef, String)>, after: Vec<(CellRef, String)> },
+    /// Cells of one sheet — what was typed and their style — as they were
+    /// and as they became.
+    Cells { sheet: usize, before: Vec<(CellRef, Cell)>, after: Vec<(CellRef, Cell)> },
     /// Anything to the workbook's shape — a sheet added, renamed, taken
     /// away — kept whole, as such changes are few.
     Book { before: Box<Workbook>, after: Box<Workbook>, active: (usize, usize) },
@@ -185,6 +235,19 @@ struct Open {
     /// The rectangle last asked for: (sheet, rows, cols).
     view: Option<(usize, [u32; 2], [u32; 2])>,
     dropped: Vec<String>,
+    /// What was last copied here, to paste with its formulas.
+    clip: Option<Clip>,
+}
+
+#[derive(Debug, Clone)]
+struct Clip {
+    generation: u32,
+    sheet: usize,
+    range: Range,
+    cells: Vec<(CellRef, Cell)>,
+    /// What went on the clipboard: a paste of this is a paste of these.
+    text: String,
+    cut: bool,
 }
 
 impl std::fmt::Debug for Open {
@@ -266,6 +329,39 @@ impl Sheets {
                 vec![cells_event(open, sheet as usize, rows, cols, None)]
             }
             Command::SheetSet { generation, sheet, cells } => self.set(generation, sheet as usize, cells),
+            Command::SheetCopy { generation, sheet, range, cut } => self.copy(generation, sheet as usize, &range, cut),
+            Command::SheetPaste { generation, sheet, at, text } => self.paste(generation, sheet as usize, &at, &text),
+            Command::SheetFill { generation, sheet, from, to } => self.fill(generation, sheet as usize, &from, &to),
+            Command::SheetFormat { generation, sheet, range, patch } => self.format(generation, sheet as usize, &range, patch),
+            Command::SheetInsert { generation, sheet, cols, at, n } => self.lines(generation, sheet as usize, cols, at, n, true),
+            Command::SheetDelete { generation, sheet, cols, at, n } => self.lines(generation, sheet as usize, cols, at, n, false),
+            Command::SheetWidth { generation, sheet, col, width } => {
+                if let Err(events) = self.checked(generation, sheet as usize) {
+                    return events;
+                }
+                self.reshape(|wb, active| {
+                    let widths = &mut wb.sheets[sheet as usize].widths;
+                    match width {
+                        Some(w) if (4.0..=1000.0).contains(&w) => {
+                            widths.insert(col, (w * 100.0).round() / 100.0);
+                        }
+                        Some(_) => return Err("a column is between 4 and 1000 points wide".into()),
+                        None => {
+                            widths.remove(&col);
+                        }
+                    }
+                    Ok(active)
+                })
+            }
+            Command::SheetFreeze { generation, sheet, rows, cols } => {
+                if let Err(events) = self.checked(generation, sheet as usize) {
+                    return events;
+                }
+                self.reshape(|wb, active| {
+                    wb.sheets[sheet as usize].frozen = proton_sheet::model::Frozen { rows: rows.min(100), cols: cols.min(50) };
+                    Ok(active)
+                })
+            }
             Command::SheetUndo => self.step(true),
             Command::SheetRedo => self.step(false),
             Command::SheetTab { sheet } => {
@@ -361,29 +457,52 @@ impl Sheets {
             version: 0,
             view: None,
             dropped,
+            clip: None,
         });
     }
 
-    fn set(&mut self, generation: u32, sheet: usize, cells: Vec<(String, String)>) -> Vec<Event> {
+    /// The workbook open, if the window's numbers are for it: its
+    /// generation and a sheet it has.
+    fn checked(&mut self, generation: u32, sheet: usize) -> Result<&mut Open, Vec<Event>> {
         let Some(open) = &mut self.open else {
-            return vec![notice("no workbook is open".into(), NoticeLevel::Warn)];
+            return Err(vec![notice("no workbook is open".into(), NoticeLevel::Warn)]);
         };
         if generation != open.generation {
-            return vec![notice("that workbook is no longer open".into(), NoticeLevel::Warn)];
+            return Err(vec![notice("that workbook is no longer open".into(), NoticeLevel::Warn)]);
         }
         if sheet >= open.book.workbook().sheets.len() {
-            return vec![notice("there is no such sheet".into(), NoticeLevel::Warn)];
+            return Err(vec![notice("there is no such sheet".into(), NoticeLevel::Warn)]);
         }
-        let mut before = Vec::new();
+        Ok(open)
+    }
+
+    fn set(&mut self, generation: u32, sheet: usize, cells: Vec<(String, String)>) -> Vec<Event> {
+        let open = match self.checked(generation, sheet) {
+            Ok(open) => open,
+            Err(events) => return events,
+        };
         let mut after = Vec::new();
         for (at, input) in cells {
             let Some(at) = CellRef::parse(&at) else {
                 return vec![notice(format!("{at} is not a cell"), NoticeLevel::Warn)];
             };
-            let was = open.book.input(sheet, at).to_string();
-            if was != input {
+            let style = cell_at(&open.book, sheet, at).style;
+            after.push((at, Cell { input, style }));
+        }
+        self.change(sheet, after)
+    }
+
+    /// Cells of a sheet changed as one step: those that differ from what
+    /// they were, and nothing when none do.
+    fn change(&mut self, sheet: usize, cells: Vec<(CellRef, Cell)>) -> Vec<Event> {
+        let Some(open) = &mut self.open else { return Vec::new() };
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        for (at, cell) in cells {
+            let was = cell_at(&open.book, sheet, at);
+            if was != cell {
                 before.push((at, was));
-                after.push((at, input));
+                after.push((at, cell));
             }
         }
         if after.is_empty() {
@@ -394,6 +513,159 @@ impl Sheets {
         let mut events = vec![self.book_event()];
         events.extend(self.moved_event(moved));
         events
+    }
+
+    /// The selection's cells as text for the clipboard — tab between cells,
+    /// a line a row, values as they show — and kept, so a paste of the same
+    /// text here brings their formulas and styles.
+    fn copy(&mut self, generation: u32, sheet: usize, range: &str, cut: bool) -> Vec<Event> {
+        let open = match self.checked(generation, sheet) {
+            Ok(open) => open,
+            Err(events) => return events,
+        };
+        let Some(range) = range_of(range) else {
+            return vec![notice(format!("{range} is not a range"), NoticeLevel::Warn)];
+        };
+        let wb = open.book.workbook();
+        let range = clip_to_used(wb, sheet, range);
+        if range.rows() as u64 * range.cols() as u64 > MOST_CLIP {
+            return vec![notice("that is more than can be copied at once".into(), NoticeLevel::Warn)];
+        }
+        let mut text = String::new();
+        let mut cells = Vec::new();
+        for r in range.start.row..=range.end.row {
+            let mut line = Vec::new();
+            for c in range.start.col..=range.end.col {
+                let at = CellRef::new(r, c);
+                let cell = cell_at(&open.book, sheet, at);
+                let format = wb.styles.get(cell.style as usize).map_or("", |st| st.format.as_str());
+                let shown = numfmt::show(&open.book.value(sheet, at), format).text;
+                line.push(shown.replace(['\t', '\n', '\r'], " "));
+                cells.push((at, cell));
+            }
+            text.push_str(line.join("\t").trim_end_matches('\t'));
+            text.push('\n');
+        }
+        open.clip = Some(Clip { generation, sheet, range, cells, text: text.clone(), cut });
+        vec![Event::SheetClip { text }]
+    }
+
+    /// Text pasted at a cell: what was copied here, formulas moved and
+    /// styles kept — and cut cells emptied — or else tab-separated text, as
+    /// if typed.
+    fn paste(&mut self, generation: u32, sheet: usize, at: &str, text: &str) -> Vec<Event> {
+        let open = match self.checked(generation, sheet) {
+            Ok(open) => open,
+            Err(events) => return events,
+        };
+        let Some(at) = CellRef::parse(at) else {
+            return vec![notice(format!("{at} is not a cell"), NoticeLevel::Warn)];
+        };
+        let ours = open.clip.as_ref().filter(|c| c.generation == generation && c.text.trim_end() == text.replace("\r\n", "\n").trim_end()).cloned();
+        let mut cells: Vec<(CellRef, Cell)> = Vec::new();
+        match ours {
+            Some(clip) => {
+                let (dr, dc) = (at.row as i64 - clip.range.start.row as i64, at.col as i64 - clip.range.start.col as i64);
+                if clip.cut {
+                    // A cut is moved once: its cells are emptied, then filled where they land.
+                    if clip.sheet == sheet {
+                        cells.extend(clip.cells.iter().map(|(from, _)| (*from, Cell::default())));
+                    } else {
+                        let mut out = self.change(clip.sheet, clip.cells.iter().map(|(from, _)| (*from, Cell::default())).collect());
+                        if let Some(open) = &mut self.open {
+                            open.clip = None;
+                        }
+                        out.extend(self.paste_cells(sheet, clip.cells.iter().map(|(from, cell)| (shift(*from, dr, dc), Cell { input: cell.input.clone(), style: cell.style })).collect()));
+                        return out;
+                    }
+                }
+                for (from, cell) in &clip.cells {
+                    let Some(to) = shift(*from, dr, dc) else { continue };
+                    let input = if clip.cut { cell.input.clone() } else { edit::moved_input(&cell.input, dr, dc) };
+                    cells.retain(|(a, _)| *a != to);
+                    cells.push((to, Cell { input, style: cell.style }));
+                }
+                if clip.cut {
+                    if let Some(open) = &mut self.open {
+                        open.clip = None;
+                    }
+                }
+            }
+            None => {
+                for (dr, row) in proton_sheet::csv::rows(text, '\t').into_iter().enumerate() {
+                    for (dc, field) in row.into_iter().enumerate() {
+                        let Some(to) = shift(at, dr as i64, dc as i64) else { continue };
+                        let style = cell_at(&open.book, sheet, to).style;
+                        cells.push((to, Cell { input: field, style }));
+                    }
+                }
+            }
+        }
+        self.change(sheet, cells)
+    }
+
+    fn paste_cells(&mut self, sheet: usize, cells: Vec<(Option<CellRef>, Cell)>) -> Vec<Event> {
+        self.change(sheet, cells.into_iter().filter_map(|(at, cell)| at.map(|at| (at, cell))).collect())
+    }
+
+    fn fill(&mut self, generation: u32, sheet: usize, from: &str, to: &str) -> Vec<Event> {
+        let open = match self.checked(generation, sheet) {
+            Ok(open) => open,
+            Err(events) => return events,
+        };
+        let (Some(from), Some(to)) = (range_of(from), range_of(to)) else {
+            return vec![notice("a fill needs two ranges".into(), NoticeLevel::Warn)];
+        };
+        if !(to.contains(from.start) && to.contains(from.end)) || to.rows() as u64 * to.cols() as u64 > MOST_CLIP {
+            return vec![notice("a fill goes on from what is selected, down or across".into(), NoticeLevel::Warn)];
+        }
+        let cells = edit::fill(&open.book.workbook().sheets[sheet].cells, from, to);
+        self.change(sheet, cells)
+    }
+
+    /// Rows or columns put in or taken out, every formula following.
+    fn lines(&mut self, generation: u32, sheet: usize, cols: bool, at: u32, n: u32, insert: bool) -> Vec<Event> {
+        if let Err(events) = self.checked(generation, sheet) {
+            return events;
+        }
+        let axis = if cols { Axis::Cols } else { Axis::Rows };
+        let n = n.clamp(1, 10_000);
+        self.reshape(|wb, active| {
+            if insert {
+                edit::insert(wb, sheet, axis, at, n);
+            } else {
+                edit::delete(wb, sheet, axis, at, n);
+            }
+            Ok(active)
+        })
+    }
+
+    /// A style changed over a range: only what the patch says, the rest of
+    /// each cell's style kept.
+    fn format(&mut self, generation: u32, sheet: usize, range: &str, patch: SheetStylePatch) -> Vec<Event> {
+        let open = match self.checked(generation, sheet) {
+            Ok(open) => open,
+            Err(events) => return events,
+        };
+        let Some(range) = range_of(range) else {
+            return vec![notice(format!("{range} is not a range"), NoticeLevel::Warn)];
+        };
+        let range = clip_to_used(open.book.workbook(), sheet, range);
+        if range.rows() as u64 * range.cols() as u64 > MOST_CLIP {
+            return vec![notice("that is more cells than can be formatted at once".into(), NoticeLevel::Warn)];
+        }
+        let mut cells = Vec::new();
+        for r in range.start.row..=range.end.row {
+            for c in range.start.col..=range.end.col {
+                let at = CellRef::new(r, c);
+                let cell = cell_at(&open.book, sheet, at);
+                let mut style = open.book.workbook().styles.get(cell.style as usize).cloned().unwrap_or_default();
+                patch.apply(&mut style);
+                let id = open.book.workbook_mut().style_id(&style);
+                cells.push((at, Cell { input: cell.input, style: id }));
+            }
+        }
+        self.change(sheet, cells)
     }
 
     fn step(&mut self, back: bool) -> Vec<Event> {
@@ -449,9 +721,10 @@ impl Sheets {
     fn moved_event(&self, moved: Vec<(usize, CellRef)>) -> Option<Event> {
         let open = self.open.as_ref()?;
         let (sheet, rows, cols) = open.view?;
+        let frozen = open.book.workbook().sheets.get(sheet).map_or(Default::default(), |s| s.frozen);
         let inside: Vec<CellRef> = moved
             .into_iter()
-            .filter(|(s, at)| *s == sheet && (rows[0]..=rows[1]).contains(&at.row) && (cols[0]..=cols[1]).contains(&at.col))
+            .filter(|(s, at)| *s == sheet && in_view(*at, rows, cols, frozen))
             .map(|(_, at)| at)
             .collect();
         if inside.is_empty() {
@@ -540,15 +813,54 @@ fn record(open: &mut Open, step: Step) {
     open.version += 1;
 }
 
-/// Inputs put into a sheet's cells; the cells whose values moved.
-fn apply_cells(book: &mut Book, sheet: usize, cells: &[(CellRef, String)]) -> Vec<(usize, CellRef)> {
-    let edits: Vec<_> = cells.iter().map(|(at, input)| (sheet, *at, input.clone())).collect();
+/// Cells put into a sheet, what was typed and their style; the cells
+/// whose values moved, and those put.
+fn apply_cells(book: &mut Book, sheet: usize, cells: &[(CellRef, Cell)]) -> Vec<(usize, CellRef)> {
+    let edits: Vec<_> = cells.iter().map(|(at, cell)| (sheet, *at, cell.input.clone())).collect();
     let mut moved = book.set_many(&edits);
-    // A cell typed into shows its new input even where its value is as it was.
+    // Styles change nothing worked out: they are put straight in.
+    let s = &mut book.workbook_mut().sheets[sheet];
+    for (at, cell) in cells {
+        match s.cells.get_mut(at) {
+            Some(kept) if cell.style == 0 && kept.input.is_empty() => {
+                s.cells.remove(at);
+            }
+            Some(kept) => kept.style = cell.style,
+            None if cell.style != 0 => {
+                s.cells.insert(*at, Cell { input: String::new(), style: cell.style });
+            }
+            None => {}
+        }
+    }
+    // A cell put shows its new input and style even where its value is as it was.
     moved.extend(cells.iter().map(|(at, _)| (sheet, *at)));
     moved.sort_unstable();
     moved.dedup();
     moved
+}
+
+/// A cell as it is kept, or an empty one.
+fn cell_at(book: &Book, sheet: usize, at: CellRef) -> Cell {
+    book.workbook().sheets.get(sheet).and_then(|s| s.cells.get(&at)).cloned().unwrap_or_default()
+}
+
+/// `B7` or `A1:C9`.
+fn range_of(s: &str) -> Option<Range> {
+    Range::parse(s.trim()).or_else(|| CellRef::parse(s.trim()).map(Range::cell))
+}
+
+/// A range cut to where the sheet has anything — a whole column copied is
+/// the rows in use — but never smaller than its first cell.
+fn clip_to_used(wb: &Workbook, sheet: usize, r: Range) -> Range {
+    let Some(used) = wb.sheets.get(sheet).and_then(|s| s.used()) else { return Range::cell(r.start) };
+    let row = r.end.row.min(used.end.row.max(r.start.row));
+    let col = r.end.col.min(used.end.col.max(r.start.col));
+    Range::new(r.start, CellRef::new(row, col))
+}
+
+fn shift(at: CellRef, dr: i64, dc: i64) -> Option<CellRef> {
+    let (r, c) = (at.row as i64 + dr, at.col as i64 + dc);
+    ((0..=proton_sheet::refs::MAX_ROW as i64).contains(&r) && (0..=proton_sheet::refs::MAX_COL as i64).contains(&c)).then(|| CellRef::new(r as u32, c as u32))
 }
 
 fn check_name(wb: &Workbook, name: &str, except: Option<usize>) -> Result<(), String> {
@@ -588,10 +900,25 @@ fn cells_event(open: &Open, sheet: usize, rows: [u32; 2], cols: [u32; 2], only: 
         None => {
             let from = CellRef::new(rows[0], 0);
             let to = CellRef::new(rows[1], proton_sheet::refs::MAX_COL);
-            s.cells.range(from..=to).filter(|(at, _)| (cols[0]..=cols[1]).contains(&at.col)).map(|(at, _)| view(*at)).collect()
+            // The frozen rows and columns are on screen wherever it is scrolled.
+            let mut out: Vec<SheetCellView> = Vec::new();
+            if s.frozen.rows > 0 && rows[0] > 0 {
+                let top = CellRef::new(s.frozen.rows.min(rows[0]) - 1, proton_sheet::refs::MAX_COL);
+                out.extend(s.cells.range(CellRef::new(0, 0)..=top).filter(|(at, _)| in_view(**at, rows, cols, s.frozen)).map(|(at, _)| view(*at)));
+            }
+            out.extend(s.cells.range(from..=to).filter(|(at, _)| in_view(**at, rows, cols, s.frozen)).map(|(at, _)| view(*at)));
+            out
         }
     };
     Event::SheetCells { generation: open.generation, version: open.version, sheet: sheet as u32, rows, cols, cells, partial: only.is_some() }
+}
+
+/// Whether a cell is in the rectangle asked for, or in a frozen row or
+/// column beside it.
+fn in_view(at: CellRef, rows: [u32; 2], cols: [u32; 2], frozen: proton_sheet::model::Frozen) -> bool {
+    let row = (rows[0]..=rows[1]).contains(&at.row) || at.row < frozen.rows;
+    let col = (cols[0]..=cols[1]).contains(&at.col) || at.col < frozen.cols;
+    row && col
 }
 
 /// A workbook read from what it is kept as, and what it held that was not kept.
@@ -823,6 +1150,66 @@ mod tests {
         sheets.apply(&root, Command::SheetRemoveSheet { sheet: 0 });
         let refused = sheets.apply(&root, Command::SheetRemoveSheet { sheet: 0 });
         assert!(book_of(&last).is_some() && matches!(&refused[0], Event::Notice { .. }), "the last sheet stays");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn copying_pasting_filling_rows_and_formats_are_each_one_step() {
+        let root = scratch("edit");
+        let mut sheets = Sheets::default();
+        let g = book_of(&sheets.apply(&root, Command::SheetNew { name: "Edit".into(), folder: None })).unwrap().generation;
+        sheets.apply(&root, Command::SheetView { generation: g, sheet: 0, rows: [0, 40], cols: [0, 10] });
+        let set = |cells: &[(&str, &str)]| Command::SheetSet { generation: g, sheet: 0, cells: cells.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() };
+        sheets.apply(&root, set(&[("A1", "1"), ("A2", "2"), ("B1", "=A1*10"), ("C1", "a\tb")]));
+        let input = |s: &Sheets, at: &str| cell_at(&s.open.as_ref().unwrap().book, 0, CellRef::parse(at).unwrap()).input;
+        let shown = |s: &Sheets, at: &str| s.open.as_ref().unwrap().book.value(0, CellRef::parse(at).unwrap());
+
+        // Copy: the values as they show, a tab between, a line a row.
+        let clip = sheets.apply(&root, Command::SheetCopy { generation: g, sheet: 0, range: "A1:C2".into(), cut: false });
+        let Event::SheetClip { text } = &clip[0] else { panic!("{clip:?}") };
+        assert_eq!(text, "1\t10\ta b\n2\n");
+        // Pasted here, its formulas move with it.
+        sheets.apply(&root, Command::SheetPaste { generation: g, sheet: 0, at: "E5".into(), text: text.clone() });
+        assert_eq!((input(&sheets, "F5"), shown(&sheets, "F5")), ("=E5*10".to_string(), Value::Number(10.0)));
+        // From elsewhere, it is typed in.
+        sheets.apply(&root, Command::SheetPaste { generation: g, sheet: 0, at: "H1".into(), text: "x\t3\n4\r\n".into() });
+        assert_eq!((input(&sheets, "H1"), input(&sheets, "I1"), input(&sheets, "H2")), ("x".into(), "3".into(), "4".into()));
+        // A cut moves, once.
+        sheets.apply(&root, Command::SheetCopy { generation: g, sheet: 0, range: "H1:I1".into(), cut: true });
+        let cut = sheets.open.as_ref().unwrap().clip.as_ref().unwrap().text.clone();
+        sheets.apply(&root, Command::SheetPaste { generation: g, sheet: 0, at: "H10".into(), text: cut });
+        assert_eq!((input(&sheets, "H1"), input(&sheets, "H10"), input(&sheets, "I10")), (String::new(), "x".into(), "3".into()));
+
+        // Fill: a series down, a formula across.
+        sheets.apply(&root, Command::SheetFill { generation: g, sheet: 0, from: "A1:A2".into(), to: "A1:A5".into() });
+        assert_eq!(input(&sheets, "A5"), "5");
+        sheets.apply(&root, Command::SheetFill { generation: g, sheet: 0, from: "B1".into(), to: "B1:B3".into() });
+        assert_eq!((input(&sheets, "B3"), shown(&sheets, "B3")), ("=A3*10".to_string(), Value::Number(30.0)));
+
+        // A row put in above moves everything below, formulas and all.
+        sheets.apply(&root, Command::SheetInsert { generation: g, sheet: 0, cols: false, at: 0, n: 1 });
+        assert_eq!((input(&sheets, "B2"), shown(&sheets, "B4")), ("=A2*10".to_string(), Value::Number(30.0)));
+        sheets.apply(&root, Command::SheetUndo);
+        assert_eq!(input(&sheets, "B1"), "=A1*10");
+
+        // Formats change only what they say, and undo takes them back.
+        sheets.apply(&root, Command::SheetFormat { generation: g, sheet: 0, range: "A1:B1".into(), patch: SheetStylePatch { bold: Some(true), ..Default::default() } });
+        let f = sheets.apply(&root, Command::SheetFormat { generation: g, sheet: 0, range: "A1".into(), patch: SheetStylePatch { format: Some("0.00".into()), ..Default::default() } });
+        let a1 = cells_of(&f).into_iter().find(|c| c.row == 0 && c.col == 0).unwrap();
+        let styles = book_of(&f).unwrap().styles;
+        assert!(styles[a1.style as usize].bold && styles[a1.style as usize].format == "0.00" && a1.text == "1.00", "{a1:?}");
+        sheets.apply(&root, Command::SheetUndo);
+        sheets.apply(&root, Command::SheetUndo);
+        assert_eq!(cell_at(&sheets.open.as_ref().unwrap().book, 0, CellRef::new(0, 0)).style, 0);
+
+        // Widths and frozen panes are the sheet's, and steps too.
+        let w = sheets.apply(&root, Command::SheetWidth { generation: g, sheet: 0, col: 2, width: Some(120.0) });
+        assert_eq!(book_of(&w).unwrap().sheets[0].widths, vec![(2, 120.0)]);
+        let fr = sheets.apply(&root, Command::SheetFreeze { generation: g, sheet: 0, rows: 1, cols: 0 });
+        assert_eq!(book_of(&fr).unwrap().sheets[0].frozen, [1, 0]);
+        sheets.apply(&root, Command::SheetSave);
+        let back = proton_sheet::folder::read(&root.join("edit.sheet")).unwrap();
+        assert_eq!((back.sheets[0].widths.get(&2), back.sheets[0].frozen.rows), (Some(&120.0), 1));
         let _ = std::fs::remove_dir_all(root);
     }
 

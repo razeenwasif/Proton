@@ -827,10 +827,14 @@
             <button class="tb-btn" data-sheet-save title="Save  ⌘S" aria-label="Save"><svg class="i"><use href="#i-check"/></svg></button>
             <button class="tb-btn" data-sheet-close title="Close the workbook" aria-label="Close the workbook"><svg class="i"><use href="#i-close"/></svg></button>
           </header>
+          <!-- Bold, italic, alignment, the number format, colours. -->
+          <div class="xl-tools" data-sheet-tools role="toolbar" aria-label="Format"></div>
           <div class="xl-bar">
             <input class="xl-name" data-sheet-name aria-label="Name box" spellcheck="false">
             <span class="xl-fx">fx</span>
             <input class="xl-formula" data-sheet-bar aria-label="Formula bar" spellcheck="false">
+            <!-- `:` and a command: :freeze, :width 90, :format 0.00, :w … -->
+            <input class="xl-cmd" data-sheet-cmd aria-label="Sheet command" spellcheck="false" placeholder=":" hidden>
           </div>
           <div class="xl-grid">
             <div class="xl-colhead" data-sheet-colhead></div>

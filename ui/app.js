@@ -858,7 +858,9 @@ const lean = createLean({ root: document, dispatch });
 /* Notebook: notebooks of your own sources, and the knowledge base they are
    chosen from. Drawn from what the core reads of them. */
 const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
-const sheet = createSheet({ root: document, dispatch });
+const sheet = createSheet({ root: document, dispatch,
+  // The system's clipboard through the shell; the page's own without one.
+  paste: async () => (await pasteText()) ?? (await navigator.clipboard?.readText?.().catch(() => null)) ?? null });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -3360,6 +3362,10 @@ function renderEvent(event) {
       break;
     case "sheetCells":
       sheet?.cells(event);
+      break;
+    // What Excel copied, on the system clipboard.
+    case "sheetClip":
+      void copyText(event.text);
       break;
 
     case "studyList":

@@ -6,6 +6,8 @@
 //! - [`book`]: the engine — what each formula comes to, worked out again
 //!   only where a change reaches.
 //! - [`functions`]: the functions formulas call.
+//! - [`edit`]: rows and columns put in and taken out, formulas following;
+//!   copying and filling.
 //! - [`numfmt`]: Excel's number formats, for showing a value.
 //! - [`xlsx`], [`csv`]: Excel's files and delimited text, opened and saved.
 //! - [`refs`], [`value`], [`dates`]: references, values, and dates as
@@ -14,6 +16,7 @@
 pub mod book;
 pub mod csv;
 pub mod dates;
+pub mod edit;
 pub mod folder;
 pub mod formula;
 pub mod functions;

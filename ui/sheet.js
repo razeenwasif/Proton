@@ -4,11 +4,14 @@
  * as ten do: it asks the core for the rectangle in view, a little more each
  * way, and keeps what it is sent by cell. The core answers an edit with the
  * cells it moved that are in that rectangle, which replace those kept.
+ * Frozen rows and columns come with every rectangle, and are drawn over the
+ * cells scrolled under them.
  *
  * What a cell shows — its number formatted, its formula worked out — is the
- * core's; this lays it out, keeps the selection, and turns typing into
- * `sheetSet`. A workbook is `generation`-numbered by the core, and anything
- * about another one is dropped. */
+ * core's; this lays it out, keeps the selection, and turns keys and the
+ * mouse into commands: Vim's keys to move and act, a spreadsheet's to type,
+ * `:` for the rest. A workbook is `generation`-numbered by the core, and
+ * anything about another one is dropped. */
 
 import { escapeHtml as esc, icon } from "./html.js";
 
@@ -16,7 +19,9 @@ import { escapeHtml as esc, icon } from "./html.js";
 /** @typedef {import("./bindings/SheetCellView").SheetCellView} CellView */
 /** @typedef {import("./bindings/SheetFound").SheetFound} Found */
 /** @typedef {import("./bindings/SheetStyle").SheetStyle} Style */
+/** @typedef {import("./bindings/SheetStylePatch").SheetStylePatch} Patch */
 /** @typedef {{generation: number, version: number, sheet: number, rows: [number, number], cols: [number, number], cells: CellView[], partial: boolean}} CellsEvent */
+/** @typedef {{r0: number, r1: number, c0: number, c1: number}} Sel */
 
 /** Pixels: a column as wide as Excel's default, a row a line of text. */
 const COL = 72;
@@ -32,6 +37,12 @@ const SPARE_ROWS = 200;
 const SPARE_COLS = 26;
 const MAX_ROW = 1_048_575;
 const MAX_COL = 16_383;
+
+/** The number formats offered, as Excel writes them. */
+export const FORMATS = /** @type {[string, string][]} */ ([
+  ["", "General"], ["0", "0"], ["0.00", "0.00"], ["#,##0", "#,##0"], ["#,##0.00", "#,##0.00"], ["0%", "0%"], ["0.00%", "0.00%"],
+  ["$#,##0.00", "$#,##0.00"], ["0.00E+00", "Scientific"], ["yyyy-mm-dd", "Date"], ["yyyy-mm-dd hh:mm", "Date and time"], ["h:mm", "Time"], ["@", "Text"],
+]);
 
 /** `A`, `Z`, `AA` for 0, 25, 26. @param {number} col */
 export function colName(col) {
@@ -54,7 +65,10 @@ export function parseCell(text) {
   return [row, col - 1];
 }
 
-/** @param {{root: Document, dispatch: (command: any) => unknown}} host */
+/** A selection as the core reads a range. @param {Sel} s */
+export const rangeName = (s) => (s.r0 === s.r1 && s.c0 === s.c1 ? cellName(s.r0, s.c0) : `${cellName(s.r0, s.c0)}:${cellName(s.r1, s.c1)}`);
+
+/** @param {{root: Document, dispatch: (command: any) => unknown, paste?: () => Promise<string | null>}} host */
 export function createSheet(host) {
   const found = /** @type {HTMLElement | null} */ (host.root.querySelector('.workspace[data-ws="sheet"]'));
   if (!found) return null;
@@ -67,12 +81,14 @@ export function createSheet(host) {
     title: q("[data-sheet-title]"),
     name: /** @type {HTMLInputElement} */ (q("[data-sheet-name]")),
     bar: /** @type {HTMLInputElement} */ (q("[data-sheet-bar]")),
+    cmd: /** @type {HTMLInputElement} */ (q("[data-sheet-cmd]")),
     scroll: q("[data-sheet-scroll]"),
     space: q("[data-sheet-space]"),
     cells: q("[data-sheet-cells]"),
     colHead: q("[data-sheet-colhead]"),
     rowHead: q("[data-sheet-rowhead]"),
     tabs: q("[data-sheet-tabs]"),
+    tools: q("[data-sheet-tools]"),
     editor: /** @type {HTMLInputElement} */ (q("[data-sheet-editor]")),
   };
 
@@ -87,18 +103,22 @@ export function createSheet(host) {
     sheet: -1,
     /** @type {{rows: [number, number], cols: [number, number]} | null} */
     asked: null,
-    /** The selected cell, and the far corner of a range dragged from it. */
+    /** The selected cell, and the far corner of a range from it. */
     at: /** @type {[number, number]} */ ([0, 0]),
     to: /** @type {[number, number]} */ ([0, 0]),
+    /** `v` stretches the selection as the cursor moves; `V` takes whole rows. */
+    visual: /** @type {"" | "v" | "V"} */ (""),
+    /** A key waiting for the next: `g`, `d`, `y`. */
+    pending: "",
     /** Where the grid ends for now: grown as it is scrolled toward. */
     extent: /** @type {[number, number]} */ ([SPARE_ROWS, SPARE_COLS]),
     /** Editing a cell: in it, or in the formula bar. */
     editing: /** @type {"" | "cell" | "bar"} */ (""),
-    drawn: 0,
   };
 
   const key = (/** @type {number} */ r, /** @type {number} */ c) => `${r},${c}`;
   const tab = () => state.book?.sheets[state.book.active] ?? null;
+  const frozen = () => /** @type {[number, number]} */ (tab()?.frozen ?? [0, 0]);
   /** Column widths in pixels, where they are not the default. */
   let widths = /** @type {Map<number, number>} */ (new Map());
   const width = (/** @type {number} */ c) => widths.get(c) ?? COL;
@@ -115,6 +135,15 @@ export function createSheet(host) {
     while (colX(c + 1) <= x && c < MAX_COL) c++;
     return c;
   }
+  /** Where a cell is drawn in the scrolled space: a frozen one moves with
+   *  the scroll, so it stays where it is on screen. @param {number} r @param {number} c */
+  function pos(r, c) {
+    const [fr, fc] = frozen();
+    return {
+      x: HEAD_W + colX(c) + (c < fc ? els.scroll.scrollLeft : 0),
+      y: HEAD_H + r * ROW + (r < fr ? els.scroll.scrollTop : 0),
+    };
+  }
 
   /* ── the home page ─────────────────────────────────────────────────── */
 
@@ -127,9 +156,8 @@ export function createSheet(host) {
         ${icon("table")}<span class="xl-row-name">${esc(w.name)}</span><span class="xl-kind">${KIND[w.kind]}</span></button>`)
       .join("");
     els.list.innerHTML = rows || `<p class="xl-empty">No workbooks in this project yet.</p>`;
-    els.home.querySelector("[data-sheet-found]")?.replaceChildren();
-    const found = els.home.querySelector("[data-sheet-found]");
-    if (found) found.innerHTML = rows;
+    const list = els.home.querySelector("[data-sheet-found]");
+    if (list) list.innerHTML = rows;
   }
 
   /* ── the workbook ──────────────────────────────────────────────────── */
@@ -142,7 +170,6 @@ export function createSheet(host) {
     if (!b) return;
     els.title.textContent = b.name;
     els.title.title = b.path;
-    ws.classList.toggle("dirty", b.dirty);
     q("[data-sheet-dirty]").hidden = !b.dirty;
     const t = tab();
     widths = new Map((t?.widths ?? []).map(([c, pt]) => [c, Math.round((pt * 4) / 3)]));
@@ -158,6 +185,7 @@ export function createSheet(host) {
       state.asked = null;
       state.at = [0, 0];
       state.to = [0, 0];
+      state.visual = "";
       els.scroll.scrollTop = 0;
       els.scroll.scrollLeft = 0;
     }
@@ -200,56 +228,88 @@ export function createSheet(host) {
   /** The style a cell names. @param {number} n @returns {Style | null} */
   const styleOf = (n) => (n ? state.book?.styles[n] ?? null : null);
 
+  /** A cell drawn. @param {CellView} cell @param {string} [extra] */
+  function cellHtml(cell, extra = "") {
+    const st = styleOf(cell.style);
+    const align = st?.align ?? (cell.kind === "n" ? "right" : cell.kind === "b" || cell.kind === "e" ? "center" : "left");
+    const p = pos(cell.row, cell.col);
+    let css = `left:${p.x}px;top:${p.y}px;width:${width(cell.col)}px;text-align:${align};`;
+    if (st?.bold) css += "font-weight:700;";
+    if (st?.italic) css += "font-style:italic;";
+    if (st?.underline) css += "text-decoration:underline;";
+    const color = cell.color ?? st?.color;
+    if (color) css += `color:${color};`;
+    if (st?.fill) css += `background:${st.fill};`;
+    const cls = `xl-c${cell.kind === "e" ? " err" : ""}${st?.wrap ? " wrap" : ""}${extra}`;
+    return `<div class="${cls}" style="${css}" data-cell="${cell.row},${cell.col}">${esc(cell.text)}</div>`;
+  }
+
   function draw() {
-    state.drawn = 0;
     if (!state.book) return;
+    const s = els.scroll;
     const v = visible();
     const sel = selection();
-    let cols = "", rows = "", cells = "";
-    for (let c = v.cols[0]; c <= v.cols[1]; c++) {
+    const [fr, fc] = frozen();
+    const viewW = s.clientWidth || 900, viewH = s.clientHeight || 600;
+    let cols = "", rows = "", cells = "", lines = "";
+    // The frozen ones, then those on screen and not scrolled under them.
+    const colList = [];
+    for (let c = 0; c < fc; c++) colList.push(c);
+    for (let c = Math.max(v.cols[0], fc); c <= v.cols[1]; c++) if (!fc || colX(c + 1) > s.scrollLeft + colX(fc)) colList.push(c);
+    const rowList = [];
+    for (let r = 0; r < fr; r++) rowList.push(r);
+    for (let r = Math.max(v.rows[0], fr); r <= v.rows[1]; r++) if (!fr || (r + 1) * ROW > s.scrollTop + fr * ROW) rowList.push(r);
+    for (const c of colList) {
       const on = c >= sel.c0 && c <= sel.c1 ? " on" : "";
-      cols += `<div class="xl-ch${on}" style="left:${HEAD_W + colX(c)}px;width:${width(c)}px">${colName(c)}</div>`;
+      const fz = c < fc ? " fz" : "";
+      const left = HEAD_W + colX(c) + (c < fc ? s.scrollLeft : 0);
+      cols += `<div class="xl-ch${on}${fz}" style="left:${left}px;width:${width(c)}px" data-col="${c}">${colName(c)}<i class="xl-resize" data-resize-col="${c}"></i></div>`;
+      // The line after each column, as tall as the screen.
+      lines += `<div class="xl-vl${fz}" style="left:${left + width(c) - 1}px;top:${s.scrollTop + HEAD_H}px;height:${viewH}px"></div>`;
     }
-    for (let r = v.rows[0]; r <= v.rows[1]; r++) {
+    for (const r of rowList) {
       const on = r >= sel.r0 && r <= sel.r1 ? " on" : "";
-      rows += `<div class="xl-rh${on}" style="top:${HEAD_H + r * ROW}px">${r + 1}</div>`;
+      const top = HEAD_H + r * ROW + (r < fr ? s.scrollTop : 0);
+      rows += `<div class="xl-rh${on}${r < fr ? " fz" : ""}" style="top:${top}px" data-row="${r}">${r + 1}</div>`;
     }
+    // What is frozen hides what scrolls under it.
+    if (fr) cells += `<div class="xl-fzband" style="left:${s.scrollLeft + HEAD_W}px;top:${s.scrollTop + HEAD_H}px;width:${viewW}px;height:${fr * ROW}px"></div>`;
+    if (fc) cells += `<div class="xl-fzband" style="left:${s.scrollLeft + HEAD_W}px;top:${s.scrollTop + HEAD_H}px;width:${colX(fc)}px;height:${viewH}px"></div>`;
     for (const cell of state.cells.values()) {
-      if (cell.row < v.rows[0] || cell.row > v.rows[1] || cell.col < v.cols[0] || cell.col > v.cols[1]) continue;
-      if (!cell.text && !cell.style) continue;
-      const st = styleOf(cell.style);
-      const align = st?.align ?? (cell.kind === "n" ? "right" : cell.kind === "b" || cell.kind === "e" ? "center" : "left");
-      let css = `left:${HEAD_W + colX(cell.col)}px;top:${HEAD_H + cell.row * ROW}px;width:${width(cell.col)}px;text-align:${align};`;
-      if (st?.bold) css += "font-weight:700;";
-      if (st?.italic) css += "font-style:italic;";
-      if (st?.underline) css += "text-decoration:underline;";
-      const color = cell.color ?? st?.color;
-      if (color) css += `color:${color};`;
-      if (st?.fill) css += `background:${st.fill};`;
-      const cls = `xl-c${cell.kind === "e" ? " err" : ""}${st?.wrap ? " wrap" : ""}`;
-      cells += `<div class="${cls}" style="${css}" data-cell="${cell.row},${cell.col}">${esc(cell.text)}</div>`;
+      const inRows = (cell.row >= v.rows[0] && cell.row <= v.rows[1]) || cell.row < fr;
+      const inCols = (cell.col >= v.cols[0] && cell.col <= v.cols[1]) || cell.col < fc;
+      if (!inRows || !inCols || (!cell.text && !cell.style)) continue;
+      // Wholly under a frozen pane and not in it: not drawn. One partly
+      // under it is, and the pane covers that part.
+      if (fr && cell.row >= fr && (cell.row + 1) * ROW <= s.scrollTop + fr * ROW) continue;
+      if (fc && cell.col >= fc && colX(cell.col + 1) <= s.scrollLeft + colX(fc)) continue;
+      cells += cellHtml(cell, cell.row < fr || cell.col < fc ? " fz" : "");
     }
     els.colHead.innerHTML = cols;
     els.rowHead.innerHTML = rows;
-    els.cells.innerHTML = cells + selectionBox(sel);
-    els.colHead.style.transform = `translateX(${-els.scroll.scrollLeft}px)`;
-    els.rowHead.style.transform = `translateY(${-els.scroll.scrollTop}px)`;
+    els.cells.innerHTML = lines + cells + selectionBox(sel);
+    els.colHead.style.transform = `translateX(${-s.scrollLeft}px)`;
+    els.rowHead.style.transform = `translateY(${-s.scrollTop}px)`;
   }
 
-  /** The selected range, its corners in order. */
+  /** The selected range, its corners in order. @returns {Sel} */
   function selection() {
     const [r, c] = state.at, [r2, c2] = state.to;
+    if (state.visual === "V") return { r0: Math.min(r, r2), r1: Math.max(r, r2), c0: 0, c1: Math.max(0, (tab()?.cols ?? 1) - 1) };
     return { r0: Math.min(r, r2), r1: Math.max(r, r2), c0: Math.min(c, c2), c1: Math.max(c, c2) };
   }
 
-  /** @param {{r0: number, r1: number, c0: number, c1: number}} sel */
+  /** @param {Sel} sel */
   function selectionBox(sel) {
-    const x = HEAD_W + colX(sel.c0), y = HEAD_H + sel.r0 * ROW;
-    const w = colX(sel.c1 + 1) - colX(sel.c0), h = (sel.r1 - sel.r0 + 1) * ROW;
+    const a = pos(sel.r0, sel.c0), b = pos(sel.r1, sel.c1);
+    const w = b.x + width(sel.c1) - a.x, h = b.y + ROW - a.y;
     const [ar, ac] = state.at;
+    const cur = pos(ar, ac);
     const range = sel.r0 !== sel.r1 || sel.c0 !== sel.c1;
-    return (range ? `<div class="xl-range" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px"></div>` : "") +
-      `<div class="xl-cursor" style="left:${HEAD_W + colX(ac)}px;top:${HEAD_H + ar * ROW}px;width:${width(ac)}px;height:${ROW}px"></div>`;
+    return (range ? `<div class="xl-range" style="left:${a.x}px;top:${a.y}px;width:${w}px;height:${h}px"></div>` : "") +
+      `<div class="xl-cursor" style="left:${cur.x}px;top:${cur.y}px;width:${width(ac)}px;height:${ROW}px"></div>` +
+      // The fill handle, at the selection's far corner.
+      `<div class="xl-handle" data-fill-handle style="left:${a.x + w - 4}px;top:${a.y + h - 4}px"></div>`;
   }
 
   let frame = 0;
@@ -261,38 +321,163 @@ export function createSheet(host) {
     });
   }
 
-  /** The cell as kept, or an empty one. @param {number} r @param {number} c */
+  /** The cell as kept. @param {number} r @param {number} c */
   const cellAt = (r, c) => state.cells.get(key(r, c));
 
-  /** Show what the selected cell holds in the name box and formula bar. */
+  /** Show what the selected cell holds in the name box, the formula bar and the format bar. */
   function showSelected() {
     const [r, c] = state.at;
-    const sel = selection();
-    els.name.value = sel.r0 === sel.r1 && sel.c0 === sel.c1 ? cellName(r, c) : `${cellName(sel.r0, sel.c0)}:${cellName(sel.r1, sel.c1)}`;
+    els.name.value = rangeName(selection());
     if (state.editing !== "bar") els.bar.value = cellAt(r, c)?.input ?? "";
+    const st = styleOf(cellAt(r, c)?.style ?? 0);
+    for (const b of els.tools.querySelectorAll("[data-sheet-style]")) {
+      const k = /** @type {HTMLElement} */ (b).dataset.sheetStyle ?? "";
+      const on = k === "bold" ? st?.bold : k === "italic" ? st?.italic : k === "underline" ? st?.underline : k === "wrap" ? st?.wrap : st?.align === k;
+      b.classList.toggle("on", !!on);
+    }
+    const fmt = /** @type {HTMLSelectElement | null} */ (els.tools.querySelector("[data-sheet-format]"));
+    if (fmt) fmt.value = FORMATS.some(([f]) => f === (st?.format ?? "")) ? st?.format ?? "" : "";
   }
 
-  /** Move the selection, keeping it on screen. @param {number} r @param {number} c @param {boolean} [extend] */
+  /** Move the cursor, keeping it on screen; with `extend`, the range's far corner.
+   *  @param {number} r @param {number} c @param {boolean} [extend] */
   function select(r, c, extend = false) {
     r = Math.max(0, Math.min(MAX_ROW, r));
     c = Math.max(0, Math.min(MAX_COL, c));
+    const stretch = extend || !!state.visual;
     state.to = [r, c];
-    if (!extend) state.at = [r, c];
+    if (!stretch) state.at = [r, c];
     if (r + 20 > state.extent[0] || c + 5 > state.extent[1]) {
       state.extent = [Math.max(state.extent[0], r + SPARE_ROWS), Math.max(state.extent[1], c + SPARE_COLS)];
       layout();
     }
-    const s = els.scroll;
-    const [tr, tc] = extend ? state.to : state.at;
-    const top = tr * ROW, left = colX(tc);
-    const viewH = s.clientHeight - HEAD_H, viewW = s.clientWidth - HEAD_W;
-    if (top < s.scrollTop) s.scrollTop = top;
-    else if (top + ROW > s.scrollTop + viewH) s.scrollTop = top + ROW - viewH;
-    if (left < s.scrollLeft) s.scrollLeft = left;
-    else if (left + width(tc) > s.scrollLeft + viewW) s.scrollLeft = left + width(tc) - viewW;
+    reveal(r, c);
     showSelected();
     redraw();
     ask();
+  }
+
+  /** Scroll a cell into view, past any frozen pane. @param {number} r @param {number} c */
+  function reveal(r, c) {
+    const s = els.scroll;
+    const [fr, fc] = frozen();
+    const top = r * ROW, left = colX(c);
+    const viewH = s.clientHeight - HEAD_H, viewW = s.clientWidth - HEAD_W;
+    if (r >= fr) {
+      if (top < s.scrollTop + fr * ROW) s.scrollTop = top - fr * ROW;
+      else if (top + ROW > s.scrollTop + viewH) s.scrollTop = top + ROW - viewH;
+    }
+    if (c >= fc) {
+      if (left < s.scrollLeft + colX(fc)) s.scrollLeft = left - colX(fc);
+      else if (left + width(c) > s.scrollLeft + viewW) s.scrollLeft = left + width(c) - viewW;
+    }
+  }
+
+  /* ── commands ──────────────────────────────────────────────────────── */
+
+  /** A command about the sheet shown, with the workbook's numbers. @param {Record<string, any>} command */
+  function send(command) {
+    const b = state.book;
+    if (!b) return;
+    host.dispatch({ generation: b.generation, sheet: b.active, ...command });
+  }
+
+  /** @param {Partial<Patch>} patch */
+  const format = (patch) => send({ type: "sheetFormat", range: rangeName(selection()), patch: { bold: null, italic: null, underline: null, wrap: null, color: null, fill: null, align: null, format: null, ...patch } });
+
+  /** Bold, italic, underline or wrap turned the other way from the cursor's. @param {"bold" | "italic" | "underline" | "wrap"} k */
+  function toggle(k) {
+    const st = styleOf(cellAt(state.at[0], state.at[1])?.style ?? 0);
+    format({ [k]: !st?.[k] });
+  }
+
+  function copy(cut = false) {
+    send({ type: "sheetCopy", range: rangeName(selection()), cut });
+    leaveVisual();
+  }
+
+  async function paste() {
+    const text = (await host.paste?.()) ?? null;
+    if (text) send({ type: "sheetPaste", at: cellName(state.at[0], state.at[1]), text });
+  }
+
+  /** The selection emptied, as one step. */
+  function clearSelection() {
+    const sel = selection();
+    /** @type {[string, string][]} */
+    const cells = [];
+    for (const cell of state.cells.values()) {
+      if (cell.row >= sel.r0 && cell.row <= sel.r1 && cell.col >= sel.c0 && cell.col <= sel.c1 && cell.input) cells.push([cellName(cell.row, cell.col), ""]);
+    }
+    if (cells.length) send({ type: "sheetSet", cells });
+    leaveVisual();
+  }
+
+  function leaveVisual() {
+    if (!state.visual && state.at[0] === state.to[0] && state.at[1] === state.to[1]) return;
+    state.visual = "";
+    state.to = [...state.at];
+    showSelected();
+    redraw();
+  }
+
+  /** Rows (or columns) put in before the selection, or after it with `after`. @param {boolean} cols @param {boolean} after */
+  function insertLines(cols, after) {
+    const sel = selection();
+    const n = cols ? sel.c1 - sel.c0 + 1 : 1;
+    const at = cols ? (after ? sel.c1 + 1 : sel.c0) : after ? sel.r1 + 1 : sel.r0;
+    send({ type: "sheetInsert", cols, at, n });
+    if (!cols && after) select(state.at[0] + 1, state.at[1]);
+  }
+
+  /** The selection's rows (or columns) taken out. @param {boolean} cols */
+  function deleteLines(cols) {
+    const sel = selection();
+    send({ type: "sheetDelete", cols, at: cols ? sel.c0 : sel.r0, n: cols ? sel.c1 - sel.c0 + 1 : sel.r1 - sel.r0 + 1 });
+    leaveVisual();
+  }
+
+  /** ⌘D and ⌘R: the selection's first row (or column) down (or across) it. @param {boolean} across */
+  function fillFrom(across) {
+    const sel = selection();
+    if (across ? sel.c0 === sel.c1 : sel.r0 === sel.r1) return;
+    const from = across ? { ...sel, c1: sel.c0 } : { ...sel, r1: sel.r0 };
+    send({ type: "sheetFill", from: rangeName(from), to: rangeName(sel) });
+  }
+
+  /** A `:` command. @param {string} line */
+  function run(line) {
+    const [word = "", ...rest] = line.trim().split(/\s+/);
+    const arg = rest.join(" ");
+    const [r, c] = state.at;
+    switch (word) {
+      case "w": host.dispatch({ type: "sheetSave" }); return;
+      case "q": host.dispatch({ type: "sheetClose", discard: false }); return;
+      case "q!": host.dispatch({ type: "sheetClose", discard: true }); return;
+      case "wq": host.dispatch({ type: "sheetSave" }); host.dispatch({ type: "sheetClose", discard: false }); return;
+      case "freeze": send({ type: "sheetFreeze", rows: r, cols: c }); return;
+      case "unfreeze": send({ type: "sheetFreeze", rows: 0, cols: 0 }); return;
+      case "width": {
+        const sel = selection();
+        for (let col = sel.c0; col <= sel.c1; col++) send({ type: "sheetWidth", col, width: arg ? Number(arg) : null });
+        return;
+      }
+      case "format": format({ format: arg }); return;
+      case "bold": toggle("bold"); return;
+      case "italic": toggle("italic"); return;
+      case "wrap": toggle("wrap"); return;
+      case "align": format({ align: arg }); return;
+      case "color": format({ color: arg }); return;
+      case "fill": format({ fill: arg }); return;
+      case "insert": insertLines(arg.startsWith("col"), false); return;
+      case "delete": deleteLines(arg.startsWith("col")); return;
+      default: {
+        // `:B7` goes there.
+        const to = parseCell(word);
+        if (to) select(to[0], to[1]);
+        else host.dispatch({ type: "notice", text: `:${word} is not a sheet command`, level: "warn" });
+      }
+    }
   }
 
   /* ── editing ───────────────────────────────────────────────────────── */
@@ -302,10 +487,12 @@ export function createSheet(host) {
     if (!state.book) return;
     const [r, c] = state.at;
     state.editing = "cell";
+    leaveVisual();
     const e = els.editor;
+    const p = pos(r, c);
     e.hidden = false;
-    e.style.left = `${HEAD_W + colX(c) - els.scroll.scrollLeft}px`;
-    e.style.top = `${HEAD_H + r * ROW - els.scroll.scrollTop}px`;
+    e.style.left = `${p.x - els.scroll.scrollLeft}px`;
+    e.style.top = `${p.y - els.scroll.scrollTop}px`;
     e.style.minWidth = `${width(c)}px`;
     e.value = text ?? cellAt(r, c)?.input ?? "";
     e.focus({ preventScroll: true });
@@ -316,14 +503,11 @@ export function createSheet(host) {
 
   /** Put what was typed into the cell, and move on. @param {string} value @param {[number, number]} [move] */
   function commit(value, move = [1, 0]) {
-    const b = state.book;
     const was = state.editing;
     stopEditing();
-    if (!b || !was) return;
+    if (!state.book || !was) return;
     const [r, c] = state.at;
-    if ((cellAt(r, c)?.input ?? "") !== value) {
-      host.dispatch({ type: "sheetSet", generation: b.generation, sheet: b.active, cells: [[cellName(r, c), value]] });
-    }
+    if ((cellAt(r, c)?.input ?? "") !== value) send({ type: "sheetSet", cells: [[cellName(r, c), value]] });
     select(r + move[0], c + move[1]);
     els.scroll.focus({ preventScroll: true });
   }
@@ -333,19 +517,6 @@ export function createSheet(host) {
     els.editor.hidden = true;
     els.editor.blur();
     showSelected();
-  }
-
-  /** The selection emptied, as one step. */
-  function clearSelection() {
-    const b = state.book;
-    if (!b) return;
-    const sel = selection();
-    /** @type {[string, string][]} */
-    const cells = [];
-    for (const cell of state.cells.values()) {
-      if (cell.row >= sel.r0 && cell.row <= sel.r1 && cell.col >= sel.c0 && cell.col <= sel.c1 && cell.input) cells.push([cellName(cell.row, cell.col), ""]);
-    }
-    if (cells.length) host.dispatch({ type: "sheetSet", generation: b.generation, sheet: b.active, cells });
   }
 
   els.editor.addEventListener("input", () => {
@@ -387,7 +558,7 @@ export function createSheet(host) {
     if (state.editing === "bar") stopEditing();
   });
 
-  // The name box: a cell's name goes there.
+  // The name box: a cell's name, or a range's, goes there.
   els.name.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -404,6 +575,65 @@ export function createSheet(host) {
     }
     e.stopPropagation();
   });
+
+  // `:` and a command, run on Enter.
+  els.cmd.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const line = els.cmd.value;
+      els.cmd.hidden = true;
+      els.cmd.value = "";
+      els.scroll.focus({ preventScroll: true });
+      run(line);
+    } else if (e.key === "Escape" || (e.key === "Backspace" && !els.cmd.value)) {
+      e.preventDefault();
+      els.cmd.hidden = true;
+      els.scroll.focus({ preventScroll: true });
+    }
+    e.stopPropagation();
+  });
+  els.cmd.addEventListener("blur", () => {
+    els.cmd.hidden = true;
+  });
+
+  /* ── the format bar ────────────────────────────────────────────────── */
+
+  els.tools.innerHTML = `
+    <button class="xl-tool" data-sheet-style="bold" title="Bold  ⌘B"><b>B</b></button>
+    <button class="xl-tool" data-sheet-style="italic" title="Italic  ⌘I"><i>I</i></button>
+    <button class="xl-tool" data-sheet-style="underline" title="Underline  ⌘U"><u>U</u></button>
+    <span class="xl-tool-sep"></span>
+    <button class="xl-tool" data-sheet-style="left" title="Align left">⇤</button>
+    <button class="xl-tool" data-sheet-style="center" title="Centre">↔</button>
+    <button class="xl-tool" data-sheet-style="right" title="Align right">⇥</button>
+    <button class="xl-tool" data-sheet-style="wrap" title="Wrap text">↵</button>
+    <span class="xl-tool-sep"></span>
+    <select class="xl-tool-format" data-sheet-format title="Number format">${FORMATS.map(([f, label]) => `<option value="${esc(f)}">${esc(label)}</option>`).join("")}</select>
+    <label class="xl-tool xl-swatch" title="Text colour"><span>A</span><input type="color" data-sheet-color value="#e06c75"></label>
+    <label class="xl-tool xl-swatch" title="Fill"><span class="xl-fill-icon"></span><input type="color" data-sheet-fill value="#3d375e"></label>
+    <button class="xl-tool" data-sheet-clear-style title="Clear formatting">⌫</button>`;
+  els.tools.addEventListener("mousedown", (e) => {
+    // Clicking a tool leaves the keyboard with the grid.
+    if (e.target instanceof Element && e.target.closest("button")) e.preventDefault();
+  });
+  els.tools.addEventListener("click", (e) => {
+    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("[data-sheet-style], [data-sheet-clear-style]")) : null;
+    if (!b || !state.book) return;
+    const k = b.dataset.sheetStyle;
+    if (b.dataset.sheetClearStyle !== undefined) format({ bold: false, italic: false, underline: false, wrap: false, color: "", fill: "", align: "", format: "" });
+    else if (k === "bold" || k === "italic" || k === "underline" || k === "wrap") toggle(k);
+    else if (k) format({ align: b.classList.contains("on") ? "" : k });
+  });
+  els.tools.querySelector("[data-sheet-format]")?.addEventListener("change", (e) => {
+    format({ format: /** @type {HTMLSelectElement} */ (e.target).value });
+    els.scroll.focus({ preventScroll: true });
+  });
+  for (const [sel, k] of /** @type {const} */ ([["[data-sheet-color]", "color"], ["[data-sheet-fill]", "fill"]])) {
+    els.tools.querySelector(sel)?.addEventListener("change", (e) => {
+      format({ [k]: /** @type {HTMLInputElement} */ (e.target).value });
+      els.scroll.focus({ preventScroll: true });
+    });
+  }
 
   /* ── keys and the mouse ────────────────────────────────────────────── */
 
@@ -423,31 +653,94 @@ export function createSheet(host) {
     ask();
   }, { passive: true });
 
-  /** The cell under a point in the grid. @param {MouseEvent} e @returns {[number, number]} */
+  /** The cell under a point in the grid, frozen panes counted. @param {MouseEvent} e @returns {[number, number]} */
   function cellUnder(e) {
     const box = els.scroll.getBoundingClientRect();
-    const x = e.clientX - box.left + els.scroll.scrollLeft - HEAD_W;
-    const y = e.clientY - box.top + els.scroll.scrollTop - HEAD_H;
-    return [Math.max(0, Math.floor(y / ROW)), colAt(Math.max(0, x))];
+    const [fr, fc] = frozen();
+    const vx = e.clientX - box.left - HEAD_W, vy = e.clientY - box.top - HEAD_H;
+    const row = vy < fr * ROW ? Math.floor(vy / ROW) : Math.floor((vy + els.scroll.scrollTop) / ROW);
+    const col = vx < colX(fc) ? colAt(Math.max(0, vx)) : colAt(Math.max(0, vx + els.scroll.scrollLeft));
+    return [Math.max(0, row), col];
   }
 
-  let dragging = false;
+  /** What a drag is doing: selecting, filling from the handle, or widening a column. */
+  let drag = /** @type {null | {kind: "select"} | {kind: "fill", from: Sel} | {kind: "width", col: number, x: number, w: number}} */ (null);
   els.scroll.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || !state.book) return;
-    const [r, c] = cellUnder(e);
     if (state.editing) commit(state.editing === "cell" ? els.editor.value : els.bar.value, [0, 0]);
-    select(r, c, e.shiftKey);
-    dragging = true;
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    if (t?.dataset.fillHandle !== undefined) {
+      drag = { kind: "fill", from: selection() };
+    } else {
+      const [r, c] = cellUnder(e);
+      if (!e.shiftKey) state.visual = "";
+      select(r, c, e.shiftKey);
+      drag = { kind: "select" };
+    }
     els.scroll.focus({ preventScroll: true });
     e.preventDefault();
   });
+  // The letters and numbers: a click takes the column or the row, a
+  // letter's edge widens its column, and a double-click there resets it.
+  const heads = /** @type {HTMLElement} */ (els.colHead.parentElement);
+  heads.addEventListener("mousedown", (e) => {
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    if (!t || !state.book || e.button !== 0) return;
+    if (t.dataset.resizeCol !== undefined) {
+      const col = Number(t.dataset.resizeCol);
+      drag = { kind: "width", col, x: e.clientX, w: width(col) };
+      e.preventDefault();
+      return;
+    }
+    const head = t.closest("[data-col], [data-row]");
+    if (!(head instanceof HTMLElement)) return;
+    if (head.dataset.col !== undefined) {
+      const c = Number(head.dataset.col);
+      state.visual = "";
+      state.at = [0, c];
+      select(Math.max(0, (tab()?.rows ?? 1) - 1), c, true);
+    } else {
+      const r = Number(head.dataset.row);
+      state.visual = "V";
+      state.at = [r, 0];
+      select(r, 0, true);
+    }
+    els.scroll.focus({ preventScroll: true });
+    e.preventDefault();
+  });
+  heads.addEventListener("dblclick", (e) => {
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    if (t?.dataset.resizeCol !== undefined) send({ type: "sheetWidth", col: Number(t.dataset.resizeCol), width: null });
+  });
   window.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
+    if (!drag) return;
+    if (drag.kind === "width") {
+      widths.set(drag.col, Math.max(16, drag.w + e.clientX - drag.x));
+      layout();
+      redraw();
+      return;
+    }
     const [r, c] = cellUnder(e);
-    if (r !== state.to[0] || c !== state.to[1]) select(r, c, true);
+    if (drag.kind === "select") {
+      if (r !== state.to[0] || c !== state.to[1]) select(r, c, true);
+    } else {
+      // The fill goes the way the pointer went furthest: down or across.
+      const f = drag.from;
+      const down = Math.abs(r - f.r1) >= Math.abs(c - f.c1);
+      state.at = [f.r0, f.c0];
+      select(down ? Math.max(r, f.r1) : f.r1, down ? f.c1 : Math.max(c, f.c1), true);
+    }
   });
   window.addEventListener("mouseup", () => {
-    dragging = false;
+    const d = drag;
+    drag = null;
+    if (!d || !state.book) return;
+    if (d.kind === "width") {
+      send({ type: "sheetWidth", col: d.col, width: Math.round(width(d.col) * 75) / 100 });
+    } else if (d.kind === "fill") {
+      const to = selection();
+      if (to.r1 !== d.from.r1 || to.c1 !== d.from.c1) send({ type: "sheetFill", from: rangeName(d.from), to: rangeName(to) });
+    }
   });
   els.scroll.addEventListener("dblclick", (e) => {
     if (!state.book) return;
@@ -458,69 +751,125 @@ export function createSheet(host) {
 
   ws.addEventListener("keydown", (e) => {
     const b = state.book;
-    const mod = e.metaKey || e.ctrlKey;
-    // ⌘S saves, ⌘Z and ⌘⇧Z undo and redo, wherever the focus is in the mode.
+    // ⌘S saves wherever the focus is in the mode.
     if (b && e.metaKey && !e.altKey && e.key.toLowerCase() === "s") {
       e.preventDefault();
       if (state.editing) commit(state.editing === "cell" ? els.editor.value : els.bar.value, [0, 0]);
       host.dispatch({ type: "sheetSave" });
       return;
     }
-    if (e.target !== els.scroll) return;
-    if (!b) return;
-    if (e.metaKey && e.key.toLowerCase() === "z") {
-      e.preventDefault();
-      host.dispatch({ type: e.shiftKey ? "sheetRedo" : "sheetUndo" });
+    if (e.target !== els.scroll || !b) return;
+    if (e.ctrlKey && /^[0-9]$/.test(e.key)) return; // modes, the window's
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (e.metaKey) {
+      /** @type {Record<string, () => void>} */
+      const chords = {
+        z: () => host.dispatch({ type: e.shiftKey ? "sheetRedo" : "sheetUndo" }),
+        c: () => copy(false),
+        x: () => copy(true),
+        v: () => void paste(),
+        d: () => fillFrom(false),
+        r: () => fillFrom(true),
+        b: () => toggle("bold"),
+        i: () => toggle("italic"),
+        u: () => toggle("underline"),
+        a: () => {
+          state.at = [0, 0];
+          select(Math.max(0, (tab()?.rows ?? 1) - 1), Math.max(0, (tab()?.cols ?? 1) - 1), true);
+        },
+      };
+      if (chords[k]) {
+        e.preventDefault();
+        chords[k]();
+      }
       return;
     }
-    if (e.ctrlKey && /^[0-9]$/.test(e.key)) return; // modes, the window's
     const [r, c] = state.at;
     const [tr, tc] = state.to;
     const ext = e.shiftKey;
-    const from = ext ? [tr, tc] : [r, c];
-    // The arrows, and Vim's h j k l; with ⇧ they stretch the selection.
+    const from = ext || state.visual ? [tr, tc] : [r, c];
+    const pending = state.pending;
+    state.pending = "";
+    // The arrows, and Vim's h j k l; with ⇧ or in visual they stretch the selection.
     /** @type {Record<string, [number, number]>} */
     const moves = { ArrowDown: [1, 0], ArrowUp: [-1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], j: [1, 0], k: [-1, 0], h: [0, -1], l: [0, 1] };
-    const named = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    const move = mod ? undefined : moves[named];
+    const move = e.ctrlKey || e.altKey ? undefined : moves[k];
     if (move) {
       e.preventDefault();
       select(from[0] + move[0], from[1] + move[1], ext);
       return;
     }
-    if (e.key === "Enter" || e.key === "F2" || (!mod && (e.key === "i" || e.key === "a"))) {
-      e.preventDefault();
-      editCell(null);
-      return;
-    }
-    if (e.key === "Tab") {
-      e.preventDefault();
-      select(r, c + (e.shiftKey ? -1 : 1));
-      return;
-    }
-    if (e.key === "Delete" || e.key === "Backspace" || (!mod && e.key === "x")) {
-      e.preventDefault();
-      clearSelection();
-      return;
-    }
-    if (!mod && e.key === "u") {
-      e.preventDefault();
-      host.dispatch({ type: "sheetUndo" });
-      return;
-    }
-    if (e.ctrlKey && e.key === "r") {
+    if (e.ctrlKey && k === "r") {
       e.preventDefault();
       host.dispatch({ type: "sheetRedo" });
       return;
     }
-    if (e.key === "Escape") {
+    if (e.ctrlKey || e.altKey) return;
+    /** @type {Record<string, () => void>} */
+    const keys = {
+      // The ends: the first column, the last in use, the top, the last row in use.
+      "0": () => select(from[0], 0, ext),
+      "^": () => select(from[0], 0, ext),
+      "$": () => select(from[0], Math.max(0, (tab()?.cols ?? 1) - 1), ext),
+      G: () => select(Math.max(0, (tab()?.rows ?? 1) - 1), from[1], ext),
+      g: () => {
+        if (pending === "g") select(0, from[1], ext);
+        else state.pending = "g";
+      },
+      Enter: () => editCell(null),
+      F2: () => editCell(null),
+      i: () => editCell(null),
+      a: () => editCell(null),
+      c: () => editCell(""),
+      Tab: () => select(r, c + (ext ? -1 : 1)),
+      Delete: () => clearSelection(),
+      Backspace: () => clearSelection(),
+      x: () => clearSelection(),
+      u: () => host.dispatch({ type: "sheetUndo" }),
+      v: () => {
+        state.visual = state.visual === "v" ? "" : "v";
+        if (!state.visual) state.to = [...state.at];
+        showSelected();
+        redraw();
+      },
+      V: () => {
+        state.visual = state.visual === "V" ? "" : "V";
+        if (!state.visual) state.to = [...state.at];
+        showSelected();
+        redraw();
+      },
+      y: () => {
+        if (state.visual || pending === "y") copy(false);
+        else state.pending = "y";
+      },
+      d: () => {
+        if (state.visual === "V" || pending === "d") deleteLines(false);
+        else if (state.visual) copy(true);
+        else state.pending = "d";
+      },
+      p: () => void paste(),
+      o: () => insertLines(false, true),
+      O: () => insertLines(false, false),
+      ":": () => {
+        els.cmd.hidden = false;
+        els.cmd.value = "";
+        els.cmd.focus();
+      },
+      Escape: () => {
+        state.visual = "";
+        select(r, c);
+      },
+    };
+    const name = e.key === "G" || e.key === "V" || e.key === "O" ? e.key : k;
+    const act = keys[name];
+    if (act) {
       e.preventDefault();
-      select(r, c);
+      act();
       return;
     }
     // Anything else typed starts the cell over with it, as in every
     // spreadsheet; `=` starts a formula.
-    if (!mod && !e.altKey && e.key.length === 1 && !"hjklHJKLaiux".includes(e.key)) {
+    if (e.key.length === 1) {
       e.preventDefault();
       editCell(e.key);
     }
@@ -605,6 +954,7 @@ export function createSheet(host) {
         state.sheet = -1;
         state.extent = [SPARE_ROWS, SPARE_COLS];
         state.editing = "";
+        state.visual = "";
         els.editor.hidden = true;
       }
       renderBook();
@@ -614,9 +964,12 @@ export function createSheet(host) {
       const b = state.book;
       if (!b || event.generation !== b.generation || event.sheet !== b.active) return;
       if (!event.partial) {
+        const [fr, fc] = frozen();
         for (const k of [...state.cells.keys()]) {
           const [r, c] = k.split(",").map(Number);
-          if (r >= event.rows[0] && r <= event.rows[1] && c >= event.cols[0] && c <= event.cols[1]) state.cells.delete(k);
+          const inRows = (r >= event.rows[0] && r <= event.rows[1]) || r < fr;
+          const inCols = (c >= event.cols[0] && c <= event.cols[1]) || c < fc;
+          if (inRows && inCols) state.cells.delete(k);
         }
       }
       for (const cell of event.cells) {
@@ -636,10 +989,6 @@ export function createSheet(host) {
           if (!state.editing) els.scroll.focus({ preventScroll: true });
         }
       });
-    },
-    /** For tests: what is selected and kept. */
-    debug() {
-      return { at: state.at, to: state.to, cells: state.cells.size, editing: state.editing, asked: state.asked };
     },
   };
 }

@@ -130,6 +130,107 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
     assert(!ws().querySelector('[data-cell="1,1"]'), 'the last sheet\'s cells are still drawn');
   });
 
+  await test('Vim\'s keys act on the selection: v and y copy, dd deletes rows, o puts one in, p pastes, ⌘B and :freeze format', async () => {
+    await win.pushEvents([book({active: 0, version: 3}), cells([cell(0, 0, 'Item', 'Item', 't', 1), cell(1, 1, '1,450.00', '1450', 'n'), cell(6, 1, '1997.95', '=SUM(B2:B5)', 'n')])]);
+    await settle();
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    scroll.focus();
+    // To A1, then v and two down and one across: A1:B3, copied.
+    key('g'); key('g'); key('0'); await settle();
+    let before = win.commands.length;
+    key('v'); key('j'); key('j'); key('l'); await settle();
+    assert(ws().querySelector('[data-sheet-name]').value === 'A1:B3', `visual selected ${ws().querySelector('[data-sheet-name]').value}`);
+    key('y'); await settle();
+    const copied = sent(before, 'sheetCopy')[0];
+    assert(copied?.range === 'A1:B3' && copied.cut === false, `copied ${JSON.stringify(copied)}`);
+    assert(ws().querySelector('[data-sheet-name]').value === 'A1', 'a copy did not leave visual');
+    // The core's text goes on the system clipboard.
+    await win.pushEvents([{type: 'sheetClip', text: 'Item\t\n\t1,450.00\n'}]); await settle();
+    assert(win.clipboardText === 'Item\t\n\t1,450.00\n', `the clipboard has ${JSON.stringify(win.clipboardText)}`);
+    // p pastes what the clipboard has, at the cursor.
+    key('j'); key('j'); key('j'); await settle();
+    before = win.commands.length;
+    win.clipboardText = 'a\tb';
+    key('p'); await settle();
+    const pasted = sent(before, 'sheetPaste')[0];
+    assert(pasted?.at === 'A4' && pasted.text === 'a\tb', `pasted ${JSON.stringify(pasted)}`);
+    // dd takes the row out; o puts one in below; V and d two rows.
+    key('d'); key('d'); await settle();
+    const deleted = sent(before, 'sheetDelete')[0];
+    assert(deleted && !deleted.cols && deleted.at === 3 && deleted.n === 1, `dd sent ${JSON.stringify(deleted)}`);
+    key('o'); await settle();
+    const put = sent(before, 'sheetInsert')[0];
+    assert(put && !put.cols && put.at === 4 && put.n === 1, `o sent ${JSON.stringify(put)}`);
+    key('V'); key('j'); key('d'); await settle();
+    const rows = sent(before, 'sheetDelete')[1];
+    assert(rows?.at === 4 && rows.n === 2, `Vjd sent ${JSON.stringify(rows)}`);
+    // ⌘B makes the cursor's cell bold, as only that.
+    key('b', {metaKey: true}); await settle();
+    const bold = sent(before, 'sheetFormat')[0];
+    assert(bold?.range === 'A5' && bold.patch.bold === true && bold.patch.italic === null && bold.patch.format === null, `⌘B sent ${JSON.stringify(bold)}`);
+    // The format bar's number format.
+    const fmt = ws().querySelector('[data-sheet-format]');
+    fmt.value = '0.00'; fmt.dispatchEvent(new win.Event('change')); await settle();
+    assert(sent(before, 'sheetFormat')[1]?.patch.format === '0.00', 'the format bar did not set a number format');
+    // :freeze at B2 freezes a row and a column.
+    scroll.focus();
+    key('g'); key('g'); key('0'); key('j'); key('l'); key(':'); await settle();
+    const cmd = ws().querySelector('[data-sheet-cmd]');
+    assert(!cmd.hidden && doc.activeElement === cmd, ': did not open the command line');
+    cmd.value = 'freeze';
+    key('Enter'); await settle();
+    const freeze = sent(before, 'sheetFreeze')[0];
+    assert(freeze?.rows === 1 && freeze.cols === 1 && cmd.hidden, `:freeze sent ${JSON.stringify(freeze)}`);
+  });
+
+  await test('Frozen rows stay on screen as the grid scrolls, and a click there picks them', async () => {
+    await win.pushEvents([book({active: 0, version: 4, sheets: [{name: 'Sheet1', rows: 500, cols: 3, frozen: [1, 0], widths: []}, {name: 'Q2', rows: 0, cols: 0, frozen: [0, 0], widths: []}]}),
+      cells([cell(0, 0, 'Item', 'Item', 't'), cell(300, 0, 'deep', 'deep', 't')])]);
+    await settle();
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    scroll.scrollTop = 300 * 24 - 24; scroll.dispatchEvent(new win.Event('scroll')); await settle();
+    const head = /** @type {HTMLElement | null} */ (ws().querySelector('[data-cell="0,0"]'));
+    const deep = /** @type {HTMLElement | null} */ (ws().querySelector('[data-cell="300,0"]'));
+    assert(head && deep, 'the frozen row or the one scrolled to is not drawn');
+    const box = scroll.getBoundingClientRect();
+    const y = (/** @type {HTMLElement} */ el) => el.getBoundingClientRect().top - box.top;
+    assert(Math.abs(y(head) - 24) < 1, `the frozen row is at ${y(head)}px, not under the letters`);
+    assert(y(deep) >= 48 - 1, `row 301 is at ${y(deep)}px, under the frozen row`);
+    // A click on the frozen row picks row 1, not the row scrolled under it.
+    scroll.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, clientX: box.left + 60, clientY: box.top + 30, button: 0}));
+    win.dispatchEvent(new win.MouseEvent('mouseup', {bubbles: true}));
+    await settle();
+    assert(ws().querySelector('[data-sheet-name]').value === 'A1', `a click on the frozen row picked ${ws().querySelector('[data-sheet-name]').value}`);
+  });
+
+  await test('Dragging the fill handle fills, and dragging a letter\'s edge sets the column\'s width', async () => {
+    await win.pushEvents([book({active: 0, version: 5}), cells([cell(0, 0, '1', '1', 'n'), cell(1, 0, '2', '2', 'n')])]);
+    await settle();
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    scroll.scrollTop = 0; scroll.scrollLeft = 0; scroll.dispatchEvent(new win.Event('scroll')); await settle();
+    const box = scroll.getBoundingClientRect();
+    const at = (/** @type {number} */ r, /** @type {number} */ c) => ({clientX: box.left + 52 + c * 72 + 30, clientY: box.top + 24 + r * 24 + 12});
+    // A1:A2 selected by a drag.
+    scroll.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, button: 0, ...at(0, 0)}));
+    win.dispatchEvent(new win.MouseEvent('mousemove', {bubbles: true, ...at(1, 0)}));
+    win.dispatchEvent(new win.MouseEvent('mouseup', {bubbles: true})); await settle();
+    assert(ws().querySelector('[data-sheet-name]').value === 'A1:A2', `the drag selected ${ws().querySelector('[data-sheet-name]').value}`);
+    const before = win.commands.length;
+    const handle = ws().querySelector('[data-fill-handle]');
+    handle.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, button: 0, ...at(1, 0)}));
+    win.dispatchEvent(new win.MouseEvent('mousemove', {bubbles: true, ...at(5, 0)}));
+    win.dispatchEvent(new win.MouseEvent('mouseup', {bubbles: true})); await settle();
+    const fill = sent(before, 'sheetFill')[0];
+    assert(fill?.from === 'A1:A2' && fill.to === 'A1:A6', `the handle filled ${JSON.stringify(fill)}`);
+    const edge = ws().querySelector('[data-resize-col="1"]');
+    const x = edge.getBoundingClientRect().left + 3;
+    edge.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, button: 0, clientX: x, clientY: box.top + 10}));
+    win.dispatchEvent(new win.MouseEvent('mousemove', {bubbles: true, clientX: x + 48, clientY: box.top + 10}));
+    win.dispatchEvent(new win.MouseEvent('mouseup', {bubbles: true})); await settle();
+    const w = sent(before, 'sheetWidth')[0];
+    assert(w?.col === 1 && w.width === 90, `the edge set ${JSON.stringify(w)}`);
+  });
+
   await test('Scrolling a long way asks for the rows there, and the grid goes on', async () => {
     await win.pushEvents([book({active: 0, version: 2})]); await settle();
     const scroll = ws().querySelector('[data-sheet-scroll]');

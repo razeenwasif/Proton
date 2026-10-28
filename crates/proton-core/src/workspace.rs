@@ -1383,6 +1383,14 @@ impl Workspace {
             | Command::SheetSave
             | Command::SheetView { .. }
             | Command::SheetSet { .. }
+            | Command::SheetCopy { .. }
+            | Command::SheetPaste { .. }
+            | Command::SheetFill { .. }
+            | Command::SheetInsert { .. }
+            | Command::SheetDelete { .. }
+            | Command::SheetFormat { .. }
+            | Command::SheetWidth { .. }
+            | Command::SheetFreeze { .. }
             | Command::SheetUndo
             | Command::SheetRedo
             | Command::SheetTab { .. }
