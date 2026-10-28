@@ -3,13 +3,13 @@
 # Proton
 
 A code editor that is also a chat client, a data notebook, a research
-workbench and a study notebook — one window, five modes, a shared Vim-style
+workbench, a study notebook and a spreadsheet — one window, six modes, a shared Vim-style
 modal engine underneath all of them, and an agent that can act in any of them.
 
 Every mode in the window reads and writes a real document: the editor,
 Telescope and language servers, the agent, the Code Visualizer, the plugin
-host, Data's notebooks, Research's investigations and Notebook's sources all
-ship. The creative modes that were here — Design, Model, Game, Canvas, Diffuse
+host, Data's notebooks, Research's investigations, Notebook's sources and
+Excel's workbooks all ship. The creative modes that were here — Design, Model, Game, Canvas, Diffuse
 and Video — moved to an app of their own in October 2026, and LaTeX and the
 Reader to Quark.
 
@@ -60,14 +60,14 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-trace/` | The Code Visualizer client |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
-| `ui/` | The front end — the app's real chrome, and the interactive prototype — all five modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
+| `ui/` | The front end — the app's real chrome, and the interactive prototype — all six modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
 | `design/DESIGN.md` | The design system, the mode-by-mode spec, and which reference each idea came from |
 | `docs/ARCHITECTURE.md` | The build document — crate layout, the core/UI seam, the mode contract, milestones |
 | `docs/STACK.md` | Language, renderer, parser, plugin runtime — what is settled and what is still a real decision |
 | `docs/CODE-VISUALIZER.md` | Integration plan for [Code-Visualizer](https://github.com/razeenwasif/Code-Visualizer) |
 | `assets/` | The reference designs the whole thing was drawn from |
 
-## The five modes
+## The six modes
 
 Every mode keeps projects of its own: the folder open in Codex is not
 carried into Data, Research or any other, and going back to a mode brings
@@ -217,6 +217,23 @@ Design, Model, Game, Canvas, Diffuse and Video, once modes here on ⌃6–⌃-,
 are an app of their own now, and LaTeX and the Reader are Quark's. Codex
 still edits `.tex` and `.bib` files, with texlab when it is on `PATH`, and
 PDFs still open in the viewer from any mode.
+
+**Excel** · a spreadsheet on ⌃6, after Google Sheets and Excel. A workbook
+is a `Name.sheet/` folder of text that diffs — `workbook.json` and a
+`.cells` file a sheet, a line a cell — and `.xlsx`, `.csv` and `.tsv` open
+and save as themselves. Formulas are worked out by Proton's own engine
+(`crates/proton-sheet`): 140 functions, Excel's grammar, references
+across sheets and names, and only what a change reaches worked out again,
+cycles shown as `#CYCLE!`. The grid draws the rows on screen and no more;
+Vim's keys move and act (`v`, `V`, `y`, `d`, `p`, `dd`, `o`, `:sort`,
+`:filter`, `:freeze`), and a spreadsheet's keys and mouse do too — typing
+starts a cell, the fill handle fills, a letter's edge widens its column.
+Number formats, bold and colour, frozen panes, sorting, filters, colour
+rules, and line, bar, scatter and pie charts drawn over the cells and kept
+in `.xlsx`. The agent reads, writes and charts the workbook with its sheet
+tools, `@sheet` sends what is selected, and a range goes to Data as a
+dataframe and a notebook's table comes back as a sheet. Edits are held until
+⌘S, and quitting with an unsaved workbook asks first.
 
 ## The three things that hold it together
 

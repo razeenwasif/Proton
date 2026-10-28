@@ -1,5 +1,8 @@
 # Excel — Proton's spreadsheet mode
 
+**Built, 2026-10-28: E0–E8.** What each milestone is, as planned, is below;
+what was measured is at the end.
+
 A spreadsheet in a tab of its own, after Google Sheets and Excel: workbooks of
 sheets, formulas recalculated as you type, sorting, filters, conditional
 colour, charts, and an agent that reads and writes ranges. Asked for on
@@ -148,3 +151,28 @@ Each lands with its tests passing.
 | **E6** | The agent's tools and `@sheet` | through `run_tool`, as the other tools are tested |
 | **E7** | Ranges to and from Data | core tests |
 | **E8** | A million rows measured, docs, the status page | a timing budget |
+
+## Measured (E8)
+
+A million rows on this Mac, an M-series, in a release build — column A the
+numbers 1 to 1,000,000, column B `=A1*2` down it, and `=SUM(B:B)` and
+`=AVERAGE(A:A)` beside them (`cargo test --release -p proton-sheet --test
+scale -- --ignored --nocapture`):
+
+| What | Took | Budget |
+|---|---|---|
+| Open: a million formulas read and worked out | 4.0 s | 8 s |
+| A1 changed: B1 and the two that read whole columns, and nothing else | 0.24 s | 0.3 s |
+| A screen of cells, 60 rows by 20 columns, formatted | < 1 ms | 20 ms |
+| Save as a `.sheet` folder (its `.cells` file is 33 MB) | 0.21 s | 4 s |
+| Read the folder back | 0.32 s | 4 s |
+| Save as `.xlsx` (15 MB) | 3.7 s | 15 s |
+| Open the `.xlsx` | 2.2 s | 15 s |
+
+The test's process peaked at 1.9 GB holding the workbook several times
+over (built, opened, read back from the folder and from the `.xlsx`); one
+open workbook of this size is about 0.7–1 GB, most of it each formula's
+parsed tree and what it reads. The edit's time is the two whole-column
+functions each visiting the two million cells of their rows; a column's
+cells kept apart would make that a million. Both are left until a workbook
+that size is opened in earnest.

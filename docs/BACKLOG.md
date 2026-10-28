@@ -100,9 +100,12 @@ Research's milestones after Lean (P0–P7, `6c103a9`).
 ## Excel
 
 The spreadsheet mode asked for on 2026-10-27 as Sheets and named Excel on
-2026-10-28 is planned in [`EXCEL.md`](EXCEL.md): a workbook as a folder of
-text, `.xlsx` and `.csv` in and out, Proton's own formula engine, sorting,
-filters, colour, charts, the agent and Data — milestones E0–E8, being built.
+2026-10-28 is built, E0–E8, as [`EXCEL.md`](EXCEL.md) planned it. Left for
+later, as asked for: `.xlsx`'s merged cells, conditional formats and filters
+kept through a save (read today as "not kept" and said); a column's whole
+sum read without visiting every row of the band; the engine's memory at a
+million rows (about 0.7–1 GB); two people editing one sheet, which would
+need a server.
 
 ## Circuit
 
