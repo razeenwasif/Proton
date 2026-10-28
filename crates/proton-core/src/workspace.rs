@@ -84,6 +84,8 @@ pub struct Workspace {
     term_sent: Vec<u64>,
     /// The notebook Data mode has open, and the kernel running it.
     data: crate::data::Data,
+    /// The workbook open in Excel mode, with its history.
+    sheets: crate::sheet::Sheets,
     settings: crate::settings::Settings,
     /// Polled while another project is on screen: what it hears is taken in,
     /// but its notebook, terminal and conversation are not drawn into events
@@ -555,19 +557,23 @@ impl Workspace {
     /// asks before closing it, because a closed workspace takes its buffers
     /// with it and there is no undo for that.
     pub fn is_modified(&self) -> bool {
-        self.editor.buffers().iter().any(|b| b.is_modified())
+        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.sheets.unsaved().is_empty()
     }
 
     /// The files with unsaved changes, as the project names them.
     pub fn unsaved(&self) -> Vec<String> {
-        self.editor
+        let mut files: Vec<String> = self
+            .editor
             .unsaved()
             .iter()
             .map(|buffer| match buffer.path() {
                 Some(path) => self.root.shown(path),
                 None => buffer.name(),
             })
-            .collect()
+            .collect();
+        // So is a workbook.
+        files.extend(self.sheets.unsaved());
+        files
     }
 
     /// Save every file with unsaved changes; the ones that could not be, and
@@ -577,7 +583,9 @@ impl Workspace {
         if failed.len() != self.editor.unsaved().len() {
             self.resync();
         }
-        failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect()
+        let mut failed: Vec<String> = failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect();
+        failed.extend(self.sheets.save_unsaved());
+        failed
     }
 
     /// Abandon a half-typed leader sequence.
@@ -666,6 +674,12 @@ impl Workspace {
                 ]);
                 events.extend(self.claude.sync());
                 events.extend(self.research().sync());
+                // Excel's home page and workbook, when it is the mode on
+                // screen: finding the workbooks walks the project.
+                if self.mode == ModeId::Sheet {
+                    let root = self.root().to_path_buf();
+                    events.extend(self.sheets.events(&root));
+                }
                 events
             }
 
@@ -1362,6 +1376,28 @@ impl Workspace {
             }
 
             Command::Poll => self.poll_servers(),
+
+            command @ (Command::SheetNew { .. }
+            | Command::SheetOpen { .. }
+            | Command::SheetClose { .. }
+            | Command::SheetSave
+            | Command::SheetView { .. }
+            | Command::SheetSet { .. }
+            | Command::SheetUndo
+            | Command::SheetRedo
+            | Command::SheetTab { .. }
+            | Command::SheetAddSheet { .. }
+            | Command::SheetRenameSheet { .. }
+            | Command::SheetRemoveSheet { .. }) => {
+                let root = self.root().to_path_buf();
+                let mut events = self.sheets.apply(&root, command);
+                if events.iter().any(|e| matches!(e, Event::SheetHome { .. })) {
+                    // A workbook made or saved is files the tree and git see.
+                    events.push(self.tree_event());
+                    events.push(self.repo_event());
+                }
+                events
+            }
 
             Command::Complete => self.request_completion(),
 
@@ -5550,6 +5586,11 @@ impl Workspace {
         // by hand since is what the board should show.
         if mode == ModeId::Research {
             events.extend(self.research().sync());
+        }
+        // Excel shows the project's workbooks, and the one open.
+        if mode == ModeId::Sheet {
+            let root = self.root().to_path_buf();
+            events.extend(self.sheets.events(&root));
         }
 
         events

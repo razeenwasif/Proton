@@ -1,7 +1,7 @@
 //! The mode contract: four slots, a verb table, and a document.
 //!
 //! A mode is the unit of "which application am I in", and the claim the whole
-//! project rests on is that five of them can share one editor because a mode
+//! project rests on is that six of them can share one editor because a mode
 //! is a small, closed thing:
 //!
 //! ```text
@@ -72,6 +72,9 @@ pub enum Slot {
     Tutor,
     /// What can be made from the sources, and what has been.
     Studio,
+    /// A sheet's cells, by rows and columns, with the formula bar above and
+    /// the sheets' tabs below.
+    Grid,
 }
 
 /// How a mode's work persists.
@@ -96,6 +99,9 @@ pub enum DocumentKind {
     /// `~/Github/Notebooks/<slug>/`: the notebook, its sources and notes in
     /// JSON and Markdown, its chats, and what the studio made.
     StudyNotebook,
+    /// `Name.sheet/`: `workbook.json` and a `.cells` file a sheet, a line a
+    /// cell. `.xlsx`, `.csv` and `.tsv` are opened and saved too.
+    Workbook,
 }
 
 /// The whole of a mode, as anything outside it needs to know.
@@ -162,6 +168,15 @@ impl Layout {
                 Slot::Studio,
                 DocumentKind::StudyNotebook,
             ),
+            // The project's files, the grid, and the agent beside it — a
+            // sheet wants its width, and the workbooks to open are the
+            // project's.
+            ModeId::Sheet => (
+                Slot::Explorer,
+                Slot::Grid,
+                Slot::Agent,
+                DocumentKind::Workbook,
+            ),
         };
         Layout {
             mode,
@@ -182,7 +197,7 @@ impl Layout {
         match self.mode {
             // The noun is prose, so the editing verbs belong to the composer
             // rather than to the mode.
-            ModeId::Chat | ModeId::Research | ModeId::Study => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
+            ModeId::Chat | ModeId::Research | ModeId::Study | ModeId::Sheet => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
             _ => true,
         }
     }
@@ -194,7 +209,7 @@ mod tests {
 
     #[test]
     fn every_mode_has_a_layout_and_a_document() {
-        // The contract is only a contract if it covers all five. A mode
+        // The contract is only a contract if it covers all six. A mode
         // added later fails to compile rather than falling through to a
         // default that puts an editor where its stage should be.
         for mode in ModeId::ALL {

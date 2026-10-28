@@ -4363,6 +4363,7 @@ dependencies = [
  "proton-lsp",
  "proton-plugin",
  "proton-research",
+ "proton-sheet",
  "proton-study",
  "proton-syntax",
  "proton-term",

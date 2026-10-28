@@ -463,6 +463,54 @@ pub enum Command {
     LeanCancel,
     /// Take Lean and Mathlib away.
     LeanRemove,
+    /* ── excel ────────────────────────────────────────────────────── */
+    /// Make a workbook: a `.sheet` folder named after it, or `folder` —
+    /// which may end `.xlsx`, `.csv` or `.tsv` to be kept as one.
+    SheetNew {
+        name: String,
+        folder: Option<String>,
+    },
+    /// Open a workbook in the project: a `.sheet` folder, `.xlsx`, `.csv`
+    /// or `.tsv`.
+    SheetOpen {
+        path: String,
+    },
+    /// Close it; refused while it has unsaved changes unless `discard`.
+    SheetClose {
+        discard: bool,
+    },
+    /// ⌘S: write it back to what it was opened from.
+    SheetSave,
+    /// The cells on screen: a sheet, its rows and columns from and to.
+    SheetView {
+        generation: u32,
+        sheet: u32,
+        rows: [u32; 2],
+        cols: [u32; 2],
+    },
+    /// Cells typed into, by reference — `B7`, `=SUM(A:A)` — as one step to undo.
+    SheetSet {
+        generation: u32,
+        sheet: u32,
+        cells: Vec<(String, String)>,
+    },
+    SheetUndo,
+    SheetRedo,
+    /// Show another sheet.
+    SheetTab {
+        sheet: u32,
+    },
+    /// A sheet after the one shown, named or `SheetN`.
+    SheetAddSheet {
+        name: Option<String>,
+    },
+    SheetRenameSheet {
+        sheet: u32,
+        name: String,
+    },
+    SheetRemoveSheet {
+        sheet: u32,
+    },
     /* ── notebook ─────────────────────────────────────────────────── */
     /// Keep notebooks in this folder — typed as a path is, `~` and all.
     /// Saved in the person's own settings.
@@ -1298,6 +1346,27 @@ pub enum Event {
     /// every output in it.
     CellSelected {
         index: usize,
+    },
+    /// The project's workbooks, for Excel mode's home page.
+    SheetHome {
+        workbooks: Vec<crate::sheet::SheetFound>,
+    },
+    /// The workbook open — its sheets, styles and whether it is saved — or none.
+    SheetBook {
+        book: Option<crate::sheet::SheetBookView>,
+    },
+    /// Cells of a sheet as they are drawn: every one with anything in the
+    /// rectangle, or — `partial` — only those a change moved, which replace
+    /// what the window has for them.
+    SheetCells {
+        generation: u32,
+        #[ts(type = "number")]
+        version: u64,
+        sheet: u32,
+        rows: [u32; 2],
+        cols: [u32; 2],
+        cells: Vec<crate::sheet::SheetCellView>,
+        partial: bool,
     },
     /// Quitting now would lose these files' unsaved changes: the quit waits
     /// for the person to say whether to save them.

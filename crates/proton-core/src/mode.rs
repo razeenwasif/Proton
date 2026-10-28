@@ -25,15 +25,19 @@ pub enum ModeId {
     /// quizzes, exams. "Notebook" on the rail; Data's Jupyter notebooks keep
     /// the word in the code.
     Study,
+    /// A spreadsheet: workbooks of sheets, formulas worked out as they are
+    /// typed, sorting, filters, colour and charts. "Excel" on the rail;
+    /// `sheet` in the code.
+    Sheet,
 }
 
 impl ModeId {
-    /// Ordered as the keys bind them, `1`–`5`: Data and Research beside
-    /// Codex, the three a working day moves between, and Notebook after
-    /// Research. (Design, Model, Game, Video, Canvas and Diffuse were the
-    /// sixth to the eleventh, and LaTeX and the Reader once among them,
-    /// until they moved to apps of their own.)
-    pub const ALL: [ModeId; 5] = [ModeId::Chat, ModeId::Codex, ModeId::Data, ModeId::Research, ModeId::Study];
+    /// Ordered as the keys bind them, `1`–`6`: Data and Research beside
+    /// Codex, the three a working day moves between, Notebook after
+    /// Research, and Excel sixth. (Design, Model, Game, Video, Canvas and
+    /// Diffuse were the sixth to the eleventh, and LaTeX and the Reader once
+    /// among them, until they moved to apps of their own.)
+    pub const ALL: [ModeId; 6] = [ModeId::Chat, ModeId::Codex, ModeId::Data, ModeId::Research, ModeId::Study, ModeId::Sheet];
 
     pub fn slug(self) -> &'static str {
         match self {
@@ -42,6 +46,7 @@ impl ModeId {
             ModeId::Data => "data",
             ModeId::Research => "research",
             ModeId::Study => "study",
+            ModeId::Sheet => "sheet",
         }
     }
 
@@ -58,6 +63,7 @@ impl ModeId {
             ModeId::Data => "Data",
             ModeId::Research => "Research",
             ModeId::Study => "Notebook",
+            ModeId::Sheet => "Excel",
         }
     }
 
@@ -70,7 +76,7 @@ impl ModeId {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`5`, one-indexed as the user sees them.
+    /// `1`–`6`, one-indexed as the user sees them.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }

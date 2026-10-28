@@ -190,3 +190,35 @@ fn a_value_from_a_table_can_be_searched_for_across_the_project() {
     assert_eq!(query, "SAT_17", "the query should be in the box, whole");
     assert!(hits > 0, "the search should have found the line");
 }
+
+#[test]
+fn excel_shows_its_workbooks_and_the_quit_prompt_names_an_unsaved_one() {
+    let root = project("excel");
+    std::fs::create_dir_all(root.join("reports")).unwrap();
+    std::fs::write(root.join("reports/q1.csv"), "a,b\n1,2\n").unwrap();
+    let mut space = Workspace::rooted(root.clone());
+    let events = space.apply(Command::SetMode { mode: ModeId::Sheet });
+    let layout = layout_in(&events).expect("a mode change carries its layout");
+    assert_eq!((layout.stage, layout.document), (Slot::Grid, DocumentKind::Workbook));
+    let found = events.iter().find_map(|e| match e {
+        Event::SheetHome { workbooks } => Some(workbooks.iter().map(|w| w.path.clone()).collect::<Vec<_>>()),
+        _ => None,
+    });
+    assert_eq!(found, Some(vec!["reports/q1.csv".to_string()]));
+
+    let events = space.apply(Command::SheetOpen { path: "reports/q1.csv".into() });
+    let generation = events
+        .iter()
+        .find_map(|e| match e {
+            Event::SheetBook { book: Some(b) } => Some(b.generation),
+            _ => None,
+        })
+        .expect("the workbook open");
+    space.apply(Command::SheetSet { generation, sheet: 0, cells: vec![("C2".into(), "=A2+B2".into())] });
+    assert!(space.is_modified());
+    assert_eq!(space.unsaved(), vec!["reports/q1.csv".to_string()]);
+    assert!(space.save_unsaved().is_empty());
+    assert!(space.unsaved().is_empty());
+    assert_eq!(std::fs::read_to_string(root.join("reports/q1.csv")).unwrap(), "a,b,\n1,2,3\n");
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -50,6 +50,9 @@ import type { ResearchTask } from "./ResearchTask";
 import type { RoundStatus } from "./RoundStatus";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
+import type { SheetBookView } from "./SheetBookView";
+import type { SheetCellView } from "./SheetCellView";
+import type { SheetFound } from "./SheetFound";
 import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
@@ -238,7 +241,7 @@ modified: boolean,
  * What the agent proposed and nobody has answered yet — also drawn
  * on each cell, and listed here for the agent's panel.
  */
-proposals: Array<ProposalView>, } | { "type": "notebookCells", path: string, cells: Array<CellAt>, modified: boolean, } | { "type": "cellSelected", index: number, } | { "type": "unsaved", files: Array<string>, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
+proposals: Array<ProposalView>, } | { "type": "notebookCells", path: string, cells: Array<CellAt>, modified: boolean, } | { "type": "cellSelected", index: number, } | { "type": "sheetHome", workbooks: Array<SheetFound>, } | { "type": "sheetBook", book: SheetBookView | null, } | { "type": "sheetCells", generation: number, version: number, sheet: number, rows: [number, number], cols: [number, number], cells: Array<SheetCellView>, partial: boolean, } | { "type": "unsaved", files: Array<string>, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
 /**
  * The folders conversations are grouped into, each with what it
  * holds; what is in a folder is not in `sessions` as well.
