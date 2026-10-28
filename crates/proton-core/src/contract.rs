@@ -168,13 +168,13 @@ impl Layout {
                 Slot::Studio,
                 DocumentKind::StudyNotebook,
             ),
-            // The project's workbooks and the grid, which wants every
-            // column it can have. The agent joins it on the right with its
-            // sheet tools.
+            // The project's workbooks, the grid, and the agent with its
+            // sheet tools beside it — shut until asked for, as the grid
+            // wants every column it can have.
             ModeId::Sheet => (
                 Slot::Explorer,
                 Slot::Grid,
-                Slot::Empty,
+                Slot::Agent,
                 DocumentKind::Workbook,
             ),
         };

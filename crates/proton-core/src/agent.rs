@@ -404,6 +404,75 @@ impl Agent {
                     "properties": { "path": { "type": "string" } }
                 }),
             },
+            // Excel's workbook. Edits are held until the person saves, and
+            // each call is one step they can undo.
+            Tool {
+                name: "sheet_info".into(),
+                description: "The workbook open in Excel mode: its sheets and the cells each uses, \
+                              frozen panes, filters, colour rules, charts and names. With none open, \
+                              the project's workbooks."
+                    .into(),
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            Tool {
+                name: "sheet_open".into(),
+                description: "Open a workbook in Excel mode: a .sheet folder, .xlsx, .csv or .tsv in the project."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": { "path": { "type": "string", "description": "As sheet_info lists it." } },
+                    "required": ["path"]
+                }),
+            },
+            Tool {
+                name: "sheet_read".into(),
+                description: "Read a range of the open workbook as a table of the values its cells come to; \
+                              with formulas, the formulas too. Up to 5000 cells a call."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "range": { "type": "string", "description": "A1:D20, or A:C for whole columns." },
+                        "sheet": { "type": "string", "description": "The sheet's name; the one on screen if not given." },
+                        "formulas": { "type": "boolean" }
+                    },
+                    "required": ["range"]
+                }),
+            },
+            Tool {
+                name: "sheet_write".into(),
+                description: "Write cells of the open workbook — values or Excel formulas starting with = — \
+                              as one step the person can undo, held until they save. Give `cells`, or \
+                              `at` and `rows` for a block. Answers with what the written cells come to."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "cells": { "type": "array", "items": { "type": "object", "properties": {
+                            "at": { "type": "string" }, "input": {} }, "required": ["at", "input"] } },
+                        "at": { "type": "string", "description": "The block's top left cell." },
+                        "rows": { "type": "array", "items": { "type": "array" } },
+                        "sheet": { "type": "string" }
+                    }
+                }),
+            },
+            Tool {
+                name: "sheet_chart".into(),
+                description: "Chart a range of the open workbook — its first row the series' names, its \
+                              first column the categories — beside it on the sheet."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "range": { "type": "string" },
+                        "kind": { "type": "string", "enum": ["line", "bar", "scatter", "pie"] },
+                        "title": { "type": "string" },
+                        "at": { "type": "string", "description": "The cell its top left sits on." },
+                        "sheet": { "type": "string" }
+                    },
+                    "required": ["range"]
+                }),
+            },
         ]
     }
 
@@ -967,7 +1036,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 16);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the

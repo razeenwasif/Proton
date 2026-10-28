@@ -1383,6 +1383,7 @@ impl Workspace {
             | Command::SheetSave
             | Command::SheetView { .. }
             | Command::SheetSet { .. }
+            | Command::SheetSelect { .. }
             | Command::SheetCopy { .. }
             | Command::SheetPaste { .. }
             | Command::SheetFill { .. }
@@ -3821,6 +3822,10 @@ impl Workspace {
             if call.name == "edit_file" {
                 events.push(self.review_event());
             }
+            // A workbook opened, written to or charted: on screen at once.
+            if crate::sheet::TOOLS.contains(&call.name.as_str()) {
+                events.extend(self.sheets.take_pending());
+            }
             self.agent.answer(&call.id, answer);
         }
 
@@ -4057,6 +4062,7 @@ impl Workspace {
             out.push_str(&match mention {
                 crate::mention::Mention::Selection => self.selected_text(),
                 crate::mention::Mention::Dataframe => self.selected_frame(),
+                crate::mention::Mention::Sheet => self.sheets.about(),
             });
         }
         out
@@ -4738,6 +4744,12 @@ impl Workspace {
                  call_tool for it"
                     .into(),
             ),
+
+            // The workbook open in Excel: its edits held, as the window's are.
+            name if crate::sheet::TOOLS.contains(&name) => {
+                let root = self.root().to_path_buf();
+                self.sheets.tool(&root, name, input)
+            }
 
             other => Err(format!("no such tool: {other}")),
         }

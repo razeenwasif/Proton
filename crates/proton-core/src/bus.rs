@@ -488,6 +488,12 @@ pub enum Command {
         rows: [u32; 2],
         cols: [u32; 2],
     },
+    /// What the window has selected, for `@sheet`.
+    SheetSelect {
+        generation: u32,
+        sheet: u32,
+        range: String,
+    },
     /// Cells typed into, by reference — `B7`, `=SUM(A:A)` — as one step to undo.
     SheetSet {
         generation: u32,

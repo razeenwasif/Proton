@@ -381,6 +381,8 @@ struct Open {
     version: u64,
     /// The rectangle last asked for: (sheet, rows, cols).
     view: Option<(usize, [u32; 2], [u32; 2])>,
+    /// What the window has selected: what `@sheet` sends.
+    selected: Option<(usize, Range)>,
     dropped: Vec<String>,
     /// What was last copied here, to paste with its formulas.
     clip: Option<Clip>,
@@ -408,7 +410,15 @@ impl std::fmt::Debug for Open {
 pub struct Sheets {
     open: Option<Open>,
     generations: u32,
+    /// What the agent's last call changed on screen, for the window.
+    pending: Vec<Event>,
 }
+
+/// The tools the agent has for a workbook.
+pub const TOOLS: [&str; 5] = ["sheet_info", "sheet_open", "sheet_read", "sheet_write", "sheet_chart"];
+
+/// No more cells than this are read or written by one call.
+const MOST_TOOL_CELLS: usize = 5_000;
 
 impl Sheets {
     pub fn is_open(&self) -> bool {
@@ -476,6 +486,12 @@ impl Sheets {
                 vec![cells_event(open, sheet as usize, rows, cols, None)]
             }
             Command::SheetSet { generation, sheet, cells } => self.set(generation, sheet as usize, cells),
+            Command::SheetSelect { generation, sheet, range } => {
+                if let (Ok(open), Some(r)) = (self.checked(generation, sheet as usize), range_of(&range)) {
+                    open.selected = Some((sheet as usize, r));
+                }
+                Vec::new()
+            }
             Command::SheetCopy { generation, sheet, range, cut } => self.copy(generation, sheet as usize, &range, cut),
             Command::SheetPaste { generation, sheet, at, text } => self.paste(generation, sheet as usize, &at, &text),
             Command::SheetFill { generation, sheet, from, to } => self.fill(generation, sheet as usize, &from, &to),
@@ -688,6 +704,7 @@ impl Sheets {
             generation: self.generations,
             version: 0,
             view: None,
+            selected: None,
             dropped,
             clip: None,
         });
@@ -999,6 +1016,168 @@ impl Sheets {
         (sheet < open.book.workbook().sheets.len()).then(|| cells_event(open, sheet, rows, cols, None))
     }
 
+    /* ── the agent ─────────────────────────────────────────────────── */
+
+    /// What the agent's last calls changed on screen.
+    pub fn take_pending(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.pending)
+    }
+
+    /// The sheet a call names, or the one on screen.
+    fn sheet_named(&self, input: &serde_json::Value) -> Result<usize, String> {
+        let open = self.open.as_ref().ok_or("No workbook is open in Excel: sheet_info lists the project's, sheet_open opens one.")?;
+        match input.get("sheet").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(name) => open.book.workbook().sheet_index(name).ok_or_else(|| format!("There is no sheet called {name}.")),
+            None => Ok(open.active),
+        }
+    }
+
+    /// One of `TOOLS`, run.
+    pub fn tool(&mut self, root: &Path, name: &str, input: &serde_json::Value) -> Result<String, String> {
+        let text = |k: &str| input.get(k).and_then(|v| v.as_str()).map(str::to_string);
+        match name {
+            "sheet_info" => Ok(self.info(root)),
+            "sheet_open" => {
+                let path = text("path").ok_or("sheet_open: `path` is required")?;
+                let events = self.apply(root, Command::SheetOpen { path: path.clone() });
+                if let Some(Event::Notice { text, .. }) = events.iter().find(|e| matches!(e, Event::Notice { level: NoticeLevel::Warn, .. })) {
+                    return Err(text.clone());
+                }
+                self.pending.extend(events);
+                Ok(self.info(root))
+            }
+            "sheet_read" => {
+                let sheet = self.sheet_named(input)?;
+                let open = self.open.as_ref().ok_or("No workbook is open.")?;
+                let range = text("range").ok_or("sheet_read: `range` is required, as A1:D20")?;
+                let r = proton_sheet::arrange::range_in(&open.book, sheet, &range).ok_or_else(|| format!("{range} is not a range"))?;
+                if r.rows() as usize * r.cols() as usize > MOST_TOOL_CELLS {
+                    return Err(format!("{range} is more than {MOST_TOOL_CELLS} cells: read it in parts"));
+                }
+                Ok(read_table(&open.book, sheet, r, input.get("formulas").and_then(|v| v.as_bool()).unwrap_or(false)))
+            }
+            "sheet_write" => {
+                let sheet = self.sheet_named(input)?;
+                let mut cells: Vec<(CellRef, String)> = Vec::new();
+                if let Some(list) = input.get("cells").and_then(|v| v.as_array()) {
+                    for c in list {
+                        let at = c.get("at").and_then(|v| v.as_str()).and_then(CellRef::parse).ok_or("each of `cells` needs `at`, a cell such as B7")?;
+                        cells.push((at, json_input(c.get("input"))));
+                    }
+                }
+                if let (Some(at), Some(rows)) = (text("at").and_then(|a| CellRef::parse(&a)), input.get("rows").and_then(|v| v.as_array())) {
+                    for (dr, row) in rows.iter().enumerate() {
+                        for (dc, v) in row.as_array().into_iter().flatten().enumerate() {
+                            if let Some(to) = shift(at, dr as i64, dc as i64) {
+                                cells.push((to, json_input(Some(v))));
+                            }
+                        }
+                    }
+                }
+                if cells.is_empty() {
+                    return Err("sheet_write: give `cells` ([{at, input}]) or `at` with `rows`".into());
+                }
+                if cells.len() > MOST_TOOL_CELLS {
+                    return Err(format!("that is more than {MOST_TOOL_CELLS} cells: write it in parts"));
+                }
+                let open = self.open.as_ref().ok_or("No workbook is open.")?;
+                let styled: Vec<(CellRef, Cell)> = cells.iter().map(|(at, input)| (*at, Cell { input: input.clone(), style: cell_at(&open.book, sheet, *at).style })).collect();
+                let was = self.open.as_ref().map(|o| o.active);
+                if let Some(open) = &mut self.open {
+                    open.active = sheet;
+                }
+                let events = self.change(sheet, styled);
+                self.pending.extend(events);
+                if was != Some(sheet) {
+                    self.pending.extend(self.view_event());
+                }
+                let open = self.open.as_ref().ok_or("No workbook is open.")?;
+                let mut out = format!("Wrote {} cells on {} (held until the person saves). They come to:\n", cells.len(), open.book.workbook().sheets[sheet].name);
+                for (at, _) in cells.iter().take(50) {
+                    out.push_str(&format!("{}	{}\n", at.name(), value_text(&open.book.value(sheet, *at))));
+                }
+                Ok(out)
+            }
+            "sheet_chart" => {
+                let sheet = self.sheet_named(input)?;
+                let range = text("range").ok_or("sheet_chart: `range` is required")?;
+                let kind = match text("kind").as_deref().unwrap_or("bar") {
+                    "line" => SheetChartKind::Line,
+                    "scatter" => SheetChartKind::Scatter,
+                    "pie" => SheetChartKind::Pie,
+                    _ => SheetChartKind::Bar,
+                };
+                let r = range_of(&range).ok_or_else(|| format!("{range} is not a range"))?;
+                let at = text("at").unwrap_or_else(|| CellRef::new(r.start.row, r.end.col + 2).name());
+                let generation = self.open.as_ref().map_or(0, |o| o.generation);
+                let chart = SheetChart { kind, range, title: text("title").unwrap_or_default(), at, width: 480, height: 300 };
+                let events = self.charts(generation, sheet, None, Some(chart));
+                if let Some(Event::Notice { text, .. }) = events.iter().find(|e| matches!(e, Event::Notice { .. })) {
+                    return Err(text.clone());
+                }
+                self.pending.extend(events);
+                Ok("Made the chart; it is on the sheet beside its data.".into())
+            }
+            other => Err(format!("no such sheet tool: {other}")),
+        }
+    }
+
+    /// The workbook open, as the agent reads it; or the project's workbooks.
+    fn info(&self, root: &Path) -> String {
+        let Some(open) = &self.open else {
+            let found = find(root);
+            if found.is_empty() {
+                return "No workbook is open in Excel, and the project has none.".into();
+            }
+            return format!("No workbook is open in Excel. The project's (open one with sheet_open):
+{}", found.iter().map(|w| format!("- {}", w.path)).collect::<Vec<_>>().join("\n"));
+        };
+        let wb = open.book.workbook();
+        let mut out = format!("{} ({:?}){}\n", open.shown, open.kind, if open.state != open.saved { ", with unsaved changes" } else { "" });
+        for (i, s) in wb.sheets.iter().enumerate() {
+            let used = s.used().map_or("empty".to_string(), |u| u.name());
+            out.push_str(&format!("- sheet {}{}: {used}", s.name, if i == open.active { " (on screen)" } else { "" }));
+            if s.frozen.rows + s.frozen.cols > 0 {
+                out.push_str(&format!(", {} rows and {} columns frozen", s.frozen.rows, s.frozen.cols));
+            }
+            if let Some(f) = &s.filter {
+                out.push_str(&format!(", filtered over {}", f.range));
+            }
+            if !s.rules.is_empty() {
+                out.push_str(&format!(", {} colour rules", s.rules.len()));
+            }
+            for c in &s.charts {
+                out.push_str(&format!(", a {:?} chart of {}", c.kind, c.range).to_lowercase());
+            }
+            out.push('\n');
+        }
+        if !wb.names.is_empty() {
+            out.push_str(&format!("Names: {}\n", wb.names.iter().map(|(k, v)| format!("{k} = {v}")).collect::<Vec<_>>().join(", ")));
+        }
+        out
+    }
+
+    /// What `@sheet` sends: the sheet on screen, its headers, and what is selected.
+    pub fn about(&self) -> String {
+        let Some(open) = &self.open else { return "No workbook is open in Excel.".into() };
+        let s = &open.book.workbook().sheets[open.active];
+        let mut out = format!("Sheet {} of {}", s.name, open.shown);
+        let Some(used) = s.used() else { return out + ", which is empty." };
+        out.push_str(&format!(", cells in use {}.\n", used.name()));
+        let head = Range::new(used.start, CellRef::new(used.start.row.saturating_add(4).min(used.end.row), used.end.col.min(used.start.col + 25)));
+        out.push_str(&format!("Its first rows ({}):
+{}", head.name(), read_table(&open.book, open.active, head, false)));
+        match open.selected {
+            Some((sheet, r)) if sheet == open.active => {
+                let r = Range::new(r.start, CellRef::new(r.end.row.min(r.start.row + 199), r.end.col.min(r.start.col + 25)));
+                out.push_str(&format!("Selected: {}
+{}", r.name(), read_table(&open.book, sheet, r, true)));
+            }
+            _ => out.push_str("Nothing is selected.\n"),
+        }
+        out
+    }
+
     fn dirty(&self) -> bool {
         self.open.as_ref().is_some_and(|o| o.state != o.saved)
     }
@@ -1113,6 +1292,55 @@ fn apply_cells(book: &mut Book, sheet: usize, cells: &[(CellRef, Cell)]) -> Vec<
     moved.sort_unstable();
     moved.dedup();
     moved
+}
+
+/// A value as the agent reads it.
+fn value_text(v: &Value) -> String {
+    match v {
+        Value::Empty => String::new(),
+        Value::Number(n) => proton_sheet::value::general(*n),
+        Value::Text(t) => t.clone(),
+        Value::Bool(b) => if *b { "TRUE" } else { "FALSE" }.into(),
+        Value::Error(e) => e.text().into(),
+    }
+}
+
+/// A range as a table: the columns' letters across the top, each row's
+/// number down the side, values as they come to; and then the formulas, when asked.
+fn read_table(book: &Book, sheet: usize, r: Range, formulas: bool) -> String {
+    let mut out = String::from("\t");
+    out.push_str(&(r.start.col..=r.end.col).map(proton_sheet::refs::col_name).collect::<Vec<_>>().join("\t"));
+    out.push('\n');
+    let mut written = Vec::new();
+    for row in r.start.row..=r.end.row {
+        out.push_str(&(row + 1).to_string());
+        for col in r.start.col..=r.end.col {
+            let at = CellRef::new(row, col);
+            out.push('\t');
+            out.push_str(&value_text(&book.value(sheet, at)).replace(['\t', '\n'], " "));
+            let input = book.input(sheet, at);
+            if formulas && input.starts_with('=') {
+                written.push(format!("{}: {input}", at.name()));
+            }
+        }
+        out.push('\n');
+    }
+    if !written.is_empty() {
+        out.push_str("Formulas:\n");
+        out.push_str(&written.join("\n"));
+        out.push('\n');
+    }
+    out
+}
+
+/// A JSON value as what is typed into a cell.
+fn json_input(v: Option<&serde_json::Value>) -> String {
+    match v {
+        None | Some(serde_json::Value::Null) => String::new(),
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Bool(b)) => if *b { "TRUE" } else { "FALSE" }.into(),
+        Some(other) => other.to_string(),
+    }
 }
 
 /// A cell as it is kept, or an empty one.
@@ -1535,6 +1763,36 @@ mod tests {
         let back = proton_sheet::folder::read(&root.join("arrange.sheet")).unwrap();
         assert_eq!((back.sheets[0].charts.len(), back.sheets[0].charts[0].kind), (1, proton_sheet::model::ChartKind::Pie));
         assert_eq!((back.sheets[0].rules.len(), back.sheets[0].filter.as_ref().map(|f| f.columns.len())), (1, Some(1)));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_agent_reads_writes_and_charts_a_workbook_and_at_sheet_says_what_is_selected() {
+        let root = scratch("agent");
+        std::fs::write(root.join("costs.csv"), "Item,Cost\nRent,1450\nFood,300\n").unwrap();
+        let mut sheets = Sheets::default();
+        let none = sheets.tool(&root, "sheet_info", &serde_json::json!({})).unwrap();
+        assert!(none.contains("costs.csv"), "{none}");
+        assert!(sheets.tool(&root, "sheet_read", &serde_json::json!({"range": "A1"})).is_err(), "nothing is open");
+        let info = sheets.tool(&root, "sheet_open", &serde_json::json!({"path": "costs.csv"})).unwrap();
+        assert!(info.contains("sheet costs (on screen): A1:B3"), "{info}");
+        assert!(sheets.take_pending().iter().any(|e| matches!(e, Event::SheetBook { book: Some(_) })), "the window is shown it");
+        let wrote = sheets
+            .tool(&root, "sheet_write", &serde_json::json!({"cells": [{"at": "B4", "input": "=SUM(B2:B3)"}], "at": "A4", "rows": [["Total"]]}))
+            .unwrap();
+        assert!(wrote.contains("B4\t1750"), "{wrote}");
+        assert_eq!(sheets.unsaved(), vec!["costs.csv"], "held until saved");
+        let read = sheets.tool(&root, "sheet_read", &serde_json::json!({"range": "A1:B4", "formulas": true})).unwrap();
+        assert_eq!(read, "\tA\tB\n1\tItem\tCost\n2\tRent\t1450\n3\tFood\t300\n4\tTotal\t1750\nFormulas:\nB4: =SUM(B2:B3)\n");
+        sheets.tool(&root, "sheet_chart", &serde_json::json!({"range": "A1:B3", "kind": "pie"})).unwrap();
+        assert!(sheets.tool(&root, "sheet_info", &serde_json::json!({})).unwrap().contains("a pie chart of a1:b3"));
+        let g = sheets.open.as_ref().unwrap().generation;
+        sheets.apply(&root, Command::SheetSelect { generation: g, sheet: 0, range: "B2:B3".into() });
+        let about = sheets.about();
+        assert!(about.contains("Selected: B2:B3\n\tB\n2\t1450\n3\t300\n") && about.contains("Its first rows (A1:B4)"), "{about}");
+        sheets.tool(&root, "sheet_write", &serde_json::json!({"cells": [{"at": "C1", "input": 5}]})).unwrap();
+        sheets.apply(&root, Command::SheetUndo);
+        assert_eq!(cell_at(&sheets.open.as_ref().unwrap().book, 0, CellRef::parse("C1").unwrap()).input, "", "an agent's write is undone as one step");
         let _ = std::fs::remove_dir_all(root);
     }
 

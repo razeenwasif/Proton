@@ -421,9 +421,25 @@ export function createSheet(host) {
   /** The cell as kept. @param {number} r @param {number} c */
   const cellAt = (r, c) => state.cells.get(key(r, c));
 
+  /** The core is told what is selected, for `@sheet`, a moment after it settles. */
+  let told = "";
+  let telling = 0;
+  function tellSelection() {
+    clearTimeout(telling);
+    telling = window.setTimeout(() => {
+      const b = state.book;
+      const range = rangeName(selection());
+      const key = `${b?.generation}:${b?.active}:${range}`;
+      if (!b || key === told) return;
+      told = key;
+      host.dispatch({ type: "sheetSelect", generation: b.generation, sheet: b.active, range });
+    }, 150);
+  }
+
   /** Show what the selected cell holds in the name box, the formula bar and the format bar. */
   function showSelected() {
     const [r, c] = state.at;
+    tellSelection();
     els.name.value = rangeName(selection());
     if (state.editing !== "bar") els.bar.value = cellAt(r, c)?.input ?? "";
     const st = styleOf(cellAt(r, c)?.style ?? 0);

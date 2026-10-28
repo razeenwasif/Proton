@@ -791,8 +791,8 @@
          as a grid drawn by the rows on screen, with the name box and the
          formula bar above it and the sheets' tabs below; or, when none is
          open, a page to open or make one (ui/sheet.js). -->
-    <section class="workspace xl" data-ws="sheet"
-             style="--col-l:240px; grid-template-columns: var(--col-l) 1px minmax(0,1fr);">
+    <section class="workspace xl" data-ws="sheet" data-right-start="hidden"
+             style="--col-l:240px; --col-r:340px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side xl-side">
         <div class="cc-side-head">
           <button class="cc-new" data-sheet-new title="New workbook"><svg class="i"><use href="#i-plus"/></svg>New workbook</button>
@@ -852,6 +852,30 @@
           <footer class="xl-tabs" role="tablist" aria-label="Sheets" data-sheet-tabs></footer>
         </div>
       </main>
+
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+
+      <!-- The agent, with the sheet tools: it reads, writes and charts the
+           workbook open, its edits held until ⌘S like the window's. -->
+      <aside class="pane xl-dock">
+        <div class="data-agent xl-agent">
+          <div class="scroll" data-agent-thread></div>
+          <div class="composer">
+            <div class="box">
+              <div class="txt" contenteditable="plaintext-only" role="textbox"
+                   aria-label="Ask about this workbook" data-agent-input
+                   data-placeholder="Ask about this workbook, @sheet to include what is selected"></div>
+              <div class="foot">
+                <span class="select" data-mention="@sheet" title="Send the sheet on screen and what is selected with the question">@sheet</span>
+                <span class="grow"></span>
+                <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
+                <span class="send" data-agent-send role="button" tabindex="0"
+                      aria-label="Send"><svg class="i"><use href="#i-send"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
     </section>
   </div>
 

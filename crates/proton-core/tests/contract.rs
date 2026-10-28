@@ -220,5 +220,13 @@ fn excel_shows_its_workbooks_and_the_quit_prompt_names_an_unsaved_one() {
     assert!(space.save_unsaved().is_empty());
     assert!(space.unsaved().is_empty());
     assert_eq!(std::fs::read_to_string(root.join("reports/q1.csv")).unwrap(), "a,b,\n1,2,3\n");
+
+    // The agent's tools, through the seam every tool is called by.
+    let wrote = space.run_tool("sheet_write", &serde_json::json!({"cells": [{"at": "D2", "input": "=C2*10"}]})).unwrap();
+    assert!(wrote.contains("D2\t30"), "{wrote}");
+    assert_eq!(space.unsaved(), vec!["reports/q1.csv".to_string()], "an agent's edit is held too");
+    let read = space.run_tool("sheet_read", &serde_json::json!({"range": "A1:D2"})).unwrap();
+    assert!(read.ends_with("2\t1\t2\t3\t30\n"), "{read}");
+    assert!(space.with_context("what is @sheet about?").contains("# @sheet\nSheet q1 of reports/q1.csv"));
     let _ = std::fs::remove_dir_all(root);
 }

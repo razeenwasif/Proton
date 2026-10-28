@@ -311,6 +311,21 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
     key('Escape'); await settle();
   });
 
+  await test('Excel has the agent in its dock, with @sheet, and tells the core what is selected', async () => {
+    await win.pushEvents([book({active: 0, version: 9})]); await settle();
+    const dock = ws().querySelector('.xl-dock');
+    assert(dock?.querySelector('[data-agent-input]') && dock.querySelector('[data-mention="@sheet"]'), 'there is no agent composer with @sheet');
+    const toggle = [...doc.querySelectorAll('[data-panel-toggle="right"]')].find((b) => b.getClientRects().length);
+    assert(toggle && !toggle.disabled, 'the dock cannot be shown');
+    const before = win.commands.length;
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    scroll.focus();
+    key('g'); key('g'); key('0'); key('v'); key('j'); key('l'); await settle(); await settle();
+    const told = sent(before, 'sheetSelect').at(-1);
+    assert(told?.range === 'A1:B2' && told.generation === 3, `the core was told ${JSON.stringify(told)}`);
+    key('Escape'); await settle();
+  });
+
   await test('Scrolling a long way asks for the rows there, and the grid goes on', async () => {
     await win.pushEvents([book({active: 0, version: 2})]); await settle();
     const scroll = ws().querySelector('[data-sheet-scroll]');
