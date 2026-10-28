@@ -3363,6 +3363,9 @@ function renderEvent(event) {
     case "sheetCells":
       sheet?.cells(event);
       break;
+    case "sheetFilterValues":
+      sheet?.filterValues(event);
+      break;
     // What Excel copied, on the system clipboard.
     case "sheetClip":
       void copyText(event.text);

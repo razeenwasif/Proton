@@ -174,6 +174,28 @@ fn apply(wb: &mut Workbook, sheet: usize, axis: Axis, change: Change) {
     adjust_all(wb, sheet, axis, change);
     let Some(s) = wb.sheets.get_mut(sheet) else { return };
     s.cells = move_cells(&s.cells, axis, change);
+    // A filter and the conditional colours keep to the cells they were over.
+    if let Some(f) = &mut s.filter {
+        match moved_range(&f.range, axis, change) {
+            Some(r) => {
+                f.range = r;
+                if axis == Axis::Cols {
+                    f.columns = std::mem::take(&mut f.columns)
+                        .into_iter()
+                        .filter_map(|(letters, c)| Some((crate::refs::col_name(change.point(crate::refs::col_of(&letters)?)?), c)))
+                        .collect();
+                }
+            }
+            None => s.filter = None,
+        }
+    }
+    s.rules.retain_mut(|rule| match moved_range(&rule.range, axis, change) {
+        Some(r) => {
+            rule.range = r;
+            true
+        }
+        None => false,
+    });
     if axis == Axis::Cols {
         s.widths = s.widths.iter().filter_map(|(c, w)| change.point(*c).map(|c| (c, *w))).collect();
     }
@@ -191,6 +213,22 @@ fn apply(wb: &mut Workbook, sheet: usize, axis: Axis, change: Change) {
             *frozen += n;
         }
     }
+}
+
+/// A range written `A1:D9` after a change; whole columns and rows, which a
+/// change across them leaves whole, as they were; none when all of it went.
+fn moved_range(text: &str, axis: Axis, change: Change) -> Option<String> {
+    let Some(r) = Range::parse(text) else { return Some(text.to_string()) };
+    let (a, b) = match axis {
+        Axis::Rows => (r.start.row, r.end.row),
+        Axis::Cols => (r.start.col, r.end.col),
+    };
+    let (a, b) = change.span(a, b)?;
+    let r = match axis {
+        Axis::Rows => Range::new(CellRef::new(a, r.start.col), CellRef::new(b, r.end.col)),
+        Axis::Cols => Range::new(CellRef::new(r.start.row, a), CellRef::new(r.end.row, b)),
+    };
+    Some(r.name())
 }
 
 /// `n` rows or columns put in before `at`.

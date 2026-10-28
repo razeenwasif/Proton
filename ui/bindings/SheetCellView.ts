@@ -18,6 +18,10 @@ input: string, style: number,
  */
 kind: string, 
 /**
- * A colour its number format gives it, `[Red]`'s.
+ * A colour its number format or a conditional colour gives it.
  */
-color: string | null, };
+color: string | null, 
+/**
+ * A conditional colour's fill, and its bold.
+ */
+fill: string | null, bold: boolean, };

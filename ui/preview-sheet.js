@@ -106,7 +106,7 @@ export function createSheetPreview(deliver) {
     const v = value(s, name);
     const kind = input === "" ? "" : typeof v === "number" ? "n" : typeof v === "boolean" ? "b" : String(v).startsWith("#") ? "e" : "t";
     const text = typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : typeof v === "number" ? String(Math.round(v * 1e10) / 1e10) : v;
-    return { row, col, text, input, style: 0, kind, color: null };
+    return { row, col, text, input, style: 0, kind, color: null, fill: null, bold: false };
   }
 
   const bookEvent = () => ({
@@ -122,7 +122,7 @@ export function createSheetPreview(deliver) {
           rows = Math.max(rows, r + 1);
           cols = Math.max(cols, c + 1);
         }
-        return { name: sh.name, rows, cols, frozen: sh.frozen ?? [0, 0], widths: [...(sh.widths ?? new Map())] };
+        return { name: sh.name, rows, cols, frozen: sh.frozen ?? [0, 0], widths: [...(sh.widths ?? new Map())], hidden: [], filter: null, rules: [] };
       }),
     },
   });

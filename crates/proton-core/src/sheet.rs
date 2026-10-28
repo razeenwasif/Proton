@@ -147,6 +147,81 @@ impl SheetStylePatch {
     }
 }
 
+/// When a conditional colour applies: `proton-sheet`'s, as the window writes it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(tag = "when", rename_all = "camelCase")]
+pub enum SheetWhen {
+    Greater { value: f64 },
+    Less { value: f64 },
+    Between { low: f64, high: f64 },
+    Equal { value: String },
+    Contains { text: String },
+    Duplicates,
+    Top { n: u32 },
+    Bottom { n: u32 },
+    Scale { low: String, high: String },
+}
+
+/// A conditional colour: over a range, when something holds, a fill, a
+/// text colour, bold.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct SheetRuleView {
+    pub range: String,
+    pub when: SheetWhen,
+    pub fill: Option<String>,
+    pub color: Option<String>,
+    pub bold: bool,
+}
+
+impl From<&proton_sheet::model::Rule> for SheetRuleView {
+    fn from(r: &proton_sheet::model::Rule) -> Self {
+        use proton_sheet::model::When as W;
+        let when = match &r.when {
+            W::Greater { value } => SheetWhen::Greater { value: *value },
+            W::Less { value } => SheetWhen::Less { value: *value },
+            W::Between { low, high } => SheetWhen::Between { low: *low, high: *high },
+            W::Equal { value } => SheetWhen::Equal { value: value.clone() },
+            W::Contains { text } => SheetWhen::Contains { text: text.clone() },
+            W::Duplicates => SheetWhen::Duplicates,
+            W::Top { n } => SheetWhen::Top { n: *n },
+            W::Bottom { n } => SheetWhen::Bottom { n: *n },
+            W::Scale { low, high } => SheetWhen::Scale { low: low.clone(), high: high.clone() },
+        };
+        SheetRuleView { range: r.range.clone(), when, fill: r.fill.clone(), color: r.color.clone(), bold: r.bold }
+    }
+}
+
+impl From<SheetRuleView> for proton_sheet::model::Rule {
+    fn from(r: SheetRuleView) -> Self {
+        use proton_sheet::model::When as W;
+        let when = match r.when {
+            SheetWhen::Greater { value } => W::Greater { value },
+            SheetWhen::Less { value } => W::Less { value },
+            SheetWhen::Between { low, high } => W::Between { low, high },
+            SheetWhen::Equal { value } => W::Equal { value },
+            SheetWhen::Contains { text } => W::Contains { text },
+            SheetWhen::Duplicates => W::Duplicates,
+            SheetWhen::Top { n } => W::Top { n },
+            SheetWhen::Bottom { n } => W::Bottom { n },
+            SheetWhen::Scale { low, high } => W::Scale { low, high },
+        };
+        let colour = |c: Option<String>| c.filter(|c| !c.trim().is_empty());
+        proton_sheet::model::Rule { range: r.range, when, fill: colour(r.fill), color: colour(r.color), bold: r.bold }
+    }
+}
+
+/// A sheet's filter: its range, and the columns that have a condition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct SheetFilterView {
+    pub range: String,
+    pub columns: Vec<u32>,
+}
+
 /// One sheet's tab, and what the grid needs to lay it out.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
@@ -160,6 +235,11 @@ pub struct SheetTabView {
     pub frozen: [u32; 2],
     /// Widths in points, where a column is not the default.
     pub widths: Vec<(u32, f64)>,
+    /// The rows its filter hides, as runs `[first, last]`; only the sheet
+    /// shown's are worked out.
+    pub hidden: Vec<[u32; 2]>,
+    pub filter: Option<SheetFilterView>,
+    pub rules: Vec<SheetRuleView>,
 }
 
 /// The workbook open: everything but its cells, which the window asks for
@@ -201,8 +281,11 @@ pub struct SheetCellView {
     /// `n` a number, `t` text, `b` true or false, `e` an error, `` nothing:
     /// which way it lines up when its style does not say.
     pub kind: String,
-    /// A colour its number format gives it, `[Red]`'s.
+    /// A colour its number format or a conditional colour gives it.
     pub color: Option<String>,
+    /// A conditional colour's fill, and its bold.
+    pub fill: Option<String>,
+    pub bold: bool,
 }
 
 /// One undoable change.
@@ -333,6 +416,88 @@ impl Sheets {
             Command::SheetPaste { generation, sheet, at, text } => self.paste(generation, sheet as usize, &at, &text),
             Command::SheetFill { generation, sheet, from, to } => self.fill(generation, sheet as usize, &from, &to),
             Command::SheetFormat { generation, sheet, range, patch } => self.format(generation, sheet as usize, &range, *patch),
+            Command::SheetSort { generation, sheet, range, keys } => {
+                let open = match self.checked(generation, sheet as usize) {
+                    Ok(open) => open,
+                    Err(events) => return events,
+                };
+                let Some(range) = proton_sheet::arrange::range_in(&open.book, sheet as usize, &range) else {
+                    return vec![notice(format!("{range} is not a range"), NoticeLevel::Warn)];
+                };
+                if keys.is_empty() || keys.iter().any(|(c, _)| !(range.start.col..=range.end.col).contains(c)) {
+                    return vec![notice("sort by a column of what is sorted".into(), NoticeLevel::Warn)];
+                }
+                if range.rows() as u64 * range.cols() as u64 > MOST_CLIP {
+                    return vec![notice("that is more cells than can be sorted at once".into(), NoticeLevel::Warn)];
+                }
+                let cells = proton_sheet::arrange::sort(&open.book, sheet as usize, range, &keys);
+                self.change(sheet as usize, cells)
+            }
+            Command::SheetFilter { generation, sheet, range } => {
+                if let Err(events) = self.checked(generation, sheet as usize) {
+                    return events;
+                }
+                self.reshape(|wb, active| {
+                    let s = &mut wb.sheets[sheet as usize];
+                    s.filter = match range {
+                        Some(r) if proton_sheet::Range::parse(r.trim()).is_some() => Some(proton_sheet::model::Filter { range: r.trim().to_string(), columns: Default::default() }),
+                        Some(r) => return Err(format!("{r} is not a range to filter")),
+                        None => None,
+                    };
+                    Ok(active)
+                })
+            }
+            Command::SheetFilterValues { generation, sheet, col } => {
+                let open = match self.checked(generation, sheet as usize) {
+                    Ok(open) => open,
+                    Err(events) => return events,
+                };
+                let Some(f) = open.book.workbook().sheets[sheet as usize].filter.clone() else { return Vec::new() };
+                let Some(range) = proton_sheet::arrange::range_in(&open.book, sheet as usize, &f.range) else { return Vec::new() };
+                let condition = f.columns.get(&proton_sheet::refs::col_name(col)).cloned().unwrap_or_default();
+                let mut values = proton_sheet::arrange::distinct(&open.book, sheet as usize, range, col);
+                values.truncate(1000);
+                vec![Event::SheetFilterValues { col, values, ticked: condition.values, criteria: condition.criteria }]
+            }
+            Command::SheetFilterSet { generation, sheet, col, values, criteria } => {
+                if let Err(events) = self.checked(generation, sheet as usize) {
+                    return events;
+                }
+                self.reshape(|wb, active| {
+                    let Some(f) = &mut wb.sheets[sheet as usize].filter else { return Err("the sheet has no filter".into()) };
+                    let letters = proton_sheet::refs::col_name(col);
+                    if values.is_none() && criteria.trim().is_empty() {
+                        f.columns.remove(&letters);
+                    } else {
+                        f.columns.insert(letters, proton_sheet::model::Condition { values, criteria: criteria.trim().to_string() });
+                    }
+                    Ok(active)
+                })
+            }
+            Command::SheetRuleAdd { generation, sheet, rule } => {
+                if let Err(events) = self.checked(generation, sheet as usize) {
+                    return events;
+                }
+                self.reshape(|wb, active| {
+                    if proton_sheet::Range::parse(rule.range.trim()).is_none() {
+                        return Err(format!("{} is not a range to colour", rule.range));
+                    }
+                    wb.sheets[sheet as usize].rules.push((*rule).into());
+                    Ok(active)
+                })
+            }
+            Command::SheetRuleRemove { generation, sheet, index } => {
+                if let Err(events) = self.checked(generation, sheet as usize) {
+                    return events;
+                }
+                self.reshape(|wb, active| {
+                    let rules = &mut wb.sheets[sheet as usize].rules;
+                    if (index as usize) < rules.len() {
+                        rules.remove(index as usize);
+                    }
+                    Ok(active)
+                })
+            }
             Command::SheetInsert { generation, sheet, cols, at, n } => self.lines(generation, sheet as usize, cols, at, n, true),
             Command::SheetDelete { generation, sheet, cols, at, n } => self.lines(generation, sheet as usize, cols, at, n, false),
             Command::SheetWidth { generation, sheet, col, width } => {
@@ -781,7 +946,8 @@ impl Sheets {
                 sheets: wb
                     .sheets
                     .iter()
-                    .map(|s| {
+                    .enumerate()
+                    .map(|(i, s)| {
                         let used = s.used();
                         SheetTabView {
                             name: s.name.clone(),
@@ -789,6 +955,12 @@ impl Sheets {
                             cols: used.map_or(0, |u| u.end.col + 1),
                             frozen: [s.frozen.rows, s.frozen.cols],
                             widths: s.widths.iter().map(|(c, w)| (*c, *w)).collect(),
+                            hidden: if i == open.active { proton_sheet::arrange::hidden(&open.book, i) } else { Vec::new() },
+                            filter: s.filter.as_ref().map(|f| SheetFilterView {
+                                range: f.range.clone(),
+                                columns: f.columns.keys().filter_map(|l| proton_sheet::refs::col_of(l)).collect(),
+                            }),
+                            rules: s.rules.iter().map(SheetRuleView::from).collect(),
                         }
                     })
                     .collect(),
@@ -879,6 +1051,7 @@ fn check_name(wb: &Workbook, name: &str, except: Option<usize>) -> Result<(), St
 fn cells_event(open: &Open, sheet: usize, rows: [u32; 2], cols: [u32; 2], only: Option<&[CellRef]>) -> Event {
     let wb = open.book.workbook();
     let s = &wb.sheets[sheet];
+    let painter = (!s.rules.is_empty()).then(|| proton_sheet::arrange::Painter::new(&open.book, sheet));
     let view = |at: CellRef| -> SheetCellView {
         let cell = s.cells.get(&at);
         let style = cell.map_or(0, |c| c.style);
@@ -893,7 +1066,10 @@ fn cells_event(open: &Open, sheet: usize, rows: [u32; 2], cols: [u32; 2], only: 
             Value::Error(_) => "e",
             Value::Empty => "",
         };
-        SheetCellView { row: at.row, col: at.col, text: shown.text, input, style, kind: kind.into(), color: shown.color.map(str::to_string) }
+        let paint = painter.as_ref().and_then(|p| p.paint(at, &value));
+        let color = paint.as_ref().and_then(|p| p.color.clone()).or(shown.color.map(str::to_string));
+        let (fill, bold) = paint.map_or((None, false), |p| (p.fill, p.bold));
+        SheetCellView { row: at.row, col: at.col, text: shown.text, input, style, kind: kind.into(), color, fill, bold }
     };
     let cells = match only {
         Some(list) => list.iter().map(|at| view(*at)).collect(),
@@ -1210,6 +1386,44 @@ mod tests {
         sheets.apply(&root, Command::SheetSave);
         let back = proton_sheet::folder::read(&root.join("edit.sheet")).unwrap();
         assert_eq!((back.sheets[0].widths.get(&2), back.sheets[0].frozen.rows), (Some(&120.0), 1));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sorting_filtering_and_colouring_follow_the_values() {
+        let root = scratch("arrange");
+        let mut sheets = Sheets::default();
+        let g = book_of(&sheets.apply(&root, Command::SheetNew { name: "Arrange".into(), folder: None })).unwrap().generation;
+        sheets.apply(&root, Command::SheetView { generation: g, sheet: 0, rows: [0, 40], cols: [0, 10] });
+        let cells: Vec<(String, String)> = [("A1", "Fruit"), ("B1", "Kg"), ("A2", "pear"), ("B2", "12"), ("A3", "apple"), ("B3", "4"), ("A4", "fig"), ("B4", "20")]
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        sheets.apply(&root, Command::SheetSet { generation: g, sheet: 0, cells });
+        let input = |s: &Sheets, at: &str| cell_at(&s.open.as_ref().unwrap().book, 0, CellRef::parse(at).unwrap()).input;
+
+        sheets.apply(&root, Command::SheetSort { generation: g, sheet: 0, range: "A2:B4".into(), keys: vec![(1, false)] });
+        assert_eq!((input(&sheets, "A2"), input(&sheets, "A4")), ("fig".to_string(), "apple".to_string()));
+        sheets.apply(&root, Command::SheetUndo);
+        assert_eq!(input(&sheets, "A2"), "pear", "a sort is one step");
+
+        let on = sheets.apply(&root, Command::SheetFilter { generation: g, sheet: 0, range: Some("A1:B4".into()) });
+        assert_eq!(book_of(&on).unwrap().sheets[0].filter.as_ref().map(|f| f.range.as_str()), Some("A1:B4"));
+        let values = sheets.apply(&root, Command::SheetFilterValues { generation: g, sheet: 0, col: 0 });
+        let Event::SheetFilterValues { values, .. } = &values[0] else { panic!("{values:?}") };
+        assert_eq!(values.iter().map(|(v, _)| v.as_str()).collect::<Vec<_>>(), vec!["apple", "fig", "pear"]);
+        let set = sheets.apply(&root, Command::SheetFilterSet { generation: g, sheet: 0, col: 1, values: None, criteria: ">5".into() });
+        let b = book_of(&set).unwrap();
+        assert_eq!((b.sheets[0].hidden.clone(), b.sheets[0].filter.as_ref().unwrap().columns.clone()), (vec![[2, 2]], vec![1]), "apple's 4 is hidden");
+
+        let rule = SheetRuleView { range: "B2:B4".into(), when: SheetWhen::Greater { value: 10.0 }, fill: Some("#ffcccc".into()), color: None, bold: true };
+        let added = sheets.apply(&root, Command::SheetRuleAdd { generation: g, sheet: 0, rule: Box::new(rule) });
+        let b2 = cells_of(&added).into_iter().find(|c| c.row == 1 && c.col == 1).expect("the cells redrawn");
+        let b3 = cells_of(&added).into_iter().find(|c| c.row == 2 && c.col == 1).unwrap();
+        assert_eq!((b2.fill.as_deref(), b2.bold, b3.fill.as_deref()), (Some("#ffcccc"), true, None));
+        sheets.apply(&root, Command::SheetSave);
+        let back = proton_sheet::folder::read(&root.join("arrange.sheet")).unwrap();
+        assert_eq!((back.sheets[0].rules.len(), back.sheets[0].filter.as_ref().map(|f| f.columns.len())), (1, Some(1)));
         let _ = std::fs::remove_dir_all(root);
     }
 

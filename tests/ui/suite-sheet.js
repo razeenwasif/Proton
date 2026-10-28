@@ -9,10 +9,10 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
   const sent = (/** @type {number} */ from, /** @type {string} */ type) => win.commands.slice(from).filter((/** @type {any} */ c) => c.type === type);
   const plain = {bold: false, italic: false, underline: false, color: null, fill: null, format: '', align: null, wrap: false};
   const book = (/** @type {Partial<any>} */ more = {}) => ({type: 'sheetBook', book: {path: 'budget.sheet', name: 'budget', kind: 'folder',
-    sheets: [{name: 'Sheet1', rows: 7, cols: 3, frozen: [0, 0], widths: [[0, 90]]}, {name: 'Q2', rows: 0, cols: 0, frozen: [0, 0], widths: []}],
+    sheets: [{name: 'Sheet1', rows: 7, cols: 3, frozen: [0, 0], widths: [[0, 90]], hidden: [], filter: null, rules: []}, {name: 'Q2', rows: 0, cols: 0, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: []}],
     active: 0, styles: [plain, {...plain, bold: true, fill: '#ffff00'}], generation: 3, version: 1, dirty: false, canUndo: false, canRedo: false, dropped: [], ...more}});
   const cell = (/** @type {number} */ row, /** @type {number} */ col, /** @type {string} */ text, input = text, kind = 't', style = 0) =>
-    ({row, col, text, input, style, kind, color: null});
+    ({row, col, text, input, style, kind, color: null, fill: null, bold: false});
   const cells = (/** @type {any[]} */ list, partial = false, generation = 3) => ({type: 'sheetCells', generation, version: 1, sheet: 0,
     rows: [0, 100], cols: [0, 30], cells: list, partial});
 
@@ -184,7 +184,7 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
   });
 
   await test('Frozen rows stay on screen as the grid scrolls, and a click there picks them', async () => {
-    await win.pushEvents([book({active: 0, version: 4, sheets: [{name: 'Sheet1', rows: 500, cols: 3, frozen: [1, 0], widths: []}, {name: 'Q2', rows: 0, cols: 0, frozen: [0, 0], widths: []}]}),
+    await win.pushEvents([book({active: 0, version: 4, sheets: [{name: 'Sheet1', rows: 500, cols: 3, frozen: [1, 0], widths: [], hidden: [], filter: null, rules: []}, {name: 'Q2', rows: 0, cols: 0, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: []}]}),
       cells([cell(0, 0, 'Item', 'Item', 't'), cell(300, 0, 'deep', 'deep', 't')])]);
     await settle();
     const scroll = ws().querySelector('[data-sheet-scroll]');
@@ -229,6 +229,55 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
     win.dispatchEvent(new win.MouseEvent('mouseup', {bubbles: true})); await settle();
     const w = sent(before, 'sheetWidth')[0];
     assert(w?.col === 1 && w.width === 90, `the edge set ${JSON.stringify(w)}`);
+  });
+
+  await test('A filter hides its rows from the grid, its ▾ lists the values to tick, and sorting and colour rules are asked for', async () => {
+    const tabOf = (/** @type {any} */ more) => ({name: 'Sheet1', rows: 6, cols: 2, frozen: [0, 0], widths: [], hidden: [], filter: null, rules: [], ...more});
+    await win.pushEvents([book({active: 0, version: 6, sheets: [tabOf({hidden: [[2, 3]], filter: {range: 'A1:B6', columns: [1]}})]}),
+      cells([cell(0, 0, 'Fruit'), cell(0, 1, 'Kg'), cell(1, 0, 'pear'), cell(2, 0, 'apple'), cell(3, 0, 'fig'), cell(4, 0, 'kiwi'), cell(4, 1, '9', '9', 'n', 0)])]);
+    await settle();
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    scroll.scrollTop = 0; scroll.scrollLeft = 0; scroll.dispatchEvent(new win.Event('scroll')); await settle();
+    assert(!ws().querySelector('[data-cell="2,0"]') && !ws().querySelector('[data-cell="3,0"]'), 'hidden rows are drawn');
+    const kiwi = /** @type {HTMLElement} */ (ws().querySelector('[data-cell="4,0"]'));
+    assert(kiwi && parseFloat(kiwi.style.top) === 24 + 2 * 24, `row 5 is at ${kiwi?.style.top}, not straight after row 2`);
+    assert(ws().querySelector('.xl-rh[data-row="4"]')?.classList.contains('gap'), 'the row after hidden ones does not say so');
+    // j from row 2 goes past the hidden rows to row 5.
+    scroll.focus();
+    key('g'); key('g'); key('j'); key('j'); await settle();
+    assert(ws().querySelector('[data-sheet-name]').value === 'A5', `j went to ${ws().querySelector('[data-sheet-name]').value}`);
+    // The ▾ on B asks for B's values; the list ticks and applies.
+    const before = win.commands.length;
+    const button = ws().querySelector('[data-filter-col="1"]');
+    assert(button?.classList.contains('on') && ws().querySelector('[data-filter-col="0"]') && !ws().querySelector('[data-filter-col="0"]').classList.contains('on'), 'the header buttons are not drawn as they are');
+    button.dispatchEvent(new win.MouseEvent('mousedown', {bubbles: true, button: 0})); await settle();
+    assert(sent(before, 'sheetFilterValues')[0]?.col === 1, 'the ▾ did not ask for the values');
+    await win.pushEvents([{type: 'sheetFilterValues', col: 1, values: [['9', 1], ['', 4]], ticked: null, criteria: ''}]); await settle();
+    const pop = ws().querySelector('.xl-pop');
+    assert(pop && pop.querySelectorAll('[data-value]').length === 2, 'the values are not listed');
+    /** @type {HTMLInputElement} */ (pop.querySelector('[data-value="1"]')).checked = false;
+    pop.querySelector('[data-criteria]').value = '>5';
+    pop.querySelector('[data-apply]').click(); await settle();
+    const set = sent(before, 'sheetFilterSet')[0];
+    assert(set?.col === 1 && JSON.stringify(set.values) === '["9"]' && set.criteria === '>5' && !ws().querySelector('.xl-pop'), `applied ${JSON.stringify(set)}`);
+    // Sorting by the cursor's column: the filter's rows under its header.
+    ws().querySelector('[data-sheet-sort="down"]').click(); await settle();
+    const sort = sent(before, 'sheetSort')[0];
+    assert(sort?.range === 'A2:B6' && JSON.stringify(sort.keys) === '[[0,false]]', `sorted ${JSON.stringify(sort)}`);
+    // The colour rules: one added over the selection.
+    ws().querySelector('[data-sheet-rules]').click(); await settle();
+    const rules = ws().querySelector('.xl-pop');
+    rules.querySelector('[data-rule-when]').value = 'greater';
+    rules.querySelector('[data-rule-when]').dispatchEvent(new win.Event('change'));
+    rules.querySelector('[data-rule-a]').value = '5';
+    rules.querySelector('[data-add-rule]').click(); await settle();
+    const rule = sent(before, 'sheetRuleAdd')[0]?.rule;
+    assert(rule?.range === 'A5' && rule.when.when === 'greater' && rule.when.value === 5 && rule.fill, `added ${JSON.stringify(rule)}`);
+    // A cell a rule colours is drawn so.
+    await win.pushEvents([cells([{...cell(4, 1, '9', '9', 'n'), fill: '#ff0000', bold: true}], true)]); await settle();
+    const nine = /** @type {HTMLElement} */ (ws().querySelector('[data-cell="4,1"]'));
+    assert(nine?.style.background.includes('255, 0, 0') && nine.style.fontWeight === '700', 'a rule\'s colour is not drawn');
+    await win.pushEvents([book({active: 0, version: 7})]); await settle();
   });
 
   await test('Scrolling a long way asks for the rows there, and the grid goes on', async () => {

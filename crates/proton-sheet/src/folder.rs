@@ -15,7 +15,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Cell, Frozen, Sheet, Style, Workbook};
+use crate::model::{Cell, Filter, Frozen, Rule, Sheet, Style, Workbook};
 use crate::refs::{col_name, col_of, CellRef};
 
 const VERSION: u32 = 1;
@@ -29,6 +29,10 @@ struct StoredSheet {
     widths: BTreeMap<String, f64>,
     #[serde(default, skip_serializing_if = "is_unfrozen")]
     frozen: Frozen,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    filter: Option<Filter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rules: Vec<Rule>,
 }
 
 fn is_unfrozen(f: &Frozen) -> bool {
@@ -128,6 +132,8 @@ pub fn workbook_text(wb: &Workbook) -> String {
                 name: s.name.clone(),
                 widths: s.widths.iter().map(|(c, w)| (col_name(*c), *w)).collect(),
                 frozen: s.frozen,
+                filter: s.filter.clone(),
+                rules: s.rules.clone(),
             })
             .collect(),
         styles: wb.styles.iter().skip(1).cloned().collect(),
@@ -168,7 +174,7 @@ pub fn read(dir: &Path) -> Result<Workbook, String> {
             let col = col_of(&letters).ok_or_else(|| format!("{shown}: “{letters}” is not a column"))?;
             widths.insert(col, w);
         }
-        sheets.push(Sheet { id: s.id, name: s.name, cells, widths, frozen: s.frozen });
+        sheets.push(Sheet { id: s.id, name: s.name, cells, widths, frozen: s.frozen, filter: s.filter, rules: s.rules });
     }
     if sheets.is_empty() {
         return Err(format!("{shown} has no sheets"));
@@ -237,6 +243,17 @@ mod tests {
         other.cells.insert(CellRef::new(4, 27), Cell { input: "=Sheet1!B3*2".into(), style: 0 });
         wb.sheets.push(other);
         wb.names.insert("Total".into(), "Sheet1!$B$3".into());
+        wb.sheets[0].filter = Some(crate::model::Filter {
+            range: "A1:B3".into(),
+            columns: [("B".to_string(), crate::model::Condition { values: None, criteria: ">10".into() })].into(),
+        });
+        wb.sheets[0].rules.push(crate::model::Rule {
+            range: "B2:B3".into(),
+            when: crate::model::When::Greater { value: 10.0 },
+            fill: Some("#ffeeee".into()),
+            color: None,
+            bold: true,
+        });
         wb
     }
 

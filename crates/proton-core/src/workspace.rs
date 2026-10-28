@@ -1391,6 +1391,12 @@ impl Workspace {
             | Command::SheetFormat { .. }
             | Command::SheetWidth { .. }
             | Command::SheetFreeze { .. }
+            | Command::SheetSort { .. }
+            | Command::SheetFilter { .. }
+            | Command::SheetFilterValues { .. }
+            | Command::SheetFilterSet { .. }
+            | Command::SheetRuleAdd { .. }
+            | Command::SheetRuleRemove { .. }
             | Command::SheetUndo
             | Command::SheetRedo
             | Command::SheetTab { .. }

@@ -555,6 +555,44 @@ pub enum Command {
         rows: u32,
         cols: u32,
     },
+    /// A range's rows sorted by some of its columns, each ascending or not.
+    SheetSort {
+        generation: u32,
+        sheet: u32,
+        range: String,
+        keys: Vec<(u32, bool)>,
+    },
+    /// A filter over a range, its first row the headers; none to take it off.
+    SheetFilter {
+        generation: u32,
+        sheet: u32,
+        range: Option<String>,
+    },
+    /// The values a filtered column has, to tick.
+    SheetFilterValues {
+        generation: u32,
+        sheet: u32,
+        col: u32,
+    },
+    /// What a filtered column lets through: values ticked, a condition.
+    SheetFilterSet {
+        generation: u32,
+        sheet: u32,
+        col: u32,
+        values: Option<Vec<String>>,
+        criteria: String,
+    },
+    /// A conditional colour added.
+    SheetRuleAdd {
+        generation: u32,
+        sheet: u32,
+        rule: Box<crate::sheet::SheetRuleView>,
+    },
+    SheetRuleRemove {
+        generation: u32,
+        sheet: u32,
+        index: u32,
+    },
     SheetUndo,
     SheetRedo,
     /// Show another sheet.
@@ -1411,6 +1449,14 @@ pub enum Event {
     /// The project's workbooks, for Excel mode's home page.
     SheetHome {
         workbooks: Vec<crate::sheet::SheetFound>,
+    },
+    /// A filtered column's values as they show, each with how many rows
+    /// have it, and what is ticked and asked of it now.
+    SheetFilterValues {
+        col: u32,
+        values: Vec<(String, u32)>,
+        ticked: Option<Vec<String>>,
+        criteria: String,
     },
     /// What was copied, for the system clipboard.
     SheetClip {

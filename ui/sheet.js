@@ -65,6 +65,14 @@ export function parseCell(text) {
   return [row, col - 1];
 }
 
+/** `B7:D9` read, or null. @param {string} text @returns {Sel | null} */
+export function parseRange(text) {
+  const [a, b = a] = text.split(":");
+  const from = parseCell(a ?? ""), to = parseCell(b ?? "");
+  if (!from || !to) return null;
+  return { r0: Math.min(from[0], to[0]), r1: Math.max(from[0], to[0]), c0: Math.min(from[1], to[1]), c1: Math.max(from[1], to[1]) };
+}
+
 /** A selection as the core reads a range. @param {Sel} s */
 export const rangeName = (s) => (s.r0 === s.r1 && s.c0 === s.c1 ? cellName(s.r0, s.c0) : `${cellName(s.r0, s.c0)}:${cellName(s.r1, s.c1)}`);
 
@@ -135,13 +143,41 @@ export function createSheet(host) {
     while (colX(c + 1) <= x && c < MAX_COL) c++;
     return c;
   }
+  /** The rows a filter hides, as runs: they take no room. */
+  const hiddenRuns = () => tab()?.hidden ?? [];
+  /** Whether a filter hides a row. @param {number} r */
+  const isHidden = (r) => hiddenRuns().some(([a, b]) => r >= a && r <= b);
+  /** Where a row starts, down from the letters, hidden rows taking no room. @param {number} r */
+  function rowY(r) {
+    let skip = 0;
+    for (const [a, b] of hiddenRuns()) {
+      if (a >= r) break;
+      skip += Math.min(b, r - 1) - a + 1;
+    }
+    return (r - skip) * ROW;
+  }
+  /** The row at a distance down. @param {number} y */
+  function rowAt(y) {
+    let r = Math.max(0, Math.floor(y / ROW));
+    for (const [a, b] of hiddenRuns()) {
+      if (a > r) break;
+      r += b - a + 1;
+    }
+    return Math.min(MAX_ROW, r);
+  }
+  /** The next row shown from `r` going `by`, past hidden ones. @param {number} r @param {number} by */
+  function step(r, by) {
+    let n = r + by;
+    while (by && n > 0 && n < MAX_ROW && isHidden(n)) n += Math.sign(by);
+    return n;
+  }
   /** Where a cell is drawn in the scrolled space: a frozen one moves with
    *  the scroll, so it stays where it is on screen. @param {number} r @param {number} c */
   function pos(r, c) {
     const [fr, fc] = frozen();
     return {
       x: HEAD_W + colX(c) + (c < fc ? els.scroll.scrollLeft : 0),
-      y: HEAD_H + r * ROW + (r < fr ? els.scroll.scrollTop : 0),
+      y: HEAD_H + rowY(r) + (r < fr ? els.scroll.scrollTop : 0),
     };
   }
 
@@ -198,14 +234,14 @@ export function createSheet(host) {
 
   function layout() {
     els.space.style.width = `${HEAD_W + colX(Math.min(state.extent[1], MAX_COL + 1))}px`;
-    els.space.style.height = `${HEAD_H + Math.min(state.extent[0], MAX_ROW + 1) * ROW}px`;
+    els.space.style.height = `${HEAD_H + rowY(Math.min(state.extent[0], MAX_ROW + 1))}px`;
   }
 
   /** The rows and columns on screen. @returns {{rows: [number, number], cols: [number, number]}} */
   function visible() {
     const s = els.scroll;
-    const r0 = Math.max(0, Math.floor(s.scrollTop / ROW));
-    const r1 = Math.min(MAX_ROW, r0 + Math.ceil((s.clientHeight || 600) / ROW) + 1);
+    const r0 = rowAt(s.scrollTop);
+    const r1 = Math.min(MAX_ROW, rowAt(s.scrollTop + (s.clientHeight || 600)) + 1);
     const c0 = colAt(s.scrollLeft);
     const c1 = Math.min(MAX_COL, colAt(s.scrollLeft + (s.clientWidth || 900)) + 1);
     return { rows: [r0, r1], cols: [c0, c1] };
@@ -234,12 +270,13 @@ export function createSheet(host) {
     const align = st?.align ?? (cell.kind === "n" ? "right" : cell.kind === "b" || cell.kind === "e" ? "center" : "left");
     const p = pos(cell.row, cell.col);
     let css = `left:${p.x}px;top:${p.y}px;width:${width(cell.col)}px;text-align:${align};`;
-    if (st?.bold) css += "font-weight:700;";
+    if (st?.bold || cell.bold) css += "font-weight:700;";
     if (st?.italic) css += "font-style:italic;";
     if (st?.underline) css += "text-decoration:underline;";
     const color = cell.color ?? st?.color;
     if (color) css += `color:${color};`;
-    if (st?.fill) css += `background:${st.fill};`;
+    const fill = cell.fill ?? st?.fill;
+    if (fill) css += `background:${fill};`;
     const cls = `xl-c${cell.kind === "e" ? " err" : ""}${st?.wrap ? " wrap" : ""}${extra}`;
     return `<div class="${cls}" style="${css}" data-cell="${cell.row},${cell.col}">${esc(cell.text)}</div>`;
   }
@@ -258,7 +295,7 @@ export function createSheet(host) {
     for (let c = Math.max(v.cols[0], fc); c <= v.cols[1]; c++) if (!fc || colX(c + 1) > s.scrollLeft + colX(fc)) colList.push(c);
     const rowList = [];
     for (let r = 0; r < fr; r++) rowList.push(r);
-    for (let r = Math.max(v.rows[0], fr); r <= v.rows[1]; r++) if (!fr || (r + 1) * ROW > s.scrollTop + fr * ROW) rowList.push(r);
+    for (let r = Math.max(v.rows[0], fr); r <= v.rows[1]; r++) if (!isHidden(r) && (!fr || rowY(r) + ROW > s.scrollTop + fr * ROW)) rowList.push(r);
     for (const c of colList) {
       const on = c >= sel.c0 && c <= sel.c1 ? " on" : "";
       const fz = c < fc ? " fz" : "";
@@ -269,8 +306,10 @@ export function createSheet(host) {
     }
     for (const r of rowList) {
       const on = r >= sel.r0 && r <= sel.r1 ? " on" : "";
-      const top = HEAD_H + r * ROW + (r < fr ? s.scrollTop : 0);
-      rows += `<div class="xl-rh${on}${r < fr ? " fz" : ""}" style="top:${top}px" data-row="${r}">${r + 1}</div>`;
+      const top = HEAD_H + rowY(r) + (r < fr ? s.scrollTop : 0);
+      // A row after hidden ones says so, as Excel's numbers do.
+      const gap = r > 0 && isHidden(r - 1) ? " gap" : "";
+      rows += `<div class="xl-rh${on}${r < fr ? " fz" : ""}${gap}" style="top:${top}px" data-row="${r}">${r + 1}</div>`;
     }
     // What is frozen hides what scrolls under it.
     if (fr) cells += `<div class="xl-fzband" style="left:${s.scrollLeft + HEAD_W}px;top:${s.scrollTop + HEAD_H}px;width:${viewW}px;height:${fr * ROW}px"></div>`;
@@ -281,15 +320,31 @@ export function createSheet(host) {
       if (!inRows || !inCols || (!cell.text && !cell.style)) continue;
       // Wholly under a frozen pane and not in it: not drawn. One partly
       // under it is, and the pane covers that part.
-      if (fr && cell.row >= fr && (cell.row + 1) * ROW <= s.scrollTop + fr * ROW) continue;
+      if (isHidden(cell.row)) continue;
+      if (fr && cell.row >= fr && rowY(cell.row) + ROW <= s.scrollTop + fr * ROW) continue;
       if (fc && cell.col >= fc && colX(cell.col + 1) <= s.scrollLeft + colX(fc)) continue;
       cells += cellHtml(cell, cell.row < fr || cell.col < fc ? " fz" : "");
     }
+    cells += filterButtons(v);
     els.colHead.innerHTML = cols;
     els.rowHead.innerHTML = rows;
     els.cells.innerHTML = lines + cells + selectionBox(sel);
     els.colHead.style.transform = `translateX(${-s.scrollLeft}px)`;
     els.rowHead.style.transform = `translateY(${-s.scrollTop}px)`;
+  }
+
+  /** The filter's ▾ on each header cell in view. @param {{rows: [number, number], cols: [number, number]}} v */
+  function filterButtons(v) {
+    const f = tab()?.filter;
+    const r = f ? parseRange(f.range) : null;
+    if (!f || !r) return "";
+    let out = "";
+    for (let c = Math.max(r.c0, v.cols[0]); c <= Math.min(r.c1, v.cols[1]); c++) {
+      const p = pos(r.r0, c);
+      const on = f.columns.includes(c) ? " on" : "";
+      out += `<button class="xl-filter${on}" data-filter-col="${c}" style="left:${p.x + width(c) - 20}px;top:${p.y + 3}px" title="Filter ${colName(c)}">▾</button>`;
+    }
+    return out;
   }
 
   /** The selected range, its corners in order. @returns {Sel} */
@@ -361,7 +416,7 @@ export function createSheet(host) {
   function reveal(r, c) {
     const s = els.scroll;
     const [fr, fc] = frozen();
-    const top = r * ROW, left = colX(c);
+    const top = rowY(r), left = colX(c);
     const viewH = s.clientHeight - HEAD_H, viewW = s.clientWidth - HEAD_W;
     if (r >= fr) {
       if (top < s.scrollTop + fr * ROW) s.scrollTop = top - fr * ROW;
@@ -445,6 +500,30 @@ export function createSheet(host) {
     send({ type: "sheetFill", from: rangeName(from), to: rangeName(sel) });
   }
 
+  /** What a sort or a filter is over: the selection when it is more than a
+   *  cell; else the filter's rows; else the rows in use under the first. */
+  function region(withHeader = false) {
+    const sel = selection();
+    if (sel.r0 !== sel.r1 || sel.c0 !== sel.c1) return sel;
+    const f = tab()?.filter ? parseRange(tab()?.filter?.range ?? "") : null;
+    if (f && sel.r0 >= f.r0 && sel.r0 <= f.r1 && sel.c0 >= f.c0 && sel.c0 <= f.c1) return withHeader ? f : { ...f, r0: f.r0 + 1 };
+    const rows = Math.max(1, tab()?.rows ?? 1), cols = Math.max(1, tab()?.cols ?? 1);
+    return { r0: withHeader ? 0 : Math.min(1, rows - 1), r1: rows - 1, c0: 0, c1: cols - 1 };
+  }
+
+  /** The rows sorted by a column, the cursor's unless one is named. @param {boolean} down @param {number} [col] */
+  function sortBy(down, col = state.at[1]) {
+    const r = region();
+    if (col < r.c0 || col > r.c1) return;
+    send({ type: "sheetSort", range: rangeName(r), keys: [[col, !down]] });
+  }
+
+  /** A filter put on, or taken off when there is one. */
+  function toggleFilter() {
+    if (tab()?.filter) send({ type: "sheetFilter", range: null });
+    else send({ type: "sheetFilter", range: rangeName(region(true)) });
+  }
+
   /** A `:` command. @param {string} line */
   function run(line) {
     const [word = "", ...rest] = line.trim().split(/\s+/);
@@ -470,6 +549,17 @@ export function createSheet(host) {
       case "color": format({ color: arg }); return;
       case "fill": format({ fill: arg }); return;
       case "insert": insertLines(arg.startsWith("col"), false); return;
+      case "sort": {
+        // `:sort`, `:sort desc`, `:sort B`, `:sort B desc`.
+        const words = arg.split(/\s+/).filter(Boolean);
+        const named = words.find((w) => /^[A-Za-z]{1,3}$/.test(w) && !/^(asc|desc)$/i.test(w));
+        const col = named ? parseCell(`${named}1`)?.[1] : undefined;
+        sortBy(words.some((w) => /^desc$/i.test(w)), col);
+        return;
+      }
+      case "filter": toggleFilter(); return;
+      case "nofilter": send({ type: "sheetFilter", range: null }); return;
+      case "rules": openRules(); return;
       case "delete": deleteLines(arg.startsWith("col")); return;
       default: {
         // `:B7` goes there.
@@ -611,14 +701,22 @@ export function createSheet(host) {
     <select class="xl-tool-format" data-sheet-format title="Number format">${FORMATS.map(([f, label]) => `<option value="${esc(f)}">${esc(label)}</option>`).join("")}</select>
     <label class="xl-tool xl-swatch" title="Text colour"><span>A</span><input type="color" data-sheet-color value="#e06c75"></label>
     <label class="xl-tool xl-swatch" title="Fill"><span class="xl-fill-icon"></span><input type="color" data-sheet-fill value="#3d375e"></label>
-    <button class="xl-tool" data-sheet-clear-style title="Clear formatting">⌫</button>`;
+    <button class="xl-tool" data-sheet-clear-style title="Clear formatting">⌫</button>
+    <span class="xl-tool-sep"></span>
+    <button class="xl-tool" data-sheet-sort="up" title="Sort A→Z by this column  :sort">A↓</button>
+    <button class="xl-tool" data-sheet-sort="down" title="Sort Z→A by this column  :sort desc">Z↓</button>
+    <button class="xl-tool" data-sheet-filter title="Filter  :filter">▾</button>
+    <button class="xl-tool" data-sheet-rules title="Conditional colour  :rules">◐</button>`;
   els.tools.addEventListener("mousedown", (e) => {
     // Clicking a tool leaves the keyboard with the grid.
     if (e.target instanceof Element && e.target.closest("button")) e.preventDefault();
   });
   els.tools.addEventListener("click", (e) => {
-    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("[data-sheet-style], [data-sheet-clear-style]")) : null;
+    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("[data-sheet-style], [data-sheet-clear-style], [data-sheet-sort], [data-sheet-filter], [data-sheet-rules]")) : null;
     if (!b || !state.book) return;
+    if (b.dataset.sheetSort) return sortBy(b.dataset.sheetSort === "down");
+    if (b.dataset.sheetFilter !== undefined) return toggleFilter();
+    if (b.dataset.sheetRules !== undefined) return openRules();
     const k = b.dataset.sheetStyle;
     if (b.dataset.sheetClearStyle !== undefined) format({ bold: false, italic: false, underline: false, wrap: false, color: "", fill: "", align: "", format: "" });
     else if (k === "bold" || k === "italic" || k === "underline" || k === "wrap") toggle(k);
@@ -635,12 +733,163 @@ export function createSheet(host) {
     });
   }
 
+  /* ── the filter's list, and the colour rules ───────────────────────── */
+
+  /** A panel over the grid; one at a time, gone with Escape or a click elsewhere. */
+  let popover = /** @type {HTMLElement | null} */ (null);
+  function closePopover() {
+    popover?.remove();
+    popover = null;
+  }
+  /** @param {string} html @param {number} x @param {number} y */
+  function openPopover(html, x, y) {
+    closePopover();
+    const el = document.createElement("div");
+    el.className = "xl-pop";
+    el.innerHTML = html;
+    const grid = /** @type {HTMLElement} */ (els.scroll.parentElement);
+    grid.append(el);
+    el.style.left = `${Math.max(4, Math.min(x, grid.clientWidth - el.offsetWidth - 8))}px`;
+    el.style.top = `${Math.max(4, Math.min(y, grid.clientHeight - el.offsetHeight - 8))}px`;
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePopover();
+        els.scroll.focus({ preventScroll: true });
+      }
+      e.stopPropagation();
+    });
+    popover = el;
+    return el;
+  }
+  document.addEventListener("mousedown", (e) => {
+    if (popover && e.target instanceof Node && !popover.contains(e.target)) closePopover();
+  }, true);
+
+  /** The values a filtered column has, to tick, and a condition.
+   *  @param {{col: number, values: [string, number][], ticked: string[] | null, criteria: string}} event */
+  function showFilter(event) {
+    const f = tab()?.filter ? parseRange(tab()?.filter?.range ?? "") : null;
+    if (!f) return;
+    const ticked = event.ticked ? new Set(event.ticked) : null;
+    const p = pos(f.r0, event.col);
+    const rows = event.values
+      .map(([v, n], i) => `<label class="xl-pop-row"><input type="checkbox" data-value="${i}" ${!ticked || ticked.has(v) ? "checked" : ""}>
+        <span>${v === "" ? "<i>(empty)</i>" : esc(v)}</span><span class="xl-pop-n">${n}</span></label>`)
+      .join("");
+    const el = openPopover(`<div class="xl-pop-title">Filter ${colName(event.col)}</div>
+      <label class="xl-pop-row xl-pop-all"><input type="checkbox" data-all ${!ticked ? "checked" : ""}><span>Select all</span></label>
+      <div class="xl-pop-list">${rows}</div>
+      <input class="xl-pop-field" data-criteria placeholder="Condition: >10, <>0, ap*" value="${esc(event.criteria)}">
+      <div class="xl-pop-actions"><button data-clear>Clear</button><button class="primary" data-apply>Apply</button></div>`,
+      p.x - els.scroll.scrollLeft, p.y - els.scroll.scrollTop + ROW);
+    const boxes = () => /** @type {HTMLInputElement[]} */ ([...el.querySelectorAll("[data-value]")]);
+    el.querySelector("[data-all]")?.addEventListener("change", (e) => {
+      for (const b of boxes()) b.checked = /** @type {HTMLInputElement} */ (e.target).checked;
+    });
+    el.querySelector("[data-apply]")?.addEventListener("click", () => {
+      const all = boxes().every((b) => b.checked);
+      const values = all ? null : boxes().filter((b) => b.checked).map((b) => event.values[Number(b.dataset.value)][0]);
+      const criteria = /** @type {HTMLInputElement} */ (el.querySelector("[data-criteria]")).value;
+      send({ type: "sheetFilterSet", col: event.col, values, criteria });
+      closePopover();
+      els.scroll.focus({ preventScroll: true });
+    });
+    el.querySelector("[data-clear]")?.addEventListener("click", () => {
+      send({ type: "sheetFilterSet", col: event.col, values: null, criteria: "" });
+      closePopover();
+      els.scroll.focus({ preventScroll: true });
+    });
+  }
+
+  const WHEN = /** @type {[string, string][]} */ ([
+    ["greater", "Greater than"], ["less", "Less than"], ["between", "Between"], ["equal", "Equal to"], ["contains", "Text contains"],
+    ["duplicates", "Duplicates"], ["top", "Top"], ["bottom", "Bottom"], ["scale", "Colour scale"],
+  ]);
+
+  /** A rule in words. @param {import("./bindings/SheetRuleView").SheetRuleView} r */
+  function ruleWords(r) {
+    const w = r.when;
+    switch (w.when) {
+      case "greater": return `> ${w.value}`;
+      case "less": return `< ${w.value}`;
+      case "between": return `${w.low} to ${w.high}`;
+      case "equal": return `= ${w.value}`;
+      case "contains": return `contains “${w.text}”`;
+      case "duplicates": return "duplicates";
+      case "top": return `top ${w.n}`;
+      case "bottom": return `bottom ${w.n}`;
+      default: return "colour scale";
+    }
+  }
+
+  /** The sheet's conditional colours, and a form to add one over the selection. */
+  function openRules() {
+    const t = tab();
+    if (!t) return;
+    const list = t.rules
+      .map((r, i) => `<div class="xl-pop-row"><i class="xl-pop-swatch" style="background:${esc(r.fill ?? "transparent")};color:${esc(r.color ?? "inherit")}">${r.bold ? "B" : "a"}</i>
+        <span>${esc(r.range)} · ${esc(ruleWords(r))}</span><button class="xl-pop-x" data-remove-rule="${i}" title="Remove">✕</button></div>`)
+      .join("") || `<p class="xl-pop-none">No colour rules on this sheet.</p>`;
+    const el = openPopover(`<div class="xl-pop-title">Conditional colour</div><div class="xl-pop-list">${list}</div>
+      <div class="xl-pop-form">
+        <input class="xl-pop-field" data-rule-range value="${esc(rangeName(selection()))}" aria-label="Range">
+        <select data-rule-when>${WHEN.map(([k, label]) => `<option value="${k}">${label}</option>`).join("")}</select>
+        <input class="xl-pop-field" data-rule-a placeholder="Value" aria-label="Value">
+        <input class="xl-pop-field" data-rule-b placeholder="and" aria-label="Second value" hidden>
+        <label class="xl-pop-row">Fill <input type="color" data-rule-fill value="#f6c1c1"> Text <input type="color" data-rule-color value="#000000"><input type="checkbox" data-rule-text> <span>colour the text</span></label>
+        <label class="xl-pop-row"><input type="checkbox" data-rule-bold><span>Bold</span></label>
+      </div>
+      <div class="xl-pop-actions"><button class="primary" data-add-rule>Add</button></div>`, 80, 8);
+    const when = /** @type {HTMLSelectElement} */ (el.querySelector("[data-rule-when]"));
+    const a = /** @type {HTMLInputElement} */ (el.querySelector("[data-rule-a]"));
+    const b = /** @type {HTMLInputElement} */ (el.querySelector("[data-rule-b]"));
+    const shape = () => {
+      const k = when.value;
+      a.hidden = k === "duplicates";
+      b.hidden = k !== "between" && k !== "scale";
+      a.placeholder = k === "scale" ? "Low colour #hex" : k === "top" || k === "bottom" ? "How many" : "Value";
+      b.placeholder = k === "scale" ? "High colour #hex" : "and";
+      if (k === "scale" && !a.value) { a.value = "#f8696b"; b.value = "#63be7b"; }
+    };
+    when.addEventListener("change", shape);
+    shape();
+    el.addEventListener("click", (e) => {
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      if (t?.dataset.removeRule !== undefined) {
+        send({ type: "sheetRuleRemove", index: Number(t.dataset.removeRule) });
+        closePopover();
+      } else if (t?.dataset.addRule !== undefined) {
+        const k = when.value, num = (/** @type {string} */ v) => Number(v);
+        /** @type {any} */
+        const w = k === "greater" || k === "less" ? { when: k, value: num(a.value) }
+          : k === "between" ? { when: k, low: num(a.value), high: num(b.value) }
+          : k === "equal" ? { when: k, value: a.value }
+          : k === "contains" ? { when: k, text: a.value }
+          : k === "top" || k === "bottom" ? { when: k, n: Math.max(1, Math.round(num(a.value) || 10)) }
+          : k === "scale" ? { when: k, low: a.value, high: b.value } : { when: "duplicates" };
+        const text = /** @type {HTMLInputElement} */ (el.querySelector("[data-rule-text]")).checked;
+        const rule = {
+          range: /** @type {HTMLInputElement} */ (el.querySelector("[data-rule-range]")).value.trim(),
+          when: w,
+          fill: k === "scale" ? null : /** @type {HTMLInputElement} */ (el.querySelector("[data-rule-fill]")).value,
+          color: text ? /** @type {HTMLInputElement} */ (el.querySelector("[data-rule-color]")).value : null,
+          bold: /** @type {HTMLInputElement} */ (el.querySelector("[data-rule-bold]")).checked,
+        };
+        if ((w.value !== undefined && Number.isNaN(w.value)) || (w.low !== undefined && typeof w.low === "number" && (Number.isNaN(w.low) || Number.isNaN(w.high)))) return;
+        send({ type: "sheetRuleAdd", rule });
+        closePopover();
+        els.scroll.focus({ preventScroll: true });
+      }
+    });
+  }
+
   /* ── keys and the mouse ────────────────────────────────────────────── */
 
   els.scroll.addEventListener("scroll", () => {
     const s = els.scroll;
     // Near the end, the grid goes on.
-    if (s.scrollTop + s.clientHeight > (state.extent[0] - 40) * ROW) {
+    if (s.scrollTop + s.clientHeight > rowY(state.extent[0] - 40)) {
       state.extent[0] = Math.min(MAX_ROW + 1, state.extent[0] + SPARE_ROWS);
       layout();
     }
@@ -658,7 +907,7 @@ export function createSheet(host) {
     const box = els.scroll.getBoundingClientRect();
     const [fr, fc] = frozen();
     const vx = e.clientX - box.left - HEAD_W, vy = e.clientY - box.top - HEAD_H;
-    const row = vy < fr * ROW ? Math.floor(vy / ROW) : Math.floor((vy + els.scroll.scrollTop) / ROW);
+    const row = vy < fr * ROW ? Math.floor(vy / ROW) : rowAt(vy + els.scroll.scrollTop);
     const col = vx < colX(fc) ? colAt(Math.max(0, vx)) : colAt(Math.max(0, vx + els.scroll.scrollLeft));
     return [Math.max(0, row), col];
   }
@@ -667,8 +916,13 @@ export function createSheet(host) {
   let drag = /** @type {null | {kind: "select"} | {kind: "fill", from: Sel} | {kind: "width", col: number, x: number, w: number}} */ (null);
   els.scroll.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || !state.book) return;
-    if (state.editing) commit(state.editing === "cell" ? els.editor.value : els.bar.value, [0, 0]);
     const t = e.target instanceof HTMLElement ? e.target : null;
+    if (t?.dataset.filterCol !== undefined) {
+      e.preventDefault();
+      send({ type: "sheetFilterValues", col: Number(t.dataset.filterCol) });
+      return;
+    }
+    if (state.editing) commit(state.editing === "cell" ? els.editor.value : els.bar.value, [0, 0]);
     if (t?.dataset.fillHandle !== undefined) {
       drag = { kind: "fill", from: selection() };
     } else {
@@ -796,7 +1050,7 @@ export function createSheet(host) {
     const move = e.ctrlKey || e.altKey ? undefined : moves[k];
     if (move) {
       e.preventDefault();
-      select(from[0] + move[0], from[1] + move[1], ext);
+      select(step(from[0], move[0]), from[1] + move[1], ext);
       return;
     }
     if (e.ctrlKey && k === "r") {
@@ -978,6 +1232,10 @@ export function createSheet(host) {
       }
       showSelected();
       redraw();
+    },
+    /** @param {{col: number, values: [string, number][], ticked: string[] | null, criteria: string}} event */
+    filterValues(event) {
+      showFilter(event);
     },
     /** The mode is on screen: the grid takes the keys. */
     shown() {

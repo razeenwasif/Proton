@@ -8,11 +8,13 @@
 //! - [`functions`]: the functions formulas call.
 //! - [`edit`]: rows and columns put in and taken out, formulas following;
 //!   copying and filling.
+//! - [`arrange`]: sorting, filters, and conditional colour.
 //! - [`numfmt`]: Excel's number formats, for showing a value.
 //! - [`xlsx`], [`csv`]: Excel's files and delimited text, opened and saved.
 //! - [`refs`], [`value`], [`dates`]: references, values, and dates as
 //!   Excel's serial numbers.
 
+pub mod arrange;
 pub mod book;
 pub mod csv;
 pub mod dates;

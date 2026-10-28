@@ -54,6 +54,60 @@ fn is_zero(n: &u32) -> bool {
     *n == 0
 }
 
+/// A filter over a range: its first row the headers, and for the columns
+/// that have one, what a row must have there to be shown.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Filter {
+    /// `A1:D99`.
+    pub range: String,
+    /// By column letters.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub columns: BTreeMap<String, Condition>,
+}
+
+/// What a filtered column lets through: the values ticked (as they show),
+/// and a condition as COUNTIF writes one (`>10`, `ap*`); both, when both.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Condition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub criteria: String,
+}
+
+/// When a conditional colour applies.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "when", rename_all = "camelCase")]
+pub enum When {
+    Greater { value: f64 },
+    Less { value: f64 },
+    Between { low: f64, high: f64 },
+    /// The same as this, without regard to case.
+    Equal { value: String },
+    Contains { text: String },
+    /// A value more than one cell of the range holds.
+    Duplicates,
+    Top { n: u32 },
+    Bottom { n: u32 },
+    /// Every number coloured between two colours by where it falls.
+    Scale { low: String, high: String },
+}
+
+/// A conditional colour: over a range, when something holds, a fill, a
+/// text colour, bold.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Rule {
+    pub range: String,
+    #[serde(flatten)]
+    pub when: When,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bold: bool,
+}
+
 /// One sheet.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Sheet {
@@ -65,6 +119,9 @@ pub struct Sheet {
     /// Column widths in points, where they are not the default.
     pub widths: BTreeMap<u32, f64>,
     pub frozen: Frozen,
+    pub filter: Option<Filter>,
+    /// Conditional colours, the first that applies to a cell winning.
+    pub rules: Vec<Rule>,
 }
 
 impl Sheet {
