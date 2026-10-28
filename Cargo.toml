@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/proton-agent",
+    "crates/proton-circuit",
     "crates/proton-claude",
     "crates/proton-council",
     "crates/proton-core",
@@ -36,6 +37,7 @@ repository = "https://github.com/razeenwasif/Proton"
 [workspace.dependencies]
 proton-agent = { path = "crates/proton-agent" }
 proton-claude = { path = "crates/proton-claude" }
+proton-circuit = { path = "crates/proton-circuit" }
 proton-voice = { path = "crates/proton-voice" }
 proton-council = { path = "crates/proton-council" }
 proton-core = { path = "crates/proton-core" }

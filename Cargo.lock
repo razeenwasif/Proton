@@ -4331,6 +4331,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-circuit"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "proton-claude"
 version = "0.0.1"
 dependencies = [

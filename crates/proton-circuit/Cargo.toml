@@ -1,0 +1,12 @@
+[package]
+name = "proton-circuit"
+description = "Circuit mode's logic simulator: values, nets, parts and Digital's timing — gates take a unit of delay each, power-on settles in a seeded order, oscillation and conflicts are found and named."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
