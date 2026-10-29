@@ -1459,7 +1459,8 @@ impl Workspace {
             | Command::CircuitMachineShow { .. }
             | Command::CircuitMachineBuild { .. }
             | Command::CircuitExport { .. }
-            | Command::CircuitImport { .. }) => {
+            | Command::CircuitImport { .. }
+            | Command::CircuitSelect { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.circuits.apply(&root, command);
                 if events.iter().any(|e| matches!(e, Event::CircuitHome { .. } | Event::CircuitExported { .. })) {
@@ -3884,6 +3885,10 @@ impl Workspace {
             if crate::sheet::TOOLS.contains(&call.name.as_str()) {
                 events.extend(self.sheets.take_pending());
             }
+            // And a circuit opened, edited, tested or built.
+            if crate::circuit::TOOLS.contains(&call.name.as_str()) {
+                events.extend(self.circuits.take_pending());
+            }
             self.agent.answer(&call.id, answer);
         }
 
@@ -4121,6 +4126,7 @@ impl Workspace {
                 crate::mention::Mention::Selection => self.selected_text(),
                 crate::mention::Mention::Dataframe => self.selected_frame(),
                 crate::mention::Mention::Sheet => self.sheets.about(),
+                crate::mention::Mention::Circuit => self.circuits.about(),
             });
         }
         out
@@ -4882,6 +4888,12 @@ impl Workspace {
             name if crate::sheet::TOOLS.contains(&name) => {
                 let root = self.root().to_path_buf();
                 self.sheets.tool(&root, name, input)
+            }
+
+            // The circuit project open in Circuit: its edits held too.
+            name if crate::circuit::TOOLS.contains(&name) => {
+                let root = self.root().to_path_buf();
+                self.circuits.tool(&root, name, input)
             }
 
             other => Err(format!("no such tool: {other}")),

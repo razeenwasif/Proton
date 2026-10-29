@@ -786,6 +786,13 @@ pub enum Command {
     CircuitTraceToData {
         generation: u32,
     },
+    /// What is selected in the circuit on screen, for `@circuit`.
+    CircuitSelect {
+        generation: u32,
+        circuit: String,
+        ids: Vec<String>,
+        wires: Vec<[i32; 4]>,
+    },
     /// The parts and wires named, as `.circ` text for the clipboard.
     CircuitCopy {
         generation: u32,

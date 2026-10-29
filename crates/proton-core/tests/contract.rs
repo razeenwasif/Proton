@@ -317,3 +317,55 @@ fn a_circuit_runs_graph_goes_to_data_as_a_dataframe() {
     assert!(root.join("from-circuit.ipynb").exists());
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn the_agents_circuit_tools_build_test_and_analyse_a_circuit_held_until_saved() {
+    let root = project("circuit-agent");
+    let mut space = Workspace::rooted(root.clone());
+    space.apply(Command::SetMode { mode: ModeId::Circuit });
+    let none = space.run_tool("circuit_info", &serde_json::json!({})).unwrap();
+    assert!(none.contains("No circuit project is open"), "{none}");
+    let info = space.run_tool("circuit_open", &serde_json::json!({"new": "Inverter"})).unwrap();
+    assert!(info.contains("Project inverter.circuit") && info.contains("- main (top, on screen)"), "{info}");
+    // An input, a NOT and an output, then wired from the pins it was told.
+    let made = space
+        .run_tool("circuit_edit", &serde_json::json!({"ops": [
+            {"op": "place", "kind": "in", "x": 0, "y": 0, "rot": 0, "mirror": false, "settings": [["label", "A"]]},
+            {"op": "place", "kind": "not", "x": 3, "y": 0, "rot": 0, "mirror": false, "settings": []},
+            {"op": "place", "kind": "out", "x": 8, "y": 0, "rot": 0, "mirror": false, "settings": [["label", "Y"]]}
+        ]}))
+        .unwrap();
+    assert!(made.contains("U1: in 3,0 · out 5,0"), "{made}");
+    space
+        .run_tool("circuit_edit", &serde_json::json!({"ops": [{"op": "wire", "points": [[0, 0], [3, 0]]}, {"op": "wire", "points": [[5, 0], [8, 0]]}]}))
+        .unwrap();
+    assert_eq!(space.unsaved(), vec!["inverter.circuit".to_string()], "an agent's edit is held");
+    let read = space.run_tool("circuit_read", &serde_json::json!({})).unwrap();
+    assert!(read.contains("part U1 not at 3,0") && read.contains("wire 0,0 3,0") && read.contains("# Out1 out: in 8,0"), "{read}");
+    // A table given in the call, run without keeping; then kept.
+    let ran = space.run_tool("circuit_test", &serde_json::json!({"table": "A Y\n0 1\n1 0\n"})).unwrap();
+    assert!(ran.contains("table: all 2 rows pass"), "{ran}");
+    let wrong = space.run_tool("circuit_test", &serde_json::json!({"table": "A Y\n0 0\n", "label": "wrong", "keep": true})).unwrap();
+    assert!(wrong.contains("wrong: 1 rows, failing:") && wrong.contains("Y is 1, not 0x0"), "{wrong}");
+    let all = space.run_tool("circuit_test", &serde_json::json!({})).unwrap();
+    assert!(all.contains("wrong: 1 rows, failing"), "{all}");
+    let analysed = space.run_tool("circuit_analyse", &serde_json::json!({})).unwrap();
+    assert!(analysed.contains("Y = A'") && analysed.contains("0 | 1\n1 | 0"), "{analysed}");
+    let built = space.run_tool("circuit_synthesise", &serde_json::json!({"name": "majority", "expression": "M = A B + A C + B C", "style": "nor"})).unwrap();
+    assert!(built.contains("Built majority") && built.contains("nor"), "{built}");
+    // @circuit: the circuit on screen, what is selected, the last tests.
+    let generation = space
+        .apply(Command::CircuitShow { circuit: "main".into() })
+        .iter()
+        .find_map(|e| match e {
+            Event::CircuitProject { project: Some(p) } => Some(p.generation),
+            _ => None,
+        })
+        .unwrap();
+    space.apply(Command::CircuitSelect { generation, circuit: "main".into(), ids: vec!["U1".into()], wires: vec![] });
+    space.run_tool("circuit_test", &serde_json::json!({})).unwrap();
+    let context = space.with_context("why does @circuit fail its test?");
+    assert!(context.contains("# @circuit\nCircuit main of inverter.circuit") && context.contains("Selected: U1") && context.contains("Last tests run:"), "{context}");
+    assert!(space.run_tool("circuit_edit", &serde_json::json!({"ops": [{"op": "place", "kind": "frob", "x": 0, "y": 0, "rot": 0, "mirror": false, "settings": []}]})).is_err());
+    let _ = std::fs::remove_dir_all(root);
+}

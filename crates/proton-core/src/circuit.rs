@@ -366,6 +366,10 @@ struct Open {
     done: Vec<Step>,
     undone: Vec<Step>,
     run: Option<Run>,
+    /// What the window has selected, for `@circuit`: the circuit, its parts and wires.
+    selected: (String, Vec<String>, Vec<[i32; 4]>),
+    /// The last tables run, and of which circuit.
+    last_tests: (String, Vec<CircuitTestResult>),
 }
 
 impl std::fmt::Debug for Open {
@@ -379,7 +383,15 @@ impl std::fmt::Debug for Open {
 pub struct Circuits {
     open: Option<Open>,
     generations: u32,
+    /// What the agent's last call changed on screen, for the window.
+    pending: Vec<Event>,
 }
+
+/// The tools the agent has for a circuit project.
+pub const TOOLS: [&str; 7] = ["circuit_info", "circuit_open", "circuit_read", "circuit_edit", "circuit_test", "circuit_analyse", "circuit_synthesise"];
+
+/// No more lines of a circuit than this go to the model at once.
+const MOST_LINES: usize = 400;
 
 impl Circuits {
     pub fn is_open(&self) -> bool {
@@ -652,7 +664,7 @@ impl Circuits {
                 if tables.is_empty() {
                     return vec![notice(format!("{circuit} has no test table{}", label.map(|l| format!(" {l}")).unwrap_or_default()), NoticeLevel::Warn)];
                 }
-                let results = match open.project.build(&circuit) {
+                let results: Vec<CircuitTestResult> = match open.project.build(&circuit) {
                     Ok(built) => tables
                         .iter()
                         .map(|(l, t)| {
@@ -662,6 +674,7 @@ impl Circuits {
                         .collect(),
                     Err(why) => tables.iter().map(|(l, _)| CircuitTestResult { label: l.clone(), rows: 0, failures: Vec::new(), error: Some(why.clone()) }).collect(),
                 };
+                open.last_tests = (circuit.clone(), results.clone());
                 vec![Event::CircuitTests { generation, circuit, results }]
             }
             Command::CircuitExport { generation, circuit, format } => {
@@ -866,6 +879,12 @@ impl Circuits {
                 record(open, after);
                 vec![notice(format!("{id}'s contents are kept as data/{name}.hex, saved with ⌘S"), NoticeLevel::Info), self.project_event()]
             }
+            Command::CircuitSelect { generation, circuit, ids, wires } => {
+                if let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) {
+                    open.selected = (circuit, ids, wires);
+                }
+                Vec::new()
+            }
             Command::CircuitCopy { generation, circuit, ids, wires } => {
                 let open = match self.checked(generation, &circuit) {
                     Ok(open) => open,
@@ -876,6 +895,257 @@ impl Circuits {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// What the agent's calls changed on screen, taken for the window.
+    pub fn take_pending(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.pending)
+    }
+
+    /// A command as the window would send it, its events kept for the
+    /// window and its notices — the reasons a thing was refused — as the
+    /// call's error.
+    fn command(&mut self, root: &Path, command: Command) -> Result<Vec<Event>, String> {
+        let events = self.apply(root, command);
+        let refused: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Notice { text, level, .. } if *level != NoticeLevel::Info => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        self.pending.extend(events.iter().filter(|e| !matches!(e, Event::Notice { .. })).cloned());
+        if refused.is_empty() {
+            Ok(events)
+        } else {
+            Err(refused.join("; "))
+        }
+    }
+
+    fn generation(&self) -> Result<u32, String> {
+        self.open.as_ref().map(|o| o.generation).ok_or_else(|| "No circuit project is open in Circuit: circuit_info lists the folder's, circuit_open opens or makes one.".into())
+    }
+
+    fn named(&self, input: &serde_json::Value) -> Result<String, String> {
+        let open = self.open.as_ref().ok_or("No circuit project is open")?;
+        let name = input.get("circuit").and_then(|v| v.as_str()).map(str::to_string).unwrap_or_else(|| open.shown.clone());
+        if !open.project.circuits.contains_key(&name) {
+            return Err(format!("there is no circuit {name}: the project has {}", open.project.circuits.keys().cloned().collect::<Vec<_>>().join(", ")));
+        }
+        Ok(name)
+    }
+
+    /// An agent's call: what it did, or why it could not.
+    pub fn tool(&mut self, root: &Path, name: &str, input: &serde_json::Value) -> Result<String, String> {
+        let text = |k: &str| input.get(k).and_then(|v| v.as_str()).map(str::to_string);
+        match name {
+            "circuit_info" => Ok(self.info(root)),
+            "circuit_open" => {
+                if let Some(new) = text("new") {
+                    self.command(root, Command::CircuitNew { name: new })?;
+                } else {
+                    let path = text("path").ok_or("circuit_open: give `path`, or `new` with a name")?;
+                    if path.ends_with(".dig") {
+                        self.command(root, Command::CircuitImport { path })?;
+                    } else {
+                        self.command(root, Command::CircuitOpen { path })?;
+                    }
+                }
+                Ok(self.info(root))
+            }
+            "circuit_read" => {
+                let circuit = self.named(input)?;
+                Ok(self.read(&circuit))
+            }
+            "circuit_edit" => {
+                let generation = self.generation()?;
+                let circuit = text("circuit").unwrap_or_else(|| self.open.as_ref().map(|o| o.shown.clone()).unwrap_or_default());
+                let exists = self.open.as_ref().is_some_and(|o| o.project.circuits.contains_key(&circuit));
+                if !exists {
+                    if input.get("create").and_then(|v| v.as_bool()) == Some(true) {
+                        self.command(root, Command::CircuitAdd { name: circuit.clone() })?;
+                    } else {
+                        return Err(format!("there is no circuit {circuit}: give `create: true` to make it"));
+                    }
+                }
+                let ops: Vec<CircuitOp> = serde_json::from_value(input.get("ops").cloned().unwrap_or_default()).map_err(|e| format!("circuit_edit: the ops do not read: {e}"))?;
+                let events = self.command(root, Command::CircuitEdit { generation, circuit: circuit.clone(), ops })?;
+                let made: Vec<String> = events
+                    .iter()
+                    .find_map(|e| match e {
+                        Event::CircuitProject { project: Some(p) } => Some(p.made.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let open = self.open.as_ref().ok_or("the project closed")?;
+                let pins: HashMap<String, Result<Vec<circ::PinAt>, String>> = open.project.pins(&circuit).into_iter().collect();
+                let mut out = format!("Done, as one step the person can undo; held until they save. {circuit} has {} parts and {} wires.", open.project.circuits[&circuit].parts.len(), open.project.circuits[&circuit].wires.len());
+                if !made.is_empty() {
+                    out.push_str("\nMade:");
+                    for id in &made {
+                        out.push_str(&format!("\n{id}: {}", pins_text(pins.get(id))));
+                    }
+                }
+                Ok(out)
+            }
+            "circuit_test" => {
+                let generation = self.generation()?;
+                let circuit = self.named(input)?;
+                if let Some(table) = text("table") {
+                    if input.get("keep").and_then(|v| v.as_bool()) == Some(true) {
+                        let label = text("label").ok_or("circuit_test: `keep` needs a `label` to keep the table as")?;
+                        self.command(root, Command::CircuitTestSet { generation, circuit: circuit.clone(), label, text: Some(table.clone()) })?;
+                    }
+                    let open = self.open.as_ref().ok_or("the project closed")?;
+                    proton_circuit::testlang::check(&table)?;
+                    let built = open.project.build(&circuit)?;
+                    let o = proton_circuit::testlang::run(&built, text("label").as_deref().unwrap_or("table"), &table);
+                    return Ok(results_text(&[CircuitTestResult { label: o.label, rows: o.rows as u32, failures: o.failures, error: o.error }]));
+                }
+                let events = self.command(root, Command::CircuitTestRun { generation, circuit, label: text("label") })?;
+                let results = events.into_iter().find_map(|e| match e {
+                    Event::CircuitTests { results, .. } => Some(results),
+                    _ => None,
+                });
+                Ok(results_text(&results.unwrap_or_default()))
+            }
+            "circuit_analyse" => {
+                let generation = self.generation()?;
+                let expression = text("expression");
+                let circuit = if expression.is_some() { None } else { Some(self.named(input)?) };
+                let events = self.command(root, Command::CircuitAnalyse { generation, circuit, expression })?;
+                let a = events
+                    .into_iter()
+                    .find_map(|e| match e {
+                        Event::CircuitAnalysis { analysis, .. } => Some(*analysis),
+                        _ => None,
+                    })
+                    .ok_or("nothing was analysed")?;
+                if let Some(why) = a.error {
+                    return Err(why);
+                }
+                let mut out = format!("Inputs: {}\nOutputs: {}\n", a.inputs.join(" "), a.outputs.join(" "));
+                for (k, o) in a.outputs.iter().enumerate() {
+                    out.push_str(&format!("{o} = {}\n{o} = {}\n", a.sop[k], a.pos[k]));
+                }
+                if !a.exact {
+                    out.push_str("(some covers were chosen greedily and may not be the least)\n");
+                }
+                if a.inputs.len() <= 6 {
+                    let n = a.inputs.len();
+                    out.push_str(&format!("\n{} | {}\n", a.inputs.join(" "), a.outputs.join(" ")));
+                    for r in 0..1usize << n {
+                        let ins: Vec<String> = (0..n).map(|i| ((r >> (n - 1 - i)) & 1).to_string()).collect();
+                        let outs: Vec<String> = a.columns.iter().map(|c| c[r..r + 1].to_string()).collect();
+                        out.push_str(&format!("{} | {}\n", ins.join(" "), outs.join(" ")));
+                    }
+                }
+                Ok(out)
+            }
+            "circuit_synthesise" => {
+                let generation = self.generation()?;
+                let name = text("name").ok_or("circuit_synthesise: `name` is required")?;
+                let expression = text("expression");
+                let circuit = if expression.is_some() { None } else { Some(self.named(input)?) };
+                let style = text("style").unwrap_or_else(|| "andOr".into());
+                self.command(root, Command::CircuitSynthesise { generation, circuit, expression, style, name: name.clone() })?;
+                Ok(format!("Built {name}, shown, with its truth table as the test \"truth\"; held until the person saves.\n\n{}", self.read(&name)))
+            }
+            other => Err(format!("no such tool: {other}")),
+        }
+    }
+
+    /// The project open, its circuits and what each holds; or the folder's.
+    fn info(&self, root: &Path) -> String {
+        let Some(open) = &self.open else {
+            let found = find(root);
+            if found.is_empty() {
+                return "No circuit project is open, and the folder has none: circuit_open with `new` makes one.".into();
+            }
+            let list: Vec<String> = found.iter().map(|f| format!("- {}{}", f.path, if f.kind == "dig" { " (Digital: imported when opened)" } else { "" })).collect();
+            return format!("No circuit project is open. In the folder:\n{}", list.join("\n"));
+        };
+        let p = &open.project;
+        let mut out = format!("Project {}{}\n", open.shown_path, if p != &open.saved { " (unsaved changes)" } else { "" });
+        for (name, d) in &p.circuits {
+            let pins = |kind: &str| -> String {
+                circ::ordered(d)
+                    .iter()
+                    .filter(|q| q.kind == kind || (kind == "in" && matches!(q.kind.as_str(), "clock" | "button")))
+                    .map(|q| {
+                        let label = q.attrs.get("label").cloned().unwrap_or_else(|| q.id.clone());
+                        match q.attrs.get("bits") {
+                            Some(b) if b != "1" => format!("{label}[{b}]"),
+                            _ => label,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let mut marks = Vec::new();
+            if *name == p.top {
+                marks.push("top");
+            }
+            if *name == open.shown {
+                marks.push("on screen");
+            }
+            let marks = if marks.is_empty() { String::new() } else { format!(" ({})", marks.join(", ")) };
+            out.push_str(&format!("- {name}{marks}: {} parts, {} wires; in {}; out {}", d.parts.len(), d.wires.len(), or_none(pins("in")), or_none(pins("out"))));
+            if let Some(t) = p.tests.get(name) {
+                out.push_str(&format!("; tables {}", t.keys().cloned().collect::<Vec<_>>().join(", ")));
+            }
+            out.push('\n');
+        }
+        if !p.machines.is_empty() {
+            out.push_str(&format!("State machines: {}\n", p.machines.keys().cloned().collect::<Vec<_>>().join(", ")));
+        }
+        if !p.data.is_empty() {
+            out.push_str(&format!("Memory files: {}\n", p.data.keys().map(|k| format!("data/{k}.hex")).collect::<Vec<_>>().join(", ")));
+        }
+        out.push_str(if open.run.is_some() { "It is running.\n" } else { "It is not running.\n" });
+        out
+    }
+
+    /// A circuit's text, and where each part's pins are.
+    fn read(&self, circuit: &str) -> String {
+        let Some(open) = &self.open else { return String::new() };
+        let Some(d) = open.project.circuits.get(circuit) else { return format!("there is no circuit {circuit}") };
+        let text = circ::write(d);
+        let lines: Vec<&str> = text.lines().collect();
+        let mut out = format!("# {circuit}.circ\n");
+        for l in lines.iter().take(MOST_LINES) {
+            out.push_str(l);
+            out.push('\n');
+        }
+        if lines.len() > MOST_LINES {
+            out.push_str(&format!("# … {} more lines\n", lines.len() - MOST_LINES));
+        }
+        out.push_str("\n# pins (x,y), as the simulator joins them\n");
+        let pins: HashMap<String, Result<Vec<circ::PinAt>, String>> = open.project.pins(circuit).into_iter().collect();
+        for part in circ::ordered(d).iter().take(MOST_LINES) {
+            out.push_str(&format!("# {} {}: {}\n", part.id, part.kind, pins_text(pins.get(&part.id))));
+        }
+        out
+    }
+
+    /// The circuit on screen, what is selected, and the last tables run:
+    /// what `@circuit` sends.
+    pub fn about(&self) -> String {
+        let Some(open) = &self.open else { return "No circuit project is open in Circuit.".into() };
+        let mut out = format!("Circuit {} of {}\n", open.shown, open.shown_path);
+        out.push_str(&self.read(&open.shown));
+        let (circuit, ids, wires) = &open.selected;
+        if *circuit == open.shown && (!ids.is_empty() || !wires.is_empty()) {
+            out.push_str(&format!("\nSelected: {}{}\n", ids.join(", "), if wires.is_empty() { String::new() } else { format!(" and {} wires", wires.len()) }));
+        } else {
+            out.push_str("\nNothing is selected.\n");
+        }
+        let (tested, results) = &open.last_tests;
+        if *tested == open.shown && !results.is_empty() {
+            out.push_str("\nLast tests run:\n");
+            out.push_str(&results_text(results));
+        }
+        out
     }
 
     /// The project open, if the window's numbers are for it: its
@@ -1083,6 +1353,8 @@ impl Circuits {
             done: Vec::new(),
             undone: Vec::new(),
             run: None,
+            selected: (String::new(), Vec::new(), Vec::new()),
+            last_tests: (String::new(), Vec::new()),
         });
     }
 
@@ -1375,6 +1647,42 @@ fn quick_run(mut sim: Sim, clocks: Vec<PartId>, breaks: Vec<PartId>, stop: Arc<A
         }
     };
     let _ = tell.send(QuickNews::Done { sim: Box::new(sim), cycles, ended });
+}
+
+fn or_none(s: String) -> String {
+    if s.is_empty() {
+        "none".into()
+    } else {
+        s
+    }
+}
+
+/// A part's pins as the model reads them: `in 3,0 · in 3,2 · out 6,1`.
+fn pins_text(pins: Option<&Result<Vec<circ::PinAt>, String>>) -> String {
+    match pins {
+        Some(Ok(pins)) if pins.is_empty() => "no pins".into(),
+        Some(Ok(pins)) => pins.iter().map(|p| format!("{} {},{}", if p.input { "in" } else { "out" }, p.x, p.y)).collect::<Vec<_>>().join(" · "),
+        Some(Err(why)) => format!("not placed: {why}"),
+        None => "?".into(),
+    }
+}
+
+/// Tables run, as the model reads them.
+fn results_text(results: &[CircuitTestResult]) -> String {
+    let mut out = String::new();
+    for r in results {
+        match (&r.error, r.failures.is_empty()) {
+            (Some(why), _) => out.push_str(&format!("{}: could not run: {why}\n", r.label)),
+            (None, true) => out.push_str(&format!("{}: all {} rows pass\n", r.label, r.rows)),
+            (None, false) => {
+                out.push_str(&format!("{}: {} rows, failing:\n", r.label, r.rows));
+                for f in &r.failures {
+                    out.push_str(&format!("  {f}\n"));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// A change made a step: the project as it was kept to undo to.

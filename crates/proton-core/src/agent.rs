@@ -473,6 +473,112 @@ impl Agent {
                     "required": ["range"]
                 }),
             },
+            // Circuit's project. Edits are held until the person saves, and
+            // each call is one step they can undo.
+            Tool {
+                name: "circuit_info".into(),
+                description: "The circuit project open in Circuit mode: its circuits (the top one marked), each one's \
+                              inputs, outputs and size, its test tables, state machines and memory files, and \
+                              whether it is running. With none open, the projects and Digital .dig files in the folder."
+                    .into(),
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            Tool {
+                name: "circuit_open".into(),
+                description: "Open a .circuit project, import a Digital .dig file (with the circuits it uses) as one, \
+                              or with `new` make a project of that name."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "As circuit_info lists it." },
+                        "new": { "type": "string", "description": "A name for a new project." }
+                    }
+                }),
+            },
+            Tool {
+                name: "circuit_read".into(),
+                description: "A circuit as its .circ text — `part <id> <kind> at x,y [rot n] [mirror] key=value…` and \
+                              `wire x1,y1 x2,y2`, in grid steps — then where each part's pins are, inputs and \
+                              outputs, as the simulator joins them. Wires join only at their ends: a wire to a pin \
+                              ends on the pin. The circuit on screen unless named."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": { "circuit": { "type": "string" } }
+                }),
+            },
+            Tool {
+                name: "circuit_edit".into(),
+                description: "Change a circuit, as one step the person can undo, held until they save. `ops` in order: \
+                              {op:'place', kind, x, y, rot?, mirror?, settings?:[[key,value]]} (kinds: in out clock button \
+                              const ground vdd led probe tunnel split text not and or nand nor xor xnor mux demux decoder \
+                              priority add subtract multiply divide compare negate shifter register dff tff jkff rsff counter \
+                              ram ram2 rom lut driver driverinv pullup pulldown bitext bitsel seg7 hexdisplay rgbled reset \
+                              break, or sub:<circuit>; settings such as bits, inputs, label, sel, value, net, in, out, wide, \
+                              flip, addr, file); {op:'wire', points:[[x,y],…]} (each leg straight; a wire's end on another's \
+                              middle joins it); {op:'move', ids, wires, dx, dy}; {op:'rotate', ids}; {op:'mirror', ids}; \
+                              {op:'delete', ids, wires:[[x1,y1,x2,y2]]}; {op:'set', id, newId?, settings}; {op:'paste', text, \
+                              dx, dy} (.circ text). Answers with the parts made and their pins. `create: true` makes \
+                              the circuit first if the project has none of that name."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "circuit": { "type": "string" },
+                        "create": { "type": "boolean" },
+                        "ops": { "type": "array", "items": { "type": "object" } }
+                    },
+                    "required": ["ops"]
+                }),
+            },
+            Tool {
+                name: "circuit_test".into(),
+                description: "Run a circuit's test tables — all, or the one labelled — or a table given here in Digital's \
+                              language (a line of signal names, then a row of values each: numbers, X, Z, C to pulse a \
+                              clock; loop(i, n) … end loop) without keeping it. Answers each table's rows and the rows \
+                              that failed with what came instead. `keep` with `label` keeps the given table."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "circuit": { "type": "string" },
+                        "label": { "type": "string" },
+                        "table": { "type": "string" },
+                        "keep": { "type": "boolean" }
+                    }
+                }),
+            },
+            Tool {
+                name: "circuit_analyse".into(),
+                description: "A circuit's truth table (one without flip-flops, of 16 input bits or fewer), or that of \
+                              expressions (`Y = A·B + C'; Z = A ^ B`): each output's least sum of products and product \
+                              of sums, and the table itself for six inputs or fewer."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "circuit": { "type": "string" },
+                        "expression": { "type": "string" }
+                    }
+                }),
+            },
+            Tool {
+                name: "circuit_synthesise".into(),
+                description: "Build a new circuit from expressions or from a circuit's truth table, laid out as AND/OR \
+                              gates, NAND only or NOR only, its table attached as the test \"truth\". A held edit."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" },
+                        "expression": { "type": "string" },
+                        "circuit": { "type": "string" },
+                        "style": { "type": "string", "enum": ["andOr", "nand", "nor"] }
+                    },
+                    "required": ["name"]
+                }),
+            },
         ]
     }
 
@@ -1036,7 +1142,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 16);
+        assert_eq!(tools.len(), 23);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the

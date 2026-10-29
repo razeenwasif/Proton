@@ -1,4 +1,4 @@
-//! `@selection`, `@dataframe` and `@sheet`: naming what the model may look at.
+//! `@selection`, `@dataframe`, `@sheet` and `@circuit`: naming what the model may look at.
 //!
 //! The design's phrasing is the specification: *what the model can see is a
 //! chip you can point at*. A question about "this" is a question the model
@@ -30,6 +30,8 @@ pub enum Mention {
     Dataframe,
     /// The sheet on screen in Excel, and what is selected on it.
     Sheet,
+    /// The circuit on screen in Circuit, what is selected, the last tests.
+    Circuit,
 }
 
 impl Mention {
@@ -39,11 +41,12 @@ impl Mention {
             Mention::Selection => "@selection",
             Mention::Dataframe => "@dataframe",
             Mention::Sheet => "@sheet",
+            Mention::Circuit => "@circuit",
         }
     }
 
     /// Every mention this build understands, for the composer's chips.
-    pub const ALL: [Mention; 3] = [Mention::Selection, Mention::Dataframe, Mention::Sheet];
+    pub const ALL: [Mention; 4] = [Mention::Selection, Mention::Dataframe, Mention::Sheet, Mention::Circuit];
 }
 
 /// The mentions in a question, in the order they were written, without repeats.
@@ -156,6 +159,8 @@ mod tests {
         assert_eq!(found("@selection"), [Mention::Selection]);
         assert_eq!(found("look at @dataframe"), [Mention::Dataframe]);
         assert_eq!(found("sum @sheet's column"), [Mention::Sheet]);
+        assert_eq!(found("why does @circuit oscillate?"), [Mention::Circuit]);
+        assert!(found("all @circuits").is_empty());
         assert_eq!(found("@sheets"), []);
     }
 

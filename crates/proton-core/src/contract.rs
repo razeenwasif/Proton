@@ -182,12 +182,13 @@ impl Layout {
                 Slot::Agent,
                 DocumentKind::Workbook,
             ),
-            // The project's circuits and the drawing, which wants its room.
-            // The agent joins it with its circuit tools (C8).
+            // The project's circuits, the drawing, and the agent with its
+            // circuit tools beside it — shut until asked for, as the drawing
+            // wants its room.
             ModeId::Circuit => (
                 Slot::Explorer,
                 Slot::Schematic,
-                Slot::Empty,
+                Slot::Agent,
                 DocumentKind::CircuitProject,
             ),
         };
