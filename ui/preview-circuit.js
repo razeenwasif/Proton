@@ -35,7 +35,7 @@ const turn = (part, pin) => ({ ...pin, x: part.x + (pin.y - part.y), y: part.y -
 
 /** @param {(events: any[]) => void} _deliver */
 export function createCircuitPreview(_deliver) {
-  /** @type {{path: string, name: string}[]} */
+  /** @type {{path: string, name: string, kind: string}[]} */
   const projects = [{ path: "labs/adder.circuit", name: "adder", kind: "circuit" }, { path: "course/cpu.dig", name: "cpu", kind: "dig" }];
   /** @type {null | {path: string, name: string, top: string, circuits: string[], shown: string, generation: number, dirty: boolean}} */
   let open = null;

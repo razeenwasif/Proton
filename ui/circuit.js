@@ -883,7 +883,24 @@ export function createCircuit(host) {
     requestAnimationFrame(() => {
       frameAsked = false;
       draw();
+      tellSelection();
     });
+  }
+
+  /** The core is told what is selected, for `@circuit`, a moment after it settles. */
+  let told = "";
+  let telling = 0;
+  function tellSelection() {
+    clearTimeout(telling);
+    telling = window.setTimeout(() => {
+      const p = state.project;
+      if (!p) return;
+      const ids = [...state.parts].sort(), wires = selectedWires();
+      const key = `${p.generation}:${p.shown}:${ids.join()}:${wires.map(wireKey).join(";")}`;
+      if (key === told) return;
+      told = key;
+      host.dispatch({ type: "circuitSelect", generation: p.generation, circuit: p.shown, ids, wires });
+    }, 150);
   }
 
   /** The theme's colours, read when drawn so a theme change shows. */

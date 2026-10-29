@@ -462,6 +462,23 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
     void stage;
   });
 
+  await test('Circuit has the agent in its dock, with @circuit, and tells the core what is selected', async () => {
+    await win.pushEvents([project()]); await settle(); await frames();
+    const dock = ws().querySelector('.xl-dock');
+    assert(dock?.querySelector('[data-agent-input]') && dock.querySelector('[data-mention="@circuit"]'), 'there is no agent composer with @circuit');
+    const toggle = [...doc.querySelectorAll('[data-panel-toggle="right"]')].find((b) => b.getClientRects().length);
+    assert(toggle && !toggle.disabled, 'the dock cannot be shown');
+    const stage = ws().querySelector('[data-circuit-stage]');
+    stage.focus();
+    key('Escape');
+    const before = win.commands.length;
+    key('a', {metaKey: true});
+    await new Promise((done) => setTimeout(done, 300)); await settle();
+    const told = sent(before, 'circuitSelect').at(-1);
+    assert(told?.generation === 4 && told.circuit === 'half' && told.ids.length === HALF.parts.length && told.wires.length === HALF.wires.length, `the core was told ${JSON.stringify(told)?.slice(0, 200)}`);
+    key('Escape');
+  });
+
   await test('Clicks and keys: another circuit, a new one, the top, zoom and fit, ⌘S and close', async () => {
     const before = win.commands.length;
     ws().querySelector('[data-circuit-show="main"]').click(); await settle();
