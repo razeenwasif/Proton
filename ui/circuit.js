@@ -24,7 +24,11 @@
  * labels buses in hex. A click on an input flips it (a wider one asks for a
  * number), a button is held while pressed, `s` is a clock edge and `.` a
  * gate delay; the clock can be left running at a few hertz, sent from here
- * an edge at a time, or quick-run by the core as fast as it goes. */
+ * an edge at a time, or quick-run by the core as fast as it goes.
+ *
+ * Below the drawing, `t` opens the circuit's test tables — written here,
+ * kept by the core as held edits, run there, the rows that failed shown —
+ * and a timing graph of what the run has recorded, which can go to Data. */
 
 import { escapeHtml as esc, icon } from "./html.js";
 
@@ -33,6 +37,12 @@ import { escapeHtml as esc, icon } from "./html.js";
 /** @typedef {import("./bindings/CircuitFound").CircuitFound} Found */
 /** @typedef {import("./bindings/CircuitRunView").CircuitRunView} RunView */
 /** @typedef {import("./bindings/CircuitValue").CircuitValue} Value */
+/** @typedef {import("./bindings/CircuitTestResult").CircuitTestResult} TestResult */
+
+/** Pixels: a sample's width in the graph, a signal's row, the names' column. */
+const SAMPLE_W = 16;
+const SIGNAL_H = 26;
+const NAMES_W = 72;
 
 /** A value as a part shows it: a bit as 0 or 1, a bus in hex, Z as Z.
  *  @param {Value | undefined} v */
@@ -212,6 +222,28 @@ export function createCircuit(host) {
     live: null,
     /** A click on an input waiting to see whether it is a click or a drag. @type {{id: string, x: number, y: number} | null} */
     press: null,
+    /** The panel below: open, and which tab. */
+    panel: false,
+    tab: /** @type {"tests" | "graph"} */ ("tests"),
+    /** The table shown in it, and the last results by table, for this
+     *  project and circuit. */
+    table: "",
+    /** @type {Map<string, TestResult>} */
+    results: new Map(),
+    resultsOf: "",
+    /** Naming a new table. */
+    naming: false,
+  };
+  const panelEls = {
+    panel: q("[data-circuit-panel]"),
+    tools: q("[data-circuit-tools]"),
+    tests: q("[data-circuit-tests]"),
+    tables: q("[data-circuit-tables]"),
+    text: /** @type {HTMLTextAreaElement} */ (q("[data-circuit-table-text]")),
+    results: q("[data-circuit-results]"),
+    graph: q("[data-circuit-graph]"),
+    graphCanvas: /** @type {HTMLCanvasElement} */ (q("[data-circuit-graph-canvas]")),
+    graphEmpty: q("[data-circuit-graph-empty]"),
   };
   const runEls = {
     status: q("[data-circuit-status]"),
@@ -319,6 +351,7 @@ export function createCircuit(host) {
     q("[data-circuit-dirty]").hidden = !p.dirty;
     els.empty.hidden = p.parts.length > 0 || p.wires.length > 0;
     renderRun();
+    renderPanel();
     // What was selected and is still there stays so; what an edit made is
     // selected instead.
     const ids = new Set(p.parts.map((part) => part.id));
@@ -332,6 +365,142 @@ export function createCircuit(host) {
     }
     if (`${p.generation}/${p.shown}` !== state.fitted) requestAnimationFrame(fit);
     else redraw();
+  }
+
+  /* ── tests and the graph ───────────────────────────────────────────── */
+
+  function renderPanel() {
+    const p = state.project;
+    panelEls.panel.hidden = !state.panel || !p;
+    if (!p || !state.panel) return;
+    const key = `${p.generation}/${p.shown}`;
+    if (state.resultsOf !== key) {
+      state.resultsOf = key;
+      state.results.clear();
+      state.table = "";
+    }
+    for (const b of panelEls.panel.querySelectorAll("[data-circuit-tab]")) {
+      b.setAttribute("aria-selected", String(/** @type {HTMLElement} */ (b).dataset.circuitTab === state.tab));
+    }
+    panelEls.tests.hidden = state.tab !== "tests";
+    panelEls.graph.hidden = state.tab !== "graph";
+    if (state.tab === "tests") {
+      panelEls.tools.innerHTML = `<button class="ci-tool" data-circuit-run-all${p.tables.length ? "" : " disabled"}>Run all</button>`;
+      if (!state.table || !p.tables.some(([l]) => l === state.table)) {
+        if (state.table !== "" || !state.naming) state.table = p.tables[0]?.[0] ?? "";
+      }
+      const badge = (/** @type {string} */ label) => {
+        const r = state.results.get(label);
+        if (!r) return "";
+        if (r.error) return `<span class="ci-badge bad">!</span>`;
+        return r.failures.length ? `<span class="ci-badge bad">✗</span>` : `<span class="ci-badge ok">✓</span>`;
+      };
+      panelEls.tables.innerHTML = p.tables
+        .map(([label]) => `<button class="xl-row${label === state.table ? " on" : ""}" data-circuit-table="${esc(label)}">${badge(label)}<span class="xl-row-name">${esc(label)}</span></button>`)
+        .join("") +
+        (state.naming
+          ? `<form class="ci-add" data-circuit-table-form><input type="text" placeholder="Name" aria-label="New table's name" spellcheck="false"></form>`
+          : `<button class="xl-row" data-circuit-table-new>${icon("plus")}<span class="xl-row-name">New table</span></button>`);
+      if (state.naming) /** @type {HTMLInputElement | null} */ (panelEls.tables.querySelector("input"))?.focus();
+      const text = p.tables.find(([l]) => l === state.table)?.[1];
+      if (document.activeElement !== panelEls.text) panelEls.text.value = text ?? "";
+      panelEls.text.disabled = text === undefined;
+      const r = state.results.get(state.table);
+      const head = text === undefined ? "" : `<div class="ci-results-head">
+        <button class="ci-tool" data-circuit-table-run title="Save and run it  ⌘↩">Run</button>
+        <button class="ci-tool" data-circuit-table-save title="Keep what is written, a held edit">Keep</button>
+        <button class="ci-tool" data-circuit-table-delete title="Take the table away (undo brings it back)">Remove</button>
+        <span class="ci-result-sum${r && (r.error || r.failures.length) ? " bad" : ""}">${r ? (r.error ? esc(r.error) : r.failures.length ? `${r.failures.length === 10 ? "10 or more" : r.failures.length} of ${r.rows} rows failed` : `all ${r.rows} rows pass`) : ""}</span></div>`;
+      panelEls.results.innerHTML = head + (r ? r.failures.map((f) => `<div class="ci-failure">${esc(f)}</div>`).join("") : "");
+    } else {
+      panelEls.tools.innerHTML = `<button class="ci-tool" data-circuit-trace-data${runOf() ? "" : " disabled"} title="The recording as a dataframe in Data">To Data</button>
+        <button class="ci-tool" data-circuit-trace-clear${runOf() ? "" : " disabled"}>Clear</button>`;
+      drawGraph();
+    }
+  }
+
+  /** The written table kept, as a held edit. */
+  function keepTable() {
+    const p = state.project;
+    if (!p || !state.table) return;
+    const now = p.tables.find(([l]) => l === state.table)?.[1];
+    const text = panelEls.text.value;
+    if (now !== text && now !== `${text}\n`) host.dispatch({ type: "circuitTestSet", generation: p.generation, circuit: p.shown, label: state.table, text });
+  }
+  /** @param {string | null} label */
+  function runTables(label) {
+    const p = state.project;
+    if (!p) return;
+    keepTable();
+    host.dispatch({ type: "circuitTestRun", generation: p.generation, circuit: p.shown, label });
+  }
+
+  /** The recorded signals, a row each, the newest sample at the right. */
+  function drawGraph() {
+    const run = runOf();
+    const trace = run?.trace;
+    panelEls.graphEmpty.hidden = !!trace && trace.samples.length > 0;
+    const c = panelEls.graphCanvas;
+    const r = panelEls.graph.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    c.width = Math.max(1, Math.round(r.width * dpr));
+    c.height = Math.max(1, Math.round(r.height * dpr));
+    c.style.width = `${r.width}px`;
+    c.style.height = `${r.height}px`;
+    const g = /** @type {CanvasRenderingContext2D} */ (c.getContext("2d"));
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, r.width, r.height);
+    if (!trace || !trace.samples.length) return;
+    const col = colours();
+    const fit = Math.max(1, Math.floor((r.width - NAMES_W - 8) / SAMPLE_W));
+    const samples = trace.samples.slice(-fit);
+    const first = trace.total - samples.length;
+    g.font = `11px ui-monospace, "SF Mono", Menlo, monospace`;
+    g.textBaseline = "middle";
+    trace.signals.forEach(([name, bits], row) => {
+      const y0 = 8 + row * SIGNAL_H, hi = y0 + 4, lo = y0 + SIGNAL_H - 6, mid = (hi + lo) / 2;
+      g.fillStyle = col.muted;
+      g.textAlign = "left";
+      g.fillText(name, 4, mid);
+      samples.forEach((sample, i) => {
+        const v = sample[row];
+        const x0 = NAMES_W + i * SAMPLE_W, x1 = x0 + SAMPLE_W;
+        const prev = i > 0 ? samples[i - 1][row] : v;
+        g.lineWidth = 1.5;
+        if (v === null) {
+          g.strokeStyle = col.z;
+          g.beginPath(); g.moveTo(x0, mid); g.lineTo(x1, mid); g.stroke();
+        } else if (bits === 1) {
+          const y = v === "1" ? hi : lo;
+          g.strokeStyle = v === "1" ? col.high : col.low;
+          g.beginPath();
+          if (prev !== v && prev !== null) { g.moveTo(x0, prev === "1" ? hi : lo); g.lineTo(x0, y); } else g.moveTo(x0, y);
+          g.lineTo(x1, y);
+          g.stroke();
+        } else {
+          // A bus: a band, crossed where its value changes, its value in it.
+          g.strokeStyle = col.bus;
+          g.beginPath();
+          const cross = prev !== v ? 3 : 0;
+          g.moveTo(x0, mid); g.lineTo(x0 + cross, hi); g.lineTo(x1, hi);
+          g.moveTo(x0, mid); g.lineTo(x0 + cross, lo); g.lineTo(x1, lo);
+          g.stroke();
+          if (prev !== v || i === 0) {
+            g.fillStyle = col.text;
+            g.textAlign = "left";
+            g.fillText(v.toUpperCase(), x0 + 4, mid);
+          }
+        }
+      });
+    });
+    // Sample numbers along the bottom, every tenth.
+    g.fillStyle = col.muted;
+    g.textAlign = "center";
+    const yb = 8 + trace.signals.length * SIGNAL_H + 6;
+    samples.forEach((_, i) => {
+      const n = first + i;
+      if (n % 10 === 0) g.fillText(String(n), NAMES_W + i * SAMPLE_W, yb);
+    });
   }
 
   /* ── running ───────────────────────────────────────────────────────── */
@@ -354,6 +523,7 @@ export function createCircuit(host) {
       else status = "running";
     }
     runEls.status.textContent = status;
+    if (state.panel && state.tab === "graph") renderPanel();
     runEls.status.classList.toggle("bad", !!r?.error);
     if (!on && state.live) setLive(false);
   }
@@ -1159,6 +1329,11 @@ export function createCircuit(host) {
       s: () => { if (running()) clockEdge(); },
       ".": () => { if (running()) runCommand("circuitStep"); },
       c: () => setLive(!state.live),
+      t: () => {
+        state.panel = !state.panel;
+        renderPanel();
+        redraw();
+      },
       Escape: () => {
         // A quick run, or the clock left running, stops first.
         if (runOf()?.quick?.running) return void host.dispatch({ type: "circuitStop" });
@@ -1212,6 +1387,37 @@ export function createCircuit(host) {
     if (t.closest("[data-circuit-new]")) return void newProject();
     if (t.closest("[data-circuit-save]")) return void host.dispatch({ type: "circuitSave" });
     if (t.closest("[data-circuit-fit]")) return void fit();
+    const tab = t.closest("[data-circuit-tab]");
+    if (tab) {
+      state.tab = /** @type {"tests" | "graph"} */ (/** @type {HTMLElement} */ (tab).dataset.circuitTab);
+      return void renderPanel();
+    }
+    if (t.closest("[data-circuit-panel-toggle]")) {
+      state.panel = !state.panel;
+      renderPanel();
+      return void redraw();
+    }
+    const table = t.closest("[data-circuit-table]");
+    if (table) {
+      keepTable();
+      state.table = /** @type {HTMLElement} */ (table).dataset.circuitTable ?? "";
+      panelEls.text.blur();
+      return void renderPanel();
+    }
+    if (t.closest("[data-circuit-table-new]")) {
+      state.naming = true;
+      return void renderPanel();
+    }
+    if (t.closest("[data-circuit-run-all]")) return void runTables(null);
+    if (t.closest("[data-circuit-table-run]")) return void runTables(state.table);
+    if (t.closest("[data-circuit-table-save]")) return void keepTable();
+    if (t.closest("[data-circuit-table-delete]")) {
+      const p = state.project;
+      if (p && state.table) host.dispatch({ type: "circuitTestSet", generation: p.generation, circuit: p.shown, label: state.table, text: null });
+      return;
+    }
+    if (t.closest("[data-circuit-trace-data]")) return void runCommand("circuitTraceToData");
+    if (t.closest("[data-circuit-trace-clear]")) return void runCommand("circuitTraceClear");
     if (t.closest("[data-circuit-run]")) return void toggleRun();
     if (t.closest("[data-circuit-clock]")) return void clockEdge();
     if (t.closest("[data-circuit-gate]")) return void runCommand("circuitStep");
@@ -1270,7 +1476,54 @@ export function createCircuit(host) {
 
   runEls.hz.addEventListener("change", () => { if (state.live) setLive(true); });
 
+  // A new table: named, then made with a header to fill in.
+  panelEls.tables.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const p = state.project;
+    const name = /** @type {HTMLInputElement | null} */ (panelEls.tables.querySelector("input"))?.value.trim() ?? "";
+    state.naming = false;
+    if (!p || !name) return void renderPanel();
+    const ins = p.parts.filter((q) => ["in", "clock", "button"].includes(q.kind)).map((q) => setting(q, "label") || q.id);
+    const outs = p.parts.filter((q) => q.kind === "out").map((q) => setting(q, "label") || q.id);
+    state.table = name;
+    host.dispatch({ type: "circuitTestSet", generation: p.generation, circuit: p.shown, label: name, text: `${[...ins, ...outs].join(" ") || "A Y"}\n` });
+  });
+  panelEls.tables.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.naming) {
+      state.naming = false;
+      renderPanel();
+    }
+    e.stopPropagation();
+  });
+  panelEls.text.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.metaKey && e.key === "Enter") {
+      e.preventDefault();
+      runTables(state.table);
+    } else if (e.metaKey && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      keepTable();
+      host.dispatch({ type: "circuitSave" });
+    } else if (e.key === "Escape") {
+      keepTable();
+      els.stage.focus({ preventScroll: true });
+    }
+  });
+  panelEls.text.addEventListener("blur", keepTable);
+  new ResizeObserver(() => { if (state.panel && state.tab === "graph") drawGraph(); }).observe(panelEls.graph);
+
   return {
+    /** @param {{generation: number, circuit: string, results: TestResult[]}} event */
+    tests(event) {
+      const p = state.project;
+      if (!p || event.generation !== p.generation || event.circuit !== p.shown) return;
+      state.resultsOf = `${p.generation}/${p.shown}`;
+      for (const r of event.results) state.results.set(r.label, r);
+      if (event.results.length === 1) state.table = event.results[0].label;
+      state.panel = true;
+      state.tab = "tests";
+      renderPanel();
+    },
     /** @param {{run: RunView | null}} event */
     run(event) {
       state.run = event.run;

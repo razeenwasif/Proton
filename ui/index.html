@@ -928,6 +928,7 @@
               <button class="tb-btn" data-circuit-live title="Leave the clock running  c" aria-label="Run the clock"><svg class="i"><use href="#i-clock"/></svg></button>
               <button class="tb-btn" data-circuit-quick title="Quick run: the clock as fast as it goes until a Break rises  ⎋ stops" aria-label="Quick run"><svg class="i"><use href="#i-bolt"/></svg></button>
             </span>
+            <button class="tb-btn" data-circuit-panel-toggle title="Tests and the graph  t" aria-label="Tests and the graph"><svg class="i"><use href="#i-target"/></svg></button>
             <button class="tb-btn" data-circuit-fit title="Fit the circuit to the window  =" aria-label="Fit"><svg class="i"><use href="#i-expand"/></svg></button>
             <button class="tb-btn" data-circuit-save title="Save  ⌘S" aria-label="Save"><svg class="i"><use href="#i-check"/></svg></button>
             <button class="tb-btn" data-circuit-close title="Close the project" aria-label="Close the project"><svg class="i"><use href="#i-close"/></svg></button>
@@ -936,6 +937,28 @@
             <canvas data-circuit-canvas></canvas>
             <p class="ci-empty" data-circuit-empty hidden>No parts yet. Pick one from Parts, or press <kbd>a</kbd> and name it; drag from a pin to wire.</p>
           </div>
+          <!-- Tests and the graph (C5): the circuit's test tables, to write
+               and run, with the rows that failed; and a timing graph of what
+               a run has recorded, which can go to Data. -->
+          <section class="ci-panel" data-circuit-panel hidden>
+            <nav class="ci-tabs" role="tablist">
+              <button role="tab" data-circuit-tab="tests" aria-selected="true">Tests</button>
+              <button role="tab" data-circuit-tab="graph" aria-selected="false">Graph</button>
+              <span class="grow"></span>
+              <span class="ci-tab-tools" data-circuit-tools></span>
+            </nav>
+            <div class="ci-tests" data-circuit-tests>
+              <div class="ci-tables" data-circuit-tables></div>
+              <div class="ci-table">
+                <textarea data-circuit-table-text spellcheck="false" aria-label="Test table" placeholder="A B   Y&#10;0 0   0&#10;loop(i, 4)&#10;  (i&gt;&gt;1) (i&amp;1)  ((i&gt;&gt;1)&amp;(i&amp;1))&#10;end loop"></textarea>
+                <div class="ci-results" data-circuit-results></div>
+              </div>
+            </div>
+            <div class="ci-graph" data-circuit-graph hidden>
+              <canvas data-circuit-graph-canvas></canvas>
+              <p class="ci-empty" data-circuit-graph-empty>Run the circuit (⌘R) to record its inputs and outputs here, a step a click or clock edge.</p>
+            </div>
+          </section>
         </div>
       </main>
     </section>

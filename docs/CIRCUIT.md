@@ -263,6 +263,18 @@ meet its wires. Contents are `data/<name>.hex` (Logisim's `v2.0 raw`, runs
 as `n*w`), named by `file=<name>` or given inline with `data=`; Digital's
 own contents in a `.dig` are read too. A running RAM is kept as a data file
 with Enter or a double-click, a held edit like any other.
+C5 — tests and the graph: `t` opens a panel below the drawing. Its Tests
+tab lists the circuit's tables, each written there and kept as a held edit
+(one that does not read is refused); ⌘↩ or Run keeps and runs one, Run all
+runs them all against the circuit built afresh, and each table is marked
+passing or failing with its failing rows shown; a new table is headed with
+the circuit's inputs and outputs. Its Graph tab is a timing diagram of what
+the run has recorded — each input and display after every click, clock
+edge and gate step, 10,000 samples kept — bits as high and low, buses as a
+band with their value, high-Z in blue; To Data writes it as
+`.proton/circuit/<project>-<circuit>.csv` and puts a cell reading it as
+`trace_df` in the notebook open (or `from-circuit.ipynb`), as Excel's ranges
+go. A table is capped at two million rows.
 
 | | What | Proved by |
 |---|---|---|

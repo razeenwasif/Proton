@@ -4721,6 +4721,32 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .ci-status.bad { color: var(--danger, #e55); }
 .ci-running { display: flex; align-items: center; gap: 8px; }
 .ci-running[hidden] { display: none; }
+.ci-panel { display: flex; flex-direction: column; height: 240px; flex: none; border-top: 1px solid var(--xl-line); min-height: 0; }
+.ci-panel[hidden] { display: none; }
+.ci-tabs { display: flex; align-items: center; gap: 4px; height: 32px; padding: 0 10px; flex: none; }
+.ci-tabs [role=tab] { height: 24px; padding: 0 10px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: var(--z-xs)/1 var(--zed); cursor: pointer; }
+.ci-tabs [role=tab][aria-selected=true] { color: var(--text); background: var(--row-hover); }
+.ci-tab-tools { display: flex; gap: 6px; }
+.ci-tool { height: 24px; padding: 0 10px; border: 1px solid var(--xl-line); border-radius: 5px; background: none; color: var(--text); font: var(--z-2xs)/1 var(--zed); cursor: pointer; }
+.ci-tool:hover:not(:disabled) { background: var(--row-hover); }
+.ci-tool:disabled { color: var(--muted); cursor: default; }
+.ci-tests { display: grid; grid-template-columns: 180px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
+.ci-tests[hidden], .ci-graph[hidden] { display: none; }
+.ci-tables { overflow: auto; border-right: 1px solid var(--xl-line); }
+.ci-table { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; }
+.ci-table textarea {
+  resize: none; border: 0; border-right: 1px solid var(--xl-line); padding: 8px 10px; background: var(--bg); color: var(--text);
+  font: var(--z-2xs)/1.5 ui-monospace, "SF Mono", Menlo, monospace; outline: none; white-space: pre; overflow: auto;
+}
+.ci-results { overflow: auto; padding: 6px 10px; color: var(--muted); font: var(--z-2xs)/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+.ci-results-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.ci-result-sum { color: var(--ci-high); }
+.ci-result-sum.bad, .ci-failure { color: var(--danger, #e55); }
+.ci-badge { width: 14px; text-align: center; font: 600 var(--z-2xs)/1 var(--zed); }
+.ci-badge.ok { color: var(--ci-high); }
+.ci-badge.bad { color: var(--danger, #e55); }
+.ci-graph { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.ci-graph canvas { position: absolute; inset: 0; display: block; }
 .ci-hold { display: flex; align-items: center; gap: 4px; color: var(--muted); font: var(--z-2xs)/1 var(--zed); white-space: nowrap; cursor: pointer; }
 .ci-hz { height: 24px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--xl-head); color: var(--text); font: var(--z-2xs)/1 var(--zed); }
 [data-circuit-live].on, [data-circuit-run] .i { color: var(--accent); }

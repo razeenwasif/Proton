@@ -12,7 +12,7 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
   const sent = (/** @type {number} */ from, /** @type {string} */ type) => win.commands.slice(from).filter((/** @type {any} */ c) => c.type === type);
   const project = (/** @type {Partial<any>} */ more = {}) => ({type: 'circuitProject', project: {path: 'labs/adder.circuit', name: 'adder', top: 'main',
     circuits: ['half', 'main'], shown: 'half', parts: HALF.parts, wires: HALF.wires, tests: [], generation: 4, dirty: false,
-    canUndo: false, canRedo: false, made: [], palette: ['in', 'out', 'clock', 'const', 'not', 'and', 'or', 'xor', 'mux', 'register'], ...more}});
+    canUndo: false, canRedo: false, made: [], data: [], tables: [], palette: ['in', 'out', 'clock', 'const', 'not', 'and', 'or', 'xor', 'mux', 'register'], ...more}});
   /** How many of the canvas's pixels are drawn on. */
   const inked = () => {
     const c = /** @type {HTMLCanvasElement} */ (ws().querySelector('[data-circuit-canvas]'));
@@ -279,6 +279,66 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
     stage.querySelector('.ci-pop').requestSubmit(); await settle();
     const saved = sent(before, 'circuitSaveMemory')[0];
     assert(saved?.id === 'M' && saved.name === 'boot' && saved.generation === 4, `saving sent ${JSON.stringify(saved)}`);
+    await win.pushEvents([{type: 'circuitRun', run: null}]); await settle();
+  });
+
+  await test('Tests: t opens the tables, written ones kept and run, failures shown, a new one headed; the graph drawn and sent to Data', async () => {
+    const tables = [['truth', 'A B S C\n0 0 0 0\n'], ['wrong', 'A B S C\n1 1 1 1\n']];
+    await win.pushEvents([project({tables}), {type: 'circuitRun', run: null}]); await settle(); await frames();
+    const stage = ws().querySelector('[data-circuit-stage]');
+    stage.focus();
+    key('t'); await settle();
+    assert(shown(ws().querySelector('[data-circuit-panel]')), 't did not open the panel');
+    const rows = [...ws().querySelectorAll('[data-circuit-table]')];
+    assert(rows.map((r) => r.dataset.circuitTable).join() === 'truth,wrong' && rows[0].classList.contains('on'), 'the tables are not listed');
+    const text = ws().querySelector('[data-circuit-table-text]');
+    assert(text.value === 'A B S C\n0 0 0 0\n', `the first table is not shown: ${JSON.stringify(text.value)}`);
+    // Written, then ⌘↩: kept and run.
+    text.focus();
+    text.value = 'A B S C\n0 0 0 0\n0 1 1 0\n';
+    let before = win.commands.length;
+    key('Enter', {metaKey: true}); await settle();
+    const kept = sent(before, 'circuitTestSet')[0];
+    assert(kept?.label === 'truth' && kept.text === 'A B S C\n0 0 0 0\n0 1 1 0\n' && kept.circuit === 'half', `keeping sent ${JSON.stringify(kept)}`);
+    assert(sent(before, 'circuitTestRun')[0]?.label === 'truth', '⌘↩ did not run it');
+    // Results: a failure shown, and marked in the list.
+    await win.pushEvents([{type: 'circuitTests', generation: 4, circuit: 'half', results: [{label: 'truth', rows: 2, failures: [], error: null}, {label: 'wrong', rows: 1, failures: ['line 2, row 1: S is 0, not 0x1'], error: null}]}]);
+    await settle();
+    ws().querySelector('[data-circuit-table="wrong"]').click(); await settle();
+    assert(ws().querySelector('[data-circuit-table="wrong"] .ci-badge.bad') && ws().querySelector('[data-circuit-table="truth"] .ci-badge.ok'), 'passing and failing are not marked');
+    assert(ws().querySelector('.ci-failure')?.textContent.includes('S is 0, not 0x1') && ws().querySelector('.ci-result-sum').textContent.includes('1 of 1'), 'the failing row is not shown');
+    // Run all; remove; a new one named, headed with the circuit's inputs and outputs.
+    before = win.commands.length;
+    ws().querySelector('[data-circuit-run-all]').click(); await settle();
+    assert(sent(before, 'circuitTestRun')[0]?.label === null, 'Run all did not run them all');
+    ws().querySelector('[data-circuit-table-delete]').click(); await settle();
+    assert(sent(before, 'circuitTestSet').some((c) => c.label === 'wrong' && c.text === null), 'Remove did not take it away');
+    ws().querySelector('[data-circuit-table-new]').click(); await settle();
+    const name = ws().querySelector('[data-circuit-table-form] input');
+    assert(name && doc.activeElement === name, 'a new table does not ask its name');
+    name.value = 'carry';
+    ws().querySelector('[data-circuit-table-form]').requestSubmit(); await settle();
+    const made = sent(before, 'circuitTestSet').find((c) => c.label === 'carry');
+    assert(made?.text === 'A B C S\n', `the new table is ${JSON.stringify(made)}`);
+
+    // The graph: drawn from the run's recording, sent to Data, cleared.
+    ws().querySelector('[data-circuit-tab="graph"]').click(); await settle();
+    const bit = (/** @type {string} */ hex) => ({bits: 1, hex, z: false, someZ: false});
+    await win.pushEvents([{type: 'circuitRun', run: {generation: 4, circuit: 'half', wires: [], values: [['A', bit('1')]], waiting: 0, stepped: [], error: null, quick: null,
+      trace: {signals: [['A', 1], ['B', 1], ['D', 8]], samples: [['0', '0', 'a'], ['1', '0', 'a'], ['1', '1', '1f'], ['0', null, '1f']], total: 4}}}]);
+    await settle(); await frames();
+    const c = /** @type {HTMLCanvasElement} */ (ws().querySelector('[data-circuit-graph-canvas]'));
+    const data = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d')).getImageData(0, 0, c.width, c.height).data;
+    let ink = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) ink++;
+    assert(ink > 300 && ws().querySelector('[data-circuit-graph-empty]').hidden, `the graph is all but empty: ${ink} pixels`);
+    before = win.commands.length;
+    ws().querySelector('[data-circuit-trace-data]').click();
+    ws().querySelector('[data-circuit-trace-clear]').click(); await settle();
+    assert(sent(before, 'circuitTraceToData')[0]?.generation === 4 && sent(before, 'circuitTraceClear').length === 1, 'To Data and Clear were not asked for');
+    stage.focus();
+    key('t'); await settle();
+    assert(!shown(ws().querySelector('[data-circuit-panel]')), 't did not close the panel');
     await win.pushEvents([{type: 'circuitRun', run: null}]); await settle();
   });
 

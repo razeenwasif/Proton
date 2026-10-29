@@ -41,6 +41,8 @@ export function createCircuitPreview(_deliver) {
   let undone = [];
   /** @type {string[]} */
   let made = [];
+  /** Test tables by circuit, then label. @type {Record<string, Record<string, string>>} */
+  const tables = { main: { table: "A B Cin Cout S\nloop(i, 8)\n(i>>2&1) (i>>1&1) (i&1) (((i>>2&1)+(i>>1&1)+(i&1))>>1) (((i>>2&1)+(i>>1&1)+(i&1))&1)\nend loop\n" } };
 
   const view = () => {
     if (!open) return { type: "circuitProject", project: null };
@@ -48,7 +50,7 @@ export function createCircuitPreview(_deliver) {
     return {
       type: "circuitProject",
       project: { path: open.path, name: open.name, top: open.top, circuits: open.circuits, shown: open.shown, parts: d.parts, wires: d.wires,
-        tests: open.shown === "main" ? ["table"] : [], generation: open.generation, dirty: open.dirty,
+        tests: Object.keys(tables[open.shown] ?? {}), tables: Object.entries(tables[open.shown] ?? {}), data: [], generation: open.generation, dirty: open.dirty,
         canUndo: done.length > 0, canRedo: undone.length > 0, made,
         palette: ["in", "out", "clock", "const", "not", "and", "or", "xor", "nand", "nor", "tunnel", ...open.circuits.filter((c) => c !== open?.shown && c !== "main").map((c) => `sub:${c}`)] },
     };
@@ -181,6 +183,16 @@ export function createCircuitPreview(_deliver) {
           return [{ type: "circuitRun", run: null }];
         case "circuitSet": case "circuitClock": case "circuitStep": case "circuitQuick":
           return [notice("the preview shows one running state; running a circuit is the app's")];
+        case "circuitTestSet": {
+          if (!open) return [];
+          const t = (tables[command.circuit] ??= {});
+          if (command.text === null) delete t[command.label];
+          else t[command.label] = command.text.endsWith("\n") ? command.text : `${command.text}\n`;
+          open.dirty = true;
+          return [view()];
+        }
+        case "circuitTestRun": case "circuitTraceToData": case "circuitTraceClear":
+          return [notice("the preview does not run tables or record; the app does")];
         case "circuitEdit":
           return edit(command.ops);
         case "circuitUndo":
