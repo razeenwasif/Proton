@@ -41,31 +41,39 @@ build circuits too. Asked for on 2026-10-28.
 
 ```
 Name.circuit/
-  project.json          which circuit is the top, clock speed, settings
-  circuits/<name>.circ  a circuit: a line per part, a line per wire
-  tests/<name>.tests    test tables for a circuit
-  data/<name>.hex       ROM and RAM contents
+  project.json                   which circuit is the top
+  circuits/<name>.circ           a circuit: a line per part, a line per wire
+  tests/<circuit>.<label>.tests  a test table for a circuit
+  data/<name>.hex                ROM and RAM contents (C4)
 ```
 
-- **A `.circ` line is a part or a wire,** sorted, so moving one part changes
-  one line:
+- **A `.circ` line is a part or a wire,** parts sorted by id (`U2` before
+  `U10`) and then wires sorted, so moving one part changes one line:
 
   ```
-  part U1 and   at 12,4 rot 0  inputs=3 bits=1
-  part A  in    at 2,4         bits=8 label="A"
-  part M  rom   at 20,8        addr=8 data=8 file=data/font.hex
-  part S  sub:alu at 30,2
+  part A in at 2,4 bits=8 label=A
+  part M ram2 at 20,8 addr=8 bits=8 program=true
+  part S sub:alu at 30,2 rot 1
+  part U1 and at 12,4 inputs=3
   wire 10,4 12,4
   wire 12,4 12,9
   ```
 
-  Ids are kept when parts move or are renamed. Wires are segments on the
-  grid; wires meeting at a point join, and crossing wires join only where a
-  dot is drawn.
+  Positions are grid steps; `rot` (quarter turns) and `mirror` are said only
+  when set, and settings are sorted. Ids are kept when parts move or are
+  renamed. Wires are straight segments on the grid and join only where their
+  ends meet, as Digital's do: a branch splits the wire it leaves.
+- **Part kinds** are lower-case words (`in`, `out`, `clock`, `const`, `and`,
+  `nand`, `mux`, `decoder`, `add`, `subtract`, `register`, `dff`, `ram2`,
+  `split`, `tunnel`…), each one of Digital's parts, so a circuit is built
+  through the same reader as a `.dig` file and its pins sit where Digital's
+  do.
 - **`project.json`** is written in the order its types declare, with nothing
-  empty said, as Excel's `workbook.json` is.
+  empty said, as Excel's `workbook.json` is, and last, so a folder read
+  halfway through a save names a top that is whole. A file that would not
+  change is not written.
 - **Other circuits in the folder are parts:** `sub:alu` places `alu.circ`,
-  whose `in` and `out` parts are its pins.
+  whose `in` and `out` parts, in id order, are its pins.
 
 ## The simulator (`proton-circuit`)
 

@@ -269,20 +269,33 @@ pub fn groups(spec: &str) -> Vec<(u8, u8)> {
     out
 }
 
+/// A part that places another circuit: Digital's `alu.dig`, or a
+/// project's own `alu.circ`.
+pub fn is_sub(name: &str) -> bool {
+    name.ends_with(".dig") || name.ends_with(".circ")
+}
+
 /// The files a circuit uses, read once each.
 pub struct Library {
-    dir: PathBuf,
+    dir: Option<PathBuf>,
     circuits: HashMap<String, Circuit>,
 }
 
 impl Library {
     pub fn new(dir: &Path) -> Library {
-        Library { dir: dir.to_path_buf(), circuits: HashMap::new() }
+        Library { dir: Some(dir.to_path_buf()), circuits: HashMap::new() }
+    }
+
+    /// Circuits already in hand, by the names their parts use; nothing is
+    /// read from disk.
+    pub fn of(circuits: HashMap<String, Circuit>) -> Library {
+        Library { dir: None, circuits }
     }
 
     pub fn get(&mut self, name: &str) -> Result<&Circuit, String> {
         if !self.circuits.contains_key(name) {
-            let path = self.dir.join(name);
+            let Some(dir) = &self.dir else { return Err(format!("there is no circuit {}", name.trim_end_matches(".circ"))) };
+            let path = dir.join(name);
             let xml = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             let c = parse(&xml).map_err(|e| format!("{name}: {e}"))?;
             self.circuits.insert(name.to_string(), c);
@@ -402,7 +415,7 @@ fn place(el: &Element, lib: &mut Library) -> Result<Vec<Pin>, String> {
             v
         }
         "Text" | "Testcase" | "Rectangle" => Vec::new(),
-        name if name.ends_with(".dig") => {
+        name if is_sub(name) => {
             let (ins, outs, w) = sub_pins(lib.get(name)?);
             // With one output the box is drawn like a gate: an even count of
             // inputs leaves the middle slot empty and the output sits level
@@ -601,7 +614,11 @@ pub struct Built {
 
 /// The circuit in `file`, in `dir`, built with every subcircuit inlined.
 pub fn build(dir: &Path, file: &str) -> Result<Built, String> {
-    let mut lib = Library::new(dir);
+    build_from(Library::new(dir), file)
+}
+
+/// The circuit `file` of a library, built with every subcircuit inlined.
+pub fn build_from(mut lib: Library, file: &str) -> Result<Built, String> {
     let mut topo_cache: HashMap<String, std::rc::Rc<Topology>> = HashMap::new();
     let mut built = Built::default();
     let top = lib.get(file)?.clone();
@@ -793,7 +810,7 @@ fn instance(
                 let (gi, go) = el.splitting();
                 nl.part(Kind::Splitter { ins: gi, outs: go }, &pname, &ins, &outs);
             }
-            sub if sub.ends_with(".dig") => {
+            sub if is_sub(sub) => {
                 let sc = lib.get(sub)?.clone();
                 let (sins, souts, _) = sub_pins(&sc);
                 let mut b: HashMap<String, NetId> = HashMap::new();

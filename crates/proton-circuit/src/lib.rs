@@ -4,8 +4,11 @@
 //! - [`parts`]: what each part does with its inputs.
 //! - [`sim`]: a netlist of parts and nets, run as Digital runs one.
 //! - [`dig`]: Digital's `.dig` files read into a netlist.
+//! - [`circ`]: Proton's own `Name.circuit/` folders, built through the same
+//!   reader.
 //! - [`testlang`]: test tables in Digital's language, run against one.
 
+pub mod circ;
 pub mod dig;
 pub mod parts;
 pub mod sim;
