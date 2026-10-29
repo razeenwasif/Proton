@@ -1434,7 +1434,11 @@ impl Workspace {
             | Command::CircuitSave
             | Command::CircuitShow { .. }
             | Command::CircuitAdd { .. }
-            | Command::CircuitSetTop { .. }) => {
+            | Command::CircuitSetTop { .. }
+            | Command::CircuitEdit { .. }
+            | Command::CircuitUndo
+            | Command::CircuitRedo
+            | Command::CircuitCopy { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.circuits.apply(&root, command);
                 if events.iter().any(|e| matches!(e, Event::CircuitHome { .. })) {

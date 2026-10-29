@@ -6,10 +6,13 @@
 //! - [`dig`]: Digital's `.dig` files read into a netlist.
 //! - [`circ`]: Proton's own `Name.circuit/` folders, built through the same
 //!   reader.
+//! - [`edit`]: what editing does to a drawing: wires split where they meet,
+//!   fresh ids, copy and paste.
 //! - [`testlang`]: test tables in Digital's language, run against one.
 
 pub mod circ;
 pub mod dig;
+pub mod edit;
 pub mod parts;
 pub mod sim;
 pub mod testlang;

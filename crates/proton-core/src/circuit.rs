@@ -11,11 +11,14 @@
 //! about the last one is never taken for this.
 //!
 //! Edits are held until ⌘S, as Codex's are, and the quit prompt names an
-//! unsaved project.
+//! unsaved project. Each edit — the ops the window sends together, a
+//! circuit added, the top changed — is a step to undo, kept as the project
+//! before and after it: a circuit is small beside what that costs.
 
 use std::path::{Path, PathBuf};
 
-use proton_circuit::circ::{self, Drawing, Project};
+use proton_circuit::circ::{self, Drawing, Part, Project, Wire};
+use proton_circuit::edit;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -65,6 +68,28 @@ pub struct CircuitPartView {
     pub problem: Option<String>,
 }
 
+/// One change to a drawing. The window sends a list of them as one step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum CircuitOp {
+    /// A new part, its id made from its kind.
+    Place { kind: String, x: i32, y: i32, rot: u8, mirror: bool, settings: Vec<(String, String)> },
+    /// Parts and wires moved by (dx, dy).
+    Move { ids: Vec<String>, wires: Vec<[i32; 4]>, dx: i32, dy: i32 },
+    /// Parts turned a quarter, each about its own origin.
+    Rotate { ids: Vec<String> },
+    /// Parts mirrored, or put back.
+    Mirror { ids: Vec<String> },
+    Delete { ids: Vec<String>, wires: Vec<[i32; 4]> },
+    /// A wire through these points, each leg straight.
+    Wire { points: Vec<[i32; 2]> },
+    /// A part's settings, all of them, and a new id if it is renamed.
+    Set { id: String, new_id: Option<String>, settings: Vec<(String, String)> },
+    /// `.circ` text put in, moved by (dx, dy).
+    Paste { text: String, dx: i32, dy: i32 },
+}
+
 /// The project open, and the circuit of it on screen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
@@ -85,7 +110,26 @@ pub struct CircuitProjectView {
     pub tests: Vec<String>,
     pub generation: u32,
     pub dirty: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    /// The parts the last edit made — placed or pasted — for the window to
+    /// select.
+    pub made: Vec<String>,
+    /// What can be placed in the circuit shown: every kind, and each other
+    /// circuit that does not place it, as `sub:<name>`.
+    pub palette: Vec<String>,
 }
+
+/// A step to undo: the project before and after, and the circuit shown.
+#[derive(Debug, Clone)]
+struct Step {
+    before: Project,
+    after: Project,
+    shown: String,
+}
+
+/// No more steps than this are kept to undo.
+const MOST_STEPS: usize = 300;
 
 struct Open {
     path: PathBuf,
@@ -96,6 +140,8 @@ struct Open {
     saved: Project,
     shown: String,
     generation: u32,
+    done: Vec<Step>,
+    undone: Vec<Step>,
 }
 
 impl std::fmt::Debug for Open {
@@ -177,8 +223,10 @@ impl Circuits {
                 if open.project.circuits.contains_key(&name) {
                     return vec![notice(format!("there is a circuit {name} already"), NoticeLevel::Warn)];
                 }
-                open.project.circuits.insert(name.clone(), Drawing::default());
+                let mut after = open.project.clone();
+                after.circuits.insert(name.clone(), Drawing::default());
                 open.shown = name;
+                record(open, after);
                 vec![self.project_event()]
             }
             Command::CircuitSetTop { circuit } => {
@@ -186,11 +234,76 @@ impl Circuits {
                 if !open.project.circuits.contains_key(&circuit) {
                     return vec![notice(format!("there is no circuit {circuit}"), NoticeLevel::Warn)];
                 }
-                open.project.top = circuit;
+                if open.project.top != circuit {
+                    let mut after = open.project.clone();
+                    after.top = circuit;
+                    record(open, after);
+                }
                 vec![self.project_event()]
+            }
+            Command::CircuitEdit { generation, circuit, ops } => {
+                let open = match self.checked(generation, &circuit) {
+                    Ok(open) => open,
+                    Err(events) => return events,
+                };
+                let mut drawing = open.project.circuits[&circuit].clone();
+                let made = match apply_ops(&mut drawing, &circuit, &open.project.circuits, ops) {
+                    Ok(made) => made,
+                    Err(why) => return vec![notice(why, NoticeLevel::Warn), self.project_event()],
+                };
+                if drawing != open.project.circuits[&circuit] {
+                    let mut after = open.project.clone();
+                    after.circuits.insert(circuit.clone(), drawing);
+                    open.shown = circuit;
+                    record(open, after);
+                }
+                vec![self.view_event(made)]
+            }
+            Command::CircuitUndo => self.step(true),
+            Command::CircuitRedo => self.step(false),
+            Command::CircuitCopy { generation, circuit, ids, wires } => {
+                let open = match self.checked(generation, &circuit) {
+                    Ok(open) => open,
+                    Err(events) => return events,
+                };
+                let wires: Vec<Wire> = wires.iter().map(|w| Wire::new((w[0], w[1]), (w[2], w[3]))).collect();
+                vec![Event::CircuitClip { text: edit::copy(&open.project.circuits[&circuit], &ids, &wires) }]
             }
             _ => Vec::new(),
         }
+    }
+
+    /// The project open, if the window's numbers are for it: its
+    /// generation and a circuit it has.
+    fn checked(&mut self, generation: u32, circuit: &str) -> Result<&mut Open, Vec<Event>> {
+        let Some(open) = &mut self.open else {
+            return Err(vec![notice("no circuit project is open".into(), NoticeLevel::Warn)]);
+        };
+        if generation != open.generation {
+            return Err(vec![notice("that project is no longer open".into(), NoticeLevel::Warn)]);
+        }
+        if !open.project.circuits.contains_key(circuit) {
+            return Err(vec![notice(format!("there is no circuit {circuit}"), NoticeLevel::Warn)]);
+        }
+        Ok(open)
+    }
+
+    /// Undo, or redo: the project as the step found or left it.
+    fn step(&mut self, back: bool) -> Vec<Event> {
+        let Some(open) = &mut self.open else { return Vec::new() };
+        let Some(step) = (if back { open.done.pop() } else { open.undone.pop() }) else { return Vec::new() };
+        open.project = if back { step.before.clone() } else { step.after.clone() };
+        if open.project.circuits.contains_key(&step.shown) {
+            open.shown = step.shown.clone();
+        } else if !open.project.circuits.contains_key(&open.shown) {
+            open.shown = open.project.top.clone();
+        }
+        if back {
+            open.undone.push(step);
+        } else {
+            open.done.push(step);
+        }
+        vec![self.project_event()]
     }
 
     fn new_project(&mut self, root: &Path, name: &str) -> Vec<Event> {
@@ -232,6 +345,8 @@ impl Circuits {
             saved: project.clone(),
             project,
             generation: self.generations,
+            done: Vec::new(),
+            undone: Vec::new(),
         });
     }
 
@@ -263,6 +378,10 @@ impl Circuits {
     }
 
     pub fn project_event(&self) -> Event {
+        self.view_event(Vec::new())
+    }
+
+    fn view_event(&self, made: Vec<String>) -> Event {
         let Some(open) = &self.open else { return Event::CircuitProject { project: None } };
         let p = &open.project;
         let drawing = p.circuits.get(&open.shown).cloned().unwrap_or_default();
@@ -301,9 +420,125 @@ impl Circuits {
                 tests: p.tests.get(&open.shown).map(|t| t.keys().cloned().collect()).unwrap_or_default(),
                 generation: open.generation,
                 dirty: open.project != open.saved,
+                can_undo: !open.done.is_empty(),
+                can_redo: !open.undone.is_empty(),
+                made,
+                palette: circ::kinds()
+                    .map(str::to_string)
+                    .chain(p.circuits.keys().map(|n| format!("sub:{n}")).filter(|k| {
+                        let probe = Part { id: "P".into(), kind: k.clone(), x: 0, y: 0, rot: 0, mirror: false, attrs: Default::default() };
+                        edit::check_part(&probe, &open.shown, &p.circuits).is_ok()
+                    }))
+                    .collect(),
             })),
         }
     }
+}
+
+/// A change made a step: the project as it was kept to undo to.
+fn record(open: &mut Open, after: Project) {
+    let before = std::mem::replace(&mut open.project, after.clone());
+    open.done.push(Step { before, after, shown: open.shown.clone() });
+    if open.done.len() > MOST_STEPS {
+        open.done.remove(0);
+    }
+    open.undone.clear();
+}
+
+/// The ops applied to a drawing, all or none: each part they touch is
+/// checked against the project. The ids of the parts made.
+fn apply_ops(d: &mut Drawing, circuit: &str, circuits: &std::collections::BTreeMap<String, Drawing>, ops: Vec<CircuitOp>) -> Result<Vec<String>, String> {
+    let mut made = Vec::new();
+    let mut touched: Vec<String> = Vec::new();
+    let wire = |w: &[i32; 4]| Wire::new((w[0], w[1]), (w[2], w[3]));
+    let find = |d: &mut Drawing, id: &str| -> Result<usize, String> { d.parts.iter().position(|p| p.id == id).ok_or_else(|| format!("there is no part {id}")) };
+    for op in ops {
+        match op {
+            CircuitOp::Place { kind, x, y, rot, mirror, settings } => {
+                let id = edit::fresh_id(d, edit::prefix(&kind));
+                let mut attrs: std::collections::BTreeMap<String, String> = settings.into_iter().filter(|(_, v)| !v.is_empty()).collect();
+                // An input or output is named for tests and for the circuits that place this one.
+                if matches!(kind.as_str(), "in" | "out" | "clock") && !attrs.contains_key("label") {
+                    attrs.insert("label".into(), id.clone());
+                }
+                d.parts.push(Part { id: id.clone(), kind, x, y, rot: rot % 4, mirror, attrs });
+                touched.push(id.clone());
+                made.push(id);
+            }
+            CircuitOp::Move { ids, wires, dx, dy } => {
+                for id in &ids {
+                    let i = find(d, id)?;
+                    d.parts[i].x += dx;
+                    d.parts[i].y += dy;
+                    touched.push(id.clone());
+                }
+                let moving: Vec<Wire> = wires.iter().map(wire).collect();
+                let kept: Vec<Wire> = d.wires.iter().copied().filter(|w| !moving.contains(w)).collect();
+                let moved: Vec<Wire> = d.wires.iter().copied().filter(|w| moving.contains(w)).collect();
+                d.wires = kept;
+                for w in moved {
+                    edit::add_wire(d, (w.a.0 + dx, w.a.1 + dy), (w.b.0 + dx, w.b.1 + dy));
+                }
+            }
+            CircuitOp::Rotate { ids } => {
+                for id in ids {
+                    let i = find(d, &id)?;
+                    edit::rotate(&mut d.parts[i]);
+                }
+            }
+            CircuitOp::Mirror { ids } => {
+                for id in ids {
+                    let i = find(d, &id)?;
+                    d.parts[i].mirror = !d.parts[i].mirror;
+                }
+            }
+            CircuitOp::Delete { ids, wires } => {
+                d.parts.retain(|p| !ids.contains(&p.id));
+                let gone: Vec<Wire> = wires.iter().map(wire).collect();
+                d.wires.retain(|w| !gone.contains(w));
+            }
+            CircuitOp::Wire { points } => {
+                if points.len() < 2 {
+                    return Err("a wire runs between two points at least".into());
+                }
+                for leg in points.windows(2) {
+                    let (a, b) = ((leg[0][0], leg[0][1]), (leg[1][0], leg[1][1]));
+                    if a != b && a.0 != b.0 && a.1 != b.1 {
+                        return Err("a wire runs straight across or down".into());
+                    }
+                    edit::add_wire(d, a, b);
+                }
+            }
+            CircuitOp::Set { id, new_id, settings } => {
+                let i = find(d, &id)?;
+                let new_id = new_id.map(|n| n.trim().to_string()).filter(|n| !n.is_empty() && *n != id);
+                if let Some(n) = &new_id {
+                    if d.parts.iter().any(|p| p.id == *n) {
+                        return Err(format!("there is a part {n} already"));
+                    }
+                }
+                let p = &mut d.parts[i];
+                p.attrs = settings.into_iter().map(|(k, v)| (k.trim().to_string(), v)).filter(|(k, v)| !k.is_empty() && !v.is_empty()).collect();
+                if let Some(n) = new_id {
+                    p.id = n;
+                }
+                touched.push(p.id.clone());
+            }
+            CircuitOp::Paste { text, dx, dy } => {
+                let ids = edit::paste(d, &text, dx, dy)?;
+                touched.extend(ids.iter().cloned());
+                made.extend(ids);
+            }
+        }
+    }
+    for id in &touched {
+        if let Some(p) = d.parts.iter().find(|p| p.id == *id) {
+            edit::check_part(p, circuit, circuits)?;
+        }
+    }
+    // Held as it is written, so a step back compares equal to what was saved.
+    *d = circ::parse(&circ::write(d)).map_err(|e| format!("the circuit would not read back: {e}"))?;
+    Ok(made)
 }
 
 /// A `.circuit` folder named relative to the project, refused if it is not
@@ -436,6 +671,90 @@ mod tests {
         assert!(!v.dirty);
         assert!(root.join("full-adder.circuit/circuits/half.circ").exists());
         assert!(c.unsaved().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn edits_are_steps_that_undo_back_to_saved_and_copy_and_paste() {
+        let root = scratch("edits");
+        let mut c = Circuits::default();
+        let v = view(&c.apply(&root, Command::CircuitNew { name: "lab".into() })).unwrap();
+        let (g, main) = (v.generation, "main".to_string());
+        let ed = |c: &mut Circuits, ops: Vec<CircuitOp>| view(&c.apply(&root, Command::CircuitEdit { generation: g, circuit: "main".into(), ops })).unwrap();
+        let place = |kind: &str, x: i32, y: i32| CircuitOp::Place { kind: kind.into(), x, y, rot: 0, mirror: false, settings: vec![] };
+
+        // Two inputs and an AND, placed as one step: ids from their kinds, inputs labelled.
+        let v = ed(&mut c, vec![place("in", 0, 0), place("in", 0, 2), place("and", 3, 0)]);
+        assert_eq!(v.made, vec!["In1", "In2", "U1"]);
+        assert_eq!(v.parts.iter().find(|p| p.id == "In1").unwrap().settings, vec![("label".to_string(), "In1".to_string())]);
+        assert!(v.dirty && v.can_undo && !v.can_redo);
+        // Wired, with a leg that bends.
+        let v = ed(&mut c, vec![CircuitOp::Wire { points: vec![[0, 0], [3, 0]] }, CircuitOp::Wire { points: vec![[0, 2], [1, 2], [1, 2], [3, 2]] }]);
+        assert_eq!(v.wires, vec![[0, 0, 3, 0], [0, 2, 1, 2], [1, 2, 3, 2]]);
+        // Moved, turned, renamed and its settings set.
+        let v = ed(&mut c, vec![
+            CircuitOp::Move { ids: vec!["U1".into()], wires: vec![], dx: 1, dy: 0 },
+            CircuitOp::Rotate { ids: vec!["U1".into()] },
+            CircuitOp::Set { id: "U1".into(), new_id: Some("Gate".into()), settings: vec![("inputs".into(), "3".into()), ("bits".into(), "".into())] },
+        ]);
+        let gate = v.parts.iter().find(|p| p.id == "Gate").unwrap();
+        assert_eq!((gate.x, gate.rot, gate.settings.clone()), (4, 1, vec![("inputs".to_string(), "3".to_string())]));
+        assert_eq!(gate.pins.len(), 4, "three inputs and the output, placed by the core");
+
+        // An edit that cannot be is refused whole.
+        let events = c.apply(&root, Command::CircuitEdit { generation: g, circuit: main.clone(), ops: vec![place("and", 9, 9), place("frob", 0, 0)] });
+        assert!(events.iter().any(|e| matches!(e, Event::Notice { .. })));
+        assert_eq!(view(&events).unwrap().parts.len(), 3, "nothing of a refused edit is kept");
+        let stale = c.apply(&root, Command::CircuitEdit { generation: g + 1, circuit: main.clone(), ops: vec![place("and", 9, 9)] });
+        assert!(stale.iter().any(|e| matches!(e, Event::Notice { .. })) && view(&stale).is_none());
+
+        // Copy and paste: a fresh id where the old is taken.
+        let clip = c.apply(&root, Command::CircuitCopy { generation: g, circuit: main.clone(), ids: vec!["Gate".into(), "In1".into()], wires: vec![[0, 0, 3, 0]] });
+        let text = match &clip[0] {
+            Event::CircuitClip { text } => text.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(text, "part Gate and at 4,0 rot 1 inputs=3\npart In1 in at 0,0 label=In1\nwire 0,0 3,0\n");
+        let v = ed(&mut c, vec![CircuitOp::Paste { text, dx: 0, dy: 10 }]);
+        assert_eq!(v.made, vec!["U1", "In3"]);
+        assert!(v.wires.contains(&[0, 10, 3, 10]));
+        let v = ed(&mut c, vec![CircuitOp::Delete { ids: vec!["In3".into(), "U1".into()], wires: vec![[0, 10, 3, 10]] }]);
+        assert_eq!(v.parts.len(), 3);
+
+        // Saved, then undone and redone: back at saved is clean again.
+        c.apply(&root, Command::CircuitSave);
+        let v = view(&c.apply(&root, Command::CircuitUndo)).unwrap();
+        assert!(v.dirty && v.can_redo && v.parts.len() == 5);
+        let v = view(&c.apply(&root, Command::CircuitRedo)).unwrap();
+        assert!(!v.dirty, "redone back to what was saved");
+        for _ in 0..10 {
+            c.apply(&root, Command::CircuitUndo);
+        }
+        let v = view(&c.events(&root)).unwrap();
+        assert!(v.parts.is_empty() && !v.can_undo);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_circuit_drawn_by_edits_runs_its_table() {
+        let root = scratch("runs");
+        let mut c = Circuits::default();
+        let g = view(&c.apply(&root, Command::CircuitNew { name: "inv".into() })).unwrap().generation;
+        let place = |kind: &str, x: i32, y: i32| CircuitOp::Place { kind: kind.into(), x, y, rot: 0, mirror: false, settings: vec![] };
+        // An input, a NOT and an output, wired by dragging from pin to pin.
+        c.apply(&root, Command::CircuitEdit { generation: g, circuit: "main".into(), ops: vec![place("in", 0, 0), place("not", 3, 0), place("out", 8, 0)] });
+        let v = view(&c.apply(&root, Command::CircuitEdit {
+            generation: g,
+            circuit: "main".into(),
+            ops: vec![CircuitOp::Wire { points: vec![[0, 0], [3, 0]] }, CircuitOp::Wire { points: vec![[5, 0], [8, 0]] }],
+        }))
+        .unwrap();
+        assert_eq!(v.wires.len(), 2);
+        let open = c.open.as_ref().unwrap();
+        let mut project = open.project.clone();
+        project.tests.entry("main".into()).or_default().insert("t".into(), "In1 Out1\n0 1\n1 0\n".into());
+        let outcomes = proton_circuit::testlang::run_all(&project.build("main").unwrap());
+        assert!(outcomes[0].passed(), "{:?} {:?}", outcomes[0].failures, outcomes[0].error);
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -671,6 +671,21 @@ pub enum Command {
     CircuitSetTop {
         circuit: String,
     },
+    /// Changes to a circuit's drawing, made together as one step to undo.
+    CircuitEdit {
+        generation: u32,
+        circuit: String,
+        ops: Vec<crate::circuit::CircuitOp>,
+    },
+    CircuitUndo,
+    CircuitRedo,
+    /// The parts and wires named, as `.circ` text for the clipboard.
+    CircuitCopy {
+        generation: u32,
+        circuit: String,
+        ids: Vec<String>,
+        wires: Vec<[i32; 4]>,
+    },
     /* ── notebook ─────────────────────────────────────────────────── */
     /// Keep notebooks in this folder — typed as a path is, `~` and all.
     /// Saved in the person's own settings.
@@ -1515,6 +1530,10 @@ pub enum Event {
     /// its pins placed, and whether it is saved — or none.
     CircuitProject {
         project: Option<Box<crate::circuit::CircuitProjectView>>,
+    },
+    /// What was copied, for the system clipboard.
+    CircuitClip {
+        text: String,
     },
     /// The project's workbooks, for Excel mode's home page.
     SheetHome {
