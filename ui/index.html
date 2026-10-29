@@ -914,6 +914,20 @@
             <i class="xl-dirty" data-circuit-dirty title="Unsaved — ⌘S" hidden></i>
             <span class="ci-shown" data-circuit-shown></span>
             <span class="grow"></span>
+            <!-- Running (C3): run and stop, a clock edge, a gate delay, the
+                 clock left running, a quick run, and what it says. -->
+            <span class="ci-status" data-circuit-status></span>
+            <button class="tb-btn" data-circuit-run title="Run  ⌘R" aria-label="Run"><svg class="i"><use href="#i-play"/></svg></button>
+            <span class="ci-running" data-circuit-running hidden>
+              <button class="tb-btn" data-circuit-clock title="A clock edge  s" aria-label="Clock edge"><svg class="i"><use href="#i-step"/></svg></button>
+              <label class="ci-hold" title="Clicks and clock edges wait, and . takes them a gate delay at a time"><input type="checkbox" data-circuit-hold> gate by gate</label>
+              <button class="tb-btn" data-circuit-gate title="One gate delay  ." aria-label="Gate step"><svg class="i"><use href="#i-arrow-up"/></svg></button>
+              <select class="ci-hz" data-circuit-hz title="How fast the clock runs when left running" aria-label="Clock speed">
+                <option value="1">1 Hz</option><option value="2" selected>2 Hz</option><option value="5">5 Hz</option><option value="10">10 Hz</option><option value="30">30 Hz</option>
+              </select>
+              <button class="tb-btn" data-circuit-live title="Leave the clock running  c" aria-label="Run the clock"><svg class="i"><use href="#i-clock"/></svg></button>
+              <button class="tb-btn" data-circuit-quick title="Quick run: the clock as fast as it goes until a Break rises  ⎋ stops" aria-label="Quick run"><svg class="i"><use href="#i-bolt"/></svg></button>
+            </span>
             <button class="tb-btn" data-circuit-fit title="Fit the circuit to the window  =" aria-label="Fit"><svg class="i"><use href="#i-expand"/></svg></button>
             <button class="tb-btn" data-circuit-save title="Save  ⌘S" aria-label="Save"><svg class="i"><use href="#i-check"/></svg></button>
             <button class="tb-btn" data-circuit-close title="Close the project" aria-label="Close the project"><svg class="i"><use href="#i-close"/></svg></button>

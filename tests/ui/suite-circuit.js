@@ -174,6 +174,80 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
     assert(edits(before)[0]?.[0].ids.join() === HALF.parts[0].id, 'what was made is not what is selected');
   });
 
+  await test('Running: ⌘R, wires coloured by value, inputs clicked, a clock edge, gate steps, the clock left running, a quick run', async () => {
+    await win.pushEvents([project(), {type: 'circuitRun', run: null}]); await settle(); await frames();
+    const stage = ws().querySelector('[data-circuit-stage]');
+    stage.focus();
+    let before = win.commands.length;
+    key('r', {metaKey: true}); await settle();
+    assert(sent(before, 'circuitStart')[0]?.generation === 4, '⌘R did not start it');
+    const bit = (/** @type {string} */ hex) => ({bits: 1, hex, z: false, someZ: false});
+    // Every wire high but the last, low; A high, B low.
+    const wires = HALF.wires.map((/** @type {any} */ _w, /** @type {number} */ i) => bit(i === HALF.wires.length - 1 ? '0' : '1'));
+    const running = (/** @type {Partial<any>} */ more = {}) => ({type: 'circuitRun', run: {generation: 4, circuit: 'half', wires,
+      values: [['A', bit('1')], ['B', bit('0')], ['C', bit('0')], ['S', bit('1')]], waiting: 0, stepped: [], error: null, quick: null, ...more}});
+    await win.pushEvents([running()]); await settle(); await frames();
+    assert(shown(ws().querySelector('[data-circuit-running]')), 'the run\'s controls are not shown');
+    assert(ws().querySelector('[data-circuit-status]').textContent === 'running', 'it does not say it is running');
+    // A high wire is drawn green: its middle's pixel has more green than red.
+    const c = /** @type {HTMLCanvasElement} */ (ws().querySelector('[data-circuit-canvas]'));
+    const dpr = win.devicePixelRatio || 1;
+    const w0 = HALF.wires[0], v = win.circuitDebug().view;
+    const px = Math.round((v.ox + ((w0[0] + w0[2]) / 2) * v.scale) * dpr), py = Math.round((v.oy + ((w0[1] + w0[3]) / 2) * v.scale) * dpr);
+    const [red, green] = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d')).getImageData(px, py, 1, 1).data;
+    assert(green > red + 40, `a high wire is not green: rgb ${red}, ${green}`);
+
+    // A click on an input flips it.
+    const a = HALF.parts.find((/** @type {any} */ p) => p.id === 'A');
+    const r = stage.getBoundingClientRect();
+    const at = {clientX: r.left + v.ox + (a.x - 0.7) * v.scale, clientY: r.top + v.oy + a.y * v.scale, bubbles: true, pointerId: 1, button: 0};
+    before = win.commands.length;
+    stage.dispatchEvent(new win.PointerEvent('pointerdown', at));
+    stage.dispatchEvent(new win.PointerEvent('pointerup', at)); await settle();
+    const set = sent(before, 'circuitSet')[0];
+    assert(set?.id === 'A' && set.value === '0' && set.hold === false, `clicking A sent ${JSON.stringify(set)}`);
+    assert(!sent(before, 'circuitEdit').length, 'clicking an input moved it');
+    // s is a clock edge; gate by gate holds it, and . takes a gate delay.
+    before = win.commands.length;
+    key('s'); await settle();
+    const hold = ws().querySelector('[data-circuit-hold]');
+    hold.click(); stage.focus();
+    key('s'); key('.'); await settle();
+    const edges = sent(before, 'circuitClock');
+    assert(edges.length === 2 && edges[0].hold === false && edges[1].hold === true, `clock edges ${JSON.stringify(edges)}`);
+    assert(sent(before, 'circuitStep').length === 1, '. did not step a gate');
+    await win.pushEvents([running({waiting: 3})]); await settle();
+    assert(ws().querySelector('[data-circuit-status]').textContent.includes('3 waiting'), 'what waits is not said');
+    hold.click(); stage.focus();
+    // c leaves the clock running, an edge each half period; Escape stops it.
+    before = win.commands.length;
+    key('c'); await new Promise((done) => setTimeout(done, 700));
+    assert(win.circuitDebug().live && sent(before, 'circuitClock').length >= 2, `the clock left running sent ${sent(before, 'circuitClock').length} edges`);
+    key('Escape'); await settle();
+    const after = sent(before, 'circuitClock').length;
+    await new Promise((done) => setTimeout(done, 400));
+    assert(!win.circuitDebug().live && sent(before, 'circuitClock').length === after, 'Escape did not stop the clock');
+    // A quick run: asked for, its progress said, ⎋ stops it.
+    before = win.commands.length;
+    ws().querySelector('[data-circuit-quick]').click(); await settle();
+    assert(sent(before, 'circuitQuick').length === 1, 'the quick run was not asked for');
+    await win.pushEvents([running({wires: [], values: [], quick: {running: true, cycles: 120000, hz: 2400000, ended: null}})]); await settle();
+    assert(ws().querySelector('[data-circuit-status]').textContent.includes('2.40 MHz'), 'the quick run\'s speed is not said');
+    stage.focus();
+    key('Escape'); await settle();
+    assert(sent(before, 'circuitStop').length === 1, '⎋ did not stop the quick run');
+    await win.pushEvents([running({quick: {running: false, cycles: 120001, hz: 2400000, ended: 'a Break rose'}})]); await settle();
+    assert(ws().querySelector('[data-circuit-status]').textContent.includes('a Break rose'), 'why it ended is not said');
+    // An error is said, and marked.
+    await win.pushEvents([running({error: 'the net n3 is driven two ways at once'})]); await settle();
+    assert(ws().querySelector('[data-circuit-status]').classList.contains('bad'), 'an error is not marked');
+    before = win.commands.length;
+    key('r', {metaKey: true}); await settle();
+    assert(sent(before, 'circuitStop').length === 1, '⌘R did not stop it');
+    await win.pushEvents([{type: 'circuitRun', run: null}]); await settle();
+    assert(!shown(ws().querySelector('[data-circuit-running]')), 'the run\'s controls stayed');
+  });
+
   await test('Clicks and keys: another circuit, a new one, the top, zoom and fit, ⌘S and close', async () => {
     const before = win.commands.length;
     ws().querySelector('[data-circuit-show="main"]').click(); await settle();

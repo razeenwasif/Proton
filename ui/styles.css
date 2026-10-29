@@ -4714,6 +4714,16 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .ci-pop-row input { flex: 1 1 auto; min-width: 0; }
 .ci-pop-hint { margin: 0; color: var(--muted); font: var(--z-2xs)/1.4 var(--zed); }
 .ci-add { padding: 2px 12px; }
+/* Running: a wire's colour is its value. Greens for 1 and 0, blue for
+   high-Z, a lighter green for a bus, which also says its value in hex. */
+.workspace.ci { --ci-high: #4ade80; --ci-low: color-mix(in srgb, #22c55e 45%, var(--bg)); --ci-z: #60a5fa; --ci-bus: #bef264; }
+.ci-status { color: var(--muted); font: var(--z-xs)/1 var(--zed); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
+.ci-status.bad { color: var(--danger, #e55); }
+.ci-running { display: flex; align-items: center; gap: 8px; }
+.ci-running[hidden] { display: none; }
+.ci-hold { display: flex; align-items: center; gap: 4px; color: var(--muted); font: var(--z-2xs)/1 var(--zed); white-space: nowrap; cursor: pointer; }
+.ci-hz { height: 24px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--xl-head); color: var(--text); font: var(--z-2xs)/1 var(--zed); }
+[data-circuit-live].on, [data-circuit-run] .i { color: var(--accent); }
 .ci-add input {
   width: 100%; height: calc(var(--z-row) - 6px); padding: 0 8px; border: 1px solid var(--xl-line); border-radius: 5px;
   background: var(--xl-head); color: var(--text); font: var(--z-ui)/1 var(--zed);

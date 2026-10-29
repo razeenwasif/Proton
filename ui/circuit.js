@@ -17,13 +17,30 @@
  * are the simulator's. Here are only the gestures: a cursor on the grid
  * moved by h j k l, a selection, and drags — from a pin or a wire's end to
  * draw a wire, from a part to move what is selected, from nothing to select
- * a box of it. ⌥-drag pans. */
+ * a box of it. ⌥-drag pans.
+ *
+ * Running is the core's too: ⌘R starts it, and it sends every wire's value
+ * after each change, which colours the wires — high, low, high-Z — and
+ * labels buses in hex. A click on an input flips it (a wider one asks for a
+ * number), a button is held while pressed, `s` is a clock edge and `.` a
+ * gate delay; the clock can be left running at a few hertz, sent from here
+ * an edge at a time, or quick-run by the core as fast as it goes. */
 
 import { escapeHtml as esc, icon } from "./html.js";
 
 /** @typedef {import("./bindings/CircuitProjectView").CircuitProjectView} ProjectView */
 /** @typedef {import("./bindings/CircuitPartView").CircuitPartView} PartView */
 /** @typedef {import("./bindings/CircuitFound").CircuitFound} Found */
+/** @typedef {import("./bindings/CircuitRunView").CircuitRunView} RunView */
+/** @typedef {import("./bindings/CircuitValue").CircuitValue} Value */
+
+/** A value as a part shows it: a bit as 0 or 1, a bus in hex, Z as Z.
+ *  @param {Value | undefined} v */
+export function shownValue(v) {
+  if (!v) return "";
+  if (v.z) return "Z";
+  return v.bits === 1 ? v.hex : `${v.hex.toUpperCase()}`;
+}
 
 /** Zoom, in pixels a grid step. */
 const MIN_SCALE = 3;
@@ -181,7 +198,28 @@ export function createCircuit(host) {
     wiring: null,
     /** The kind `space` places. */
     last: "and",
+    /** The circuit running, as the core last said. @type {RunView | null} */
+    run: null,
+    /** The clock left running: the timer sending its edges. @type {ReturnType<typeof setInterval> | null} */
+    live: null,
+    /** A click on an input waiting to see whether it is a click or a drag. @type {{id: string, x: number, y: number} | null} */
+    press: null,
   };
+  const runEls = {
+    status: q("[data-circuit-status]"),
+    run: q("[data-circuit-run]"),
+    running: q("[data-circuit-running]"),
+    hold: /** @type {HTMLInputElement} */ (q("[data-circuit-hold]")),
+    hz: /** @type {HTMLSelectElement} */ (q("[data-circuit-hz]")),
+    live: q("[data-circuit-live]"),
+  };
+  /** The run, if it is of the circuit on screen. */
+  const runOf = () => {
+    const r = state.run, p = state.project;
+    return r && p && r.generation === p.generation && r.circuit === p.shown ? r : null;
+  };
+  /** A part's value while running. @param {string} id */
+  const valueOf = (id) => runOf()?.values.find(([k]) => k === id)?.[1];
 
   const wireKey = (/** @type {number[]} */ w) => w.join(",");
   /** Changes to the circuit shown, sent as one step. @param {any[]} ops */
@@ -272,6 +310,7 @@ export function createCircuit(host) {
     els.shown.textContent = p.shown === p.top ? `${p.shown}` : `${p.shown}  ·  top is ${p.top}`;
     q("[data-circuit-dirty]").hidden = !p.dirty;
     els.empty.hidden = p.parts.length > 0 || p.wires.length > 0;
+    renderRun();
     // What was selected and is still there stays so; what an edit made is
     // selected instead.
     const ids = new Set(p.parts.map((part) => part.id));
@@ -285,6 +324,75 @@ export function createCircuit(host) {
     }
     if (`${p.generation}/${p.shown}` !== state.fitted) requestAnimationFrame(fit);
     else redraw();
+  }
+
+  /* ── running ───────────────────────────────────────────────────────── */
+
+  function renderRun() {
+    const r = state.run, p = state.project;
+    const on = !!r && !!p && r.generation === p.generation;
+    runEls.run.innerHTML = icon(on ? "stop" : "play");
+    runEls.run.title = on ? "Stop  ⌘R" : "Run  ⌘R";
+    runEls.run.setAttribute("aria-label", on ? "Stop" : "Run");
+    runEls.running.hidden = !on;
+    runEls.live.classList.toggle("on", !!state.live);
+    let status = "";
+    if (on && r) {
+      const q = r.quick;
+      if (r.error) status = r.error;
+      else if (q?.running) status = `quick run · ${q.cycles.toLocaleString()} cycles · ${hertz(q.hz)}`;
+      else if (q) status = `${q.cycles.toLocaleString()} cycles at ${hertz(q.hz)} — ${q.ended ?? "ended"}`;
+      else if (r.waiting) status = `${r.waiting} waiting — . steps`;
+      else status = "running";
+    }
+    runEls.status.textContent = status;
+    runEls.status.classList.toggle("bad", !!r?.error);
+    if (!on && state.live) setLive(false);
+  }
+
+  /** @param {number} hz */
+  const hertz = (hz) => (hz >= 1e6 ? `${(hz / 1e6).toFixed(2)} MHz` : hz >= 1e3 ? `${(hz / 1e3).toFixed(1)} kHz` : `${hz.toFixed(0)} Hz`);
+
+  /** Commands about the run, for the project open. @param {string} type @param {Record<string, unknown>} more */
+  function runCommand(type, more = {}) {
+    const p = state.project;
+    if (p) host.dispatch({ type, generation: p.generation, ...more });
+  }
+  const running = () => !!runOf() && !runOf()?.quick?.running && !runOf()?.error;
+  function toggleRun() {
+    if (state.run && state.run.generation === state.project?.generation) {
+      setLive(false);
+      host.dispatch({ type: "circuitStop" });
+    } else {
+      runCommand("circuitStart");
+    }
+  }
+  const clockEdge = () => runCommand("circuitClock", { hold: runEls.hold.checked });
+  /** The clock left running, an edge each half period, or stopped. @param {boolean} on */
+  function setLive(on) {
+    if (state.live) clearInterval(state.live);
+    state.live = null;
+    if (on && running()) {
+      const hz = Number(runEls.hz.value) || 2;
+      state.live = setInterval(() => (running() ? clockEdge() : setLive(false)), 500 / hz);
+    }
+    runEls.live.classList.toggle("on", !!state.live);
+  }
+
+  /** An input clicked while running: a bit flips, a wider one is asked for.
+   *  @param {PartView} part */
+  function setInput(part) {
+    const v = valueOf(part.id);
+    const bits = v?.bits ?? 1;
+    if (bits === 1) {
+      runCommand("circuitSet", { id: part.id, value: v && !v.z && v.hex === "1" ? "0" : "1", hold: runEls.hold.checked });
+      return;
+    }
+    popup(`<label class="ci-pop-row"><span>${esc(part.id)} · ${bits} bits</span><input name="value" value="0x${esc(v?.hex ?? "0")}" aria-label="Value" spellcheck="false"></label>`,
+      [part.x, part.y], (form) => {
+        const value = /** @type {HTMLInputElement} */ (form.elements.namedItem("value")).value.trim();
+        if (value) runCommand("circuitSet", { id: part.id, value, hold: runEls.hold.checked });
+      });
   }
 
   /** The circuit fitted to the stage, no closer than a comfortable zoom. */
@@ -318,7 +426,8 @@ export function createCircuit(host) {
   function colours() {
     const css = getComputedStyle(ws);
     const get = (/** @type {string} */ n, /** @type {string} */ d) => css.getPropertyValue(n).trim() || d;
-    return { text: get("--text", "#ddd"), muted: get("--muted", "#888"), accent: get("--accent", "#6af"), bg: get("--bg", "#111"), danger: get("--danger", "#e55"), line: get("--xl-line", "#333") };
+    return { text: get("--text", "#ddd"), muted: get("--muted", "#888"), accent: get("--accent", "#6af"), bg: get("--bg", "#111"), danger: get("--danger", "#e55"), line: get("--xl-line", "#333"),
+      high: get("--ci-high", "#4ade80"), low: get("--ci-low", "#166534"), z: get("--ci-z", "#60a5fa"), bus: get("--ci-bus", "#a3e635") };
   }
 
   function draw() {
@@ -360,17 +469,42 @@ export function createCircuit(host) {
     g.lineWidth = Math.max(1.5 / s, 0.09);
     /** @type {Map<string, number>} */
     const ends = new Map();
-    for (const on of [false, true]) {
-      g.strokeStyle = on ? col.accent : col.muted;
+    const run = runOf();
+    /** A wire's colour: selected, then its value when running. @param {number} i */
+    const wireColour = (i) => {
+      if (state.wires.has(wireKey(p.wires[i]))) return col.accent;
+      const v = run?.wires[i];
+      if (!v) return col.muted;
+      if (v.z) return col.z;
+      if (v.bits > 1) return col.bus;
+      return v.hex === "1" ? col.high : col.low;
+    };
+    const byColour = /** @type {Map<string, number[]>} */ (new Map());
+    p.wires.forEach((w, i) => {
+      const c = wireColour(i);
+      byColour.set(c, [...(byColour.get(c) ?? []), i]);
+      if (!state.wires.has(wireKey(w)) || !d?.moved) for (const k of [`${w[0]},${w[1]}`, `${w[2]},${w[3]}`]) ends.set(k, (ends.get(k) ?? 0) + 1);
+    });
+    for (const [colour, list] of byColour) {
+      g.strokeStyle = colour;
+      g.lineWidth = Math.max(1.5 / s, 0.09) * (run && colour !== col.muted ? 1.6 : 1);
       g.beginPath();
-      for (const w of p.wires) {
-        if (state.wires.has(wireKey(w)) !== on) continue;
-        const [dx, dy] = on ? shift : [0, 0];
+      for (const i of list) {
+        const w = p.wires[i];
+        const [dx, dy] = state.wires.has(wireKey(w)) ? shift : [0, 0];
         g.moveTo(w[0] + dx, w[1] + dy);
         g.lineTo(w[2] + dx, w[3] + dy);
-        if (!on || !d?.moved) for (const k of [`${w[0]},${w[1]}`, `${w[2]},${w[3]}`]) ends.set(k, (ends.get(k) ?? 0) + 1);
       }
       g.stroke();
+    }
+    g.lineWidth = Math.max(1.5 / s, 0.09);
+    // A bus says its value, at the middle of each wire long enough to hold it.
+    if (run) {
+      p.wires.forEach((w, i) => {
+        const v = run.wires[i];
+        if (!v || v.bits === 1 || Math.abs(w[2] - w[0]) + Math.abs(w[3] - w[1]) < 2) return;
+        text(g, shownValue(v), (w[0] + w[2]) / 2, (w[1] + w[3]) / 2 - 0.4, v.z ? col.z : col.bus, 0.5, "center");
+      });
     }
     for (const part of p.parts) for (const pin of part.pins) {
       const k = `${pin.x},${pin.y}`;
@@ -394,6 +528,31 @@ export function createCircuit(host) {
         g.restore();
       } else {
         drawPart(g, part, col, s, on);
+      }
+    }
+
+    // While running: inputs and displays show their values; a high LED lights.
+    if (run) {
+      for (const part of p.parts) {
+        const v = valueOf(part.id);
+        if (!v) continue;
+        const b = body(part);
+        const [x, y] = world(part, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+        const high = v.bits === 1 && v.hex === "1" && !v.z;
+        if (part.kind === "led") {
+          g.fillStyle = high ? col.high : col.bg;
+          g.beginPath();
+          g.arc(x, y, 0.42, 0, Math.PI * 2);
+          g.fill();
+        } else {
+          if (high) {
+            g.fillStyle = col.high;
+            g.globalAlpha = 0.3;
+            g.fillRect(x - 0.5, y - 0.45, 1, 0.9);
+            g.globalAlpha = 1;
+          }
+          text(g, shownValue(v), x, y, v.z ? col.z : col.text, 0.6, "center");
+        }
       }
     }
 
@@ -644,6 +803,18 @@ export function createCircuit(host) {
       return;
     }
     const part = partAt(at.x, at.y);
+    // Running: an input under the pointer is to be clicked — a button at
+    // once, held while pressed; the others when the press ends without a drag.
+    state.press = null;
+    if (part && running() && !e.shiftKey && ["in", "clock", "button"].includes(part.kind)) {
+      if (part.kind === "button") {
+        runCommand("circuitSet", { id: part.id, value: "1", hold: runEls.hold.checked });
+        state.press = { id: part.id, x: e.clientX, y: e.clientY };
+        state.drag = null;
+        return;
+      }
+      state.press = { id: part.id, x: e.clientX, y: e.clientY };
+    }
     const wire = part ? null : wireAt(at.x, at.y);
     if (part || wire) {
       const key = part ? part.id : wireKey(/** @type {number[]} */ (wire));
@@ -680,6 +851,18 @@ export function createCircuit(host) {
   els.stage.addEventListener("pointerup", () => {
     const d = state.drag;
     state.drag = null;
+    const press = state.press;
+    state.press = null;
+    const pressed = press && state.project?.parts.find((q) => q.id === press.id);
+    if (pressed?.kind === "button") {
+      runCommand("circuitSet", { id: pressed.id, value: "0", hold: runEls.hold.checked });
+      return;
+    }
+    if (pressed && !d?.moved) {
+      setInput(pressed);
+      redraw();
+      return;
+    }
     if (!d) return;
     if (d.kind === "move" && d.moved) {
       const dx = d.to[0] - d.from[0], dy = d.to[1] - d.from[1];
@@ -826,11 +1009,17 @@ export function createCircuit(host) {
       host.dispatch({ type: "circuitSave" });
       return;
     }
+    if (p && e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "r") {
+      e.preventDefault();
+      toggleRun();
+      return;
+    }
     if (e.target !== els.stage || !p) return;
     const r = els.stage.getBoundingClientRect();
     const k = e.key;
     /** @type {Record<string, () => void>} */
     const chords = {
+      r: toggleRun,
       z: () => host.dispatch({ type: e.shiftKey ? "circuitRedo" : "circuitUndo" }),
       c: copy,
       x: () => { copy(); remove(); },
@@ -893,7 +1082,13 @@ export function createCircuit(host) {
       y: copy,
       p: () => void paste(),
       u: () => host.dispatch({ type: "circuitUndo" }),
+      s: () => { if (running()) clockEdge(); },
+      ".": () => { if (running()) runCommand("circuitStep"); },
+      c: () => setLive(!state.live),
       Escape: () => {
+        // A quick run, or the clock left running, stops first.
+        if (runOf()?.quick?.running) return void host.dispatch({ type: "circuitStop" });
+        if (state.live) return void setLive(false);
         state.wiring = null;
         state.parts.clear();
         state.wires.clear();
@@ -943,6 +1138,14 @@ export function createCircuit(host) {
     if (t.closest("[data-circuit-new]")) return void newProject();
     if (t.closest("[data-circuit-save]")) return void host.dispatch({ type: "circuitSave" });
     if (t.closest("[data-circuit-fit]")) return void fit();
+    if (t.closest("[data-circuit-run]")) return void toggleRun();
+    if (t.closest("[data-circuit-clock]")) return void clockEdge();
+    if (t.closest("[data-circuit-gate]")) return void runCommand("circuitStep");
+    if (t.closest("[data-circuit-live]")) return void setLive(!state.live);
+    if (t.closest("[data-circuit-quick]")) {
+      setLive(false);
+      return void runCommand(runOf()?.quick?.running ? "circuitStop" : "circuitQuick");
+    }
     if (t.closest("[data-circuit-close]")) {
       const p = state.project;
       if (p?.dirty && !window.confirm(`${p.name} has unsaved changes. Close it and lose them?`)) return;
@@ -991,7 +1194,15 @@ export function createCircuit(host) {
     form.reset();
   });
 
+  runEls.hz.addEventListener("change", () => { if (state.live) setLive(true); });
+
   return {
+    /** @param {{run: RunView | null}} event */
+    run(event) {
+      state.run = event.run;
+      renderRun();
+      redraw();
+    },
     /** @param {{projects: Found[]}} event */
     home(event) {
       state.projects = event.projects;
@@ -1000,7 +1211,10 @@ export function createCircuit(host) {
     /** @param {{project: ProjectView | null}} event */
     project(event) {
       state.project = event.project;
-      if (!event.project) state.fitted = "";
+      if (!event.project) {
+        state.fitted = "";
+        state.run = null;
+      }
       renderProject();
     },
     /** The mode is on screen: the drawing takes the keys. */
@@ -1016,7 +1230,7 @@ export function createCircuit(host) {
     },
     /** For the tests: the view, and the parts as drawn. */
     debug() {
-      return { view: { ...state.view }, project: state.project };
+      return { view: { ...state.view }, project: state.project, run: state.run, live: !!state.live };
     },
   };
 }

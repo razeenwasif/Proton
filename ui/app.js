@@ -3367,6 +3367,9 @@ function renderEvent(event) {
     case "circuitProject":
       circuit?.project(event);
       break;
+    case "circuitRun":
+      circuit?.run(event);
+      break;
     case "circuitClip":
       void copyText(event.text);
       break;

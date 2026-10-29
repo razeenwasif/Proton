@@ -238,6 +238,17 @@ what is selected (a click, ⇧-click, or a box dragged over nothing); a part's
 id and settings with Enter or a double-click; copy and paste as `.circ`
 text through the system clipboard; and undo and redo, each edit one step,
 back to saved meaning saved. The wheel pans and ⌥-drag too.
+C3 — running, of the circuit shown, built afresh after any edit with its
+inputs as they were: ⌘R runs and stops; wires coloured by value (green for 1
+and 0, blue for high-Z, buses lighter and labelled in hex) and inputs,
+outputs and LEDs showing theirs; a click flips an input (a wider one asks
+for a number), a button is held while pressed; `s` is a clock edge, and
+"gate by gate" holds changes for `.` to take a gate delay at a time; `c`
+leaves the clock running at 1–30 Hz; a quick run flips the clocks on a
+thread of its own, nothing drawn, until a Break rises or ⎋, and says how
+fast it went. Measured (release, this Mac, `a_cpu_clocked_as_fast_as_it_goes`):
+the person's basic CPU (144 parts) runs at about 366 kHz, the extended one
+(5,574 parts) at about 138 kHz.
 
 | | What | Proved by |
 |---|---|---|

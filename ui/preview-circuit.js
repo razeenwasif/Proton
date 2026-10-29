@@ -8,6 +8,10 @@
 /** The circuits, as drawn. @type {Record<string, {parts: any[], wires: number[][]}>} */
 const DRAWN = {"main":{"parts":[{"id":"A","kind":"in","x":0,"y":0,"rot":0,"mirror":false,"settings":[["label","A"]],"pins":[{"x":0,"y":0,"input":false}],"problem":null},{"id":"B","kind":"in","x":0,"y":1,"rot":0,"mirror":false,"settings":[["label","B"]],"pins":[{"x":0,"y":1,"input":false}],"problem":null},{"id":"Cin","kind":"in","x":0,"y":4,"rot":0,"mirror":false,"settings":[["label","Cin"]],"pins":[{"x":0,"y":4,"input":false}],"problem":null},{"id":"Cout","kind":"out","x":16,"y":1,"rot":0,"mirror":false,"settings":[["label","Cout"]],"pins":[{"x":16,"y":1,"input":true}],"problem":null},{"id":"H1","kind":"sub:half","x":2,"y":0,"rot":0,"mirror":false,"settings":[],"pins":[{"x":2,"y":0,"input":true},{"x":2,"y":1,"input":true},{"x":5,"y":0,"input":false},{"x":5,"y":1,"input":false}],"problem":null},{"id":"H2","kind":"sub:half","x":7,"y":1,"rot":0,"mirror":false,"settings":[],"pins":[{"x":7,"y":1,"input":true},{"x":7,"y":2,"input":true},{"x":10,"y":1,"input":false},{"x":10,"y":2,"input":false}],"problem":null},{"id":"O","kind":"or","x":12,"y":0,"rot":0,"mirror":false,"settings":[],"pins":[{"x":12,"y":0,"input":true},{"x":12,"y":2,"input":true},{"x":15,"y":1,"input":false}],"problem":null},{"id":"S","kind":"out","x":16,"y":4,"rot":0,"mirror":false,"settings":[["label","S"]],"pins":[{"x":16,"y":4,"input":true}],"problem":null}],"wires":[[0,0,2,0],[0,1,2,1],[0,4,6,4],[5,0,12,0],[5,1,7,1],[6,2,6,4],[6,2,7,2],[10,1,11,1],[10,2,10,4],[10,4,16,4],[11,1,11,2],[11,2,12,2],[15,1,16,1]]},"half":{"parts":[{"id":"A","kind":"in","x":0,"y":0,"rot":0,"mirror":false,"settings":[["label","A"]],"pins":[{"x":0,"y":0,"input":false}],"problem":null},{"id":"B","kind":"in","x":0,"y":2,"rot":0,"mirror":false,"settings":[["label","B"]],"pins":[{"x":0,"y":2,"input":false}],"problem":null},{"id":"C","kind":"out","x":8,"y":4,"rot":0,"mirror":false,"settings":[["label","C"]],"pins":[{"x":8,"y":4,"input":true}],"problem":null},{"id":"S","kind":"out","x":8,"y":0,"rot":0,"mirror":false,"settings":[["label","S"]],"pins":[{"x":8,"y":0,"input":true}],"problem":null},{"id":"X","kind":"xor","x":4,"y":0,"rot":0,"mirror":false,"settings":[],"pins":[{"x":4,"y":0,"input":true},{"x":4,"y":2,"input":true},{"x":7,"y":1,"input":false}],"problem":null},{"id":"Y","kind":"and","x":4,"y":4,"rot":0,"mirror":false,"settings":[],"pins":[{"x":4,"y":4,"input":true},{"x":4,"y":6,"input":true},{"x":7,"y":5,"input":false}],"problem":null}],"wires":[[0,0,2,0],[0,2,3,2],[2,0,2,4],[2,0,4,0],[2,4,4,4],[3,2,3,6],[3,2,4,2],[3,6,4,6],[7,1,8,1],[7,5,8,5],[8,0,8,1],[8,4,8,5]]}};
 
+/** The full adder running with A and Cin high, as the core sent it. The
+ *  preview shows this one state; running anything else is the app's. */
+const RUNNING = {"circuit":"main","wires":[{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"0","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"0","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"0","z":false,"someZ":false},{"bits":1,"hex":"0","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false}],"values":[["A",{"bits":1,"hex":"1","z":false,"someZ":false}],["B",{"bits":1,"hex":"0","z":false,"someZ":false}],["Cin",{"bits":1,"hex":"1","z":false,"someZ":false}],["Cout",{"bits":1,"hex":"1","z":false,"someZ":false}],["S",{"bits":1,"hex":"0","z":false,"someZ":false}]],"waiting":0,"stepped":[],"error":null,"quick":null};
+
 /** Where a new part's pins go, unturned, for the kinds the sample shows:
  *  Digital's layouts as the core places them. Others are drawn as a box
  *  with no pins — this is a stand-in, the core places them all. */
@@ -51,6 +55,14 @@ export function createCircuitPreview(_deliver) {
   };
   const home = () => ({ type: "circuitHome", projects });
   const notice = (/** @type {string} */ message) => ({ type: "notice", message, level: "warn" });
+
+  let running = false;
+  /** The canned run, for the sample's main circuit as it was dumped. */
+  const runView = () => {
+    const pristine = open && JSON.stringify(drawn.main) === JSON.stringify(DRAWN.main);
+    return { type: "circuitRun", run: { ...RUNNING, generation: open?.generation ?? 0, circuit: open?.shown ?? "main",
+      ...(open?.shown === "main" && pristine ? {} : { wires: [], values: [] }) } };
+  };
 
   /** An edit's ops, applied to the circuit shown. @param {any[]} ops */
   function edit(ops) {
@@ -140,7 +152,8 @@ export function createCircuitPreview(_deliver) {
         case "circuitClose":
           if (open?.dirty && !command.discard) return [notice("the circuit has unsaved changes")];
           open = null;
-          return [home(), view()];
+          running = false;
+          return [home(), view(), { type: "circuitRun", run: null }];
         case "circuitSave":
           if (!open) return [];
           open.dirty = false;
@@ -159,6 +172,15 @@ export function createCircuitPreview(_deliver) {
           open.dirty = true;
           return [view()];
         }
+        case "circuitStart":
+          if (!open) return [];
+          running = true;
+          return [runView()];
+        case "circuitStop":
+          running = false;
+          return [{ type: "circuitRun", run: null }];
+        case "circuitSet": case "circuitClock": case "circuitStep": case "circuitQuick":
+          return [notice("the preview shows one running state; running a circuit is the app's")];
         case "circuitEdit":
           return edit(command.ops);
         case "circuitUndo":
